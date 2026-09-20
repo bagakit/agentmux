@@ -1,8 +1,18 @@
-import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, resolveManagedHookPlan } from '../../src/agent-provider.js'
-import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan } from '../../src/providers/claude.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
+import { AgentProviderRegistry, defineAgentProvider, resolveManagedHookPlan } from '../../src/agent-provider.js'
+import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
 import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
+import { AgentMuxClient } from '../../src/client.js'
+import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
+import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../../src/agent-session-store.js'
+import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../../src/agent-session-identity.js'
+import { defaultAgentMuxHookPort } from '../../src/runtime-paths.js'
+import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**
@@ -146,10 +156,27 @@ describe('Claude provider', () => {
   })
 
   describe('两条互斥的收尾：Stop 与 StopFailure', () => {
-    it('StopFailure 判 done 并归入 turn-end——它取代 Stop，报错收尾不会有 Stop', () => {
+    it('Stop 与 SubagentStop 回调在决策前到达，不证明最终主轮/子轮成功，显式声明 lifecycleEvent: null 与 semanticState: unknown', () => {
+      for (const stop_hook_active of [false, true]) {
+        const stopEvent = hook('Stop', {
+          stop_hook_active,
+          last_assistant_message: 'Done with task'
+        })
+        expect<AgentSemanticState>(stopEvent.semanticState).toBe('unknown')
+        expect(stopEvent.lifecycleEvent).toBeNull()
+      }
+      const subStopEvent = hook('SubagentStop', {
+        agent_id: 'sub-1',
+        stop_hook_active: false
+      })
+      expect<AgentSemanticState>(subStopEvent.semanticState).toBe('unknown')
+      expect(subStopEvent.lifecycleEvent).toBeNull()
+    })
+
+    it('StopFailure 判 error 并归入 turn-end——它取代 Stop，报错收尾不会有 Stop，且不伪造 done/成功完成', () => {
       // 少了它，Agent 报错后会永远停在 working，且没有任何后续事件能把它救回来。
       const event = hook('StopFailure', { error: 'model overloaded', error_details: 'HTTP 529' })
-      expect<AgentSemanticState>(event.semanticState).toBe('done')
+      expect<AgentSemanticState>(event.semanticState).toBe('error')
       expect(event.lifecycleEvent).toBe('turn-end')
     })
 
@@ -195,4 +222,358 @@ describe('Claude provider', () => {
       expect(claude.catalog.capabilities.permission).toBe('respond')
     })
   })
+})
+
+describe('Claude Stop pre-decision observation through built public Core and FileStore', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  const sessionId = 'claude-test-session'
+  const runId = 'claude-test-run'
+  const token = 'c'.repeat(43)
+
+  async function claudeHarness(planMode: 'render-then-submit' | 'single-phase') {
+    const root = await mkdtemp(join(tmpdir(), 'amux-claude-stop-'))
+    const path = join(root, 'sessions.json')
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath)
+    await mkdir(join(root, 'runtime'))
+
+    vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
+    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'queue.ndjson'))
+    vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', path)
+
+    let claudeDef!: Parameters<typeof defineAgentProvider>[0]
+    const baseClaude = createClaudeProvider((def: Parameters<typeof defineAgentProvider>[0]) => {
+      claudeDef = def
+      return defineAgentProvider(def)
+    })
+    const { terminalPromptRender: _omittedRender, ...singlePhaseBase } = claudeDef
+    const provider = planMode === 'render-then-submit'
+      ? baseClaude
+      : defineAgentProvider({
+          ...singlePhaseBase,
+          planPromptInput: (prompt: string) => ({ kind: 'single-phase', data: prompt + '\r' })
+        })
+
+    const store = new AgentMuxFileAgentSessionStore(path)
+    await store.compareAndSwap(null, {
+      kind: 'agent',
+      agentSessionId: sessionId,
+      providerId: 'claude',
+      executorId: 'claude',
+      hostId: 'local',
+      workspacePath,
+      run: { runId },
+      retiredRuns: [],
+      hookBindingId: 'b'.repeat(43),
+      hookToken: token,
+      createdAt: 1,
+      updatedAt: 1,
+      semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
+    })
+
+    let cursor = 10
+    let outputCursor = 0
+    const writes: string[] = []
+    const chunks: OutputChunk[] = []
+    const streams = new Set<{ push(event: RunEvent): void; close(): void }>()
+    const run = () => ({
+      id: runId,
+      spec: { program: 'claude', args: [], cwd: workspacePath, env: {} },
+      lineage: null,
+      pid: 321,
+      state: { type: 'running' as const },
+      latest_output_bytes: outputCursor,
+      durable_output_bytes: outputCursor,
+      first_available_byte: 0,
+      attachments: streams.size,
+      applied_input_bytes: cursor,
+      current_size: { cols: 80, rows: 24 }
+    })
+
+    function output(text: string) {
+      const data = new TextEncoder().encode(text)
+      const chunk = { start_byte: outputCursor, end_byte: outputCursor + data.byteLength, data }
+      outputCursor = chunk.end_byte
+      chunks.push(chunk)
+      for (const stream of streams) stream.push({ type: 'output', chunk })
+    }
+
+    if (planMode === 'render-then-submit') {
+      output('\u001b[?2026h\u001b[22;1H❯ \u001b[22;3H\u001b[?2026l')
+    }
+
+    const receipts = new Map<string, { start_byte: number; end_byte: number; data: string }>()
+    const recoverableInput = vi.fn(async (op: {
+      daemonInstance: string; operationKey: string; runId: string; expectedByte: number; data: string
+    }) => {
+      expect(op.daemonInstance).toBe('claude-daemon')
+      expect(op.runId).toBe(runId)
+      const existing = receipts.get(op.operationKey)
+      if (existing) return { run: run(), receipt: existing }
+      expect(op.expectedByte).toBe(cursor)
+      const receipt = { start_byte: cursor, end_byte: cursor + Buffer.byteLength(op.data), data: op.data }
+      cursor = receipt.end_byte
+      receipts.set(op.operationKey, receipt)
+      writes.push(op.data)
+      if (planMode === 'render-then-submit' && op.data !== '\r') {
+        output(`\u001b[?2026h\u001b[2J\u001b[22;1H❯ ${op.data}\u001b[22;${3 + op.data.length}H\u001b[?2026l`)
+      }
+      return { run: run(), receipt }
+    })
+
+    const attachTerminal = vi.fn(async (id: string) => {
+      expect(id).toBe(runId)
+      let closed = false, wake: (() => void) | undefined
+      const queue: RunEvent[] = []
+      const stream = {
+        push(event: RunEvent) { queue.push(event); wake?.() },
+        close() { closed = true; wake?.(); streams.delete(stream) }
+      }
+      streams.add(stream)
+      return {
+        snapshot: {
+          run: run(),
+          resize_revision: 0,
+          terminal: {
+            type: 'basic_vt',
+            checkpoint: { run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } },
+            resizes: []
+          },
+          terminal_restore: new TextEncoder().encode('\u001bc'),
+          replay: { chunks: [...chunks], first_available_byte: 0, latest_output_bytes: outputCursor, truncated: false }
+        },
+        async *events() {
+          while (!closed) {
+            if (queue.length) yield queue.shift()!
+            else await new Promise<void>(resolve => { wake = resolve })
+          }
+        },
+        detach: async () => stream.close(),
+        close: () => stream.close()
+      }
+    })
+
+    const start = vi.fn(async () => { throw new Error('Unexpected native Run creation') })
+    const stop = vi.fn(async () => { throw new Error('Unexpected native Run stop') })
+
+    const clients: AgentMuxClient[] = []
+    async function connect() {
+      const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(path), providers: [provider] })
+      const adapter = (client as unknown as { kernel: CtxmuxRunAdapter }).kernel
+      Object.assign(adapter, {
+        client: {
+          list: async () => [{ id: runId }],
+          status: async () => run(),
+          recoverableInput,
+          attachTerminal,
+          start,
+          stop
+        },
+        runtime: { daemonInstanceId: 'claude-daemon' }
+      })
+      clients.push(client)
+      await client.connect()
+      return client
+    }
+
+    const client = await connect()
+    // Establish the previous prompt through current admission and real fixture SDK receipts.
+    await client.submitAgentPrompt({
+      ...agentPromptCondition(client.agentSession(sessionId)),
+      agentSessionId: sessionId,
+      operationId: 'prior-sub',
+      prompt: 'prior prompt',
+      allowUncertainTurn: true
+    })
+    const prior = client.agentSession(sessionId).promptCompletionAdmission!
+    expect(prior.submissionId).toBe('prior-sub')
+    expect(prior.acknowledged).toBe(true)
+    const priorReceipts = [...receipts.values()]
+    expect(priorReceipts.length).toBeGreaterThan(0)
+    expect(priorReceipts[0]!.start_byte).toBe(prior.startByte)
+    expect(priorReceipts.at(-1)!.end_byte).toBe(prior.endByte)
+    expect((await client.listRuns()).find(run => run.runId === runId)!.acceptedInputBytes).toBe(prior.endByte)
+    // The callback counts only its own submissions; retain the prior receipt in the SDK ledger.
+    writes.length = 0
+    let receiptCounter = 0
+
+    async function feed(eventName: string, payload: Record<string, unknown> = {}) {
+      const response = await fetch(`http://127.0.0.1:${defaultAgentMuxHookPort()}/v1/events`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          receiptId: `claude-rcpt-${++receiptCounter}`,
+          eventName,
+          payload: { hook_event_name: eventName, ...payload }
+        })
+      })
+      return response.status
+    }
+
+    async function stored() {
+      const rows = (await new AgentMuxFileAgentSessionStore(path).load()).map(normalizeStoredAgentSession)
+      expect(rows).toHaveLength(1)
+      return rows[0]!
+    }
+
+    return {
+      client,
+      root,
+      feed,
+      stored,
+      writes,
+      start,
+      stop,
+      async reopen() {
+        await client.dispose()
+        const env = { ...process.env }
+        for (const k of Object.keys(env)) if (k.startsWith('AGENTMUX_')) delete env[k]
+        return await connect()
+      },
+      async close() {
+        for (const c of clients) await c.dispose()
+        for (const s of streams) s.close()
+        await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
+      }
+    }
+  }
+
+  it.each(['render-then-submit', 'single-phase'] as const)(
+    'Claude %s: Stop over HTTP leaves turn unconfirmed without synthesizing turn-end or prompt readiness',
+    async (planMode) => {
+      const h = await claudeHarness(planMode)
+      try {
+        const initial = await h.stored()
+        expect(initial.semanticStatus?.state).toBe('working')
+
+        // Send real Claude Stop payload over HTTP
+        const status = await h.feed('Stop', {
+          session_id: 'sess-claude',
+          transcript_path: '/tmp/claude.jsonl',
+          stop_hook_active: false,
+          last_assistant_message: 'Finished inspecting files.'
+        })
+        expect(status).toBe(204)
+
+        const observed = await h.stored()
+        // Must declare explicit lifecycle null, not turn-end
+        expect(observed.hookReceipt).toMatchObject({
+          eventName: 'Stop',
+          lifecycleEvent: null
+        })
+        // Semantic status must NOT flip to done
+        expect(observed.semanticStatus?.state).toBe('working')
+        // No false prompt readiness
+        expect(observed.terminalPromptReadiness).toBeUndefined()
+        // No false completion identity or turn end boundary
+        expect(agentTurnCompletionIdentity(observed)).toBeUndefined()
+        expect(agentTurnEndBoundary(observed)).toBeUndefined()
+
+        // Fresh client recovery sees identical state
+        const reopenedClient = await h.reopen()
+        const reopenedSession = reopenedClient.agentSession(sessionId)
+        expect(reopenedSession.hookReceipt).toEqual(observed.hookReceipt)
+        expect(reopenedSession.semanticStatus).toEqual(observed.semanticStatus)
+
+        // Automatic prompt submission with expected completion ID fails
+        const automaticSession = reopenedClient.agentSession(sessionId)
+        const automaticRun = (await reopenedClient.listRuns()).find(run => run.runId === automaticSession.run.runId)
+        expect(automaticRun).toBeDefined()
+        expect(Number.isSafeInteger(automaticRun!.acceptedInputBytes)).toBe(true)
+        await expect(
+          reopenedClient.submitAgentPrompt({
+            ...agentPromptCondition(automaticSession),
+            agentSessionId: sessionId,
+            operationId: 'auto-submit',
+            prompt: 'next prompt',
+            expectedCompletionId: JSON.stringify([runId, 1]),
+            expectedInputByte: automaticRun!.acceptedInputBytes
+          })
+        ).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+
+        // Manual prompt submission without allowUncertainTurn fails with AGENT_TURN_END_UNCONFIRMED
+        await expect(
+          reopenedClient.submitAgentPrompt({
+            ...agentPromptCondition(reopenedClient.agentSession(sessionId)),
+            agentSessionId: sessionId,
+            operationId: 'manual-submit-unconfirmed',
+            prompt: 'manual prompt'
+          })
+        ).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+
+        // Manual prompt with allowUncertainTurn succeeds in degraded mode
+        await reopenedClient.submitAgentPrompt({
+          ...agentPromptCondition(reopenedClient.agentSession(sessionId)),
+          agentSessionId: sessionId,
+          operationId: 'manual-submit-confirmed',
+          prompt: 'force continue',
+          allowUncertainTurn: true
+        })
+        const delivered = await h.stored()
+        expect(delivered.terminalPromptDelivery).toMatchObject({
+          state: 'unverified',
+          mode: 'degraded',
+          reason: 'turn-end-unconfirmed'
+        })
+
+        // Prompt bytes reached kernel without blocking
+        expect(h.writes.length).toBeGreaterThan(0)
+
+        // Genuine failure termination (StopFailure) ends the turn cleanly with error semantics, not done
+        expect(await h.feed('StopFailure', { error: 'rate limited' })).toBe(204)
+        const failedStored = await h.stored()
+        expect(failedStored.hookReceipt).toMatchObject({
+          eventName: 'StopFailure',
+          lifecycleEvent: 'turn-end'
+        })
+        expect(failedStored.semanticStatus?.state).toBe('error')
+        expect(agentTurnCompletionIdentity(failedStored)).toBeUndefined()
+        expect(agentTurnEndBoundary(failedStored)).toBeDefined()
+
+        // Automatic prompt submission with expectedCompletionId must be rejected
+        const failureSession = reopenedClient.agentSession(sessionId)
+        const failureRun = (await reopenedClient.listRuns()).find(run => run.runId === failureSession.run.runId)
+        expect(failureRun).toBeDefined()
+        expect(Number.isSafeInteger(failureRun!.acceptedInputBytes)).toBe(true)
+        await expect(
+          reopenedClient.submitAgentPrompt({
+            ...agentPromptCondition(failureSession),
+            agentSessionId: sessionId,
+            operationId: 'auto-submit-after-failure',
+            prompt: 'next auto prompt',
+            expectedCompletionId: JSON.stringify([runId, failedStored.hookReceipt!.observedAt]),
+            expectedInputByte: failureRun!.acceptedInputBytes
+          })
+        ).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+
+        // Manual prompt after failure succeeds without allowUncertainTurn because turn ended natively
+        await reopenedClient.submitAgentPrompt({
+          ...agentPromptCondition(reopenedClient.agentSession(sessionId)),
+          agentSessionId: sessionId,
+          operationId: 'manual-after-failure',
+          prompt: 'retry prompt after failure'
+        })
+
+        // Second manual prompt without completion/end fails with AGENT_TURN_END_UNCONFIRMED
+        await expect(
+          reopenedClient.submitAgentPrompt({
+            ...agentPromptCondition(reopenedClient.agentSession(sessionId)),
+            agentSessionId: sessionId,
+            operationId: 'manual-again',
+            prompt: 'too fast'
+          })
+        ).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+
+        // Controls check: start and stop remain strictly uncalled
+        expect(h.start).not.toHaveBeenCalled()
+        expect(h.stop).not.toHaveBeenCalled()
+      } finally {
+        await h.close()
+      }
+    }
+  )
 })
