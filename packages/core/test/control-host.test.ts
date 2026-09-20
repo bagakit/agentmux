@@ -991,6 +991,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'open.agent': 'long',
       'open.terminal': 'long',
       'open.browser': 'long',
+      // Refresh checks the saved executable on the selected host; it waits for that probe.
+      'settings.executors.refresh': 'long',
       send: 'long',
       resume: 'long',
       stop: 'long',
