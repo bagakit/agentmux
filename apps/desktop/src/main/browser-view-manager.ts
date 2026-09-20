@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES } from '@agentmux/core'
+import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_VIEWPORT_PRESETS,
@@ -43,9 +43,7 @@ import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
   buildBrowserAnnotationMarkerScript,
-  buildBrowserDriveBadgeScript,
   buildCancelBrowserAnnotationMarkerScript,
-  buildCancelBrowserDriveBadgeScript,
   buildBrowserElementSelectionScript,
   buildCancelBrowserElementSelectionScript
 } from './browser-selection-script.js'
@@ -67,7 +65,7 @@ type BrowserEntry = {
   viewport: BrowserViewport
   error: string | null
   /**
-   * 这一刻有没有一段 Agent 程序在驱动它。导航后重注角标要读它，`snapshot()` 也要——渲染进程据此
+   * 这一刻有没有一段 Agent 程序在驱动它。`snapshot()` 读取它——渲染进程据此
    * 在标签上认出是哪一格（见 `BrowserSnapshot.driving` 的说明）。
    *
    * 一个布尔够用，不必是计数：两次 run 不可能在同一个页面上重叠——`BrowserCdpSession.attach` 对
@@ -84,6 +82,8 @@ type BrowserEntry = {
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
 type BrowserTakeover = { at: number | null; kind: string }
+
+const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 
 function summarizeBrowserValue(value: unknown): string {
   if (value === null) return 'null'
@@ -795,7 +795,6 @@ export class BrowserViewManager {
     // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
     // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
     this.emit(entry)
-    void this.showDriveBadge(entry, entry.view)
     try {
       const resultContext: BrowserResultContext = {
         workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
@@ -955,7 +954,11 @@ export class BrowserViewManager {
       entry.activity = { operation, control: 'agent', ...('message' in outcome ? { warning: outcome.message } : {}) }
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
-      session.detach()
+      const cleanupWarning = session.detach()
+      if (cleanupWarning) {
+        operation.warning ??= cleanupWarning
+        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? cleanupWarning }
+      }
       // 监听器跟着这一次运行走，不跟着 entry 走。挂在整个 entry 生命周期上的话，人平时正常
       // 用这个浏览器就一直在写 `takeover`，下一次 run 一启动就以为自己被接管了。
       contents.removeListener('input-event', onInput)
@@ -977,7 +980,6 @@ export class BrowserViewManager {
         }
       }
       this.emit(entry)
-      void this.hideDriveBadge(entry.view)
     }
   }
 
@@ -1072,37 +1074,6 @@ export class BrowserViewManager {
   }
 
   /**
-   * 角标注入与清除。
-   *
-   * **整段包在 try 里，不是只 `.catch()` 那个 Promise**：`executeJavaScriptInIsolatedWorld` 不存在
-   * 或同步抛的时候，`.catch()` 根本还没挂上，异常会从这个 async 方法里漏成一个未处理的 rejection
-   * ——而调用方是 `void`，于是一个纯装饰的角标能把进程搅成噪音甚至崩掉。提示失败就该无声。
-   */
-  private async showDriveBadge(entry: BrowserEntry, view: WebContentsView): Promise<void> {
-    try {
-      if (!this.owns(entry, view) || view.webContents.isDestroyed()) return
-      await view.webContents.executeJavaScriptInIsolatedWorld(
-        BROWSER_SELECTION_WORLD_ID,
-        [{ code: buildBrowserDriveBadgeScript() }]
-      )
-    } catch {
-      // 页面可能正好在导航、可能已经销毁。提示没注上不该打断这次运行。
-    }
-  }
-
-  private async hideDriveBadge(view: WebContentsView): Promise<void> {
-    try {
-      if (view.webContents.isDestroyed()) return
-      await view.webContents.executeJavaScriptInIsolatedWorld(
-        BROWSER_SELECTION_WORLD_ID,
-        [{ code: buildCancelBrowserDriveBadgeScript() }]
-      )
-    } catch {
-      // 同上。清不掉最多留一个角标到下次导航，比抛出去好。
-    }
-  }
-
-  /**
    * 页面函数真正干活的那一头。
    *
    * 这个方法是 `captureBrowserPageSnapshot` 与 `resolveBrowserRef` 的**唯一生产调用路径**——
@@ -1120,6 +1091,8 @@ export class BrowserViewManager {
     operation: BrowserOperation
   ): (name: string, args: unknown[]) => Promise<unknown> {
     let activeStep: BrowserOperationStep | null = null
+    const waitingSteps = new Set<number>()
+    let beforeWaiting: { phase: BrowserOperation['phase']; summary: string } | null = null
     const requireLive = (): WebContentsView => {
       const view = entry.view
       if (this.entries.get(entry.id) !== entry || view.webContents.isDestroyed()) {
@@ -1183,6 +1156,14 @@ export class BrowserViewManager {
           ...(step.replay ? { replay: step.replay } : {})
         })
       }
+      if (BROWSER_WAIT_PAGE_CALLS.has(name) && (operation.phase === 'running' || operation.phase === 'waiting')) {
+        if (waitingSteps.size === 0) beforeWaiting = { phase: operation.phase, summary: operation.summary }
+        waitingSteps.add(step.sequence)
+        operation.phase = 'waiting'
+        operation.summary = `Waiting: ${step.label}`
+        void this.operationJournal?.setPhase(operation.id, 'waiting', { summary: operation.summary })
+        this.emit(entry)
+      }
       const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string): Promise<void> => {
         if (!this.stepEvidence) return
         try {
@@ -1240,6 +1221,16 @@ export class BrowserViewManager {
         throw error
       } finally {
         activeStep = null
+        if (waitingSteps.delete(step.sequence) && waitingSteps.size === 0) {
+          // Human takeover and Stop own the newer phase; finishing a wait must never overwrite them.
+          if (operation.phase === 'waiting' && beforeWaiting) {
+            operation.phase = beforeWaiting.phase
+            operation.summary = beforeWaiting.summary
+            void this.operationJournal?.setPhase(operation.id, operation.phase, { summary: operation.summary })
+            this.emit(entry)
+          }
+          beforeWaiting = null
+        }
       }
     }
   }
@@ -1550,9 +1541,6 @@ export class BrowserViewManager {
       if (!this.owns(entry, view)) return
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry, view)
-      // 导航把页面内的东西全冲掉了，角标也在其中。这一处已经是"导航后重新施加状态"的既有位置
-      // （上面两行就是），所以角标挂在这里，而不是另起一套重注机制。
-      if (entry.driving) void this.showDriveBadge(entry, view)
       this.repaintAfterFirstFrame(entry, view)
     })
     contents.on('did-start-navigation', (details) => {

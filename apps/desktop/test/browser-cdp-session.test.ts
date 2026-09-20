@@ -117,6 +117,31 @@ describe('被踢掉之后不许再假装在工作', () => {
 })
 
 describe('收摊要摘干净', () => {
+  it('destroyed contents 不再访问 dead debugger，仍释放本轮 frame 和观察者', async () => {
+    const contents = fakeContents()
+    const session = BrowserCdpSession.attach(contents)
+    contents.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'child' })
+    expect(session.frames.size).toBe(1)
+    const observed = vi.fn()
+    session.observe(observed)
+    const debuggerWrapper = contents.debugger
+    contents.destroyed = true
+    Object.defineProperty(contents, 'debugger', { get: () => { throw new Error('Object has been destroyed') } })
+    expect(session.detach()).toBeNull()
+    expect(session.frames.size).toBe(0)
+    debuggerWrapper.emit('message', 'Runtime.consoleAPICalled', {})
+    expect(observed).not.toHaveBeenCalled()
+  })
+
+  it('活页面 cleanup 失败保留明确告示，同时完成其余清理', () => {
+    const contents = fakeContents()
+    const session = BrowserCdpSession.attach(contents)
+    contents.debugger.off = () => { throw new Error('listener removal unavailable') }
+    expect(session.detach()).toMatch(/cleanup.*listener removal unavailable.*result is retained/)
+    expect(contents.debugger.isAttached()).toBe(false)
+    expect(session.frames.size).toBe(0)
+  })
+
   it('detach 之后 debugger 上不留监听', async () => {
     const contents = fakeContents()
     const session = BrowserCdpSession.attach(contents)
