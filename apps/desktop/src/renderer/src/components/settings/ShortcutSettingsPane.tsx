@@ -80,7 +80,7 @@ export function ShortcutSettingsPane({ config, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Keep your go-to prompts close. Type <code>/</code> to choose one in the composer, or use its keyword in your draft. You decide what to send.</p>
+      <p className="settings-lead">Type <code>/</code> to choose one in the composer, or use its keyword in your draft. You decide what to send.</p>
       <div className="settings-pane-toolbar">
         <button className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
       </div>
