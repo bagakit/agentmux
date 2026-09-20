@@ -25,6 +25,10 @@ const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser
 const children = new Set(), connections = new Set()
 const deadline = Date.now() + 120_000
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
+await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
+const captureDirectory = await mkdtemp(join(repositoryRoot,'.tmp/browser-operation-visual-'))
+receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-performed', frames: [],
+  compositorBoundary: 'Full BrowserWindow Renderer frames and native WebContentsView page frames are captured separately without compositing. Actual DOM and native bounds prove their shared geometry.' }
 const fixtureEnvironment = { HOME: privateHome, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 let phase = 'prepare', failure, first, second, server
@@ -64,7 +68,7 @@ async function connectCdp(url) {
   return cdp
 }
 async function identity() {
-  const rendererFiles = (await readdir(join(desktopRoot, 'out/renderer/assets'))).filter(name => /\.js$/.test(name))
+  const rendererFiles = (await readdir(join(desktopRoot, 'out/renderer/assets'))).filter(name => /\.(js|css)$/.test(name))
   assert.ok(rendererFiles.length > 0)
   const files = ['apps/desktop/out/main/index.js', 'apps/desktop/out/preload/index.cjs', 'apps/desktop/out/renderer/index.html',
     ...rendererFiles.map(name => `apps/desktop/out/renderer/assets/${name}`),
@@ -72,6 +76,8 @@ async function identity() {
     'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/index.ts',
     'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/store.ts',
     'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/lib/browser-state.ts',
+    'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx', 'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
+    'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/verify-browser-recovery-restart.mjs']
   const values = await Promise.all(files.map(async name => { const bytes = await readFile(join(repositoryRoot, name)); assert.ok(bytes.length > 0, name); return [name, digest(bytes)] }))
@@ -178,19 +184,85 @@ async function actualWorkbench(probe, expected) {
   const sessions=await probe.cdp.evaluate('(async()=> (await window.agentmux.sessions.snapshot()).sessions.map(s=>({id:s.id,kind:s.kind})))()');assert.equal(sessions.filter(s=>s.kind==='agent').length,0)
   return {restored,inspected,geometry,sessions}
 }
+async function resize(probe, width, height) {
+  const actual = await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    const win=BrowserWindow.getAllWindows()[0];win.setSize(${width},${height});return win.getSize() })()`)
+  await waitFor('actual Renderer resize',()=>probe.cdp.evaluate(`innerWidth===${actual[0]}`))
+  return actual
+}
+async function capture(probe, label) {
+  await probe.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  const observation = await probe.cdp.evaluate(`(() => {
+    const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
+    const rows=Array.from(document.querySelectorAll('.browser-rsi-timeline__step')).filter(visible);
+    const rail=Array.from(document.querySelectorAll('.browser-trace-rail')).find(visible),stage=rail?.previousElementSibling;
+    const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
+    return {viewport:{width:innerWidth,height:innerHeight},rows:rows.map(e=>({sequence:e.dataset.sequence,status:e.querySelector('.browser-rsi-timeline__status').textContent,
+      selected:e.querySelector('button').getAttribute('aria-pressed'),expanded:e.querySelector('button').getAttribute('aria-expanded')})),
+      trace:rail&&rect(rail),stage:stage&&rect(stage),payloadCount:document.querySelectorAll('.browser-rsi-timeline__step-detail').length,
+      focus:document.activeElement?.getAttribute('aria-label'),focusVisible:document.activeElement?.matches(':focus-visible')??false};
+  })()`)
+  assert.ok(observation.rows.length>0,'Visual review must contain real operation steps')
+  assert.ok(observation.stage.width>0&&observation.stage.height>0,'The actual page keeps positive visible geometry')
+  assert.ok(observation.stage.x+observation.stage.width<=observation.trace.x+1,'Trace does not overlay the native stage')
+  const nativeBounds=await waitFor('native page bounds inside the actual stage',async()=>{
+    const bounds=await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+      return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:')).map(v=>v.getBounds()); })()`)
+    const s=observation.stage
+    return bounds.length===1&&bounds[0].width>0&&bounds[0].height>0&&bounds[0].x>=s.x-1&&bounds[0].y>=s.y-1&&
+      bounds[0].x+bounds[0].width<=s.x+s.width+1&&bounds[0].y+bounds[0].height<=s.y+s.height+1?bounds:null
+  })
+  const file=join(captureDirectory,`${label}.png`)
+  const frame=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    const image=await BrowserWindow.getAllWindows()[0].capturePage();if(image.isEmpty())throw new Error('Empty compositor frame');
+    const png=image.toPNG();process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(file)},png);
+    return {size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
+  const pageFile=join(captureDirectory,`${label}-native-page.png`)
+  const nativePage=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
+    const image=await view.webContents.capturePage();if(image.isEmpty())throw new Error('Empty native page frame');const png=image.toPNG();
+    process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {file:${JSON.stringify(pageFile)},bounds:view.getBounds(),size:image.getSize(),
+      sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
+  receipt.visual.frames.push({label,file,...frame,observation,nativeBounds,nativePage})
+}
+async function reviewOperationRows(probe, browserId) {
+  const operator={id:'private-browser-review',name:'Private Browser review'}
+  const run=async code=>probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`)
+  const completed=await run('await snapshot({scope:"page",maxNodes:20}); await pageInfo(); return "private observed page";')
+  assert.equal(completed.outcome.kind,'completed')
+  await click(probe.cdp,selectors('[aria-label="Open browser activity timeline"]'))
+  await waitFor('real completed timeline',()=>probe.cdp.evaluate(`document.querySelectorAll('.browser-rsi-timeline__step').length>=2`))
+  await resize(probe,1440,900);await capture(probe,'normal-completed-collapsed')
+  await resize(probe,980,700);await capture(probe,'narrow-completed-collapsed')
+  const failed=await run('await snapshot({scope:"page",maxNodes:20}); await click("not-a-recorded-ref");')
+  assert.equal(failed.outcome.kind,'script-failed')
+  await waitFor('real failed row',()=>probe.cdp.evaluate(`Boolean(document.querySelector('.browser-rsi-timeline__step--failed'))`))
+  await click(probe.cdp,selectors('.browser-rsi-timeline__step--failed button'))
+  await capture(probe,'narrow-failed-selected')
+  await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8})
+  await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8})
+  await waitFor('visible keyboard focus',()=>probe.cdp.evaluate('document.activeElement?.matches(":focus-visible")'))
+  await capture(probe,'narrow-keyboard-focus')
+  await resize(probe,1440,560);await capture(probe,'short-window-failed')
+  await resize(probe,1440,900)
+  await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
+  return {completed:completed.runOperation,failed:failed.runOperation}
+}
 try {
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1></body></html>')})
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
-  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:false,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
+  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
   first=await launch('first');phase='create-actual-browser-split'
   await click(first.cdp,selectors(`.project-rail-row[data-workspace-id="${workspaceId}"]`))
   await click(first.cdp,selectors('[aria-label="Browser Tools"]'))
   await click(first.cdp,`${selectors('button')}.filter(e=>e.textContent.trim()==='New Browser')`)
   const initial=await waitFor('actual UI-created Browser Region',async()=>{const s=await state(first.cdp);if(!s)return null;return Object.values(s.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='browser'&&x.surface.workspaceId===workspaceId)})
   await first.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.surface.browserId)},${JSON.stringify(urls[0])})`)
+  await waitFor('actual first page before visual operation',()=>nativePages(first,[urls[0]]))
+  receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
   const sibling=await openBrowser(urls[1],{kind:'split',direction:'right',region:{kind:'region',regionId:initial.surface.regionId}})
   await control('focus',{kind:'region',regionId:initial.surface.regionId})
   const expected={tabId:initial.tab.id,focus:initial.surface.regionId,regions:[{browserId:initial.surface.browserId,regionId:initial.surface.regionId,url:urls[0]},{browserId:sibling.browserId,regionId:sibling.regionId,url:urls[1]}]}
