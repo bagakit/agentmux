@@ -2,6 +2,7 @@ import { ArrowUpRight, Check, ChevronRight, CirclePlus, Columns3, List, Search, 
 import { useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { goalNextStep } from '../lib/goal-presentation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { executionFocusSessionId } from '../lib/agent-focus'
@@ -9,7 +10,7 @@ import { DEMAND_STATUS_IDS, demandColumns, projectDemands, type DemandProjection
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { ComposerTextarea } from './ComposerTextarea'
 import { GoalDetail } from './GoalDetail'
-import '../styles/goals.css'
+import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
 
 export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
@@ -27,7 +28,7 @@ function GoalRow({ demand, selected, sessionContext, onSelect }: { demand: Deman
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
     <span className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{sessionContext ? <span>Current execution</span> : null}<span className="goals-row__status">{GOAL_STATUS_LABELS[demand.status]}</span></span></span>
-    <span className="goals-row__next">{demand.status === 'done' ? 'Result unverified' : 'Align goal'}<ChevronRight size={13} /></span>
+    <span className="goals-row__next">{goalNextStep(demand)}<ChevronRight size={13} /></span>
     {selected ? <Check className="goals-row__selected" size={13} aria-label="Selected goal" /> : null}
   </div>
 }
@@ -55,7 +56,10 @@ export function GlobalBoardSurface() {
   const [intent, setIntent] = useState('')
   const [saving, setSaving] = useState(false)
   const [creationError, setCreationError] = useState<string | null>(null)
-  const [moteError, setMoteError] = useState<{ demandId: string; message: string; mode: 'open' | 'grill' | 'grounding' } | null>(null)
+  const [moteErrors, setMoteErrors] = useState<Record<string, { message: string; mode: 'open' | 'grill' | 'grounding' }>>({})
+  const [motePending, setMotePending] = useState<Record<string, boolean>>({})
+  const [acknowledgementFeedback, setAcknowledgementFeedback] = useState<Record<string, GoalAcknowledgementFeedback>>({})
+  const moteRequests = useRef(new Set<string>())
   const newGoalRef = useRef<HTMLButtonElement>(null)
   const filterRef = useRef<HTMLButtonElement>(null)
   const selectedRowRef = useRef<HTMLElement | null>(null)
@@ -84,11 +88,14 @@ export function GlobalBoardSurface() {
     setSelectedDemand(null); queueMicrotask(() => { if (row?.isConnected) row.focus(); else newGoalRef.current?.focus() })
   }
   async function openMote(demandId: string, mode?: 'grill' | 'grounding') {
+    if (moteRequests.current.has(demandId)) return
+    moteRequests.current.add(demandId); setMotePending(current => ({ ...current, [demandId]: true }))
     try {
       const tabId = mode ? await requestDemandPmoTask(demandId, mode) : await openDemandPmo(demandId)
       requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
-      setMoteError(null)
-    } catch (error) { setMoteError({ demandId, mode: mode ?? 'open', message: error instanceof Error ? error.message : String(error) }) }
+      setMoteErrors(current => { const next = { ...current }; delete next[demandId]; return next })
+    } catch (error) { setMoteErrors(current => ({ ...current, [demandId]: { mode: mode ?? 'open', message: error instanceof Error ? error.message : String(error) } })) }
+    finally { moteRequests.current.delete(demandId); setMotePending(current => { const next = { ...current }; delete next[demandId]; return next }) }
   }
   async function submitIntent() {
     if (!intent.trim() || saving) return
@@ -134,6 +141,6 @@ export function GlobalBoardSurface() {
       </div>
       <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
     </div>
-    {selectedDemand ? <GoalDetail key={selectedDemand.id} demand={selectedDemand} draft={goalDrafts.current.get(selectedDemand.id) ?? {}} onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }} onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }} onClose={closeDetail} onOpenMote={() => void openMote(selectedDemand.id)} onGrill={() => void openMote(selectedDemand.id, 'grill')} moteError={moteError?.demandId === selectedDemand.id ? moteError : null} onRetryMote={() => void openMote(selectedDemand.id, moteError?.mode === 'open' ? undefined : moteError?.mode)} /> : selectedDemandId ? <aside className="goals-detail"><button className="goals-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
+    {selectedDemand ? <GoalDetail key={selectedDemand.id} demand={selectedDemand} acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={(patch) => setAcknowledgementFeedback(current => ({ ...current, [selectedDemand.id]: { ...(current[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT), ...patch } }))} draft={goalDrafts.current.get(selectedDemand.id) ?? {}} onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }} onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }} onClose={closeDetail} onOpenMote={() => void openMote(selectedDemand.id)} onGrill={() => void openMote(selectedDemand.id, 'grill')} onGrounding={() => void openMote(selectedDemand.id, 'grounding')} motePending={Boolean(motePending[selectedDemand.id])} moteError={moteErrors[selectedDemand.id] ?? null} onRetryMote={() => { const mode = moteErrors[selectedDemand.id]?.mode; void openMote(selectedDemand.id, mode === 'open' ? undefined : mode) }} /> : selectedDemandId ? <aside className="goals-detail"><button className="goals-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
   </section>
 }

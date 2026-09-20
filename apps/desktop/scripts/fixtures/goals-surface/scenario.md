@@ -7,3 +7,5 @@
 数据边界：preview API初始化后注入确定的Goal fixture；App和组件/CSS真实，输入点击与键盘来自私有Electron的CDP。原preview Session控制身份前后核对；未触碰用户App或Run。不证明CLI/Native、Mote真实送达、Grill/Grounding认可或重启（由完整候选单独验收）。采图成功只证明采图，独立Agent实际看完整图后才可判审美。
 
 运行：`node apps/desktop/scripts/verify-goals-surface.mjs`。输出私有编译身份、截图、render.json、receipt.json和review.md。
+
+T3 adds actual App views of a current proposal, unresolved choice, confirmed target, complete report, explicit gap acceptance, unknown result, stale earlier accepted report, normal acceptance, accepted gaps, and an actual failed-confirmation service window. Wide + 620px key reading states are captured. Proposal/report/acknowledgement facts are deterministic fixture data; the receipt-failure transport intentionally rejects. These images do not prove native persistence or real Agent evidence contents; the mounted workflow suite uses the unique real durable owner for acknowledgements.

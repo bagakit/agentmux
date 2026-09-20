@@ -33,7 +33,15 @@ app.whenReady().then(async()=>{
     assert.equal(await evaluate('document.activeElement.textContent.trim()'),'New Goal','Escape returns focus to the real entry')
     await size(1280); await evaluate('goalsVisual.seed("empty")'); await capture('1280-empty',1280)
     assert.deepEqual(await evaluate('goalsVisual.facts().runs'),original,'Original preview Run identities remain intact')
-    assert.equal(result.frames.length,9); assert.deepEqual(result.consoleErrors,[]); result.passed=true
+    assert.equal(result.frames.length,9);
+    for (const mode of ['proposal','questions','confirmed','results','gap','unknown','stale','accepted','accepted-gaps','receipt-failure']) {
+      await evaluate(`goalsVisual.seed(${JSON.stringify(mode)})`); await waitFor('Boolean(document.querySelector("[data-goal-summary]"))'); await evaluate('document.querySelector(".goals-detail").scrollTop=0')
+      if(mode==='receipt-failure') { await click('document.querySelector("[data-goal-confirm]")'); await waitFor('Boolean(document.querySelector("[data-goal-acknowledgement-failure]"))') }
+      await capture('1280-'+mode,1280)
+      if(mode==='unknown'||mode==='stale'){ assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-accept], [data-goal-accept-gaps]"))'),false,'Ineligible results have no acceptance shortcut') }
+      if(['proposal','results','gap','unknown','stale','accepted-gaps'].includes(mode)) { await size(620); await capture('620-'+mode,620); await size(1280) }
+    }
+    assert.equal(result.frames.length,25); assert.deepEqual(result.consoleErrors,[]); result.passed=true
   } catch(error) { result.failure={name:error.name,message:error.message,stack:error.stack} }
   finally { await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2)); win?.destroy(); app.exit(result.passed?0:1) }
 })

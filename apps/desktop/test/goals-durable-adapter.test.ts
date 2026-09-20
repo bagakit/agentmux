@@ -153,6 +153,7 @@ it('invokes the actual registered Main Demand handlers against the unique filesy
   await routes.get('demands:create')!({ id: 'ipc', title: 'Actual Main adapter', sessionIds: ['healthy-run'] })
   await routes.get('demands:update')!('ipc', { alignment: proposal })
   await routes.get('demands:confirmAlignment')!('ipc', 1)
+  expect((await owner.get('ipc'))!.alignment!.confirmedAt).toEqual(expect.any(Number))
   expect((await owner.get('ipc'))!.alignment!.confirmedAt).toBeGreaterThan(0)
   await routes.get('demands:update')!('ipc', { grounding: { alignmentRevision: 1, summary: 'Restored', checks: [{ criterionId: 'tabs', outcome: 'met', evidence: ['README.md'], note: '' }] } })
   await routes.get('demands:acceptGrounding')!('ipc', 1, (await owner.get('ipc'))!.grounding!.submissionId)

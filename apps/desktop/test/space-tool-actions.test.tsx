@@ -33,7 +33,7 @@ beforeEach(() => {
   })
 })
 
-const render = () => dom.render(<SurfaceToolDock surface="workbench" workspace={workspace} />)
+const render = () => dom.render(<SurfaceToolDock workspace={workspace} />)
 function createButton(label: 'New Agent' | 'New Browser') {
   const button = dom.container.querySelector<HTMLButtonElement>(`.surface-tool-activitybar [aria-label="${label}"]`)
   expect(button).not.toBeNull()
@@ -48,7 +48,7 @@ function retainedFacts() {
 }
 
 describe('Space tool actions on the real dock and Store', () => {
-  it('keeps only icon tool selection in Space and preserves the Goals label', async () => {
+  it('keeps only icon tool selection in Space', async () => {
     await render()
     const header = dom.container.querySelector('.surface-tool-activitybar')!
     expect(header).not.toBeNull()
@@ -62,9 +62,7 @@ describe('Space tool actions on the real dock and Store', () => {
     ])
     for (const button of buttons) expect(button.title).toContain(`${button.getAttribute('aria-label')} — `)
     expect(header.textContent).toBe('')
-    await dom.render(<SurfaceToolDock surface="board" workspace={workspace} />)
-    expect(dom.container.querySelector('.surface-tool-activitybar > span')?.textContent).toBe('Branch Board')
-    expect(dom.container.querySelector('.surface-tool-create')).toBeNull()
+
   })
 
   it('opens the existing Launcher owner in the focused group and retains the live Agent', async () => {

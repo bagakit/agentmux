@@ -15,7 +15,6 @@ import { useAppStore } from '../src/renderer/src/store.js'
 import { BoardRowsProvider, useBoardRows } from '../src/renderer/src/hooks/useBoardRows.js'
 import { useScratchTopics } from '../src/renderer/src/hooks/useScratchTopics.js'
 import { WorkspaceBoard } from '../src/renderer/src/components/WorkspaceBoard.js'
-import { BoardToolList } from '../src/renderer/src/components/SurfaceToolDock.js'
 
 let root: Root
 let container: HTMLDivElement
@@ -47,25 +46,23 @@ afterEach(async () => {
 })
 async function renderBoard(enabled = true) {
   await act(async () => root.render(createElement(BoardRowsProvider, {
-    enabled, children: [createElement(WorkspaceBoard, { key: 'board' }), createElement(BoardToolList, { key: 'dock', hostId: 'local' })]
+    enabled, children: createElement(WorkspaceBoard)
   })))
 }
 describe('Board request ownership', () => {
-  it('one read supplies the real Board and dock; Refresh updates both', async () => {
+  it('one read supplies the Branch Board; Refresh updates it', async () => {
     await renderBoard()
     expect(api.workspaces.listBranches).toHaveBeenCalledTimes(1)
     expect(container.querySelector('.board--matrix')!.textContent).toContain('before-refresh')
-    expect(container.querySelector('.board-tool-list')!.textContent).toContain('No requests or ideas yet')
     vi.mocked(api.workspaces.listBranches).mockResolvedValue(branches('after-refresh'))
     const refresh = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Refresh')!
     expect(refresh).toBeDefined()
     await act(async () => refresh.click())
     expect(api.workspaces.listBranches).toHaveBeenCalledTimes(2)
     expect(container.querySelector('.board--matrix')!.textContent).toContain('after-refresh')
-    expect(container.querySelector('.board-tool-list')!.textContent).toContain('No requests or ideas yet')
     expect(container.textContent).not.toContain('before-refresh')
   })
-  it('shows read failure in both surfaces instead of an empty Board or endless loading', async () => {
+  it('shows read failure in the Branch Board instead of an empty Board or endless loading', async () => {
     vi.mocked(api.workspaces.listBranches).mockRejectedValue(new Error('Git read failed'))
     await renderBoard()
     expect(container.querySelector('[data-loading-phase="failed"]')!.textContent).toContain('Git read failed')

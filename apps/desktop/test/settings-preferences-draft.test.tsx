@@ -112,7 +112,7 @@ describe('ordinary preference drafts on actual consumers', () => {
 
   it('saves only authored toolbar fields through SurfaceToolDock while preserving external fields and remembered scheme answers', async () => {
     const f = await ownerConsumer({ workspaces: [{ id: 'w', name: 'Private project', hostId: 'local', path: '/private', kind: 'folder' }] })
-    await dom.render(<SurfaceToolDock surface="workbench" workspace={f.owner.current.workspaces[0]} />)
+    await dom.render(<SurfaceToolDock workspace={f.owner.current.workspaces[0]} />)
     expect(BROWSER_TOOLBAR_ITEM_ORDER.length).toBeGreaterThan(1)
     const [first, second] = BROWSER_TOOLBAR_ITEM_ORDER
     await act(async () => toolbarInput(first).click())
@@ -134,7 +134,7 @@ describe('ordinary preference drafts on actual consumers', () => {
 
   it('keeps a matching external toolbar value dirty until explicit Save acknowledges it without another commit', async () => {
     const f = await ownerConsumer({ workspaces: [{ id: 'w', name: 'Private project', hostId: 'local', path: '/private', kind: 'folder' }] })
-    await dom.render(<SurfaceToolDock surface="workbench" workspace={f.owner.current.workspaces[0]} />)
+    await dom.render(<SurfaceToolDock workspace={f.owner.current.workspaces[0]} />)
     const item = BROWSER_TOOLBAR_ITEM_ORDER[0]
     await act(async () => toolbarInput(item).click())
     await act(async () => { await f.owner.update((config) => ({ ...config, browser: { ...config.browser, toolbar: { ...config.browser.toolbar, [item]: false } } })) })
@@ -150,7 +150,7 @@ describe('ordinary preference drafts on actual consumers', () => {
 
   it('reports a failed toolbar save locally and keeps the original draft and expected fields for retry', async () => {
     const f = await ownerConsumer({ workspaces: [{ id: 'w', name: 'Private project', hostId: 'local', path: '/private', kind: 'folder' }] })
-    await dom.render(<SurfaceToolDock surface="workbench" workspace={f.owner.current.workspaces[0]} />)
+    await dom.render(<SurfaceToolDock workspace={f.owner.current.workspaces[0]} />)
     const item = BROWSER_TOOLBAR_ITEM_ORDER[0]
     await act(async () => toolbarInput(item).click())
     f.save.mockRejectedValueOnce(new Error('disk full'))
