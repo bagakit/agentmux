@@ -72,6 +72,10 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
 
+### 组件化的独立评估边界
+
+用户希望摸底时单独评价组件化，以公开 API、服务的定义与实现及消费关系、贡献的注册与释放、真实调用者和替换成本为依据。比较项目仅作为证据，不能成为本项目的实现分支，也不自动形成 all-plugin 或 RSI 要求。评估与后续改进必须保护 Core 与 ctxmux 的既有职责和权威事实，不复制运行时 owner，不阻断健康 Run，不丢失现有工作面。
+
 ### AgentMux 自操作与 Computer Use 边界
 
 - Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility 或其他通用 Computer Use 旁路完成本产品已有的操作。
@@ -1975,6 +1979,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ### Terminal 连续向上阅读历史
 
+- **底层卡住时，Region 必须持续指出问题并支持手动刷新**。attachment、resume 或底层服务失败时，对应 Region 持续呈现实际失败步骤、可读原因、最后确认的运行事实和当前未知的输入送达，并提供手动观察刷新；不能靠瞬时 toast、收件箱已读或一次 metadata 成功消除仍存在的问题。刷新只重新取得原 Session／Run 的事实与输出观察连接，保留同 Run 的共享连接、原终端历史／视口／选择、Tab／Group／Region／焦点／布局、草稿和 queued／sending／unconfirmed 消息的原身份、字节与状态；刷新及其事件回流不能顺带投递、重放未知输入、停止或重启健康 Run，独立显式输入仍沿原入口。失败或超时保留原投影与真实告示；running、Hook 或快照读取成功不能冒充实况恢复，只有同一 subject 的实际观察结果能解除对应观察失败，缺少 owner 活性或输入回执时继续如实未知。重复点击复用已有在途操作与连接，晚回包或 subject 变化不能污染另一 Region；进程重启后先恢复原工作面并自动尝试原身份续接，不能从 failed resume 删除原 Session。
 - **Terminal 与 Message Tool 同时停住（，P00）**。用户反馈一个既有 Session「terminal 按键无回显，Message Tool 发送也不出」，并问是否与电脑重启前全局卡住是同一种问题。必须分别核对实际输入入口、原 Session/Run 的 PTY 读写、CLI 活性和共享 Native owner；不能凭进程仍 running、静态 input capability 或 Renderer acceptsInput 就称实际输入可用，也不能因相似症状把未知触发归为旧 WAL 故障。共享输出 owner 的异常不能悄然停止无关健康 Run 的 PTY 读取与输入；原因未明时保留原工作面、Run 和草稿，如实表达哪些字节已应用、哪些结果仍未知、失败步骤和可执行动作。诊断与修复沿 Runtime 的唯一 owner，不向用户 Session 发送探测字节，不通过停止、重启或另一份 Runtime 制造恢复结论。 用户进一步确认「卡住时无法退出」是终端 Ctrl+C／退出 CLI：同一 PTY 的中断字节必须仍能送达实际 CLI，不能把这个反馈改写为应用关闭或用杀进程代替正常中断；私有验证须核对原 Run 身份、真实信号／退出行为及不相关健康 Run 的输入。
 - **更多 Session 同时卡住必须按共享 owner 归因并完整闭合（，P00）**。用户确认其他既有 Session 也出现 Terminal 无回显、Message Tool 不发送，要求「优化包括问题解决、各自技术实现、可观测性与整段能力」。局部解析异常不能扩散成多 Run 的共享 PTY 停读；问题解决、唯一 owner 的技术实现、真实故障表达与从原输入到真实 CLI 回显／中断的整段能力须分别有证据，不能用进程活着、静态能力、局部测试或一种入口可用替代其余结果。派生终端状态不可用与原始字节／输入服务失效必须区分；未知初始触发如实保留，不能从多个相似 Session 反推某一旧错误。提醒沿同一 Runtime 事实与服务窗，未确认的输入不重放，原工作面与草稿保留，不以新增轮询、强行重启或另一套 Runtime 避开根因。
 - **输出安静后也必须完成耐久化（，P0）**。ctxmux 已读取的仍可保留输出不能因为最后一块遇到持久化队列背压，就永久等下一次输出才提交。持久化健康时，队列恢复可用后原尾段须自行收敛到真实 durable 水位；不得要求用户再打字、改变尺寸、退出或升级来补写。自然安静收敛与显式交接 flush 分别证明，FIFO barrier 只确认已经入队的字节，不能把未提交尾段或未知来源伪装成已耐久化。补写工作只随确有未提交输出的 Run 和原字节增长，不扫描无关会话、不阻塞共享 PTY 读取；原保留范围、真实存储失败、健康输入与安全交接边界保持。
