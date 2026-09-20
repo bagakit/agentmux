@@ -310,17 +310,22 @@ async function reviewOperationStates(probe, browserId) {
   await nativePageScript(probe,'document.querySelector("#private-delayed-ready").remove();null')
   await start(held);await status('running')
   await nativePageScript(probe,'globalThis.__privateTrustedInput=0;document.addEventListener("mousedown",event=>{if(event.isTrusted)globalThis.__privateTrustedInput++},{once:true});null')
-  await probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-    const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
-    if(!view.getVisible())throw new Error('Human input requires the actual visible page');view.webContents.focus();
-    for(const type of ['mouseDown','mouseUp'])view.webContents.sendInputEvent({type,button:'left',clickCount:1,x:20,y:80});return true;})()`)
+  const nativeInput=await probe.main.evaluate(`(async()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    const window=BrowserWindow.getAllWindows()[0],views=window.contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
+    if(views.length!==1)throw new Error('Expected exactly one private native input owner');const view=views[0],bounds=view.getBounds();
+    if(!window.isVisible()||window.isMinimized()||!view.getVisible()||bounds.width<=0||bounds.height<=0)throw new Error('Human input requires the actual visible page and window');
+    app.focus({steal:true});window.focus();view.webContents.focus();const focusDeadline=Date.now()+2000;
+    while(!window.isFocused()&&Date.now()<focusDeadline)await new Promise(done=>setTimeout(done,30));
+    if(!window.isFocused())throw new Error('Native input requires the actual BrowserWindow focused');
+    const observed={windowFocused:window.isFocused(),pageFocused:view.webContents.isFocused(),visible:view.getVisible(),bounds};
+    for(const type of ['mouseDown','mouseUp'])view.webContents.sendInputEvent({type,button:'left',clickCount:1,x:20,y:80});return observed;})()`)
+  const trustedInput=await waitFor('trusted native page input',async()=>{const count=await nativePageScript(probe,'globalThis.__privateTrustedInput');return count>0?count:null},2000)
   await frames('human')
-  const trustedInput=await nativePageScript(probe,'globalThis.__privateTrustedInput')
   assert.ok(trustedInput>0,'The native page received trusted input, not a page-authored event')
   await nativePageScript(probe,'globalThis.__finishPrivateStatus?.();null')
   const human=await probe.cdp.evaluate('globalThis.__privateStatusRun')
   assert.equal(human.outcome.kind,'stopped')
-  receipt.visual.states.human={operation:human.runOperation,trustedInput,inputSource:'Electron native sendInputEvent; physical hardware not tested',outcome:human.outcome}
+  receipt.visual.states.human={operation:human.runOperation,nativeInput,trustedInput,inputSource:'Electron native sendInputEvent; physical hardware not tested',outcome:human.outcome}
   await probe.cdp.evaluate(`window.agentmux.browser.returnControl(${JSON.stringify(browserId)})`)
   await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
 }
