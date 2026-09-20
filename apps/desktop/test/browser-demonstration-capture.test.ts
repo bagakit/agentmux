@@ -186,4 +186,12 @@ describe('BrowserDemonstrationCapture', () => {
     expect(s.contents.attached).toBe(false)
     expect(s.contents.listenerCount('input-event')).toBe(0)
   })
+
+  it('preserves the mature CDP owner cleanup warning without rejecting a stopped recording', async () => {
+    const s = setup(); await s.capture.start()
+    s.contents.debugger.detach = () => { throw new Error('Cleanup failed') }
+    await expect(s.capture.stop()).resolves.toMatchObject({ status: 'stopped' })
+    expect(s.drafts.at(-1)?.warning).toContain('Browser debugger cleanup could not finish')
+    expect(s.contents.listenerCount('input-event')).toBe(0)
+  })
 })

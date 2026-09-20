@@ -307,7 +307,10 @@ export class BrowserDemonstrationCapture {
     this.unsubscribe?.()
     this.unsubscribe = undefined
     if (!contents.isDestroyed()) {
-      try { this.session?.detach() }
+      try {
+        const cleanupWarning = this.session?.detach()
+        if (cleanupWarning) this.warning = cleanupWarning
+      }
       catch { this.warning = 'Recording debugger cleanup could not be confirmed. Check this Browser before recording again.' }
     }
     this.session = undefined

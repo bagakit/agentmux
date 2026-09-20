@@ -41,6 +41,7 @@ cases.push(
   [capture, 'ambiguous-target-approved', 'matches.length !== 1', 'matches.length < 1'],
   [capture, 'isolated-world-unproven', 'response.result?.value === true', 'true'],
   [capture, 'owner-not-released', 'this.session?.detach()', 'void 0'],
+  [capture, 'cleanup-warning-discarded', 'if (cleanupWarning) this.warning = cleanupWarning', 'void 0'],
   [capture, 'slow-start-reacquires-owner', 'if (generation !== this.generation) return draft', 'if (false) return draft'],
   [capture, 'budget-stop-keeps-debugger', "if (draft && draft.status !== 'recording' && this.active) this.release()", 'void 0'],
   [capture, 'event-budget-removed', 'state.events.length >= ${MAX_EVENTS}', 'false'],
@@ -67,7 +68,7 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   const baseline = await run('baseline-green')
   assert.equal(baseline.result.status, 0, baseline.log)
-  assert.match(baseline.log, /Tests\s+19 passed/, 'All actual regression tests must execute')
+  assert.match(baseline.log, /Tests\s+20 passed/, 'All actual regression tests must execute')
   for (const [file, name, before, after] of cases) {
     const source = originals.get(file)
     const occurrences = source.split(before).length - 1
@@ -83,7 +84,7 @@ try {
   }
   const green = await run('restored-green')
   assert.equal(green.result.status, 0, green.log)
-  assert.match(green.log, /Tests\s+19 passed/, 'Restored source must execute all actual tests')
+  assert.match(green.log, /Tests\s+20 passed/, 'Restored source must execute all actual tests')
   receipt.green = { exit: green.result.status, log: green.file, sha256: green.sha256 }
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message } }
