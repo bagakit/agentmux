@@ -266,6 +266,83 @@ describe('runScript records readable evidence for the exact step', () => {
   }, 30_000)
 })
 
+describe('runScript waiting follows the Core capability effects', () => {
+  const waitCapabilities = browserPageCapabilityNames('wait')
+  it('the authoritative wait set is nonempty', () => {
+    expect(waitCapabilities.length).toBeGreaterThan(0)
+  })
+
+  it.each(waitCapabilities)('%s emits waiting only while dispatch is pending and restores running before the next step', async name => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    let release!: () => void
+    let entered!: () => void
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const phases: string[] = []
+    createDispatch.mockImplementationOnce(() => async called => {
+      phases.push(sentEvents().at(-1)?.browser.activity.operation.phase)
+      if (called === name) { entered(); await pending }
+      return true
+    })
+    try {
+      const running = manager.runScript('b1', `await ${name}(); return await js('true')`)
+      await ready
+      expect(sentEvents().at(-1)?.browser.activity.operation.phase).toBe('waiting')
+      release()
+      const report = await running
+      expect(phases).toEqual(['waiting', 'running'])
+      expect(report.outcome.kind).toBe('completed')
+      expect(sentEvents().at(-1)?.browser.activity.operation.phase).toBe('completed')
+      expect(contents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled()
+    } finally { release(); manager.dispose() }
+  }, 30_000)
+
+  it('wait rejection restores running for a caught error before the next observation', async () => {
+    const { manager, sentEvents } = await managerWithBrowser()
+    const phases: string[] = []
+    createDispatch.mockImplementationOnce(() => async name => {
+      phases.push(sentEvents().at(-1)?.browser.activity.operation.phase)
+      if (name === 'waitForElement') throw new Error('element not found')
+      return true
+    })
+    try {
+      const report = await manager.runScript('b1', "try { await waitForElement() } catch {} return await pageInfo()")
+      expect(phases).toEqual(['waiting', 'running'])
+      expect(report.outcome.kind).toBe('completed')
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('completing a wait never overwrites human takeover', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    const phases: string[] = []
+    createDispatch.mockImplementationOnce(() => async name => {
+      if (name === 'waitForElement') contents.emit('input-event', { type: 'mouseDown' })
+      phases.push(sentEvents().at(-1)?.browser.activity.operation.phase)
+      return true
+    })
+    try {
+      const report = await manager.runScript('b1', 'await waitForElement(); return await pageInfo()')
+      expect(phases).toEqual(['human', 'human'])
+      expect(report.outcome.kind).toBe('stopped')
+      expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('a healthy completed program retains a cleanup warning and remains runnable', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    const originalOff = contents.debugger.off
+    contents.debugger.off = () => { throw new Error('listener removal unavailable') }
+    try {
+      const report = await manager.runScript('b1', 'return 7')
+      expect(report).toMatchObject({ result: 7, outcome: { kind: 'completed' }, runOperation: { warning: expect.stringContaining('cleanup') } })
+      expect(sentEvents().at(-1)?.browser.activity.warning).toContain('cleanup')
+      expect(contents.debugger.isAttached()).toBe(false)
+      contents.debugger.off = originalOff
+      await expect(manager.runScript('b1', 'return 8')).resolves.toMatchObject({ result: 8, outcome: { kind: 'completed' } })
+    } finally { contents.debugger.off = originalOff; manager.dispose() }
+  }, 30_000)
+})
+
 describe('runScript 把页面调用交给派发层', () => {
   it('Agent 程序调页面函数，落到 createBrowserPageDispatch 建的那个闭包上', async () => {
     const { manager, contents } = await managerWithBrowser()
