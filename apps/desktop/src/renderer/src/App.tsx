@@ -19,7 +19,6 @@ import { ShortcutsCheatSheet } from './components/ShortcutsCheatSheet'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
-import { BoardRowsProvider } from './hooks/useBoardRows'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
@@ -161,7 +160,7 @@ function DesktopApp() {
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
     fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
-  const toolsAvailable = mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace))
+  const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const renderedToolDockWidth = getRenderedToolDockWidth(toolDockWidth, projectRailOpen)
@@ -254,7 +253,6 @@ function DesktopApp() {
     <SettingsNavigation.Provider value={{ open: openSettings }}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
       <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} measurementActive={terminalParkingMeasurement}>
-      <BoardRowsProvider enabled={mainSurface === 'board' && !settingsRoute}>
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
       >
@@ -381,7 +379,6 @@ function DesktopApp() {
       />
       </div>
       <WindowOverlayHost />
-      </BoardRowsProvider>
       </RendererResourceOwners>
     </ExecutorIdentityContext.Provider>
     </SettingsNavigation.Provider>

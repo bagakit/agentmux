@@ -18,6 +18,7 @@ import {
   isDemandStatus,
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
+import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
 const INITIAL_REVISION = 0
 const queues = new Map<string, Promise<void>>()
@@ -122,9 +123,11 @@ function parseDemand(value: unknown, label: string): Demand {
     'sessionIds',
     'activities',
     'decisions',
+    'alignment',
+    'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -151,6 +154,8 @@ function parseDemand(value: unknown, label: string): Demand {
     sessionIds: stringArray(record.sessionIds, `${label}.sessionIds`),
     activities: record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`)),
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
+    ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
+    ...(record.grounding === undefined ? {} : { grounding: parseGrounding(record.grounding) }),
     createdAt: timestamp(record.createdAt, `${label}.createdAt`),
     updatedAt: timestamp(record.updatedAt, `${label}.updatedAt`),
   }
@@ -291,6 +296,9 @@ export class DemandStore {
   async update(id: string, patch: UpdateDemandInput): Promise<DemandReceipt> {
     return this.mutate('update', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
+      if ('confirmedAt' in patch || 'acceptedAt' in patch || 'revision' in patch || 'submissionId' in patch) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Agent updates cannot supply acknowledgement fields.')
+      }
       if (patch.title !== undefined) demand.title = inputString(patch.title, 'title') ?? demand.title
       if (patch.description !== undefined) demand.description = patch.description
       if (patch.status !== undefined) demand.status = ensureStatus(patch.status, 'status') ?? demand.status
@@ -303,8 +311,77 @@ export class DemandStore {
       if (patch.targetAt !== undefined) demand.targetAt = patch.targetAt
       if (patch.parentDemandId !== undefined) demand.parentDemandId = patch.parentDemandId
       if (patch.phaseIndex !== undefined) demand.phaseIndex = patch.phaseIndex
+      try {
+        if (patch.alignment !== undefined) {
+          const proposal = parseAlignmentProposal(patch.alignment)
+          const current = demand.alignment
+          const content = current && { summary: current.summary, criteria: current.criteria, openQuestions: current.openQuestions }
+          if (JSON.stringify(proposal) !== JSON.stringify(content)) {
+            demand.alignment = { ...proposal, revision: (current?.revision ?? 0) + 1, confirmedAt: null }
+          }
+        }
+        if (patch.grounding !== undefined) {
+          const proposal = parseGroundingProposal(patch.grounding)
+          const alignment = demand.alignment
+          if (!alignment || proposal.alignmentRevision !== alignment.revision) throw new Error('Grounding must reference the current goal revision.')
+          const criterionIds = new Set(alignment.criteria.map(criterion => criterion.id))
+          if (proposal.checks.some(check => !criterionIds.has(check.criterionId))) throw new Error('Grounding references an unknown success criterion.')
+          const current = demand.grounding
+          const content = current && { alignmentRevision: current.alignmentRevision, summary: current.summary, checks: current.checks }
+          if (JSON.stringify(proposal) !== JSON.stringify(content)) {
+            demand.grounding = { ...proposal, submissionId: `grounding_${randomUUID()}`, acceptedAt: null }
+          }
+        }
+      } catch (error) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, error instanceof Error ? error.message : String(error), error)
+      }
       demand.updatedAt = Date.now()
       validateNewDemand(demand, this.storePath)
+      return demand
+    })
+  }
+
+  async proposeAlignment(id: string, proposal: DemandAlignmentProposal): Promise<DemandReceipt> {
+    return this.update(id, { alignment: proposal })
+  }
+
+  async proposeGrounding(id: string, proposal: DemandGroundingProposal): Promise<DemandReceipt> {
+    return this.update(id, { grounding: proposal })
+  }
+
+  /** Human acknowledgement. Hosts expose this through an explicit user action, never Agent update. */
+  async confirmAlignment(id: string, expectedRevision: number): Promise<DemandReceipt> {
+    return this.mutate('confirm-alignment', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      if (!demand.alignment || demand.alignment.revision !== expectedRevision) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The goal changed. Read the current proposal before confirming it.')
+      }
+      const issue = alignmentConfirmationIssue(demand.alignment)
+      if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
+      if (demand.alignment.confirmedAt === null) {
+        demand.alignment.confirmedAt = Date.now()
+        demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'goal-confirmed', message: `User confirmed goal revision ${expectedRevision}.`, createdAt: demand.alignment.confirmedAt, actorId: null })
+      }
+      demand.updatedAt = Date.now()
+      return demand
+    })
+  }
+
+  /** Acceptance binds the exact result shown to the user; retaining gaps is a distinct choice. */
+  async acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps = false): Promise<DemandReceipt> {
+    return this.mutate('accept-grounding', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      if (demand.alignment?.revision !== expectedAlignmentRevision || demand.grounding?.submissionId !== expectedSubmissionId) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The goal or results changed. Read the current results before accepting them.')
+      }
+      if (typeof acceptGaps !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Accepting with gaps requires an explicit boolean choice.')
+      const issue = groundingAcceptanceIssue(demand.alignment, demand.grounding, acceptGaps)
+      if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
+      if (demand.grounding.acceptedAt === null) {
+        demand.grounding.acceptedAt = Date.now()
+        demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: demand.grounding.acceptedAt, actorId: null })
+      }
+      demand.updatedAt = Date.now()
       return demand
     })
   }

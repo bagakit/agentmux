@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseAlignmentProposal, parseGroundingProposal } from '@agentmux/demand/goals'
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import packageManifest from '../package.json' with { type: 'json' }
@@ -408,11 +409,17 @@ async function demandCommand(args: readonly string[]): Promise<number> {
     return 0
   }
   if (action === 'update') {
-    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'data' })
+    const flags = parseFlags(args.slice(1), { '--demand': 'value', '--title': 'data', '--description': 'data', '--project': 'value', '--priority': 'value', '--status': 'value', '--session': 'data', '--alignment': 'data', '--grounding': 'data' })
     const priority = flags.values.get('--priority'); const status = flags.values.get('--status')
     if (priority && !(AGENTMUX_DEMAND_PRIORITIES as readonly string[]).includes(priority)) throw cliError(`Unknown demand priority: ${priority}`)
     if (status && !(AGENTMUX_DEMAND_STATUSES as readonly string[]).includes(status)) throw cliError(`Unknown demand status: ${status}`)
     const patch: Record<string, unknown> = {}
+    try {
+      if (flags.values.has('--alignment')) patch.alignment = parseAlignmentProposal(JSON.parse(requiredData(flags, '--alignment', 'Goal proposal')))
+      if (flags.values.has('--grounding')) patch.grounding = parseGroundingProposal(JSON.parse(requiredData(flags, '--grounding', 'Result proposal')))
+    } catch (error) {
+      throw cliError(error instanceof Error ? error.message : 'Goal proposal is invalid.')
+    }
     for (const [flag, key] of [['--title', 'title'], ['--description', 'description'], ['--project', 'projectId'], ['--priority', 'priority'], ['--status', 'status'], ['--session', 'sessionIds']] as const) {
       if (!flags.values.has(flag)) continue
       patch[key] = flag === '--session' ? [identifier(flags.values.get(flag), 'Session id')] : flags.values.get(flag)

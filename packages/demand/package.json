@@ -30,6 +30,10 @@
     "./cli": {
       "types": "./dist/src/cli.d.ts",
       "import": "./dist/src/cli.js"
+    },
+    "./goals": {
+      "types": "./dist/src/goals.d.ts",
+      "import": "./dist/src/goals.js"
     }
   },
   "bin": {

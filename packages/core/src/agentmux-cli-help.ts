@@ -614,6 +614,8 @@ Usage:
   agentmux demand show --demand <demand-id>
   agentmux demand create --title <title> [--project <project-id>] [--status <status>] [--priority <priority>]
   agentmux demand update --demand <demand-id> [--title <title>] [--status <status>] [--priority <priority>]
+  agentmux demand update --demand <demand-id> --alignment <proposal-json>
+  agentmux demand update --demand <demand-id> --grounding <proposal-json>
   agentmux demand assign --demand <demand-id> [--project <project-id>] [--executor <executor-id>] [--start]
   agentmux demand start --demand <demand-id> [--session <session-id>]
   agentmux demand handoff --demand <demand-id> [--executor <executor-id>] [--session <session-id>]
