@@ -164,7 +164,7 @@ export function InlineComposer(props: InlineComposerProps) {
       return false
     },
     clipboardTextSerializer: (slice: any) => documentDraft({ type: 'doc', content: slice.content.toJSON() })
-  }), [])
+  }), [props.placeholder, props['aria-label']])
   const onUpdate = useMemo(() => ({ editor }: { editor: any }) => { const value = documentDraft(editor.getJSON()); if (value !== latest.current.value) latest.current.onValueChange(value) }, [])
   const editor = useEditor({
     immediatelyRender: false,
