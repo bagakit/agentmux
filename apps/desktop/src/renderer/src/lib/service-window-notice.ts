@@ -210,32 +210,12 @@ export function agentSessionServiceOutcome(session: SessionSnapshot | undefined)
     return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }
 
-  // Core 落下的「输出通道断了、进程没死」事实，比推断出的 disconnected 更权威：重连本身成功了，是
-  // 这一个 Run 的实时输出泵没能重建（client.ts 的 `resumed === 'dead'`）。输入照常送达 Agent，但它的
-  // 输出永远到不了这块屏——不告知的话用户对着一块永不回显的屏幕打字。直接投影这条事实（进程在跑就是
-  // 第 2 类，放行 + 提醒），它挺过视图切换与快照刷新，直到一次成功的 reattach 撤下它。
-  //
-  // restore 这句刻意**不说 Resume**，尽管清除这条事实的 Core 侧函数确实叫 reattach、而 Resume 的注释
-  // 也声称走那条路。实测不是：这条降级只在进程**还在跑**时产生，而 Resume 走
-  // `ensureAgentContinuity`，对一个 running 的 Run 判出 `reattachable` 就直接返回投影——
-  // 全程 attach 调用数为 0，标记原样留着（对 client 实跑验证过：verdict=reattachable、attach 0 次、
-  // 标记仍在）。也就是说 Resume 在这个状态下按了等于没按。
-  //
-  // 真正能撤下它的是让这块屏**重新挂载**：卸载时 TerminalView 会 detach（runtime-controller 随之
-  // 丢掉 attachment owner），重新挂载时 `existing` 缺席，于是走 `reattachAgent` → `attachAgentRun`
-  // → `clearOutputChannel`。
-  //
-  // 点名 Terminal/Activity 这个切换，而不是「切走再切回 tab」：后者要等冷却
-  // （TERMINAL_COLD_PARK_DELAY_MS = 30s，且还要过 TTL 或被挤出热集）才真的卸载，用户照字面做
-  // ——切走、马上切回——屏幕仍是热的、根本不重挂，于是什么都不会发生。这条视图切换是
-  // SessionPane 里一个真正的条件卸载，立即生效，且 pane 上就有那个带标签的按钮。
-  // 这条告示在两个视图下都会出现，所以措辞取「切到 Activity 再切回 Terminal」这个双向都说得通的
-  // 来回，而不是预设用户此刻在哪一侧。
+  // A failed output observation confirms that step only. It is not an Input receipt or owner-health proof.
   if (session.terminalOutputChannel?.reason === 'reattach-failed') {
     const step: ProcessStep = {
       label: 'Reattaching this window’s output',
-      degradedMode: 'Output may not be showing here, but your input still reaches the Agent',
-      restore: 'Switch this pane to Activity and back to Terminal to reattach its output'
+      degradedMode: 'The output connection could not be reopened. The last Run observation is kept; current availability and input delivery are unconfirmed',
+      restore: 'Use Refresh observation in this Region to re-read its Session and reopen output. Unknown Input is not replayed'
     }
     return { completed: false, step, agentViability: agentViabilityFromProcessState(session.processState) }
   }

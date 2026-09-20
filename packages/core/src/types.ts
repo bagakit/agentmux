@@ -963,7 +963,10 @@ export type AgentMuxAcpEvent =
       toolInput?: string
     }
 
-export type AgentMuxClientEvent =
+/** The exact observation operation that produced a projection; never new Input intent. */
+export type AgentMuxObservationOrigin = { kind: 'attachment-refresh'; operationId: string; run: AgentMuxRunRef }
+
+export type AgentMuxClientEvent = (
   | ({
       /** Fresh authoritative representation, ordered before subsequent live events on this Run. */
       type: 'terminal-snapshot'
@@ -1057,6 +1060,8 @@ export type AgentMuxClientEvent =
       state: 'lost' | 'restored' | 'unrecoverable'
       evidence: AgentMuxEvidence
     }
+
+) & { observationOrigin?: AgentMuxObservationOrigin }
 
 export type AgentStatus = {
   state: AgentDisplayState

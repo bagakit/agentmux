@@ -91,6 +91,7 @@ const runtimeFixture = vi.hoisted(() => {
       replay: [],
       gap: null
     }))
+    readonly refreshRunAttachment = vi.fn(async (run: { runId: string }) => this.attachTerminal(run.runId))
     readonly releaseRunAttachment = vi.fn(async () => {})
     readonly reattachAgent = vi.fn(async () => {
       throw new Error('Agent attachment fixture is not configured')
@@ -2190,6 +2191,53 @@ describe('RuntimeController configuration transaction', () => {
       sessionAttachmentLeases: 0
     })
     detachRenderer()
+  })
+
+  it('coalesces actual shared observation refresh and preserves both Region leases and exact Run identity', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const control: SessionControl = { kind: 'terminal', hostId: 'local', runId: 'run-1', run: { runId: 'run-1' } }
+    const snapshot = await client.attachTerminal.getMockImplementation()!('run-1')
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [{ subjectId: 'terminal:local:run-1', kind: 'terminal',
+      hostId: 'local', workspacePath: '/repo', run: snapshot.run }] })
+    const a = await controller.attachSession(17, control, 0, localConfig)
+    const b = await controller.attachSession(19, control, 12, localConfig)
+    const pending = deferred<typeof snapshot>()
+    client.refreshRunAttachment.mockReturnValueOnce(pending.promise)
+    const first = controller.refreshSessionAttachment(17, control, a.attachmentId, 12, localConfig)
+    const second = controller.refreshSessionAttachment(19, control, b.attachmentId, 12, localConfig)
+    await vi.waitFor(() => expect(client.refreshRunAttachment).toHaveBeenCalledExactlyOnceWith(control.run, 12, 'terminal'))
+    expect(client.readRunReplay).toHaveBeenCalledOnce()
+    expect(client.releaseRunAttachment).not.toHaveBeenCalled()
+    expect(controller.resourceOwnerCounts()).toEqual({ sessionAttachmentOwners: 1, sessionAttachmentLeases: 2 })
+    pending.resolve(snapshot)
+    const results = await Promise.all([first, second])
+    expect(results.map(r => r.attachmentId)).toEqual([a.attachmentId, b.attachmentId])
+    expect(results.map(r => r.session.control)).toEqual([control, control])
+    expect(controller.resourceOwnerCounts()).toEqual({ sessionAttachmentOwners: 1, sessionAttachmentLeases: 2 })
+    await expect(controller.refreshSessionAttachment(99, control, a.attachmentId, 12, localConfig)).rejects.toThrow('exact Session')
+    await controller.detachSession(17, a.attachmentId)
+    expect(client.releaseRunAttachment).not.toHaveBeenCalled()
+    await controller.detachSession(19, b.attachmentId)
+    expect(client.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith(control.run)
+    await controller.dispose()
+  })
+
+  it('failed observation refresh retains the existing lease and rejects a different-Run reply without restarting', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const control: SessionControl = { kind: 'terminal', hostId: 'local', runId: 'run-1', run: { runId: 'run-1' } }
+    const snapshot = await client.attachTerminal.getMockImplementation()!('run-1')
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [{ subjectId: 'terminal:local:run-1', kind: 'terminal',
+      hostId: 'local', workspacePath: '/repo', run: snapshot.run }] })
+    const lease = await controller.attachSession(17, control, 0, localConfig)
+    client.refreshRunAttachment.mockRejectedValueOnce(new Error('Native observation stopped'))
+    await expect(controller.refreshSessionAttachment(17, control, lease.attachmentId, 12, localConfig)).rejects.toThrow('Native observation stopped')
+    expect(controller.resourceOwnerCounts()).toEqual({ sessionAttachmentOwners: 1, sessionAttachmentLeases: 1 })
+    client.refreshRunAttachment.mockResolvedValueOnce({ ...snapshot, run: { ...snapshot.run, runId: 'different-run' } })
+    await expect(controller.refreshSessionAttachment(17, control, lease.attachmentId, 12, localConfig)).rejects.toThrow('exact Run')
+    expect(controller.resourceOwnerCounts()).toEqual({ sessionAttachmentOwners: 1, sessionAttachmentLeases: 1 })
+    expect(client.releaseRunAttachment).not.toHaveBeenCalled()
+    expect(client.attachTerminal).toHaveBeenCalledOnce()
+    await controller.detachSession(17, lease.attachmentId); await controller.dispose()
   })
 
   it('serializes Attachment-owned resize with exact-Run Stop and revokes late viewport work', async () => {

@@ -227,6 +227,12 @@ export function SessionPane({
     [linkRequest, openHttpLink, linkOrigin, reportError]
   )
   const [refreshing, setRefreshing] = useState(false)
+  const [observationMounted, setObservationMounted] = useState(false)
+  const observationRefreshRef = useRef<(() => Promise<void>) | null>(null)
+  const bindObservationRefresh = useCallback((refresh: (() => Promise<void>) | null) => {
+    observationRefreshRef.current = refresh
+    setObservationMounted(refresh !== null)
+  }, [])
   const [recovering, setRecovering] = useState(false)
   // daemon_restart auto-recovery fires at most once per dead session id, so a flapping
   // daemon can't spin us into a relaunch loop. Keyed by the session id we last recovered from.
@@ -325,11 +331,15 @@ export function SessionPane({
             ? `${noun} process exited`
             : `${noun} session unavailable`
 
-  async function refresh(): Promise<void> {
+  async function refresh(observationOnly = false): Promise<void> {
     if (refreshing) return
     setRefreshing(true)
-    await refreshSession(sessionId)
-    setRefreshing(false)
+    try {
+      if (observationRefreshRef.current) await observationRefreshRef.current()
+      else if (observationOnly) reportError(new Error('No terminal observation is mounted in this Region. Open Terminal to refresh its output connection.'))
+      else await refreshSession(sessionId)
+    } catch { /* The owning Store/Terminal already retains and presents the actual cause. */ }
+    finally { setRefreshing(false) }
   }
 
   // The history notice and the underlying Session share one Core-reasoned action.
@@ -362,10 +372,13 @@ export function SessionPane({
         name={agentInputIdentity!} executorLabel={agentInputExecutor!} sessionId={session.id}
         regionId={linkOrigin.regionId} readOnly={readOnly}
         onHistory={!historyOpen && !inlineHistory ? () => setHistoryOpen(true) : undefined}
+        onRefreshObservation={observationMounted ? () => void refresh(true) : undefined}
+        refreshing={refreshing}
       /> : null}
       {launchNotice}
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }}
-        busy={recovering} retry={() => void recover()} /> : null}
+        busy={recovering || refreshing} retry={() => void recover()}
+        {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
           <div className="agent-terminal-stage">
@@ -388,6 +401,7 @@ export function SessionPane({
                 visible={visible && !historyOpen}
                 readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
+                onObservationRefresh={bindObservationRefresh}
               />
             )}
             {(historyOpen || inlineHistory) && session.kind === 'agent' ? <SessionHistoryView

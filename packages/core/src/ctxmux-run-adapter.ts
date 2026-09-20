@@ -1010,9 +1010,10 @@ export class CtxmuxRunAdapter {
     runId: string,
     afterByte: number,
     beforeLive?: (snapshot: CtxmuxAdapterAttachment) => void,
-    view: AgentMuxRunAttachmentView = 'raw'
+    view: AgentMuxRunAttachmentView = 'raw',
+    replace = false
   ): Promise<CtxmuxAdapterAttachment> {
-    if (this.hasAttachment(runId)) {
+    if (this.hasAttachment(runId) && !replace) {
       throw new AgentMuxError('This client already owns an Attachment for the Run.', 'ATTACHMENT_EXISTS')
     }
     try {
@@ -1022,7 +1023,8 @@ export class CtxmuxRunAdapter {
       // Record the offered snapshot before synchronous publication can lose the connection.
       // No second queue: the SDK attachment owns all bytes until its pump starts.
       const token = Symbol(runId)
-      this.attachments.set(runId, { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes })
+      const previous = this.attachments.get(runId)
+      if (!replace) this.attachments.set(runId, { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes })
       try { beforeLive?.(snapshot) } catch (error) {
         if (this.attachments.get(runId)?.token === token) this.attachments.delete(runId)
         try { await attachment.detach() } catch (cleanupError) {
@@ -1031,10 +1033,15 @@ export class CtxmuxRunAdapter {
         }
         throw error
       }
+      // Open and validate first: a failed refresh must leave the original live owner intact.
+      if (replace) this.attachments.set(runId, { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes })
       if (this.attachments.get(runId)?.token === token) {
         void this.pump(runId, token, attachment, decoder)
       } else {
         attachment.close()
+      }
+      if (previous?.attachment) {
+        try { await previous.attachment.detach() } catch { previous.attachment.close() }
       }
       return snapshot
     } catch (error) {
@@ -1283,7 +1290,7 @@ export class CtxmuxRunAdapter {
       }
     } catch (error) {
       threw = true
-      this.errorListener?.(translateCtxmuxError(error), runId)
+      if (this.attachments.get(runId)?.token === token) this.errorListener?.(translateCtxmuxError(error), runId)
     } finally {
       const stillOwned = this.attachments.get(runId)?.token === token
       // 这条流怎么结束的，决定了要不要对账。分类是纯函数（ctxmux-stream-end），三种结局：

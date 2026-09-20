@@ -228,10 +228,13 @@ describe('输出通道断了、进程没死：放行必须配告知', () => {
     expect(classification.kind).toBe('process-degraded')
     const rendered = serviceNoticeToRender(classification)
     expect(rendered).not.toBeNull()
-    // 三段文案要点名「输出可能没在显示」「输入仍到达 Agent」，以及一个此刻真能走通的动作。
-    expect(rendered!.notice.mode).toContain('Output may not be showing')
-    expect(rendered!.notice.mode).toContain('input still reaches the Agent')
-    expect(rendered!.notice.restore).toContain('Switch this pane to Activity and back to Terminal')
+    // 旧 running 只是最后观察，不是当前 Input 回执；真实恢复动作沿原 Region observer。
+    expect(rendered!.notice.mode).toContain('The output connection could not be reopened')
+    expect(rendered!.notice.mode).toContain('The last Run observation is kept')
+    expect(rendered!.notice.mode).toContain('input delivery are unconfirmed')
+    expect(rendered!.notice.mode).not.toContain('input still reaches the Agent')
+    expect(rendered!.notice.restore).toContain('Refresh observation in this Region')
+    expect(rendered!.notice.restore).toContain('Unknown Input is not replayed')
   })
 
   it('restore 不许点名 Resume——这个状态下按了等于没按', () => {

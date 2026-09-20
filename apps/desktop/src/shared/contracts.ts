@@ -1436,6 +1436,7 @@ export type AgentMuxDesktopApi = {
     timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
     historyPage(session: AgentSessionControl, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
+    refreshAttachment(session: SessionControl, attachmentId: string | null, afterByte: number): Promise<SessionAttachResult>
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
     detach(attachmentId: string): Promise<void>
     write(session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<void>

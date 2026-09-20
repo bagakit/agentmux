@@ -235,6 +235,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:historyPage', session, options),
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
+    refreshAttachment: (session: SessionControl, attachmentId: string | null, afterByte: number) =>
+      ipcRenderer.invoke('sessions:refreshAttachment', session, attachmentId, afterByte),
     replay: (attachmentId: string, afterByte: number) =>
       ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
