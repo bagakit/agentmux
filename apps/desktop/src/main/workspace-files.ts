@@ -7,6 +7,10 @@ import { basename, dirname, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ExecutionHost } from '@agentmux/core'
+import {
+  WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES,
+  type WorkspaceFileByteRead, type WorkspaceFileByteReadOptions
+} from '../shared/workspace-file-bytes.js'
 import type {
   CreateWorkspacePathInput,
   MoveWorkspacePathInput,
@@ -29,6 +33,7 @@ const WORKSPACE_MOVE_HELPER = resolve(
 
 type LocalWorkerRequest =
   | { action: 'read'; name: string }
+  | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string }
   | { action: 'list' }
   | { action: 'reveal'; name: string | null }
   | { action: 'observe'; name: string }
@@ -140,6 +145,43 @@ try {
   if (request.action === 'read') {
     const handle = await openRegularFile(request.name, constants.O_RDONLY)
     try { process.stdout.write(await handle.readFile()) } finally { await handle.close() }
+  } else if (request.action === 'read-bytes') {
+    const handle = await openRegularFile(request.name, constants.O_RDONLY)
+    try {
+      const before = await handle.stat({ bigint: true })
+      const totalBytes = Number(before.size)
+      if (!Number.isSafeInteger(totalBytes) || totalBytes > request.maxFileBytes) {
+        throw Object.assign(new Error('Workspace file exceeds the byte transfer budget'), { code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+      }
+      if (request.offset > totalBytes) throw new Error('Byte offset exceeds the Workspace file length')
+      const end = Math.min(totalBytes, request.offset + request.maxBytes)
+      const bytes = Buffer.alloc(end - request.offset)
+      const block = Buffer.alloc(64 * 1024)
+      const digest = createHash('sha256')
+      let position = 0
+      while (position < totalBytes) {
+        const read = await handle.read(block, 0, Math.min(block.length, totalBytes - position), position)
+        if (!read.bytesRead) throw new Error('Workspace file changed while reading its bytes')
+        const chunk = block.subarray(0, read.bytesRead)
+        digest.update(chunk)
+        const start = Math.max(position, request.offset), stop = Math.min(position + read.bytesRead, end)
+        if (stop > start) chunk.copy(bytes, start - request.offset, start - position, stop - position)
+        position += read.bytesRead
+      }
+      const after = await handle.stat({ bigint: true })
+      if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
+        throw new Error('Workspace file changed while reading its bytes')
+      }
+      const revision = 'sha256:' + digest.digest('hex')
+      if (request.expectedRevision !== undefined && request.expectedRevision !== revision) {
+        throw Object.assign(new Error('Workspace file no longer matches its original revision'), { code: 'WORKSPACE_FILE_REVISION_MISMATCH' })
+      }
+      process.stdout.write(JSON.stringify({
+        data: bytes.toString('base64'), totalBytes, revision, offset: request.offset,
+        returnedBytes: bytes.length, nextOffset: end < totalBytes ? end : null,
+        readCost: { payloadBytes: position }
+      }))
+    } finally { await handle.close() }
   } else if (request.action === 'list') {
     const entries = await readdir('.', { withFileTypes: true })
     const ignored = new Set()
@@ -371,7 +413,7 @@ async function runLocalWorker(
   cwd: string,
   root: string,
   request: LocalWorkerRequest,
-  input?: string
+  input?: string | Uint8Array
 ): Promise<Buffer> {
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
@@ -1114,6 +1156,38 @@ export class WorkspaceFiles {
     workspace: WorkspaceRecord,
     input: WorkspaceFileWriteInput
   ): Promise<WorkspaceFileWriteResult> {
+    return await this.writeContent(workspace, input, () => this.options.beforeWrite?.(input))
+  }
+
+  /** Publish a new binary file through the same atomic, root-confined owner as editor saves. */
+  async writeBytes(workspace: WorkspaceRecord, input: { path: string; bytes: Uint8Array }): Promise<WorkspaceFileWriteResult> {
+    if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > WORKSPACE_FILE_MAX_BYTES) {
+      return { status: 'error', code: 'WORKSPACE_FILE_BYTE_LIMIT', message: 'Workspace file exceeds the byte transfer budget.' }
+    }
+    return await this.writeContent(workspace, { path: input.path, content: Buffer.from(input.bytes), expectedRevision: null })
+  }
+
+  /** Strict root confinement; unlike Explorer reads, a byte transfer cannot follow an outside link. */
+  async readBytes(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions = {}): Promise<WorkspaceFileByteRead> {
+    if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
+    const offset = options.offset ?? 0, maxBytes = options.maxBytes ?? WORKSPACE_FILE_MAX_READ_BYTES
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > WORKSPACE_FILE_MAX_READ_BYTES) {
+      throw new Error(`Byte reads require an integer offset and maxBytes from 1 to ${WORKSPACE_FILE_MAX_READ_BYTES}.`)
+    }
+    const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    const document = JSON.parse((await runLocalWorker(dirname(resolved.target), resolved.root, {
+      action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: WORKSPACE_FILE_MAX_BYTES,
+      ...(options.expectedRevision !== undefined ? { expectedRevision: options.expectedRevision } : {})
+    })).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
+    const { data, ...result } = document
+    return { ...result, bytes: Buffer.from(data, 'base64') }
+  }
+
+  private async writeContent(
+    workspace: WorkspaceRecord,
+    input: { path: string; content: string | Uint8Array; expectedRevision: string | null },
+    beforeWrite?: () => void | Promise<void>
+  ): Promise<WorkspaceFileWriteResult> {
     const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
     return await this.serializeWrite(this.writeRequestTails, requestKey, async () => {
       try {
@@ -1129,7 +1203,7 @@ export class WorkspaceFiles {
         const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
         return await this.serializeWrite(this.writeTails, key, async () => {
           try {
-            await this.options.beforeWrite?.(input)
+            await beforeWrite?.()
             const fault = typeof this.options.localWriteFault === 'function'
               ? this.options.localWriteFault()
               : this.options.localWriteFault
