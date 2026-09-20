@@ -1,19 +1,17 @@
 /* Browser operation controls stay local; the host owns native page/trace-rail geometry. */
-.browser-rsi-rail { flex: none; min-width: 0; min-height: 30px; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-1) var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--text-2); background: var(--surface-1); }
-.browser-rsi-rail--running { border-bottom-color: var(--green-line); }
-.browser-rsi-rail--human { border-bottom-color: var(--amber-line); }
-.browser-rsi-rail--failed, .browser-rsi-rail--indeterminate { border-bottom-color: var(--red-line); }
-.browser-rsi-rail--idle { color: var(--text-3); }
-.browser-rsi-rail--quiet { min-height: 26px; justify-content: flex-end; padding-block: var(--sp-1); background: transparent; border-bottom-color: transparent; }
-.browser-rsi-rail__identity, .browser-rsi-rail__target, .browser-rsi-rail__copy { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); }
-.browser-rsi-rail__identity > span:not(.agent-avatar), .browser-rsi-rail__target > span { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
-.browser-rsi-rail__identity { flex: 0 1 auto; }
-.browser-rsi-rail__target { flex: 1 1 160px; color: var(--green-2); }
-.browser-rsi-rail__identity strong, .browser-rsi-rail__target strong, .browser-rsi-rail__copy strong { overflow: hidden; color: var(--text-2); font-size: var(--fs-micro); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.browser-rsi-rail__identity small, .browser-rsi-rail__target small, .browser-rsi-rail__copy small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
-.browser-rsi-rail__warning { flex-basis: 100%; order: 1; min-width: 0; display: inline-flex; align-items: flex-start; gap: var(--sp-2); color: var(--amber-text); font-size: var(--fs-micro); line-height: 1.5; overflow-wrap: anywhere; }
-.browser-rsi-rail__warning svg { flex: none; }
-.browser-rsi-rail__actions { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.browser-operation-status { flex: none; display: inline-flex; }
+.browser-operation-status__trigger { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.browser-operation-status__trigger:hover, .browser-operation-status__trigger[data-state="open"] { color: var(--text); background: var(--surface-3); }
+.browser-operation-status__trigger:focus-visible { outline: 2px solid var(--green-line); outline-offset: -2px; }
+.browser-operation-status[data-phase="running"], .browser-operation-status[data-phase="preparing"], .browser-operation-status[data-phase="completed"] { color: var(--green-2); }
+.browser-operation-status[data-phase="waiting"], .browser-operation-status[data-phase="human"], .browser-operation-status[data-phase="unknown"], .browser-operation-status[data-phase="indeterminate"] { color: var(--amber-text); }
+.browser-operation-status[data-phase="failed"] { color: var(--red-text); }
+.browser-operation-status:not([data-phase="idle"]) .browser-operation-status__trigger { color: inherit; }
+.browser-operation-menu { max-width: min(280px, calc(100vw - 16px)); }
+.browser-operation-menu__identity { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.browser-operation-menu__identity strong { color: var(--text-2); font-weight: 650; }
+.browser-operation-menu__identity small { font-size: inherit; overflow-wrap: anywhere; }
+.browser-operation-warning { flex: none; min-width: 0; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--amber-line); color: var(--amber-text); font-size: var(--fs-micro); line-height: 1.5; }
 .browser-rsi-button, .browser-rsi-icon-button { min-height: 25px; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .browser-rsi-button { padding: 0 var(--sp-3); white-space: nowrap; }
 .browser-rsi-button--quiet:hover:not(:disabled), .browser-rsi-icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
@@ -22,8 +20,6 @@
 .browser-rsi-button:disabled, .browser-rsi-icon-button:disabled { opacity: .45; cursor: default; }
 .browser-rsi-button:focus-visible, .browser-rsi-icon-button:focus-visible, .browser-rsi-history__item:focus-visible, .browser-rsi-timeline__step-button:focus-visible { outline: 2px solid var(--green-line); outline-offset: -2px; }
 .browser-rsi-icon-button { width: 25px; padding: 0; }
-.browser-rsi-rail--human .browser-rsi-rail__target { color: var(--amber-text); }
-.browser-rsi-rail--failed .browser-rsi-rail__target, .browser-rsi-rail--indeterminate .browser-rsi-rail__target { color: var(--red-text); }
 .browser-rsi-timeline, .browser-rsi-replay { min-width: 0; overflow: hidden; color: var(--text-2); }
 .browser-rsi-timeline--empty { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .browser-rsi-timeline__header, .browser-rsi-replay__header { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
@@ -102,10 +98,4 @@
 .browser-rsi-replay__outcome--script-failed { color: var(--red-text); background: var(--red-bg); }
 .browser-rsi-replay__outcome--indeterminate { color: var(--amber-text); background: var(--amber-bg); }
 .browser-rsi-replay__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
-@media (max-width: 700px) {
-  .browser-rsi-rail { flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
-  .browser-rsi-rail__identity { flex-basis: auto; }
-  .browser-rsi-rail__target { flex-basis: 120px; }
-  .browser-rsi-rail__actions { flex-wrap: wrap; }
-  .browser-rsi-rail__warning { order: 3; width: 100%; }
-}
+@media (prefers-reduced-motion: reduce) { .browser-operation-status .spin, .browser-operation-status .semantic-icon { animation: none; } }

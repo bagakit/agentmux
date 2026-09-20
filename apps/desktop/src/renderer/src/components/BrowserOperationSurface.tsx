@@ -2,7 +2,6 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
-  CircleDot,
   CircleX,
   Hand,
   History,
@@ -14,7 +13,6 @@ import {
   UserRound
 } from 'lucide-react'
 import { useId, useState } from 'react'
-import type { AgentProviderId } from '@agentmux/core'
 import type {
   BrowserActivityState,
   BrowserOperation,
@@ -23,78 +21,67 @@ import type {
   BrowserReplayPlan
 } from '../../../shared/browser-operation'
 import type { BrowserScriptRunReport } from '../../../shared/contracts'
-import { AgentAvatar } from './AgentAvatar'
 import { SemanticIcon } from './semantic-icons'
+import * as DropdownMenu from './HoverDropdownMenu'
 
-/**
- * The operator rail is deliberately a small, persistent surface. It answers three questions in one
- * line: who is driving, what phase they are in, and which semantic target is currently under review.
- * The browser page remains visible below it; this surface never intercepts page input.
- */
-export function BrowserOperationRail({
+/** One toolbar disclosure owns Browser operation state and its optional actions. */
+export function BrowserOperationStatus({
   activity,
   onTakeControl,
   onReturnControl,
   onStop,
-  onOpenTimeline
+  onOpenTimeline,
+  onOpenChange
 }: {
   activity: BrowserActivityState
   onTakeControl?: () => void
   onReturnControl?: () => void
   onStop?: () => void
   onOpenTimeline?: () => void
+  onOpenChange?: (open: boolean) => void
 }) {
   const operation = activity.operation
-  if (!operation) {
-    const agentControl = activity.control === 'agent'
-    // The Browser page is the primary surface.  A quiet human-owned tab has no operation fact to
-    // explain, so rendering a "ready" card here would turn a control hint into the only visible page.
-    // Keep the rail for an active handoff or a durable warning where it carries real information.
-    if (!agentControl && !activity.warning && !onOpenTimeline) return null
-    const quietHuman = !agentControl && !activity.warning
-    return (
-      <div className={`browser-rsi-rail browser-rsi-rail--idle${quietHuman ? ' browser-rsi-rail--quiet' : ''}`} role="status" aria-label="Browser activity">
-        {!quietHuman ? <CircleDot size={13} aria-hidden="true" /> : null}
-        {!quietHuman ? <span className="browser-rsi-rail__copy">
-          <strong>{agentControl ? 'Agent control active' : 'Browser ready'}</strong>
-          <small>{agentControl ? 'Activity details are loading…' : 'You have control'}</small>
-        </span> : null}
-        {activity.warning ? <BrowserOperationNotice message={activity.warning} className="browser-rsi-rail__warning" /> : null}
-        {onOpenTimeline ? <span className="browser-rsi-rail__actions"><button type="button" className="browser-rsi-icon-button" aria-label="Open browser activity timeline" title="Open activity timeline" onClick={onOpenTimeline}><History size={13} aria-hidden="true" /></button></span> : null}
-      </div>
-    )
-  }
-
-  const canTakeControl = activity.control === 'agent' && operation.phase !== 'completed' && operation.phase !== 'failed' && operation.phase !== 'stopped'
-  const canReturnControl = activity.control === 'human' && Boolean(onReturnControl)
-  const target = currentTarget(operation)
+  const terminal = operation && ['completed', 'failed', 'stopped', 'indeterminate'].includes(operation.phase)
+  const phase = operation
+    ? !terminal && activity.control === 'human' ? 'human' : operation.phase
+    : activity.control === 'agent' ? 'unknown' : 'idle'
+  const label = phase === 'unknown' ? 'Agent control active · Activity details are loading'
+    : phase === 'idle' ? 'You have control' : phaseLabel(phase)
+  const target = operation ? currentTarget(operation) ?? operation.summary : null
+  const description = [operation?.operator.name, label, target].filter(Boolean).join(' · ')
+  const canStop = Boolean(operation && !terminal)
+  const canTakeControl = canStop && activity.control === 'agent'
+  const canReturnControl = canStop && activity.control === 'human'
   return (
-    <section
-      className={`browser-rsi-rail browser-rsi-rail--${operation.phase}`}
-      data-control={activity.control}
-      data-operation-id={operation.id}
-      aria-label={`Browser operation by ${operation.operator.name}`}
-    >
-      <span className="browser-rsi-rail__identity" title={`${operation.operator.name} · ${operation.operator.id}`}>
-        <AgentAvatar label={operation.operator.name} sessionId={operation.operator.id}
-          {...(operation.operator.providerId ? { providerId: operation.operator.providerId as AgentProviderId } : {})}
-          size={18}
-        />
-        <span><strong>{operation.operator.name}</strong><small>{phaseLabel(operation.phase)}</small></span>
-      </span>
-      <span className="browser-rsi-rail__target" title={`${target ?? operation.summary} · ${operation.url}`}>
-        <PhaseGlyph phase={operation.phase} />
-        <span><strong>{target ?? operation.summary}</strong></span>
-      </span>
-      {operation.warning || activity.warning ? <BrowserOperationNotice message={(operation.warning ?? activity.warning)!} className="browser-rsi-rail__warning" /> : null}
-      <span className="browser-rsi-rail__actions">
-        {canTakeControl && onTakeControl ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={onTakeControl}><Hand size={13} aria-hidden="true" />Take control</button> : null}
-        {canReturnControl && onReturnControl ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" onClick={onReturnControl}><RotateCcw size={13} aria-hidden="true" />Return to Agent</button> : null}
-        {onStop && operation.phase !== 'completed' && operation.phase !== 'failed' && operation.phase !== 'stopped' ? <button type="button" className="browser-rsi-icon-button" aria-label="Stop browser operation" title="Stop operation" onClick={onStop}><Square size={12} aria-hidden="true" /></button> : null}
-        {onOpenTimeline ? <button type="button" className="browser-rsi-icon-button" aria-label="Open browser activity timeline" title="Open activity timeline" onClick={onOpenTimeline}><History size={13} aria-hidden="true" /></button> : null}
-      </span>
-    </section>
+    <span className="browser-operation-status" data-phase={phase} data-control={activity.control} data-operation-id={operation?.id}>
+      <DropdownMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
+        <DropdownMenu.Trigger asChild>
+          <button type="button" className="browser-operation-status__trigger" aria-label={`Browser activity: ${description}`} title={description}>
+            {phase === 'idle' ? <History size={14} aria-hidden="true" />
+              : phase === 'unknown' ? <CircleAlert size={14} aria-hidden="true" /> : <PhaseGlyph phase={phase} />}
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content className="browser-menu browser-operation-menu" align="end" sideOffset={5} collisionPadding={8}>
+            <DropdownMenu.Label className="browser-operation-menu__identity">
+              <strong>{operation?.operator.name ?? 'Browser activity'}</strong><span>{label}</span>
+              {target ? <small>{target}</small> : null}
+            </DropdownMenu.Label>
+            {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><Hand size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
+            {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><RotateCcw size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
+            {canStop && onStop ? <DropdownMenu.Item className="browser-menu__item" aria-label="Stop browser operation" onSelect={() => onStop()}><Square size={12} aria-hidden="true" /><span>Stop operation</span></DropdownMenu.Item> : null}
+            {onOpenTimeline ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open browser activity timeline" onSelect={() => onOpenTimeline()}><History size={13} aria-hidden="true" /><span>Activity</span></DropdownMenu.Item> : null}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </span>
   )
+}
+
+/** Persistent service notice is separate from the optional operation disclosure. */
+export function BrowserOperationWarning({ activity }: { activity: BrowserActivityState }) {
+  const message = activity.operation?.warning ?? activity.warning
+  return message ? <BrowserOperationNotice message={message} className="browser-operation-warning" /> : null
 }
 
 /**

@@ -40,7 +40,7 @@ import {
 } from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
-import { BrowserOperationHistory, BrowserOperationRail, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
 import {
   ScreenshotEditor,
@@ -364,7 +364,7 @@ export function BrowserPane({
   //
   // 协议按 **operationId** 寻址而不是 browserId，这正是它比旧 IPC 强的地方：一条操作的寿命长于任何
   // 一条连接，也长于这张 Tab。所以这里从 activity 投影里取那条操作的 id；投影里没有操作时按钮本身
-  // 不会出现（BrowserOperationRail 的 `operation` 为 null 时那一枝不渲染 onStop），所以这不是一个
+  // 不会出现（BrowserOperationStatus 没有 current operation 就不提供 Stop），所以这不是一个
   // 需要兜底的状态——真的没有就什么也不做，而不是随便停一个。
   async function stopBrowserOperation(): Promise<void> {
     const operationId = tab.activity?.operation?.id
@@ -563,6 +563,7 @@ export function BrowserPane({
   }
 
   const timelineOperation = operationForTimeline()
+  const browserActivity = tab.activity ?? { operation: null, control: tab.driving ? 'agent' as const : 'human' as const }
   const timelineSelectedStep = selectedStep?.operationId === timelineOperation?.id
     ? timelineOperation?.steps.find(step => step.sequence === selectedStep?.sequence) : undefined
   // A persistence warning belongs to the current live projection. Do not attach it to a historical
@@ -621,6 +622,14 @@ export function BrowserPane({
             onChange={(event) => setAddress(event.target.value)}
           />
         </label>
+        <BrowserOperationStatus
+          activity={browserActivity}
+          onTakeControl={() => void stopBrowserOperation()}
+          onStop={() => void stopBrowserOperation()}
+          onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
+          onOpenTimeline={openOperationTimeline}
+          onOpenChange={setMenuOpen}
+        />
         {toolbar?.selectElement ? (
           <button
             type="button"
@@ -738,13 +747,7 @@ export function BrowserPane({
           </DropdownMenu.Root>
         ) : null}
       </form>
-      <BrowserOperationRail
-        activity={tab.activity ?? { operation: null, control: tab.driving ? 'agent' : 'human' }}
-        onTakeControl={() => void stopBrowserOperation()}
-        onStop={() => void stopBrowserOperation()}
-        onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
-        onOpenTimeline={openOperationTimeline}
-      />
+      <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与轨迹是左右两块，不是上下两块。原生 WebContentsView 的矩形取自 `.browser-stage`
           的 getBoundingClientRect（见上面那个 ResizeObserver），所以轨迹 rail 作为 flex 兄弟把
           stage 挤窄时，原生视图会跟着收——轨迹不是盖在页面上，是页面真的让出了那条竖带。 */}
