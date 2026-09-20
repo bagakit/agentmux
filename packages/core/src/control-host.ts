@@ -252,6 +252,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.operation === 'diagnostics.crash-log.get' || source.operation === 'diagnostics.crash-log.reveal') {
+    if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
+      throw new AgentMuxError('Crash log diagnostics take no data parameters.', 'INVALID_CONTROL_REQUEST')
+    }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
   if (isSettingsResourceOperation(source.operation)) return settingsResourceRequest(source)
   if (source.operation === 'settings.workspaces.add') {
     const code = 'INVALID_CONTROL_REQUEST'
@@ -860,6 +866,25 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'diagnostics.crash-log.get' || operation === 'diagnostics.crash-log.reveal') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'ok', 'operation', 'result'].includes(key))) throw new AgentMuxError('Crash log receipt fields are invalid.', code)
+    const path = text(result.path, 'Crash log path', code)
+    if (operation === 'diagnostics.crash-log.reveal') {
+      if (result.requested !== true || Object.keys(result).some(key => !['path', 'requested'].includes(key))) throw new AgentMuxError('Crash log request receipt is invalid.', code)
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { path, requested: true } }
+    }
+    if (result.outcome === 'present' || result.outcome === 'absent') {
+      if (Object.keys(result).some(key => !['path', 'outcome'].includes(key))) throw new AgentMuxError('Crash log fact fields are invalid.', code)
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { path, outcome: result.outcome } }
+    }
+    if (result.outcome !== 'check-failed' || Object.keys(result).some(key => !['path', 'outcome', 'cause'].includes(key))) throw new AgentMuxError('Crash log fact is invalid.', code)
+    const original = object(result.cause, 'Crash log cause is invalid.', code)
+    if (Object.keys(original).some(key => !['code', 'message'].includes(key))) throw new AgentMuxError('Crash log cause fields are invalid.', code)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { path, outcome: 'check-failed', cause: {
+      code: text(original.code, 'Crash log cause code', code), message: text(original.message, 'Crash log cause message', code)
+    } } }
+  }
   if (operation === 'settings.workspaces.add') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)

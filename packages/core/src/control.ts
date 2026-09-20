@@ -13,6 +13,7 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'CONTROL_UNAVAILABLE',
   'CONTROL_OWNER_BUSY',
   'CONTROL_FAILED',
+  'CRASH_LOG_NOT_FILE',
   'CONTROL_CANCELLED',
   'CONTROL_REQUEST_CONFLICT',
   'CONTROL_OWNER_LOST',
@@ -505,6 +506,18 @@ export type AgentMuxControlBrowserOperationRequest = RequestBase & {
 export type AgentMuxControlBrowserSubscribeRequest = RequestBase & {
   operation: 'browser.subscribe'; operationId: string; afterSequence?: number
 }
+export type AgentMuxControlCrashLogFact =
+  | { path: string; outcome: 'present' }
+  | { path: string; outcome: 'absent' }
+  | { path: string; outcome: 'check-failed'; cause: { code: string; message: string } }
+export type AgentMuxControlCrashLogRequest = RequestBase & (
+  | { operation: 'diagnostics.crash-log.get' }
+  | { operation: 'diagnostics.crash-log.reveal' }
+)
+export type AgentMuxControlCrashLogResult =
+  | ({ operation: 'diagnostics.crash-log.get' } & AgentMuxControlCrashLogFact)
+  | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
+
 export type AgentMuxControlRequest =
   | AgentMuxControlInspectClientRequest
   | AgentMuxControlInspectTabRequest
@@ -525,6 +538,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSettingsWorkspaceAddRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlSettingsHostsRequest
+  | AgentMuxControlCrashLogRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
@@ -617,6 +631,7 @@ export type AgentMuxControlResult =
   | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | AgentMuxControlSettingsResourceResult
   | AgentMuxControlSettingsHostsResult
+  | AgentMuxControlCrashLogResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
@@ -822,6 +837,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'list.projects': 'short',
   'list.active-agents': 'short',
   'settings.get': 'short',
+  'diagnostics.crash-log.get': 'short',
+  'diagnostics.crash-log.reveal': 'short',
   'settings.hosts.list': 'short',
   'settings.hosts.test': 'long',
   'settings.set': 'short',

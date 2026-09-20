@@ -1007,6 +1007,8 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'list.projects': 'short',
       'list.active-agents': 'short',
       'settings.get': 'short',
+      'diagnostics.crash-log.get': 'short',
+      'diagnostics.crash-log.reveal': 'short',
       'settings.hosts.list': 'short',
       'settings.hosts.test': 'long',
       'settings.set': 'short',

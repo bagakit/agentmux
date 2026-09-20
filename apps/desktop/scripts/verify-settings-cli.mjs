@@ -15,8 +15,9 @@ import { verifyRadioKeyboard } from './fixtures/settings-cli/radio.mjs'
 import { browserSettingsProof } from './fixtures/settings-cli/browser.mjs'
 import { workspaceSettingsProof } from './fixtures/settings-cli/workspaces.mjs'
 import { hostsSettingsProof } from './fixtures/settings-cli/hosts.mjs'
+import { crashLogDiagnosticsProof } from './fixtures/settings-cli/diagnostics.mjs'
 
-export async function verifySettingsCli({ browser = false, workspaces = false, hosts = false, ownerTiming = false } = {}) {
+export async function verifySettingsCli({ browser = false, workspaces = false, hosts = false, diagnostics = false, ownerTiming = false } = {}) {
   // Real bundled Desktop/Main IPC + Core + built CLI. Only initial private fixture materialization
   // writes configuration directly; every setting operation after launch goes through the product owner.
   const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
@@ -38,7 +39,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
   const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
   const receipt = { schema: 'agentmux.settings-cli-desktop-proof.v1', passed: false, cli: [], facts: {}, cleanup: {},
     fixture: { userData, privateHome, runtimeDirectory, workspacePath, topicsPath, syntheticPty: true, ownerTimingInstrumented: ownerTiming } }
-  let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, obstruction, vocabulary, preferences, browserProof, workspaceProof, hostsProof
+  let phase = 'prepare', failure, first, second, session, client, ownedRunProcess, originalRun, obstruction, vocabulary, preferences, browserProof, workspaceProof, hostsProof, diagnosticsProof
 
   async function waitFor(label, read, budget = 20_000) {
     const end = Math.min(deadline, Date.now() + budget)
@@ -50,7 +51,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     const directories = ['apps/desktop/src', 'packages/core/src', 'packages/demand/src', 'packages/layout/src',
       'apps/desktop/out', 'packages/core/dist', 'packages/demand/dist',
       'apps/desktop/scripts/fixtures/settings-cli']
-    const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/verify-settings-workspace-add-cli.mjs', 'apps/desktop/scripts/verify-settings-hosts-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
+    const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/verify-settings-workspace-add-cli.mjs', 'apps/desktop/scripts/verify-settings-hosts-cli.mjs', 'apps/desktop/scripts/verify-crash-log-diagnostics-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
       'packages/core/bin/agentmux', 'packages/core/package.json', 'apps/desktop/package.json',
       'packages/core/scripts/build.mjs', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json']
     const dependencies = {}
@@ -374,6 +375,11 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       receipt.facts.hosts=hostsProof.facts
       await hostsProof.exercise()
     }
+    if (diagnostics) {
+      diagnosticsProof=crashLogDiagnosticsProof({probe:first,desktopRoot,userData,command,configPath,section,waitFor,phase:value=>{phase=value}})
+      receipt.facts.diagnostics=diagnosticsProof.facts
+      await diagnosticsProof.exercise()
+    }
     assert.deepEqual((await ui(first)).controlRequests,[],'Settings never use the Renderer Control bridge')
     const trustedKeys=await first.cdp.evaluate('window.__settingsCliProof.keys')
     assert.ok(trustedKeys.length>0); assert.ok(trustedKeys.every(event=>event.trusted===true))
@@ -398,6 +404,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     if (browserProof) await browserProof.verifyRestart(second)
     if (workspaceProof) await workspaceProof.verifyRestart(second)
     if (hostsProof) await hostsProof.verifyRestart(second)
+    if (diagnosticsProof) await diagnosticsProof.verifyRestart(second)
     const snapshot=await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
     const attached=snapshot.sessions.find(value=>value.id===session.agentSessionId)
     assert.equal(attached?.processState,'running'); assert.equal(attached.control.run.runId,session.run.runId)
@@ -417,6 +424,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     if (browserProof) await browserProof.verifyNoView()
     if (workspaceProof) await workspaceProof.verifyNoView()
     if (hostsProof) await hostsProof.verifyNoView()
+    if (diagnosticsProof) await diagnosticsProof.verifyNoView(second)
     await terminate(second)
     phase='offline-owner'
     const offlineBytes=await readFile(configPath)
@@ -427,6 +435,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     if (browserProof) await browserProof.verifyOffline()
     if (workspaceProof) await workspaceProof.verifyOffline()
     if (hostsProof) await hostsProof.verifyOffline()
+    if (diagnosticsProof) await diagnosticsProof.verifyOffline()
     phase='same-healthy-run'
     client=await connectLocalAgentMux({store})
     const run=(await client.listRuns()).find(value=>value.runId===session.run.runId)
@@ -459,6 +468,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       if(!receipt.identityAfter)receipt.identityAfter=await identity()
       if(receipt.identityBefore)assert.deepEqual(receipt.identityAfter,receipt.identityBefore,'Proof inputs changed even during a failed attempt')
     })
+    if (diagnosticsProof) await attempt(()=>diagnosticsProof.cleanup())
     await attempt(restoreObstruction)
     for(const connection of connections) connection.close()
     for(const child of children) await attempt(async()=>{
