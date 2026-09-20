@@ -190,6 +190,7 @@ export function BrowserPane({
     nativeLifecycleRef.current = 'restoring'
     setRestoring(true)
     void api.browser.restore(tab.browserId, {
+      workspaceId: tab.workspaceId,
       profileId: tab.profileId,
       viewport: tab.viewport
     }).then((browser) => {
@@ -816,7 +817,7 @@ export function BrowserPane({
             <strong>Page could not be loaded</strong>
             <span>{tab.error}</span>
             <button className="small-button" type="button" onClick={() => void run(async () => {
-              const browser = await api.browser.create(tab.browserId, tab.url)
+              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId)
               return browser.error ? await api.browser.reload(tab.browserId) : browser
             })}><RefreshCw size={12} /> Retry</button>
           </div>

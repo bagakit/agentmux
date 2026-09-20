@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -232,7 +232,7 @@ async function buildDispatchBundle(outDirectory: string): Promise<void> {
       outDir: outDirectory,
       emptyOutDir: false,
       lib: { entry: entryPath, formats: ['es'], fileName: () => 'dispatch.mjs' },
-      rollupOptions: { external: ['electron', /^node:/] }
+      rollupOptions: { external: ['electron', '@agentmux/core', /^node:/] }
     }
   })
 }
@@ -280,6 +280,7 @@ type ProbeReport = {
 async function runProbe(): Promise<ProbeReport> {
   const root = await mkdtemp(join(tmpdir(), 'amux-drive-e2e-'))
   temporaryRoots.push(root)
+  await symlink(new URL('../node_modules', import.meta.url).pathname, join(root, 'node_modules'), 'dir')
   const pagePath = join(root, 'probe.html')
   const reportPath = join(root, 'report.json')
   await buildDispatchBundle(root)
