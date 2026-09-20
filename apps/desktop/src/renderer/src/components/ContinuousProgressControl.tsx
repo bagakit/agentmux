@@ -3,6 +3,7 @@ import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
+import { ComposerTextarea } from './ComposerTextarea'
 import { agentProviderLabel } from './AgentProviderIcon'
 
 /** Existing Main loop owner is observed only for this Session. Closing the leaf does not stop it. */
@@ -66,7 +67,7 @@ export function ContinuousProgressControl({ session }: { session: Extract<Sessio
       disabled={busy} onPause={() => action('pause')} onResume={() => action('resume')} onStop={() => action('stop')} onCheck={() => action('check')} />
       : <form onSubmit={event => { event.preventDefault(); void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
         <label>Check every (minutes)<input type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
-        <label>Continuation prompt<textarea value={prompt} onChange={event => setPrompt(event.target.value)} /></label>
+        <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={setPrompt} /></label>
         <label><input type="checkbox" checked={bindSource} onChange={event => setBindSource(event.target.checked)} />Bind a read-only Feature Tracker source</label>
         {bindSource ? <>
           <label>Tracker root<input aria-label="Tracker root" value={sourceRoot} onChange={event => setSourceRoot(event.target.value)} /></label>

@@ -176,6 +176,47 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   await click('Stop continuous progress'); expect(manager.list()[0]!.status).toBe('stopped')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Check continuous progress now"]')).toBeNull())
 })
+it('keeps an unconfirmed continuation composition through an independent loop notification and submits only the final text', async () => {
+  const existing = await create()
+  const stopped = await api.continuousProgress.action(target(), existing.loopId, 'stop')
+  await vi.waitFor(() => expect(container.querySelector('.continuous-progress-control form')).not.toBeNull())
+  const form = container.querySelector<HTMLFormElement>('.continuous-progress-control form')!
+  const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
+  expect(textarea).not.toBeNull()
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+  const drafts = structuredClone(useAppStore.getState().agentComposerDrafts)
+  const queues = structuredClone(useAppStore.getState().agentSteerQueues)
+  const created = vi.spyOn(api.continuousProgress, 'create')
+  await act(async () => {
+    setValue.call(textarea, 'preedit')
+    textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: 'preedit' }))
+  })
+  await act(async () => {
+    setValue.call(textarea, 'unconfirmed candidate')
+    textarea.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: 'unconfirmed candidate' }))
+  })
+  await act(async () => bridge.deliver(CONTINUOUS_PROGRESS_CHANGED,
+    { ...stopped, lastDecision: 'Fresh stopped-loop observation' }))
+  expect(container.textContent).toContain('Fresh stopped-loop observation')
+  expect(form.querySelector('textarea')).toBe(textarea)
+  expect(textarea.value).toBe('unconfirmed candidate')
+  expect(created).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(drafts)
+  expect(useAppStore.getState().agentSteerQueues).toEqual(queues)
+  expect(writes).toEqual([])
+  await act(async () => {
+    setValue.call(textarea, 'final confirmed continuation')
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'final confirmed continuation' }))
+  })
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+  await vi.waitFor(() => expect(created).toHaveBeenCalledExactlyOnceWith(target(), 1_800_000,
+    'final confirmed continuation', undefined))
+  await vi.waitFor(() => expect(manager.list().find(loop => loop.status === 'active')?.prompt)
+    .toBe('final confirmed continuation'))
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(drafts)
+  expect(useAppStore.getState().agentSteerQueues).toEqual(queues)
+  expect(writes).toEqual([])
+})
 it('keeps an existing draft and queue owned by Store, rejects enabling and pauses an active loop without any Native delivery', async () => {
   const loop = await create()
   await act(async () => useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'my draft'))
