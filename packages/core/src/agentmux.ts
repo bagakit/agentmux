@@ -969,6 +969,7 @@ async function readAllStdin(): Promise<string> {
 }
 
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'diagnostics' && args[1] === 'crash-log') return args[2] === 'reveal' ? 'diagnostics.crash-log.reveal' : 'diagnostics.crash-log.get'
   if (args[0] === 'settings' && args[1] === 'workspaces') {
     return args[2] === undefined || args[2].startsWith('-') ? 'settings.workspaces' : `settings.workspaces.${args[2]}`
   }
@@ -995,6 +996,11 @@ function operationPath(args: readonly string[]): string | null {
   return args[0] ?? null
 }
 function requestsHelp(args: readonly string[]): boolean {
+  if (args[0] === 'diagnostics') {
+    const tail = args.at(-1)
+    return (tail === '--help' || tail === '-h') && (args.length === 2 ||
+      (args[1] === 'crash-log' && (args.length === 3 || (args.length === 4 && args[2] === 'reveal'))))
+  }
   if (args[0] === 'settings') {
     const help = (value: string | undefined): boolean => value === '--help' || value === '-h'
     return (args.length === 2 && help(args[1])) ||
@@ -1103,6 +1109,13 @@ async function main(): Promise<number> {
   if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
+  if (args[0] === 'diagnostics') {
+    if (args[1] !== 'crash-log' || (args.length !== 2 && !(args.length === 3 && args[2] === 'reveal'))) {
+      throw cliError('Run agentmux diagnostics --help for fixed crash-log diagnostics.')
+    }
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: args[2] === 'reveal' ? 'diagnostics.crash-log.reveal' : 'diagnostics.crash-log.get' })
+    printSuccess(receipt.operation, receipt.result); return 0
+  }
   if (args[0] === 'settings') {
     const request = { ...requestBase(), ...await parseSettingsCommand(args.slice(1)) }
     settingsResourceBudget(request, 'INVALID_CLI_ARGUMENT')
