@@ -371,7 +371,10 @@ try {
   }
   if (goalsAlignmentProof) {
     goalsAccepted = await approveGoalsInActualUI({ cdp: first.cdp, fixture: goalsFixture, activateButton, waitFor })
-    const goalsBeforeCrash = await readGoalsSurface(first.cdp)
+    const goalsBeforeCrash = await waitFor('production durable Goals selection', async () => {
+      const value = await readGoalsSurface(first.cdp)
+      return value.surface === 'board' && value.selectedDemandId === goalsFixture.id ? value : null
+    })
     assert.equal(goalsBeforeCrash.surface, 'board'); assert.equal(goalsBeforeCrash.selectedDemandId, goalsFixture.id)
     assert.deepEqual(goalsBeforeCrash.workbench, expectedWorkbench); assert.deepEqual(goalsBeforeCrash.focus, before.focus)
     goalsExpectedWorkbench = expectedWorkbench; goalsExpectedFocus = before.focus
