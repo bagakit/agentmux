@@ -27,23 +27,23 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
 const render = () => act(async () => { root.render(createElement(GlobalFocusSurface)); await Promise.resolve() })
-it('shows actual named Topic and branch lanes with compact recovery in their own idle groups', async () => {
+it('keeps branch identity on the board and named disconnected Topics in the counted project drawer', async () => {
   await render()
+  expect([...container.querySelectorAll<HTMLElement>('[data-lane-id]')].map(lane => [...lane.querySelectorAll('.focus-project-lanes__label')].map(label => label.textContent).join(''))).toEqual(['Productfeature/compact'])
+  const vault = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] > button')!
+  expect(vault).not.toBeNull(); expect(vault.textContent).toBe('Disconnected1 project · 3 contexts')
+  expect(container.querySelectorAll('[data-session-id]')).toHaveLength(1)
+  await act(async () => vault.click())
   const lanes = [...container.querySelectorAll<HTMLElement>('[data-lane-id]')]
   expect(lanes).toHaveLength(3)
-  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__heading')!.parentElement!.className)).toEqual(['focus-context-group__header', 'focus-context-group__header', 'focus-context-group__header'])
-  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__axis')!.textContent)).toEqual(['Productfeature/compact', 'ScratchPlanning', 'ScratchBug fixes'])
-  expect(container.querySelectorAll('[data-session-id]')).toHaveLength(1)
-  const vaults = [...container.querySelectorAll<HTMLButtonElement>('.focus-recovery-toggle')]
-  expect(vaults.map(button => button.textContent)).toEqual(['Disconnected2', 'Disconnected1'])
-  expect(vaults.map(button => button.closest<HTMLElement>('[data-bucket]')!.dataset.bucket)).toEqual(['idle', 'idle'])
-  await act(async () => vaults[0]!.click())
-  expect(container.querySelectorAll('[data-session-id]')).toHaveLength(3)
+  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__heading')!.parentElement!.className)).toEqual(['focus-project-lanes__track', 'focus-project-lanes__track', 'focus-project-lanes__track'])
+  expect(lanes.map(lane => [...lane.querySelectorAll('.focus-project-lanes__label')].map(label => label.textContent).join(''))).toEqual(['Productfeature/compact', 'ScratchPlanning', 'ScratchBug fixes'])
+  expect([...container.querySelectorAll<HTMLElement>('[data-session-id]')].map(row => row.dataset.sessionId)).toEqual(['live', 'one', 'two', 'three'])
   await act(async () => container.querySelector<HTMLButtonElement>('[data-session-id="two"]')!.click())
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('two')
-  await act(async () => vaults[0]!.click())
+  await act(async () => vault.click())
   expect(container.querySelector('[data-session-id="two"]')).toBeTruthy()
-  expect(container.querySelector('[data-session-id="one"]')).toBeNull()
+  expect(container.querySelector('[data-session-id="one"]')).toBeTruthy()
 })
 it('search finds a disconnected Topic context without opening every recovery vault', async () => {
   await render()
@@ -62,8 +62,12 @@ it('keeps a checkout lane after removal and does not requery scopes for unrelate
   vi.mocked(api.workspaces.listBranches).mockResolvedValue({ kind: 'git-repository', hostId: 'local', repoPath: '/repo', branches: [{ name: 'feature/compact', worktreePath: null, workspaceId: null, isCurrent: false }] })
   await act(async () => { useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.filter(workspace => workspace.id !== 'branch') }, workspaceFileRevisions: { repo: 1 }, sessions: state.sessions.map(item => item.id === 'live' ? { ...item, processState: 'disconnected', status: { ...item.status, state: 'disconnected' } } : item) })); await Promise.resolve() })
   // Root is no longer represented by a Session; its cached checkout evidence still preserves independent identity.
+  const recovery = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] > button')!
+  expect(recovery.textContent).toBe('Disconnected2 projects · 4 contexts')
+  await act(async () => recovery.click())
   const orphan = container.querySelector<HTMLElement>('[data-lane-id*="checkout"]')!
   expect(orphan).toBeTruthy(); expect(orphan.textContent).toContain('feature/compact')
   expect(orphan.dataset.recovery).toBe('removed')
-  expect(orphan.querySelector('.focus-recovery-toggle')!.textContent).toBe('Disconnected1')
+  expect(orphan.closest('[aria-label="Disconnected projects"]')).not.toBeNull()
+  expect([...orphan.querySelectorAll<HTMLElement>('[data-session-id]')].map(row => row.dataset.sessionId)).toEqual(['live'])
 })
