@@ -26,18 +26,20 @@ function sourceFiles(root: string): string[] {
 }
 
 describe('status/browser/topic/executor integration contract', () => {
-  it('keeps the Browser page as the flexible stage and the rail as a compact sibling', () => {
+  it('keeps the Browser page flexible and operation status inside its existing toolbar', () => {
     const css = allStyles()
     const surface = sliceFrom(css, '.browser-surface {', '.browser-toolbar {')
     const stage = sliceFrom(css, '.browser-stage {', '.browser-surface > .browser-toolbar')
-    const quietRail = sliceFrom(css, '.browser-rsi-rail--quiet {')
+    const status = sliceFrom(css, '.browser-operation-status__trigger {', '.browser-operation-status__trigger:hover')
     expect(surface).toMatch(/display:\s*flex/)
     expect(surface).toMatch(/flex-direction:\s*column/)
     expect(stage).toMatch(/flex:\s*1/)
-    expect(quietRail).toMatch(/min-height/)
+    expect(status).toMatch(/width:\s*27px/)
+    expect(status).toMatch(/height:\s*27px/)
     const operationSource = read('components/BrowserOperationSurface.tsx')
-    expect(operationSource).toContain('if (!agentControl && !activity.warning && !onOpenTimeline) return null')
-    expect(operationSource).toContain('browser-rsi-rail--quiet')
+    expect(operationSource).toContain('BrowserOperationStatus')
+    expect(operationSource).toContain("phase === 'idle'")
+    expect(operationSource).not.toContain('browser-rsi-rail')
   })
 
   it('keeps every Topic row action inside its own action cell', () => {

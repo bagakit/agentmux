@@ -222,6 +222,8 @@ async function capture(probe, label) {
     const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
     return {viewport:{width:innerWidth,height:innerHeight},rows:rows.map(e=>({sequence:e.dataset.sequence,status:e.querySelector('.browser-rsi-timeline__status').textContent,
       selected:e.querySelector('button').getAttribute('aria-pressed'),expanded:e.querySelector('button').getAttribute('aria-expanded')})),
+      operationStatus:(()=>{const s=document.querySelector('.browser-operation-status');return s&&{phase:s.dataset.phase,control:s.dataset.control,operationId:s.dataset.operationId,
+        trigger:s.querySelector('button')?.getAttribute('aria-label'),insideToolbar:!!s.closest('.browser-toolbar')};})(),
       trace:rail&&rect(rail),stage:stage&&rect(stage),payloadCount:document.querySelectorAll('.browser-rsi-timeline__step-detail').length,
       focus:document.activeElement?.getAttribute('aria-label'),focusVisible:document.activeElement?.matches(':focus-visible')??false};
   })()`)
@@ -248,12 +250,86 @@ async function capture(probe, label) {
       sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   receipt.visual.frames.push({label,file,...frame,observation,nativeBounds,nativePage})
 }
+async function openActivityTimeline(probe) {
+  await click(probe.cdp,selectors('.browser-operation-status__trigger'))
+  await click(probe.cdp,selectors('[aria-label="Open browser activity timeline"]'))
+}
+async function pressKey(probe, key, code = key, windowsVirtualKeyCode) {
+  const value = {key,code,...(windowsVirtualKeyCode ? {windowsVirtualKeyCode} : {})}
+  await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',...value})
+  await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...value})
+}
+async function nativePageScript(probe, expression) {
+  return probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    const views=BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
+    if(views.length!==1)throw new Error('Expected exactly one private native page');return views[0].webContents.executeJavaScript(${JSON.stringify(expression)});})()`)
+}
+async function reviewOperationStates(probe, browserId) {
+  const operator={id:'private-browser-status',name:'Private Browser status'}
+  const start=async code=>{
+    const expression=`globalThis.__privateStatusRun=window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`
+    const result=await probe.cdp.call('Runtime.evaluate',{expression,awaitPromise:false})
+    assert.equal(result.exceptionDetails,undefined)
+  }
+  const status=async expected=>waitFor(`actual Browser ${expected} state`,()=>probe.cdp.evaluate(`document.querySelector('.browser-operation-status')?.dataset.phase===${JSON.stringify(expected)}`))
+  const frames=async expected=>{
+    await status(expected);await openActivityTimeline(probe)
+    await waitFor('nonempty actual operation timeline',()=>probe.cdp.evaluate('document.querySelectorAll(".browser-rsi-timeline__step").length>0'))
+    for(const [label,width,height] of [['normal',1440,900],['narrow',980,700],['short-window',1440,560]]){
+      await resize(probe,width,height);await capture(probe,`${label}-${expected}-status`)
+      const actual=receipt.visual.frames.at(-1).observation.operationStatus
+      assert.equal(actual.phase,expected);assert.equal(actual.insideToolbar,true)
+    }
+    await resize(probe,1440,900)
+  }
+  const held='await js("new Promise(resolve => { globalThis.__finishPrivateStatus = resolve })"); return "private observed operation";'
+  receipt.visual.states={}
+  await start(held);await frames('running')
+  await click(probe.cdp,selectors('.browser-operation-status__trigger'))
+  await capture(probe,'normal-running-actions')
+  const navigation=[]
+  for(let index=0;index<4;index++){
+    await pressKey(probe,'ArrowDown','ArrowDown',40)
+    const focused=await probe.cdp.evaluate('({role:document.activeElement?.getAttribute("role"),label:document.activeElement?.getAttribute("aria-label"),text:document.activeElement?.textContent})')
+    navigation.push(focused)
+    if(focused.label==='Stop browser operation')break
+  }
+  assert.equal(navigation.at(-1).label,'Stop browser operation','Keyboard can reach the real Stop item')
+  await pressKey(probe,'Enter','Enter',13)
+  await nativePageScript(probe,'globalThis.__finishPrivateStatus?.();null')
+  const stopped=await probe.cdp.evaluate('globalThis.__privateStatusRun')
+  assert.equal(stopped.outcome.kind,'stopped')
+  receipt.visual.states.running={operation:stopped.runOperation,keyboard:navigation,outcome:stopped.outcome}
+  await probe.cdp.evaluate(`window.agentmux.browser.returnControl(${JSON.stringify(browserId)})`)
+  await start('await waitForElement("Private delayed ready",30000); return "observed ready element";')
+  await frames('waiting')
+  await nativePageScript(probe,'(()=>{const button=document.createElement("button");button.id="private-delayed-ready";button.textContent="Private delayed ready";document.body.append(button);return true})()')
+  const waited=await probe.cdp.evaluate('globalThis.__privateStatusRun')
+  assert.equal(waited.outcome.kind,'completed')
+  receipt.visual.states.waiting={operation:waited.runOperation,outcome:waited.outcome}
+  await nativePageScript(probe,'document.querySelector("#private-delayed-ready").remove();null')
+  await start(held);await status('running')
+  await nativePageScript(probe,'globalThis.__privateTrustedInput=0;document.addEventListener("mousedown",event=>{if(event.isTrusted)globalThis.__privateTrustedInput++},{once:true});null')
+  await probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
+    if(!view.getVisible())throw new Error('Human input requires the actual visible page');view.webContents.focus();
+    for(const type of ['mouseDown','mouseUp'])view.webContents.sendInputEvent({type,button:'left',clickCount:1,x:20,y:80});return true;})()`)
+  await frames('human')
+  const trustedInput=await nativePageScript(probe,'globalThis.__privateTrustedInput')
+  assert.ok(trustedInput>0,'The native page received trusted input, not a page-authored event')
+  await nativePageScript(probe,'globalThis.__finishPrivateStatus?.();null')
+  const human=await probe.cdp.evaluate('globalThis.__privateStatusRun')
+  assert.equal(human.outcome.kind,'stopped')
+  receipt.visual.states.human={operation:human.runOperation,trustedInput,inputSource:'Electron native sendInputEvent; physical hardware not tested',outcome:human.outcome}
+  await probe.cdp.evaluate(`window.agentmux.browser.returnControl(${JSON.stringify(browserId)})`)
+  await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
+}
 async function reviewOperationRows(probe, browserId) {
   const operator={id:'private-browser-review',name:'Private Browser review'}
   const run=async code=>probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`)
   const completed=await run('await snapshot({scope:"page",maxNodes:20}); await pageInfo(); await captureScreenshot(); return "private observed page";')
   assert.equal(completed.outcome.kind,'completed')
-  await click(probe.cdp,selectors('[aria-label="Open browser activity timeline"]'))
+  await openActivityTimeline(probe)
   await waitFor('real completed timeline',()=>probe.cdp.evaluate(`document.querySelectorAll('.browser-rsi-timeline__step').length>=2`))
   await resize(probe,1440,900);await capture(probe,'normal-completed-collapsed')
   await resize(probe,980,700);await capture(probe,'narrow-completed-collapsed')
@@ -267,6 +343,9 @@ async function reviewOperationRows(probe, browserId) {
   const failed=await run('await snapshot({scope:"page",maxNodes:20}); await click("not-a-recorded-ref");')
   assert.equal(failed.outcome.kind,'script-failed')
   await waitFor('real failed row',()=>probe.cdp.evaluate(`Boolean(document.querySelector('.browser-rsi-timeline__step--failed'))`))
+  await resize(probe,1440,900);await capture(probe,'normal-failed-status')
+  assert.equal(receipt.visual.frames.at(-1).observation.operationStatus.phase,'failed')
+  await resize(probe,980,700)
   await click(probe.cdp,selectors('.browser-rsi-timeline__step--failed button'))
   await capture(probe,'narrow-failed-selected')
   await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8})
@@ -295,6 +374,7 @@ try {
   // Observe genuine readiness; do not override the product's overlay/focus visibility decisions.
   await observeNativeFrameReady(first,urls[0])
   receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
+  await reviewOperationStates(first,initial.surface.browserId)
   receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
   const sibling=await openBrowser(urls[1],{kind:'split',direction:'right',region:{kind:'region',regionId:initial.surface.regionId}})
   await control('focus',{kind:'region',regionId:initial.surface.regionId})

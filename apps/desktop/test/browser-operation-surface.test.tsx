@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrowserActivityState, BrowserOperation, BrowserReplayPlan } from '../src/shared/browser-operation.js'
 import {
-  BrowserOperationRail,
+  BrowserOperationStatus,
   BrowserOperationHistory,
   BrowserOperationTimeline,
   BrowserReplayPreview,
@@ -52,31 +52,31 @@ const plan: BrowserReplayPlan = {
   ]
 }
 
-describe('BrowserOperationRail', () => {
+describe('BrowserOperationStatus', () => {
   it('leaves an idle human-owned Browser page unobscured', () => {
-    const markup = renderToStaticMarkup(createElement(BrowserOperationRail, {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: null, control: 'human' },
       onOpenTimeline: vi.fn()
     }))
-    expect(markup).toContain('browser-rsi-rail--quiet')
-    expect(markup).toContain('Open browser activity timeline')
+    expect(markup).toContain('data-phase="idle"')
+    expect(markup).toContain('Browser activity: You have control')
     expect(markup).not.toContain('Browser ready')
-    expect(markup).not.toContain('You have control')
+    expect(markup).not.toContain('browser-rsi-rail')
   })
 
   it('does not claim the Browser is idle while Agent control is active but activity is loading', () => {
-    const markup = renderToStaticMarkup(createElement(BrowserOperationRail, {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: null, control: 'agent' },
       onOpenTimeline: vi.fn()
     }))
     expect(markup).toContain('Agent control active')
     expect(markup).toContain('Activity details are loading')
-    expect(markup).toContain('Open browser activity timeline')
+    expect(markup).toContain('data-phase="unknown"')
     expect(markup).not.toContain('No Agent operation')
   })
 
-  it('keeps operator identity, phase and semantic target visible', () => {
-    const markup = renderToStaticMarkup(createElement(BrowserOperationRail, {
+  it('keeps operator identity, phase and semantic target in the compact disclosure name', () => {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity,
       onTakeControl: vi.fn(),
       onStop: vi.fn(),
@@ -85,17 +85,18 @@ describe('BrowserOperationRail', () => {
     expect(markup).toContain('Navigator')
     expect(markup).toContain('Operating page')
     expect(markup).toContain('button “Open settings”')
-    expect(markup).toContain('Take control')
-    expect(markup).toContain('Stop browser operation')
-    expect(markup).toContain('Open browser activity timeline')
+    expect(markup).toContain('aria-haspopup="menu"')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).not.toContain('Stop browser operation')
   })
 
-  it('shows explicit return affordance only while the human owns control', () => {
-    const markup = renderToStaticMarkup(createElement(BrowserOperationRail, {
+  it('states human control without mounting a second action row', () => {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: { ...operation, phase: 'human' }, control: 'human' },
       onReturnControl: vi.fn()
     }))
-    expect(markup).toContain('Return to Agent')
+    expect(markup).toContain('Human has control')
+    expect(markup).toContain('data-phase="human"')
     expect(markup).not.toContain('Take control')
   })
 })
