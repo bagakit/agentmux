@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Columns3,
   FolderGit2,
   Globe2,
   History,
@@ -31,12 +30,9 @@ import { BROWSER_TOOLBAR_ITEM_LABELS } from '../lib/browser-toolbar'
 import { BROWSER_TOOLBAR_ITEM_ORDER, type BrowserToolbarItem } from '../../../shared/browser-toolbar'
 import { useSettingDraftRecord } from './settings/use-setting-draft'
 import { useSettingsSave } from './settings/SettingsSaveBar'
-import { demandColumns, projectDemands, type DemandStatus } from '../lib/global-demand-board'
 import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
-import type { MainSurface } from '../store'
 import {
-  boardListSegments,
   contentSlotPresentation,
   resolveExplorerCollapsed,
   resolveWorkspaceTools,
@@ -44,7 +40,6 @@ import {
   type WorkspaceAgentGroupId,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { projectWorkspaces } from '../lib/workspace-projects'
 import { api } from '../lib/api'
 import { formatRelativeAge } from '../lib/relative-age'
 import { contextPressure, contextUsedPercent } from '../lib/agent-usage'
@@ -65,7 +60,6 @@ import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { BrowserProfilesPanel } from './BrowserProfilesPanel'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
-import { StatusDot } from './StatusDot'
 import { SidebarToggleChrome } from './TopRowChrome'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 
@@ -80,13 +74,6 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
   'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: FolderGit2 },
   agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot },
   'browser-tools': { label: 'Browser Tools', description: 'Open browsers and configure their tools', icon: Globe2 }
-}
-
-const BOARD_TOOL: ToolDefinition<'branch-board'> = {
-  id: 'branch-board',
-  label: 'Branch Board',
-  description: 'Inspect project Branches by run status',
-  icon: Columns3
 }
 
 export function BrowserToolbarPreferences({
@@ -427,51 +414,9 @@ export function WorkspaceAgentsTool({
   )
 }
 
-/**
- * Board 工具的次级面板：当前 Board 的工作清单。
- *
- * 用户打开它是来找一条具体的工作线，不是读一段介绍 Board 是什么的文案。行与 Board 主视图
- * 同源（`useBoardRows`），因此不会出现面板列了一条 Board 上没有的行。图例式静态说明降级为
- * 空态——没有任何行时它才有话说。
- */
-export function BoardToolList({ hostId: _hostId }: { hostId: string }) {
-  const config = useAppStore((state) => state.config)
-  const sessions = useAppStore((state) => state.sessions)
-  const demandRecords = useAppStore((state) => state.demands)
-  const selectedDemandId = useAppStore((state) => state.selectedDemandId)
-  const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
-  const [showAll, setShowAll] = useState(false)
-  const demands = projectDemands(config, sessions, demandRecords)
-  const columns = demandColumns(demands)
-  // 一条清单，按状态排序后整体截断——不是每列各截 5 条。按列截断会把"其余还有多少"
-  // 分散成七个各自无声的缺口，而用户读到的是一条连续的清单。
-  const ordered = (['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as DemandStatus[])
-    .flatMap((status) => columns[status].map((demand) => ({ demand, status })))
-  const { shown, hidden } = boardListSegments(ordered, showAll)
-  return (
-    <section className="board-tool-list" aria-label="Global goal index">
-      <div className="board-tool-context"><span><Columns3 size={12} /> Goals</span><em>{demands.length} goal{demands.length === 1 ? '' : 's'}</em></div>
-      {demands.length === 0 ? <div className="board-tool-row__empty">No goals yet. Use Mote to clarify your first goal.</div> : null}
-      {shown.map(({ demand, status }) => (
-        <button className={`board-tool-demand ${selectedDemandId === demand.id ? 'selected' : ''}`} type="button" key={demand.id} onClick={() => setSelectedDemand(demand.id)} title={demand.title}>
-          <StatusDot status={demand.sessions[0]?.status ?? { state: 'waiting', source: 'run-process', observedAt: Date.now() }} />
-          <span><strong>{demand.title}</strong><small>{demand.projectName ?? 'Global'} · {status}</small></span>
-        </button>
-      ))}
-      {hidden > 0 ? (
-        <button className="board-tool-more" type="button" onClick={() => setShowAll(true)}>
-          其余 {hidden} 条
-        </button>
-      ) : null}
-    </section>
-  )
-}
-
 export function SurfaceToolDock({
-  surface,
   workspace
 }: {
-  surface: MainSurface
   workspace: WorkspaceRecord | undefined
 }) {
   const workspaceTool = useAppStore((state) => state.workspaceTool)
@@ -491,7 +436,6 @@ export function SurfaceToolDock({
   const [startingBrowser, setStartingBrowser] = useState(false)
   const [savingBrowserToolbar, setSavingBrowserToolbar] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const isBoard = surface === 'board'
   const fileEditingProbe = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
   // Scratch is a wiki-first workspace: the content slot keeps its `files-branches` role but is
@@ -503,9 +447,7 @@ export function SurfaceToolDock({
     isScratch
   })
   const contentSlot = contentSlotPresentation(isScratch)
-  const tools: ToolDefinition<string>[] = isBoard
-    ? [BOARD_TOOL]
-    : workspaceToolIds.map((id) => {
+  const tools: ToolDefinition<WorkspaceTool>[] = workspaceToolIds.map((id) => {
         const meta = WORKSPACE_TOOL_META[id]
         // Re-skin the content slot for Scratch without changing its enum id.
         if (id === 'files-branches' && isScratch) {
@@ -513,13 +455,8 @@ export function SurfaceToolDock({
         }
         return { id, ...meta }
       })
-  const selectedTool = isBoard ? BOARD_TOOL.id : fileEditingProbe ? 'files-branches' : effectiveWorkspaceTool
+  const selectedTool = fileEditingProbe ? 'files-branches' : effectiveWorkspaceTool
   const activePaneId = layout?.activeGroupId
-  const project = workspace
-    ? projectWorkspaces(config?.workspaces ?? []).find((candidate) =>
-        candidate.workspaces.some((item) => item.id === workspace.id)
-      )
-    : null
   const allBrowserSurfaces = Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab))
     .flatMap((candidate) => candidate.kind === 'browser' ? [candidate] : [])
   const browserSurfaces = allBrowserSurfaces.filter((candidate) => candidate.workspaceId === workspace?.id)
@@ -565,10 +502,10 @@ export function SurfaceToolDock({
   }
 
   return (
-    <aside className="surface-tool-panel" aria-label={`${isBoard ? 'Goals' : 'Space'} tools`}>
-      <header className={`surface-tool-activitybar ${isBoard ? '' : 'surface-tool-activitybar--space'} ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
+    <aside className="surface-tool-panel" aria-label="Space tools">
+      <header className={`surface-tool-activitybar surface-tool-activitybar--space ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
-        <nav aria-label={`${isBoard ? 'Goals' : 'Space'} tool selection`}>
+        <nav aria-label="Space tool selection">
           {tools.map((tool) => {
             const Icon = tool.icon
             return (
@@ -580,7 +517,7 @@ export function SurfaceToolDock({
                 aria-pressed={selectedTool === tool.id}
                 title={`${tool.label} — ${tool.description}`}
                 onClick={() => {
-                  if (!isBoard) setWorkspaceTool(tool.id as WorkspaceTool)
+                  setWorkspaceTool(tool.id)
                 }}
               >
                 <Icon size={15} />
@@ -588,8 +525,7 @@ export function SurfaceToolDock({
             )
           })}
         </nav>
-        {isBoard ? <span>{BOARD_TOOL.label}</span> : null}
-        {!isBoard && selectedTool === 'agents' && workspace && layout ? (
+        {selectedTool === 'agents' && workspace && layout ? (
           <button
             type="button"
             className="surface-tool-create icon-button"
@@ -600,7 +536,7 @@ export function SurfaceToolDock({
             <Plus size={15} />
           </button>
         ) : null}
-        {!isBoard && selectedTool === 'browser-tools' && workspace ? (
+        {selectedTool === 'browser-tools' && workspace ? (
           <button
             type="button"
             className="surface-tool-create icon-button"
@@ -614,17 +550,17 @@ export function SurfaceToolDock({
         ) : null}
       </header>
       <div className="surface-tool-content">
-        {!isBoard && selectedTool === 'files-branches' && workspace ? (
+        {selectedTool === 'files-branches' && workspace ? (
           <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} />
         ) : null}
-        {!isBoard && effectiveWorkspaceTool === 'agents' && workspace ? (
+        {effectiveWorkspaceTool === 'agents' && workspace ? (
           <WorkspaceAgentsTool
             workspace={workspace}
             sessions={sessions}
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}
           />
         ) : null}
-        {!isBoard && effectiveWorkspaceTool === 'browser-tools' && workspace && config ? (
+        {effectiveWorkspaceTool === 'browser-tools' && workspace && config ? (
           <section className="browser-tools-panel" aria-label="Browser Tools">
             <BrowserToolbarPreferences
               toolbar={config.browser.toolbar}
@@ -649,7 +585,6 @@ export function SurfaceToolDock({
             />
           </section>
         ) : null}
-        {isBoard ? <BoardToolList hostId={project?.hostId ?? workspace?.hostId ?? 'local'} /> : null}
         {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
       </div>
     </aside>
