@@ -7,6 +7,7 @@ import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { ConversationToolTrace } from './ConversationToolTrace'
 import { ComposerTextarea } from './ComposerTextarea'
 import { SemanticIcon } from './semantic-icons'
 
@@ -190,14 +191,12 @@ export function ConversationMessage({
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
               {...(readPastedImage ? { readPastedImage } : {})}
               {...(openHttpLink ? { openHttpLink } : {})}
-            /> : part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result' ? (
-              <details key={key} className="log-turn__trace" data-trace-kind={part.kind}
-                {...(part.kind === 'tool-result' && part.failed === true ? { 'data-status': 'failed' } : {})}>
-                <summary>{part.kind === 'reasoning' ? 'Reasoning' : part.kind === 'tool-call'
-                  ? `Tool call · ${part.name}` : `Tool result${part.name ? ` · ${part.name}` : ''}`}
-                  {part.kind === 'tool-result' && part.failed === true ? ' · Failed' : null}
-                </summary>
-                <pre>{part.kind === 'reasoning' ? part.text : part.kind === 'tool-call' ? part.input : part.output}</pre>
+            /> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
+              <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot} />
+            ) : part.kind === 'reasoning' ? (
+              <details key={key} className="log-turn__trace" data-trace-kind={part.kind}>
+                <summary>Reasoning</summary>
+                <pre>{part.text}</pre>
               </details>
             ) : <div key={key} className="log-turn__resource">
               <span>{part.label ?? `${part.resourceType} resource`}</span>
