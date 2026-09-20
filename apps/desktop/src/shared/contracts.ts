@@ -46,6 +46,7 @@ export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcom
 
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
 import type { BrowserStepEvidenceRead } from './browser-step-evidence'
+import type { BrowserDemonstrationState } from './browser-demonstration'
 export type { BrowserStepEvidenceRead } from './browser-step-evidence'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
 export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
@@ -1067,6 +1068,8 @@ export type BrowserSnapshot = {
   appLinkPrompt: { url: string; scheme: string } | null
   /** Latest bounded Browser operation projection; transient while the native page is live. */
   activity?: BrowserActivityState
+  /** Explicit human recording or recovered durable draft; recovery never starts capture. */
+  demonstration?: BrowserDemonstrationState
 }
 
 export type BrowserProfileImportedSource = {
@@ -1497,6 +1500,10 @@ export type AgentMuxDesktopApi = {
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     captureScreenshot(id: string): Promise<BrowserScreenshotCapture>
+    /** Human toolbar only; Agent/Core control exposes no recording-start operation. */
+    startDemonstration(id: string): Promise<BrowserDemonstrationState>
+    stopDemonstration(id: string): Promise<BrowserDemonstrationState>
+    getDemonstration(id: string): Promise<BrowserDemonstrationState>
     /**
      * 在这个 Browser 上跑一段 Agent 写的程序，返回它的结局。
      *

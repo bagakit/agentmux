@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow } from 'electron'
+import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import {
@@ -39,6 +39,9 @@ import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../sha
 import type { BrowserPageSnapshot } from '../shared/contracts.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
 import type { BrowserResultContext } from '../shared/browser-result-artifact.js'
+import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
+import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
+import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
@@ -78,6 +81,7 @@ type BrowserEntry = {
   humanControl: boolean
   activeRun: { operationId: string; stop: () => void } | undefined
   runInFlight: boolean
+  demonstration?: BrowserDemonstrationState
 }
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
@@ -324,6 +328,7 @@ export function normalizeBrowserUrl(value: string): string {
 export class BrowserViewManager {
   private readonly entries = new Map<string, BrowserEntry>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
+  private demonstrationCapture: { entry: BrowserEntry; view: WebContentsView; contents: WebContents; capture: BrowserDemonstrationCapture } | null = null
 
   constructor(
     private readonly window: BrowserWindow,
@@ -343,7 +348,8 @@ export class BrowserViewManager {
     private readonly appLinks: AppLinkHost,
     private readonly operationJournal?: BrowserOperationJournal,
     private readonly stepEvidence?: BrowserStepEvidenceStore,
-    private readonly resultArtifacts?: BrowserResultArtifactStore
+    private readonly resultArtifacts?: BrowserResultArtifactStore,
+    private readonly demonstrations?: BrowserDemonstrationRecorder
   ) {}
 
   resourceOwnerCounts(): { browserViews: number; releasedBrowserViews: number } {
@@ -387,6 +393,7 @@ export class BrowserViewManager {
   async release(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (!entry) return
+    void this.releaseDemonstrationCapture(entry)
     this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
     const contents = entry.view.webContents
     // `getURL()` is the last committed document. During an in-flight navigation it can still
@@ -477,10 +484,16 @@ export class BrowserViewManager {
     let childRegistrationAttempted = false
     try {
       childRegistrationAttempted = true
+      // BrowserWindow's original Renderer is child 0. Browsers sit above it and below native Chrome.
       this.window.contentView.addChildView(view)
       view.setVisible(false)
       this.attach(entry, view)
       this.emit(entry)
+      if (this.demonstrations) void this.getDemonstration(id).catch(() => {
+        if (!this.owns(entry, view) || this.demonstrationCapture?.entry === entry) return
+        entry.demonstration = { draft: null, warning: 'The saved demonstration could not be read. The Browser remains usable; reopen its activity details to retry.' }
+        this.emit(entry)
+      })
       void view.webContents.loadURL(url).catch((error) => {
         if (!this.owns(entry, view)) return
         entry.error = error instanceof Error ? error.message : String(error)
@@ -601,6 +614,7 @@ export class BrowserViewManager {
       candidate.setVisible(entry.visible)
       this.window.contentView.removeChildView(authoritativeView)
 
+      void this.releaseDemonstrationCapture(entry)
       entry.pendingSwitch = null
       entry.view = candidate
       entry.profileId = profileId
@@ -690,6 +704,8 @@ export class BrowserViewManager {
    */
   async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
+    // Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.
+    void this.releaseDemonstrationCapture(entry)
     const resultNavigationId = entry.navigationId
     if (entry.humanControl) {
       // 带类型化的码，不是一句散文：调用方要能把「人在用这一页」与「出故障了」分开，并且知道恢复
@@ -981,6 +997,87 @@ export class BrowserViewManager {
       }
       this.emit(entry)
     }
+  }
+
+  async startDemonstration(id: string): Promise<BrowserDemonstrationState> {
+    const entry = this.require(id)
+    if (!this.demonstrations) throw new Error('Demonstration storage is unavailable. The Browser remains usable.')
+    if (entry.runInFlight || entry.activeRun) throw new Error('Stop the active Browser operation before recording a human demonstration.')
+    void this.releaseDemonstrationCapture()
+    const view = entry.view
+    const contents = view.webContents
+    const current = {
+      entry, view, contents,
+      capture: new BrowserDemonstrationCapture({
+        contents, browserId: id, recorder: this.demonstrations,
+        getIdentity: () => ({ navigationId: entry.navigationId, url: contents.getURL() || entry.requestedUrl, title: contents.getTitle() }),
+        onDraft: (draft, warning) => {
+          if (this.demonstrationCapture !== current || !this.owns(entry, view) || contents.isDestroyed()) return
+          this.publishDemonstration(entry, draft, warning)
+          if (draft && draft.status !== 'recording') this.demonstrationCapture = null
+        }
+      })
+    }
+    this.demonstrationCapture = current
+    try {
+      const draft = await current.capture.start()
+      if (this.demonstrationCapture !== current || !this.owns(entry, view) || contents.isDestroyed()) {
+        throw new Error('Recording no longer owns this Browser. The current Browser operation remains available.')
+      }
+      if (entry.demonstration?.draft?.id !== draft.id) this.publishDemonstration(entry, draft)
+      return structuredClone(entry.demonstration!)
+    } catch (error) {
+      if (this.demonstrationCapture === current) void this.releaseDemonstrationCapture(entry)
+      throw error
+    }
+  }
+
+  async stopDemonstration(id: string): Promise<BrowserDemonstrationState> {
+    const entry = this.require(id)
+    const view = entry.view
+    if (!this.demonstrations) throw new Error('Demonstration storage is unavailable. The Browser remains usable.')
+    const stopped = this.releaseDemonstrationCapture(entry)
+    const draft = stopped ? await stopped : await this.demonstrations.stop(id)
+    if (this.owns(entry, view) && this.demonstrationCapture?.entry !== entry) this.publishDemonstration(entry, draft)
+    return structuredClone(entry.demonstration ?? { draft })
+  }
+
+  async getDemonstration(id: string): Promise<BrowserDemonstrationState> {
+    const entry = this.require(id)
+    const view = entry.view
+    if (!this.demonstrations) return { draft: null, warning: 'Demonstration storage is unavailable. The Browser remains usable.' }
+    const draft = await this.demonstrations.get(id)
+    if (this.owns(entry, view) && this.demonstrationCapture?.entry !== entry) this.publishDemonstration(entry, draft)
+    return structuredClone(entry.demonstration ?? { draft })
+  }
+
+  private publishDemonstration(entry: BrowserEntry, draft: BrowserDemonstrationDraft | null, warning?: string): void {
+    if (draft && entry.demonstration?.draft?.id === draft.id && entry.demonstration.draft.revision > draft.revision) return
+    const notice = warning ?? this.demonstrations?.getPersistenceWarning() ?? draft?.warning
+    entry.demonstration = { draft, ...(notice ? { warning: notice } : {}) }
+    this.emit(entry)
+  }
+
+  /** The native owner is released synchronously; saving the stopped draft completes in the background. */
+  private releaseDemonstrationCapture(entry?: BrowserEntry): Promise<BrowserDemonstrationDraft | null> | null {
+    const current = this.demonstrationCapture
+    if (!current || (entry && current.entry !== entry)) return null
+    this.demonstrationCapture = null
+    if (!current.contents.isDestroyed() && current.entry.demonstration?.draft?.status === 'recording') {
+      this.publishDemonstration(current.entry, { ...current.entry.demonstration.draft, status: 'stopped' })
+    }
+    return current.capture.stop().then(draft => {
+      if (this.owns(current.entry, current.view) && !current.contents.isDestroyed() && this.demonstrationCapture?.entry !== current.entry) {
+        this.publishDemonstration(current.entry, draft)
+      }
+      return draft
+    }).catch(() => {
+      if (this.owns(current.entry, current.view) && !current.contents.isDestroyed() && this.demonstrationCapture?.entry !== current.entry) {
+        this.publishDemonstration(current.entry, current.entry.demonstration?.draft ?? null,
+          'The demonstration stopped, but saving the draft could not be confirmed. The Browser remains usable; check local storage before recording again.')
+      }
+      return null
+    })
   }
 
   async listOperationHistory(): Promise<BrowserOperation[]> {
@@ -1471,6 +1568,7 @@ export class BrowserViewManager {
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
     if (!entry) return this.releasedEntries.delete(id)
+    void this.releaseDemonstrationCapture(entry)
     this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
     if (!entry.view.webContents.isDestroyed()) {
       entry.selectionOperation = null
@@ -1611,6 +1709,7 @@ export class BrowserViewManager {
         return
       }
       if (!this.owns(entry, view)) return
+      void this.releaseDemonstrationCapture(entry)
       this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch'))
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
@@ -1711,6 +1810,7 @@ export class BrowserViewManager {
       viewport: entry.viewport,
       error: entry.error,
       driving: entry.driving,
+      ...(entry.demonstration ? { demonstration: entry.demonstration } : {}),
       appLinkPrompt: entry.appLinkPrompt,
       activity: persistenceWarning
         ? { ...entry.activity, warning: entry.activity.warning ?? persistenceWarning }

@@ -4,6 +4,9 @@ import { mkdtempSync } from 'node:fs'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
+import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
+import type { BrowserDemonstrationDocument, BrowserDemonstrationDraft } from '../src/shared/browser-demonstration.js'
 
 /**
  * `runScript` 那条路的单元判据：**生产的 onPageCall 真的走派发层**，以及会话中途没了要如实报告。
@@ -160,7 +163,7 @@ function fakeWindow(): any {
 }
 
 async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore,
-  results?: BrowserResultArtifactStore, workspaceId: string | null = null): Promise<{
+  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -178,7 +181,7 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal, evidence, results)
+  }, journal, evidence, results, demonstrations)
   await manager.create('b1', 'https://example.invalid/', workspaceId)
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
@@ -262,6 +265,124 @@ describe('runScript records readable evidence for the exact step', () => {
       expect(report.runOperation.steps).toEqual([expect.objectContaining({ status: 'completed' })])
       expect(report.runOperation.warning).toContain('could not be saved')
       await expect(manager.getStepEvidence(report.runOperation.id, 1)).resolves.toMatchObject({ status: 'unavailable', warning: expect.stringContaining('action result is retained'), items: [] })
+    } finally { manager.dispose() }
+  }, 30_000)
+})
+
+describe('human demonstration via the actual Manager → capture → recorder chain', () => {
+  it('publishes a nonempty draft through Browser snapshots and recovers it without starting capture', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'amx-demonstration-owner-'))
+    const storePath = join(directory, 'drafts.json')
+    const recorder = new BrowserDemonstrationRecorder(new BrowserDemonstrationFileStore(storePath))
+    const { manager, contents, sentEvents } = await managerWithBrowser(undefined, undefined, undefined, null, recorder)
+    try {
+      const started = await manager.startDemonstration('b1')
+      expect(started.draft).toMatchObject({ browserId: 'b1', status: 'recording', steps: [] })
+      expect(contents.debugger.isAttached()).toBe(true)
+      recorder.noteNativeInput({ browserId: 'b1', navigationId: started.draft!.navigationId, type: 'mouseDown' })
+      await recorder.recordBrowserDemonstration({ browserId: 'b1', navigationId: started.draft!.navigationId,
+        kind: 'click', isTrusted: true, target: { role: 'button', name: 'Review preferences', ordinal: 1, count: 1 } })
+      const stopped = await manager.stopDemonstration('b1')
+      expect(stopped.draft).toMatchObject({ id: started.draft!.id, status: 'stopped',
+        steps: [expect.objectContaining({ method: 'click', source: 'native-human', target: { role: 'button', name: 'Review preferences', ordinal: 1, count: 1 } })] })
+      expect(sentEvents().at(-1)?.browser.demonstration).toEqual(stopped)
+      expect(contents.debugger.isAttached()).toBe(false)
+      manager.dispose()
+      const restored = await managerWithBrowser(undefined, undefined, undefined, null,
+        new BrowserDemonstrationRecorder(new BrowserDemonstrationFileStore(storePath)))
+      try {
+        await expect(restored.manager.getDemonstration('b1')).resolves.toEqual(stopped)
+        expect(restored.contents.debugger.isAttached()).toBe(false)
+        expect(restored.sentEvents().at(-1)?.browser.demonstration).toEqual(stopped)
+      } finally { restored.manager.dispose() }
+    } finally { manager.dispose(); await rm(directory, { recursive: true, force: true }) }
+  }, 30_000)
+
+  it('one actual capture owner moves between Browsers and releases the previous native session', async () => {
+    const recorder = new BrowserDemonstrationRecorder({ load: async () => null, save: async () => {} })
+    const { manager, contents } = await managerWithBrowser(undefined, undefined, undefined, null, recorder)
+    try {
+      const first = await manager.startDemonstration('b1')
+      await manager.create('b2', 'https://second.example.invalid/')
+      const secondContents = fakeElectron.FakeWebContentsView.instances[1]!.webContents
+      const second = await manager.startDemonstration('b2')
+      expect(second.draft).toMatchObject({ browserId: 'b2', status: 'recording' })
+      expect(contents.debugger.isAttached()).toBe(false)
+      expect(secondContents.debugger.isAttached()).toBe(true)
+      await expect(manager.getDemonstration('b1')).resolves.toMatchObject({ draft: { id: first.draft!.id, status: 'stopped' } })
+      await manager.stopDemonstration('b2')
+      expect(secondContents.debugger.isAttached()).toBe(false)
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('a slow recording start releases synchronously and never gates or reattaches after a healthy Agent run', async () => {
+    let release!: () => void
+    let entered!: () => void
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    let holdFirst = true
+    const recorder = new BrowserDemonstrationRecorder({ load: async () => null, save: async document => {
+      if (holdFirst && document.drafts.at(-1)?.status === 'recording') { holdFirst = false; entered(); await held }
+    } })
+    const { manager, contents } = await managerWithBrowser(undefined, undefined, undefined, null, recorder)
+    const attach = vi.spyOn(contents.debugger, 'attach')
+    const start = manager.startDemonstration('b1').then(value => value, error => error)
+    try {
+      await ready
+      const outcome = await Promise.race([
+        manager.runScript('b1', 'return 41').then(value => value, error => error),
+        new Promise(resolve => setTimeout(() => resolve('run blocked on recording storage'), 3_000))
+      ])
+      expect(outcome).toMatchObject({ result: 41, outcome: { kind: 'completed' } })
+      expect(attach).toHaveBeenCalledTimes(1)
+      release()
+      expect(await start).toEqual(expect.objectContaining({ message: expect.stringContaining('no longer owns') }))
+      await manager.stopDemonstration('b1')
+      expect(attach).toHaveBeenCalledTimes(1)
+      expect(contents.debugger.isAttached()).toBe(false)
+      await expect(manager.runScript('b1', 'return 42')).resolves.toMatchObject({ result: 42, outcome: { kind: 'completed' } })
+    } finally { release(); await start; attach.mockRestore(); manager.dispose() }
+  }, 30_000)
+
+  it('an old capture callback cannot overwrite the newer recording on the same entry/view', async () => {
+    const recorder = new BrowserDemonstrationRecorder({ load: async () => null, save: async () => {} })
+    const originalStart = BrowserDemonstrationCapture.prototype.start
+    const captures: BrowserDemonstrationCapture[] = []
+    const start = vi.spyOn(BrowserDemonstrationCapture.prototype, 'start').mockImplementation(function(this: BrowserDemonstrationCapture) {
+      captures.push(this)
+      return originalStart.call(this)
+    })
+    const { manager, sentEvents } = await managerWithBrowser(undefined, undefined, undefined, null, recorder)
+    try {
+      const first = await manager.startDemonstration('b1')
+      await manager.stopDemonstration('b1')
+      const second = await manager.startDemonstration('b1')
+      expect(captures).toHaveLength(2)
+      expect(second.draft!.id).not.toBe(first.draft!.id)
+      // Exercise the callback supplied by Main: model an async producer completing after replacement.
+      const old = captures[0] as unknown as { options: { onDraft: (draft: BrowserDemonstrationDraft, warning?: string) => void } }
+      old.options.onDraft(first.draft!, 'Late producer result')
+      expect(sentEvents().at(-1)?.browser.demonstration).toEqual(second)
+      await expect(manager.getDemonstration('b1')).resolves.toEqual(second)
+    } finally { start.mockRestore(); manager.dispose() }
+  }, 30_000)
+
+  it('a recovered recording draft is interrupted and has no native capture or input listener', async () => {
+    const draft: BrowserDemonstrationDraft = { id: 'prior-draft', browserId: 'b1', navigationId: 'prior-nav',
+      url: 'https://example.invalid/', revision: 2, status: 'recording', startedAt: 1, updatedAt: 2,
+      steps: [{ id: 'prior-step', sequence: 1, recordedAt: 2, navigationId: 'prior-nav', source: 'native-human',
+        method: 'fillInput', url: 'https://example.invalid/', args: [], inputKey: 'input-1', blockedReason: 'Supply a fresh parameter.' }] }
+    const persisted: BrowserDemonstrationDocument = { version: 1, drafts: [draft] }
+    const recorder = new BrowserDemonstrationRecorder({ load: async () => structuredClone(persisted), save: async () => {} })
+    const { manager, contents, sentEvents } = await managerWithBrowser(undefined, undefined, undefined, null, recorder)
+    try {
+      const restored = await manager.getDemonstration('b1')
+      expect(restored.draft).toMatchObject({ id: 'prior-draft', status: 'interrupted', steps: [expect.objectContaining({ inputKey: 'input-1' })] })
+      expect(restored.warning).toContain('restart')
+      expect(sentEvents().at(-1)?.browser.demonstration).toEqual(restored)
+      expect(contents.debugger.isAttached()).toBe(false)
+      expect(contents.listeners.get('input-event') ?? []).toEqual([])
+      await expect(manager.runScript('b1', 'return 7')).resolves.toMatchObject({ result: 7, outcome: { kind: 'completed' } })
     } finally { manager.dispose() }
   }, 30_000)
 })
