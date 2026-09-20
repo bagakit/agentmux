@@ -149,6 +149,46 @@ async function composerVisual(layoutOwning=false) {
   assert.ok(result.frames.length>0,'Actual composer scenes are nonempty')
   if(layoutOwning)assert.equal(result.progressLayouts?.length,2,'Both actual widths have a nonempty form observation')
 }
+async function terminalLoadingVisual() {
+  result.captureOnly=true;result.aestheticReview='not-performed';result.loadingLayouts=[]
+  for(const width of [640,320]){
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:width*2+1,height:740,deviceScaleFactor:1,mobile:false})
+    await evaluate('window.loadingFixture=identityMenu.terminalLoading(); void 0')
+    const view=`${surface}.querySelector('.terminal-view')`
+    try{
+      await waitFor(visible(`${view}?.querySelector(':scope > .full-page-loading--region')`))
+      await waitFor(visible(`${view}?.querySelector(':scope > .terminal-service-window')`))
+      await painted()
+      for(const state of ['loading','released']){
+        if(state==='released'){
+          await evaluate('loadingFixture.release()')
+          await waitFor(`!${view}.querySelector(':scope > .full-page-loading--region')`)
+          await painted()
+        }
+        const observed=await evaluate(`(()=>{
+          const view=${view},canvas=view.querySelector(':scope > .terminal-view__xterm'),notice=view.querySelector(':scope > .terminal-service-window')
+          const loading=view.querySelector(':scope > .full-page-loading--region'),style=getComputedStyle(canvas)
+          const rect=node=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,width:r.width,height:r.height}}
+          return {view:rect(view),canvas:rect(canvas),notice:rect(notice),loading:loading?{...rect(loading),position:getComputedStyle(loading).position}:null,
+            marginTop:parseFloat(style.marginTop),marginBottom:parseFloat(style.marginBottom),terminal:identityMenu.terminal(),noticeCount:notice.querySelectorAll('.service-window').length}
+        })()`)
+        const file=`${width}-terminal-${state}.png`,png=await capture(file.slice(0,-4))
+        result.frames.push({width,state,file,png});result.loadingLayouts.push({width,state,...observed})
+        assert.ok(observed.noticeCount>0,'Actual terminal notices are nonempty during the layout observation')
+        assert.ok(observed.canvas.width>0&&observed.view.height>0,'The actual terminal layout is nonempty')
+        const available=observed.view.height-observed.notice.height-observed.marginTop-observed.marginBottom
+        assert.ok(Math.abs(observed.canvas.height-available)<=1,'The actual xterm gets the space left by notices, not the loading surface')
+        if(state==='loading')assert.equal(observed.loading.position,'absolute','The actual Region loading surface is outside terminal flex flow')
+        if(state==='released'){
+          const previous=result.loadingLayouts.at(-2)
+          assert.equal(observed.terminal.id,previous.terminal.id,'Releasing the original attach keeps the same xterm')
+        }
+      }
+    }finally{await evaluate('loadingFixture.release()')}
+  }
+  assert.equal(result.frames.length,4,'Both actual widths have loading and released frames')
+  assert.equal(result.loadingLayouts.length,4,'The actual layout observations are nonempty')
+}
 async function selection(label,width,input='mouse') {
   await seed(width);await identity();await open()
   await evaluate('identityMenu.focusNeighbor()');await painted()
@@ -195,7 +235,8 @@ app.whenReady().then(async()=>{
     result.consoleErrors=[];win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push(details.message)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.identityMenu)')
-    if(probe==='composer-visual'||probe==='composer-layout-owning')await composerVisual(probe==='composer-layout-owning')
+    if(probe==='terminal-loading-owning')await terminalLoadingVisual()
+    else if(probe==='composer-visual'||probe==='composer-layout-owning')await composerVisual(probe==='composer-layout-owning')
     else if(probe==='name'){await seed(640);result.names=await identity()}
     else if(probe==='target')await selection('Split',320)
     else if(probe.startsWith('swap-'))result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})

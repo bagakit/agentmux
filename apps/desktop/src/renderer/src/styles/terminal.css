@@ -18,6 +18,7 @@
   margin-left:var(--sp-2);
 }
 .terminal-view__xterm--hydrating { visibility: hidden; }
+.terminal-view > .full-page-loading--region { position: absolute; inset: 0; }
 /* Passive pane-corner status readout; the opposite vertical edge keeps the hovered row clear.
    Absolute positioning stays within this Region without changing xterm's grid or taking input. */
 .terminal-link-preview {
