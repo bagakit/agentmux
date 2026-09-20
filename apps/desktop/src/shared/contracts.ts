@@ -1484,7 +1484,7 @@ export type AgentMuxDesktopApi = {
     /** Forget only the answer displayed on this row; a newer answer is a conflict. */
     forgetAppLinkScheme(scheme: string, expected: AppLinkSchemeChoice): Promise<void>
     /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */
-    create(id: string, url: string): Promise<BrowserSnapshot>
+    create(id: string, url: string, workspaceId: string | null): Promise<BrowserSnapshot>
     navigate(id: string, url: string): Promise<BrowserSnapshot>
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
@@ -1550,6 +1550,7 @@ export type AgentMuxDesktopApi = {
     release(id: string): Promise<void>
     /** Rebuild a previously released native page from the retained Region projection. */
     restore(id: string, input: {
+      workspaceId: string | null
       profileId: string
       viewport: BrowserViewport
     }): Promise<BrowserSnapshot>

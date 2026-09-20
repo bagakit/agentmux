@@ -93,6 +93,8 @@ import { BrowserViewManager } from './browser-view-manager.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
+import { BrowserResultArtifactStore } from './browser-result-artifact.js'
+import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { pastedDirectory } from './pasted-directory.js'
@@ -209,7 +211,8 @@ export async function registerIpc(args: {
     },
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
-  }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')))
+  }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')),
+  new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')))
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
@@ -775,7 +778,8 @@ export async function registerIpc(args: {
     }
     await forgetBrowserAppLink(configOwner, scheme, expected)
   })
-  handle('browser:create', async (id: string, url: string) => await browsers.create(id, url))
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown) =>
+    await browsers.create(id, url, verifiedBrowserWorkspace(config.workspaces, workspaceId)))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))
@@ -901,8 +905,8 @@ export async function registerIpc(args: {
   handle('browser:release', async (id: string) => await browsers.release(id))
   handle('browser:restore', async (
     id: string,
-    input: { profileId: string; viewport: BrowserViewport }
-  ) => await browsers.restore(id, input))
+    input: { workspaceId: unknown; profileId: string; viewport: BrowserViewport }
+  ) => await browsers.restore(id, { ...input, workspaceId: verifiedBrowserWorkspace(config.workspaces, input.workspaceId) }))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
   const control = new AgentMuxControlServer({

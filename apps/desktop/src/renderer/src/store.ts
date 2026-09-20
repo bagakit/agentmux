@@ -2434,7 +2434,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           browserIndex += 1
           set({ startupProgress: { step: 'browsers', current: browserIndex, total: browserSurfaces.length } })
           try {
-            const browser = await api.browser.create(surface.browserId, surface.url)
+            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId)
             get().applyBrowserEvent({ type: 'updated', browser })
           } catch (error) {
             // Failure to acquire a native owner is not a user close. Keep the current durable Region
@@ -3471,7 +3471,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw primary
     }
     try {
-      const browser = await api.browser.create(browserId, request.url)
+      const browser = await api.browser.create(browserId, request.url, workspace.id)
       createdBrowserId = browser.id
       if (browser.id !== browserId) await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Browser owner returned another Browser identity.'))
       if (signal?.aborted) await cleanup(controlCancellation(signal))
@@ -5503,7 +5503,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
     try {
-      const browser = await api.browser.create(regionId, url)
+      const browser = await api.browser.create(regionId, url, workspaceId)
       const surface: BrowserWorkbenchSurface = {
         ...browser,
         regionId,

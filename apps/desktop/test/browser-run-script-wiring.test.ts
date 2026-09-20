@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import { mkdtempSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -138,6 +138,8 @@ import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
 import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/browser-operation-journal.js'
 import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
+import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.js'
+import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '../src/shared/browser-result-artifact.js'
 import type { BrowserPageContext } from '../src/main/browser-page-dispatch.js'
 
 const profiles: BrowserProfileResolver = {
@@ -157,7 +159,8 @@ function fakeWindow(): any {
   }
 }
 
-async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore): Promise<{
+async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore,
+  results?: BrowserResultArtifactStore, workspaceId: string | null = null): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -175,8 +178,8 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal, evidence)
-  await manager.create('b1', 'https://example.invalid/')
+  }, journal, evidence, results)
+  await manager.create('b1', 'https://example.invalid/', workspaceId)
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
   return {
@@ -225,7 +228,11 @@ describe('runScript records readable evidence for the exact step', () => {
     try {
       const report = await manager.runScript('b1', 'await snapshot(); await click("@e1"); await elementContext("@e404")')
       expect(report.outcome.kind).toBe('script-failed')
-      expect(report.runOperation.steps.map(value => [value.sequence, value.status])).toEqual([[1, 'completed'], [2, 'completed'], [3, 'failed']])
+      expect(report.runOperation.steps).toEqual([
+        expect.objectContaining({ sequence: 1, status: 'completed' }),
+        expect.objectContaining({ sequence: 2, status: 'completed' }),
+        expect.objectContaining({ sequence: 3, status: 'failed' })
+      ])
       const saved = await manager.getStepEvidence(report.runOperation.id, 3)
       expect(saved.status).toBe('available')
       expect(saved.items).toHaveLength(1)
@@ -252,7 +259,7 @@ describe('runScript records readable evidence for the exact step', () => {
     try {
       const report = await manager.runScript('b1', 'await snapshot(); return "action-kept"')
       expect(report).toMatchObject({ result: 'action-kept', outcome: { kind: 'completed' } })
-      expect(report.runOperation.steps.map(value => value.status)).toEqual(['completed'])
+      expect(report.runOperation.steps).toEqual([expect.objectContaining({ status: 'completed' })])
       expect(report.runOperation.warning).toContain('could not be saved')
       await expect(manager.getStepEvidence(report.runOperation.id, 1)).resolves.toMatchObject({ status: 'unavailable', warning: expect.stringContaining('action result is retained'), items: [] })
     } finally { manager.dispose() }
@@ -418,6 +425,7 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
       snapshot: 'snapshot()',
       snapshotText: 'snapshotText()',
       pageInfo: 'pageInfo()',
+      readResult: 'readResult({})',
       captureScreenshot: 'captureScreenshot()',
       elementContext: 'elementContext("@e1")',
       click: 'click("@e1")',
@@ -1200,5 +1208,133 @@ describe('Browser RSI：及时交接与单一运行者', () => {
     const report = await pending
     expect(report).toMatchObject({ result: 'first', outcome: { kind: 'completed' }, runOperation: { id: operationId } })
     expect(held.calls).toEqual(['wait'])
+  }, 30_000)
+})
+
+
+describe('durable result via the actual Manager → dispatch → runner chain', () => {
+  it('real disk failure retains the completed action and a healthy original Browser', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-disk-failure-'))
+    const blocked = join(directory, 'not-a-directory')
+    await writeFile(blocked, 'keep this file')
+    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
+    let manager: BrowserViewManager | undefined
+    try {
+      const created = await managerWithBrowser(new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json'))),
+        undefined, new BrowserResultArtifactStore(blocked), 'workspace-a')
+      manager = created.manager
+      let actions = 0
+      created.contents.debugger.sendCommandImpl = async (method: string) => {
+        if (method === 'Runtime.evaluate') { actions += 1; return { result: { value: 'acted' } } }
+        return {}
+      }
+      const failed = await manager.runScript('b1', 'await js("one action"); return "x".repeat(1100000)')
+      expect(failed.outcome.kind).toBe('indeterminate')
+      expect(failed.outcome.kind !== 'completed' && failed.outcome.message).toContain('Do not automatically rerun')
+      expect(failed.runOperation!.steps).toEqual([expect.objectContaining({ method: 'js', status: 'completed' })])
+      expect(failed.runOperation!.phase).toBe('indeterminate')
+      expect(actions).toBe(1)
+      expect(manager.resourceOwnerCounts().browserViews).toBe(1)
+      expect(created.contents.isDestroyed()).toBe(false)
+      expect((await manager.runScript('b1','return "still healthy"')).outcome.kind).toBe('completed')
+      expect(actions).toBe(1)
+      expect(await readFile(blocked,'utf8')).toBe('keep this file')
+    } finally {
+      manager?.close('b1')
+      createDispatch.mockImplementation(() => async (name,args) => { dispatchCalls.push({name,args}); return `dispatched:${name}` })
+      await rm(directory,{recursive:true,force:true})
+    }
+  }, 30_000)
+
+  it('continues original result after navigation and native release/restart without replaying its action', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-manager-'))
+    const journalPath = join(directory, 'operations.json')
+    const storePath = join(directory, 'results')
+    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
+    let manager: BrowserViewManager | undefined
+    try {
+      const journal = new BrowserOperationJournal(new BrowserOperationFileStore(journalPath))
+      const created = await managerWithBrowser(journal, undefined, new BrowserResultArtifactStore(storePath), 'workspace-a')
+      manager = created.manager
+      let actions = 0
+      created.contents.debugger.sendCommandImpl = async (method: string) => {
+        if (method === 'Runtime.evaluate') { actions += 1; return { result: { value: 'acted' } } }
+        return {}
+      }
+      const initialNavigation = (await manager.create('b1', 'https://ignored.invalid/', 'workspace-a')).navigationId
+      const report = await manager.runScript('b1', 'await js("increment a counter"); return {text:"中文🙂".repeat(150000)}')
+      expect(report.outcome.kind).toBe('completed')
+      const reference = report.result as BrowserResultArtifactReference
+      expect(reference).toMatchObject({ workspaceId: 'workspace-a', browserId: 'b1', operationId: report.runOperation!.id, navigationId: initialNavigation })
+      expect(report.runOperation!.steps).toEqual([expect.objectContaining({ method: 'js' })])
+      expect(actions).toBe(1)
+      const navigationListeners = created.contents.listeners.get('did-start-navigation')
+      expect(navigationListeners.length).toBeGreaterThan(0)
+      for (const listener of navigationListeners) listener({ url: 'https://next.invalid/', isMainFrame: true, isSameDocument: false })
+      expect((await manager.create('b1', 'https://ignored.invalid/', 'workspace-a')).navigationId).not.toBe(reference.navigationId)
+      const continued = await manager.runScript('b1', `return await readResult(${JSON.stringify(reference)}, {offset:1,maxBytes:65536})`)
+      expect(continued.outcome.kind).toBe('completed')
+      const chunk = continued.result as BrowserResultArtifactChunk
+      expect(chunk.returnedBytes).toBe(65536)
+      expect(chunk.reference.operationId).toBe(reference.operationId)
+      expect(continued.runOperation!.id).not.toBe(reference.operationId)
+      expect(continued.runOperation!.steps).toEqual([expect.objectContaining({ method: 'readResult' })])
+      expect(actions).toBe(1)
+      await expect(manager.create('b1', 'https://ignored.invalid/', 'foreign-workspace')).rejects.toThrow(/another Workspace/)
+      await manager.release('b1')
+      await expect(manager.restore('b1', { workspaceId: 'foreign-workspace' })).rejects.toThrow(/another Workspace/)
+      await manager.restore('b1', { workspaceId: null })
+      const resumed = await manager.runScript('b1', `return await readResult(${JSON.stringify(reference)}, {offset:0,maxBytes:11})`)
+      expect(resumed.outcome.kind).toBe('completed')
+      expect((resumed.result as BrowserResultArtifactChunk).returnedBytes).toBe(11)
+      manager.close('b1')
+      const restarted = await managerWithBrowser(new BrowserOperationJournal(new BrowserOperationFileStore(journalPath)), undefined,
+        new BrowserResultArtifactStore(storePath), 'workspace-a')
+      manager = restarted.manager
+      const recovered = await manager.runScript('b1', `return await readResult(${JSON.stringify(reference)}, {offset:65537,maxBytes:33})`)
+      expect(recovered.outcome.kind).toBe('completed')
+      expect(recovered.result).toMatchObject({ reference, offset: 65537, returnedBytes: 33 })
+      expect(actions).toBe(1)
+      const forged = await manager.runScript('b1', `return await readResult(${JSON.stringify({ ...reference, operationId: 'foreign-operation' })})`)
+      expect(forged.outcome.kind).toBe('script-failed')
+      expect(actions).toBe(1)
+    } finally {
+      manager?.close('b1')
+      createDispatch.mockImplementation(() => async (name, args) => { dispatchCalls.push({ name, args }); return `dispatched:${name}` })
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('an unknown Workspace keeps small scripts healthy and reports large result unavailable after an action', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-unknown-'))
+    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
+    let manager: BrowserViewManager | undefined
+    try {
+      const created = await managerWithBrowser(new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json'))),
+        undefined, new BrowserResultArtifactStore(join(directory, 'results')), null)
+      manager = created.manager
+      let actions = 0
+      created.contents.debugger.sendCommandImpl = async (method: string) => {
+        if (method === 'Runtime.evaluate') { actions += 1; return { result: { value: 'acted' } } }
+        return {}
+      }
+      expect((await manager.runScript('b1', 'return null')).result).toBeNull()
+      const large = await manager.runScript('b1', 'await js("one action"); return "x".repeat(1100000)')
+      expect(large.outcome.kind).toBe('indeterminate')
+      expect(large.outcome.kind !== 'completed' && large.outcome.message).toMatch(/no verified Workspace/)
+      expect(large.runOperation!.steps).toEqual([expect.objectContaining({ method: 'js' })])
+      expect(actions).toBe(1)
+      const after = await manager.runScript('b1', 'return "still healthy"')
+      expect(after.outcome.kind).toBe('completed')
+      expect(after.result).toBe('still healthy')
+      expect(actions).toBe(1)
+    } finally {
+      manager?.close('b1')
+      createDispatch.mockImplementation(() => async (name, args) => { dispatchCalls.push({ name, args }); return `dispatched:${name}` })
+      await rm(directory, { recursive: true, force: true })
+    }
   }, 30_000)
 })
