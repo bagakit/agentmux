@@ -36,8 +36,9 @@ const SRC_MAIN = new URL('../src/main/', import.meta.url)
  */
 const PROBE_PAGE = `<!doctype html><html><body>
   <button id="probe-button">Reveal</button>
-  <input id="probe-input" aria-label="Probe Field" />
+  <section id="probe-region"><input id="probe-input" aria-label="Probe Field" /></section>
   <div id="slot"></div>
+  <button style="position:absolute;top:2200px">Outside viewport</button>
   <script>
     document.getElementById('probe-button').addEventListener('click', () => {
       document.getElementById('slot').innerHTML = '<button id="revealed">Revealed Action</button>'
@@ -65,6 +66,7 @@ import { writeFileSync } from 'node:fs'
 const reportPath = process.env.PROBE_REPORT
 const pageUrl = process.env.PROBE_PAGE_URL
 const report = { schema: 'agentmux.browser-drive-e2e.v2' }
+app.setPath('userData', process.env.PROBE_USER_DATA)
 
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 900, height: 700, show: true })
@@ -123,17 +125,28 @@ app.whenReady().then(async () => {
     // ── 第三步：re-snapshot，观察到变化 ─────────────────────────────────
     const second = await dispatch('snapshot', [])
     report.secondNodeCount = second.nodes.length
+    report.fullObservationBytes = Buffer.byteLength(JSON.stringify(second))
     report.secondRefs = second.nodes.filter((n) => n.ref).map((n) => n.ref + ':' + n.role + ':' + n.name)
     report.revealedAppeared = second.nodes.some((n) => /revealed/i.test(n.name || ''))
 
     // snapshotText 是 Agent 实际读到的那一份。它必须**真的带着把手**，
     // 否则 Agent 读完一段好看的文本却无从下手。
-    const text = await dispatch('snapshotText', [])
-    report.textMentionsRef = typeof text === 'string' && text.includes(second.nodes.find((n) => n.ref).ref)
+    const viewport = await dispatch('snapshot', [{ scope: 'viewport', interactiveOnly: true }])
+    report.viewportNames = viewport.nodes.map((n) => n.name)
+    report.viewportObservation = viewport.observation
+    const scoped = await dispatch('snapshot', [{ within: '#probe-region', interactiveOnly: true, maxNodes: 1 }])
+    report.scopedNames = scoped.nodes.map((n) => n.name)
+    report.scopedObservation = scoped.observation
+    report.scopedObservationBytes = Buffer.byteLength(JSON.stringify(scoped))
+    const text = await dispatch('snapshotText', [{ within: '#probe-region' }])
+    const fieldMatch = text.match(/(@e[0-9]+) text input: Probe Field/)
+    report.textMentionsRef = typeof text === 'string' && !!fieldMatch
 
     // 填输入框走的是 setter + input/change 事件。只设 value 的话 React/Vue 的受控输入
     // 完全看不见这次修改——表现为"填了但提交的是空的"。
-    const field = second.nodes.find((n) => n.ref && /probe field/i.test(n.name || ''))
+    // snapshotText captures a fresh graph too. The earlier structured handles
+    // have been superseded, so act on the handle in the text just read.
+    const field = fieldMatch ? { ref: fieldMatch[1] } : null
     if (field) {
       await dispatch('fillInput', [field.ref, 'typed-by-agent'])
       const readBack = await dispatch('js', ['document.getElementById("probe-input").value'])
@@ -172,7 +185,8 @@ app.whenReady().then(async () => {
     report.unknownRefMessage = await refuse('unknown', () => dispatch('click', ['@e9999']))
 
     navigationId = 'nav-2'
-    report.staleSnapshotMessage = await refuse('stale', () => dispatch('click', [target.ref]))
+    report.supersededRefMessage = await refuse('superseded', () => dispatch('click', [target.ref]))
+    report.staleSnapshotMessage = await refuse('stale', () => dispatch('click', [field.ref]))
     navigationId = 'nav-1'
 
     report.ok = true
@@ -246,6 +260,13 @@ type ProbeReport = {
   filledValue?: unknown
   unknownRefMessage?: string
   staleSnapshotMessage?: string
+  supersededRefMessage?: string
+  scopedNames?: string[]
+  scopedObservation?: { fullObserved: number; scoped: number; returned: number; scope: { document: string }; work: { axTrees: number; axNodes: number } }
+  viewportNames?: string[]
+  viewportObservation?: { work: { axTrees: number; layoutTrees: number } }
+  fullObservationBytes?: number
+  scopedObservationBytes?: number
   /** 换一次运行之后，拿上一轮的 ref 填进去的那个值；认错了元素就读不回它。 */
   crossRunValue?: unknown
   crossRunError?: string
@@ -271,6 +292,7 @@ async function runProbe(): Promise<ProbeReport> {
       ...process.env,
       PROBE_REPORT: reportPath,
       PROBE_PAGE_URL: `file://${pagePath}`,
+      PROBE_USER_DATA: join(root, 'userData'),
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -339,6 +361,20 @@ describe('T-010 真机竖切：snapshot → click(ref) → re-snapshot', () => {
     // 读回来的是页面上的真值，不是我们自己刚写进去的那个变量：只设 value 不派事件的实现
     // 在这条上会绿，所以它证的是"值到了"，配合受控输入才有意义——这里先钉住"值到了"。
     expect(result.filledValue, 'fillInput 没把值落到页面上').toBe('typed-by-agent')
+  }, 180_000)
+
+  it('真实页面的CSS局部与viewport观察有收获、保留完整采集事实且旧ref失效', async () => {
+    const result = await probe()
+    expect(result.scopedNames).toEqual(['Probe Field'])
+    expect(result.scopedObservation).toMatchObject({ scoped: 1, returned: 1, scope: { document: 'main' }, work: { axTrees: 1 } })
+    expect(result.scopedObservation?.fullObserved).toBeGreaterThan(1)
+    expect(result.scopedObservation?.work.axNodes).toBeGreaterThan(1)
+    expect(result.viewportNames).toEqual(expect.arrayContaining(['Reveal', 'Probe Field', 'Revealed Action']))
+    expect(result.viewportNames).not.toContain('Outside viewport')
+    expect(result.viewportObservation).toMatchObject({ work: { axTrees: 1, layoutTrees: 1 } })
+    expect(result.supersededRefMessage).toMatch(/superseded/)
+    expect(result.fullObservationBytes).toBeGreaterThan(result.scopedObservationBytes!)
+    console.info('browser-scoped-native-cost', JSON.stringify({ fullObservationBytes: result.fullObservationBytes, scopedObservationBytes: result.scopedObservationBytes, scoped: result.scopedObservation, viewport: result.viewportObservation }))
   }, 180_000)
 
   it('两类 ref 失败各自说清了下一步，且不是同一句话', async () => {
