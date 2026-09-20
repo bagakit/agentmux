@@ -21,14 +21,10 @@
   background: linear-gradient(180deg, var(--surface-1), var(--surface-0));
   box-shadow: inset -1px 0 var(--line-soft);
 }
-/* Project Rail 密度：三个拨盘（每层缩进 / 行图标 / 行高）是一档 CSS 自定义属性，由容器上的一个
-   `data-rail-density` 重定义——它们因此不可能各自漂开半档（DEN「Project Rail 与 Topic 行密度」）。
-   缺省档已比 2026-09-19 之前更紧（那时 16px 缩进 / 20px 图标框 / 28px 行高）。这三个属性只由 rail 行
-   消费，px 值不落在任何被尺度合同扫描的属性上（它扫 font-size/间距/颜色/圆角，不扫 width/height/
-   min-height 与自定义属性声明）。 */
+/* Density changes row rhythm and icon size; real nesting stays legible in every tier. */
 .project-rail { --rail-indent: var(--sp-5); --rail-icon: 15px; --rail-row-min: 24px; }
-.project-rail[data-rail-density='compact'] { --rail-indent: var(--sp-4); --rail-icon: 14px; --rail-row-min: 22px; }
-.project-rail[data-rail-density='dense'] { --rail-indent: var(--sp-3); --rail-icon: 12px; --rail-row-min: 20px; }
+.project-rail[data-rail-density='compact'] { --rail-icon: 14px; --rail-row-min: 22px; }
+.project-rail[data-rail-density='dense'] { --rail-icon: 12px; --rail-row-min: 20px; }
 .project-rail-titlebar {
   height: 36px;
   flex: 0 0 36px;
@@ -68,10 +64,12 @@
   -webkit-app-region: drag;
 }
 .project-rail-titlebar .sidebar-toggle-chrome {
-  width: 100%;
-  flex-basis: 100%;
-  padding-right:var(--sp-4);
+  width: auto;
+  flex: 1;
+  padding-right: 0;
+  box-shadow: none;
 }
+.project-rail-titlebar > .icon-button { flex: 0 0 28px; margin-right: var(--sp-2); -webkit-app-region: no-drag; }
 .sidebar-toggle-chrome .icon-button {
   flex: 0 0 auto;
   -webkit-app-region: no-drag;
@@ -91,7 +89,7 @@
   opacity: .78;
 }
 .sidebar__heading-actions { display: flex; align-items: center; gap:1px; }
-.space-tree-search { display: flex; align-items: center; gap: var(--sp-3); min-height: 26px; margin: 0 var(--sp-4) var(--sp-4); padding: 0 var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-3); }
+.space-tree-search { display: flex; align-items: center; gap: var(--sp-3); min-height: 26px; margin: var(--sp-2) var(--sp-2) var(--sp-3); padding: 0 var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-3); }
 .space-tree-search:focus-within { border-color: var(--focus-line); }
 .space-tree-search > svg { flex: 0 0 auto; }
 .space-tree-search input { width: 100%; min-width: 0; padding: var(--sp-2) 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--fs-meta); }
@@ -100,24 +98,31 @@
 .space-tree-search .icon-button { flex: 0 0 20px; width: 20px; height: 20px; }
 .space-tree-empty { margin: var(--sp-2) var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .space-tree { min-height: 0; flex: 1; overflow: auto; padding: 0 var(--sp-2) var(--sp-4); }
-.space-topics-tree, .space-topic-children, .space-tree-entry, .project-list { display: grid; align-content: start; gap: var(--sp-1); }
-.space-topic-children { position: relative; }
-.space-topic-children::before { content: ''; position: absolute; top: 0; bottom: var(--sp-2); left: calc(var(--sp-4) + 9px); width: 1px; background: var(--line-soft); opacity: .8; pointer-events: none; }
-.project-list > .sidebar__section-heading { margin-top: var(--sp-6); margin-left: var(--sp-4); }
-.space-folders-heading { margin-top: var(--sp-5); }
-.space-folders-row > small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-/* 一组同处一个父目录的 Project。组之间留一点空档，让分组头归属于它下面那几行而不是漂在中间。 */
-.project-rail-group { display: grid; align-content: start; gap:var(--sp-1); }
-.project-rail-group + .project-rail-group { margin-top:var(--sp-2); }
-/* 展开分组的成员共享一条低对比结构线；它只表达归属，不抢选中/运行状态的语义。 */
-.project-rail-group--expanded { position: relative; }
-.project-rail-group--expanded::before { content: ''; position: absolute; top: var(--rail-row-min); bottom: var(--sp-2); left: calc(var(--sp-4) + 9px); width: 1px; background: var(--line-soft); opacity: .8; pointer-events: none; }
-/* 分组头复用树的折叠、图标与标题列，用轻字重和大写字距表达分类。
-   它只有 disclosure 作用，不借用对象行的 hover/selected Surface。 */
+.space-topics-tree, .space-section, .space-tree-entry, .project-list { display: grid; align-content: start; gap: var(--sp-1); }
+.space-section + .space-section, .project-list { margin-top: var(--sp-5); }
+.space-section-heading { display: flex; align-items: center; min-width: 0; gap: var(--sp-1); min-height: var(--rail-row-min); padding: 0 var(--sp-2); color: var(--text-3); }
+.space-section-label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-3); padding: 0; border: 0; background: transparent; color: var(--text-3); cursor: pointer; text-align: left; }
+.space-section-label strong { overflow: hidden; font-size: var(--fs-micro); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.space-section-label small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.space-section-label:hover, .space-section-label[aria-current='page'] { color: var(--text); }
+.space-section-label[aria-current='page'] strong { font-weight: 650; }
+.space-section-label:disabled { cursor: default; }
+.space-section-add.icon-button { flex: 0 0 20px; width: 20px; height: 20px; color: var(--text-3); }
+.space-section-add.icon-button:hover { color: var(--text); }
+.space-disclosure { position: relative; flex: 0 0 var(--rail-icon); width: var(--rail-icon); height: var(--rail-row-min); display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.space-disclosure__type { display: inline-flex; align-items: center; justify-content: center; width: var(--rail-icon); height: var(--rail-icon); }
+.space-disclosure__type > svg { width: 100%; height: 100%; }
+.space-disclosure__hint { position: absolute; inset: 0; display: inline-flex; align-items: center; justify-content: center; opacity: 0; }
+.space-disclosure:not(:disabled):hover .space-disclosure__type, .space-disclosure:focus-visible .space-disclosure__type { opacity: 0; }
+.space-disclosure:not(:disabled):hover .space-disclosure__hint, .space-disclosure:focus-visible .space-disclosure__hint { opacity: 1; }
+.space-disclosure:hover { background: var(--surface-2); color: var(--text); }
+.project-rail-group { display: grid; align-content: start; gap: var(--sp-1); }
+.project-rail-group + .project-rail-group { margin-top: var(--sp-2); }
+/* Path grouping is a real level, with no decorative tree spine. */
 .project-rail-group__header {
   width: 100%; min-width: 0; min-height: var(--rail-row-min);
   display: flex; align-items: center;
-  padding: 0 0 0 var(--sp-4);
+  padding: 0 var(--sp-2);
   border: 0; border-radius: var(--radius-sm);
   color: var(--text-3); background: transparent; font-size: var(--fs-micro);
   text-align: left; cursor: pointer;
@@ -125,16 +130,7 @@
 }
 /* 只提亮文字，**不上填充**：填充是项目行表达 hover 与选中的手段，分组头借了它就又变回"一行条目"。 */
 .project-rail-group__header:hover { color: var(--text-2); }
-.project-rail-group__chevron {
-  flex: 0 0 18px; display: inline-flex; align-items: center; justify-content: center;
-  color: var(--text-3); opacity: .7;
-}
-.project-rail-group__identity {
-  flex: 1; min-width: 0; display: grid;
-  grid-template-columns: var(--rail-icon) minmax(2em, 1fr) minmax(0, auto);
-  align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4) 0 var(--sp-2);
-}
-.project-rail-group__header:hover .project-rail-group__chevron { opacity: 1; }
+.project-rail-group__identity { flex: 1; min-width: 0; display: grid; grid-template-columns: var(--rail-icon) minmax(2em, 1fr) minmax(0, auto); align-items: center; gap: var(--sp-3); }
 /* 大写 + 字距是"分类标签"的写法，与 .sidebar__section-heading 同族。字重压在 560：它比项目名的
    620 轻，密度合同要的就是这个次序。 */
 .project-rail-group__label {
@@ -155,12 +151,11 @@
 }
 /* 折叠后的角标与项目行的角标同形，因为它答的是同一个问题（里面有没有人在等你）。它复用
    .project-rail-row__count 的 attention 配色，见下面那组 [data-attention] 规则。 */
-.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: var(--rail-row-min, 26px); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); padding-left: calc(var(--sp-4) + var(--rail-depth) * var(--rail-indent, var(--sp-4))); border: 0; border-radius: var(--radius); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
-.project-rail-row-shell { flex: 1; display: flex; align-items: center; min-width: 0; padding-left: calc(var(--sp-4) + var(--rail-depth, 0) * var(--rail-indent, var(--sp-4))); }
+.project-rail-row { --rail-depth: 0; width: 100%; min-width: 0; min-height: var(--rail-row-min, 26px); display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-2); padding-left: calc(var(--sp-2) + var(--rail-depth) * var(--rail-indent)); border: 0; border-radius: var(--radius); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.project-rail-row-shell { position: relative; flex: 1; display: flex; align-items: center; min-width: 0; padding-left: calc(var(--rail-depth, 0) * var(--rail-indent)); }
 .project-rail-row-shell > .project-rail-row { flex: 1; padding-left: var(--sp-2); }
-.project-rail-row__collapse, .project-rail-row__collapse-spacer { flex: 0 0 18px; width: 18px; height: var(--rail-row-min); display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); border: 0; background: transparent; border-radius: var(--radius-sm); }
-.project-rail-row__collapse { cursor: pointer; }
-.project-rail-row__collapse:hover { color: var(--text); background: var(--surface-2); }
+.project-rail-row-shell > .space-disclosure { position: absolute; z-index: 1; left: calc(var(--sp-2) + var(--rail-depth, 0) * var(--rail-indent)); }
+.project-rail-row-shell > .project-rail-row--disclosure { padding-left: calc(var(--sp-2) + var(--rail-icon) + var(--sp-3)); }
 .scratch-workspace-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .project-rail-row:hover { color: var(--text); background: var(--surface-2); }
 .project-rail-row--active, .project-rail-row--active:hover { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
@@ -168,18 +163,17 @@
 .project-rail-row__icon { width: var(--rail-icon, 16px); height: var(--rail-icon, 16px); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; transition: background .12s ease, color .12s ease; }
 .project-rail-row__icon > svg { width: 100%; height: 100%; }
 .space-mote-row .project-rail-row__icon { color: var(--green-2); }
-.space-topics-row > small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .space-topic-row .project-rail-row__identity strong { font-size: var(--fs-meta); font-weight: 500; }
 .space-topic-row.project-rail-row--active .project-rail-row__identity strong { font-weight: 620; }
-.space-topic-row .project-rail-row__icon > svg { width: calc(100% - 2px); height: calc(100% - 2px); }
-.space-mote-edit.icon-button { flex: 0 0 var(--rail-row-min); width: var(--rail-row-min); height: var(--rail-row-min); color: var(--text-3); opacity: 0; pointer-events: none; }
-.space-tree-entry:hover .space-mote-edit, .space-tree-entry:focus-within .space-mote-edit { opacity: 1; pointer-events: auto; }
+.space-row-action.icon-button { display: none; flex: 0 0 20px; width: 20px; height: var(--rail-row-min); padding: 0; color: var(--text-3); opacity: 0; overflow: hidden; pointer-events: none; }
+.space-tree-entry:hover .space-row-action, .space-tree-entry:focus-within .space-row-action, .space-pin--pinned.icon-button { display: inline-flex; opacity: 1; pointer-events: auto; }
+.space-pin--pinned.icon-button { color: var(--text-2); }
+.space-pin--pinned svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
 .space-tree button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 /* 一行只占一行：标题与它的元信息同处一行，不为常驻元信息另起次行（密度预算 Project Rail Row）。
    小字跟在标题之后而不是它下面，且只有真的有话说时才在场——本机 host 不占位。 */
-.project-rail-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
+.project-rail-row__identity { flex: 1; min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); }
 .project-rail-row__identity strong { min-width: 0; overflow: hidden; font-size: var(--fs-meta); font-weight: 500; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.space-topics-row .project-rail-row__identity strong, .space-folders-row .project-rail-row__identity strong { font-weight: 600; }
 .project-rail-row__identity small { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap:var(--sp-1); overflow: hidden; font-size: var(--fs-micro); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
 /* 项目 icon 自带形状与颜色，不需要再给它一个 Surface 色块托底——那会读作"图标外面还有一个按钮"。
    这也顺带让选中与否不再改变这枚图标的任何东西（T-008 的那条约束）。 */
@@ -190,11 +184,6 @@
 .project-rail-row--pinned-child { min-height: calc(var(--rail-row-min) - 2px); text-decoration: none; text-underline-offset: var(--sp-1); text-decoration-thickness: 1px; }
 .project-rail-row--pinned-child .project-rail-row__identity strong { font-size: var(--fs-micro); font-weight: 560; }
 .project-rail-row--pinned-child:hover, .project-rail-row--pinned-child:focus-visible { color: var(--text-2); background: transparent; text-decoration-line: underline; }
-.project-rail-entry--pinned { position: relative; }
-.project-rail-entry--pinned::before, .project-rail-entry--pinned::after { position: absolute; z-index: 0; pointer-events: none; content: ''; border-color: var(--line-soft); border-style: dashed; opacity: .82; }
-.project-rail-entry--pinned::before { top: calc(-1 * var(--rail-row-min) + 50%); bottom: 50%; left: calc(var(--sp-4) + (var(--rail-depth) - 1) * var(--rail-indent) + var(--sp-2)); border-width: 0 0 0 1px; }
-.project-rail-entry--pinned::after { top: 50%; left: calc(var(--sp-4) + (var(--rail-depth) - 1) * var(--rail-indent) + var(--sp-2)); width: calc(var(--rail-indent) + var(--sp-5)); border-width: 1px 0 0; }
-.project-rail-entry--pinned > * { position: relative; z-index: 1; }
 .project-rail-row--active .scratch-workspace-row__meta { color: var(--text-2); }
 .topbar {
   min-width: 0;

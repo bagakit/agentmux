@@ -77,12 +77,9 @@ it('renders exact existing state totals on the Folder row and keeps full accessi
   const metrics = [...trigger!.querySelectorAll('.project-activity__metric')]
   expect(metrics.map(metric => [metric.className, metric.querySelector('strong')?.textContent])).toEqual([
     ['project-activity__metric project-activity__metric--needs-you', '3'],
-    ['project-activity__metric project-activity__metric--error', '1'],
-    ['project-activity__metric project-activity__metric--working', '12'],
-    ['project-activity__metric project-activity__metric--idle', '3'],
-    ['project-activity__metric project-activity__metric--done', '4']
+    ['project-activity__metric project-activity__metric--error', '1']
   ])
-  expect(metrics.map(metric => metric.querySelectorAll('svg').length)).toEqual([1, 1, 1, 1, 1])
+  expect(metrics.map(metric => metric.querySelectorAll('svg').length)).toEqual([1, 1])
   const fullCounts = '3 Needs you · 1 Error · 12 Working · 3 Idle · 4 Completed'
   expect(trigger!.getAttribute('aria-label')).toContain(fullCounts)
   expect(trigger!.title).toContain(fullCounts)

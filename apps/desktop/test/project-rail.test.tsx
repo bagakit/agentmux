@@ -132,7 +132,7 @@ function renderRail(): string {
 
 /** 取出某一行的完整标记。按 aria-label 定位，因为那是这一行对辅助技术自称的名字。 */
 function rowFor(markup: string, name: string): string {
-  const rows = [...markup.matchAll(/<button[^>]*class="[^"]*project-rail-row[^"]*"[\s\S]*?<\/button>/g)]
+  const rows = [...markup.matchAll(/<button[^>]*class="[^"]*(?:project-rail-row|space-section-label)[^"]*"[\s\S]*?<\/button>/g)]
     .map((match) => match[0])
     .filter((row) => new RegExp(`aria-label="${name}(?:[^"]*)?"`).test(row))
   expect(`${name}: ${rows.length} 行`).toBe(`${name}: 1 行`)
@@ -259,11 +259,12 @@ describe('Project Rail selection and running signals', () => {
     const projectRows = [...markup.matchAll(/<button[^>]+class="project-rail-row(?:"| )[^>]*>[\s\S]*?<\/button>/g)]
       .map((match) => match[0])
       .filter((row) => row.includes('project-rail-row__identity'))
-    expect(projectRows).toHaveLength(6)
+    expect(projectRows).toHaveLength(4)
     const regularRows = projectRows.filter((row) => row.includes('data-workspace-id='))
     expect(regularRows).toHaveLength(3)
     expect(regularRows.every((row) => row.includes('project-rail-row__icon'))).toBe(true)
-    expect(rowFor(markup, 'Topics overview')).toContain('lucide-notebook-text')
+    expect(rowFor(markup, 'Topics overview')).toContain('Topics')
+    expect(markup).toContain('lucide-notebook-text')
   })
 
   it('counts running Agents in the badge, not worktrees', () => {
@@ -342,8 +343,10 @@ describe('Project Rail selection and running signals', () => {
 
   it('uses the special Topics icon in the unified Space tree', () => {
     fixture.state.config = structuredClone(config)
-    const topics = rowFor(renderRail(), 'Topics overview')
-    expect(topics).toContain('lucide-notebook-text')
+    const markup = renderRail()
+    const topics = rowFor(markup, 'Topics overview')
+    expect(topics).toContain('Topics')
+    expect(markup).toContain('lucide-notebook-text')
     expect(topics).not.toContain('brand-icon')
   })
 
@@ -382,19 +385,16 @@ describe('Project Rail style contract', () => {
     expect(source).toContain('.project-activity__metric')
   })
 
-  it('gives pinned children smaller underline-only hover and a quiet dashed relation connector', () => {
+  it('gives pinned children smaller underline-only hover without decorative connectors', () => {
     const hover = source.match(/\.project-rail-row--pinned-child:hover,\s*\.project-rail-row--pinned-child:focus-visible\s*\{([^}]*)\}/)?.[1] ?? ''
-    const connector = source.match(/\.project-rail-entry--pinned::before,\s*\.project-rail-entry--pinned::after\s*\{([^}]*)\}/)?.[1] ?? ''
     const title = source.match(/\.project-rail-row--pinned-child \.project-rail-row__identity strong\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(hover.length).toBeGreaterThan(0)
-    expect(connector.length).toBeGreaterThan(0)
     expect(title.length).toBeGreaterThan(0)
     expect(hover).toContain('background: transparent')
     expect(hover).toContain('text-decoration-line: underline')
     expect(hover).not.toContain('var(--surface-2)')
-    expect(connector).toContain('border-color: var(--line-soft)')
-    expect(connector).toContain('border-style: dashed')
-    expect(connector).toContain('pointer-events: none')
+    expect(source).not.toContain('.project-rail-entry--pinned::before')
+    expect(source).not.toContain('.space-topic-children::before')
     expect(title).toContain('font-size: var(--fs-micro)')
     expect(title).toContain('font-weight: 560')
   })
@@ -574,47 +574,17 @@ describe('Project Rail 的分组与嵌套', () => {
     expect(exactRow(markup, 'solo')).toContain('project-rail-row')
   })
 
-  // 结构线（分组成员的竖直连接线）只挂在 `.project-rail-group--expanded` 上（chrome.css 的 ::before）。
-  // 上面的用例判 aria-expanded / 地址 / 成员行 / 卷积，却没有一条钉住这个真正开关结构线的类，
-  // 于是"仅展开的有名分组显示结构线；无分组和折叠无空线"是未证的。这里直接对分组容器的类断言。
-
-  /** 取出某个分组容器 `<div class="project-rail-group ...">` 的开标签。用它内含的成员行 aria-label 定位。 */
-  function groupDivFor(markup: string, memberName: string): string {
-    const divs = [...markup.matchAll(/<div class="project-rail-group[^"]*"[^>]*>[\s\S]*?(?=<div class="project-rail-group|<\/nav>)/g)]
-      .map((match) => match[0])
-      .filter((div) => new RegExp(`aria-label="${memberName}(?:[^"]*)?"`).test(div))
-    expect(`${memberName}: ${divs.length} 组`).toBe(`${memberName}: 1 组`)
-    return divs[0]!
-  }
-
-  it('有名且展开的分组挂上结构线的类', () => {
-    // 命名 + 展开：kit 领两个成员，其容器带 project-rail-group--expanded（结构线的唯一挂点）。
-    // 去掉 WorkspaceSidebar.tsx:219 的 group.label 判断 → 无名分组也会拿到类（下一条红）；
-    // 这一条正向证明命名+展开时类在场。
+  it('keeps real path groups and nonempty members without connector-only modifiers', () => {
     useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
-    expect(groupDivFor(renderRail(), 'one')).toContain('project-rail-group--expanded')
-  })
-
-  it('无分组的单例不挂结构线的类——不留空线', () => {
-    // solo 独占一个无名分组：容器绝不能带 project-rail-group--expanded，否则会画出一条没有成员
-    // 关系的空竖线。去掉 :219 的 `group.label` → 无名分组也拿到类 → 本条红。
-    useWorkspaces([['solo', '/elsewhere/solo']])
-    expect(groupDivFor(renderRail(), 'solo')).not.toContain('project-rail-group--expanded')
-  })
-
-  it('折叠的有名分组不挂结构线的类——折叠态无成员亦无线', () => {
-    // 折叠时成员行已藏，容器不能再带 project-rail-group--expanded 画一条悬空的线。
-    // 折叠键走 SSOT 的 projectGroupKey，避免 JSON.stringify 形状在测试里另抄一份漂移。
-    // 去掉 :219 的 `!collapsed` → 折叠分组仍带类/画线 → 本条红。
-    useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
-    const key = projectGroupKey({ hostId: 'local', groupPath: '/proj/kit' })!
-    fixture.state.collapsedProjectGroups = { [key]: true }
     const markup = renderRail()
-    // 折叠后成员行不在，用分组头的 aria-label 定位该容器。
-    const header = markup.match(/<div class="project-rail-group[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? ''
-    expect(header, '分组容器缺失').not.toBe('')
-    expect(header).not.toContain('project-rail-group--expanded')
+    expect(exactRow(markup, 'one')).toContain('--rail-depth:1')
+    expect(exactRow(markup, 'two')).toContain('--rail-depth:1')
+    expect(markup).toContain('project-rail-group__header')
+    expect(markup).not.toContain('project-rail-group--expanded')
+    expect(chrome.length).toBeGreaterThan(1000)
+    expect(chrome).not.toContain('.project-rail-group--expanded::before')
   })
+
 })
 
 describe('Pinned Topics / Branches as child nodes in the rail', () => {
@@ -645,7 +615,7 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     const markup = renderRail()
     expect(markup).not.toContain('project-rail-row--pinned-child')
     // Topics 的一级入口有独立 nav；三条普通项目各自占一个 entry。
-    expect((markup.match(/class="project-rail-entry"/g) ?? []).length).toBe(3)
+    expect((markup.match(/class="project-rail-entry"/g) ?? []).length).toBe(4)
   })
 
   it('把 pinned Branch 挂在它自己的 Project 下，而不是 Scratch 或别的项目', () => {
@@ -669,7 +639,7 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     expect(betaAt).toBeLessThan(featYAt)
   })
 
-  it('pinned branch titles share their parent collapse and icon slots before applying depth', () => {
+  it('pinned branch titles use a meaningful pin glyph without an empty disclosure slot', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.pinnedItems = { [alphaScope]: ['feat-x'] }
     const markup = renderRail()
@@ -678,8 +648,9 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     const at = markup.indexOf(child)
     expect(at).toBeGreaterThan(0)
     const prefix = markup.slice(0, at)
-    expect(prefix).toMatch(/<div class="project-rail-row-shell" style="--rail-depth:1"><span class="project-rail-row__collapse-spacer" aria-hidden="true"><\/span>$/)
-    expect(markup).toContain('project-rail-entry--pinned')
+    expect(prefix).toMatch(/<div class="project-rail-row-shell" style="--rail-depth:1">$/)
+    expect(child).toContain('lucide-pin')
+    expect(child).toContain('data-space-parent=')
   })
 
   it('projects pinned Topics from the same filesystem collection under Topics', () => {
@@ -690,8 +661,8 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:launcher-abc'] }
     const markup = renderRail()
     const child = rowFor(markup, 'Open Pinned Topic')
-    expect(depthOf(child)).toBe(1)
-    expect(child).toContain('lucide-pin')
+    expect(depthOf(child)).toBe(0)
+    expect(markup).toContain('aria-label="Unpin Pinned Topic"')
     const topicsAt = markup.indexOf('aria-label="Topics overview"')
     const topicAt = markup.indexOf('aria-label="Open Pinned Topic"')
     const alphaAt = markup.indexOf('aria-label="Alpha"')

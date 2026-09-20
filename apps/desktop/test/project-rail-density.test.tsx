@@ -8,13 +8,8 @@ import { allStyles } from './helpers/styles.js'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { PROJECT_RAIL_DENSITY_IDS } from '../src/shared/contracts.js'
 
-// 用户诉求（2026-09-19）：「左侧项目菜单的缩进有点多, 图标有点大, 每个项的高度有点高了, 可以更加
-// 紧凑些, 或者在顶层的 projects 上的加号旁边增加一个组件, 调整紧凑程度」。
-//
-// 这条守三件事，每一件都是那句诉求里的一个约束：
-//   1. 三个拨盘（每层缩进 / 行图标 / 行高）**一起**从缺省移到更紧——不许出现半档；
-//   2. 控件是加号旁的可见常驻控件，切换写回 durable config；
-//   3. 密度是看法不是数据：切换不改树结构、归属、选中、滚动。
+// 2026-10-03: density changes row/icon rhythm; real nesting stays at least 12px.
+// The permanent control lives at the end of the search row and saves durable config.
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -97,7 +92,7 @@ afterEach(() => {
   savedConfigs.calls.length = 0
 })
 
-describe('Project Rail density is one tier across three dials', () => {
+describe('Project Rail density keeps legible nesting while reducing row and icon rhythm', () => {
   const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
   /** 一个选择器规则体里，这三个拨盘各自被赋的值（未出现即 null）。 */
@@ -120,16 +115,16 @@ describe('Project Rail density is one tier across three dials', () => {
     expect(base.row, '.project-rail 没声明 --rail-row-min').not.toBeNull()
   })
 
-  it.each(['compact', 'dense'] as const)('%s tier redefines all three dials together — no half tier', (tier) => {
+  it.each(['compact', 'dense'] as const)('%s tier changes row and icon size without shrinking nesting', (tier) => {
     // 这是那句诉求的要害：三个拨盘必须**同一档一起变**。逐个断言「compact 档下这个拨盘存在」，
     // 任何一个漏改（半档）都当场红——变异「删掉 compact 档的 --rail-icon」会打红这里。
     const tierValues = dialsOf(`.project-rail[data-rail-density='${tier}']`)
-    expect(tierValues.indent, `${tier} 档没收紧每层缩进`).not.toBeNull()
+    expect(tierValues.indent, `${tier} must inherit the readable base indent`).toBeNull()
     expect(tierValues.icon, `${tier} 档没收紧行图标`).not.toBeNull()
     expect(tierValues.row, `${tier} 档没收紧行高`).not.toBeNull()
   })
 
-  it('every dial actually gets tighter through compact to dense', () => {
+  it('row and icon get tighter while all tiers inherit at least 12px nesting', () => {
     // 派生自样式表本身，不手抄期望值：把三档拨盘各自解析成 px 再比大小。
     // --rail-indent/--rail-row-min 走 token 或 px，--rail-icon 是 px；各档都从同一张表读。
     const tokenPx: Record<string, number> = { '--sp-1': 2, '--sp-2': 4, '--sp-3': 6, '--sp-4': 8, '--sp-5': 12, '--sp-6': 16 }
@@ -141,7 +136,8 @@ describe('Project Rail density is one tier across three dials', () => {
     const base = dialsOf('.project-rail')
     const compact = dialsOf(".project-rail[data-rail-density='compact']")
     const dense = dialsOf(".project-rail[data-rail-density='dense']")
-    for (const dial of ['indent', 'icon', 'row'] as const) {
+    expect(resolve(base.indent!)).toBeGreaterThanOrEqual(12)
+    for (const dial of ['icon', 'row'] as const) {
       const b = resolve(base[dial]!)
       const c = resolve(compact[dial]!)
       const d = resolve(dense[dial]!)
@@ -161,16 +157,18 @@ describe('Project Rail density is one tier across three dials', () => {
   })
 })
 
-describe('Project Rail density control lives next to the Plus button', () => {
-  it('renders a persistent density control in the Spaces heading', () => {
+describe('Project Rail density control lives at the end of search', () => {
+  it('renders one control row and a persistent density control at the end of search', () => {
     fixture.state.config = { ...structuredClone(config), projectRailDensity: 'default' }
     const markup = renderRail()
-    // 加号旁的那簇动作里有两枚按钮：密度切换与添加项目。
-    const actions = markup.match(/<div class="sidebar__heading-actions">([\s\S]*?)<\/div>/)?.[1] ?? ''
-    expect(actions, 'sidebar__heading-actions 没渲染出来').not.toBe('')
-    expect(markup).toContain('<span>Spaces</span>')
-    expect(actions).toContain('Add Space')
-    expect(actions).toMatch(/aria-label="Use compact project spacing"/)
+    const heading = markup.match(/<header class="project-rail-titlebar">([\s\S]*?)<\/header>/)?.[1] ?? ''
+    const search = markup.match(/<div class="space-tree-search">([\s\S]*?)<\/div>/)?.[1] ?? ''
+    expect(heading.length).toBeGreaterThan(0)
+    expect(search.length).toBeGreaterThan(0)
+    expect(heading).toContain('Add Space')
+    expect(search).toContain('Use compact project spacing')
+    expect(markup).not.toContain('<span>Spaces</span>')
+
   })
 
   it('reflects the current tier on the container and control, defaulting when absent', () => {

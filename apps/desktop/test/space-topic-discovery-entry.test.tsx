@@ -12,7 +12,7 @@ import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 const fixture = vi.hoisted(() => ({
   topics: [] as ScratchTopicSnapshot[],
   state: {
-    layouts: {}, tabs: {}, activeWorkspaceId: 'project', scratchTopicOrder: [],
+    layouts: {}, tabs: {}, sessions: [], activeWorkspaceId: 'project', scratchTopicOrder: [],
     pinnedItems: {}, collapsedProjectGroups: {}, workspaceFileRevisions: {}, toolsOpen: false,
     openScratchTopic: vi.fn(async () => {}), selectWorkspace: vi.fn(async () => {}),
     setWorkspaceTool: vi.fn(), toggleProjectGroup: vi.fn(), reportError: vi.fn()
@@ -56,8 +56,8 @@ it('discovers two filesystem Topics without Sessions or Tab bindings and opens t
   fixture.topics = await service.list(workspace())
   expect(fixture.topics.map((topic) => topic.title)).toEqual(['Alpha', 'Beta'])
   await mount()
-  expect(button('Open Alpha').title).toBe('Alpha summary.')
-  expect(button('Open Beta').title).toBe('Beta summary.')
+  expect(button('Open Alpha').title).toBe('Alpha\nAlpha summary.\ntopic--launcher--alpha')
+  expect(button('Open Beta').title).toBe('Beta\nBeta summary.\ntopic--view--beta')
   await act(async () => button('Open Beta').click())
   expect(fixture.state.openScratchTopic).toHaveBeenCalledWith('view:beta', SCRATCH_WORKSPACE_ID)
   await act(async () => button('Topics overview').click())
