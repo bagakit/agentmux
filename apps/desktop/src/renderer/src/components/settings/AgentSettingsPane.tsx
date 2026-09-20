@@ -20,6 +20,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { withYoloArgs } from '../../lib/executors'
+import { currentExecutorDetection, executorDetectionLabel } from '../../lib/executor-detection'
 import { useResourceDrafts } from './use-resource-drafts'
 
 type ExecutorDraft = {
@@ -54,12 +55,12 @@ function parseEnv(text: string): Record<string, string> {
 }
 
 function statusCopy(state: ReturnType<typeof useAppStore.getState>['executorDetections'][string] | undefined) {
+  const label = executorDetectionLabel(state)
   switch (state?.state) {
-    case 'ready': return { label: 'Available', icon: <CheckCircle2 size={13} /> }
-    case 'missing': return { label: 'Not installed', icon: <XCircle size={13} /> }
-    case 'checking': return { label: 'Checking', icon: <LoaderCircle className="spin" size={13} /> }
-    case 'error': return { label: 'Check failed', icon: <AlertTriangle size={13} /> }
-    default: return { label: 'Not checked', icon: <XCircle size={13} /> }
+    case 'ready': return { label, icon: <CheckCircle2 size={13} /> }
+    case 'checking': return { label, icon: <LoaderCircle className="spin" size={13} /> }
+    case 'error': return { label, icon: <AlertTriangle size={13} /> }
+    default: return { label, icon: <XCircle size={13} /> }
   }
 }
 
@@ -120,8 +121,8 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
   const executors = useMemo(() => Object.entries(drafts).map(([id, draft]) => ({
     id,
     draft,
-    detection: detections[executorDetectionKey(hostId, id)]
-  })), [detections, drafts, hostId])
+    detection: currentExecutorDetection(detections[executorDetectionKey(hostId, id)], id, draft, config.hosts.find(host => host.id === hostId))
+  })), [config.hosts, detections, drafts, hostId])
   const checking = executors.some((executor) => executor.detection?.state === 'checking')
   function filterExecutors(query: string): void {
     // Search chooses a stable set of editors. Renaming a found executor must not hide it mid-input.
@@ -232,9 +233,10 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
         <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Filter executors" placeholder="Find an executor…" value={filter.query} onChange={(event) => filterExecutors(event.target.value)} /></label>
         <div className="settings-detection-tools">
           <label className="settings-compact-field"><span>Check on</span><select value={hostId} onChange={(event) => setHostId(event.target.value)}>{config.hosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select></label>
-          <button className="icon-button" aria-label="Refresh executor availability" title="Refresh availability" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}</button>
+          <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}</button>
         </div>
       </div>
+      <p className="settings-group-note">Checks use saved commands. Save a changed command before refreshing.</p>
       <div className="agent-settings-list">
         {executors.map(({ id, draft, detection }) => {
           const status = statusCopy(detection)

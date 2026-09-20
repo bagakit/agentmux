@@ -1012,7 +1012,8 @@ function requestsHelp(args: readonly string[]): boolean {
       (args.length === 4 && args[1] === 'browser' && args[2] === 'links' && help(args[3])) ||
       (args.length === 5 && args[1] === 'browser' && args[2] === 'links' && args[3] === 'list' && help(args[4])) ||
       (args.length === 3 && (args[1] === 'get' || args[1] === 'set' || args[1] === 'executors' || args[1] === 'prompts') && help(args[2])) ||
-      (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3]))
+      (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3])) ||
+      (args.length === 4 && args[1] === 'executors' && args[2] === 'refresh' && help(args[3]))
   }
   return args.some((argument, index) => (
     (argument === '--help' || argument === '-h') &&

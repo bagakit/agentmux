@@ -259,6 +259,21 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
   if (isSettingsResourceOperation(source.operation)) return settingsResourceRequest(source)
+  if (source.operation === 'settings.executors.refresh') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'executorId', 'hostId'], code)
+    const executorId = text(source.executorId, 'Executor ID', code), hostId = text(source.hostId, 'Host ID', code)
+    if (!executorId.length || !hostId.length) throw new AgentMuxError('Executor Refresh requires exact Executor and Host IDs.', code)
+    const request = {
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId,
+      operation: source.operation,
+      executorId,
+      hostId
+    }
+    settingsResourceBudget(request, code)
+    return request
+  }
   if (source.operation === 'settings.workspaces.add') {
     const code = 'INVALID_CONTROL_REQUEST'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'input'], code)
@@ -866,6 +881,39 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'settings.executors.refresh') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    const fields = settingsResourceRecord(result, code)
+    settingsResourceEnvelope(fields, ['input', 'availability', 'executable', 'cause'], code)
+    const captured = settingsResourceEnvelope(fields.input, ['executorId', 'providerId', 'command', 'host'], code)
+    const input = {
+      executorId: text(captured.executorId, 'Executor ID', code),
+      providerId: text(captured.providerId, 'Provider ID', code),
+      command: text(captured.command, 'Authored command', code),
+      host: settingsResourceRecord(captured.host, code)
+    }
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const, operation }
+    settingsResourceBudget(source, code)
+    const executable = Object.hasOwn(fields, 'executable') ? text(fields.executable, 'Resolved executable', code) : undefined
+    if (fields.availability !== 'available' && fields.availability !== 'missing' && fields.availability !== 'check-failed') {
+      throw new AgentMuxError('Executor Refresh outcome is invalid.', code)
+    }
+    if (fields.availability === 'available') {
+      if (executable === undefined || Object.hasOwn(fields, 'cause')) throw new AgentMuxError('Available executable fact is invalid.', code)
+      return { ...base, result: { input, executable, availability: fields.availability } }
+    }
+    const cause = Object.hasOwn(fields, 'cause') ? (() => {
+      const value = settingsResourceEnvelope(fields.cause, ['code', 'message'], code)
+      return { code: text(value.code, 'Check cause code', code), message: text(value.message, 'Check cause message', code) }
+    })() : undefined
+    if (fields.availability === 'check-failed') {
+      if (!cause) throw new AgentMuxError('A failed executable check requires its cause.', code)
+      return { ...base, result: { input, availability: fields.availability, cause, ...(executable === undefined ? {} : { executable }) } }
+    }
+    if (executable === undefined) throw new AgentMuxError('Missing executable fact is invalid.', code)
+    return { ...base, result: { input, executable, availability: fields.availability, ...(cause ? { cause } : {}) } }
+  }
   if (operation === 'diagnostics.crash-log.get' || operation === 'diagnostics.crash-log.reveal') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'ok', 'operation', 'result'].includes(key))) throw new AgentMuxError('Crash log receipt fields are invalid.', code)

@@ -1,7 +1,8 @@
 import { createReadStream } from 'node:fs'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSettingsGetRequest,
   type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest,
-  type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest, type AgentMuxControlSettingsHostsRequest } from './control.js'
+  type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest, type AgentMuxControlSettingsHostsRequest,
+  type AgentMuxControlSettingsExecutorRefreshRequest } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 
@@ -12,11 +13,18 @@ type SettingsCommand =
   | WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>
   | Omit<AgentMuxControlSettingsWorkspaceAddRequest, 'schemaVersion' | 'requestId'>
   | WithoutEnvelope<AgentMuxControlSettingsHostsRequest>
+  | Omit<AgentMuxControlSettingsExecutorRefreshRequest, 'schemaVersion' | 'requestId'>
 type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest | AgentMuxControlSettingsBrowserLinksRequest | AgentMuxControlSettingsHostsRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
 type ResourceCommand = WithoutEnvelope<AgentMuxControlSettingsResourceRequest>
 
 /** Positional scalar values are data, including literal --help and empty strings. */
 export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCommand> {
+  if (args[0] === 'executors' && args[1] === 'refresh') {
+    if (args.length !== 5 || !args[2]?.length || args[3] !== '--host' || !args[4]?.length) {
+      throw invalid('Refresh requires exact Executor and Host IDs. Run agentmux settings executors refresh --help.')
+    }
+    return { operation: 'settings.executors.refresh', executorId: args[2], hostId: args[4] }
+  }
   if (args[0] === 'hosts') {
     if (args[1] === 'list' && args.length === 2) return { operation: 'settings.hosts.list' }
     // Three arguments select an exact saved ID, including literal --input or --help.

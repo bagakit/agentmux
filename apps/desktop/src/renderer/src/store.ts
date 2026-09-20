@@ -8,6 +8,7 @@ import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { create } from 'zustand'
+import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
@@ -38,6 +39,7 @@ import type {
   HostConfig,
   HostCheckResult,
   ExecutorDetection,
+  ExecutorDetectionInput,
   RuntimeEvent,
   RuntimeSnapshot,
   ScratchTopicSnapshot,
@@ -285,6 +287,7 @@ type OpenScratchTopicOptions = {
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
 export type ExecutorDetectionState = {
   state: AsyncCheckState
+  input?: ExecutorDetectionInput
   result?: ExecutorDetection
   detail?: string
   observedAt?: number
@@ -1115,7 +1118,7 @@ export function executorAvailabilityFromCheckState(state: AsyncCheckState | unde
   }
 }
 
-const detectionRequestIds = new Map<string, number>()
+const detectionRequestIds = new Map<string, symbol>()
 const hostCheckRequestIds = new Map<string, number>()
 const timelineResyncs = new Map<string, { requested: boolean; promise: Promise<void> }>()
 
@@ -2687,6 +2690,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
         request.operation === 'settings.workspaces.add' ||
+        request.operation === 'settings.executors.refresh' ||
         request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' ||
         request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget' ||
         request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
@@ -2821,7 +2825,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           providerId: executor.providerId,
           availability: (state.config?.workspaces ?? [])
             .map((workspace) => executorAvailabilityFromCheckState(
-              state.executorDetections[executorDetectionKey(workspace.hostId, executorId)]?.state
+              currentExecutorDetection(state.executorDetections[executorDetectionKey(workspace.hostId, executorId)], executorId, executor,
+                state.config?.hosts.find(host => host.id === workspace.hostId))?.state
             ))
             .reduce<AgentMuxExecutorAvailability>(
               (best, current) => (availabilityRank[current] > availabilityRank[best] ? current : best),
@@ -4342,24 +4347,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async detectExecutors(hostId) {
-    const executorIds = Object.keys(get().config?.executors ?? {})
-    if (executorIds.length === 0) return
-    if (executorIds.some((executorId) => get().executorDetections[executorDetectionKey(hostId, executorId)]?.state === 'checking')) return
-    const requestId = (detectionRequestIds.get(hostId) ?? 0) + 1
-    detectionRequestIds.set(hostId, requestId)
+    const config = get().config, host = config?.hosts.find(host => host.id === hostId)
+    if (!config || !host) return
+    const targets = Object.entries(config.executors).filter(([executorId, executor]) =>
+      currentExecutorDetection(get().executorDetections[executorDetectionKey(hostId, executorId)], executorId, executor, host)?.state !== 'checking'
+    ).map(([executorId, executor]) => {
+      const key = executorDetectionKey(hostId, executorId), requestId = Symbol()
+      detectionRequestIds.set(key, requestId)
+      const input = structuredClone({ executorId, providerId: executor.providerId, command: executor.command, host })
+      return { key, requestId, input }
+    })
+    if (targets.length === 0) return
+    const matchesCurrent = (input: ExecutorDetectionInput) => executorDetectionMatches(input, input.executorId,
+      get().config?.executors[input.executorId], get().config?.hosts.find(host => host.id === input.host.id))
     set((state) => ({
       executorDetections: {
         ...state.executorDetections,
-        ...Object.fromEntries(
-          executorIds.map((executorId) => [executorDetectionKey(hostId, executorId), { state: 'checking' } satisfies ExecutorDetectionState])
-        )
+        ...Object.fromEntries(targets.map(({ key, input }) => [key, { state: 'checking', input } satisfies ExecutorDetectionState]))
       }
     }))
     await Promise.all(
-      executorIds.map(async (executorId) => {
+      targets.map(async ({ key, requestId, input }) => {
         try {
-          const result = await api.executors.detect(executorId, hostId)
-          if (detectionRequestIds.get(hostId) !== requestId) return
+          const result = await api.executors.detect(input.executorId, hostId)
+          if (detectionRequestIds.get(key) !== requestId || result.input.executorId !== input.executorId ||
+            result.input.host.id !== hostId || !matchesCurrent(result.input)) return
           // 三态探测结局 → store 的检查状态：available→ready, missing→missing, check-failed→error。
           // check-failed（环境退化，我们没查成）落到 error 而不是 missing——这正是那次误报要防的：
           // 「没查成」绝不能显示成「没装」。AgentSettingsPane 的 'error' 文案已是 "Check failed"。
@@ -4371,8 +4383,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set((current) => ({
             executorDetections: {
               ...current.executorDetections,
-              [executorDetectionKey(hostId, executorId)]: {
+              [key]: {
                 state,
+                input: result.input,
                 result,
                 ...(result.availability !== 'available' && result.cause ? { detail: `${result.cause.code}: ${result.cause.message}` } : {}),
                 observedAt: Date.now()
@@ -4380,12 +4393,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             }
           }))
         } catch (error) {
-          if (detectionRequestIds.get(hostId) !== requestId) return
+          if (detectionRequestIds.get(key) !== requestId || !matchesCurrent(input)) return
           set((state) => ({
             executorDetections: {
               ...state.executorDetections,
-              [executorDetectionKey(hostId, executorId)]: {
+              [key]: {
                 state: 'error',
+                input,
                 detail: presentError(error),
                 observedAt: Date.now()
               }
@@ -6301,7 +6315,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const runtimeConfigChanged = JSON.stringify(get().config?.hosts) !== JSON.stringify(config.hosts) ||
       JSON.stringify(get().config?.executors) !== JSON.stringify(config.executors)
     if (runtimeConfigChanged) {
-      detectionRequestIds.clear()
+      for (const [key, check] of Object.entries(get().executorDetections)) {
+        const input = check.input
+        if (!input || !executorDetectionMatches(input, input.executorId, config.executors[input.executorId],
+          config.hosts.find(host => host.id === input.host.id))) detectionRequestIds.delete(key)
+      }
       hostCheckRequestIds.clear()
     }
     // 活动位跟着一起算。此前这里只清 host 键的两张缓存却不管 `activeWorkspaceId`，而那正是**唯一**
@@ -6315,7 +6333,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     disposeObserversForRemovedWorkspaces(get().tabs, config)
     set((state) => ({
       ...adoptedConfig(state.activeWorkspaceId, config),
-      ...(runtimeConfigChanged ? { executorDetections: {}, hostChecks: {} } : {})
+      ...(runtimeConfigChanged ? { executorDetections: Object.fromEntries(Object.entries(state.executorDetections).filter(([, check]) => {
+        const input = check.input
+        return input && executorDetectionMatches(input, input.executorId, config.executors[input.executorId], config.hosts.find(host => host.id === input.host.id))
+      })), hostChecks: {} } : {})
     }))
   },
   reportError(error, context) {
