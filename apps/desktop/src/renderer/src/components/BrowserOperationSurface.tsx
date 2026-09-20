@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  ChevronRight,
   CircleAlert,
   CircleDot,
   CircleX,
@@ -12,6 +13,7 @@ import {
   Square,
   UserRound
 } from 'lucide-react'
+import { useId, useState } from 'react'
 import type { AgentProviderId } from '@agentmux/core'
 import type {
   BrowserActivityState,
@@ -80,9 +82,9 @@ export function BrowserOperationRail({
         />
         <span><strong>{operation.operator.name}</strong><small>{phaseLabel(operation.phase)}</small></span>
       </span>
-      <span className="browser-rsi-rail__target" title={target ?? operation.url}>
+      <span className="browser-rsi-rail__target" title={`${target ?? operation.summary} · ${operation.url}`}>
         <PhaseGlyph phase={operation.phase} />
-        <span><strong>{target ?? operation.summary}</strong><small>{operation.url}</small></span>
+        <span><strong>{target ?? operation.summary}</strong></span>
       </span>
       {operation.warning || activity.warning ? <span className="browser-rsi-rail__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{operation.warning ?? activity.warning}</span> : null}
       <span className="browser-rsi-rail__actions">
@@ -103,11 +105,13 @@ export function BrowserOperationRail({
 export function BrowserOperationTimeline({
   operation,
   warning,
+  selectedSequence,
   onSelectStep,
   onReplay
 }: {
   operation: BrowserOperation | null
   warning?: string
+  selectedSequence?: number
   onSelectStep?: (step: BrowserOperationStep) => void
   onReplay?: (operation: BrowserOperation) => void
 }) {
@@ -122,23 +126,39 @@ export function BrowserOperationTimeline({
       </header>
       {operation.warning || warning ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{operation.warning ?? warning}</p> : null}
       <ol className="browser-rsi-timeline__list">
-        {operation.steps.length === 0 ? <li className="browser-rsi-timeline__empty">Waiting for the first observed action…</li> : operation.steps.map((step) => {
-          const item = (
-            <span className="browser-rsi-timeline__step-content">
-              <span className="browser-rsi-timeline__step-head"><strong>{step.label}</strong><time dateTime={new Date(step.startedAt).toISOString()}>{formatClock(step.startedAt)}</time></span>
-              <span className="browser-rsi-timeline__step-meta"><code>{step.method}</code>{targetLabel(step.target) ? <span>{targetLabel(step.target)}</span> : null}</span>
-              {step.summary ? <small>{step.summary}</small> : null}
-            </span>
-          )
-          return (
-            <li key={`${step.sequence}-${step.startedAt}`} className={`browser-rsi-timeline__step browser-rsi-timeline__step--${step.status}`} data-sequence={step.sequence}>
-              <span className="browser-rsi-timeline__marker" aria-hidden="true"><StepGlyph status={step.status} /></span>
-              {onSelectStep ? <button type="button" className="browser-rsi-timeline__step-button" onClick={() => onSelectStep(step)} aria-label={`Inspect step ${step.sequence}: ${step.label}`}>{item}</button> : item}
-            </li>
-          )
-        })}
+        {operation.steps.length === 0 ? <li className="browser-rsi-timeline__empty">Waiting for the first observed action…</li> : operation.steps.map((step) => (
+          <BrowserStepRow key={`${operation.id}-${step.sequence}-${step.startedAt}`} step={step}
+            selected={selectedSequence === step.sequence} {...(onSelectStep ? { onSelectStep } : {})} />
+        ))}
       </ol>
     </section>
+  )
+}
+
+function BrowserStepRow({ step, selected, onSelectStep }: {
+  step: BrowserOperationStep; selected: boolean; onSelectStep?: (step: BrowserOperationStep) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  const target = targetLabel(step.target)
+  return (
+    <li className={`browser-rsi-timeline__step browser-rsi-timeline__step--${step.status}${selected ? ' is-selected' : ''}`} data-sequence={step.sequence}>
+      <button type="button" className="browser-rsi-timeline__step-button" aria-label={`Inspect step ${step.sequence}: ${step.label}`}
+        aria-expanded={open} aria-controls={panelId} aria-pressed={selected}
+        onClick={() => { setOpen(!open); onSelectStep?.(step) }}>
+        <span className="browser-rsi-timeline__marker" aria-hidden="true"><StepGlyph status={step.status} /></span>
+        <span className="browser-rsi-timeline__step-content" title={[step.label, target].filter(Boolean).join(' · ')}>
+          <strong>{step.label}</strong>
+          {target ? <span className="browser-rsi-timeline__target">{target}</span> : null}
+        </span>
+        <span className="browser-rsi-timeline__status">{step.status}</span>
+        <ChevronRight className="browser-rsi-timeline__chevron" size={11} aria-hidden="true" />
+      </button>
+      {open ? <div id={panelId} className="browser-rsi-timeline__step-detail">
+        <span><code>{step.method}</code><time>{formatClock(step.startedAt)}</time></span>
+        {step.summary ? <p>{step.summary}</p> : null}
+      </div> : null}
+    </li>
   )
 }
 
