@@ -30,7 +30,6 @@ export function BrowserSettingsPane({ browser, onSave, onForget }: {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Let agents work alongside you on the web. Choose whether they can read and act on pages in your open browsers.</p>
       <section className="settings-group">
         <header><span>Agent automation</span><small>Saved: {saved ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
