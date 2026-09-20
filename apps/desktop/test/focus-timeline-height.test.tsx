@@ -52,6 +52,28 @@ it('drags upward to grow, saves once at pointer-up, and keeps the main workspace
   available = 800; await act(async () => resizeCallback())
   expect(timeline().style.height).toBe('382px')
 })
+it('cancels a height gesture without later movement or saving, then permits a fresh drag', async () => {
+  const save = vi.spyOn(useAppStore.getState(), 'setFocusTimelineHeight')
+  const focus = useAppStore.getState().agentFocus
+  const sessions = useAppStore.getState().sessions
+  expect(sessions.length).toBeGreaterThan(0)
+  expect(container.querySelectorAll('.recent-focus__segment')).toHaveLength(1)
+  const pointer = (type: string, clientY?: number) => act(async () => {
+    const target = type === 'pointerdown' ? handle() : window
+    target.dispatchEvent(new PointerEvent(type, { ...(clientY === undefined ? {} : { clientY }), button: 0, bubbles: true }))
+  })
+  await pointer('pointerdown', 500); await pointer('pointermove', 388)
+  expect(timeline().style.height).toBe('208px'); expect(save).not.toHaveBeenCalled()
+  await pointer('pointercancel')
+  expect(timeline().style.height).toBe('96px')
+  expect(document.body.style.cursor).toBe(''); expect(document.body.style.userSelect).toBe('')
+  await pointer('pointermove', 320); await pointer('pointerup')
+  expect(timeline().style.height).toBe('96px'); expect(save).not.toHaveBeenCalled()
+  await pointer('pointerdown', 500); await pointer('pointermove', 436); await pointer('pointerup')
+  expect(timeline().style.height).toBe('160px'); expect(save.mock.calls).toEqual([[160]])
+  expect(useAppStore.getState().agentFocus).toBe(focus); expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(container.querySelectorAll('.recent-focus__segment')).toHaveLength(1)
+})
 it('keyboard resizing, collapse, and persisted restoration retain height and original focus', async () => {
   const before = useAppStore.getState().agentFocus
   await key('ArrowUp'); await key('ArrowUp'); expect(timeline().style.height).toBe('128px')
