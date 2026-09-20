@@ -137,7 +137,7 @@ describe('收摊要摘干净', () => {
     const contents = fakeContents()
     const session = BrowserCdpSession.attach(contents)
     contents.debugger.off = () => { throw new Error('listener removal unavailable') }
-    expect(session.detach()).toMatch(/cleanup.*listener removal unavailable.*result is retained/)
+    expect(session.detach()).toEqual(expect.stringMatching(/cleanup.*listener removal unavailable.*result is retained/))
     expect(contents.debugger.isAttached()).toBe(false)
     expect(session.frames.size).toBe(0)
   })
