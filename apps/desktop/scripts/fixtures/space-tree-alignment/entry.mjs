@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceSidebar } from '../../../src/renderer/src/components/WorkspaceSidebar'
+import { SidebarToggleChrome } from '../../../src/renderer/src/components/TopRowChrome'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -104,6 +105,29 @@ window.spaceTreeGeometry = () => {
     original: { sessions: useAppStore.getState().sessions, tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts }
   }
 }
+window.spaceVisualRestraint = () => {
+  const motes = document.querySelector('.space-motes-section')
+  const topics = document.querySelector('.space-topics-section')
+  const folders = document.querySelector('.project-list')
+  const controls = selector => [...document.querySelectorAll(selector)].map(node => {
+    const style = getComputedStyle(node)
+    return { active:node.classList.contains('sidebar-toggle-button--active'), box:rect(node), fill:style.backgroundColor,
+      shadow:style.boxShadow, radius:style.borderRadius, hovered:node.matches(':hover'), pressed:node.matches(':active') }
+  })
+  const color = token => {
+    const probe = document.createElement('span')
+    probe.style.cssText = `position:fixed;left:-10000px;background:var(${token})`
+    document.body.append(probe)
+    const value = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return value
+  }
+  return { boundaries:[rect(topics).y - rect(motes).bottom, rect(folders).y - rect(topics).bottom],
+    rowGap:getComputedStyle(motes).rowGap, sectionContainerGap:getComputedStyle(document.querySelector('.space-topics-tree')).rowGap,
+    controls:controls('.project-rail-titlebar .sidebar-toggle-button'), globalControls:controls('[data-global-sidebar-probe] .sidebar-toggle-button'),
+    surface2:color('--surface-2'), surface3:color('--surface-3'), indent:parseFloat(getComputedStyle(document.querySelector('.project-rail')).getPropertyValue('--rail-indent')) }
+}
 createRoot(document.getElementById('root')).render(createElement('div', {
   style: { height: '100vh', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)' }
-}, createElement(WorkspaceSidebar)))
+}, createElement(WorkspaceSidebar), createElement('div', { 'data-global-sidebar-probe':'',
+  style:{position:'fixed',left:'-10000px',height:'36px'} }, createElement(SidebarToggleChrome))))

@@ -23,12 +23,23 @@ async function click(expression) {
   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p, buttons: 0 })
   for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...p, button: 'left', clickCount: 1 })
 }
+async function tap(expression) {
+  await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+  const p = await point(expression)
+  await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...p, id: 1 }] })
+  await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
 async function wheel(expression, deltaY) {
   const p = await point(expression)
   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...p, deltaX: 0, deltaY })
   await delay(35)
 }
 async function painted() { await delay(80); await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))') }
+async function menuPainted() {
+  await waitFor(`(()=>{const e=document.querySelector('.agent-region-menu');return !!e&&Number(getComputedStyle(e).opacity)===1&&e.getAnimations({subtree:true}).filter(a=>a.effect.getComputedTiming().iterations!==Infinity).every(a=>a.playState==='finished')})()`)
+  await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+  return evaluate(`(()=>{const e=document.querySelector('.agent-region-menu'),r=e.getBoundingClientRect();return{opacity:getComputedStyle(e).opacity,width:r.width,height:r.height,animations:e.getAnimations({subtree:true}).map(a=>({state:a.playState,iterations:a.effect.getComputedTiming().iterations}))}})()`)
+}
 async function capture(name, facts) {
   await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); const bytes = (await win.webContents.capturePage()).toPNG()
   const png = name + '.png'; await fs.writeFile(path.join(evidence, png), bytes)
@@ -154,9 +165,14 @@ async function auxiliaryDetails() {
   const before = await evaluate('qualityProbe.terminal()'), control = await evaluate('qualityProbe.facts().session')
   const witnesses = []
   async function fromHeader(expression) {
-    await click(`(${pane}).querySelector('.agent-region-header__more')`)
+    const more = `(${pane}).querySelector('.agent-region-header__more')`
+    // Hover intentionally keeps the previous input focus; tap explicitly activates this menu.
+    await tap(more)
     await waitFor(`Boolean(document.querySelector('.agent-region-menu'))`)
     await key('Escape', 'Escape', 27); await waitFor(`!document.querySelector('.agent-region-menu')`)
+    // Radix returns focus after close. Do not begin traversal while that return is still pending.
+    await waitFor(`document.activeElement===${more}`)
+    await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
     return keyboardReach(expression)
   }
   for (let index = 0; index < 2; index++) {
@@ -177,12 +193,14 @@ async function auxiliaryDetails() {
       assert.equal(observed.visible, true, 'Original full cause and restoration last line must be actually readable inside the local scroll clips')
       assert.equal(observed.selectable, 'text'); saved.push(observed)
     }
-    witnesses.push({ index, cause, saved })
+    const witnessRecord = { index, cause, saved, activeAfterRead: await evaluate('document.activeElement?.outerHTML.slice(0,300)') }
+    witnesses.push(witnessRecord)
+    assert.equal(await evaluate(`document.activeElement===${original}`), true, 'Reading original details must retain their actual keyboard focus after the Header return has settled')
     await painted()
     assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
     assert.ok((await evaluate('qualityProbe.terminal()')).rows >= 3)
     await capture(`320x400-aux-${index}-details-last-line`, { ...await evaluate(measure), witnesses: saved })
-    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 })
+    witnessRecord.closeTabs = await keyboardReach(summary, true)
     assert.equal(await evaluate(`document.activeElement===${summary}`), true)
     await key(' ', 'Space', 32, ' '); await waitFor(`!${detail}.open`)
   }
@@ -263,6 +281,115 @@ async function observationDetails() {
   result.observation = { before, control, failed, last, after, restored,
     qualification: 'Original SessionPane-bound Terminal refresh owner and exact preview attachment lease; controlled one-time failure, no real Core availability inferred' }
 }
+async function headerScenes(layoutOnly = false) {
+  result.scope = 'header-only'
+  async function scene(mode, width, height, appearance = 'dark') {
+    result.stage = { mode, width, height, appearance, step: 'header-scene' }
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)};qualityProbe.header(${JSON.stringify(mode)})`)
+    await waitFor(`Boolean(qualityProbe.terminal()) && !(${terminal}).classList.contains('terminal-view__xterm--hydrating')`)
+    await painted()
+    const facts = await evaluate(`(()=>{
+      const s=${pane},h=s.querySelector('.agent-region-header'),n=h.querySelector('.agent-region-header__name'),m=h.querySelector('.agent-region-header__more'),owner=s.closest('[data-workbench-region-id]'),x=owner?.querySelector('.workbench-region__close');
+      const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
+      const hit=e=>{if(!e)return null;const r=e.getBoundingClientRect();return [[.1,.1],[.5,.5],[.9,.9]].map(([x,y])=>document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)?.closest('button')===e)};
+      return{...(${measure}),header:{rect:rect(h),name:rect(n),nameText:n.innerText,title:n.title,aria:h.getAttribute('aria-label'),font:getComputedStyle(n).fontSize,weight:getComputedStyle(n).fontWeight,ellipsis:getComputedStyle(n).textOverflow,
+        more:rect(m),moreHits:hit(m),close:rect(x),closeHits:hit(x),rightInset:parseFloat(getComputedStyle(h).paddingRight),readOnly:!!h.querySelector('.agent-region-header__mode'),meta:h.querySelectorAll('.agent-region-header__meta').length},owner:rect(owner)}
+    })()`)
+    await capture(`${width}x${height}-header-${mode}-${appearance}`, facts)
+    assert.equal(facts.header.meta, 0)
+    assert.equal(facts.header.title, facts.header.nameText, 'The full semantic name must remain available to mouse disclosure')
+    assert.ok(facts.header.aria.includes(facts.header.nameText))
+    assert.equal(facts.header.font, '11px'); assert.equal(facts.header.weight, '400')
+    assert.equal(facts.header.more.width, 22); assert.equal(facts.header.more.height, 22)
+    assert.equal(facts.header.moreHits.length, 3); assert.ok(facts.header.moreHits.every(Boolean))
+    assert.ok(Math.abs(facts.header.more.right - (facts.header.rect.right - facts.header.rightInset)) < 1, 'Header action row must align to its right inset')
+    assert.ok(facts.header.rect.height <= Math.max(facts.header.more.height, facts.header.close?.height ?? 0) + 2, 'The single Header row must only reserve its existing action and focus geometry')
+    assert.ok(facts.terminal.y >= facts.header.rect.bottom - 1, 'Header must not cover the original xterm reading surface')
+    if (facts.header.close) {
+      assert.equal(facts.header.close.width, 22); assert.equal(facts.header.close.height, 22)
+      assert.equal(facts.header.closeHits.length, 3); assert.ok(facts.header.closeHits.every(Boolean))
+      assert.ok(facts.header.close.bottom <= facts.header.rect.bottom + 1, 'Original X must remain inside this compact action row')
+      assert.ok(facts.header.more.right <= facts.header.close.x)
+    }
+    if (mode === 'readonly') { assert.equal(facts.header.readOnly, true); assert.equal(facts.composer, null) }
+    if (width === 641) assert.ok(Math.abs(facts.owner.width - 320) < 1, 'Actual narrow split Region must be 320px')
+    assert.ok(facts.xterm.rows >= 3 && facts.terminal.height > 40)
+    assert.equal(facts.draft, 'Preserved draft'); assert.equal(facts.screenshotCalls, 0)
+    return facts
+  }
+  await scene('normal', 1281, 600)
+  if (layoutOnly) { assert.equal(result.frames.length, 1); return }
+  for (const args of [['long',1281,600,'dark'],['long',641,600,'dark'],['readonly',320,400,'dark'],['notice',641,600,'dark'],['long',641,600,'light'],['normal',1281,600,'light']]) await scene(...args)
+  await scene('long', 641, 600)
+  const before = await evaluate('qualityProbe.terminal()'), origin = await evaluate('qualityProbe.facts()')
+  const semanticName = await evaluate(`(${pane}).querySelector('.agent-region-header__name').title`)
+  await click(terminal); await key('h','KeyH',72,'h')
+  await waitFor(`qualityProbe.facts().writes.some(args=>args[1]==='h')`)
+  const more = `(${pane}).querySelector('.agent-region-header__more')`
+  await tap(more)
+  await waitFor(`Boolean(document.querySelector('.agent-region-menu'))`)
+  const menuPaint = await menuPainted()
+  const context = await evaluate(`document.querySelector('.agent-region-menu__context').innerText`)
+  assert.ok(context.includes(origin.session.agentSessionId) && context.includes('Executor:') && context.includes(semanticName))
+  await capture('320-header-menu-full-context', { ...await evaluate(measure), context, menuPaint })
+  await key('Escape','Escape',27); await waitFor(`!document.querySelector('.agent-region-menu')`)
+  await waitFor(`document.activeElement===${more}`)
+  await painted()
+  const focus = await evaluate(`(()=>{const e=${more},s=getComputedStyle(e);return{visible:e.matches(':focus-visible'),width:s.outlineWidth,offset:s.outlineOffset,color:s.outlineColor}})()`)
+  assert.equal(focus.visible, true); assert.equal(focus.width, '2px'); assert.equal(focus.offset, '-2px')
+  await capture('320-header-keyboard-more-focus', { ...await evaluate(measure), focus })
+  await key('ArrowDown','ArrowDown',40); await waitFor(`Boolean(document.querySelector('.agent-region-menu [role="menuitem"]'))`)
+  await evaluate('qualityProbe.focusNeighbor()')
+  await painted()
+  const labels = await evaluate(`[...document.querySelectorAll('.agent-region-menu [role="menuitem"]')].map(e=>e.innerText.trim())`)
+  assert.ok(labels.length > 0 && labels.includes('Copy Region Address'), 'Actual precise Region menu consumer must be present')
+  result.headerMenuTrace = []
+  for (let n = 0; n < labels.length + 2; n++) {
+    if (await evaluate(`document.activeElement?.innerText.trim()==='Copy Region Address'`)) break
+    await key('ArrowDown','ArrowDown',40)
+    await delay(35)
+    result.headerMenuTrace.push(await evaluate(`({active:document.activeElement?.outerHTML.slice(0,300),selected:qualityProbe.facts().tab.layout.activeRegionId})`))
+  }
+  assert.equal(await evaluate(`document.activeElement?.innerText.trim()`), 'Copy Region Address')
+  const count = await evaluate('qualityProbe.facts().clipboard.length')
+  await key('Enter','Enter',13,'\r'); await waitFor(`qualityProbe.facts().clipboard.length>${count}`)
+  const copied = await evaluate('qualityProbe.facts()')
+  assert.equal(copied.clipboard.at(-1), origin.regionAddress)
+  assert.equal(copied.tab.layout.activeRegionId, 'quality-neighbor')
+  assert.deepEqual(copied.session, origin.session); assert.equal(copied.draft, origin.draft)
+  assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
+  await click(more); await waitFor(`Boolean(document.querySelector('.agent-region-menu'))`)
+  await click(`[...document.querySelectorAll('.agent-region-menu [role="menuitem"]')].find(e=>e.innerText.trim()==='Conversation history')`)
+  await waitFor(`Boolean((${pane}).querySelector('.session-history:not(.session-history--inline)'))`)
+  assert.equal(await evaluate(`(${pane}).querySelector('.agent-region-header__name').title`), semanticName)
+  assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
+  await capture('320-header-original-history-subject', { ...await evaluate(measure), origin: origin.session })
+  await click(`(${pane}).querySelector('.session-history__toolbar button')`)
+  await waitFor(`!(${pane}).querySelector('.session-history:not(.session-history--inline)')`)
+  assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
+  await click(terminal); await key('v','KeyV',86,'v'); await waitFor(`qualityProbe.facts().writes.some(args=>args[1]==='v')`)
+  assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
+  // The original Composer gives ordinary trusted Tab traversal; Terminal retains its literal CLI Tab.
+  await click(`(${pane}).querySelector('.tiptap')`)
+  const close = `document.querySelector('[data-workbench-region-id="quality-target"] > .workbench-region__close')`
+  await keyboardReach(close)
+  await waitFor(`!document.querySelector('.agent-identity-popover')`)
+  await painted()
+  const closeFocus = await evaluate(`(()=>{const e=${close},s=getComputedStyle(e);return{visible:e.matches(':focus-visible'),width:s.outlineWidth,offset:s.outlineOffset}})()`)
+  assert.equal(closeFocus.visible, true); assert.equal(closeFocus.width, '2px'); assert.equal(closeFocus.offset, '-2px')
+  await capture('320-header-keyboard-close-focus', { ...await evaluate(measure), closeFocus })
+  await key('Enter','Enter',13,'\r')
+  await waitFor(`!document.querySelector('[data-workbench-region-id="quality-target"]') && Boolean(document.querySelector('[data-workbench-region-id="quality-neighbor"]'))`)
+  const closed = await evaluate('qualityProbe.facts()')
+  assert.deepEqual(Object.keys(closed.tab.regions), ['quality-neighbor'])
+  assert.deepEqual(closed.session, origin.session); assert.equal(closed.draft, origin.draft)
+  await capture('320-header-original-close-keeps-neighbor', { closed })
+  result.headerInteractions = { before, origin, copied, focus, closeFocus, closed, context,
+    qualification: 'Trusted input/menu/Escape/Region copy/original X in actual WorkspaceWorkbench; clipboard API controlled, no user clipboard or Core process touched' }
+  await auxiliaryDetails()
+  assert.ok(result.frames.length >= 12 && result.headerInteractions, 'Header-only must not sign an empty or old notice matrix')
+}
 app.whenReady().then(async () => {
   try {
     await fs.mkdir(evidence, { recursive: true })
@@ -271,6 +398,7 @@ app.whenReady().then(async () => {
     await win.loadFile(html); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.qualityProbe)')
+    if (process.argv.includes('--header-only')) { await headerScenes(process.argv.includes('--header-layout-only')); result.passed = true; return }
     if (process.argv.includes('--aux-only')) { await auxiliaryDetails(); result.passed = true; return }
     if (process.argv.includes('--narrow-only')) {
       await seed('normal', 320, 400)
