@@ -22,9 +22,9 @@
   box-shadow: inset -1px 0 var(--line-soft);
 }
 /* Density changes row rhythm and icon size; real nesting stays legible in every tier. */
-.project-rail { --rail-indent: var(--sp-5); --rail-icon: 15px; --rail-row-min: 24px; }
-.project-rail[data-rail-density='compact'] { --rail-icon: 14px; --rail-row-min: 22px; }
-.project-rail[data-rail-density='dense'] { --rail-icon: 12px; --rail-row-min: 20px; }
+.project-rail { --rail-indent: var(--sp-5); --rail-icon: 15px; --rail-row-min: 24px; --rail-section-gap: var(--sp-5); }
+.project-rail[data-rail-density='compact'] { --rail-icon: 14px; --rail-row-min: 22px; --rail-section-gap: var(--sp-4); }
+.project-rail[data-rail-density='dense'] { --rail-icon: 12px; --rail-row-min: 20px; --rail-section-gap: var(--sp-3); }
 .project-rail-titlebar {
   height: 36px;
   flex: 0 0 36px;
@@ -76,6 +76,7 @@
 }
 .sidebar-toggle-button { color: var(--text-3); }
 .sidebar-toggle-button--active { color: var(--text); background: var(--surface-3); box-shadow: var(--hl-strong); }
+:where(.project-rail-titlebar, .surface-tool-activitybar--space) .sidebar-toggle-button--active:not(:hover):not(:active) { background: var(--surface-2); box-shadow: none; }
 .sidebar__section-heading {
   display: flex;
   align-items: center;
@@ -99,7 +100,8 @@
 .space-tree-empty { margin: var(--sp-2) var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .space-tree { min-height: 0; flex: 1; overflow: auto; padding: 0 var(--sp-2) var(--sp-4); }
 .space-topics-tree, .space-section, .space-tree-entry, .project-list { display: grid; align-content: start; gap: var(--sp-1); }
-.space-section + .space-section, .project-list { margin-top: var(--sp-5); }
+.space-topics-tree { gap: 0; }
+.space-section + .space-section, .project-list { margin-top: var(--rail-section-gap); }
 .space-section-heading { display: flex; align-items: center; min-width: 0; gap: var(--sp-1); min-height: var(--rail-row-min); padding: 0 var(--sp-2); color: var(--text-3); }
 .space-section-label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-3); padding: 0; border: 0; background: transparent; color: var(--text-3); cursor: pointer; text-align: left; }
 .space-section-label strong { overflow: hidden; font-size: var(--fs-micro); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
