@@ -275,7 +275,7 @@ function DesktopApp() {
                 className={`surface-tool-dock ${isResizing ? 'surface-tool-dock--resizing' : ''}`}
                 data-surface-tool-dock
               >
-                <SurfaceToolDock surface={mainSurface} workspace={workspace} />
+                <SurfaceToolDock workspace={workspace} />
                 <div
                   className="surface-tool-width-handle"
                   role="separator"

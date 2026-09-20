@@ -46,11 +46,11 @@ describe('Workflow component gallery production reachability', () => {
       ['ConversationAxis', activity],
       ['ConversationMessage', activity],
       ['ConversationMessage', read('components/ObservationSurfaceGallery.tsx')],
-      ['AgentMarkdown', read('components/ConversationMessage.tsx')],
+      ['MemoizedAgentMarkdown', read('components/ConversationMessage.tsx')],
       ['AgentInteractionCard', sessionPane],
       ['InlineComposer', read('components/AgentComposer.tsx')],
-      ['StatusDot', read('components/SurfaceToolDock.tsx')],
-      ['ServiceWindowNotice', read('components/TerminalView.tsx')]
+      ['StatusDot', read('components/GoalExecution.tsx')],
+      ['ServiceWindowNotice', sessionPane]
     ]
     expect(consumers.length).toBeGreaterThan(0)
     for (const [name, text] of consumers) expect(text, `${name} has no production consumer`).toContain(`<${name}`)

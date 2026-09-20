@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
-import { projectWorkspaces } from '../lib/workspace-projects'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
@@ -16,10 +15,7 @@ function useSurfaceIdentity() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
-  const project = projectWorkspaces(config?.workspaces ?? []).find((candidate) =>
-    candidate.workspaces.some((item) => item.id === activeWorkspaceId)
-  )
-  return { mainSurface, workspace, project }
+  return { mainSurface, workspace }
 }
 
 export function TopRowLeadingChrome() {
@@ -28,7 +24,7 @@ export function TopRowLeadingChrome() {
   const { mainSurface, workspace } = useSurfaceIdentity()
   const toolDockOwnsChrome = !projectRailOpen
     && toolsOpen
-    && (mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(workspace)))
+    && mainSurface === 'workbench' && Boolean(workspace)
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
   const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey') && chromeOwnedOutsideMain
   return (
@@ -74,9 +70,9 @@ export function ToolsToggle() {
   const toggleTools = useAppStore((state) => state.toggleTools)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
-  const toolsAvailable =
-    mainSurface === 'board' || (mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId)))
-  const scope = mainSurface === 'board' ? 'Goals' : mainSurface === 'agents' ? 'Focus' : 'Space'
+  if (mainSurface === 'board') return null
+  const toolsAvailable = mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId))
+  const scope = mainSurface === 'agents' ? 'Focus' : 'Space'
   return (
     <button
       className={`icon-button sidebar-toggle-button ${toolsOpen ? 'sidebar-toggle-button--active' : ''}`}
@@ -97,8 +93,8 @@ export function ToolsToggle() {
 // （sidebar 不显示 branch，是唯一未重复的 within-project 上下文）。绝对路径只进
 // title tooltip，永不平铺。host-pill 仅在非 local 时出现。
 export function TopBreadcrumb() {
-  const { mainSurface, workspace, project } = useSurfaceIdentity()
-  const hostId = mainSurface === 'board' ? project?.hostId : workspace?.hostId
+  const { mainSurface, workspace } = useSurfaceIdentity()
+  const hostId = workspace?.hostId
   if (mainSurface === 'agents') {
     return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
   }
@@ -106,20 +102,7 @@ export function TopBreadcrumb() {
     return <div className="breadcrumbs"><strong>Survey</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Browse and verify</span></div>
   }
   if (mainSurface === 'board') {
-    return (
-      <div className="breadcrumbs">
-        <strong>Goals</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Goals &amp; progress</span>
-        {project ? (
-          <>
-            <span className="breadcrumbs__sep" aria-hidden>/</span>
-            <span>{project.name}</span>
-          </>
-        ) : null}
-        {hostId && hostId !== 'local' ? (
-          <span className="host-pill"><RadioTower size={11} /> {hostId}</span>
-        ) : null}
-      </div>
-    )
+    return <div className="breadcrumbs"><strong>Goals</strong></div>
   }
   // workbench 顶行不画项目名（已在左侧 Projects 列表高亮，画了就是重复）。
   // 只在有 branch（sidebar 未展示的 within-project 上下文）或非 local host 时
