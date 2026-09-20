@@ -49,7 +49,7 @@ const SECTIONS = [
   { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Choose how agents interact with your pages.', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
   { id: 'prompts' as const, group: 'preferences' as const, title: 'Prompts', description: 'Keep your everyday instructions close at hand.', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
   { id: 'copy-paths' as const, group: 'preferences' as const, title: 'Copy Paths', description: 'Choose how paths look when you share them.', icon: ClipboardCopy, keywords: 'copy path clipboard home directory tilde abbreviate absolute full shorten' },
-  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Local storage, session continuity, and diagnostics.', icon: Settings2, keywords: 'core runtime terminal tmux ssh' }
+  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Local storage, session continuity, and diagnostics.', icon: Settings2, keywords: 'core runtime terminal tmux ssh show crash log session recovery' }
 ]
 
 /**
