@@ -277,7 +277,7 @@ export function WorkspaceSidebar() {
           workspaceId={preferred ?? project.preferredWorkspaceId}
           onRemove={() => setRemoveRequest(project)}
         >
-          <div className="project-rail-entry" data-space-entry>{row}<ProjectActivity compact sessions={projectSessions} contexts={activityContextsForWorkspaces(visibleProjectIds.flatMap((id) => projectRelations.nodes.get(id)!.workspaces))} /></div>
+          <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={projectSessions} contexts={activityContextsForWorkspaces(visibleProjectIds.flatMap((id) => projectRelations.nodes.get(id)!.workspaces))} /> : null}</div>
         </WorkspaceRowContextMenu>
         {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
             projectWorkspaces). The pinned branch name labels the row; navigation prefers the
@@ -336,7 +336,7 @@ export function WorkspaceSidebar() {
           <SpaceSectionHeader label="Folders" count={projects.length} icon={<Folders size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup('space:folders')}
             createLabel="Open Folder" onCreate={chooseFolder}
-            activity={foldersCollapsed ? <ProjectActivity compact sessions={folderSessions}
+            activity={foldersCollapsed && folderSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={folderSessions}
               contexts={activityContextsForWorkspaces(projects.flatMap((project) => project.workspaces))} /> : undefined} />
           {filtering && shownGroups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
           {foldersCollapsed ? null : shownGroups.map((group) => {
@@ -439,7 +439,7 @@ function GroupHeader({
           ) : null}
         </span>
       </button>
-      {collapsed ? (
+      {collapsed && groupSessions.some((session) => session.kind === 'agent') ? (
         <ProjectActivity
           compact
           sessions={groupSessions}

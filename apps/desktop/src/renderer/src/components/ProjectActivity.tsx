@@ -1,5 +1,6 @@
 import { ChevronRight } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { AgentTimelineItem, AgentTimelineSnapshot, AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { sessionRecentActivity } from '../lib/session-recency'
 import { activityGlyphFor } from '../lib/attention-event'
@@ -95,8 +96,17 @@ export function ProjectActivity({
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const config = useAppStore((state) => state.config)
-  const timelines = useAppStore((state) => state.timelines)
-  const agentNames = useAppStore((state) => state.agentNames)
+  const agentIds = useMemo(() => sessions.filter((session) => session.kind === 'agent').map((session) => session.id), [sessions])
+  // Read only this consumer's facts. Another Session's output must not wake every Space row.
+  const timelines = useAppStore(useShallow((state) => {
+    const owned: Record<string, AgentTimelineSnapshot> = {}
+    for (const id of agentIds) {
+      const timeline = state.timelines[id]
+      if (timeline) owned[id] = timeline
+    }
+    return owned
+  }))
+  const agentNames = useAppStore(useShallow((state) => Object.fromEntries(agentIds.map((id) => [id, state.agentNames[id]]))))
   const [open, setOpen] = useState(false)
   const [, setNow] = useState(Date.now)
   // A new observation can arrive between ticks. Sample once per actual render;

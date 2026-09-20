@@ -83,7 +83,7 @@ export function SpaceTopicsTree({ workspace, query = '' }: { workspace: Workspac
         expanded={expanded} filtering={filtering} onToggle={() => toggleGroup(key)}
         {...(label === 'Topics' ? { onOpen: () => void openOverview(), selected: activeWorkspaceId === workspace.id && !current } : {})}
         createLabel={label === 'Motes' ? 'Create Mote' : 'Create Topic'} onCreate={() => createTopic(label === 'Motes' ? 'mote' : undefined)}
-        activity={!expanded ? <ProjectActivity compact sessions={sectionSessions} contexts={contexts} /> : undefined} />
+        activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={sectionSessions} contexts={contexts} /> : undefined} />
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}
       {expanded ? ids.map((id) => {
         const topic = byId.get(id)!
@@ -109,7 +109,7 @@ export function SpaceTopicsTree({ workspace, query = '' }: { workspace: Workspac
               onClick={() => togglePinned(SCRATCH_WORKSPACE_ID, id)}><Pin size={11} /></button>
             {isMote ? <button type="button" className="icon-button space-row-action space-mote-edit" aria-label={`Edit ${name} SOUL.md`}
               title="Edit SOUL.md · New sessions use saved changes" onClick={() => void openMote(id, true)}><NotebookPen size={12} /></button> : null}
-            <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} />
+            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
           </div>
           {topic.readError ? <div className="new-tab-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
         </div>

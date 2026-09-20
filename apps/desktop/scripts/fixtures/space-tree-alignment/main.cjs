@@ -99,6 +99,12 @@ app.whenReady().then(async () => {
       const r = await read(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({block:'nearest'}); const r = node.getBoundingClientRect(); return {x:r.x + r.width/2, y:r.y + r.height/2} })()`)
       for (const type of ['mousePressed', 'mouseReleased']) await input('Input.dispatchMouseEvent', { type, button: 'left', clickCount: 1, ...r })
     }
+    const originalDisclosure = await read('window.spaceTreeDisclosure()')
+    for (const label of ['Create Mote', 'Create Topic', 'Open Folder']) await click(`[aria-label="${label}"]`)
+    result.creationCalls = await read('window.spaceTreeOpenCalls')
+    assert.deepEqual(result.creationCalls, [{kind:'mote'}, {kind:'topic'}, {kind:'open-folder'}])
+    assert.deepEqual(await read('window.spaceTreeDisclosure()'), originalDisclosure)
+    await read('window.spaceTreeOpenCalls.length = 0')
     for (const tier of ['compact', 'dense']) {
       await click('.space-tree-search > button:last-child')
       await until(`document.querySelector('.project-rail').dataset.railDensity === '${tier}'`)
@@ -148,10 +154,24 @@ app.whenReady().then(async () => {
     assert.ok(result.collapsed.scroll.scrollWidth <= result.collapsed.scroll.clientWidth)
     assert.deepEqual(result.collapsed.original, original)
     await capture('collapsed.png')
+    const press = async key => {
+      const codes = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, Escape: 27, Enter: 13, Tab: 9 }
+      for (const type of ['keyDown', 'keyUp']) await input('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: codes[key], ...(key === 'Enter' && type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
+    }
     const disclosureHover = await read('(() => { const node = document.querySelector(".space-topics-heading [data-space-disclosure]"); node.scrollIntoView({block:"nearest"}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
     await input('Input.dispatchMouseEvent', { type:'mouseMoved', ...disclosureHover })
     await capture('disclosure-hover.png')
-    await read('document.querySelector(".space-topics-heading [data-space-disclosure]").focus()')
+    await input('Input.dispatchMouseEvent', { type:'mouseMoved', x:10, y:10 })
+    await read('document.querySelector(".space-motes-heading .space-section-add").focus()')
+    let reachedDisclosure = false
+    for (let index = 0; index < 12; index += 1) {
+      await press('Tab')
+      if (await read('document.activeElement.matches(".space-topics-heading [data-space-disclosure]")')) { reachedDisclosure = true; break }
+    }
+    assert.equal(reachedDisclosure, true, 'native Tab reaches the independent disclosure type slot')
+    result.disclosureFocus = await read('({ visible:document.activeElement.matches(":focus-visible"), outline:getComputedStyle(document.activeElement).outlineStyle, label:document.activeElement.getAttribute("aria-label") })')
+    assert.equal(result.disclosureFocus.visible, true)
+    assert.notEqual(result.disclosureFocus.outline, 'none')
     await capture('disclosure-focus.png')
     result.disclosureGlyph = await read('(() => { const control=document.querySelector(".space-topics-heading [data-space-disclosure]"); return {hint:getComputedStyle(control.querySelector(".space-disclosure__hint")).opacity, width:control.getBoundingClientRect().width, glyph:control.querySelector(".space-disclosure__hint svg").getAttribute("class"), label:control.getAttribute("aria-label")} })()')
     assert.ok(result.disclosureGlyph.glyph.includes('chevron'))
@@ -159,10 +179,7 @@ app.whenReady().then(async () => {
     assert.equal(result.disclosureGlyph.hint, '1')
     const savedDisclosure = await read('window.spaceTreeDisclosure()')
     const savedScroll = await read('document.querySelector(".space-tree").scrollTop')
-    const press = async key => {
-      const codes = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, Escape: 27, Enter: 13, Tab: 9 }
-      for (const type of ['keyDown', 'keyUp']) await input('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: codes[key], ...(key === 'Enter' && type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
-    }
+
     await click('[aria-label="Find Spaces"]')
     await input('Input.insertText', { text: 'core' })
     await until('!!document.querySelector(\'[data-workspace-id="core"]\') && !document.querySelector(\'[data-workspace-id="beta"]\')')
