@@ -61,4 +61,21 @@ describe('compact browser operation rows', () => {
       expect(host.querySelector('.browser-rsi-timeline__step-detail')!.textContent).toContain('The click did not complete')
     } finally { await act(async () => root.unmount()) }
   })
+
+  it('keeps the reported failure/recovery line persistent and full diagnostics reachable on demand', async () => {
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    const warning = 'The step failed. Review the page before retrying.\n    at private-worker-frame'
+    try {
+      await act(async () => root.render(createElement(BrowserOperationTimeline, { operation: { ...operation, warning } })))
+      expect(host.querySelector('[role="status"]')!.textContent).toContain('The step failed. Review the page before retrying.')
+      expect(host.textContent).not.toContain('private-worker-frame')
+      const details = host.querySelector<HTMLButtonElement>('[aria-label="Show browser warning details"]')!
+      expect(details).not.toBeNull()
+      await act(async () => details.click())
+      expect(host.querySelector('.browser-rsi-notice pre')!.textContent).toBe(warning)
+      await act(async () => details.click())
+      expect(host.querySelector('.browser-rsi-notice pre')).toBeNull()
+    } finally { await act(async () => root.unmount()) }
+  })
 })

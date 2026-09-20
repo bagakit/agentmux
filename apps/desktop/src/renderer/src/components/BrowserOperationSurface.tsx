@@ -59,7 +59,7 @@ export function BrowserOperationRail({
           <strong>{agentControl ? 'Agent control active' : 'Browser ready'}</strong>
           <small>{agentControl ? 'Activity details are loading…' : 'You have control'}</small>
         </span> : null}
-        {activity.warning ? <span className="browser-rsi-rail__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{activity.warning}</span> : null}
+        {activity.warning ? <BrowserOperationNotice message={activity.warning} className="browser-rsi-rail__warning" /> : null}
         {onOpenTimeline ? <span className="browser-rsi-rail__actions"><button type="button" className="browser-rsi-icon-button" aria-label="Open browser activity timeline" title="Open activity timeline" onClick={onOpenTimeline}><History size={13} aria-hidden="true" /></button></span> : null}
       </div>
     )
@@ -86,7 +86,7 @@ export function BrowserOperationRail({
         <PhaseGlyph phase={operation.phase} />
         <span><strong>{target ?? operation.summary}</strong></span>
       </span>
-      {operation.warning || activity.warning ? <span className="browser-rsi-rail__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{operation.warning ?? activity.warning}</span> : null}
+      {operation.warning || activity.warning ? <BrowserOperationNotice message={(operation.warning ?? activity.warning)!} className="browser-rsi-rail__warning" /> : null}
       <span className="browser-rsi-rail__actions">
         {canTakeControl && onTakeControl ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={onTakeControl}><Hand size={13} aria-hidden="true" />Take control</button> : null}
         {canReturnControl && onReturnControl ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" onClick={onReturnControl}><RotateCcw size={13} aria-hidden="true" />Return to Agent</button> : null}
@@ -124,7 +124,7 @@ export function BrowserOperationTimeline({
         <span><History size={14} aria-hidden="true" /><strong>Activity timeline</strong><small>{operation.steps.length} {operation.steps.length === 1 ? 'step' : 'steps'} · {phaseLabel(operation.phase)}</small></span>
         {onReplay ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => onReplay(operation)}><Play size={12} aria-hidden="true" />Replay</button> : null}
       </header>
-      {operation.warning || warning ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{operation.warning ?? warning}</p> : null}
+      {operation.warning || warning ? <BrowserOperationNotice message={(operation.warning ?? warning)!} className="browser-rsi-timeline__warning" /> : null}
       <ol className="browser-rsi-timeline__list">
         {operation.steps.length === 0 ? <li className="browser-rsi-timeline__empty">Waiting for the first observed action…</li> : operation.steps.map((step) => (
           <BrowserStepRow key={`${operation.id}-${step.sequence}-${step.startedAt}`} step={step}
@@ -133,6 +133,22 @@ export function BrowserOperationTimeline({
       </ol>
     </section>
   )
+}
+
+function BrowserOperationNotice({ message, className }: { message: string; className: string }) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  // The first reported line is the cause/recovery text. Stack traces remain exact and reachable,
+  // without filling both the page rail and its timeline before the person asks for diagnostics.
+  const summary = message.split('\n')[0] ?? message
+  const hasDetails = summary !== message
+  return <div className={`${className} browser-rsi-notice`} role="status">
+    <span className="browser-rsi-notice__line"><CircleAlert size={12} aria-hidden="true" /><span>{summary}</span>
+      {hasDetails ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
+        aria-label="Show browser warning details" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Details</button> : null}
+    </span>
+    {open ? <pre id={panelId}>{message}</pre> : null}
+  </div>
 }
 
 function BrowserStepRow({ step, selected, onSelectStep }: {
