@@ -782,10 +782,29 @@ assert.ok(handshakeQueryIndex >= 0)
 assert.ok(handshakeAckIndex > handshakeQueryIndex)
 assert.ok(initialPromptIndex > handshakeAckIndex)
 assert.ok(submittedPromptIndex > handshakeAckIndex)
+let nextReadinessDiagnosticAt = Date.now()
 try {
-  await waitFor('next ready prompt epoch', () => {
-    const readiness = codexSecond.agentSession(codex.agentSessionId).terminalPromptReadiness
-    return readiness?.id !== initialReadiness.id && readiness?.readyThroughByte !== undefined
+  await waitFor('next ready prompt epoch', async () => {
+    // Control requests used a different, short-lived Client. Read that owner's durable
+    // facts; agentSession/statusAgent alone only inspect this Client's registry cache.
+    const cached = codexSecond.agentSession(codex.agentSessionId)
+    const fresh = await codexSecond.refreshAgentSession(codex.agentSessionId, codex.run)
+    const readiness = fresh.terminalPromptReadiness
+    if (readiness?.id !== initialReadiness.id && readiness?.readyThroughByte !== undefined) return true
+    if (Date.now() - nextReadinessDiagnosticAt >= 10_000) {
+      nextReadinessDiagnosticAt = Date.now()
+      const replay = await codexSecond.readRunReplay(codex.run, 0)
+      process.stderr.write(`[packed-consumer] next ready prompt epoch facts ${JSON.stringify({
+        initialReadinessId: initialReadiness.id,
+        cachedReadiness: cached.terminalPromptReadiness,
+        durableReadiness: readiness,
+        terminalPromptSubmission: fresh.terminalPromptSubmission,
+        hookReceipt: fresh.hookReceipt,
+        agentErrors: codexSecondEvents.filter((event) => event.type === 'agent-error'),
+        outputTail: replay.replay.map((event) => event.data).join('').slice(-1_500)
+      })}\n`)
+    }
+    return false
   })
 } catch (error) {
   const session = codexSecond.agentSession(codex.agentSessionId)
@@ -811,8 +830,8 @@ await assert.rejects(
   }),
   (error) => error?.code === 'INVALID_AGENT_PROMPT'
 )
-await waitFor('ready prompt epoch after long input', () => {
-  const readiness = codexSecond.agentSession(codex.agentSessionId).terminalPromptReadiness
+await waitFor('ready prompt epoch after long input', async () => {
+  const readiness = (await codexSecond.refreshAgentSession(codex.agentSessionId, codex.run)).terminalPromptReadiness
   return readiness?.readyThroughByte === undefined ? null : readiness
 })
 const packedPromptCondition2 = agentPromptCondition(codexSecond.agentSession(codex.agentSessionId))
