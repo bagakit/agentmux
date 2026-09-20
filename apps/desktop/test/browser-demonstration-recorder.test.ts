@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   BrowserDemonstrationFileStore,
   BrowserDemonstrationRecorder,
-  type BrowserDemonstrationDocument,
   type BrowserDemonstrationEvent,
   type BrowserDemonstrationStore
 } from '../src/main/browser-demonstration-recorder.js'
+import type { BrowserDemonstrationDocument } from '../src/shared/browser-demonstration.js'
 
 class MemoryStore implements BrowserDemonstrationStore {
   document: BrowserDemonstrationDocument | null = null
@@ -67,6 +67,16 @@ describe('BrowserDemonstrationRecorder', () => {
     s.recorder.noteNativeInput({ browserId, navigationId, type: 'mouseUp', at: 4_000 })
     await expect(s.event()).resolves.toBeNull()
     expect((await s.recorder.get(browserId))?.steps).toEqual([])
+  })
+
+  it('attests before asynchronous target verification and waits for its actual result', async () => {
+    const s = setup(); await s.start(); s.native()
+    let resolve!: (value: typeof target) => void
+    const verified = new Promise<typeof target>(done => { resolve = done })
+    const recording = s.event({ target: verified })
+    s.time(5_000)
+    resolve(target)
+    await expect(recording).resolves.toMatchObject({ steps: [expect.objectContaining({ recordedAt: 1_000, target })] })
   })
 
   it('never accepts values, coalesces a field semantic step, and leaves uncertain targets blocked', async () => {
