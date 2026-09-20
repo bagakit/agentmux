@@ -197,6 +197,8 @@ fixture 只定义场景数据、操作、观察点与模拟边界，并引用当
 - 标记由用户拥有。Topic/Mote 的 pin 操作与既有 Topics 总览复用同一 `pinnedItems` 与 toggle owner，标记必须在树上可读、可操作、可撤销；已有 Branch pin 仍从属于原 Folder。pin、选中与运行状态表达不同事实，不能相互冒充。热度变化不重新排序对象；沿用已有用户顺序和置顶规则，保持空间记忆。
 - 分区开合、查找、pin、密度和人格入口不改写 Session/Run、Tab/Region 或布局；查找继续暂时显示命中上下文并在清除时恢复原折叠与滚动。进程重启后保留原对象、分区折叠、pin、密度、选中及工作面，并沿既有恢复路径继续原 Session；探测或显示信息失败按原服务窗合同保留健康工作面。顶部层数、左缘、折叠字形与无连线层级的视觉约束只定义在 surface-density《Project Rail 与 Topic 行密度》。
 
+用户追问：「你自己满意了吗」。Space 导航已交付的对象、创建、查找、标记、真实注意力与恢复行为继续成立；本次视觉收敛只调整顶部开关的静息选中重量与三档分区节奏，不能借调整外观改写对象归属、工作面、焦点、Session/Run 或健康 Agent 的可用性。视觉约束唯一见 surface-density《Project Rail 与 Topic 行密度》，不扩展 Agents、Browser 主体或其他工作面。
+
 用户进一步提出把 PMO Agent 这样的特殊 Topic 赋予特定类型，体验参考 muse 或 OpenAI dot，并明确：「这种 Agent 其实非常类似 Topic 的逻辑，和普通 folder 共享一套 space 管理逻辑，但是有自己的特殊预制」。
 
 - PMO 等特殊 Agent 以带预制的 Topic 组织，复用 Topic 的耐久目录、Wiki、资料、产出与铭牌，以及 Folder/Topic 共用的 Space 管理能力。预制负责特殊身份、默认上下文与产品入口，不建立另一套 Space、Topic、Agent 或 Run 生命周期。

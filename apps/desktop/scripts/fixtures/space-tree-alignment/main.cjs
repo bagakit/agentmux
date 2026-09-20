@@ -24,6 +24,33 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(privateRoot, name), (await win.webContents.capturePage()).toPNG())
   }
   const aligned = (a, b, message) => assert.ok(Math.abs(a - b) < .5, `${message}: ${a} vs ${b}`)
+  const checkRestraint = async expectedGap => {
+    const facts = await read('window.spaceVisualRestraint()')
+    assert.equal(facts.boundaries.length, 2)
+    for (const gap of facts.boundaries) aligned(gap, expectedGap, 'actual Space section boundary distance')
+    assert.equal(facts.rowGap, '2px', 'section-internal rhythm remains unchanged')
+    assert.equal(facts.sectionContainerGap, '0px', 'section container cannot add a second gap')
+    assert.equal(facts.indent, 12)
+    assert.equal(facts.controls.length, 2)
+    const active = facts.controls.filter(control => control.active)
+    assert.ok(active.length > 0, 'real Space selected controls must be present')
+    for (const control of active) {
+      assert.equal(control.hovered, false)
+      assert.equal(control.pressed, false)
+      assert.equal(control.fill, facts.surface2, 'Space static active fill is restrained')
+      assert.equal(control.shadow, 'none', 'Space static active has no strengthening shadow')
+      assert.equal(control.radius, '6px')
+      assert.equal(control.box.width, 28); assert.equal(control.box.height, 28)
+      assert.ok(control.box.x >= 80, 'Space controls stay clear of traffic lights')
+    }
+    const globalActive = facts.globalControls.filter(control => control.active)
+    assert.ok(globalActive.length > 0, 'actual shared global Chrome controls are mounted')
+    for (const control of globalActive) {
+      assert.equal(control.fill, facts.surface3, 'global active fill stays unchanged')
+      assert.notEqual(control.shadow, 'none', 'global active strengthening stays unchanged')
+    }
+    return facts
+  }
   const check = g => {
     assert.equal(g.topicCount, 13)
     for (const key of ['mote', 'topics', 'standalone', 'alpha', 'core', 'beta', 'group']) {
@@ -76,6 +103,7 @@ app.whenReady().then(async () => {
     const g = await read('window.spaceTreeGeometry()')
     result.default = g
     check(g)
+    result.restraint = { default:await checkRestraint(12) }
     const rich = await read('(() => { const topic = document.querySelector(".space-topic-row").closest(".project-rail-entry"); return { label:topic.querySelector(".project-activity").getAttribute("aria-label"), mark:topic.querySelector(".space-pin--pinned").getAttribute("aria-label"), metrics:[...topic.querySelectorAll(".project-activity__metric")].map(node=>node.textContent) } })()')
     assert.deepEqual(rich.metrics, ['12', '3'])
     assert.ok(rich.label.includes('12 Needs you') && rich.label.includes('3 Error') && rich.label.includes('Topic · Release planning'))
@@ -109,6 +137,7 @@ app.whenReady().then(async () => {
       await click('.space-tree-search > button:last-child')
       await until(`document.querySelector('.project-rail').dataset.railDensity === '${tier}'`)
       result[tier] = await read('window.spaceTreeGeometry()'); check(result[tier])
+      result.restraint[tier] = await checkRestraint(tier === 'compact' ? 8 : 6)
       assert.equal(result[tier].indent, result.default.indent)
       assert.ok(result[tier].mote.icon.width < (tier === 'compact' ? result.default.mote.icon.width : result.compact.mote.icon.width))
       assert.ok(result[tier].mote.box.height < (tier === 'compact' ? result.default.mote.box.height : result.compact.mote.box.height))
@@ -255,11 +284,13 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".space-pin--pinned")')
     await click('[aria-label="Collapse Topics"]')
     result.durable = await read('window.spaceTreePersist()')
+    await input('Input.dispatchMouseEvent', { type:'mouseMoved', x:10, y:10 })
     await read('document.documentElement.dataset.appearance = "light"')
     const themeFacts = () => read(`(() => { const root = document.documentElement; const style = getComputedStyle(root); const mote = getComputedStyle(document.querySelector('.space-mote-row')); const active = getComputedStyle(document.querySelector('.project-rail-row--active')); return { dataset:{...root.dataset}, inlineStyle:root.getAttribute('style'), text:style.getPropertyValue('--text').trim(), text2:style.getPropertyValue('--text-2').trim(), surface3:style.getPropertyValue('--surface-3').trim(), moteColor:mote.color, selectedColor:active.color, selectedFill:active.backgroundColor, transitions:document.getAnimations().map(animation => ({type:animation.constructor.name, iterations:animation.effect?.getComputedTiming().iterations})) } })()`)
     result.lightTransition = await themeFacts()
     await capture('light.png')
     result.lightStable = await themeFacts()
+    result.restraint.light = await checkRestraint(6)
     assert.equal(result.lightStable.text, '#17201a')
     assert.equal(result.lightStable.text2, '#46554b')
     assert.equal(result.lightStable.surface3, '#d7dfda')

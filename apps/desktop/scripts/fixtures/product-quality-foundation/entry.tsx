@@ -7,6 +7,7 @@ import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
+import { formatRegionAddress } from '../../../src/renderer/src/lib/agent-address'
 import '../../../src/renderer/src/styles/index.css'
 
 // Only the existing public preview API boundary is synthetic. Production views, effects, xterm and CSS are actual.
@@ -19,12 +20,13 @@ const output = Array.from({ length: 100 }, (_, n) => `OUTPUT ${String(n).padStar
 const bytes = new TextEncoder().encode(output)
 const originalAttach = api.sessions.attach, originalWrite = api.sessions.write, originalRefresh = api.sessions.refresh, originalRefreshAttachment = api.sessions.refreshAttachment
 let mode = 'normal', generation = 0, screenshots = 0, observationFailures = 0
-const writes: unknown[] = [], refreshes: unknown[] = [], attachmentRefreshes: unknown[] = [], recoveries: unknown[] = [], actions: unknown[] = [], events: unknown[] = []
+const writes: unknown[] = [], refreshes: unknown[] = [], attachmentRefreshes: unknown[] = [], recoveries: unknown[] = [], actions: unknown[] = [], events: unknown[] = [], clipboard: string[] = []
 const loops = originals.map(session => ({ loopId: 'loop-' + session.id, hostId: session.hostId, agentSessionId: session.id,
   providerId: session.providerId, workspacePath: session.workspacePath, intervalMs: 60_000, prompt: 'Continue the original task',
   nextCheckAt: 60_000, status: 'active' as const, lastOutcome: 'unknown' as const, lastDecision: 'Original automatic progress cause FINAL PROGRESS CAUSE' }))
 api.ui.captureScreenshot = async () => { screenshots += 1; throw new Error('System capture forbidden in this private UI proof') }
 api.ui.chooseFiles = async () => []
+api.ui.writeClipboardText = async text => { clipboard.push(text) }
 api.continuousProgress.list = async target => {
   if (mode === 'list-rejected') throw new Error('Original list cause FINAL LIST CAUSE')
   return ['progress-unknown', 'progress-action', 'progress-busy'].includes(mode) ? loops.filter(loop => loop.agentSessionId === target.agentSessionId) : []
@@ -109,7 +111,16 @@ const probe = {
     flushSync(() => useAppStore.setState({ error: 'Original recovery observation cause. '.repeat(7) + 'FINAL LIFECYCLE CAUSE', errorDismissed: false,
       errorNoticeContext: { kind: 'indeterminate', lifecycle: { step: 'resume', subject: session.control, lastProcessState: 'interrupted' } } }))
   },
+  header(next: string) {
+    probe.mode(next === 'readonly' ? 'readonly' : next === 'notice' ? 'unknown' : 'normal', next !== 'readonly')
+    const name = next === 'long' ? 'Original Agent — preserve the complete investigation name and precise Session while reading this wide Terminal' : 'Agent'
+    flushSync(() => useAppStore.setState(state => ({ agentNames: { [originals[0]!.id]: name, [originals[1]!.id]: name },
+      sessions: state.sessions.map(session => session.id === originals[1]!.id ? { ...session, providerId: originals[0]!.providerId, executorId: originals[0]!.executorId } : session) })))
+    return name
+  },
+  focusNeighbor() { flushSync(() => useAppStore.getState().focusRegion(workspaceId, 'quality-tab', 'quality-neighbor', 'pointer')) },
   facts() { return { generation, mode, writes, refreshes, attachmentRefreshes, recoveries, actions, events, screenshots,
+    clipboard, regionAddress: formatRegionAddress('quality-target'), tab: useAppStore.getState().tabs['quality-tab'],
     draft: useAppStore.getState().agentComposerDrafts[originals[0]!.id], session: useAppStore.getState().sessions.find(session => session.id === originals[0]!.id)?.control } }
 }
 Object.assign(window, { qualityProbe: probe })
