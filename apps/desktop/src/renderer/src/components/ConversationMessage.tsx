@@ -1,6 +1,6 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentTimelineItemStatus } from '@agentmux/core'
 import { Copy } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { formatClock, formatOffset } from '../lib/activity-ruler'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
@@ -9,6 +9,8 @@ import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ComposerTextarea } from './ComposerTextarea'
 import { SemanticIcon } from './semantic-icons'
+
+const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationMessageProps = {
   messageId?: string
@@ -30,8 +32,6 @@ export type ConversationMessageProps = {
 export type ConversationAnnotation = {
   messageId: string
   quote: string
-  start: number
-  end: number
   note: string
 }
 
@@ -48,18 +48,34 @@ export function ConversationMessage({
   speaker, name, providerId, content, status, createdAt, origin, workspaceRoot = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onAnnotate
 }: ConversationMessageProps) {
-  const parts: readonly AgentSessionHistoryContentPart[] = typeof content === 'string'
+  const isStringContent = typeof content === 'string'
+  const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
     ? [{ kind: 'text', text: content }]
     : content
   const hasContent = parts.some((part) => partText(part).length > 0)
   const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker ? 'Assistant' : 'Activity')
   // Native parts have no annotation offset contract. Live string annotations retain their original
-  // source offsets; read-only callers do not collect selection state.
+  // quote and note; read-only callers do not collect selection state.
   const canAnnotate = onAnnotate !== undefined && typeof content === 'string'
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [selection, setSelection] = useState<{ quote: string; start: number; end: number } | null>(null)
+  const activeCopyActionRef = useRef(0)
+  const copyTimerRef = useRef<number | null>(null)
+  const localPartKeysRef = useRef<WeakMap<object, string>>(new WeakMap())
+  const nextLocalKeyRef = useRef(1)
+  const [selection, setSelection] = useState<{ quote: string } | null>(null)
   const [note, setNote] = useState('')
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current)
+        copyTimerRef.current = null
+      }
+      ++activeCopyActionRef.current
+    }
+  }, [])
+
   function captureSelection(): void {
     if (!canAnnotate || typeof content !== 'string') return
     const current = window.getSelection()
@@ -68,22 +84,69 @@ export function ConversationMessage({
     if (!bodyRef.current.contains(range.commonAncestorContainer)) return
     const quote = current.toString().trim()
     if (!quote) return
-    const start = content.indexOf(quote)
-    setSelection({ quote, start: Math.max(0, start), end: Math.max(0, start) + quote.length })
+    setSelection({ quote })
   }
+
   async function copyMessage(): Promise<void> {
+    const actionId = ++activeCopyActionRef.current
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = null
+    }
     const text = parts.map(partText).join('\n')
-    const accepted = await copyTextToClipboard(text, () => setCopyState('failed'))
-    setCopyState(accepted ? 'copied' : 'failed')
-    if (accepted) window.setTimeout(() => setCopyState('idle'), 1600)
+    const accepted = await copyTextToClipboard(text, () => {
+      if (activeCopyActionRef.current === actionId) {
+        setCopyState('failed')
+      }
+    })
+    if (activeCopyActionRef.current !== actionId) return
+    if (accepted) {
+      setCopyState('copied')
+      copyTimerRef.current = window.setTimeout(() => {
+        if (activeCopyActionRef.current === actionId) {
+          setCopyState('idle')
+          copyTimerRef.current = null
+        }
+      }, 1600)
+    } else {
+      setCopyState('failed')
+    }
   }
+
   function submitAnnotation(): void {
     if (!selection || !note.trim() || !onAnnotate) return
-    onAnnotate({ messageId, quote: selection.quote, start: selection.start, end: selection.end, note: note.trim() })
+    onAnnotate({ messageId, quote: selection.quote, note: note.trim() })
     setNote('')
     setSelection(null)
     window.getSelection()?.removeAllRanges()
   }
+
+  const callCounts = new Map<string, number>()
+  for (const part of parts) {
+    if ((part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId) {
+      const k = `${part.kind}:${part.callId}`
+      callCounts.set(k, (callCounts.get(k) ?? 0) + 1)
+    }
+  }
+
+  const renderOccurrences = new Map<object, number>()
+
+  function partKey(part: AgentSessionHistoryContentPart): string {
+    if (isStringContent) return 'text'
+    if ((part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId) {
+      const k = `${part.kind}:${part.callId}`
+      if (callCounts.get(k) === 1) return k
+    }
+    let baseKey = localPartKeysRef.current.get(part)
+    if (!baseKey) {
+      baseKey = `part-${nextLocalKeyRef.current++}`
+      localPartKeysRef.current.set(part, baseKey)
+    }
+    const occurrence = (renderOccurrences.get(part) ?? 0) + 1
+    renderOccurrences.set(part, occurrence)
+    return occurrence === 1 ? baseKey : `${baseKey}:${occurrence}`
+  }
+
   return (
     <div className="log-turn" data-speaker-role={speaker?.role} data-status={status}>
       <span className="log-turn__node" aria-hidden="true">
@@ -106,36 +169,42 @@ export function ConversationMessage({
           ? formatClock(createdAt) : `${formatClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {formatClock(createdAt)}
         </span>}
-        {hasContent ? <span className="log-turn__actions">
+        {hasContent ? <span className="log-turn__actions" data-copy-state={copyState}>
+          {copyState === 'failed' ? (
+            <span className="log-turn__copy-error" role="alert">Copy failed</span>
+          ) : null}
           <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
-            <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}
+            <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button>
         </span> : null}
       </div>
       {hasContent ? (
         <div ref={bodyRef} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
-          {parts.map((part, index) => part.kind === 'text' ? <AgentMarkdown
-            key={index}
-            content={part.text}
-            workspaceRoot={workspaceRoot}
-            {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-            {...(readPastedImage ? { readPastedImage } : {})}
-            {...(openHttpLink ? { openHttpLink } : {})}
-          /> : part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result' ? (
-            <details key={index} className="log-turn__trace" data-trace-kind={part.kind}
-              {...(part.kind === 'tool-result' && part.failed === true ? { 'data-status': 'failed' } : {})}>
-              <summary>{part.kind === 'reasoning' ? 'Reasoning' : part.kind === 'tool-call'
-                ? `Tool call · ${part.name}` : `Tool result${part.name ? ` · ${part.name}` : ''}`}
-                {part.kind === 'tool-result' && part.failed === true ? ' · Failed' : null}
-              </summary>
-              <pre>{part.kind === 'reasoning' ? part.text : part.kind === 'tool-call' ? part.input : part.output}</pre>
-            </details>
-          ) : <div key={index} className="log-turn__resource">
-            <span>{part.label ?? `${part.resourceType} resource`}</span>
-            <code>{part.reference}</code>
-            <small>Resource reference; preview is not available here.</small>
-          </div>)}
+          {parts.map((part) => {
+            const key = partKey(part)
+            return part.kind === 'text' ? <MemoizedAgentMarkdown
+              key={key}
+              content={part.text}
+              workspaceRoot={workspaceRoot}
+              {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+              {...(readPastedImage ? { readPastedImage } : {})}
+              {...(openHttpLink ? { openHttpLink } : {})}
+            /> : part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result' ? (
+              <details key={key} className="log-turn__trace" data-trace-kind={part.kind}
+                {...(part.kind === 'tool-result' && part.failed === true ? { 'data-status': 'failed' } : {})}>
+                <summary>{part.kind === 'reasoning' ? 'Reasoning' : part.kind === 'tool-call'
+                  ? `Tool call · ${part.name}` : `Tool result${part.name ? ` · ${part.name}` : ''}`}
+                  {part.kind === 'tool-result' && part.failed === true ? ' · Failed' : null}
+                </summary>
+                <pre>{part.kind === 'reasoning' ? part.text : part.kind === 'tool-call' ? part.input : part.output}</pre>
+              </details>
+            ) : <div key={key} className="log-turn__resource">
+              <span>{part.label ?? `${part.resourceType} resource`}</span>
+              <code>{part.reference}</code>
+              <small>Resource reference; preview is not available here.</small>
+            </div>
+          })}
         </div>
       ) : null}
       {selection && onAnnotate ? <div className="log-turn__annotation" role="dialog" aria-label="Annotate selected text">

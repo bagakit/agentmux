@@ -5,8 +5,9 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/dist/index.js'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
 // source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
@@ -33,11 +34,15 @@ const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId =
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
 const regionCloseProof = process.argv.includes('--close-region')
 const identityMenuProof = process.argv.includes('--identity-menu')
+const swapNameProof = process.argv.includes('--swap-names')
+assert.ok(!swapNameProof || (identityMenuProof && !regionCloseProof), 'Three-Agent Swap is a separate identity case, never the original close case')
 const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
 let client, session, producer, failure, result, ownedRunProcess, seedReport
+const swapPeers = []
+let swapFixture, swapBefore, swapSelection
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function waitFor(label, read, budget = 20_000) {
@@ -91,7 +96,7 @@ async function launch(label) {
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   try {
-  await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')${!regionCloseProof || label === 'first' ? ` && document.querySelector('[data-workbench-region-id="${fileRegionId}"]')` : ''})`))
+  await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')${!regionCloseProof || label === 'first' ? ` && document.querySelector('[data-workbench-region-id="${fileRegionId}"]')` : ''}${swapNameProof ? ` && document.querySelector('[data-workbench-region-id="crash-third"] .composer [role="textbox"]')` : ''})`))
   } catch (error) {
     const observed = await cdp.evaluate(`({text:document.querySelector('main')?.innerText.slice(0,800),
       stored:JSON.parse(localStorage.getItem('agentmux-workbench-v1')),
@@ -219,6 +224,7 @@ try {
   assert.ok(Number.isFinite(originalRun.acceptedInputBytes) && originalRun.acceptedInputBytes >= 0,
     'Zero-replay proof requires an actual known Runtime input cursor')
   ownedRunProcess = await runProcessIdentity(originalRun.pid); assert.ok(ownedRunProcess)
+  if (swapNameProof) await createSwapPeers({ client, root, workspacePath, codexHome, peers: swapPeers })
   if (holdForWatchdog) {
     await client.dispose(); client = null
     console.error('region_restart_private_run_ready')
@@ -248,11 +254,18 @@ try {
       layouts: { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId },
         __scratch__: { root: { type: 'leaf', groupId: scratchGroupId }, groups: [{ id: scratchGroupId, tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: scratchGroupId } }
     } } }
+  if (swapNameProof) swapFixture = seedSwapRegions(seed, { session, peers: swapPeers, tabId, agentRegionId, fileRegionId, workspaceId, identityName })
   await seedWorkbench(seed)
   const first = await launch('first')
   await delay(600) // Establish the pre-edit hydrated baseline, never flush a post-edit value.
   const before = await surface(first.cdp)
-  assert.deepEqual(before.tabs, [tabId]); assert.deepEqual(before.regions, [agentRegionId, fileRegionId].sort())
+  assert.deepEqual(before.tabs, [tabId]); assert.deepEqual(before.regions, (swapNameProof ? swapFixture.ids : [agentRegionId, fileRegionId]).slice().sort())
+  if (swapNameProof) {
+    swapBefore = await readSwapFacts(first.cdp, swapFixture.ids)
+    assert.deepEqual(swapBefore.headers.map(header => header.name), [identityName, 'Private saved reviewer', identityName])
+    assert.ok(swapBefore.headers.length === 3 && swapBefore.headers.every(header => header.visible && header.name === header.title))
+    for (const peer of swapPeers) assert.equal(swapBefore.drafts[peer.session.agentSessionId], seed.state.agentComposerDrafts[peer.session.agentSessionId])
+  }
   if(identityMenuProof) assert.deepEqual(before.identity,{name:identityName,stored:identityName,more:1})
   assert.equal(before.draft, oldDraft); assert.equal(before.splitPercent, 70)
   assert.deepEqual(before.queued.map(entry => entry.operationId), ['private-queue-first', 'private-queue-unknown', 'private-queue-last'])
@@ -316,6 +329,18 @@ try {
   const expectedWorkbench = structuredClone(before.workbench)
   expectedWorkbench.tabs[tabId].layout.root.ratio = 0.6
   expectedWorkbench.tabs[tabId].layout.activeRegionId = fileRegionId
+  if (swapNameProof) {
+    const focusNeighbor = async () => {
+      const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
+        operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'))
+      assert.equal(reply.ok, true, JSON.stringify(reply)); assert.equal(reply.operation, 'focus'); return reply
+    }
+    swapSelection = await selectSwapTarget({ cdp: first.cdp, key, activateButton, waitFor, focusNeighbor, agentRegionId, fileRegionId, identityName, tabId })
+    const split = expectedWorkbench.tabs[tabId].layout.root
+    split.first.regionId = 'crash-third'; split.second.second.regionId = agentRegionId
+    await waitFor('exact original three-Agent Swap projection', async () => JSON.stringify((await surface(first.cdp)).workbench) === JSON.stringify(expectedWorkbench))
+    lastEditAt = Date.now()
+  }
   if (regionCloseProof) {
     // Close the existing file Region through its actual X. Dirty cancellation/confirmation is
     // separately exercised by the mounted Workbench owner; Editor loading is not a Header gate.
@@ -372,7 +397,7 @@ try {
       movedQueueWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.queued) === JSON.stringify(expectedQueue) },
     second: { pid: second.child.pid, workbenchDigest: hash(JSON.stringify(restored.workbench)), draftDigest: hash(restored.draft ?? ''),
       exactDraftRestored: restored.draft === newDraft, exactWorkbenchRestored: JSON.stringify(restored.workbench) === JSON.stringify(expectedWorkbench),
-      exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(before.focus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
+      exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(swapNameProof ? immediatelyBeforeCrash.focus : before.focus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
     limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
       'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
@@ -384,7 +409,7 @@ try {
   assert.deepEqual(restored.workbench, expectedWorkbench, 'The exact edited workbench must survive sudden process termination while Agent events are active')
   assert.equal(restored.draft, newDraft, 'The unsent edited draft must survive without an unload flush')
   assert.deepEqual(restored.queued, expectedQueue, 'Moved pending order, immutable admission time and historical execution pause must survive the second process')
-  assert.deepEqual(restored.focus, before.focus); assert.deepEqual(restored.regions, regionCloseProof ? [agentRegionId] : [agentRegionId, fileRegionId].sort()); assert.deepEqual(restored.activeRegions, regionCloseProof ? [] : [fileRegionId])
+  assert.deepEqual(restored.focus, swapNameProof ? immediatelyBeforeCrash.focus : before.focus); assert.deepEqual(restored.regions, regionCloseProof ? [agentRegionId] : (swapNameProof ? swapFixture.ids : [agentRegionId, fileRegionId]).slice().sort()); assert.deepEqual(restored.activeRegions, regionCloseProof ? [] : [fileRegionId])
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
   assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
@@ -400,12 +425,32 @@ try {
     assert.equal(triggerReturned,true)
     result.identityMenu={passed:true,before:before.identity,restored:restored.identity,entries,escapeReturned:true}
   }
+  if (swapNameProof) {
+    const after = await readSwapFacts(second.cdp, swapFixture.ids)
+    assert.deepEqual(after.names, swapBefore.names); assert.deepEqual(after.headers, swapBefore.headers)
+    for (const peer of swapPeers) {
+      const id = peer.session.agentSessionId, attached = sessions.sessions.find(value => value.id === id)
+      assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, peer.session.run.runId)
+      assert.equal(after.drafts[id], swapBefore.drafts[id]); assert.deepEqual(after.queues[id], swapBefore.queues[id])
+    }
+    const entries = await restoreSwapMenu({ cdp: second.cdp, key, activateButton, waitFor, agentRegionId, identityName })
+    result.swapNames = { passed: true, fixture: swapFixture, before: swapBefore, after, selection: swapSelection, entries }
+  }
   second.cdp.close(); process.kill(-second.child.pid, 'SIGKILL')
   await waitFor('second private exit', () => second.child.signalCode !== null || second.child.exitCode !== null, 5_000); children.delete(second.child)
   client = await connectLocalAgentMux({ store })
   const run = (await client.listRuns()).find(value => value.runId === session.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, originalRun.pid)
   assert.equal(run.acceptedInputBytes, originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write any input to this private Run')
+  if (swapNameProof) {
+    const runs = await client.listRuns()
+    result.swapNames.peers = await Promise.all(swapPeers.map(async peer => {
+      const current = runs.find(run => run.runId === peer.session.run.runId)
+      assert.equal(current?.state, 'running'); assert.equal(current.pid, peer.run.pid); assert.equal(current.acceptedInputBytes, peer.run.acceptedInputBytes)
+      const birth = await swapRunBirth(current.pid); assert.equal(birth, peer.birth)
+      return { agentSessionId: peer.session.agentSessionId, runId: current.runId, pid: current.pid, birth, inputBefore: peer.run.acceptedInputBytes, inputAfter: current.acceptedInputBytes }
+    }))
+  }
   result.pendingQueueAutomaticallyReplayed = false
   await client.writeTerminal(session.run, { ownerInstanceId: client.runtimeIdentity().instanceId, operationId: randomUUID(), expectedByte: run.acceptedInputBytes, data: 'private-input-after-crash\r' })
   await waitFor('same private Run accepts input', async () => (await client.listRuns()).find(value => value.runId === session.run.runId)?.acceptedInputBytes > run.acceptedInputBytes)
@@ -423,7 +468,7 @@ try {
   })
   await attempt(async () => {
     if (!client && session) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
-    if (client) { try { if (session) await client.stopAgent(session.agentSessionId, session.run) } finally { await client.dispose() } }
+    if (client) { try { for (const agent of [session, ...swapPeers.map(peer => peer.session)]) if (agent) await client.stopAgent(agent.agentSessionId, agent.run) } finally { await client.dispose() } }
   })
   // A Core/transport cleanup failure cannot skip the detached cat whose argv no longer
   // contains its private wrapper path. Birth identity prevents acting on a reused PID.
@@ -435,6 +480,7 @@ try {
     try { process.kill(-actual.group, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
   })
   await attempt(async () => {
+    if (swapNameProof) cleanup.swapPeerRuns = await cleanupSwapPeers(root, swapPeers)
     await stopProbeProcesses(process.pid + 1_000_000_000, root)
     assert.deepEqual(await listProbeProcesses(process.pid + 1_000_000_000, root), [])
     const remainingRun = ownedRunProcess && await runProcessIdentity(ownedRunProcess.pid)

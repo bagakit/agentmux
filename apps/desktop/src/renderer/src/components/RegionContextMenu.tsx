@@ -225,6 +225,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator }: {
       <Item
         key={`swap-${entry.entry.targetRegionId}`}
         className="tab-context-menu__item"
+        title={entry.entry.label}
         onSelect={entry.entry.onSelect}
       >
         <Replace size={14} />
@@ -314,7 +315,7 @@ export function RegionContextMenu({
       <ContextMenu.Root>
         <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
         <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-          <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
+          <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8}>
             {model.entries.map((entry, index) => <RegionMenuEntryView
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}

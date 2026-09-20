@@ -127,11 +127,12 @@ describe('对话消息上的选区注解', () => {
     expect(annotation.messageId, '注解没带消息身份，宿主无法把它挂回原消息').toBe('m-42')
     expect(annotation.quote).toBe(QUOTE)
     expect(annotation.note).toBe('Check this branch.')
-    // range 不是抄来的数字，要真能在原文里切回同一段——切错了注解就落在别的字上。
-    expect(
-      CONTENT.slice(annotation.start, annotation.end),
-      `start/end 切不回引文：切出来的是 "${CONTENT.slice(annotation.start, annotation.end)}"`
-    ).toBe(QUOTE)
+    // start/end 契约已删除：产品消费者（SessionPane / composer）仅消费 quote 与 note 追加草稿，
+    // 全 renderer 零 start/end 消费者；此前内部用 indexOf 计算对重复文本取首个 index、对渲染 Markdown
+    // 取 -1 clamp 0 产生虚假数字坐标。因此删除未消费的数字坐标契约，保留真实 quote / messageId / note。
+    expect(CONTENT).toContain(annotation.quote)
+    expect((annotation as Record<string, unknown>).start).toBeUndefined()
+    expect((annotation as Record<string, unknown>).end).toBeUndefined()
 
     await act(async () => root.unmount())
     host.remove()

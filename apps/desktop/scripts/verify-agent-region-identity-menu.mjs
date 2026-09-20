@@ -64,7 +64,10 @@ async function productionCallers(){
     {symbol:'useRegionMenuEntries',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionHeader.tsx',kind:'call'},
     {symbol:'RegionMenuEntryView',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionHeader.tsx',kind:'jsx'},
     {symbol:'agentDisplayName',definition:'lib/workbench-tabs.ts',caller:'components/SessionPane.tsx',kind:'call'},
-    {symbol:'closeRegion',definition:'store.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'}
+    {symbol:'closeRegion',definition:'store.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
+    {symbol:'agentDisplayName',definition:'lib/workbench-tabs.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
+    {symbol:'regionSwapMenuEntries',definition:'lib/workbench-tab-actions.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
+    {symbol:'swapRegions',definition:'store.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'}
   ]
   for(const contract of contracts){
     assert.notEqual(contract.definition,contract.caller)
@@ -77,30 +80,40 @@ async function productionCallers(){
     result.callers.push({...contract,hits,sourceSha256:hash(text)})
   }
 }
-async function restart(){
-  const directory=join(privateRoot,'restart');await mkdir(directory)
-  const receiptPath=join(evidence,'restart-raw-receipt.json')
+async function restart(swapNames=false){
+  const directory=join(privateRoot,swapNames?'restart-swap':'restart');await mkdir(directory)
+  const receiptPath=join(evidence,swapNames?'restart-swap-raw-receipt.json':'restart-raw-receipt.json')
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
   let outcome,detachedRuns;const log=[]
-  try{outcome=await runProbeProcess(process.execPath,[join(desktop,'scripts/verify-workbench-persistence-restart.mjs'),'--identity-menu',`--probe-root=${directory}`,`--receipt-path=${receiptPath}`],{
+  const args=[join(desktop,'scripts/verify-workbench-persistence-restart.mjs'),'--identity-menu',`--probe-root=${directory}`,`--receipt-path=${receiptPath}`]
+  if(swapNames)args.push('--swap-names')
+  try{outcome=await runProbeProcess(process.execPath,args,{
     temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:125000,onLine:line=>log.push(line)})}
-  finally{detachedRuns=await reapDetachedRuns(directory);await writeFile(join(evidence,'restart.log'),log.join('\n'))}
+  finally{detachedRuns=await reapDetachedRuns(directory);await writeFile(join(evidence,swapNames?'restart-swap.log':'restart.log'),log.join('\n'))}
   assert.equal(outcome.exitCode,0);assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
   const receipt=JSON.parse(await readFile(receiptPath,'utf8'))
   assert.equal(receipt.passed,true);assert.equal(receipt.regionClose,false);assert.equal(receipt.identityMenu.passed,true)
-  assert.equal(receipt.second.visibleRegions.length,2);assert.equal(receipt.sameRunPid,true);assert.equal(receipt.privateInputAccepted,true)
-  await writeFile(join(evidence,'restart.json'),JSON.stringify(receipt,null,2))
+  assert.equal(receipt.second.visibleRegions.length,swapNames?3:2);assert.equal(receipt.sameRunPid,true);assert.equal(receipt.privateInputAccepted,true)
+  if(swapNames){assert.equal(receipt.swapNames.passed,true);assert.equal(receipt.swapNames.peers.length,2)}
+  await writeFile(join(evidence,swapNames?'restart-swap.json':'restart.json'),JSON.stringify(receipt,null,2))
   return{outcome,detachedRuns,receipt}
 }
 try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim();result.sourceBefore=await sources()
-  result.render=await renderer('fixed');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
-  if(!process.argv.includes('--render-only')){
+  const swapOnly=process.argv.includes('--swap-render-only')
+  result.render=await renderer('fixed',swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
+  if(!process.argv.includes('--render-only')&&!swapOnly){
     await mutation('name',join(desktop,'src/renderer/src/components/AgentRegionHeader.tsx'),'>{name}</strong>',">{''}</strong>",'name',/Actual Agent name is nonempty/)
     await mutation('target',join(desktop,'src/renderer/src/components/WorkspaceWorkbench.tsx'),
       'split: (direction) => splitRegion(tab.workspaceId, tab.id, node.regionId, direction)',
       'split: (direction) => splitRegion(tab.workspaceId, tab.id, tab.layout.activeRegionId, direction)','target',/^Expected values to be strictly deep-equal:/)
-    await productionCallers();result.restart=await restart()
+    await mutation('swap-name',join(desktop,'src/renderer/src/components/WorkspaceWorkbench.tsx'),
+      'label: facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions)',
+      'label: regionSurfaceLabel(region, sessions)','swap-name',/Swap targets use the actual current Header display-name chain/)
+    await mutation('swap-target',join(desktop,'src/renderer/src/components/WorkspaceWorkbench.tsx'),
+      'swap: (a, b) => swapRegions(tab.workspaceId, tab.id, a, b)',
+      'swap: (a, b) => swapRegions(tab.workspaceId, tab.id, a, tab.layout.activeRegionId)','swap-target',/The original source swaps only with the selected third target/)
+    await productionCallers();result.restart=await restart();result.swapRestart=await restart(true)
   }else result.diagnosticOnly=true
   result.sourceAfter=await sources();assert.deepEqual(result.sourceAfter,result.sourceBefore);result.passed=true
 }catch(error){result.failure={name:error.name,message:error.message}}

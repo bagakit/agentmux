@@ -20,11 +20,13 @@ vi.mock('react-resizable-panels', () => ({ PanelGroup: forwardRef(({ children }:
         children: ReactNode;
     }) => createElement('div', null, children), PanelResizeHandle: () => createElement('div') }));
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface';
+import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice';
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench';
 const initial = useAppStore.getState();
 let root: Root, container: HTMLDivElement, resolveRecovery: (result: SessionRecoveryResult) => void, recover: MockInstance<typeof api.sessions.recover>, originalTab: ReturnType<typeof createWorkbenchTab>, recovered: SessionSnapshot;
 function terminal(id: string): SessionSnapshot { return { id, kind: 'terminal', providerId: null, hostId: 'local', workspacePath: '/repo', label: 'Terminal', createdAt: 1, updatedAt: 1, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0, control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } } }; }
-function Fixture() { const tabs = useAppStore(s => s.tabs), id = useAppStore(s => s.agentFocus.execution.sessionId), tab = tabForFocusedSession(tabs, id); return createElement('section', null, createElement(GlobalFocusSurface), createElement('div', { className: 'workspace-workbench-registry' }, createElement('div', { className: 'workspace-workbench-slot workspace-workbench-slot--focus-source' }, createElement(WorkspaceWorkbench, { workspaceId: 'repo', visible: true, focusTabId: tab?.id ?? null, focusPortalTargetId: 'focus-workspace-slot' })))); }
+function Notices() { const state = useAppStore(); return createElement(TransientErrorNotice, { error: state.error, dismissed: state.errorDismissed, lastError: state.lastError, onDismiss: state.dismissError, onReopen: state.reopenError, kind: state.errorNoticeContext?.kind ?? 'indeterminate' }); }
+function Fixture() { const tabs = useAppStore(s => s.tabs), id = useAppStore(s => s.agentFocus.execution.sessionId), tab = tabForFocusedSession(tabs, id); return createElement('section', null, createElement(GlobalFocusSurface), createElement(Notices), createElement('div', { className: 'workspace-workbench-registry' }, createElement('div', { className: 'workspace-workbench-slot workspace-workbench-slot--focus-source' }, createElement(WorkspaceWorkbench, { workspaceId: 'repo', visible: true, focusTabId: tab?.id ?? null, focusPortalTargetId: 'focus-workspace-slot' })))); }
 const row = (id: string) => { const r = container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`); expect(r).not.toBeNull(); return r!; };
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 beforeEach(async () => {
@@ -103,4 +105,43 @@ it('keeps Focus closed when the user closes it during a pending restart', async 
     expect(after.agentFocus).toBe(choice);
     expect(container.querySelector('#focus-workspace-slot')).toBeNull();
     expect(after.tabs['original-tab']!.regions['old-region']).toEqual({ ...originalTab.regions['old-region'], sessionId: 'new' });
+});
+
+it('shows the cleanup failure beside the recovered Terminal without losing healthy neighbors', async () => {
+    const before = useAppStore.getState(), old = before.sessions.find(session => session.id === 'old')!, sibling = before.sessions.find(session => session.id === 'sibling')!, neighbor = before.sessions.find(session => session.id === 'neighbor')!, neighborTab = before.tabs['neighbor-tab']!, drafts = before.agentComposerDrafts;
+    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async control => {
+        expect(control).toEqual(recovered.control);
+        throw new Error('Recovered terminal cleanup failed');
+    });
+    await clickRestart();
+    await act(async () => { await useAppStore.getState().closeRegion('repo', 'original-tab', 'old-region');
+        expect(useAppStore.getState().tabs['original-tab']!.regions['old-region']).toBeUndefined();
+        expect(stop).not.toHaveBeenCalled(); await settle(); });
+    await act(async () => { resolveRecovery({ kind: 'terminal-restarted', session: recovered }); await settle(); });
+    const after = useAppStore.getState();
+    expect(stop.mock.calls.map(([control]) => control)).toEqual([recovered.control]);
+    expect(after.sessions.find(session => session.id === 'new')).toBe(recovered);
+    expect(after.sessions.find(session => session.id === 'sibling')).toBe(sibling);
+    expect(after.sessions.find(session => session.id === 'neighbor')).toBe(neighbor);
+    expect(after.tabs['neighbor-tab']).toBe(neighborTab);
+    expect(after.tabs['original-tab']!.regions['sibling-region']).toEqual(originalTab.regions['sibling-region']);
+    expect(after.agentComposerDrafts).toBe(drafts);
+    expect(after.closingWorkbenchViews).toEqual({});
+    expect(row('new').getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-test-terminal-paint="new"]')).not.toBeNull();
+    const notices = container.querySelectorAll('.error-notice');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.getAttribute('role')).toBe('status');
+    expect(notices[0]!.textContent).toContain('Recovered Session owner disappeared and cleanup failed');
+    expect(notices[0]!.querySelector('[aria-label="Dismiss error"]')).not.toBeNull();
+    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click(); await settle(); });
+    expect(container.querySelectorAll('.error-notice')).toHaveLength(0);
+    const reopen = container.querySelector<HTMLButtonElement>('.error-notice__reopen');
+    expect(reopen).not.toBeNull();
+    await act(async () => { reopen!.click(); await settle(); });
+    expect(container.querySelectorAll('.error-notice')).toHaveLength(1);
+    expect(container.querySelector('.error-notice')!.textContent).toContain('cleanup failed');
+    expect(container.querySelector('[data-test-terminal-paint="new"]')).not.toBeNull();
+    expect(useAppStore.getState().sessions.find(session => session.id === 'sibling')).toBe(sibling);
+
 });

@@ -6125,10 +6125,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       } catch (cleanupError) {
         set((state) => projectRecoveredSession(state, sessionId, session))
         get().selectSession(session.id)
-        throw new AggregateError(
+        const failure = new AggregateError(
           [new Error('Recovered Session owner disappeared before commit.'), cleanupError],
           'Recovered Session owner disappeared and cleanup failed.'
         )
+        if (operationId) throw failure
+        // The replacement has a new ID; the outer stale-owner guard cannot report its cleanup.
+        get().reportError(failure)
       }
     } catch (error) {
       if (operationId) throw error

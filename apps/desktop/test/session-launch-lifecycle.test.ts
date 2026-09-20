@@ -23,7 +23,10 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
+import { warmLauncherId } from '../src/renderer/src/lib/warm-terminal-preview.js'
+
 const initialState = useAppStore.getState()
+const warmOwner = warmLauncherId({ tabGroupId: 'pane', regionId: initialWorkbenchRegionId('launcher-tab') })
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -60,7 +63,7 @@ function launcherFixture(): WorkbenchTab {
   return launcher
 }
 
-function terminalSession(id: string): SessionSnapshot {
+function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal' }> {
   return {
     id,
     kind: 'terminal',
@@ -82,11 +85,12 @@ function terminalSession(id: string): SessionSnapshot {
   }
 }
 
-function agentSession(id: string): SessionSnapshot {
+function agentSession(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
     ...terminalSession(id),
     kind: 'agent',
     agentSessionUpdatedAt: 1,
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     providerId: 'codex',
     executorId: 'codex',
     label: 'Codex',
@@ -112,7 +116,10 @@ function browserSurface(regionId: string, browserId = `browser:${regionId}`) {
     loading: false,
     canGoBack: false,
     canGoForward: false,
-    viewport: 'responsive',
+    viewport: 'responsive' as const,
+    profileId: 'default',
+    driving: false,
+    appLinkPrompt: null,
     error: null
   }
 }
@@ -131,9 +138,9 @@ describe('Session and Launcher lifecycle ownership', () => {
     delete mutableApi.control
 
     try {
-      await expect(useAppStore.getState().initialize()).rejects.toThrow('AgentMux Control API is unavailable')
+        await expect(useAppStore.getState().initialize()).rejects.toThrow('AgentMux Control API is unavailable')
     } finally {
-      mutableApi.control = control
+      mutableApi.control = control!
     }
 
     expect(subscribeSessions).not.toHaveBeenCalled()
@@ -230,7 +237,8 @@ describe('Session and Launcher lifecycle ownership', () => {
           label: stale.label,
           createdAt: stale.createdAt,
           updatedAt: stale.updatedAt,
-          run: { ...stale.control.run }
+          run: { ...stale.control.run },
+          semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() }
         }]
       })
       .mockResolvedValueOnce({
@@ -244,15 +252,16 @@ describe('Session and Launcher lifecycle ownership', () => {
     })
 
     const dispose = await useAppStore.getState().initialize()
+    try {
 
-    expect(recover).toHaveBeenCalledWith(stale.control, stale.workspacePath)
-    expect(snapshot).toHaveBeenCalledTimes(2)
-    expect(useAppStore.getState().sessions).toContainEqual(resumed)
-    expect(useAppStore.getState().tabs[tab.id]?.regions['persisted-region']).toMatchObject({
-      kind: 'agent',
-      sessionId: stale.id
-    })
-    dispose()
+      expect(recover).toHaveBeenCalledWith(stale.control, stale.workspacePath)
+      expect(snapshot).toHaveBeenCalledTimes(2)
+      expect(useAppStore.getState().sessions).toContainEqual(resumed)
+      expect(useAppStore.getState().tabs[tab.id]?.regions['persisted-region']).toMatchObject({
+        kind: 'agent',
+        sessionId: stale.id
+      })
+    } finally { dispose() }
   })
 
   it('stops a late successful launch without recreating its closed Tab', async () => {
@@ -689,11 +698,13 @@ describe('Session and Launcher lifecycle ownership', () => {
         !state.closingWorkbenchViews[firstTab.id]
       ) return
       unsubscribe()
+      const surface = secondTab.regions[secondRegionId]
+      if (surface?.kind !== 'terminal') throw new Error('Expected the reserved Terminal fixture')
       useAppStore.setState((current) => ({
         tabs: {
           ...current.tabs,
           [secondTab.id]: replaceWorkbenchRegion(current.tabs[secondTab.id]!, secondRegionId, {
-            ...secondTab.regions[secondRegionId]!,
+            ...surface,
             phase: 'attached'
           })
         }
@@ -891,7 +902,7 @@ describe('Session and Launcher lifecycle ownership', () => {
     expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
   })
 
-  it('keeps a recovered Agent Run visible when owner-loss cleanup fails', async () => {
+  it('keeps a canonical recovered Agent visible when the frozen old Run closes', async () => {
     const session = agentSession('agent-run')
     const recovered = {
       ...session,
@@ -905,12 +916,14 @@ describe('Session and Launcher lifecycle ownership', () => {
       workspaceId: 'workspace',
       sessionId: session.id
     })
+    const neighbor = agentSession('neighbor-agent')
+    const neighborTab = createWorkbenchTab('neighbor-view', { regionId: 'neighbor-region', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: neighbor.id })
     useAppStore.setState({
       config,
       activeWorkspaceId: 'workspace',
-      sessions: [session],
-      tabs: { [tab.id]: tab },
-      layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
+      sessions: [session, neighbor],
+      tabs: { [tab.id]: tab, [neighborTab.id]: neighborTab },
+      layouts: { workspace: createWorkspaceLayout('pane', [tab.id, neighborTab.id]) },
       error: null
     })
     const pendingRecover = deferred<SessionRecoveryResult>()
@@ -929,16 +942,27 @@ describe('Session and Launcher lifecycle ownership', () => {
     const recover = useAppStore.getState().recoverSession(session.id)
     const close = useAppStore.getState().closeTab('workspace', 'pane', tab.id)
     await oldStopStarted.promise
-    pendingRecover.resolve({ kind: 'resumed', session: recovered })
-    await recover
-    expect(useAppStore.getState().sessions[0]?.control.run.runId).toBe('recovered-run')
-    pendingOldStop.resolve()
+    try {
+      pendingRecover.resolve({ kind: 'resumed', session: recovered })
+      await recover
+      useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
+        type: 'agent-session', session: {
+          kind: 'agent', agentSessionId: session.id, providerId: 'codex', executorId: 'codex',
+          hostId: 'local', workspacePath: '/repo', createdAt: 1, updatedAt: 2,
+          run: recovered.control.run, retiredRuns: [session.control.run]
+        }
+      } })
+      expect(useAppStore.getState().sessions[0]?.control.run.runId).toBe('recovered-run')
+    } finally { pendingOldStop.resolve(); await close }
 
     await expect(close).resolves.toBe(false)
-    expect(stop).toHaveBeenCalledTimes(2)
+    expect(stop.mock.calls.map(([control]) => control)).toEqual([session.control])
     expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
-    expect(useAppStore.getState().sessions).toEqual([recovered])
-    expect(useAppStore.getState().error).toContain('Recovered Session owner disappeared and cleanup failed')
+    expect(useAppStore.getState().sessions.map(item => [item.id, item.control.run.runId])).toEqual([[session.id, 'recovered-run'], [neighbor.id, neighbor.control.run.runId]])
+    expect(useAppStore.getState().tabs[neighborTab.id]).toBe(neighborTab)
+    expect(useAppStore.getState().sessions.find(item => item.id === neighbor.id)).toBe(neighbor)
+    expect(useAppStore.getState().error).toContain('View changed while it was closing')
+    expect(useAppStore.getState().closingWorkbenchViews).toEqual({})
   })
 
   it('projects Core continuity unavailability without replacing or stopping the Session', async () => {
@@ -1172,6 +1196,58 @@ describe('Session and Launcher lifecycle ownership', () => {
     expect(useAppStore.getState().error).toContain('cleanup failed')
   })
 
+  it('retains operation rejection when recovered Terminal owner-loss cleanup fails', async () => {
+    const session = terminalSession('terminal-run')
+    const recovered = terminalSession('recovered-run')
+    const tab = createWorkbenchTab('terminal-view', {
+      regionId: 'terminal-region',
+      kind: 'terminal',
+      phase: 'attached',
+      workspaceId: 'workspace',
+      sessionId: session.id
+    })
+    useAppStore.setState({
+      config,
+      activeWorkspaceId: 'workspace',
+      sessions: [session],
+      tabs: { [tab.id]: tab },
+      layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) },
+      error: null
+    })
+    const pendingRecover = deferred<SessionRecoveryResult>()
+    vi.spyOn(api.sessions, 'recover').mockImplementation(async () => await pendingRecover.promise)
+    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async (control) => {
+      if (control.run.runId === recovered.control.run.runId) {
+        throw new Error('recovered Run cleanup failed')
+      }
+      useAppStore.getState().applyEvent({
+        type: 'core',
+        hostId: session.hostId,
+        event: {
+          type: 'run-removed',
+          run: session.control.run,
+          evidence: { source: 'user', observedAt: 2, run: session.control.run }
+        }
+      })
+    })
+
+    const recover = useAppStore.getState().recoverSession(session.id, 'recovery-operation')
+    const rejection = expect(recover).rejects.toThrow('Recovered Session owner disappeared and cleanup failed')
+    await expect(useAppStore.getState().closeTab('workspace', 'pane', tab.id)).resolves.toBe(true)
+    pendingRecover.resolve({ kind: 'terminal-restarted', session: recovered })
+    await rejection
+
+    const reopened = useAppStore.getState().tabs[`session:${recovered.id}`]
+    expect(stop).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().sessions).toEqual([recovered])
+    expect(reopened && titleWorkbenchSurface(reopened)).toMatchObject({
+      kind: 'terminal',
+      phase: 'attached',
+      sessionId: recovered.id
+    })
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('does not resurrect a Session from a refresh that resolves after owner removal', async () => {
     const session = terminalSession('terminal-run')
     const tab = createWorkbenchTab('terminal-view', {
@@ -1241,6 +1317,7 @@ describe('Session and Launcher lifecycle ownership', () => {
           root: {
             type: 'split',
             direction: 'horizontal',
+            ratio: 0.5,
             first: { type: 'leaf', groupId: 'left' },
             second: { type: 'leaf', groupId: 'right' }
           },
@@ -1430,7 +1507,10 @@ describe('Session and Launcher lifecycle ownership', () => {
       loading: false,
       canGoBack: false,
       canGoForward: false,
-      viewport: 'responsive',
+      viewport: 'responsive' as const,
+      profileId: 'default',
+      driving: false,
+      appLinkPrompt: null,
       error: null
     })
     await create
@@ -1440,15 +1520,22 @@ describe('Session and Launcher lifecycle ownership', () => {
   })
 
   it('accepts queue ownership and retains delivery refusal on that entry', async () => {
-    const session = agentSession('agent-run')
+    const session = { ...agentSession('agent-run'), promptSubmissionPredecessor: null }
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+    const dispose = await useAppStore.getState().initialize()
     useAppStore.setState({ sessions: [session], error: null })
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('agent input is not ready'))
+    try {
 
-    expect(useAppStore.getState().send(session.id, 'keep this message')).toBe(true)
-    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([
-      expect.objectContaining({ text: 'keep this message', status: 'deferred', error: 'agent input is not ready' })
-    ]))
-    expect(useAppStore.getState().error).toBeNull()
+      expect(useAppStore.getState().send(session.id, 'keep this message')).toBe(true)
+      await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([
+        expect.objectContaining({ text: 'keep this message', status: 'deferred', error: 'agent input is not ready' })
+      ]))
+      expect(useAppStore.getState().error).toBeNull()
+    } finally { dispose() }
   })
 
   it('strips Electron IPC transport framing from the retained delivery reason', async () => {
@@ -1456,7 +1543,12 @@ describe('Session and Launcher lifecycle ownership', () => {
     // `Error invoking remote method '<channel>': <name>: <message>` (and drops the original `.code`). The
     // user reported seeing exactly this raw string when steering codex mid-turn. The retained entry must show the
     // message the main process actually raised, not the transport envelope.
-    const session = agentSession('agent-run')
+    const session = { ...agentSession('agent-run'), promptSubmissionPredecessor: null }
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session)
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+    const dispose = await useAppStore.getState().initialize()
     useAppStore.setState({ sessions: [session], error: null })
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error(
       "Error invoking remote method 'sessions:submitPrompt': AgentMuxError: " +
@@ -1465,16 +1557,18 @@ describe('Session and Launcher lifecycle ownership', () => {
       'If it stays not ready, check the Provider readiness marker or Hook ingress. ' +
       'Diagnostic: runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending'
     ))
+    try {
 
-    expect(useAppStore.getState().send(session.id, 'steer mid-turn')).toBe(true)
-    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.status).toBe('deferred'))
-    expect(useAppStore.getState().error).toBeNull()
-    expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.error).toBe(
-      'The prompt was not sent because this Run has no consumable composer readiness yet. ' +
-      'The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. ' +
-      'If it stays not ready, check the Provider readiness marker or Hook ingress. ' +
-      'Diagnostic: runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending'
-    )
+      expect(useAppStore.getState().send(session.id, 'steer mid-turn')).toBe(true)
+      await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.status).toBe('deferred'))
+      expect(useAppStore.getState().error).toBeNull()
+      expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.error).toBe(
+        'The prompt was not sent because this Run has no consumable composer readiness yet. ' +
+        'The Agent Run is still running; wait for the Stop/screen readiness observation to finish, then send again. ' +
+        'If it stays not ready, check the Provider readiness marker or Hook ingress. ' +
+        'Diagnostic: runId=run-1 readinessId=readiness-1 readinessSource=native-stop readyThroughByte=pending reason=observation-pending'
+      )
+    } finally { dispose() }
   })
 })
 
@@ -1485,7 +1579,7 @@ describe('Warm terminal pool', () => {
     const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(warm)
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(warm)
 
-    useAppStore.getState().prewarmTerminal('workspace')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
     expect(launchTerminal).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().sessions).toEqual([])
 
@@ -1506,8 +1600,8 @@ describe('Warm terminal pool', () => {
     launcherFixture()
     const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(terminalSession('warm'))
 
-    useAppStore.getState().prewarmTerminal('workspace')
-    useAppStore.getState().prewarmTerminal('workspace')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
 
     expect(launchTerminal).toHaveBeenCalledTimes(1)
   })
@@ -1534,8 +1628,8 @@ describe('Warm terminal pool', () => {
     ))
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
 
-    useAppStore.getState().prewarmTerminal('workspace')
-    useAppStore.getState().prewarmTerminal('other')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
+    useAppStore.getState().prewarmTerminal('other', warmOwner)
     first.resolve(firstSession)
 
     await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(firstSession.control))
@@ -1550,7 +1644,7 @@ describe('Warm terminal pool', () => {
     const warm = terminalSession('warm-run')
     vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(warm)
 
-    useAppStore.getState().prewarmTerminal('workspace')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
     expect(useAppStore.getState().warmTerminal?.session).toBeNull()
 
     await useAppStore.getState().warmTerminal?.ready
@@ -1586,7 +1680,7 @@ describe('Warm terminal pool', () => {
       return fresh
     })
 
-    useAppStore.getState().prewarmTerminal('workspace')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
     await useAppStore.getState().promoteWarmTerminal('pane', {
       tabId: launcher.id,
       regionId: launcher.layout.activeRegionId
@@ -1605,7 +1699,7 @@ describe('Warm terminal pool', () => {
     vi.spyOn(api.sessions, 'launchTerminal').mockImplementation(async () => await pending.promise)
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
 
-    useAppStore.getState().prewarmTerminal('workspace')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
     const promote = useAppStore.getState().promoteWarmTerminal('pane', {
       tabId: launcher.id,
       regionId: launcher.layout.activeRegionId
@@ -1640,7 +1734,7 @@ describe('Warm terminal pool', () => {
     })
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue()
 
-    useAppStore.getState().prewarmTerminal('workspace')
+    useAppStore.getState().prewarmTerminal('workspace', warmOwner)
     const promote = useAppStore.getState().promoteWarmTerminal('pane', {
       tabId: tab.id,
       regionId: launcher.layout.activeRegionId
@@ -1651,12 +1745,18 @@ describe('Warm terminal pool', () => {
     pendingWarm.resolve(warm)
     await promote
 
-    expect(stop).toHaveBeenCalledWith(warm.control)
-    expect(useAppStore.getState().tabs[tab.id]?.regions[launcher.layout.activeRegionId])
-      .toMatchObject({ kind: 'launcher' })
-    pendingBrowserClose.resolve()
+    try {
+      expect(stop).toHaveBeenCalledWith(warm.control)
+      expect(useAppStore.getState().tabs[tab.id]?.regions[launcher.layout.activeRegionId])
+        .toMatchObject({ kind: 'terminal', phase: 'launching' })
+    } finally { pendingBrowserClose.resolve(); await close }
     await expect(close).resolves.toBe(true)
     expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
+    expect(useAppStore.getState().closingWorkbenchViews).toEqual({})
+    expect(useAppStore.getState().warmTerminal).toBeNull()
+    expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual([])
+    expect(stop.mock.calls.map(([control]) => control)).toEqual([warm.control])
+    expect(useAppStore.getState().layouts.workspace!.groups.flatMap(group => group.tabOrder)).not.toContain(tab.id)
   })
 
   it('cleans only known unclaimed terminals without expanding Runtime Sessions into Views', async () => {

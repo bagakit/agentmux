@@ -1,6 +1,6 @@
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '../lib/composer-insertion'
-import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Paperclip, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -25,6 +25,7 @@ import { TerminalView } from './TerminalView'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { AgentComposerTools } from './AgentComposerTools'
+import { ComposerReferenceTool } from './ComposerReferenceTool'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { lifecycleFailureBelongsTo } from '../lib/agent-lifecycle-feedback'
@@ -386,9 +387,8 @@ export function NewTabSurface({
             {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})}
             runAction={feedback.run}
           />
-          <button type="button" className="composer-tool" disabled={busy !== null || !workspace} onClick={() => { void feedback.run(chooseComposerFiles) }} title="Reference files for the Agent" aria-label="Reference files for the Agent">
-            <Paperclip size={14} /><span className="composer-tool__label">Files</span>
-          </button>
+          <ComposerReferenceTool disabled={busy !== null || !workspace}
+            onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
         </div>
       </div>
 
