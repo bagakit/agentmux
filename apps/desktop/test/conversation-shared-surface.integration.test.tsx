@@ -316,18 +316,18 @@ it('keeps expanded native tool identity when Latest replaces the same message pa
   const a: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'shell', input: 'command A', callId: 'call-a' }
   const b: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'shell', input: 'command B', callId: 'call-b' }
   await mount('history', '', [a, b])
-  const before = [...host.querySelectorAll<HTMLDetailsElement>('.log-turn__trace')]
+  const before = [...host.querySelectorAll<HTMLButtonElement>('.conversation-tool-trace__row')]
   expect(before).toHaveLength(2)
-  before[0]!.open = true
-  expect(before[0]!.querySelector('pre')!.textContent).toBe('command A')
+  await act(async () => before[0]!.click())
+  expect(before[0]!.parentElement!.querySelector('pre')!.textContent).toBe('command A')
   historyPageSpy.mockResolvedValueOnce(page([b, a]))
   const latest = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent === ' Latest' || button.textContent?.trim() === 'Latest'
   )
   expect(latest).toBeDefined()
   await act(async () => latest!.click())
-  const expanded = [...host.querySelectorAll<HTMLDetailsElement>('.log-turn__trace')].filter(
-    (details) => details.open
+  const expanded = [...host.querySelectorAll<HTMLElement>('.conversation-tool-trace')].filter(
+    (trace) => trace.querySelector('button')!.getAttribute('aria-expanded') === 'true'
   )
   expect(expanded).toHaveLength(1)
   expect(expanded[0]!.querySelector('pre')!.textContent).toBe('command A')
@@ -501,7 +501,7 @@ it('assigns distinct local keys to parts with duplicate callIds without key warn
         />
       )
     )
-    const traces = host.querySelectorAll<HTMLDetailsElement>('.log-turn__trace')
+    const traces = host.querySelectorAll<HTMLButtonElement>('.conversation-tool-trace__row')
     expect(traces).toHaveLength(2)
     const keyWarnings = errors.filter(
       (args) => String(args[0]).includes('same key') || String(args[0]).includes('unique "key"')
@@ -509,9 +509,9 @@ it('assigns distinct local keys to parts with duplicate callIds without key warn
     expect(keyWarnings).toHaveLength(0)
 
     // Expand first tool trace; second must remain closed
-    traces[0]!.open = true
-    expect(traces[0]!.open).toBe(true)
-    expect(traces[1]!.open).toBe(false)
+    await act(async () => traces[0]!.click())
+    expect(traces[0]!.getAttribute('aria-expanded')).toBe('true')
+    expect(traces[1]!.getAttribute('aria-expanded')).toBe('false')
   } finally {
     errorSpy.mockRestore()
   }

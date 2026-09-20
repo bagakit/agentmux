@@ -2,7 +2,6 @@ import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { ChevronRight, CircleX, Terminal } from 'lucide-react'
 import { memo, useId, useState } from 'react'
 import { stepTitle } from '../lib/activity-step-summary'
-import '../styles/conversation-tool-trace.css'
 
 type ToolPart = Extract<AgentSessionHistoryContentPart, { kind: 'tool-call' | 'tool-result' }>
 
