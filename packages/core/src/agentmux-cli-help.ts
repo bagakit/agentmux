@@ -903,6 +903,8 @@ agentmux settings browser links list
 agentmux settings browser links forget <literal scheme>
 agentmux settings browser links forget --input <file|->
 agentmux settings workspaces add --input <file|->
+agentmux settings hosts list
+agentmux settings hosts test <id>
 \`\`\`
 
 Read the running host's supported entries before setting a value. Each entry reports its

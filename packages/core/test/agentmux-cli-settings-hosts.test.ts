@@ -25,6 +25,18 @@ beforeEach(async () => {
   await server.start()
 })
 afterEach(async () => { await server?.stop(); if (root) await rm(root, { recursive: true }) })
+
+it('discovers Host read and Test in the built skill without losing project registration', async () => {
+  const result = await exec(process.execPath, [cli, '--skill'], {
+    timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: join(root, 'absent-owner'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined }
+  })
+  expect(result.stdout.length).toBeGreaterThan(0)
+  expect(result.stdout).toContain('agentmux settings hosts list')
+  expect(result.stdout).toContain('agentmux settings hosts test <id>')
+  expect(result.stdout).toContain('agentmux settings workspaces add --input <file|->')
+  expect(seen).toEqual([])
+})
+
 async function run(args: string[], input?: string | Buffer, directory = root) {
   try {
     const pending = exec(process.execPath, [cli, 'settings', 'hosts', ...args], {
