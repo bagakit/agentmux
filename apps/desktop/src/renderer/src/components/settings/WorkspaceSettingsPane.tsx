@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { currentHostCheck } from '../../lib/host-check'
 import { presentError } from '../../lib/error-presentation'
 import { configuredExecutors } from '../../lib/executors'
+import { currentExecutorDetection } from '../../lib/executor-detection'
 import { executorDetectionKey, useAppStore } from '../../store'
 import { agentProviderLabel } from '../AgentProviderIcon'
 
@@ -30,8 +31,8 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const checkingHosts = config.hosts.some((host) => !hostChecks[host.id] || hostChecks[host.id]?.state === 'checking')
   const executors = useMemo(() => configuredExecutors(config).map((executor) => ({
     ...executor,
-    detection: detections[executorDetectionKey(hostId, executor.id)]
-  })), [config.executors, detections, hostId])
+    detection: currentExecutorDetection(detections[executorDetectionKey(hostId, executor.id)], executor.id, executor, config.hosts.find(host => host.id === hostId))
+  })), [config.executors, config.hosts, detections, hostId])
   const readyExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
   const checking = executors.some((executor) => executor.detection?.state === 'checking')
   const matchingWorkspaces = config.workspaces.filter((workspace) =>

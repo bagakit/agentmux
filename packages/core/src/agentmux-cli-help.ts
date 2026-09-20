@@ -82,6 +82,25 @@ Options:
   --version, -V  Print version and exit.
   --help, -h     Show help.`
 
+const EXECUTOR_REFRESH_HELP = `Check one saved Executor on one explicit Host
+
+Usage: agentmux settings executors refresh <executor-id> --host <host-id>
+
+Both IDs are exact literal data, including --help; labels, focus and defaults are never
+inferred. No --all or draft input mode is supported. Main captures the committed Provider,
+authored command and Host connection when it handles the request. Refresh does not save
+configuration, send input, launch, stop or resume an Agent.
+
+The result includes captured input and availability (available, missing or check-failed).
+Available means a regular executable file was found. Missing means no usable file was
+found, including a confirmed non-file path; it does not claim every path is absent.
+Check-failed carries the original cause.code/message. A resolved executable is returned
+only when Core obtained it. These facts do not include launch args, env or Agent health.
+
+Exit 0 means the diagnostic completed; inspect availability and cause. No managed Agent
+caller or open View is required. An offline Main returns CONTROL_UNAVAILABLE; the CLI
+never reads configuration files directly. Refresh again after fixing the reported check.`
+
 function resourceHelp(resource: 'executors' | 'prompts' | 'executors|prompts'): string {
   return `Read or commit host-owned ${resource}
 
@@ -103,7 +122,7 @@ performed. List returns items and partial scope, including an empty list. Get re
 add/update report the committed item and changed; remove reports the removed ID.
 No Agent caller or open View is required. An unavailable host returns CONTROL_UNAVAILABLE;
 the CLI never writes configuration files. A timeout does not prove a commit: read before
-deciding what to do next.`
+deciding what to do next.${resource === 'executors' ? `\n\n${EXECUTOR_REFRESH_HELP}` : ''}`
 }
 
 const SETTINGS_AUTHORITY = `Settings use the current Unix user's local configuration authority. Explicitly enabling
@@ -200,6 +219,7 @@ Usage:
   agentmux settings hosts test --input <file|->
   agentmux settings set <key> <value>
   agentmux settings executors|prompts list|get|add|update|remove [arguments]
+  agentmux settings executors refresh <executor-id> --host <host-id>
   agentmux settings browser links list
   agentmux settings browser links forget <literal scheme>
   agentmux settings browser links forget --input <file|->
@@ -225,6 +245,7 @@ ${SETTINGS_AUTHORITY}`],
   ['settings.workspaces', WORKSPACE_ADD_HELP],
   ['settings.workspaces.add', WORKSPACE_ADD_HELP],
   ['settings.executors', resourceHelp('executors')],
+  ['settings.executors.refresh', EXECUTOR_REFRESH_HELP],
   ['settings.prompts', resourceHelp('prompts')],
   ['settings.resource.list', resourceHelp('executors|prompts')],
   ['settings.get', `Read host-owned settings
@@ -912,6 +933,7 @@ agentmux settings get
 agentmux settings get <target>
 agentmux settings set <key> <value>
 agentmux settings executors list
+agentmux settings executors refresh <executor-id> --host <host-id>
 agentmux settings prompts list
 agentmux settings executors|prompts get <id>
 agentmux settings executors|prompts add <id> --input <file|->

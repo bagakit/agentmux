@@ -273,6 +273,24 @@ export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts'
 export type AgentMuxControlSettingsResourceJson = null | boolean | number | string
   | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
 export type AgentMuxControlSettingsResourceFields = { [key: string]: AgentMuxControlSettingsResourceJson }
+export type AgentMuxControlSettingsExecutorRefreshRequest = RequestBase & {
+  operation: 'settings.executors.refresh'
+  executorId: string
+  hostId: string
+}
+export type AgentMuxControlSettingsExecutorRefreshResult = {
+  operation: 'settings.executors.refresh'
+  input: {
+    executorId: string
+    providerId: string
+    command: string
+    host: AgentMuxControlSettingsResourceFields
+  }
+} & (AgentMuxExecutorProbeResult | {
+  availability: 'check-failed'
+  cause: { code: string; message: string }
+  executable?: undefined
+})
 /** Host configuration belongs to the client; Core transports bounded JSON and diagnostic facts. */
 export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.list' }
@@ -541,6 +559,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSettingsWorkspaceAddRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlSettingsHostsRequest
+  | AgentMuxControlSettingsExecutorRefreshRequest
   | AgentMuxControlCrashLogRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
@@ -634,6 +653,7 @@ export type AgentMuxControlResult =
   | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | AgentMuxControlSettingsResourceResult
   | AgentMuxControlSettingsHostsResult
+  | AgentMuxControlSettingsExecutorRefreshResult
   | AgentMuxControlCrashLogResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
@@ -844,6 +864,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'diagnostics.crash-log.reveal': 'short',
   'settings.hosts.list': 'short',
   'settings.hosts.test': 'long',
+  'settings.executors.refresh': 'long',
   'settings.set': 'short',
   'settings.browser.links.list': 'short',
   'settings.browser.links.forget': 'short',

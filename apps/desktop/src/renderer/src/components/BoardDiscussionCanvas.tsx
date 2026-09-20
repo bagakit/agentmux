@@ -18,6 +18,7 @@ import { describeDeliveryEvidence } from '../lib/delivery-evidence'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import { configuredExecutors } from '../lib/executors'
+import { currentExecutorDetection } from '../lib/executor-detection'
 import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -50,9 +51,10 @@ export function BoardDiscussionCanvas({
   const executors = useMemo(
     () => configuredExecutors(config).map((executor) => ({
       ...executor,
-      detection: detections[executorDetectionKey(hostId, executor.id)]
+      detection: currentExecutorDetection(detections[executorDetectionKey(hostId, executor.id)], executor.id, executor,
+        config?.hosts.find(host => host.id === hostId))
     })),
-    [config?.executors, detections, hostId]
+    [config?.executors, config?.hosts, detections, hostId]
   )
   const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
   const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
