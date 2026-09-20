@@ -26,12 +26,14 @@ describe('shared conversation trace rendering', () => {
     expect(markup).toContain('data-speaker-role="agent"')
     expect(markup).toContain('Agent one')
     const labels = ['First answer', 'Reasoning', 'Observed reasoning', 'Tool call',
-      'check &lt;input&gt;', 'Tool result', 'Failed &lt;output&gt;', '/native/image.png', 'Last answer']
+      'Tool result', 'Failed', '/native/image.png', 'Last answer']
     const positions = labels.map((label) => markup.indexOf(label))
-    expect(positions).toHaveLength(9)
+    expect(positions).toHaveLength(8)
     expect(positions.every((value) => value >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
     expect(markup).toContain('data-trace-kind="tool-result" data-status="failed"')
+    expect(markup).not.toContain('check &lt;input&gt;')
+    expect(markup).not.toContain('Failed &lt;output&gt;')
     expect(markup).toContain('Copy message')
     expect(markup).not.toContain('log-turn__time')
   })
@@ -41,7 +43,8 @@ describe('shared conversation trace rendering', () => {
       content: [{ kind: 'tool-result', output: 'Native result' }]
     }))
     expect(markup).toContain('data-trace-kind="tool-result"')
-    expect(markup).toContain('Native result')
+    expect(markup).toContain('Tool result')
+    expect(markup).not.toContain('Native result')
     expect(markup).not.toContain('data-status=')
     expect(markup).not.toContain('Failed')
   })
