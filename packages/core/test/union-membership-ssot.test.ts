@@ -134,6 +134,8 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'settings.resource.add': true,
   'settings.resource.update': true,
   'settings.resource.remove': true,
+  'diagnostics.crash-log.get': true,
+  'diagnostics.crash-log.reveal': true,
   interrupt: true,
   resume: true,
   stop: true,
