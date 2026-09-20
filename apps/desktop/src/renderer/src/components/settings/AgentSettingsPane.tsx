@@ -252,6 +252,7 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
                 <ChevronDown className="settings-disclosure-icon" size={14} />
               </summary>
               <div className="agent-settings-fields">
+                {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                 <label><span>Name</span><input data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
                   <label><span>Provider</span><select value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
@@ -273,7 +274,6 @@ export function AgentSettingsPane({ config, onSave, executorId }: {
                     {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ShieldOff size={13} /> Enable YOLO</button></div> : null}
                   </div>
                 </details>
-                {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                 <div className="settings-executor-remove"><button type="button" className="small-button" disabled={saving} onClick={() => setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([candidate]) => candidate !== id)))}><Trash2 size={13} /> Delete executor</button></div>
               </div>
             </details>
