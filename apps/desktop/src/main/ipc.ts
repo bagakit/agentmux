@@ -10,7 +10,7 @@ import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /** The paste write and the pasted-image read share ONE extension whitelist and ONE byte cap
  *  (`PASTED_IMAGE_*` in contracts). A `Set` is derived here for the `.has()` membership test; the
@@ -116,7 +116,7 @@ import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
 import { sessionSnapshotPayload } from './session-snapshot-payload.js'
 import { rebindLocalFolder } from './workspace-rebind.js'
-import { insertOrGetWorkspace } from './workspace-location.js'
+import { executeSettingsWorkspaceAddControl, registerWorkspace } from './settings-workspace-add-control.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
 import { openDemandStore } from '@agentmux/demand'
@@ -268,6 +268,7 @@ export async function registerIpc(args: {
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
+    if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
     }
@@ -354,18 +355,7 @@ export async function registerIpc(args: {
     const selection = await dialog.showOpenDialog(args.window, { properties: ['openDirectory'] })
     const path = selection.filePaths[0]
     if (selection.canceled || !path) return null
-    // Picking a folder that is already registered is a no-op-with-feedback, not an error: route the
-    // append through the shared location rule so it returns the existing record instead of building a
-    // second one that `save()` would reject with a raw zod dump. Save only when something changed.
-    const insertion = insertOrGetWorkspace(config, {
-      id: randomUUID(),
-      name: basename(path),
-      hostId: 'local',
-      path,
-      kind: 'folder'
-    })
-    if (insertion.inserted) await configOwner.edit(config, insertion.config)
-    return insertion.workspace
+    return (await registerWorkspace({ hostId: 'local', path }, configOwner, id => args.runtime.executionHost(id))).workspace
   })
   // 重绑一个本地文件夹 Workspace。编排在 `workspace-rebind` 里，所以测试够得着：这个 handler
   // 只剩一个转发表达式，没有可以插早退的语句位置。文本守卫看不见这里的早退——插一句
@@ -379,18 +369,7 @@ export async function registerIpc(args: {
     return result.workspace
   })
   handle('workspaces:add', async (input: CreateWorkspaceInput) => {
-    args.runtime.executionHost(input.hostId)
-    // Same location rule as chooseLocalFolder: an add onto an already-registered location returns the
-    // existing record rather than appending a duplicate that `save()` would reject.
-    const insertion = insertOrGetWorkspace(config, {
-      id: randomUUID(),
-      name: input.name?.trim() || input.path.split(/[\\/]/).filter(Boolean).pop() || input.path,
-      hostId: input.hostId,
-      path: input.path,
-      kind: 'folder'
-    })
-    if (insertion.inserted) await configOwner.edit(config, insertion.config)
-    return insertion.workspace
+    return (await registerWorkspace(input, configOwner, id => args.runtime.executionHost(id))).workspace
   })
   handle('workspaces:listBranches', async (workspaceId: string) => await worktrees.list(workspaceId, config))
   handle('workspaces:openBranch', async (workspaceId: string, branch: string) => {

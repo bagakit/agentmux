@@ -969,6 +969,9 @@ async function readAllStdin(): Promise<string> {
 }
 
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'settings' && args[1] === 'workspaces') {
+    return args[2] === undefined || args[2].startsWith('-') ? 'settings.workspaces' : `settings.workspaces.${args[2]}`
+  }
   if (args[0] === 'settings' && args[1] === 'browser') {
     if (args[2] === 'links') return args[3] === undefined || args[3].startsWith('-') ? 'settings.browser.links' : `settings.browser.links.${args[3]}`
     return args[2] === undefined || args[2].startsWith('-') ? 'settings.browser' : `settings.browser.${args[2]}`
@@ -992,6 +995,8 @@ function requestsHelp(args: readonly string[]): boolean {
   if (args[0] === 'settings') {
     const help = (value: string | undefined): boolean => value === '--help' || value === '-h'
     return (args.length === 2 && help(args[1])) ||
+      (args.length === 3 && args[1] === 'workspaces' && help(args[2])) ||
+      (args.length === 4 && args[1] === 'workspaces' && args[2] === 'add' && help(args[3])) ||
       (args.length === 3 && args[1] === 'browser' && help(args[2])) ||
       (args.length === 4 && args[1] === 'browser' && args[2] === 'links' && help(args[3])) ||
       (args.length === 5 && args[1] === 'browser' && args[2] === 'links' && args[3] === 'list' && help(args[4])) ||

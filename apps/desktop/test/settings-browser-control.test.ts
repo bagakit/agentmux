@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { AppConfig, AppLinkSchemeChoice } from '../src/shared/contracts.js'
-import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-controller.js'
+import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
 import type { ScratchTopics } from '../src/main/scratch-topics.js'
 import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
@@ -36,7 +36,7 @@ vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: clas
   dispose() {}
 } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } from '@agentmux/core'
+import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } from '@agentmux/core'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
@@ -44,9 +44,11 @@ import { registerIpc } from '../src/main/ipc.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from '../src/main/settings-browser-control.js'
 import { scalarSettingsSchemaKeys } from './helpers/settings-schema-keys.js'
+import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 
 const directories: string[] = []
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'browser-settings' } as const
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 
@@ -158,11 +160,16 @@ describe('Browser settings share the sole typed Main owner', () => {
 
   it('routes registered native answers, public Control and UI Forget through the same actual Main ConfigOwner', async () => {
     const f = await privateConfig(), sender = { id: 918, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } }
+    const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    vi.spyOn(runtime, 'prepare').mockImplementation(vi.mocked(f.runtime.prepare).getMockImplementation()!)
+    vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
+    const progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(f.root, 'loops.json')),
+      async () => 'unknown', undefined, async () => { throw new Error('No automatic loop is admitted in the Browser fixture') })
     // The durable private file is already initialized; no default global Topics bootstrap is part of this owner oracle.
     vi.spyOn(f.store, 'get').mockResolvedValue(f.config)
     ipc.handlers.clear(); ipc.execute = undefined; ipc.remember = undefined
     const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-      configStore: f.store, runtime: f.runtime, scratchTopics: {} as ScratchTopics,
+      configStore: f.store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     try {
       expect(ipc.execute).toBeTypeOf('function'); expect(ipc.remember).toBeTypeOf('function')
@@ -182,6 +189,6 @@ describe('Browser settings share the sole typed Main owner', () => {
       await handler!({ sender } as unknown as IpcMainInvokeEvent, '__proto__', 'deny')
       expect(JSON.parse(await f.bytes()).browser.appLinkSchemes).toEqual({ neighbor: 'allow' })
       expect(sender.send).toHaveBeenCalledTimes(publications + 2)
-    } finally { await dispose() }
+    } finally { await dispose(); await progressLoops.stop() }
   })
 })

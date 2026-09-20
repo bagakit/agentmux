@@ -18,7 +18,7 @@ async function press(cdp, key, code, windowsVirtualKeyCode) {
 }
 
 /** A native mouse focus and native select/delete followed by literal text insertion, not per-key typing. */
-async function replaceText(cdp, expression, text) {
+export async function replaceText(cdp, expression, text) {
   const point = await cdp.evaluate(`(() => { const e=${expression}; if(!e || !e.getClientRects().length)throw new Error('Missing visible resource field'); e.scrollIntoView({block:'nearest'}); const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2} })()`)
   await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
   await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })

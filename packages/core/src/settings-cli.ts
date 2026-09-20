@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSettingsGetRequest,
   type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest,
-  type AgentMuxControlSettingsBrowserLinksRequest } from './control.js'
+  type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 
@@ -10,6 +10,7 @@ type SettingsCommand =
   | Omit<AgentMuxControlSettingsSetRequest, 'schemaVersion' | 'requestId'>
   | ResourceCommand
   | WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>
+  | Omit<AgentMuxControlSettingsWorkspaceAddRequest, 'schemaVersion' | 'requestId'>
 type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest | AgentMuxControlSettingsBrowserLinksRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
 type ResourceCommand = WithoutEnvelope<AgentMuxControlSettingsResourceRequest>
 
@@ -17,6 +18,12 @@ type ResourceCommand = WithoutEnvelope<AgentMuxControlSettingsResourceRequest>
 export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCommand> {
   if (args[0] === 'executors' || args[0] === 'prompts') return resourceCommand(args)
   if (args[0] === 'browser') return browserLinksCommand(args)
+  if (args[0] === 'workspaces') {
+    if (args[1] !== 'add' || args.length !== 4 || args[2] !== '--input') {
+      throw invalid('Workspace add requires --input <file|->. Run agentmux settings workspaces --help.')
+    }
+    return { operation: 'settings.workspaces.add', input: settingsResourceRecord(await input(args[3]!), 'INVALID_CLI_ARGUMENT') }
+  }
   if (args[0] === 'get' && args.length <= 2) {
     const target = args[1]
     if (target?.startsWith('-')) throw invalid('settings get accepts a target, not options.')
