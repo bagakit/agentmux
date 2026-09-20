@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { allStyles } from './helpers/styles'
 
 const rendererRoot = resolve(__dirname, '../src/renderer/src')
 
@@ -26,7 +27,7 @@ function sourceFiles(root: string): string[] {
 
 describe('status/browser/topic/executor integration contract', () => {
   it('keeps the Browser page as the flexible stage and the rail as a compact sibling', () => {
-    const css = read('styles/browser.css')
+    const css = allStyles()
     const surface = sliceFrom(css, '.browser-surface {', '.browser-toolbar {')
     const stage = sliceFrom(css, '.browser-stage {', '.browser-surface > .browser-toolbar')
     const quietRail = sliceFrom(css, '.browser-rsi-rail--quiet {')
