@@ -1,7 +1,7 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronDown, Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { BrandIcon } from './BrandIcon'
@@ -98,7 +98,13 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
   const config = useAppStore((state) => state.config)
   const [active, setActive] = useState<SettingsSectionId>(initialSection)
   const [query, setQuery] = useState('')
+  const searchInput = useRef<HTMLInputElement>(null)
   const [visited, setVisited] = useState<SettingsSectionId[]>([initialSection])
+
+  function clearSearch(): void {
+    setQuery('')
+    searchInput.current?.focus()
+  }
 
   useEffect(() => setActive(initialSection), [initialSection, executorId])
   useEffect(() => {
@@ -189,13 +195,18 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
         <header>
           <div className="settings-sidebar__brand"><BrandIcon size={26} /><span><strong>AgentMux</strong><small>Settings</small></span></div>
         </header>
-        <label className="settings-search"><Search size={14} /><input aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
+        <label className="settings-search"><Search size={14} /><input ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={clearSearch}><X size={12} /></button> : null}</label>
         <DropdownMenu.Root modal={false}>
           <DropdownMenu.Trigger asChild>
             <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ChevronDown size={13} /></button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content className="settings-section-menu" align="end" sideOffset={6} collisionPadding={{ top: 34, right: 8, bottom: 40, left: 8 }} onEscapeKeyDown={(event) => event.stopPropagation()}>
+            <DropdownMenu.Content className="settings-section-menu" align="end" sideOffset={6} collisionPadding={{ top: 34, right: 8, bottom: 40, left: 8 }} onEscapeKeyDown={(event) => event.stopPropagation()} onCloseAutoFocus={(event) => {
+              // Keep focus the user has already moved to another control.
+              const focused = document.activeElement
+              if (focused instanceof HTMLElement && focused !== document.body
+                && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
+            }}>
               <DropdownMenu.RadioGroup value={active} onValueChange={(value) => setActive(value as SettingsSectionId)}>
                 {navGroups.map((group) => <Fragment key={group.id}>
                   <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
