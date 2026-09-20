@@ -62,8 +62,8 @@ app.whenReady().then(async () => {
     await read(`${command}.scrollIntoView({block:'center'})`); await settle(); await replace(command, draftCommand)
     await read(`window.__toolbarNodes={card:document.querySelector('.agent-settings-card'),name:${name},command:${command},filter:${filter}}`)
     const assertDraft = async () => {
-      const actual = await read(`({sameCard:window.__toolbarNodes.card===document.querySelector('.agent-settings-card'),sameName:window.__toolbarNodes.name===${name},sameCommand:window.__toolbarNodes.command===${command},sameFilter:window.__toolbarNodes.filter===${filter},open:window.__toolbarNodes.card.open,launchOpen:window.__toolbarNodes.command.closest('details').open,name:window.__toolbarNodes.name.value,command:window.__toolbarNodes.command.value})`)
-      assert.deepEqual(actual, { sameCard: true, sameName: true, sameCommand: true, sameFilter: true, open: true, launchOpen: true, name: 'Toolbar retained draft', command: draftCommand }); return actual
+      const actual = await read(`({sameCard:window.__toolbarNodes.card===document.querySelector('.agent-settings-card'),sameName:window.__toolbarNodes.name===${name},sameCommand:window.__toolbarNodes.command===${command},sameFilter:window.__toolbarNodes.filter===${filter},open:window.__toolbarNodes.card.open,launchOpen:window.__toolbarNodes.command.closest('details').open,name:window.__toolbarNodes.name.value,command:window.__toolbarNodes.command.value,status:window.__toolbarNodes.card.querySelector('.check-pill').textContent.trim()})`)
+      assert.deepEqual(actual, { sameCard: true, sameName: true, sameCommand: true, sameFilter: true, open: true, launchOpen: true, name: 'Toolbar retained draft', command: draftCommand, status: 'Not checked' }); return actual
     }
     await read("document.querySelector('[data-settings-pane=agents]').scrollTop=0"); await settle()
     for (const labelMode of ['short', 'long']) {
