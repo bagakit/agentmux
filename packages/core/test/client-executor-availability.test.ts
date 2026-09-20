@@ -38,9 +38,17 @@ afterEach(async () => {
 // 只解析命令再查文件系统。vitest 只转译不查类型，允许改私有面。
 function connectedClient(): AgentMuxClient {
   const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
-  const internals = client as unknown as { connected: boolean; kernel: { isConnected(): boolean } }
+  const internals = client as unknown as {
+    connected: boolean
+    kernel: { isConnected(): boolean }
+    requireHookIngressOwner(): Promise<void>
+  }
   internals.connected = true
   internals.kernel = { isConnected: () => true }
+  // A broken classification must fail an assertion without escaping into shared Hook/Runtime setup.
+  internals.requireHookIngressOwner = vi.fn(async () => {
+    throw new Error('Owned probe fixture stops before Hook or Runtime setup')
+  })
   return client
 }
 

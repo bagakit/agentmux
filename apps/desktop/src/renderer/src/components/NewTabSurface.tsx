@@ -8,6 +8,7 @@ import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { currentHostCheck, hostCheckLabel } from '../lib/host-check'
 import { configuredExecutors } from '../lib/executors'
+import { currentExecutorDetection, executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '../lib/error-presentation'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
 import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
@@ -138,9 +139,10 @@ export function NewTabSurface({
   const executors = useMemo(
     () => configuredExecutors(config).map((executor) => ({
       ...executor,
-      detection: workspace ? detections[executorDetectionKey(workspace.hostId, executor.id)] : undefined
+      detection: workspace ? currentExecutorDetection(detections[executorDetectionKey(workspace.hostId, executor.id)], executor.id, executor,
+        config?.hosts.find(host => host.id === workspace.hostId)) : undefined
     })),
-    [config?.executors, detections, workspace]
+    [config?.executors, config?.hosts, detections, workspace]
   )
   const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
   const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
@@ -279,7 +281,7 @@ export function NewTabSurface({
                 <button
                   type="button"
                   className={`agent-catalog__more-btn ${showUnavailable ? 'agent-catalog__more-btn--active' : ''}`}
-                  title={showUnavailable ? 'Hide unavailable agents' : `View ${unavailableExecutors.length} more uninstalled agents`}
+                  title={showUnavailable ? 'Hide other agents' : `View ${unavailableExecutors.length} other agents`}
                   onClick={() => setShowUnavailable((prev) => !prev)}
                 >
                   <ChevronRight size={12} className={showUnavailable ? 'icon-rotate-90' : ''} />
@@ -326,14 +328,14 @@ export function NewTabSurface({
         {showUnavailable && unavailableExecutors.length > 0 ? (
           <div className="agent-catalog__group agent-catalog__group--unavailable animate-fade-in">
             <div className="agent-catalog__label">
-              <span>Not installed on {workspace?.hostId ?? 'this host'}</span>
+              <span>Other agents on {workspace?.hostId ?? 'this host'}</span>
               <em>{unavailableExecutors.length}</em>
             </div>
             <div className="agent-picks">
               {unavailableExecutors.map((executor) => (
-                <button type="button" key={executor.id} className="agent-pick agent-pick--unavailable" disabled>
+                <button type="button" key={executor.id} className="agent-pick agent-pick--unavailable" title={executor.detection?.detail} disabled>
                   <span className="agent-pick__icon"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
-                  <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · Unavailable</small></span>
+                  <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · {executorDetectionLabel(executor.detection)}</small></span>
                 </button>
               ))}
             </div>
