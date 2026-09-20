@@ -219,7 +219,7 @@ describe('SessionPane Agent Composer ownership', () => {
     expect(markup).toContain('data-test-agent-composer="enabled"')
   })
 
-  it('keeps the user Agent name and compact Session identity in the input rail', () => {
+  it('keeps the user Agent name and full Session context accessible in the compact header', () => {
     fixture.state.sessions = [session('agent')]
     fixture.state.viewModes = { 'agent-1': 'terminal' }
     fixture.state.agentNames = { 'agent-1': 'codex /name' }
@@ -232,7 +232,8 @@ describe('SessionPane Agent Composer ownership', () => {
     const markup = render('agent-1', 'agent')
 
     expect(markup).toContain('codex /name')
-    expect(markup).toContain('Codex · agent-1')
+    expect(markup).toContain('title="codex /name; Codex; Session agent-1"')
+    expect(markup).not.toContain('agent-region-header__meta')
     expect(markup).toContain('Session agent-1')
   })
 

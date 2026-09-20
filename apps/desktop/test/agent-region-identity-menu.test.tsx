@@ -68,6 +68,22 @@ it('keeps distinct fact-derived names for two Agents with the same Provider and 
   expect(container.querySelectorAll('.agent-input-stack__rail')).toHaveLength(0)
   expect(container.querySelectorAll('.composer-tool--view-toggle')).toHaveLength(2)
 })
+it('keeps the full name accessible while moving executor and Session context into the original precise menu',async()=>{
+  await mount()
+  const header=left().querySelector<HTMLElement>('.agent-region-header')!
+  expect(header).not.toBeNull()
+  expect(header.querySelectorAll('.agent-region-header__meta')).toHaveLength(0)
+  expect(header.querySelector<HTMLElement>('.agent-region-header__name')!.title).toBe(names[0])
+  expect(header.getAttribute('aria-label')).toContain(names[0]!)
+  const menu=await menuWithRightActive(),context=menu.querySelector<HTMLElement>('.agent-region-menu__context')
+  expect(context,'original More exposes mouse-readable identity context').not.toBeNull()
+  expect(context!.textContent).toContain(names[0]!)
+  expect(context!.textContent).toContain(`Session: ${sessionIds[0]}`)
+  expect(context!.textContent).toContain('Executor:')
+  const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
+  await select(menuItem(menu,'Copy Region Address'))
+  expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
+})
 it('the actual identity follows user name, first prompt, Session label and then the current Provider label',async()=>{
   await mount();const id=sessionIds[0]!,name=()=>left().querySelector('.agent-region-header strong')!.textContent
   expect(name()).toBe(names[0])
