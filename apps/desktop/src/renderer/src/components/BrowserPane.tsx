@@ -11,6 +11,7 @@ import {
   Ellipsis,
   FileCode2,
   Globe2,
+  History,
   LoaderCircle,
   Monitor,
   RefreshCw,
@@ -18,7 +19,7 @@ import {
   SlidersHorizontal,
   Wrench
 } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 import {
   BROWSER_VIEWPORT_PRESETS,
   type BrowserScreenshotCapture,
@@ -41,6 +42,7 @@ import {
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
 import {
   ScreenshotEditor,
@@ -146,6 +148,8 @@ export function BrowserPane({
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null)
   const [selectedStep, setSelectedStep] = useState<{ operationId: string; sequence: number } | null>(null)
+  const [demonstrationBusy, setDemonstrationBusy] = useState(false)
+  const demonstrationRequest = useRef(0)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
@@ -163,6 +167,8 @@ export function BrowserPane({
     setHistoryError(null)
     setReplayPlan(null)
     setReplayOutcome(undefined)
+    demonstrationRequest.current += 1
+    setDemonstrationBusy(false)
   }, [tab.browserId])
 
   // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
@@ -503,6 +509,22 @@ export function BrowserPane({
   function openOperationTimeline(): void {
     setTimelineOpen(true)
     void loadOperationHistory()
+    void api.browser.getDemonstration(tab.browserId).catch(reportError)
+  }
+
+  async function controlDemonstration(event: MouseEvent<HTMLButtonElement>, action: 'start' | 'stop'): Promise<void> {
+    if (event.nativeEvent.isTrusted !== true) return
+    const browserId = tab.browserId
+    const request = ++demonstrationRequest.current
+    setDemonstrationBusy(true)
+    try {
+      if (action === 'start') await api.browser.startDemonstration(browserId)
+      else await api.browser.stopDemonstration(browserId)
+    } catch (error) {
+      if (browserIdentity.current.id === browserId && demonstrationRequest.current === request) reportError(error)
+    } finally {
+      if (browserIdentity.current.id === browserId && demonstrationRequest.current === request) setDemonstrationBusy(false)
+    }
   }
 
   function operationForTimeline(): BrowserOperation | null {
@@ -739,6 +761,9 @@ export function BrowserPane({
                 <DropdownMenu.Item className="browser-menu__item" onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
                   <RefreshCw size={12} /><span>Reload page</span>
                 </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={openOperationTimeline}>
+                  <History size={12} /><span>Demonstration</span>
+                </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" onSelect={() => setWorkspaceTool('browser-tools')}>
                   <SlidersHorizontal size={12} /><span>Customize toolbar…</span>
                 </DropdownMenu.Item>
@@ -832,6 +857,13 @@ export function BrowserPane({
       </div>
       {timelineOpen ? (
         <aside className="browser-trace-rail" aria-label="Browser activity trace">
+          <BrowserDemonstrationSurface
+            draft={tab.demonstration?.draft ?? null}
+            {...(tab.demonstration?.warning ? { warning: tab.demonstration.warning } : {})}
+            busy={demonstrationBusy || tab.driving}
+            onStart={event => void controlDemonstration(event, 'start')}
+            onStop={event => void controlDemonstration(event, 'stop')}
+          />
           <BrowserOperationHistory
             operations={[
               ...(tab.activity?.operation && !operationHistory.some((operation) => operation.id === tab.activity?.operation?.id) ? [tab.activity.operation] : []),

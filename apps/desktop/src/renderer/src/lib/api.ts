@@ -1142,6 +1142,9 @@ const mockApi: AgentMuxDesktopApi = {
     // Web 预览里没有真页面也没有子进程。**不能返回一个假的"跑完了"**——那会让 Agent 以为它的程序
     // 执行过了。与上面 captureScreenshot 抛"requires the desktop app"同一条理由。
     runScript: async () => { throw new Error('Driving a Browser requires the desktop app.') },
+    startDemonstration: async () => { throw new Error('Recording a human demonstration requires the desktop app.') },
+    stopDemonstration: async () => ({ draft: null, warning: 'Human demonstration recording requires the desktop app.' }),
+    getDemonstration: async () => ({ draft: null, warning: 'Saved human demonstrations require the desktop app.' }),
     listOperationHistory: async () => [],
     // 查不到是一次成功的回答（`null`），不是错误——Web 预览里没有 journal，所以每个 id 都查不到。
     // 与 `runScript` 抛"requires the desktop app"不同：那条抛是因为**谎称跑过了**会误导 Agent，
