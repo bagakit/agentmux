@@ -1,3 +1,4 @@
+import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError } from './errors.js'
 import type { AgentExecutorId, AgentProviderId } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
@@ -356,6 +357,8 @@ export type AgentMuxDemand = {
   createdAt: number
   updatedAt: number
   source: 'default-topic' | 'session'
+  alignment?: DemandAlignment
+  grounding?: DemandGrounding
 }
 export type AgentMuxDemandDecision = {
   input: string
@@ -382,7 +385,7 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
 export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   operation: 'demand.update'
   demandId: string
-  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>>
+  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {

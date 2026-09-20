@@ -1176,11 +1176,8 @@ async function main() {
   // Keep the release gate coupled to the same source checkout: a package cannot be called
   // "latest" when a design anchor has no production caller or test evidence.
   await run('pnpm', ['--filter', '@agentmux/desktop', 'audit:features'], { cwd: repositoryRoot })
-  // The Renderer imports Core's public subpaths (for example `@agentmux/core/agent-status`).
-  // Build Core first so a clean checkout never asks Vite to resolve a dist file that has not
-  // been emitted yet; the packaged runtime still copies the exact Core output from this build.
-  await run('pnpm', ['--filter', '@agentmux/core', 'build'], { cwd: repositoryRoot })
-  await run('pnpm', ['--filter', '@agentmux/demand', 'build'], { cwd: repositoryRoot })
+  // Emit Core and its workspace dependencies in pnpm's dependency order before compiling Desktop.
+  await run('pnpm', ['--filter', '@agentmux/core...', 'build'], { cwd: repositoryRoot })
   await run('pnpm', ['build'], { cwd: desktopRoot })
   const electronRoot = dirname(require.resolve('electron/package.json'))
   const electronApp = join(electronRoot, 'dist', 'Electron.app')

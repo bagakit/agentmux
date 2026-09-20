@@ -1,3 +1,4 @@
+import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
 import { chmod, lstat, mkdir, rm } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
@@ -431,6 +432,15 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'demand.update') {
     const patchSource = object(source.patch, 'Demand patch is invalid.', 'INVALID_CONTROL_REQUEST')
     const patch: AgentMuxControlDemandUpdateRequest['patch'] = {}
+    for (const key of ['revision', 'submissionId', 'confirmedAt', 'acceptedAt']) {
+      if (key in patchSource) throw new AgentMuxError('Agent updates cannot supply acknowledgement fields.', 'INVALID_CONTROL_REQUEST')
+    }
+    try {
+      if (patchSource.alignment !== undefined) patch.alignment = parseAlignmentProposal(patchSource.alignment)
+      if (patchSource.grounding !== undefined) patch.grounding = parseGroundingProposal(patchSource.grounding)
+    } catch (error) {
+      throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'INVALID_CONTROL_REQUEST')
+    }
     if (patchSource.title !== undefined) patch.title = text(patchSource.title, 'Demand title')
     if (patchSource.description !== undefined) patch.description = text(patchSource.description, 'Demand description')
     if (patchSource.status !== undefined) patch.status = demandStatus(patchSource.status)
@@ -759,7 +769,17 @@ function parseExecutors(value: unknown): AgentMuxControlExecutor[] {
 
 function parseDemand(value: unknown): AgentMuxDemand {
   const source = object(value, 'Control demand is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding'> = {}
+  try {
+    goalFacts = {
+      ...(source.alignment === undefined ? {} : { alignment: parseAlignment(source.alignment) }),
+      ...(source.grounding === undefined ? {} : { grounding: parseGrounding(source.grounding) })
+    }
+  } catch (error) {
+    throw new AgentMuxError(error instanceof Error ? error.message : 'Control Goal facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
   return {
+    ...goalFacts,
     id: id(source.id, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     title: text(source.title, 'Control demand title', 'CONTROL_PROTOCOL_ERROR'),
     description: text(source.description, 'Control demand description', 'CONTROL_PROTOCOL_ERROR'),

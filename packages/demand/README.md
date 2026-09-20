@@ -27,3 +27,20 @@ atomic rename. Corrupt snapshots and lock failures raise `StoreError` with `code
 The standalone `agentmux-demand` binary reads the same API. Pass `--root` (or set
 `AGENTMUX_DEMAND_ROOT`) and use `list`, `show`, `create`, `update`, `link-session`,
 `unlink-session`, `link-project`, `unlink-project`, `activity`, and `decision-log`.
+
+Goals use the same durable owner. Agents submit `proposeAlignment(id, proposal)`
+and `proposeGrounding(id, proposal)`, or CLI `propose-alignment` / `propose-grounding`
+with `--id` and `--proposal <json>`. `update` also accepts `--alignment <json>` and
+`--grounding <json>`. Proposals cannot provide revisions, submission identities or
+acknowledgement timestamps. The owner generates those facts.
+
+Hosts expose `confirmAlignment(id, expectedRevision)` and
+`acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps?)`
+only through explicit human actions. Changed goals invalidate confirmation; changed
+results invalidate acceptance. Same-content proposals retain acknowledgements.
+Acceptance requires one known, evidenced result per current confirmed criterion;
+remaining gaps require the explicit `acceptGaps` choice and stay recorded as gaps.
+A locatable evidence reference does not claim that the owner verified its contents.
+
+Browser clients consume the pure types, parsers and readiness helpers from
+`@agentmux/demand/goals`; this subpath has no filesystem or UI dependency.

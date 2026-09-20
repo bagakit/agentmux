@@ -77,7 +77,7 @@ type PreparedMutation = AgentManagedHookMutation & {
 }
 
 type InstallMutation = PreparedMutation & {
-  currentContent: Buffer | null
+  currentContent: Uint8Array | null
 }
 
 type PreparedPreview = {
@@ -85,11 +85,11 @@ type PreparedPreview = {
   mutations: PreparedMutation[]
 }
 
-function hash(content: Buffer | string): string {
+function hash(content: Uint8Array | string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-export async function readManagedHookTarget(path: string): Promise<{ content: Buffer; mode: number } | null> {
+export async function readManagedHookTarget(path: string): Promise<{ content: Uint8Array; mode: number } | null> {
   try {
     const info = await lstat(path)
     if (!info.isFile() || info.isSymbolicLink()) {
@@ -122,7 +122,7 @@ function safeTarget(path: string): string {
   return path
 }
 
-async function writeAtomically(path: string, content: Buffer | string, mode: number): Promise<void> {
+async function writeAtomically(path: string, content: Uint8Array | string, mode: number): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const temporaryPath = `${path}.agentmux-${process.pid}-${randomUUID()}.tmp`
   try {
@@ -155,7 +155,7 @@ export class AgentManagedHookInstaller {
       for (const mutation of plan.mutations) {
         try {
           const target = await readManagedHookTarget(mutation.path)
-          const content = target?.content.toString('utf8')
+          const content = target ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(target.content) : undefined
           const facts = content === undefined ? { present: false, current: false }
             : mutation.merge ? inspectManagedHookContent(content, mutation.content, mutation.merge)
               : { present: true, current: content === mutation.content }
@@ -187,7 +187,7 @@ export class AgentManagedHookInstaller {
     for (const mutation of plan.mutations) {
       const path = mutation.path
       const current = await readManagedHookTarget(path)
-      const currentContent = current ? current.content.toString('utf8') : null
+      const currentContent = current ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(current.content) : null
       const effectiveContent = mutation.merge
         ? renderMergedHookContent(currentContent, mutation.content, mutation.merge)
         : mutation.content

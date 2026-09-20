@@ -349,6 +349,8 @@ const mockApi: AgentMuxDesktopApi = {
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }) },
   demands: {
     list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
+    confirmAlignment: async () => { throw new Error('Goal confirmation requires the Desktop durable owner. This preview does not record acknowledgement.') },
+    acceptGrounding: async () => { throw new Error('Result acceptance requires the Desktop durable owner. This preview does not record acknowledgement.') },
     create: async (input) => {
       const now = Date.now()
       const demand: Demand = { id: input.id ?? crypto.randomUUID(), title: input.title, description: input.description ?? '', status: input.status ?? 'backlog', priority: input.priority ?? 'normal', projectId: input.projectId ?? null, projectName: input.projectName ?? null, executorId: input.executorId ?? null, tags: [...(input.tags ?? [])], plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, sessionIds: [...(input.sessionIds ?? [])], activities: [], decisions: [], createdAt: now, updatedAt: now }

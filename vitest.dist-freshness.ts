@@ -1,5 +1,5 @@
 import { readdir, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, resolve, basename } from 'node:path'
 
 /**
  * 跑任何测试之前，先钉住「`packages/core/dist` 是当前 `packages/core/src` 的产物」。
@@ -42,9 +42,8 @@ import { join, resolve } from 'node:path'
  */
 
 const repositoryRoot = import.meta.dirname
-const packageDirectory = resolve(repositoryRoot, 'packages/core')
 /** 消解这道守卫要跑的那条命令。导出给测试断言文案确实点名了它——错误信息第一行就该是可执行的动作。 */
-export const rebuild = 'pnpm --filter @agentmux/core build'
+export const rebuild = 'pnpm --filter @agentmux/core... build'
 
 /**
  * 目录里 mtime 的极值那一个。`wins` 决定取最新还是最旧。
@@ -88,14 +87,15 @@ export function distIsStale(
  * 参数化之后这条缝可以喂两个临时目录去测，代价只是多一个形参；此前把「必须读真 packages/core」当成
  * 既定事实，其实是那个模块作用域常量造成的，不是问题本身要求的。
  */
-export async function staleDistComplaint(packageDirectory: string): Promise<string | null> {
-  const entryPoint = join(packageDirectory, 'dist', 'index.js')
+export async function staleDistComplaint(packageDirectory: string, entry = 'dist/index.js'): Promise<string | null> {
+  const entryPoint = join(packageDirectory, entry)
+  const packageName = basename(packageDirectory)
   try {
     await stat(entryPoint)
   } catch {
     return (
-      `先跑 \`${rebuild}\`：packages/core/dist/index.js 不存在。` +
-      'desktop 的测试与 tsc 都经 dist 消费 @agentmux/core，没有它这次运行测的是空气。'
+      `先跑 \`${rebuild}\`：${entry} 不存在。` +
+      `测试与 tsc 经 dist 消费 @agentmux/${packageName}，没有它这次运行测的是空气。`
     )
   }
 
@@ -104,18 +104,26 @@ export async function staleDistComplaint(packageDirectory: string): Promise<stri
   // 两个 undefined 分支不是防御性代码，是扫描根写错时的判别器：目录不存在会在上面 readdir 抛，
   // 而一个**存在但空**的目录会让下面的比较无声通过（本仓记过 false-green-gate-patterns：
   // 「扫描根写错」与「空集合满足一切断言」是同一族假绿的两个入口）。
-  if (!newestSource) return 'packages/core/src 下一个文件都没有——扫描根写错了。'
-  if (!oldestArtifact) return `packages/core/dist 是空的：先跑 \`${rebuild}\`。`
+  if (!newestSource) return `packages/${packageName}/src 下一个文件都没有——扫描根写错了。`
+  if (!oldestArtifact) return `packages/${packageName}/dist 是空的：先跑 \`${rebuild}\`。`
 
   if (!distIsStale(newestSource, oldestArtifact)) return null
   return (
-    `先跑 \`${rebuild}\`：packages/core/dist 比 src 旧，这次运行加载的是上一次构建的 Core。\n` +
+    `先跑 \`${rebuild}\`：packages/${packageName}/dist 比 src 旧，这次运行加载的是上一次构建的包。\n` +
     `  最旧产物 ${oldestArtifact.path}\n` +
     `  晚于它的源码 ${newestSource.path}`
   )
 }
 
+export async function assertWorkspaceDistBuiltFromCurrentSource(root: string): Promise<void> {
+  // Demand's pure subpath is now consumed by both Core and Renderer. A fresh Core alone cannot
+  // prove that the Goal validators being exercised belong to the current source.
+  for (const [directory, entry] of [['core', 'dist/index.js'], ['demand', 'dist/src/index.js']] as const) {
+    const complaint = await staleDistComplaint(resolve(root, 'packages', directory), entry)
+    if (complaint) throw new Error(complaint)
+  }
+}
+
 export default async function assertCoreDistBuiltFromCurrentSource(): Promise<void> {
-  const complaint = await staleDistComplaint(packageDirectory)
-  if (complaint) throw new Error(complaint)
+  await assertWorkspaceDistBuiltFromCurrentSource(repositoryRoot)
 }

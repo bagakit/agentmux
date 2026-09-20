@@ -70,15 +70,20 @@ it('shows Mote consistently in the real Space tree, creation menu and fixed navi
 
 it('passes Mote product identity and PMO role through the real New Goal action', async () => {
   const { root, container } = mount()
-  const createDemand = vi.fn(() => 'demand:mote-name')
-  const openDemandPmo = vi.fn(async () => 'launcher:goal-context')
-  useAppStore.setState({ config: { ...initial.config!, workspaces: [], executors: {} }, sessions: [], demands: {}, selectedDemandId: null, createDemand, openDemandPmo })
+  const createDemand = vi.fn(async () => 'demand:mote-name')
+  const requestDemandPmoTask = vi.fn(async () => 'launcher:goal-context')
+  useAppStore.setState({ config: { ...initial.config!, workspaces: [], executors: {} }, sessions: [], demands: {}, selectedDemandId: null, createDemand, requestDemandPmoTask })
   await act(async () => root.render(createElement(GlobalBoardSurface)))
   const newGoal = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'New Goal')
   expect(newGoal).toBeDefined()
   await act(async () => { newGoal!.click(); await Promise.resolve() })
-  expect(createDemand).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ description: 'Created from Goals; Mote will clarify the goal and completion criteria before execution.' }))
-  expect(openDemandPmo).toHaveBeenCalledExactlyOnceWith('demand:mote-name', expect.stringContaining('Mote，默认角色是 PMO'))
+  expect(createDemand).not.toHaveBeenCalled()
+  const intent = container.querySelector<HTMLTextAreaElement>('[aria-label="Goal intent"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(intent, 'Make Mote goal discussion readable'); intent.dispatchEvent(new Event('input', { bubbles: true })) })
+  const submit = container.querySelector<HTMLButtonElement>('button[type="submit"]')!
+  await act(async () => { submit.click(); await Promise.resolve() })
+  expect(createDemand).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ description: 'Make Mote goal discussion readable' }))
+  expect(requestDemandPmoTask).toHaveBeenCalledExactlyOnceWith('demand:mote-name', 'grill')
 })
 
 

@@ -156,6 +156,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@agentmux/demand':
+        specifier: workspace:*
+        version: link:../demand
       fs-native-extensions:
         specifier: 1.5.1
         version: 1.5.1

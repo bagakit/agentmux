@@ -1,6 +1,7 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { DemandActivity, DemandDecision } from '@agentmux/demand'
+import type { DemandAlignment, DemandGrounding } from '@agentmux/demand/goals'
 
 export const DEMAND_STATUS_IDS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as const
 export type DemandStatus = (typeof DEMAND_STATUS_IDS)[number]
@@ -31,6 +32,8 @@ export type DemandRecord = {
   decisionLog?: AgentMuxDemandDecision[]
   activities?: DemandActivity[]
   decisions?: DemandDecision[]
+  alignment?: DemandAlignment
+  grounding?: DemandGrounding
 }
 
 export type DemandProjection = DemandRecord & {

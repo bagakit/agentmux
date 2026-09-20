@@ -1,3 +1,4 @@
+import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
 import { sessionPresentationById } from './lib/session-presentation'
@@ -432,7 +433,11 @@ type AppState = {
   demandArrangement: DemandArrangement
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
-  openDemandPmo(demandId: string, prompt?: string): Promise<string>
+  openDemandPmo(demandId: string): Promise<string>
+  requestDemandPmoTask(demandId: string, mode: 'grill' | 'grounding'): Promise<string>
+  refreshDemand(demandId: string): Promise<void>
+  confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
+  acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean): Promise<void>
   createDemand(input: {
     title: string
     description?: string
@@ -450,8 +455,8 @@ type AppState = {
     status?: DemandStatus
     source?: DemandRecord['source']
     decisionLog?: readonly AgentMuxDemandDecision[]
-  }): string
-  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog'>>): void
+  }): Promise<string>
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }): Promise<void>
   deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
@@ -924,7 +929,7 @@ function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): 
     session.control.run.runId === control.run.runId
 }
 
-function demandRecordFromFilesystem(demand: FilesystemDemand): DemandRecord {
+function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandRecord): DemandRecord {
   return {
     id: demand.id,
     title: demand.title,
@@ -942,11 +947,13 @@ function demandRecordFromFilesystem(demand: FilesystemDemand): DemandRecord {
     activityLog: demand.activities.map((activity) => `${activity.kind}: ${activity.message}`),
     activities: demand.activities,
     decisions: demand.decisions,
+    ...(demand.alignment === undefined ? {} : { alignment: demand.alignment }),
+    ...(demand.grounding === undefined ? {} : { grounding: demand.grounding }),
     sessionIds: [...demand.sessionIds],
     createdAt: demand.createdAt,
     updatedAt: demand.updatedAt,
-    source: 'default-topic',
-    decisionLog: []
+    source: retained?.source ?? 'default-topic',
+    decisionLog: [...(retained?.decisionLog ?? [])]
   }
 }
 
@@ -2013,6 +2020,99 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
 let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
+async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
+  const get = useAppStore.getState
+  const set = useAppStore.setState
+  const state = get()
+  const demand = state.demands[demandId]
+  if (!demand) throw new Error(`Demand ${demandId} is unavailable`)
+  const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
+  if (!workspace) throw new Error('Scratch workspace is unavailable')
+  const executorId = Object.keys(state.config?.executors ?? {})[0]
+  if (!executorId) throw new Error('No PMO executor is configured')
+  const buildPmoPrompt = (): string => {
+    const current = get()
+    const executionContext = executionFocusContextText(
+      current.agentFocus,
+      current.sessions,
+      (session) => current.agentNames[session.id] ?? session.label
+    )
+    return [
+      prompt?.trim() || PMO_TEAMS_TOPIC_ROLE,
+      executionContext
+    ].join('\n\n')
+  }
+  const focusPmoTabSession = (tabId: string): void => {
+    const tab = get().tabs[tabId]
+    const surface = tab?.regions[tab.layout.activeRegionId]
+    if (surface?.kind !== 'agent') return
+    const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
+    if (session && focusLaneForSession(topicIdForSession(get().config, session), PMO_TEAMS_TOPIC_ID) === 'pmo') {
+      get().focusPmoSession(session.id)
+    }
+  }
+
+  const mappedTabId = state.demandPmoTabIds[demandId]
+  const mappedTab = mappedTabId ? state.tabs[mappedTabId] : undefined
+  const layout = state.layouts[workspace.id]
+  const mappedRegion = mappedTab?.layout.activeRegionId ? mappedTab.regions[mappedTab.layout.activeRegionId] : undefined
+  const mappedTabIsUsable = Boolean(
+    mappedTab &&
+    mappedTab.workspaceId === workspace.id &&
+    mappedTab.topicId === PMO_TEAMS_TOPIC_ID &&
+    layout &&
+    tabGroupForTab(layout, mappedTab.id) !== null &&
+    mappedRegion !== undefined && isAgentOrLauncherSurface(mappedRegion)
+  )
+  if (mappedTabIsUsable && mappedTab) {
+    await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
+    if (mappedRegion?.kind === 'launcher') {
+      const liveLayout = get().layouts[workspace.id]
+      const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
+      if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
+      const contextPrompt = [
+        buildPmoPrompt(),
+        `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
+        `Title: ${demand.title}`,
+        `Description: ${demand.description || '(empty)'}`
+      ].join('\n\n')
+      await get().launchAgent(executorId, contextPrompt, groupId, {
+        tabId: mappedTab.id,
+        regionId: mappedTab.layout.activeRegionId
+      }, undefined, { tabName: `PMO · ${demand.title}` })
+    }
+    if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
+      if (!get().send(mappedRegion.sessionId, buildPmoPrompt())) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
+    }
+    focusPmoTabSession(mappedTab.id)
+    return mappedTab.id
+  }
+
+  await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID)
+  const current = get()
+  const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
+  const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
+  const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
+  if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
+  set((next) => ({
+    tabs: { ...next.tabs, [tab.id]: tab },
+    layouts: { ...next.layouts, [workspace.id]: nextLayout },
+    demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id }
+  }))
+  const contextPrompt = [
+    buildPmoPrompt(),
+    `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
+    `Title: ${demand.title}`,
+    `Description: ${demand.description || '(empty)'}`
+  ].join('\n\n')
+  await get().launchAgent(executorId, contextPrompt, currentLayout.activeGroupId, {
+    tabId: tab.id,
+    regionId: tab.layout.activeRegionId
+  }, undefined, { tabName: `PMO · ${demand.title}` })
+  focusPmoTabSession(tab.id)
+  return tab.id
+}
+
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   config: null,
@@ -2882,11 +2982,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
       return record
     }
-    if (request.operation === 'demand.list') {
-      return { operation: request.operation, demands: projectDemands(get().config, get().sessions, get().demands).map(({ sessions: _sessions, workspacePath: _workspacePath, ...demand }) => demand) }
-    }
-    if (request.operation === 'demand.show') {
-      const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === request.demandId)
+    if (request.operation === 'demand.list' || request.operation === 'demand.show') {
+      const facts = await api.demands.list()
+      const retained = get().demands
+      const records = Object.fromEntries(facts.map(demand => [demand.id, demandRecordFromFilesystem(demand, retained[demand.id])]))
+      set(state => ({ demands: { ...state.demands, ...records } }))
+      const projected = projectDemands(get().config, get().sessions, records)
+      if (request.operation === 'demand.list') {
+        return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...demand }) => demand) }
+      }
+      const demand = projected.find((candidate) => candidate.id === request.demandId)
       if (!demand) return { operation: request.operation, demand: null }
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
       return { operation: request.operation, demand: record }
@@ -2901,7 +3006,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
       })
       if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Demand routing is unresolved; choose a Project before writing.' : 'Demand write requires explicit confirmation.')
-      const id = get().createDemand({
+      const id = await get().createDemand({
         title: request.title,
         ...(request.description === undefined ? {} : { description: request.description }),
         projectId: request.projectId ?? null,
@@ -2919,13 +3024,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
       const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
+      await get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
       const demand = demandRecord(request.demandId)
       return { operation: request.operation, demand, receipt: { demandId: demand.id, updatedAt: demand.updatedAt } }
     }
-    const appendDemandActivity = (demandId: string, message: string) => {
+    const appendDemandActivity = async (demandId: string, message: string) => {
       const current = demandRecord(demandId)
-      get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
+      await get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
     }
     const startDemand = async (demandId: string, sessionId?: string) => {
       const current = demandRecord(demandId)
@@ -2945,10 +3050,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         await get().launchBoardAgent(current.projectId, current.assigneeExecutorId, current.description.trim() || current.title)
         const created = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && !before.has(candidate.id) && candidate.executorId === current.assigneeExecutorId).at(-1)
         attachedSessionId = created?.id ?? null
-        if (attachedSessionId) get().updateDemand(demandId, { sessionIds: [...current.sessionIds, attachedSessionId] })
+        if (attachedSessionId) await get().updateDemand(demandId, { sessionIds: [...current.sessionIds, attachedSessionId] })
       }
-      get().updateDemand(demandId, { status: 'in_progress' })
-      appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
+      await get().updateDemand(demandId, { status: 'in_progress' })
+      await appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
       return { sessionId: attachedSessionId, demand: demandRecord(demandId) }
     }
     if (request.operation === 'demand.assign') {
@@ -2956,8 +3061,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const projectId = request.projectId === undefined ? current.projectId : request.projectId
       const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      get().updateDemand(request.demandId, { projectId, projectName: project?.name ?? null, assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId })
-      appendDemandActivity(request.demandId, request.start ? 'Assigned and start requested.' : 'Assigned without starting execution.')
+      await get().updateDemand(request.demandId, { projectId, projectName: project?.name ?? null, assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId })
+      await appendDemandActivity(request.demandId, request.start ? 'Assigned and start requested.' : 'Assigned without starting execution.')
       if (request.start) {
         const started = await startDemand(request.demandId)
         return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: true } }
@@ -2970,8 +3075,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'demand.handoff') {
       const current = demandRecord(request.demandId)
-      get().updateDemand(request.demandId, { assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId, ...(request.sessionId && !current.sessionIds.includes(request.sessionId) ? { sessionIds: [...current.sessionIds, request.sessionId] } : {}) })
-      appendDemandActivity(request.demandId, `Handoff to ${request.assigneeExecutorId ?? 'unassigned'}${request.sessionId ? ` with Session ${request.sessionId}` : ''}.`)
+      await get().updateDemand(request.demandId, { assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId, ...(request.sessionId && !current.sessionIds.includes(request.sessionId) ? { sessionIds: [...current.sessionIds, request.sessionId] } : {}) })
+      await appendDemandActivity(request.demandId, `Handoff to ${request.assigneeExecutorId ?? 'unassigned'}${request.sessionId ? ` with Session ${request.sessionId}` : ''}.`)
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, handedOffAt: Date.now(), sessionId: request.sessionId ?? null } }
     }
     if (request.operation === 'demand.delete') {
@@ -2987,13 +3092,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const current = demandRecord(request.demandId)
       if (!get().sessions.some((session) => session.id === request.sessionId)) throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${request.sessionId}`)
       const sessionIds = current.sessionIds.includes(request.sessionId) ? current.sessionIds : [...current.sessionIds, request.sessionId]
-      get().updateDemand(request.demandId, { sessionIds })
+      await get().updateDemand(request.demandId, { sessionIds })
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, sessionId: request.sessionId } }
     }
     if (request.operation === 'demand.link-project') {
       const project = get().config?.workspaces.find((workspace) => workspace.id === request.projectId)
       if (!project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
-      get().updateDemand(request.demandId, { projectId: project.id, projectName: project.name })
+      await get().updateDemand(request.demandId, { projectId: project.id, projectName: project.name })
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, projectId: project.id } }
     }
     if (request.operation === 'demand.decision-log') {
@@ -4094,183 +4199,124 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setDemandArrangement(arrangement) {
     set({ demandArrangement: arrangement })
   },
-  async openDemandPmo(demandId, prompt) {
-    const state = get()
-    const demand = state.demands[demandId]
-    if (!demand) throw new Error(`Demand ${demandId} is unavailable`)
-    const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
-    if (!workspace) throw new Error('Scratch workspace is unavailable')
-    const executorId = Object.keys(state.config?.executors ?? {})[0]
-    if (!executorId) throw new Error('No PMO executor is configured')
-    const buildPmoPrompt = (): string => {
-      const current = get()
-      const executionContext = executionFocusContextText(
-        current.agentFocus,
-        current.sessions,
-        (session) => current.agentNames[session.id] ?? session.label
-      )
-      return [
-        prompt?.trim() || PMO_TEAMS_TOPIC_ROLE,
-        executionContext
-      ].join('\n\n')
-    }
-    const focusPmoTabSession = (tabId: string): void => {
-      const tab = get().tabs[tabId]
-      const surface = tab?.regions[tab.layout.activeRegionId]
-      if (surface?.kind !== 'agent') return
-      const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
-      if (session && focusLaneForSession(topicIdForSession(get().config, session), PMO_TEAMS_TOPIC_ID) === 'pmo') {
-        get().focusPmoSession(session.id)
-      }
-    }
-
-    const mappedTabId = state.demandPmoTabIds[demandId]
-    const mappedTab = mappedTabId ? state.tabs[mappedTabId] : undefined
-    const layout = state.layouts[workspace.id]
-    const mappedRegion = mappedTab?.layout.activeRegionId ? mappedTab.regions[mappedTab.layout.activeRegionId] : undefined
-    const mappedTabIsUsable = Boolean(
-      mappedTab &&
-      mappedTab.workspaceId === workspace.id &&
-      mappedTab.topicId === PMO_TEAMS_TOPIC_ID &&
-      layout &&
-      tabGroupForTab(layout, mappedTab.id) !== null &&
-      mappedRegion !== undefined && isAgentOrLauncherSurface(mappedRegion)
-    )
-    if (mappedTabIsUsable && mappedTab) {
-      await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
-      if (mappedRegion?.kind === 'launcher') {
-        const liveLayout = get().layouts[workspace.id]
-        const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
-        if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
-        const contextPrompt = [
-          buildPmoPrompt(),
-          `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
-          `Title: ${demand.title}`,
-          `Description: ${demand.description || '(empty)'}`
-        ].join('\n\n')
-        await get().launchAgent(executorId, contextPrompt, groupId, {
-          tabId: mappedTab.id,
-          regionId: mappedTab.layout.activeRegionId
-        }, undefined, { tabName: `PMO · ${demand.title}` })
-      }
-      focusPmoTabSession(mappedTab.id)
-      return mappedTab.id
-    }
-
-    await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID)
-    const current = get()
-    const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
-    const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
-    const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
-    if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
-    set((next) => ({
-      tabs: { ...next.tabs, [tab.id]: tab },
-      layouts: { ...next.layouts, [workspace.id]: nextLayout },
-      demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id }
-    }))
-    const contextPrompt = [
-      buildPmoPrompt(),
-      `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
-      `Title: ${demand.title}`,
-      `Description: ${demand.description || '(empty)'}`
-    ].join('\n\n')
-    await get().launchAgent(executorId, contextPrompt, currentLayout.activeGroupId, {
-      tabId: tab.id,
-      regionId: tab.layout.activeRegionId
-    }, undefined, { tabName: `PMO · ${demand.title}` })
-    focusPmoTabSession(tab.id)
-    return tab.id
+  async openDemandPmo(demandId) {
+    return openGoalPmo(demandId)
   },
-  createDemand(input) {
-    const id = `demand:${crypto.randomUUID()}`
-    const now = Date.now()
-    const record: DemandRecord = {
-      id,
-      title: input.title.trim() || 'Untitled demand',
-      description: input.description?.trim() ?? '',
-      status: input.status ?? 'backlog',
-      priority: input.priority ?? 'normal',
+  async requestDemandPmoTask(demandId, mode) {
+    const demand = get().demands[demandId]
+    if (!demand) throw new Error(`Goal ${demandId} is unavailable`)
+    const quote = (value: string): string => "'" + value.replaceAll("'", "'\"'\"'") + "'"
+    const proposal = mode === 'grill'
+      ? { summary: 'Current goal in the user’s words', criteria: [{ id: 'criterion-1', text: 'Observable success condition' }], openQuestions: [] }
+      : { alignmentRevision: demand.alignment?.revision ?? 1, summary: 'Observed results', checks: [{ criterionId: demand.alignment?.criteria[0]?.id ?? 'criterion-1', outcome: 'unknown', evidence: [], note: 'State what remains unverified.' }] }
+    const prompt = [
+      `You are Mote for existing Goal ${demand.id}. This is a new user request for ${mode === 'grill' ? 'Grill: align the goal' : 'Grounding: align the results'}.`,
+      'Preserve the user’s original intent. Do not create another Goal, invent requirements, or overwrite description with your summary.',
+      mode === 'grill'
+        ? 'Discuss only choices that change the goal. Propose a readable summary, stable success criterion IDs, and actual unresolved questions. The person confirms the goal in Goals.'
+        : 'Inspect the actual work and report every current criterion with met/gap/unknown, locatable evidence references and concrete gaps. A reference is not proof by itself. The person accepts results in Goals; never claim their acceptance.',
+      `Current durable Goal facts:\n${JSON.stringify({ id: demand.id, title: demand.title, description: demand.description, projectId: demand.projectId, sessionIds: demand.sessionIds, alignment: demand.alignment, grounding: demand.grounding }, null, 2)}`,
+      'Read the current Goal before submitting. Use the public CLI below; replace the example with your actual proposal, not its placeholder content. Owner generates revision/submission IDs and acknowledgement timestamps.',
+      `"$AGENTMUX_CLI" demand show --demand ${quote(demand.id)}`,
+      `"$AGENTMUX_CLI" demand update --demand ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
+    ].join('\n\n')
+    return openGoalPmo(demandId, prompt)
+  },
+  async createDemand(input) {
+    let receipt = await api.demands.create({
+      title: input.title.trim(),
+      description: input.description ?? '',
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.priority === undefined ? {} : { priority: input.priority }),
       projectId: input.projectId ?? null,
       projectName: input.projectName ?? null,
-      assigneeExecutorId: input.assigneeExecutorId ?? null,
-      tags: [...(input.tags ?? [])],
-      plannedStartAt: input.plannedStartAt ?? null,
-      targetAt: input.targetAt ?? null,
-      parentDemandId: input.parentDemandId ?? null,
-      phaseIndex: input.phaseIndex ?? null,
-      activityLog: [...(input.activityLog ?? [])],
-      sessionIds: [...(input.sessionIds ?? [])],
-      createdAt: now,
-      updatedAt: now,
-      source: input.source ?? 'default-topic',
-      ...(input.decisionLog && input.decisionLog.length > 0 ? { decisionLog: [...input.decisionLog] } : {})
+      executorId: input.assigneeExecutorId ?? null,
+      ...(input.tags === undefined ? {} : { tags: input.tags }),
+      ...(input.plannedStartAt === undefined ? {} : { plannedStartAt: input.plannedStartAt }),
+      ...(input.targetAt === undefined ? {} : { targetAt: input.targetAt }),
+      ...(input.parentDemandId === undefined ? {} : { parentDemandId: input.parentDemandId }),
+      ...(input.phaseIndex === undefined ? {} : { phaseIndex: input.phaseIndex }),
+      sessionIds: input.sessionIds ?? []
+    })
+    const id = receipt.demand.id
+    const decisionLog: AgentMuxDemandDecision[] = []
+    const publish = (): void => {
+      const record = { ...demandRecordFromFilesystem(receipt.demand), source: input.source ?? 'default-topic', decisionLog: [...decisionLog] }
+      set(state => ({ demands: { ...state.demands, [id]: record }, selectedDemandId: id }))
     }
-    set((state) => ({ demands: { ...state.demands, [id]: record }, selectedDemandId: id }))
-    void api.demands.create({
-      id,
-      title: record.title,
-      description: record.description,
-      status: record.status,
-      priority: record.priority,
-      projectId: record.projectId,
-      projectName: record.projectName,
-      executorId: record.assigneeExecutorId ?? null,
-      ...(record.tags === undefined ? {} : { tags: record.tags }),
-      ...(record.plannedStartAt === undefined ? {} : { plannedStartAt: record.plannedStartAt }),
-      ...(record.targetAt === undefined ? {} : { targetAt: record.targetAt }),
-      ...(record.parentDemandId === undefined ? {} : { parentDemandId: record.parentDemandId }),
-      ...(record.phaseIndex === undefined ? {} : { phaseIndex: record.phaseIndex }),
-      sessionIds: record.sessionIds
-    }).catch((error) => get().reportError(error))
-    if (record.decisionLog?.length) {
-      const decision = record.decisionLog.at(-1)
-      if (decision) void api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '', rationale: decision.candidates.map((candidate) => candidate.reason).join('; '), actorId: decision.sourceSessionId }).catch((error) => get().reportError(error))
+    publish()
+    try {
+      for (const message of input.activityLog ?? []) {
+        receipt = await api.demands.activity(id, { kind: 'board', message, actorId: null })
+        publish()
+      }
+      for (const decision of input.decisionLog ?? []) {
+        receipt = await api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '(unassigned)', rationale: decision.candidates.map(candidate => candidate.reason).join('; ') || 'Explicit routing decision', actorId: decision.sourceSessionId })
+        decisionLog.push(decision)
+        publish()
+      }
+    } catch (error) {
+      throw new Error(`Goal ${id} was saved, but its activity or routing record was not saved. The goal is retained; review it before retrying. ${error instanceof Error ? error.message : String(error)}`)
     }
     return id
   },
-  updateDemand(id, patch) {
+  async updateDemand(id, patch) {
     const current = get().demands[id]
-    if (current) {
-      const { sessionIds } = patch
-      void api.demands.update(id, {
-        ...(patch.title === undefined ? {} : { title: patch.title }),
-        ...(patch.description === undefined ? {} : { description: patch.description }),
-        ...(patch.status === undefined ? {} : { status: patch.status }),
-        ...(patch.priority === undefined ? {} : { priority: patch.priority }),
-        ...(patch.projectId === undefined ? {} : { projectId: patch.projectId }),
-        ...(patch.projectName === undefined ? {} : { projectName: patch.projectName }),
-        ...(patch.assigneeExecutorId === undefined ? {} : { executorId: patch.assigneeExecutorId }),
-        ...(patch.tags === undefined ? {} : { tags: patch.tags }),
-        ...(patch.plannedStartAt === undefined ? {} : { plannedStartAt: patch.plannedStartAt }),
-        ...(patch.targetAt === undefined ? {} : { targetAt: patch.targetAt }),
-        ...(patch.parentDemandId === undefined ? {} : { parentDemandId: patch.parentDemandId }),
-        ...(patch.phaseIndex === undefined ? {} : { phaseIndex: patch.phaseIndex }),
-      }).catch((error) => get().reportError(error))
-      if (sessionIds !== undefined) {
-        const previous = new Set(current.sessionIds)
-        const next = new Set(sessionIds)
-        for (const sessionId of sessionIds) if (!previous.has(sessionId)) void api.demands.linkSession(id, sessionId).catch((error) => get().reportError(error))
-        for (const sessionId of current.sessionIds) if (!next.has(sessionId)) void api.demands.unlinkSession(id, sessionId).catch((error) => get().reportError(error))
-      }
-      if (patch.activityLog && patch.activityLog.length > (current.activityLog?.length ?? 0)) {
-        const message = patch.activityLog.at(-1)
-        if (message) void api.demands.activity(id, { kind: 'board', message, actorId: null }).catch((error) => get().reportError(error))
-      }
-      if (patch.decisionLog && patch.decisionLog.length > (current.decisionLog?.length ?? 0)) {
-        const decision = patch.decisionLog.at(-1)
-        if (decision) void api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '', rationale: decision.candidates.map((candidate) => candidate.reason).join('; '), actorId: decision.sourceSessionId }).catch((error) => get().reportError(error))
-      }
-    }
-    set((state) => {
-      const current = state.demands[id]
-      if (!current) return state
-      return {
-        demands: {
-          ...state.demands,
-          [id]: { ...current, ...patch, updatedAt: Date.now() }
-        }
-      }
+    if (!current) throw new Error(`Goal ${id} is unavailable`)
+    const decisionLog = [...(current.decisionLog ?? [])]
+    let receipt = await api.demands.update(id, {
+      ...(patch.title === undefined ? {} : { title: patch.title }),
+      ...(patch.description === undefined ? {} : { description: patch.description }),
+      ...(patch.status === undefined ? {} : { status: patch.status }),
+      ...(patch.priority === undefined ? {} : { priority: patch.priority }),
+      ...(patch.projectId === undefined ? {} : { projectId: patch.projectId }),
+      ...(patch.projectName === undefined ? {} : { projectName: patch.projectName }),
+      ...(patch.assigneeExecutorId === undefined ? {} : { executorId: patch.assigneeExecutorId }),
+      ...(patch.tags === undefined ? {} : { tags: patch.tags }),
+      ...(patch.plannedStartAt === undefined ? {} : { plannedStartAt: patch.plannedStartAt }),
+      ...(patch.targetAt === undefined ? {} : { targetAt: patch.targetAt }),
+      ...(patch.parentDemandId === undefined ? {} : { parentDemandId: patch.parentDemandId }),
+      ...(patch.phaseIndex === undefined ? {} : { phaseIndex: patch.phaseIndex }),
+      ...(patch.alignment === undefined ? {} : { alignment: patch.alignment }),
+      ...(patch.grounding === undefined ? {} : { grounding: patch.grounding })
     })
+    const publish = (): void => {
+      const record = { ...demandRecordFromFilesystem(receipt.demand), source: current.source, decisionLog: [...decisionLog] }
+      set(state => ({ demands: { ...state.demands, [id]: record } }))
+    }
+    publish()
+    try {
+      if (patch.sessionIds !== undefined) {
+        const previous = new Set(current.sessionIds), next = new Set(patch.sessionIds)
+        for (const sessionId of patch.sessionIds) if (!previous.has(sessionId)) { receipt = await api.demands.linkSession(id, sessionId); publish() }
+        for (const sessionId of current.sessionIds) if (!next.has(sessionId)) { receipt = await api.demands.unlinkSession(id, sessionId); publish() }
+      }
+      for (const message of patch.activityLog?.slice(current.activityLog?.length ?? 0) ?? []) {
+        receipt = await api.demands.activity(id, { kind: 'board', message, actorId: null })
+        publish()
+      }
+      for (const decision of patch.decisionLog?.slice(current.decisionLog?.length ?? 0) ?? []) {
+        receipt = await api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '(unassigned)', rationale: decision.candidates.map(candidate => candidate.reason).join('; ') || 'Explicit routing decision', actorId: decision.sourceSessionId })
+        decisionLog.push(decision)
+        publish()
+      }
+    } catch (error) {
+      throw new Error(`Goal changes were saved, but a Session link, activity or routing record was not saved. Saved changes are retained; review the goal before retrying. ${error instanceof Error ? error.message : String(error)}`)
+    }
+  },
+  async confirmDemandGoal(id, expectedRevision) {
+    const receipt = await api.demands.confirmAlignment(id, expectedRevision)
+    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
+  },
+  async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps) {
+    const receipt = await api.demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps)
+    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
+  },
+  async refreshDemand(id) {
+    const facts = await api.demands.list()
+    const demand = facts.find(demand => demand.id === id)
+    if (!demand) throw new Error('The Goal owner did not return this goal. Its saved view is kept; retry loading the current proposal.')
+    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(demand, state.demands[id]) } }))
   },
   deleteDemand(id) {
     void api.demands.delete(id).catch((error) => get().reportError(error))

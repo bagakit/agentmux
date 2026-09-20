@@ -1,309 +1,139 @@
-import {
-  ArrowUpRight,
-  UserRound,
-  Check,
-  ChevronDown,
-  CirclePlus,
-  Columns3,
-  Grid2X2,
-  Inbox,
-  MoreHorizontal,
-  NotebookPen,
-  PanelRightClose,
-  Search,
-  SlidersHorizontal,
-  SquareTerminal,
-  Trash2,
-  X
-} from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import { ArrowUpRight, Check, ChevronRight, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { executionFocusSessionId } from '../lib/agent-focus'
-import {
-  DEMAND_STATUS_IDS,
-  demandColumns,
-  projectDemands,
-  type DemandArrangement,
-  type DemandPriority,
-  type DemandProjection,
-  type DemandStatus
-} from '../lib/global-demand-board'
-import { workspaceForSession } from '../lib/workbench-tabs'
-import { SessionPane } from './SessionPane'
-import { SessionRegionHost } from './SessionRegionHost'
-import { StatusDot } from './StatusDot'
-import { AgentTopologySummary } from './AgentTopologySummary'
-import { ComposerTextarea } from './ComposerTextarea'
+import { DEMAND_STATUS_IDS, demandColumns, projectDemands, type DemandProjection, type DemandStatus } from '../lib/global-demand-board'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
+import { ComposerTextarea } from './ComposerTextarea'
+import { GoalDetail } from './GoalDetail'
+import '../styles/goals.css'
 
-const STATUS_META: Record<DemandStatus, { label: string; icon: typeof Inbox }> = {
-  backlog: { label: 'Backlog', icon: Inbox },
-  todo: { label: 'Todo', icon: NotebookPen },
-  in_progress: { label: 'In progress', icon: SquareTerminal },
-  in_review: { label: 'In review', icon: UserRound },
-  blocked: { label: 'Blocked', icon: UserRound },
-  done: { label: 'Done', icon: Check },
-  cancelled: { label: 'Cancelled', icon: X }
+export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
+  backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
 }
 
-const PRIORITY_LABEL: Record<DemandPriority, string> = {
-  low: 'Low',
-  normal: 'Normal',
-  high: 'High',
-  urgent: 'Urgent'
-}
-
-function sessionWorkspaceId(config: ReturnType<typeof useAppStore.getState>['config'], session: SessionSnapshot): string {
-  return workspaceForSession(config, session)?.id ?? SCRATCH_WORKSPACE_ID
-}
-
-function formatDemandDate(value: number | null | undefined): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
-}
-
-function DemandCard({ demand, selected, sessionContext, onSelect, onOpenPmo, sessions, tabs, config }: { demand: DemandProjection; selected: boolean; sessionContext?: string; onSelect: () => void; onOpenPmo: () => void; sessions: readonly SessionSnapshot[]; tabs: ReturnType<typeof useAppStore.getState>['tabs']; config: ReturnType<typeof useAppStore.getState>['config'] }) {
-  const status = STATUS_META[demand.status]
-  const Icon = status.icon
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      className={`global-demand-card ${selected ? 'global-demand-card--selected' : ''}${sessionContext ? ' global-demand-card--session-context' : ''}`}
-      data-demand-id={demand.id}
-      data-demand-status={demand.status}
-      {...(sessionContext ? { 'data-session-context': sessionContext } : {})}
-      aria-pressed={selected}
-      onClick={onSelect}
-      onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
-    >
-      <span className="global-demand-card__topline">
-        <span className="global-demand-card__id">{demand.id.startsWith('session:') ? 'SESSION' : demand.id.slice(0, 12).toUpperCase()}</span>
-        <span className={`global-demand-card__priority global-demand-card__priority--${demand.priority}`}>{PRIORITY_LABEL[demand.priority]}</span>
-      </span>
-      <strong className="global-demand-card__title">{demand.title}</strong>
-      {demand.description ? <span className="global-demand-card__description">{demand.description}</span> : null}
-      <span className="global-demand-card__meta">
-        <span><Icon size={12} /> {status.label}</span>
-        <span>{demand.projectName ?? 'Unassigned project'}</span>
-        <span>{demand.sessions.length} Session{demand.sessions.length === 1 ? '' : 's'}</span>
-      </span>
-      <button type="button" className="global-demand-card__pmo" aria-label={`Open PMO for ${demand.title}`} onClick={(event) => { event.stopPropagation(); onOpenPmo() }}><ArrowUpRight size={12} /> PMO</button>
-      {sessionContext ? <span className="global-demand-card__session-context">Current Session · {sessionContext.slice(0, 8)}</span> : null}
-      {demand.tags?.length || demand.plannedStartAt || demand.targetAt || demand.phaseIndex !== null && demand.phaseIndex !== undefined ? (
-        <span className="global-demand-card__metadata" aria-label="Goal metadata">
-          {demand.tags?.slice(0, 3).map((tag) => <span className="global-demand-card__tag" key={tag}>{tag}</span>)}
-          {formatDemandDate(demand.plannedStartAt) ? <span>Start {formatDemandDate(demand.plannedStartAt)}</span> : null}
-          {formatDemandDate(demand.targetAt) ? <span>Target {formatDemandDate(demand.targetAt)}</span> : null}
-          {demand.phaseIndex !== null && demand.phaseIndex !== undefined ? <span>Batch {demand.phaseIndex + 1}</span> : null}
-        </span>
-      ) : null}
-      {demand.activities?.length || demand.decisions?.length ? <span className="global-demand-card__activity-count">{(demand.activities?.length ?? 0) + (demand.decisions?.length ?? 0)} updates</span> : null}
-      {demand.sessionIds.length > 0 ? <AgentTopologySummary sessionIds={demand.sessionIds} sessions={sessions} tabs={tabs} config={config} /> : null}
-    </div>
-  )
-}
-
-function DemandWorkspace({ demand, arrangement, onArrangement, onClose, onOpenPmo, onUpdate, onDelete, executors, allSessions, tabs }: {
-  demand: DemandProjection
-  arrangement: DemandArrangement
-  onArrangement: (value: DemandArrangement) => void
-  onClose: () => void
-  onOpenPmo: () => void
-  onUpdate: (patch: Partial<Pick<DemandProjection, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>>) => void
-  onDelete: () => void
-  executors: Record<string, { label: string }>
-  allSessions: readonly SessionSnapshot[]
-  tabs: ReturnType<typeof useAppStore.getState>['tabs']
-}) {
-  const config = useAppStore((state) => state.config)
-  const selectSession = useAppStore((state) => state.selectSession)
-  const sessions = demand.sessions
-  const [title, setTitle] = useState(demand.title)
-  const [description, setDescription] = useState(demand.description)
-  const [sessionToAdd, setSessionToAdd] = useState('')
-  const [tags, setTags] = useState((demand.tags ?? []).join(', '))
-  useEffect(() => { setTitle(demand.title); setDescription(demand.description); setTags((demand.tags ?? []).join(', ')); setSessionToAdd('') }, [demand.id, demand.title, demand.description, demand.tags])
-  const arrangementClass = arrangement === 'grid' ? 'global-demand-workspace__regions--grid' : arrangement === 'balanced' ? 'global-demand-workspace__regions--balanced' : 'global-demand-workspace__regions--columns'
-  return (
-    <aside className="global-demand-workspace" aria-label={`Goal workspace for ${demand.title}`}>
-      <header className="global-demand-workspace__header">
-        <div className="global-demand-workspace__identity">
-          <span className="global-demand-workspace__status" data-status={demand.status}>{STATUS_META[demand.status].label}</span>
-          <input className="global-demand-workspace__title" aria-label="Goal title" value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => onUpdate({ title })} />
-          <small>{demand.projectName ?? 'Global goal'} · {demand.sessionIds.length} linked Session{demand.sessionIds.length === 1 ? '' : 's'}</small>
-        </div>
-        <div className="global-demand-workspace__header-actions"><button type="button" className="small-button global-demand-workspace__pmo" title="Open dedicated PMO Tab" aria-label={`Open PMO for ${demand.title}`} onClick={onOpenPmo}><ArrowUpRight size={13} /> Open PMO</button><button type="button" className="icon-button" title="Delete goal" aria-label="Delete goal" onClick={() => { if (window.confirm(`Delete goal “${demand.title}”?`)) onDelete() }}><Trash2 size={14} /></button><button type="button" className="icon-button" title="Close goal workspace" aria-label="Close goal workspace" onClick={onClose}><PanelRightClose size={15} /></button></div>
-      </header>
-      <div className="global-demand-workspace__editor">
-        <label className="global-demand-workspace__description">Description<ComposerTextarea aria-label="Goal description" value={description} onValueChange={setDescription} onBlur={() => onUpdate({ description })} rows={3} /></label>
-        <div className="global-demand-workspace__properties">
-          <label className="global-board-select">Status<select aria-label="Goal status" value={demand.status} onChange={(event) => onUpdate({ status: event.target.value as DemandStatus })}>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select></label>
-          <label className="global-board-select">Priority<select aria-label="Goal priority" value={demand.priority} onChange={(event) => onUpdate({ priority: event.target.value as DemandPriority })}>{Object.entries(PRIORITY_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-          <label className="global-board-select">Project<select aria-label="Goal project" value={demand.projectId ?? ''} onChange={(event) => { const project = config?.workspaces.find((workspace) => workspace.id === event.target.value); onUpdate({ projectId: project?.id ?? null, projectName: project?.name ?? null }) }}><option value="">Unassigned</option>{config?.workspaces.filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
-          <label className="global-board-select">Assignee<select aria-label="Goal assignee" value={demand.assigneeExecutorId ?? ''} onChange={(event) => onUpdate({ assigneeExecutorId: event.target.value || null })}><option value="">Unassigned</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
-        </div>
-        <details className="global-demand-workspace__metadata">
-          <summary>More properties</summary>
-          <label>Tags<input aria-label="Goal tags" value={tags} onChange={(event) => setTags(event.target.value)} onBlur={() => onUpdate({ tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="design, customer, release" /></label>
-          <div className="global-demand-workspace__dates">
-          <label>Planned start<input type="date" value={demand.plannedStartAt ? new Date(demand.plannedStartAt).toISOString().slice(0, 10) : ''} onChange={(event) => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T00:00:00`) : null })} /></label>
-          <label>Target date<input type="date" value={demand.targetAt ? new Date(demand.targetAt).toISOString().slice(0, 10) : ''} onChange={(event) => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T00:00:00`) : null })} /></label>
-          <label>Progress batch<input type="number" min={1} value={demand.phaseIndex === null || demand.phaseIndex === undefined ? '' : demand.phaseIndex + 1} onChange={(event) => onUpdate({ phaseIndex: event.target.value ? Math.max(0, Number(event.target.value) - 1) : null })} /></label>
-          </div>
-        </details>
-        <details className="global-demand-workspace__assignment" open={demand.sessionIds.length > 0}>
-          <summary>{demand.sessionIds.length > 0 ? 'Linked Sessions' : 'Link a Session'}</summary>
-          <div className="global-demand-workspace__assignment-add"><select aria-label="Add Session to goal" value={sessionToAdd} onChange={(event) => setSessionToAdd(event.target.value)}><option value="">Choose a Session</option>{allSessions.filter((session) => !demand.sessionIds.includes(session.id)).map((session) => <option key={session.id} value={session.id}>{session.label} · {session.id.slice(0, 8)}</option>)}</select><button type="button" className="small-button" disabled={!sessionToAdd} onClick={() => { onUpdate({ sessionIds: [...demand.sessionIds, sessionToAdd] }); setSessionToAdd('') }}>Add</button></div>{demand.sessions.map((session) => <div className="global-demand-workspace__assignment-row" key={session.id}><span>{session.label}</span><button type="button" className="small-button" onClick={() => onUpdate({ sessionIds: demand.sessionIds.filter((id) => id !== session.id) })}>Remove</button></div>)}
-        </details>
-        {demand.sessionIds.length > 0 ? <AgentTopologySummary sessionIds={demand.sessionIds} sessions={allSessions} tabs={tabs} config={config} /> : null}
-        {sessions.length === 0 ? (
-          <p className="global-demand-workspace__empty">
-            {demand.sessionIds.length === 0 ? 'No Session linked yet. Open PMO to clarify and route this goal, or link an existing Session.' : 'Linked Sessions are not yet available. Their identities are retained while recovery continues.'}
-          </p>
-        ) : null}
-      </div>
-      {sessions.length > 1 ? <div className="global-demand-workspace__toolbar">
-        <div className="global-demand-workspace__arrangement" role="group" aria-label="Session arrangement">
-          <button type="button" className={arrangement === 'columns' ? 'is-active' : ''} onClick={() => onArrangement('columns')} title="Columns"><Columns3 size={13} /></button>
-          <button type="button" className={arrangement === 'grid' ? 'is-active' : ''} onClick={() => onArrangement('grid')} title="Grid"><Grid2X2 size={13} /></button>
-          <button type="button" className={arrangement === 'balanced' ? 'is-active' : ''} onClick={() => onArrangement('balanced')} title="Balanced"><SlidersHorizontal size={13} /></button>
-        </div>
-      </div> : null}
-      {(demand.activities?.length || demand.decisions?.length) ? <section className="global-demand-workspace__timeline" aria-label="Goal activity timeline"><strong>Activity</strong>{[...(demand.activities ?? []).map((activity) => ({ id: activity.id, at: activity.createdAt, label: activity.kind, text: activity.message })), ...(demand.decisions ?? []).map((decision) => ({ id: decision.id, at: decision.createdAt, label: 'decision', text: decision.decision }))].sort((left, right) => right.at - left.at).slice(0, 12).map((entry) => <div className="global-demand-workspace__timeline-row" key={entry.id}><time dateTime={new Date(entry.at).toISOString()}>{formatDemandDate(entry.at)}</time><span><b>{entry.label}</b> {entry.text}</span></div>)}</section> : null}
-      {sessions.length > 0 ? (
-        <SessionRegionHost arrangement={arrangement} className={`global-demand-workspace__regions ${arrangementClass}`}>
-          {sessions.map((session, index) => {
-            const workspaceId = sessionWorkspaceId(config, session)
-            const tabId = `demand-workspace:${demand.id}`
-            const regionId = `demand-region:${demand.id}:${session.id}`
-            return (
-              <section className="global-demand-region" key={session.id} data-region-id={regionId}>
-                <header className="global-demand-region__header">
-                  <span className="global-demand-region__name"><StatusDot status={session.status} /> {session.label}</span>
-                  <button type="button" className="global-demand-region__jump" onClick={() => selectSession(session.id)} title="Open this Session in its Project"><ArrowUpRight size={12} /> Project</button>
-                </header>
-                <div className="global-demand-region__body">
-                  <SessionPane
-                    sessionId={session.id}
-                    surfaceKind={session.kind}
-                    interactiveResize={false}
-                    readOnly
-                    visible
-                    linkOrigin={{ workspaceId, tabGroupId: `demand-group:${demand.id}`, tabId, regionId }}
-                  />
-                </div>
-                <span className="global-demand-region__index">{index + 1} / {sessions.length}</span>
-              </section>
-            )
-          })}
-        </SessionRegionHost>
-      ) : null}
-    </aside>
-  )
+function GoalRow({ demand, selected, sessionContext, onSelect }: { demand: DemandProjection; selected: boolean; sessionContext: boolean; onSelect: () => void }) {
+  const execution = useAppStore(useShallow((state) => {
+    const byId = sessionPresentationById(state.sessions)
+    let count = 0; const statuses = new Set<string>()
+    for (const id of demand.sessionIds) { const session = byId.get(id); if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } }
+    return { count, status: [...statuses].join(' / ') }
+  }))
+  return <div role="button" tabIndex={0} className={`goals-row${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(sessionContext ? { 'data-session-context': true } : {})} aria-pressed={selected} onClick={onSelect} onKeyDown={(event) => {
+    if (event.target !== event.currentTarget) return
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
+  }}>
+    <span className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{sessionContext ? <span>Current execution</span> : null}<span className="goals-row__status">{GOAL_STATUS_LABELS[demand.status]}</span></span></span>
+    <span className="goals-row__next">{demand.status === 'done' ? 'Result unverified' : 'Align goal'}<ChevronRight size={13} /></span>
+    {selected ? <Check className="goals-row__selected" size={13} aria-label="Selected goal" /> : null}
+  </div>
 }
 
 const EMPTY_EXECUTORS: Record<string, { label: string }> = {}
-
 export function GlobalBoardSurface() {
   const config = useAppStore((state) => state.config)
-  const sessions = useAppStore((state) => state.sessions)
-  const tabs = useAppStore((state) => state.tabs)
   const demands = useAppStore((state) => state.demands)
   const selectedDemandId = useAppStore((state) => state.selectedDemandId)
   const selectedSessionId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const setSelectedDemand = useAppStore((state) => state.setSelectedDemand)
   const createDemand = useAppStore((state) => state.createDemand)
+  const requestDemandPmoTask = useAppStore((state) => state.requestDemandPmoTask)
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)
-  const demandArrangement = useAppStore((state) => state.demandArrangement)
-  const setDemandArrangement = useAppStore((state) => state.setDemandArrangement)
-  const updateDemand = useAppStore((state) => state.updateDemand)
-  const deleteDemand = useAppStore((state) => state.deleteDemand)
-  const reportError = useAppStore((state) => state.reportError)
-  const executorCatalog = useAppStore((state) => state.config?.executors)
-  const executors = executorCatalog ?? EMPTY_EXECUTORS
+  const executors = config?.executors ?? EMPTY_EXECUTORS
   const [query, setQuery] = useState('')
+  const [view, setView] = useState<'list' | 'board'>('list')
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<DemandStatus | 'all'>('all')
   const [projectFilter, setProjectFilter] = useState('all')
   const [routingFilter, setRoutingFilter] = useState<'all' | 'unassigned' | 'assigned'>('all')
   const [executorFilter, setExecutorFilter] = useState('all')
-  const projectedDemands = useMemo(() => projectDemands(config, sessions, demands), [demands, config, sessions])
+  const [showHistory, setShowHistory] = useState(false)
+  const [intakeOpen, setIntakeOpen] = useState(false)
+  const [intent, setIntent] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [creationError, setCreationError] = useState<string | null>(null)
+  const [moteError, setMoteError] = useState<{ demandId: string; message: string; mode: 'open' | 'grill' | 'grounding' } | null>(null)
+  const newGoalRef = useRef<HTMLButtonElement>(null)
+  const filterRef = useRef<HTMLButtonElement>(null)
+  const selectedRowRef = useRef<HTMLElement | null>(null)
+  const surfaceRef = useRef<HTMLElement>(null)
+  const goalDrafts = useRef(new Map<string, Partial<Record<'title' | 'description', string>>>())
+  const projectedDemands = useMemo(() => projectDemands(config, [], demands), [demands, config])
+  const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
+  const projects = useMemo(() => (config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID), [config?.workspaces])
   const filteredDemands = useMemo(() => projectedDemands.filter((demand) => {
     const normalized = query.trim().toLocaleLowerCase()
     const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
     const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeExecutorId : Boolean(demand.projectId && demand.assigneeExecutorId))
-    return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (executorFilter === 'all' || demand.assigneeExecutorId === executorFilter)
-  }), [executorFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
+    const matchesHistory = showHistory || statusFilter !== 'all' || (demand.status !== 'done' && demand.status !== 'cancelled')
+    return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (executorFilter === 'all' || demand.assigneeExecutorId === executorFilter)
+  }), [executorFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
-  const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
-  const selectedSessionDemand = selectedSessionId
-    ? projectedDemands.find((demand) => demand.sessionIds.includes(selectedSessionId)) ?? null
-    : null
-  const projects = useMemo(() => (config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID).map((workspace) => [workspace.id, workspace.name] as [string, string]), [config?.workspaces])
+  const appliedFilters = [
+    ...(statusFilter !== 'all' ? [{ label: GOAL_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
+    ...(projectFilter !== 'all' ? [{ label: projects.find((project) => project.id === projectFilter)?.name ?? projectFilter, clear: () => setProjectFilter('all') }] : []),
+    ...(routingFilter !== 'all' ? [{ label: routingFilter === 'unassigned' ? 'Needs routing' : 'Assigned', clear: () => setRoutingFilter('all') }] : []),
+    ...(executorFilter !== 'all' ? [{ label: executors[executorFilter]?.label ?? executorFilter, clear: () => setExecutorFilter('all') }] : [])
+  ]
 
-  useEffect(() => {
-    if (selectedDemandId && !selectedDemand) setSelectedDemand(null)
-  }, [selectedDemandId, selectedDemand, setSelectedDemand])
-
-  function createDemandCard(): void {
-    const project = projectFilter !== 'all' ? projects.find(([id]) => id === projectFilter) : undefined
-    const demandId = createDemand({
-      title: 'New goal — needs clarification',
-      description: 'Created from Goals; Mote will clarify the goal and completion criteria before execution.',
-      projectId: project?.[0] ?? null,
-      projectName: project?.[1] ?? null,
-      status: 'backlog',
-      source: 'default-topic'
-    })
-    const projectContext = project ? `\n当前筛选的目标 Project：${project[1]}（${project[0]}）。` : '\n当前没有预选 Project，请先澄清归属。'
-    const prompt = `你现在是 AgentMux 的 Mote，默认角色是 PMO，从 Goals 的 New Goal 入口接到已创建的 Demand ${demandId}。你的身份是项目调度与需求澄清者，不是代替用户直接完成需求的执行 Agent。请围绕这条已有 Demand 和用户对话，先澄清并更新标题、描述、优先级、风险、目标 Project、执行 Agent/Session 和验收标准；不要重复创建 Demand。${projectContext}\n形成可审查的方案后，等待用户明确确认，再通过公开 Demand/CUI 能力更新或分配这条 Demand 并返回 receipt。`
-    void openDemandPmo(demandId, prompt)
-      .then((tabId) => requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId }))
-      .catch(reportError)
+  function closeDetail() {
+    const row = surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]') ?? selectedRowRef.current
+    setSelectedDemand(null); queueMicrotask(() => { if (row?.isConnected) row.focus(); else newGoalRef.current?.focus() })
   }
-
-  function openDemandPmoSurface(demandId: string): void {
-    void openDemandPmo(demandId)
-      .then((tabId) => requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId }))
-      .catch(reportError)
+  async function openMote(demandId: string, mode?: 'grill' | 'grounding') {
+    try {
+      const tabId = mode ? await requestDemandPmoTask(demandId, mode) : await openDemandPmo(demandId)
+      requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
+      setMoteError(null)
+    } catch (error) { setMoteError({ demandId, mode: mode ?? 'open', message: error instanceof Error ? error.message : String(error) }) }
   }
+  async function submitIntent() {
+    if (!intent.trim() || saving) return
+    setSaving(true); setCreationError(null)
+    const project = projects.find((candidate) => candidate.id === projectFilter)
+    try {
+      const demandId = await createDemand({ title: intent.trim().split('\n')[0]!.slice(0, 100), description: intent, projectId: project?.id ?? null, projectName: project?.name ?? null, status: 'backlog', source: 'default-topic' })
+      setSelectedDemand(demandId); setIntakeOpen(false); setIntent('')
+      await openMote(demandId, 'grill')
+    } catch (error) { setCreationError(error instanceof Error ? error.message : String(error)) }
+    finally { setSaving(false) }
+  }
+  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} sessionContext={Boolean(selectedSessionId && demand.sessionIds.includes(selectedSessionId))} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
-  return (
-    <section className={`global-board-surface ${selectedDemand ? 'global-board-surface--demand-open' : ''}`}>
-      <div className="global-board-main">
-        <header className="global-board-toolbar">
-          <div className="global-board-toolbar__scope"><span className="global-board-toolbar__mark"><Columns3 size={14} /></span><strong>Goals</strong><span className="global-board-toolbar__crumb">Goals &amp; progress · Global</span></div>
-          <div className="global-board-toolbar__controls">
-            <label className="global-board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search goals" placeholder="Search goals" />{query ? <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X size={11} /></button> : null}</label>
-            <label className="global-board-select"><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as DemandStatus | 'all')}><option value="all">All</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{STATUS_META[status].label}</option>)}</select><ChevronDown size={12} /></label>
-            <label className="global-board-select"><span>Project</span><select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">All</option>{projects.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><ChevronDown size={12} /></label>
-            <label className="global-board-select"><span>Routing</span><select aria-label="Goal routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select><ChevronDown size={12} /></label>
-            <label className="global-board-select"><span>Executor</span><select aria-label="Goal executor" value={executorFilter} onChange={(event) => setExecutorFilter(event.target.value)}><option value="all">All</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select><ChevronDown size={12} /></label>
-            <button type="button" className="global-board-action" onClick={createDemandCard}><CirclePlus size={14} /> New Goal</button>
-            <button type="button" className="global-board-icon-action" title="Goal filters" aria-label="Goal filters"><MoreHorizontal size={15} /></button>
-          </div>
-        </header>
-        <div className="global-board-columns" role="region" aria-label="Global goals">
-          {DEMAND_STATUS_IDS.map((status) => {
-            const meta = STATUS_META[status]
-            const Icon = meta.icon
-            return (
-              <section className="global-board-column" key={status} data-status={status}>
-                <header className="global-board-column__header"><span><Icon size={13} /><strong>{meta.label}</strong><em>{columns[status].length}</em></span><button type="button" title={`Add ${meta.label} goal`} aria-label={`Add ${meta.label} goal`} onClick={createDemandCard}><CirclePlus size={13} /></button></header>
-                <div className="global-board-column__cards">
-                  {columns[status].map((demand) => <DemandCard key={demand.id} demand={demand} selected={demand.id === selectedDemandId} {...(demand.id === selectedSessionDemand?.id && selectedSessionId ? { sessionContext: selectedSessionId } : {})} onSelect={() => setSelectedDemand(demand.id)} onOpenPmo={() => openDemandPmoSurface(demand.id)} sessions={sessions} tabs={tabs} config={config} />)}
-                  {columns[status].length === 0 ? <div className="global-board-column__empty">Nothing here</div> : null}
-                </div>
-              </section>
-            )
-          })}
-        </div>
-        <footer className="global-board-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals</span><span className="global-board-footer__hint">Select a goal to keep its execution context beside the work surface</span></footer>
+  return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
+    if (event.key !== 'Escape' || event.nativeEvent.isComposing) return
+    if (intakeOpen && !saving) { setIntakeOpen(false); queueMicrotask(() => newGoalRef.current?.focus()) }
+    else if (filtersOpen) { setFiltersOpen(false); queueMicrotask(() => filterRef.current?.focus()) }
+    else if (selectedDemand && !['INPUT', 'TEXTAREA', 'SELECT'].includes((event.target as HTMLElement).tagName)) closeDetail()
+  }}>
+    <div className="goals-index">
+      <header className="goals-toolbar">
+        <label className="goals-search"><Search size={14} /><input aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
+        <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
+        <div className="goals-view-toggle" role="group" aria-label="Goal view"><button type="button" aria-label="List view" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={14} /></button><button type="button" aria-label="Board view" aria-pressed={view === 'board'} onClick={() => setView('board')}><Columns3 size={14} /></button></div>
+        <button ref={newGoalRef} type="button" className="goals-button goals-button--primary" onClick={() => setIntakeOpen(true)}><CirclePlus size={13} />New Goal</button>
+      </header>
+      {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">
+        <label>Status<select aria-label="Filter status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">All active</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{GOAL_STATUS_LABELS[status]}</option>)}</select></label>
+        <label>Project<select aria-label="Filter project" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">All projects</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+        <label>Routing<select aria-label="Filter routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select></label>
+        <label>Executor<select aria-label="Filter executor" value={executorFilter} onChange={(event) => setExecutorFilter(event.target.value)}><option value="all">Any executor</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
+      </div> : null}
+      {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<X size={11} /></button>)}</div> : null}
+      {intakeOpen ? <form className="goals-intake" aria-label="New goal" onSubmit={(event) => { event.preventDefault(); void submitIntent() }}>
+        <label htmlFor="goal-intent">What would you like to achieve?</label>
+        <ComposerTextarea id="goal-intent" autoFocus aria-label="Goal intent" placeholder="Describe the outcome in your own words…" value={intent} onValueChange={setIntent} rows={4} disabled={saving} />
+        <div className="goals-intake__footer"><span>{projects.find((project) => project.id === projectFilter)?.name ?? 'No project selected'}</span><button type="button" className="goals-button" disabled={saving} onClick={() => { setIntakeOpen(false); newGoalRef.current?.focus() }}>Cancel</button><button type="submit" className="goals-button goals-button--primary" disabled={!intent.trim() || saving}>{saving ? 'Saving…' : 'Save & discuss'}<ArrowUpRight size={13} /></button></div>
+        {creationError ? <p className="goals-service" role="status">Goal could not be saved. Your draft is kept. Retry Save &amp; discuss. <span>{creationError}</span></p> : null}
+      </form> : null}
+      <div className={`goals-collection goals-collection--${view}`} role="region" aria-label="Global goals">
+        {filteredDemands.length === 0 ? <p className="goals-empty">{projectedDemands.length ? 'No goals match this view.' : 'Start with an outcome you want to achieve.'}</p> : view === 'list' ? <div className="goals-list">{filteredDemands.map(renderRow)}</div> : <div className="goals-board">{DEMAND_STATUS_IDS.filter((status) => columns[status].length > 0 || !['done', 'cancelled'].includes(status)).map((status) => <section className="goals-board-column" key={status} data-status={status}><header><strong>{GOAL_STATUS_LABELS[status]}</strong><span>{columns[status].length}</span></header>{columns[status].map(renderRow)}{columns[status].length === 0 ? <p className="goals-board-column__empty">—</p> : null}</section>)}</div>}
       </div>
-      {selectedDemand ? <DemandWorkspace demand={selectedDemand} arrangement={demandArrangement} onArrangement={setDemandArrangement} onClose={() => setSelectedDemand(null)} onOpenPmo={() => openDemandPmoSurface(selectedDemand.id)} onDelete={() => { deleteDemand(selectedDemand.id); setSelectedDemand(null) }} executors={executors} allSessions={sessions} tabs={tabs} onUpdate={(patch) => updateDemand(selectedDemand.id, { ...patch, ...(patch.status ? { activityLog: [...(selectedDemand.activityLog ?? []), `Status → ${patch.status}`] } : {}) })} /> : null}
-    </section>
-  )
+      <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
+    </div>
+    {selectedDemand ? <GoalDetail key={selectedDemand.id} demand={selectedDemand} draft={goalDrafts.current.get(selectedDemand.id) ?? {}} onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }} onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }} onClose={closeDetail} onOpenMote={() => void openMote(selectedDemand.id)} onGrill={() => void openMote(selectedDemand.id, 'grill')} moteError={moteError?.demandId === selectedDemand.id ? moteError : null} onRetryMote={() => void openMote(selectedDemand.id, moteError?.mode === 'open' ? undefined : moteError?.mode)} /> : selectedDemandId ? <aside className="goals-detail"><button className="goals-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
+  </section>
 }

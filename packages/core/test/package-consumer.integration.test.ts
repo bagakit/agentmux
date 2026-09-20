@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
@@ -330,12 +331,14 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       const root = await mkdtemp('/tmp/agentmux-packed-ctxmux-')
       roots.push(root)
       const packDirectory = join(root, 'pack')
+      const packWorkspace = join(root, 'pack-workspace')
       const consumerDirectory = join(root, 'consumer')
       const testUid = `t${process.pid}-${randomUUID().slice(0, 8)}`
       const runtimeDirectory = join('/private/tmp', `amx-${testUid}-${ctxmuxRuntimeId}`)
       roots.push(runtimeDirectory)
       await Promise.all([
         mkdir(packDirectory),
+        mkdir(packWorkspace),
         mkdir(consumerDirectory, { recursive: true }),
         mkdir(join(consumerDirectory, 'bin'), { recursive: true }),
         mkdir(runtimeDirectory, { mode: 0o700 })
@@ -346,61 +349,82 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         type: 'module'
       }))
 
-      // 这个包必须由**已经存在的** dist 打成，绝不能让 pack 顺手重建它。
-      //
-      // 之前走 `pnpm --filter @agentmux/core pack`，pnpm 一定跑 prepack（= `pnpm build`），而 build
-      // 的第一步是 scripts/clean-build.mjs 对整个 dist/ 做 rm -rf，再由 tsc 重建——留下约 2 秒 dist
-      // 为空的窗口（实测 0.15s 采样抓到连续 14 次 GONE）。同一批跑的 agentmux-cli-help.test.ts 正好
-      // execFile bin/agentmux，而那个文件只有一行 `import '../dist/agentmux.js'`，于是成片红在
-      // ERR_MODULE_NOT_FOUND——症状像构建坏了，真因是共享可变状态。单跑 15/15 绿，组合跑 13 红。
-      //
-      // 换成 `npm pack --ignore-scripts` 是消除那份共享可变状态，不是靠排程回避：dist 不再被这个测试
-      // 写，于是任何读 dist 的测试都能与它同批跑。`npm_config_ignore_scripts: 'true'` 这个环境变量对
-      // pnpm 无效（实测 prepack 照跑，stderr 里能看到 `$ pnpm build`），`pnpm pack` 也没有跳过脚本的
-      // 开关（`--ignore-scripts` 被它当未知选项拒绝），所以只能走 npm 的 pack。
-      //
-      // 代价是一个此前隐式、现在必须显式的前提：dist 得是当前源码的产物。测试脚本本来就是
-      // `pnpm build && vitest run`，但那个顺序过去由 prepack 兜底，现在不再有。这个前提由
-      // `vitest.dist-freshness.ts` 的 globalSetup 钉住，对**每一次** vitest 运行生效（含只点名单个
-      // 文件的那种），所以这里不再自己断言一遍。此前这道判据是本文件的一个私有函数，被三重关住
-      // ——只在 `runIf(darwin && arm64)` 里调、文件被 test:fast 排掉、唯一会跑它的 test:native 又
-      // 自己前置了 build——也就是永远不可能红。搬到 globalSetup 才让它真的守到东西。
+      // Pack the existing artifacts in an owned workspace. A prepack must never rebuild shared
+      // dist while other consumers read it. pnpm supplies the actual publish-time workspace
+      // dependency conversion; npm pack would retain workspace:* and produce an unusable Core.
+      await writeFile(join(packWorkspace, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+      async function pack(directory: string): Promise<{ filename: string; files: Array<{ path: string }> }> {
+        try {
+          const result = await execFileAsync('pnpm', ['pack', '--pack-destination', packDirectory, '--json'], {
+            cwd: join(packWorkspace, 'packages', directory), maxBuffer: 8 * 1024 * 1024
+          })
+          return JSON.parse(result.stdout)
+        } catch (error) {
+          const failure = error as { stdout?: string; stderr?: string; message: string }
+          throw new Error(`Private ${directory} publish pack failed:\n${failure.stdout ?? ''}${failure.stderr ?? ''}${failure.message}`)
+        }
+      }
+      const manifests = new Map<string, { name: string; version: string; files: string[]; scripts?: Record<string, string>; dependencies?: Record<string, string> }>()
+      for (const directory of ['core', 'demand']) {
+        const source = join(repositoryRoot, 'packages', directory)
+        const destination = join(packWorkspace, 'packages', directory)
+        const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
+        expect(manifest.files.length).toBeGreaterThan(0)
+        manifests.set(manifest.name, manifest)
+        await mkdir(destination, { recursive: true })
+        for (const file of manifest.files) await cp(join(source, file), join(destination, file), { recursive: true })
+        const privateManifest = structuredClone(manifest)
+        if (privateManifest.scripts) delete privateManifest.scripts.prepack
+        await writeFile(join(destination, 'package.json'), JSON.stringify(privateManifest))
+      }
+      const sourceManifest = manifests.get('@agentmux/core')!
+      // Reproduce the workspace link inside the owned copy; pnpm reads its version to publish
+      // workspace:*. The external consumer below installs tarballs, never this link or checkout.
+      await mkdir(join(packWorkspace, 'packages/core/node_modules/@agentmux'), { recursive: true })
+      await symlink('../../../demand', join(packWorkspace, 'packages/core/node_modules/@agentmux/demand'))
+      const demandMetadata = await pack('demand')
+      expect(demandMetadata.files.map((file: { path: string }) => file.path)).toContain('dist/src/goals.js')
+      const demandArchive = resolve(packDirectory, demandMetadata.filename)
+
+      // Artifact freshness remains the global setup's responsibility. These deterministic local
+      // packing/install steps share the owning test deadline, never a shorter competing budget.
       // 下面这些 `execFileAsync` 都没有挂钟预算，判据同 `waitForDaemonReady` 那段（见 :92 起）：
       // npm 的 pack/install、tsc、以及本测试自己起的那几个 worker fixture，都是**本机对固定输入的
       // 确定性步骤**——它们一定会答，被压满时只是慢。期限由外层 `it(…, 95_000)` 持有；再插一个更短的
       // 预算只贡献假阴性，而且 `execFile` 的超时错误从不说自己是超时，会把「慢」伪装成「坏」。
       // 保留 `timeout` 的是另一类：`ps`、以及经 socket 找/停守护进程那几处——socket 在而进程卡住时，
       // 对端可能永不回答。
-      const packed = await execFileAsync('npm', [
-        'pack',
-        '--ignore-scripts',
-        '--pack-destination',
-        packDirectory,
-        '--json'
-      ], {
-        cwd: resolve(repositoryRoot, 'packages/core'),
-        maxBuffer: 8 * 1024 * 1024
-      })
-      // npm pack --json 给的是数组（一次可打多个包），pnpm 给的是单个对象。
-      const packedManifests = JSON.parse(packed.stdout) as Array<{
-        filename: string
-        files: Array<{ path: string }>
-      }>
-      expect(packedManifests).toHaveLength(1)
-      const metadata = packedManifests[0]!
-      // npm pack 的 filename 是裸文件名（pnpm 给的是可解析路径）。下面 npm install 的 cwd 是
-      // consumerDirectory，裸名会被当成 consumer 目录里的文件而找不到，所以在这里拼成绝对路径。
-      const packedArchive = join(packDirectory, metadata.filename)
-      const packedHeadless = await execFileAsync('npm', [
-        'pack',
-        resolve(repositoryRoot, 'packages/core/node_modules/@xterm/headless'),
-        '--pack-destination',
-        packDirectory
-      ], {
-        cwd: repositoryRoot,
-        maxBuffer: 8 * 1024 * 1024
-      })
-      const headlessArchive = join(packDirectory, packedHeadless.stdout.trim().split(/\r?\n/u).at(-1)!)
+      const metadata = await pack('core')
+      const packedArchive = resolve(packDirectory, metadata.filename)
+      // Provide the locked installed dependency graph, including native prebuilds, as ordinary
+      // tarballs. An offline external consumer must not depend on an incidental npm cache.
+      const dependencyArchives: string[] = []
+      const packedDependencies = new Set<string>()
+      async function packDependencies(owner: string, dependencies: Record<string, string>): Promise<void> {
+        for (const [name, version] of Object.entries(dependencies)) {
+          if (version.startsWith('workspace:')) continue
+          const resolver = createRequire(join(owner, 'package.json'))
+          let source: string | undefined
+          for (const searchPath of resolver.resolve.paths(name) ?? []) {
+            try { source = await realpath(join(searchPath, name)); break }
+            catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error }
+          }
+          expect(source, `Installed dependency ${name} of ${owner}`).toBeDefined()
+          const manifest = JSON.parse(await readFile(join(source!, 'package.json'), 'utf8'))
+          const identity = `${manifest.name}@${manifest.version}`
+          if (packedDependencies.has(identity)) continue
+          packedDependencies.add(identity)
+          await packDependencies(source!, manifest.dependencies ?? {})
+          const packed = await execFileAsync('npm', ['pack', source!, '--ignore-scripts', '--pack-destination', packDirectory, '--json'], {
+            cwd: packWorkspace, maxBuffer: 8 * 1024 * 1024
+          })
+          const metadata = JSON.parse(packed.stdout)
+          expect(metadata).toHaveLength(1)
+          dependencyArchives.push(resolve(packDirectory, metadata[0].filename))
+        }
+      }
+      await packDependencies(join(repositoryRoot, 'packages/core'), sourceManifest.dependencies!)
+      expect(dependencyArchives.length).toBeGreaterThan(0)
       const packedPaths = metadata.files.map((file) => file.path)
       expect(packedPaths).toContain('bin/agentmux')
       expect(packedPaths).not.toContain('bin/agentmuxd.js')
@@ -417,7 +441,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         '--ignore-scripts',
         '--no-package-lock',
         '--no-save',
-        headlessArchive,
+        ...dependencyArchives,
+        demandArchive,
         packedArchive
       ], {
         cwd: consumerDirectory,
@@ -465,8 +490,12 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         }
       })
       expect(installedManifest.dependencies).not.toHaveProperty('node-pty')
-      expect(installedManifest.dependencies).toEqual({ '@xterm/headless': '5.5.0', yaml: '2.9.0' })
-      expect(JSON.stringify(installedManifest)).not.toMatch(/(?:file|link):/u)
+      const publishedDependencies = Object.fromEntries(Object.entries(sourceManifest.dependencies!).map(([name, version]) =>
+        [name, version === 'workspace:*' ? manifests.get(name)!.version : version]))
+      expect(installedManifest.dependencies).toEqual(publishedDependencies)
+      expect(installedManifest.dependencies['@agentmux/demand']).toBe(manifests.get('@agentmux/demand')!.version)
+      expect(JSON.stringify(installedManifest)).not.toMatch(/(?:workspace|file|link):/u)
+      expect(await realpath(join(consumerDirectory, 'node_modules/@agentmux/demand'))).toBe(join(consumerDirectory, 'node_modules/@agentmux/demand'))
       await Promise.all([
         writeFile(join(consumerDirectory, 'consumer.ts'), [
           "import type { AgentMuxAgentSession, AgentMuxRuntimeDiagnostics } from '@agentmux/core'",
@@ -512,15 +541,13 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         }`)
       }
 
-      const artifactManifest = JSON.parse(await readFile(
+      const artifactBytes = await readFile(
         join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'manifest.json'),
         'utf8'
-      ))
-      expect(artifactManifest.source).toMatchObject({
-        commit: 'c168c0ab9cd849bfade68461b62684982c71f688',
-        tree: 'a2cc33fe7adac2b25110df58370e3dac17850e00',
-        worktree_clean: true
-      })
+      )
+      expect(createHash('sha256').update(artifactBytes).digest('hex')).toBe(CTXMUX_MANIFEST_SHA256)
+      expect(artifactBytes).toBe(await readFile(join(repositoryRoot,
+        'packages/core/vendor/ctxmux/darwin-arm64/manifest.json'), 'utf8'))
 
       const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
       const cliPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux')

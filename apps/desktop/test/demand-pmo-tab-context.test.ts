@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -11,6 +11,9 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 const initialState = useAppStore.getState()
+let dispose: (() => void) | undefined
+beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
+afterAll(() => dispose?.())
 const scratchWorkspace = { id: SCRATCH_WORKSPACE_ID, name: 'Scratch', hostId: 'local', path: '/scratch', kind: 'scratch' as const }
 const config = {
   version: 9,
@@ -45,8 +48,8 @@ describe('Demand dedicated PMO Tab context', () => {
       launchAgent: launchAgent as never
     })
 
-    const tabId = await useAppStore.getState().openDemandPmo(demand.id, 'fresh demand prompt')
-    const secondTabId = await useAppStore.getState().openDemandPmo(secondDemand.id, 'second fresh prompt')
+    const tabId = await useAppStore.getState().requestDemandPmoTask(demand.id, 'grill')
+    const secondTabId = await useAppStore.getState().requestDemandPmoTask(secondDemand.id, 'grounding')
     const state = useAppStore.getState()
     const tab = state.tabs[tabId]
     expect(secondTabId).not.toBe(tabId)
@@ -56,8 +59,8 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.tabOrder).toContain(secondTabId)
     expect(state.demandPmoTabIds[demand.id]).toBe(tabId)
     expect(state.demandPmoTabIds[secondDemand.id]).toBe(secondTabId)
-    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('fresh demand prompt'), 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' })
-    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('second fresh prompt'), 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' })
+    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('Grill:'), 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' })
+    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('Grounding:'), 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' })
     expect(launchAgent.mock.calls[0]?.[1]).toContain('Read-only execution Agent context')
   })
 
@@ -81,6 +84,49 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
   })
 
+  it('delivers a new Grill or Grounding task to the mapped Agent through retained userIntent admission', async () => {
+    const tab = { ...createWorkbenchTab('pmo-tab-one', { regionId: 'region-one', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'session-one' }, 'PMO'), topicId: PMO_TEAMS_TOPIC_ID }
+    const send = vi.fn().mockReturnValue(true)
+    const launchAgent = vi.fn()
+    useAppStore.setState({ config, demands: { [demand.id]: demand }, demandPmoTabIds: { [demand.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [tab.id]) }, openScratchTopic: vi.fn().mockResolvedValue(undefined) as never, send: send as never, launchAgent: launchAgent as never })
+    await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grill')).resolves.toBe(tab.id)
+    await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grounding')).resolves.toBe(tab.id)
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(send.mock.calls[0]).toEqual(['session-one', expect.stringContaining('Grill:')])
+    expect(send.mock.calls[1]).toEqual(['session-one', expect.stringContaining('Grounding:')])
+    expect(send.mock.calls[1]![1]).toContain('Clarify one outcome')
+    expect(launchAgent).not.toHaveBeenCalled()
+    expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
+    send.mockReturnValue(false)
+    await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grill')).rejects.toThrow(/not queued/u)
+    expect(useAppStore.getState().demands[demand.id]).toEqual(demand)
+    expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
+  })
+
+  it('retains a real queued Mote task on a healthy busy Run and sends it on retry', async () => {
+    const session = { id: 'session-one', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'session-one', run: { runId: 'healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null }
+    const quotedDemand = { ...demand, id: "goal's-id", alignment: { revision: 1, summary: 'User goal', criteria: [{ id: "criterion's-id", text: 'Current criterion' }], openQuestions: [], confirmedAt: 1 } }
+    const tab = { ...createWorkbenchTab('pmo-tab-one', { regionId: 'region-one', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }, 'PMO'), topicId: PMO_TEAMS_TOPIC_ID }
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session as never)
+    vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Readiness not yet observed'))
+    const launch = vi.fn()
+    useAppStore.setState({ config, sessions: [session as never], demands: { [quotedDemand.id]: quotedDemand }, demandPmoTabIds: { [quotedDemand.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [tab.id]) }, openScratchTopic: vi.fn().mockResolvedValue(undefined) as never, launchAgent: launch as never })
+    await expect(useAppStore.getState().requestDemandPmoTask(quotedDemand.id, 'grounding')).resolves.toBe(tab.id)
+    await vi.waitFor(() => { expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]).toMatchObject({ runId: 'healthy-run', status: 'deferred', error: 'Readiness not yet observed' }) })
+    const retained = useAppStore.getState().agentSteerQueues[session.id]![0]!
+    expect(retained.text).toContain("--demand 'goal'\"'\"'s-id'")
+    expect(retained.text).toContain("criterion'\"'\"'s-id")
+    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), undefined, { allowUncertainTurn: true })
+    expect(useAppStore.getState().sessions).toEqual([session])
+    expect(launch).not.toHaveBeenCalled()
+    submit.mockResolvedValue(undefined)
+    await useAppStore.getState().flushAgentSteerQueue(session.id)
+    expect(useAppStore.getState().agentSteerQueues[session.id]).toBeUndefined()
+    expect(submit.mock.calls.at(-1)?.[2]).toBe(retained.operationId)
+    expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
+  })
+
   it('focuses the requested PMO Tab even when another Demand owns the first Tab', async () => {
     const firstTab = { ...createWorkbenchTab('pmo-tab-one', { regionId: 'region-one', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'session-one' }, 'PMO · One demand'), topicId: PMO_TEAMS_TOPIC_ID }
     const secondTab = { ...createWorkbenchTab('pmo-tab-two', { regionId: 'region-two', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'session-two' }, 'PMO · Two demand'), topicId: PMO_TEAMS_TOPIC_ID }
@@ -91,7 +137,7 @@ describe('Demand dedicated PMO Tab context', () => {
       layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [firstTab.id, secondTab.id]) }
     })
 
-    await useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: secondTab.id })
+    await useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: true, tabId: secondTab.id })
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBe(secondTab.id)
     await expect(useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: 'missing-tab' })).rejects.toThrow()
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBe(secondTab.id)
@@ -111,7 +157,7 @@ it('keeps the Demand-to-PMO mapping in renderer persistence and exposes both PMO
   expect(source.length).toBeGreaterThan(0)
   expect(board.length).toBeGreaterThan(0)
   expect(source).toContain('demandPmoTabIds: state.demandPmoTabIds')
-  expect(source).toContain('openDemandPmo(demandId, prompt)')
-  expect(board).toContain('global-demand-card__pmo')
-  expect(board).toContain('global-demand-workspace__pmo')
+  expect(source).toContain('requestDemandPmoTask(demandId, mode)')
+  expect(board).toContain('onOpenMote=')
+  expect(board).toContain("await openDemandPmo(demandId)")
 })
