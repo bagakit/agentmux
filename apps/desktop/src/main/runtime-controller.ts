@@ -38,7 +38,6 @@ import type {
   AgentSessionControl,
   AgentSessionRecoveryCandidate,
   AppConfig,
-  HostCheckResult,
   HostConfig,
   RuntimeEvent,
   RuntimeSnapshot,
@@ -512,13 +511,12 @@ export class RuntimeController {
     return host.executionHost
   }
 
-  async checkHost(config: HostConfig): Promise<HostCheckResult> {
+  async checkHost(config: HostConfig): Promise<{ detail: string }> {
     let prepared: PreparedRuntimeHost | null = null
     try {
       prepared = await this.prepareHost(config, new AgentMuxMemoryAgentSessionStore())
       const identity = prepared.client.runtimeIdentity()
       return {
-        ok: true,
         detail: `Runtime ${identity.buildIdentity} · protocol ${identity.protocolVersion}`
       }
     } finally {

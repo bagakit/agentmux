@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSettingsGetRequest,
   type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest,
-  type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest } from './control.js'
+  type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest, type AgentMuxControlSettingsHostsRequest } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 
@@ -11,11 +11,21 @@ type SettingsCommand =
   | ResourceCommand
   | WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>
   | Omit<AgentMuxControlSettingsWorkspaceAddRequest, 'schemaVersion' | 'requestId'>
-type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest | AgentMuxControlSettingsBrowserLinksRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
+  | WithoutEnvelope<AgentMuxControlSettingsHostsRequest>
+type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest | AgentMuxControlSettingsBrowserLinksRequest | AgentMuxControlSettingsHostsRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
 type ResourceCommand = WithoutEnvelope<AgentMuxControlSettingsResourceRequest>
 
 /** Positional scalar values are data, including literal --help and empty strings. */
 export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCommand> {
+  if (args[0] === 'hosts') {
+    if (args[1] === 'list' && args.length === 2) return { operation: 'settings.hosts.list' }
+    // Three arguments select an exact saved ID, including literal --input or --help.
+    if (args[1] === 'test' && args.length === 3 && args[2]!.length) return { operation: 'settings.hosts.test', id: args[2]! }
+    if (args[1] === 'test' && args.length === 4 && args[2] === '--input') {
+      return { operation: 'settings.hosts.test', input: settingsResourceRecord(await input(args[3]!), 'INVALID_CLI_ARGUMENT') }
+    }
+    throw invalid('Run agentmux settings hosts --help for exact ID or complete draft Test syntax.')
+  }
   if (args[0] === 'executors' || args[0] === 'prompts') return resourceCommand(args)
   if (args[0] === 'browser') return browserLinksCommand(args)
   if (args[0] === 'workspaces') {

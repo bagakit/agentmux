@@ -1,8 +1,9 @@
-import { CheckCircle2, ChevronDown, LoaderCircle, Monitor, Plus, RadioTower, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Info, LoaderCircle, Monitor, Plus, RadioTower, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
 import type { AppConfig, HostConfig, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore } from '../../store'
+import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 
@@ -81,7 +82,7 @@ export function HostSettingsPane({ config, onSave }: {
       </div>
       <div className="host-settings-list">
         {hosts.map((host) => {
-          const check = checks[host.id]
+          const check = currentHostCheck(checks[host.id], host)
           const sessionCount = sessions.filter((session) => session.hostId === host.id).length
           return (
             <section className="host-settings-card" key={host.id}>
@@ -89,10 +90,10 @@ export function HostSettingsPane({ config, onSave }: {
                 <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
                 <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'This Mac'}</small></div>
                 {check ? (
-                  <span role="status" className={`check-pill check-pill--${check.state}`}>
+                  <span role="status" className={`check-pill check-pill--${check.state === 'error' ? check.result?.outcome ?? 'check-failed' : check.state}`}>
                     {check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> :
-                      check.state === 'ready' ? <CheckCircle2 size={13} /> : check.state === 'error' ? <XCircle size={13} /> : null}
-                    {{ checking: 'Testing', ready: 'Ready', error: check.result ? 'Unavailable' : 'Check failed', idle: 'Not tested' }[check.state]}
+                      check.state === 'ready' ? <CheckCircle2 size={13} /> : check.state === 'error' ? <Info size={13} /> : null}
+                    {hostCheckLabel(check)}
                   </span>
                 ) : null}
                 <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>

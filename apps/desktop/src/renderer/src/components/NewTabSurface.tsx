@@ -6,6 +6,7 @@ import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
+import { currentHostCheck, hostCheckLabel } from '../lib/host-check'
 import { configuredExecutors } from '../lib/executors'
 import { presentError } from '../lib/error-presentation'
 import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
@@ -111,8 +112,10 @@ export function NewTabSurface({
     launcherTabWorkspaceId: tabWorkspaceId,
     activeWorkspaceId
   }))
-  const hostLabel = workspace ? (config?.hosts.find((host) => host.id === workspace.hostId)?.label ?? workspace.hostId) : 'No host'
-  const hostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
+  const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
+  const hostLabel = host?.label ?? workspace?.hostId ?? 'No host'
+  const storedHostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
+  const hostCheck = host ? currentHostCheck(storedHostCheck, host) : undefined
   // Only show a warm shell created for this exact host and working directory.
   // It remains outside the ordinary Session list until the user claims it.
   const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
@@ -431,7 +434,7 @@ export function NewTabSurface({
         <span>
           {workspace?.hostId !== 'local' ? <RadioTower size={13} /> : null}
           {hostLabel}
-          {hostCheck ? <em className={`launch-host-health launch-host-health--${hostCheck.state}`}>{hostCheck.state === 'ready' ? 'Ready' : hostCheck.state === 'checking' ? 'Checking' : 'Needs attention'}</em> : null}
+          {hostCheck ? <em className={`launch-host-health launch-host-health--${hostCheck.state === 'error' ? hostCheck.result?.outcome ?? 'check-failed' : hostCheck.state}`}>{hostCheck.state === 'checking' ? 'Checking' : hostCheckLabel(hostCheck)}</em> : null}
         </span>
         <button
           className="primary-button"

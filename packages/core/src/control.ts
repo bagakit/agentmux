@@ -269,6 +269,16 @@ export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts'
 export type AgentMuxControlSettingsResourceJson = null | boolean | number | string
   | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
 export type AgentMuxControlSettingsResourceFields = { [key: string]: AgentMuxControlSettingsResourceJson }
+/** Host configuration belongs to the client; Core transports bounded JSON and diagnostic facts. */
+export type AgentMuxControlSettingsHostsRequest = RequestBase & (
+  | { operation: 'settings.hosts.list' }
+  | { operation: 'settings.hosts.test'; id: string; input?: never }
+  | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; id?: never }
+)
+export type AgentMuxHostCheckOutcome = 'ready' | 'unsupported' | 'check-failed'
+export type AgentMuxControlSettingsHostsResult =
+  | { operation: 'settings.hosts.list'; hosts: AgentMuxControlSettingsResourceFields[] }
+  | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; outcome: AgentMuxHostCheckOutcome; detail: string }
 export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields }
 export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
   operation: 'settings.workspaces.add'; input: AgentMuxControlSettingsResourceFields
@@ -514,6 +524,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSettingsBrowserLinksRequest
   | AgentMuxControlSettingsWorkspaceAddRequest
   | AgentMuxControlSettingsResourceRequest
+  | AgentMuxControlSettingsHostsRequest
   | AgentMuxControlInterruptRequest
   | AgentMuxControlResumeRequest
   | AgentMuxControlStopRequest
@@ -605,6 +616,7 @@ export type AgentMuxControlResult =
   | { operation: 'settings.browser.links.forget'; scheme: string; changed: boolean }
   | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | AgentMuxControlSettingsResourceResult
+  | AgentMuxControlSettingsHostsResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
@@ -810,6 +822,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'list.projects': 'short',
   'list.active-agents': 'short',
   'settings.get': 'short',
+  'settings.hosts.list': 'short',
+  'settings.hosts.test': 'long',
   'settings.set': 'short',
   'settings.browser.links.list': 'short',
   'settings.browser.links.forget': 'short',

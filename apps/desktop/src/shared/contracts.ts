@@ -994,7 +994,8 @@ export type SessionRecoveryResult =
   | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' }>
 
 export type HostCheckResult = {
-  ok: boolean
+  input: HostConfig
+  outcome: import('@agentmux/core').AgentMuxHostCheckOutcome
   detail: string
 }
 
