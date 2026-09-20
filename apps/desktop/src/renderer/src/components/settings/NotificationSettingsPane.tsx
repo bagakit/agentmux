@@ -57,7 +57,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Stay in flow. Get a notification when an agent finishes, needs your attention or runs into trouble while you are elsewhere.</p>
+      <p className="settings-lead">Get a notification when an agent finishes, needs your attention or runs into trouble while you are elsewhere.</p>
       <figure className="notification-preview" aria-label="Notification preview">
         <div className="notification-preview__chrome"><b>AgentMux</b><time>now</time></div>
         <div className="notification-preview__title">
