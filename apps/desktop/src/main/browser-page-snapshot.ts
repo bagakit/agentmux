@@ -305,10 +305,11 @@ export type BrowserPageSnapshotInput = {
 
 export type BrowserPageCapture = BrowserPageSnapshot & { scopeFacts: BrowserSnapshotScopeFacts }
 
-async function resolveWithinSelector(send: BrowserCdpSender, selector: string): Promise<string> {
+export async function resolveWithinSelector(send: BrowserCdpSender, selector: string, executionContextId?: number): Promise<string> {
   const response = await send('Runtime.evaluate', {
     expression: `(() => { const matches = document.querySelectorAll(${JSON.stringify(selector)}); if (matches.length !== 1) throw new Error('Observation within must match exactly one region; matched ' + matches.length); return matches[0] })()`,
-    returnByValue: false
+    returnByValue: false,
+    ...(executionContextId !== undefined ? { contextId: executionContextId } : {})
   }) as { result?: { objectId?: string }; exceptionDetails?: unknown }
   if (response.exceptionDetails || !response.result?.objectId) throw new Error('Observation within must be a valid CSS selector matching exactly one region in the main document. Inspect the page and retry snapshot().')
   return response.result.objectId
