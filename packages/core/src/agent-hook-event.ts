@@ -18,7 +18,7 @@ import { TURN_REOPENING_EVENTS } from './hook-turn-phase.js'
  */
 
 /**
- * 事件名可能藏身的 payload 字段名，顺序即优先级。
+ * Provider 可声明的原始 payload 事件名字段；运行时只读取声明的那个键。
  *
  * 三个拼法都真实存在：Claude/Codex 的 stdin 负载给 `hook_event_name`，同族 CLI 的 camelCase 变体给
  * `hookEventName`，另一些给裸 `eventName`。**此前三个读取点各认其中两个**——normalizer 认

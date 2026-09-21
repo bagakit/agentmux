@@ -153,9 +153,8 @@ export function hookResponseFor(provider: string | null, eventName: string | nul
 
 export async function runAgentHookCommand(): Promise<void> {
   const flagEvent = parseEventFromArgv()
-  // 空串/纯空白的环境变量读作「没设」，不是「事件名是空串」。`??` 只挡 null/undefined，于是一个
-  // 存在但为空的 AGENTMUX_HOOK_EVENT 会顶掉后面所有来源、把事件名定成空串——`eventName` falsy
-  // 会让整段 POST 被跳过（见下方 `if (url && token && eventName)`），状态与用量双双静默丢失。
+  // 空串/纯空白的环境变量读作「没设」，避免覆盖后续有效来源。
+  // 所有来源都缺席时仍上报原始 receipt，事件名保持未知。
   const envEvent =
     firstNonEmpty(
       process.env.AGENTMUX_ANTIGRAVITY_EVENT,

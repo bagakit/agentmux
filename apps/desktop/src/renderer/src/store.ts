@@ -6467,9 +6467,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   partialize: partializeAppState
 }))
 
-/** A controlled UI update flushes draft and layout state before unloading. */
-export function prepareRendererUpdate(): void {
+/** Flush admitted draft/layout changes, then await their existing Chromium owner's request. */
+export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'): Promise<void> {
+  // No writes have been admitted during cold hydration. Quitting must preserve that durable record,
+  // without qualifying an empty loading projection as an original workbench.
+  if (intent === 'quit' && !workbenchWriteFence.isOpen()) return
   if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')
   if (Object.values(useAppStore.getState().savingDocuments).some(Boolean)) throw new Error('A file save is in progress; retry the update after it completes.')
   persistentWorkbenchStorage.flush()
+  await api.ui.requestStorageFlush()
 }

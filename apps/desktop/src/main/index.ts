@@ -23,7 +23,7 @@ import { registerWindowResizeEvents } from './window-resize-events.js'
 import { WindowGeometryStore } from './window-geometry-store.js'
 import { clampGeometryToVisibleArea, windowConstructorGeometry } from './window-geometry.js'
 import { liveVisibleAreas } from './window-visible-area.js'
-import { registerWindowStatePersistence } from './window-state-persistence.js'
+import { prepareWindowWorkbenchForQuit, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
@@ -94,6 +94,7 @@ function startPrimaryInstance(): void {
   let ownerDisposal: Promise<void> | null = null
   let rendererUpdates: RendererUpdates | null = null
   let allowingQuit = false
+  let workbenchWindow: BrowserWindow | null = null
   // Every window entry point shares this read, including a second launch during startup.
   const environmentReady = hydrateProcessEnvironmentFromLoginShell().then((result) => {
     const warning = loginShellEnvironmentWarning(result)
@@ -173,6 +174,8 @@ function startPrimaryInstance(): void {
       backgroundColor: '#0b0d0f',
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
+    workbenchWindow = window
+    window.once('closed', () => { if (workbenchWindow === window) workbenchWindow = null })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
@@ -444,12 +447,20 @@ function startPrimaryInstance(): void {
     if (process.platform !== 'darwin') app.quit()
   })
 
+  const prepareQuit = singleFlight(async () => {
+    const window = workbenchWindow
+    if (window) {
+      try { await prepareWindowWorkbenchForQuit(window) }
+      catch (error) { reportWorkbenchQuitFailure(window, error); return }
+    }
+    try { await disposeOwners() }
+    catch (error) { await exitAfterFailure(error); return }
+    allowingQuit = true
+    app.quit()
+  })
   app.on('before-quit', (event) => {
     if (allowingQuit) return
     event.preventDefault()
-    void disposeOwners().then(() => {
-      allowingQuit = true
-      app.quit()
-    }, async (error) => await exitAfterFailure(error))
+    void prepareQuit()
   })
 }

@@ -57,10 +57,16 @@ export const desktopLoadedRendererSchema = z.object({
   kind: z.enum(['bundled', 'staged']), id: z.string().regex(/^[a-f0-9]{64}$/),
   identity: z.object({ shell: id, ctxmux: id }).strict()
 }).strict()
+export const desktopWorkbenchStorageObservationSchema = z.object({
+  userData: id, sessionData: id, directory: nullableId,
+  localStorage: z.enum(['present', 'missing', 'unconfirmed']), detail: z.string().nullable()
+}).strict()
 export const desktopClientObservationSchema = z.object({
   schema: z.literal('agentmux.desktop-client-observation.v1'),
   main: z.object({ pid: z.number().int().positive(), package: desktopPackageIdentitySchema.nullable(),
     renderer: desktopLoadedRendererSchema,
+    // An absent observation is unknown. It never selects a guessed or configured fallback root.
+    storage: desktopWorkbenchStorageObservationSchema.optional(),
     runtimes: z.array(z.object({ hostId: id, identity: z.object({ hostId: id, buildIdentity: id,
       protocolVersion: z.number().int().positive(), processId: z.number().int().positive().nullable(), instanceId: id,
       ownership: z.enum(['owned', 'unverified']).optional() }).strict() }).strict()) }).strict(),
@@ -69,6 +75,7 @@ export const desktopClientObservationSchema = z.object({
 export type DesktopPackageIdentity = z.infer<typeof desktopPackageIdentitySchema>
 export type DesktopLoadedRenderer = z.infer<typeof desktopLoadedRendererSchema>
 export type DesktopWorkbenchObservation = z.infer<typeof desktopWorkbenchObservationSchema>
+export type DesktopWorkbenchStorageObservation = z.infer<typeof desktopWorkbenchStorageObservationSchema>
 export type DesktopClientObservation = z.infer<typeof desktopClientObservationSchema>
 
 /** Shared by the production Control owner and the installer; never fills missing facts. */
