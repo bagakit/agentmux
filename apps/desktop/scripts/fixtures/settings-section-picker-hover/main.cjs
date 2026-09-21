@@ -104,6 +104,7 @@ app.whenReady().then(async () => {
         const hovered = await feedback(row('Workspaces'))
         assert.notEqual(hovered.background, normal.background, 'actual RadioItem CSS hover is visible with input focus')
         await move(row('General')); await keep('RadioItem A leave and B move', font, '18', null)
+        await capture(`settings-${width}-radio-hover`)
         await move(n('.settings-section-menu__label')); await keep('RadioItem B leave to menu gap', font, '18', null)
         await capture(`settings-${width}-hover`)
         await closeByLeave(search); await keep('leave closes only menu', font, '18', null)
@@ -125,7 +126,11 @@ app.whenReady().then(async () => {
         await move(search); await move(picker); await until(`!!${menu}`); await click(search); await until(`!${menu}`)
         await exactTrigger(search)
         await key('Tab'); await exactTrigger(picker)
-        await key('ArrowDown'); await until(`!!${menu}`); await key('Escape'); await until(`!${menu}`); await exactTrigger(picker)
+        await key('ArrowDown'); await until(`!!${menu}`); await key('ArrowDown')
+        assert.equal(await read('document.activeElement?.getAttribute("role")'), 'menuitemradio')
+        assert.equal(await read('document.activeElement?.hasAttribute("data-highlighted")'), true)
+        await capture(`settings-${width}-keyboard`)
+        await key('Escape'); await until(`!${menu}`); await exactTrigger(picker)
         for (const openKey of ['Enter', ' ']) {
           await key(openKey); await until(`!!${menu}`); await key('Escape'); await until(`!${menu}`); await exactTrigger(picker)
         }
@@ -155,6 +160,9 @@ app.whenReady().then(async () => {
         await replaceText(search, 'copy'); await point(n('[aria-label="Clear settings search"]'))
         await click(n('[aria-label="Clear settings search"]')); await exactTrigger(search)
         assert.equal(await read(`${search}.value`), '')
+        await click(nav('Appearance'))
+        assert.equal(await read(`${font}.value`), '18')
+        assert.equal(await read(`${n('[data-settings-pane=appearance] .primary-button')}.disabled`), false)
       }
       assert.equal(await read('window.__sectionHover.facts()'), await read('window.__sectionHover.initialFacts'), 'committed config and workbench facts unchanged')
       assert.equal(await read('window.__sectionHover.saves'), 0)
@@ -172,6 +180,7 @@ app.whenReady().then(async () => {
       await move(split); await until(`!!${menu}`)
       await move(row('Split Left')); await keep('ordinary Item A', input, 'draft', 2)
       await move(row('Split Right')); await keep('ordinary Item A leave/B move', input, 'draft', 2)
+      await capture('ordinary-item-active-hover')
       await move(n('.tab-context-menu__separator')); await keep('ordinary Item gap', input, 'draft', 2)
       await capture('ordinary-item-hover')
       await closeByLeave(input); await keep('ordinary Item leave', input, 'draft', 2)
@@ -214,6 +223,7 @@ app.whenReady().then(async () => {
         assert.notEqual(after.background, before.background, `actual ${selector} feedback`)
         assert.equal(await read(`!!document.querySelector('.project-activity-group--expanded')`), false)
         result.steps.push({ label: selector + ' feedback', before, after })
+        await capture(selector.endsWith('__summary') ? 'project-summary-hover' : 'project-disclosure-hover')
         await move(n('.composer-menu__hint')); await keep(`${selector} leave`, input, 'draft', 2)
       }
       await capture('project-activity-hover'); await closeByLeave(input)
