@@ -549,6 +549,10 @@ type AppState = {
   lastError: string | null
   errorNoticeContext: ErrorNoticeContext | null
   errorDismissed: boolean
+  /** UI projection of the latest save request failure, never a persistence or Agent health owner. */
+  workbenchSaveWarning: string | null
+  reportWorkbenchSaveFailure(error: unknown): void
+  retryWorkbenchSave(): Promise<void>
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
   activateWorkspaceSelection(result: WorkspaceSelectionResult): void
@@ -1904,11 +1908,21 @@ const persistentWorkbenchStorage = createDebouncedPersistentStorage<PersistedApp
 // The writer batches real presentation changes before this boundary. A visible localStorage value
 // is not a cross-process durability receipt; ask its existing platform owner to commit that batch.
 // Failure is advisory: retain the written state and retry on the next real storage mutation.
+let workbenchSaveRequest = 0
+async function requestWorkbenchStorageFlush(): Promise<void> {
+  const request = ++workbenchSaveRequest
+  try {
+    await api.ui.requestStorageFlush()
+    if (request === workbenchSaveRequest && useAppStore.getState().workbenchSaveWarning !== null) {
+      useAppStore.setState({ workbenchSaveWarning: null })
+    }
+  } catch (error) {
+    if (request === workbenchSaveRequest) useAppStore.getState().reportWorkbenchSaveFailure(error)
+    throw error
+  }
+}
 function requestWorkbenchStorageCommit(): void {
-  void api.ui.requestStorageFlush().catch((error) => useAppStore.getState().reportError(new Error(
-    'Saving the workbench is unconfirmed. Your current layout and drafts remain visible; the next workbench change will retry saving.',
-    { cause: error }
-  )))
+  void requestWorkbenchStorageFlush().catch(() => {})
 }
 const workbenchWriteFence = createWriteFencedStorage(persistentWorkbenchStorage.storage)
 
@@ -2182,6 +2196,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   lastError: null,
   errorNoticeContext: null,
   errorDismissed: false,
+  workbenchSaveWarning: null,
+  reportWorkbenchSaveFailure(error) {
+    // A timed-out quit request must not later clear its warning without a new retry result.
+    ++workbenchSaveRequest
+    const warning = presentError(error)
+    if (get().workbenchSaveWarning !== warning) set({ workbenchSaveWarning: warning })
+  },
+  async retryWorkbenchSave() {
+    try { await prepareRendererUpdate() }
+    catch (error) { get().reportWorkbenchSaveFailure(error) }
+  },
   async initialize() {
     if (!api.control || typeof api.control.onRequest !== 'function') {
       throw new Error('AgentMux Control API is unavailable')
@@ -6475,5 +6500,5 @@ export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'
   if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')
   if (Object.values(useAppStore.getState().savingDocuments).some(Boolean)) throw new Error('A file save is in progress; retry the update after it completes.')
   persistentWorkbenchStorage.flush()
-  await api.ui.requestStorageFlush()
+  await requestWorkbenchStorageFlush()
 }
