@@ -31,6 +31,7 @@ export function GlobalFocusSurface() {
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
+  const focusRegion = useAppStore(state => state.focusRegion)
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
@@ -107,7 +108,14 @@ export function GlobalFocusSurface() {
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
       {hierarchyErrors.length ? <p className="focus-hierarchy-warning" role="status" title={hierarchyErrors.join('\n')}>Some lane details could not load. Contexts remain available.</p> : null}
-      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => { const id = pmoAttention[0]!; focusPmoSession(id); const tab = tabForFocusedSession(tabs, id); requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined) }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
+      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
+        const id = pmoAttention[0]!
+        focusPmoSession(id)
+        const tab = tabForFocusedSession(tabs, id)
+        const region = tab && Object.values(tab.regions).find(region => region.kind === 'agent' && region.sessionId === id)
+        if (tab && region && tab.layout.activeRegionId !== region.regionId) focusRegion(tab.workspaceId, tab.id, region.regionId)
+        requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined)
+      }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} /> : null}
