@@ -1857,7 +1857,7 @@ Tab 的 hover/focus 浮层只保留一份信息：上方是 Tab 身份，主体�
 
 执行 Agent 焦点由一个明确的全局导航上下文承载：当前 Session 和真实聚焦事件共用同一份有界持久化记录。最近上下文入口按最近使用顺序从该记录派生，同一个 Session 只出现一次；时间音轨保留记录中的真实重访位置，不以最新位置覆盖旧事件，也不回填从前未保留的事件。任何执行 Agent 的打开、选中或跨表面跳转都通过这一上下文记录；切换主表面只读取它，不另猜一个“最近变化的 Session”。历史可以被 Agents 界面作为可操作的最近上下文入口，也作为只读上下文提供给 PMO Teams；PMO 只能观察这份执行上下文，不能把自己的交互写回去。
 
-PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic 导航使用。PMO 打开、恢复、提交消息和切换 PMO Tab 都更新 PMO 焦点；关闭 PMO 后回到之前的执行 Agent 上下文。执行 Agent 历史和 PMO 历史不合并，两个身份在 UI、持久化和提供给 Agent 的上下文中都必须可区分。
+PMO Teams 有独立的当前 Session/Tab 焦点，只由 PMO 浮窗和 PMO Topic 导航使用。PMO 打开、恢复、提交消息和切换 PMO Tab 都更新 PMO 焦点；从 Focus 的待处理提醒进入时，须激活该请求所在的原 Region，不能因同 Tab 的其他格正在激活而选错 Session。关闭 PMO 后回到之前的执行 Agent 上下文。执行 Agent 历史和 PMO 历史不合并，两个身份在 UI、持久化和提供给 Agent 的上下文中都必须可区分。
 
 ### Focus 执行上下文、项目泳道与底部时间音轨
 
