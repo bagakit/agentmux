@@ -53,13 +53,28 @@ export class BrowserResultArtifactStore {
   constructor(private readonly directory: string) {}
 
   async import(context: BrowserResultContext, sourcePath: string): Promise<BrowserResultArtifactReference> {
+    return await this.persist(context, async () => await readBounded(sourcePath, BROWSER_RESULT_MAX_BYTES))
+  }
+
+  /** Main-generated observations use the same durable owner, byte limits and continuation reads. */
+  async registerJSON(context: BrowserResultContext, value: unknown): Promise<BrowserResultArtifactReference> {
+    return await this.persist(context, async () => {
+      const text = JSON.stringify(value)
+      if (text === undefined || Buffer.byteLength(text) > BROWSER_RESULT_MAX_BYTES) {
+        throw new Error('Result artifact exceeds its storage budget or is not JSON.')
+      }
+      return Buffer.from(text, 'utf8')
+    })
+  }
+
+  private async persist(context: BrowserResultContext, load: () => Promise<Buffer>): Promise<BrowserResultArtifactReference> {
     if (!context.workspaceId) throw new Error('This Browser has no verified Workspace binding; durable results are unavailable.')
     if (!context.browserId || !context.operationId || !context.navigationId) throw new Error('Result source identity is incomplete.')
     const workspaceId = context.workspaceId
-    const source = { ...context, workspaceId }
+    const source = { workspaceId, browserId: context.browserId, operationId: context.operationId, navigationId: context.navigationId }
     const write = this.tail.catch(() => {}).then(async () => {
       await this.ready()
-      const bytes = await readBounded(sourcePath, BROWSER_RESULT_MAX_BYTES)
+      const bytes = await load()
       JSON.parse(bytes.toString('utf8')) // A result is JSON, not an arbitrary file transfer.
       const id = randomUUID()
       const reference: BrowserResultArtifactReference = {
