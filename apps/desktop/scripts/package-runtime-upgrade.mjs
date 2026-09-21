@@ -336,3 +336,9 @@ if (process.argv[1] && resolve(process.argv[1]) === script) {
     process.stdout.write(JSON.stringify(statuses))
   } else throw new Error('Unknown installer Runtime inspection operation.')
 }
+
+/** Unknown storage refuses this update before GUI exit; it does not interrupt the serving Agent. */
+export function requireOutgoingWorkbenchStorage(observation) {
+  fail(observation.main.storage?.localStorage === 'present',
+    'The original workbench storage owner is unconfirmed. The existing interface and Runs were kept; restore storage access and retry the update.')
+}

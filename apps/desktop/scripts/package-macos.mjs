@@ -24,7 +24,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 import { snapshotApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
-import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient } from './package-runtime-upgrade.mjs'
+import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -981,12 +981,6 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
     }
   }
   return observation
-}
-
-/** Unknown storage refuses this update before GUI exit; it does not interrupt the serving Agent. */
-export function requireOutgoingWorkbenchStorage(observation) {
-  assert(observation.main.storage?.localStorage === 'present',
-    'The original workbench storage owner is unconfirmed. The existing interface and Runs were kept; restore storage access and retry the update.')
 }
 
 async function awaitUiActivation(appPath, before, runtimePlan = null) {

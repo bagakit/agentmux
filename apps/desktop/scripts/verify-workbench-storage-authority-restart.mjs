@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 // Reuse the existing actual Main/PTY fixture, preserving its four-phase/LIVE predicates.
 // Only this private generated copy receives storage qualification, refused-quit, and closed-DB reads.
 const repositoryRoot = resolve(process.env.AGENTMUX_VERIFY_REPOSITORY_ROOT ?? resolve(import.meta.dirname, '../../..'))
+const visualOnly = process.argv.includes('--visual-only')
 const original = join(repositoryRoot, 'apps/desktop/scripts/verify-region-terminal-refresh.mjs')
 let source = await readFile(original, 'utf8')
 function replaceOnce(before, after) {
@@ -14,12 +15,16 @@ function replaceOnce(before, after) {
   source = source.replace(before, after)
 }
 replaceOnce('mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile', 'cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile')
-replaceOnce("'apps/desktop/scripts/probe-process.mjs']", "'apps/desktop/scripts/probe-process.mjs',\n 'apps/desktop/src/main/index.ts','apps/desktop/src/main/workbench-storage-authority.ts','apps/desktop/src/main/window-state-persistence.ts',\n 'apps/desktop/src/main/client-observation.ts','apps/desktop/src/shared/client-observation.ts','apps/desktop/src/renderer/src/main.tsx',\n 'apps/desktop/scripts/package-macos.mjs','apps/desktop/scripts/verify-workbench-storage-authority-restart.mjs']")
+replaceOnce("'apps/desktop/scripts/probe-process.mjs']", "'apps/desktop/scripts/probe-process.mjs',\n 'apps/desktop/src/main/index.ts','apps/desktop/src/main/workbench-storage-authority.ts','apps/desktop/src/main/window-state-persistence.ts',\n 'apps/desktop/src/main/client-observation.ts','apps/desktop/src/shared/client-observation.ts','apps/desktop/src/renderer/src/main.tsx','apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx',\n 'apps/desktop/scripts/package-macos.mjs','apps/desktop/scripts/package-runtime-upgrade.mjs','apps/desktop/scripts/verify-workbench-storage-authority-restart.mjs']")
 replaceOnce("schema:'agentmux.region-terminal-refresh.v1'", "schema:'agentmux.workbench-storage-authority.v1'")
 replaceOnce("const draft='Unsent exact Region draft survives failed observation and two restarts'", "let draft='Unsent exact Region draft survives failed observation and two restarts'")
-replaceOnce("receipt.firstQuit=await normalQuit(first);await exactRun(item)", "await missingStorageKeepsWorking(first,durable,item,draft);\n draft=await finalDraft(first,durable,draft,'first');\n receipt.firstQuit=await normalQuit(first);await exactRun(item);await readClosedStorage('first',durable,draft)")
+replaceOnce("receipt.firstQuit=await normalQuit(first);await exactRun(item)", "await missingStorageKeepsWorking(first,durable,item,draft,'database');await missingStorageKeepsWorking(first,durable,item,draft,'category');\n draft=await finalDraft(first,durable,draft,'first');\n receipt.firstQuit=await normalQuit(first);await exactRun(item);await readClosedStorage('first',durable,draft)")
 replaceOnce("receipt.secondQuit=await normalQuit(second);await exactRun(item)", "draft=await finalDraft(second,durable,draft,'second');\n receipt.secondQuit=await normalQuit(second);await exactRun(item);await readClosedStorage('second',durable,draft)")
 replaceOnce('const nativeHome = await cdp.evaluate', 'await storageScope(main,cdp,label)\n  const nativeHome = await cdp.evaluate')
+// The READY-file smoke branch has no successful RendererUpdates owner. Observe ordinary product
+// startup instead; this public Electron read does not install state or change lifecycle facts.
+replaceOnce('...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile', '...fixtureEnvironment')
+replaceOnce("return JSON.parse(await readFile(readyFile, 'utf8'))", `return await main.evaluate("(() => {const e=process.getBuiltinModule('module').createRequire("+JSON.stringify(join(desktopRoot,'package.json'))+")('electron');const w=e.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('file:'));return e.app.isReady()&&w&&!w.webContents.isLoading()?{pid:process.pid,loaded:true}:null})()")`)
 replaceOnce("join(repositoryRoot,'.tmp/region-terminal-refresh-last.json')", "join(repositoryRoot,'.tmp/workbench-storage-authority-last.json')")
 const additional = String.raw`
 async function storageScope(main,cdp,label) {
@@ -29,20 +34,28 @@ async function storageScope(main,cdp,label) {
  assert.deepEqual(observed.main.storage,{userData,sessionData:userData,directory:userData,localStorage:'present',detail:null})
  ;(receipt.storageScopes??=[]).push({label,...paths})
 }
-async function missingStorageKeepsWorking(probe,durable,item,draft) {
- phase='actual-missing-storage-refuses-quit'
- const {requireOutgoingWorkbenchStorage}=await import(pathToFileURL(join(desktopRoot,'scripts/package-macos.mjs')))
- const directory=join(userData,'Local Storage'),held=join(userData,'Local Storage.held')
+async function missingStorageKeepsWorking(probe,durable,item,draft,mode) {
+ phase='actual-missing-'+mode+'-refuses-quit'
+ const {requireOutgoingWorkbenchStorage}=await import(pathToFileURL(join(desktopRoot,'scripts/package-runtime-upgrade.mjs')))
+ const directory=mode==='database'?join(userData,'Local Storage','leveldb'):join(userData,'Local Storage'),held=directory+'.held'
  assert.ok(userData.startsWith(root+'/'));assert.notEqual(root,'/');await rename(directory,held)
  try {
   const observed=(await control('inspect.client')).observation
+  receipt.currentMissingCase={mode,directory,observedStorage:observed.main.storage,tabCount:observed.workbench.tabs.length};
   assert.ok(observed.workbench.tabs.length>0);assert.equal(observed.main.storage.directory,userData);assert.equal(observed.main.storage.localStorage,'missing')
   assert.throws(()=>requireOutgoingWorkbenchStorage(observed),/existing interface and Runs were kept/)
   const failure=await probe.cdp.evaluate("window.agentmux.ui.requestStorageFlush().then(()=>({fulfilled:true}),e=>({fulfilled:false,message:String(e)}))")
   assert.equal(failure.fulfilled,false,'An actual missing category must reject the platform save request')
   await probe.main.evaluate("process.getBuiltinModule('module').createRequire("+JSON.stringify(join(desktopRoot,'package.json'))+")('electron').app.quit()")
-  await waitFor('refused quit service window',()=>probe.cdp.evaluate("document.body.textContent.includes('Quitting was paused because saving the workbench is unconfirmed')"),8_000)
+  const paused=await waitFor('refused quit service window',()=>probe.cdp.evaluate("document.body.textContent.includes('Quitting was paused because saving the workbench is unconfirmed')"),8_000).catch(error=>({unavailable:error.message}))
+  assert.equal(paused,true,'The original window must remain and report the refused quit')
   assert.equal(probe.child.exitCode,null);assert.equal(probe.child.signalCode,null)
+  await click(probe.cdp,'button[title="System notifications"]')
+  await waitFor('actual save notice visible',()=>probe.cdp.evaluate("document.querySelector('.global-system-notices__details[data-state=\"open\"]')?.textContent.includes('Saving the workbench is unconfirmed')"))
+  const png=await probe.cdp.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});assert.ok(png.data.length>0)
+  const imagePath=join(repositoryRoot,'.tmp/workbench-storage-'+mode+'-refused-quit.png');await writeFile(imagePath,Buffer.from(png.data,'base64'))
+  ;(receipt.images??=[]).push({mode,path:imagePath,sha256:digest(Buffer.from(png.data,'base64'))})
+  await click(probe.cdp,'button[title="Collapse system notifications"]')
   assert.deepEqual((await localState(probe.cdp)).restoredWorkbench,durable.workbench)
   assert.equal((await localState(probe.cdp)).agentComposerDrafts[session.agentSessionId],draft)
   const before=await status(item),runBefore=await exactRun(item)
@@ -53,18 +66,21 @@ async function missingStorageKeepsWorking(probe,durable,item,draft) {
   assert.ok(runAfter.latestOutputBytes>runBefore.latestOutputBytes)
   receipt.missingStorage={originalRoot:userData,localStorage:observed.main.storage.localStorage,saveRejected:true,quitPaused:true,
    sameRun:item.runId,samePid:item.pid,inputDelta:1,outputIncreased:true,draftRetained:true,topologyRetained:true,
-   causeBoundary:'Private existing category renamed; historical production directory disappearance remains unknown.'}
+   mode,causeBoundary:'Private existing '+mode+' directory renamed; historical production directory disappearance remains unknown.'}
  } finally {await rename(held,directory)}
  await probe.cdp.evaluate('window.agentmux.ui.requestStorageFlush()')
  assert.equal((await control('inspect.client')).observation.main.storage.localStorage,'present')
  receipt.missingStorage.retryAccepted=true
+ ;(receipt.missingCases??=[]).push(receipt.missingStorage)
 }
 async function finalDraft(probe,durable,draft,label) {
  await click(probe.cdp,'[data-workbench-region-id="'+durable.regionIds[0]+'"] .composer [role="textbox"]')
  const suffix=' '+label+'-last-change-before-quit'
- await probe.cdp.call('Input.insertText',{text:suffix})
- // This is intentionally inside the 400ms trailing writer window; quit must land the pending batch.
  const changed=draft+suffix
+ await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:4})
+ await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:4})
+ await probe.cdp.call('Input.insertText',{text:changed})
+ // This is intentionally inside the 400ms trailing writer window; quit must land the pending batch.
  return changed
 }
 async function readClosedStorage(label,durable,draft) {
@@ -98,6 +114,14 @@ async function readClosedStorage(label,durable,draft) {
 }
 `
 replaceOnce('const python=String.raw`', additional + '\nconst python=String.raw`')
+if (visualOnly) {
+  // A finite re-capture after summary-only presentation changes; never substitutes for the full gate.
+  const start=source.indexOf(" draft=await finalDraft(first"),end=source.indexOf(" receipt.after=await identity()",start)
+  assert.ok(start>0&&end>start,'Nonempty unique post-fault capture range')
+  assert.equal(source.indexOf(" draft=await finalDraft(first",start+1),-1)
+  source=source.slice(0,start)+" receipt.visualOnly=true;\n"+source.slice(end)
+  replaceOnce("schema:'agentmux.workbench-storage-authority.v1'","schema:'agentmux.workbench-storage-visual.v1'")
+}
 const attempt = join(repositoryRoot, '.tmp/workbench-storage-authority-proofs', 'attempt-' + Date.now())
 await mkdir(attempt, { recursive: true })
 const generated = join(attempt, 'actual-private.mjs')
@@ -107,7 +131,9 @@ const child = spawn(process.execPath, [generated], { cwd: repositoryRoot, env: {
 const status = await new Promise((done, fail) => { child.once('error', fail); child.once('exit', (code, signal) => done({ code, signal })) })
 assert.equal(status.signal, null);assert.equal(status.code, 0, 'Actual storage authority/restart proof failed')
 const receipt = JSON.parse(await readFile(join(repositoryRoot, '.tmp/workbench-storage-authority-last.json'), 'utf8'))
-assert.equal(receipt.passed, true);assert.equal(receipt.storageScopes.length,3);assert.equal(receipt.closedStorageReads.length,2)
-assert.equal(receipt.missingStorage.quitPaused,true);assert.equal(receipt.missingStorage.retryAccepted,true)
+assert.equal(receipt.passed, true)
+if (visualOnly) { assert.equal(receipt.visualOnly,true);assert.equal(receipt.images.length,2);assert.equal(receipt.storageScopes.length,1) }
+else { assert.equal(receipt.storageScopes.length,3);assert.equal(receipt.closedStorageReads.length,2) }
+assert.equal(receipt.missingCases.length,2);assert.deepEqual(receipt.missingCases.map(c=>c.mode),['database','category']);assert.equal(receipt.missingStorage.quitPaused,true);assert.equal(receipt.missingStorage.retryAccepted,true)
 assert.deepEqual(receipt.cleanup.privateProcessesRemaining,[]);assert.equal(receipt.cleanup.rootRemoved,true)
 await writeFile(join(attempt,'receipt.json'),JSON.stringify(receipt,null,2)+'\n')

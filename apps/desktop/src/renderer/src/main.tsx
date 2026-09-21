@@ -27,4 +27,4 @@ createRoot(document.getElementById('root')!).render(
 Object.assign(window, { agentmuxPrepareRendererUpdate: prepareRendererUpdate })
 
 window.addEventListener('agentmux-renderer-update-error', (event) => useAppStore.getState().reportError((event as CustomEvent).detail))
-window.addEventListener('agentmux-workbench-save-error', (event) => useAppStore.getState().reportError((event as CustomEvent).detail))
+window.addEventListener('agentmux-workbench-save-error', (event) => useAppStore.getState().reportWorkbenchSaveFailure((event as CustomEvent).detail))

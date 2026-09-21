@@ -87,7 +87,7 @@ export async function prepareWindowWorkbenchForQuit(window: BrowserWindow): Prom
 /** Keep the original window and healthy Runs when the presentation save step is unconfirmed. */
 export function reportWorkbenchQuitFailure(window: BrowserWindow, error: unknown): void {
   const detail = error instanceof Error ? error.message : String(error)
-  const message = `Quitting was paused because saving the workbench is unconfirmed. Your window and Agents remain available. Restore storage access or wait for the current save, then try Quit again. ${detail}`
+  const message = `Quitting was paused because saving the workbench is unconfirmed. Your original window was kept; Agent input was not disabled by this save request. Restore storage access or wait for the current save, retry saving, then try Quit again. ${detail}`
   process.stderr.write(`${message}\n`)
   if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
     void window.webContents.executeJavaScript(
