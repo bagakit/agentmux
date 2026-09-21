@@ -35,7 +35,7 @@ function harness(withFrames = false, initialLedger: BrowserRefLedger | null = nu
     if (method === 'Accessibility.getFullAXTree') return { nodes: document === 'main' ? TREE : frameTree }
     if (method === 'Runtime.evaluate') {
       const expression = String(params?.expression)
-      if (expression.includes('document.querySelectorAll')) {
+      if (expression.includes('Observation within must match exactly one region')) {
         if (expression.includes('#left')) return { result: { objectId: 'region-20' } }
         if (expression.includes('#right')) return { result: { objectId: 'region-60' } }
         return { exceptionDetails: { text: 'matches 0 or more than one' } }
