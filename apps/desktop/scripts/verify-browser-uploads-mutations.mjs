@@ -3,8 +3,9 @@ const file='apps/desktop/src/main/browser-uploads.ts'
 await verifyRendererSourceMutations({name:'browser-uploads-mutations',tests:['apps/desktop/test/browser-uploads.test.ts'],
   sources:[file,'apps/desktop/src/shared/browser-upload.ts','apps/desktop/src/main/workspace-files.ts','apps/desktop/src/shared/workspace-file-bytes.ts'],
   mutations:[
+    {label:'cdp-object-key-order-rejects-correct-file-list',file,before:'const observedFiles = observed.result?.value',after:'const observedFiles = JSON.stringify(observed.result?.value) === JSON.stringify(selection.files.map(file => ({ name: file.name, byteLength: file.byteLength }))) ? observed.result?.value : []'},
     {label:'upload-reuses-backend-instead-of-exact-object',file,before:"'DOM.setFileInputFiles', { objectId: context.target.objectId, files: staged }",after:"'DOM.setFileInputFiles', { backendNodeId: 42, files: staged }"},
-    {label:'file-list-verification-disconnected',file,before:'observed.exceptionDetails || JSON.stringify(observed.result?.value) !== JSON.stringify(selection.files.map(file => ({ name: file.name, byteLength: file.byteLength })))',after:'false'},
+    {label:'file-list-verification-disconnected',file,before:'observed.exceptionDetails || !Array.isArray(observedFiles) || observedFiles.length === 0 || observedFiles.length !== selection.files.length ||\n        observedFiles.some((file, index) => !file || file.name !== selection.files[index]!.name || file.byteLength !== selection.files[index]!.byteLength)',after:'false'},
     {label:'single-file-guard-removed',file,before:'if (paths.length > 1 && !target.multiple)',after:'if (false)'},
     {label:'navigation-check-removed',file,before:'context.currentNavigationId() !== context.navigationId',after:'false'},
     {label:'incomplete-file-snapshot-accepted',file,before:'snapshot.bytes.length !== snapshot.totalBytes || snapshot.totalBytes > WORKSPACE_FILE_MAX_BYTES || snapshot.nextOffset !== null',after:'false'},
