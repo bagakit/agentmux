@@ -641,7 +641,7 @@ it('rejects a stale automatic completion at the durable input claim, while leavi
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: 2 }))
   const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
-  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]'))
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]', undefined, false, undefined, 0))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).not.toHaveBeenCalled()
   await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), fixture.currentRun, 'manual', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), undefined, undefined, true)
@@ -661,14 +661,14 @@ it('reconciles an admitted automatic operation after its completion changes with
   const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
   const fixture = await coordinatorFixture(stored)
   const plan = new AgentProviderRegistry().get('codex').planPromptInput('next')
-  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]', undefined, false, undefined, 0)
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
   const calls = fixture.kernel.input.mock.calls.length
   expect(calls).toBe(2)
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]', undefined, false, undefined, 5)
   expect(fixture.kernel.input).toHaveBeenCalledTimes(calls)
-  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'other-auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]'))
+  await expect(fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'other-auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]', undefined, false, undefined, 5))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).toHaveBeenCalledTimes(calls)
 })
@@ -687,13 +687,13 @@ it('recovers a lost acknowledgement after submit was accepted and the Agent is w
   const update = fixture.registry.update.bind(fixture.registry)
   const spy = vi.spyOn(fixture.registry, 'update').mockImplementationOnce(update)
     .mockRejectedValueOnce(new Error('receipt persistence interrupted'))
-  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]')).rejects.toThrow('receipt persistence interrupted')
+  await expect(fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]', undefined, false, undefined, 0)).rejects.toThrow('receipt persistence interrupted')
   spy.mockRestore()
   expect(cursor).toBe(5)
   expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission?.submit.acknowledged).toBe(false)
   await update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(cursor), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(cursor), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]', undefined, false, undefined, cursor)
   expect(accepted.size).toBe(2)
   expect(cursor).toBe(5)
   expect(fixture.registry.get(stored.agentSessionId).terminalPromptSubmission?.submit.acknowledged).toBe(true)
@@ -725,25 +725,25 @@ it.each(['single-phase', 'two-phase'] as const)('consumes done atomically for ma
   expect(afterManual.promptCompletionAdmission).toMatchObject({ completionId: '["run-1",1]', startByte: 0, endByte: 5 })
   const writes = fixture.kernel.input.mock.calls.length
   expect(writes).toBe(kind === 'single-phase' ? 1 : 2)
-  await expect(fixture.coordinator.submitInputPlan(afterManual, run(5), 'auto-stale', 'next', plan, agentPromptCondition(afterManual), '["run-1",1]'))
+  await expect(fixture.coordinator.submitInputPlan(afterManual, run(5), 'auto-stale', 'next', plan, agentPromptCondition(afterManual), '["run-1",1]', undefined, false, undefined, 5))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes)
   await fixture.coordinator.submitInputPlan(afterManual, run(5), 'manual-2', 'next', plan, agentPromptCondition(afterManual), undefined, undefined, true)
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 2)
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(10), 'auto-new', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",2]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(10), 'auto-new', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",2]', undefined, false, undefined, 10)
   expect(fixture.kernel.input).toHaveBeenCalledTimes(writes * 3)
 })
 it('reuses the original single-phase operation and byte range after an unknown outcome', async () => {
   const stored = session(); stored.semanticStatus = { state: 'done', source: 'native-hook', observedAt: 1 }
   const fixture = await coordinatorFixture(stored)
   const plan = { kind: 'single-phase' as const, data: 'next\r' }
-  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(stored, fixture.currentRun, 'auto', 'next', plan, agentPromptCondition(stored), '["run-1",1]', undefined, false, undefined, 0)
   const first = fixture.kernel.input.mock.calls[0]!
   await fixture.registry.update(stored.agentSessionId, stored.run, (current) => ({ ...current,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 2 }, updatedAt: Date.now() }))
-  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]')
+  await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]', undefined, false, undefined, 5)
   expect(fixture.kernel.input.mock.calls).toEqual([first, first])
   expect(fixture.registry.get(stored.agentSessionId).promptCompletionAdmission).toMatchObject({ startByte: 0, endByte: 5 })
 })

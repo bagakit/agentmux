@@ -1092,6 +1092,12 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
         ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
         ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
         ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
+        ...(admission.uncertainTurn === undefined ? {} : {
+          uncertainTurn: (() => {
+            if (typeof admission.uncertainTurn !== 'boolean') throw new AgentMuxError('Invalid prompt admission turn risk fact.', 'INVALID_AGENT_SESSION_STORE')
+            return admission.uncertainTurn
+          })()
+        }),
         ...(admission.acknowledged === undefined ? {} : { acknowledged: (() => {
           if (typeof admission.acknowledged !== 'boolean') throw new AgentMuxError('Invalid prompt acknowledgement.', 'INVALID_AGENT_SESSION_STORE')
           return admission.acknowledged
