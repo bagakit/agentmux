@@ -1,4 +1,5 @@
 import type { BrowserPng } from './contracts'
+import type { BrowserStructuredOutputReceipt } from './browser-structured-output'
 
 export type BrowserEvidenceIdentity = {
   operationId: string
@@ -19,6 +20,7 @@ export type BrowserStepEvidenceReference = BrowserEvidenceIdentity & {
 export type BrowserStepEvidenceContent =
   | { kind: 'page'; text: string; truncated: boolean }
   | { kind: 'screenshot'; image: BrowserPng }
+  | { kind: 'structured-output'; receipt: BrowserStructuredOutputReceipt }
   | { kind: 'diagnostic'; code: 'page-call-failed'; message: string; nextAction: string }
 
 export type BrowserStepEvidenceItem = {

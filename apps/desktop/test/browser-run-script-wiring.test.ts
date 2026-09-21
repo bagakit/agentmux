@@ -148,6 +148,7 @@ import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/
 import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
 import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.js'
 import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '../src/shared/browser-result-artifact.js'
+import type { BrowserStructuredOutputReceipt } from '../src/shared/browser-structured-output.js'
 import type { BrowserPageContext } from '../src/main/browser-page-dispatch.js'
 
 const profiles: BrowserProfileResolver = {
@@ -271,6 +272,90 @@ describe('runScript records readable evidence for the exact step', () => {
       expect(report.runOperation.warning).toContain('could not be saved')
       await expect(manager.getStepEvidence(report.runOperation.id, 1)).resolves.toMatchObject({ status: 'unavailable', warning: expect.stringContaining('action result is retained'), items: [] })
     } finally { manager.dispose() }
+  }, 30_000)
+})
+
+describe('structured extraction via the actual Manager → Journal → retained result chain', () => {
+  it('joins only the Main-recorded extraction step to its exact artifact and reads without rerunning', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'amx-structured-wiring-'))
+    const results = new BrowserResultArtifactStore(join(directory, 'results'))
+    const { manager } = await managerWithBrowser(
+      new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json'))),
+      new BrowserStepEvidenceStore(join(directory, 'evidence')), results, 'workspace-structured')
+    let calls = 0
+    createDispatch.mockImplementationOnce(context => async name => {
+      expect(name).toBe('extractStructured')
+      calls++
+      const source = { ...context.structuredOutput!.source(), url: context.pageInfo().url,
+        document: 'actual-document:11', documentUrl: context.pageInfo().url, scope: { kind: 'page' as const } }
+      const artifact = await results.registerJSON(source, { value: 'retained observation' })
+      const receipt: BrowserStructuredOutputReceipt = { kind: 'browser-structured-output', status: 'complete', source,
+        fields: [{ key: 'title', type: 'string', source: { selector: 'h1', read: 'text' },
+          status: 'observed', inline: true, value: 'retained observation' }], work: null,
+        artifactStatus: 'available', artifact }
+      return receipt
+    })
+    try {
+      const report = await manager.runScript('b1', 'return await extractStructured({fields:[{key:"title",type:"string",source:{selector:"h1",read:"text"}}]})')
+      expect(report.outcome).toMatchObject({ kind: 'completed' })
+      expect(report.runOperation.steps).toEqual([expect.objectContaining({ method: 'extractStructured', status: 'completed' })])
+      const evidence = await manager.getStepEvidence(report.runOperation.id, 1)
+      expect(evidence.items).toHaveLength(1)
+      expect(evidence.items[0]?.content).toEqual({ kind: 'structured-output', receipt: report.result })
+      const chunk = await manager.readStepResult(report.runOperation.id, 1, { offset: 0, maxBytes: 65536 })
+      expect(JSON.parse(Buffer.from(chunk.data, 'base64').toString('utf8'))).toEqual({ value: 'retained observation' })
+      expect(calls).toBe(1)
+      expect(await manager.listOperationHistory()).toEqual([expect.objectContaining({ id: report.runOperation.id })])
+
+      // A receipt-shaped script result is not an extraction step recorded by Main.
+      const foreign = await manager.runScript('b1', 'return ' + JSON.stringify(report.result))
+      await expect(manager.readStepResult(foreign.runOperation.id, 1)).rejects.toThrow('no retained structured result')
+
+      const corrupted = structuredClone(evidence)
+      const item = corrupted.items[0]!
+      if (item.content.kind !== 'structured-output') throw new Error('Actual extraction evidence absent')
+      const reader = vi.spyOn(manager, 'getStepEvidence').mockResolvedValue(corrupted)
+      try {
+        for (const [field, value] of [
+          ['operationId', 'other-operation'], ['browserId', 'other-browser'],
+          ['workspaceId', 'other-workspace'], ['navigationId', 'other-document']
+        ] as const) {
+          item.content.receipt.source = { ...(report.result as BrowserStructuredOutputReceipt).source, [field]: value }
+          await expect(manager.readStepResult(report.runOperation.id, 1), field).rejects.toThrow('does not belong')
+        }
+      } finally { reader.mockRestore() }
+      expect(calls).toBe(1)
+      expect(manager.resourceOwnerCounts().browserViews).toBe(1)
+    } finally { manager.dispose(); await rm(directory, { recursive: true, force: true }) }
+  }, 30_000)
+
+  it('publishes and retains an observation warning while keeping the completed step and healthy Browser', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'amx-structured-warning-'))
+    const { manager, sentEvents } = await managerWithBrowser(
+      new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json'))),
+      new BrowserStepEvidenceStore(join(directory, 'evidence')))
+    const warning = 'Structured result storage is unavailable. Inspect the live page before retrying.'
+    let warningVisibleDuringRead = false
+    createDispatch.mockImplementationOnce(context => async () => {
+      context.note(warning)
+      warningVisibleDuringRead = sentEvents().at(-1)?.browser.activity.operation.warning === warning
+      const receipt: BrowserStructuredOutputReceipt = { kind: 'browser-structured-output', status: 'unavailable',
+        source: { ...context.structuredOutput!.source(), url: context.pageInfo().url, document: 'actual-document:11',
+          documentUrl: context.pageInfo().url, scope: { kind: 'page' } }, fields: [], work: null,
+        artifactStatus: 'unavailable', warning }
+      return receipt
+    })
+    try {
+      const report = await manager.runScript('b1', 'return await extractStructured({fields:[{key:"title",type:"string",source:{selector:"h1",read:"text"}}]})')
+      expect(report.outcome).toMatchObject({ kind: 'indeterminate', message: warning })
+      expect(report.runOperation.steps).toEqual([expect.objectContaining({ method: 'extractStructured', status: 'completed' })])
+      expect(warningVisibleDuringRead).toBe(true)
+      expect(sentEvents().filter(event => event.browser?.activity?.warning === warning).length).toBeGreaterThan(0)
+      await expect(manager.getOperation(report.runOperation.id)).resolves.toMatchObject({ phase: 'indeterminate', warning })
+      await expect(manager.readStepResult(report.runOperation.id, 1)).rejects.toThrow('no retained structured result')
+      expect(manager.resourceOwnerCounts().browserViews).toBe(1)
+      await expect(manager.runScript('b1', 'return 42')).resolves.toMatchObject({ result: 42, outcome: { kind: 'completed' } })
+    } finally { manager.dispose(); await rm(directory, { recursive: true, force: true }) }
   }, 30_000)
 })
 
@@ -628,6 +713,7 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
       snapshot: 'snapshot()',
       snapshotText: 'snapshotText()',
       pageInfo: 'pageInfo()',
+      extractStructured: 'extractStructured({fields:[{key:"title",type:"string",source:{selector:"h1",read:"text"}}]})',
       readResult: 'readResult({})',
       captureScreenshot: 'captureScreenshot()',
       elementContext: 'elementContext("@e1")',

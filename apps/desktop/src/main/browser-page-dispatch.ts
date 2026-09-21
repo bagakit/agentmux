@@ -9,7 +9,9 @@ import { resolveBrowserRef } from './browser-ref-resolve.js'
 import { buildBrowserElementContextDeclaration } from './browser-selection-script.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import { readBrowserResultArtifact, type BrowserResultArtifactStore } from './browser-result-artifact.js'
-import type { BrowserResultArtifactReference, BrowserResultCurrentOwner, BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
+import type { BrowserResultArtifactReference, BrowserResultContext, BrowserResultCurrentOwner, BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
+import { extractBrowserStructuredOutput, parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
+import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -52,6 +54,8 @@ export type BrowserPageContext = {
   recordTarget?(target: BrowserReplayTarget): void
   /** Result source identity lives in storage; a continuation run supplies only its current authorization. */
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
+  /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */
+  structuredOutput?: { source(): BrowserResultContext; isCurrent(navigationId: string): boolean }
 }
 
 /** 默认的等待上限。脚本整体还有自己的超时兜底，这里只防"一个 wait 把整轮吃光"。 */
@@ -318,6 +322,59 @@ export function createBrowserPageDispatch(
     return response.result?.value
   }
 
+  async function extractStructured(input: unknown): Promise<unknown> {
+    const request = parseBrowserStructuredOutputRequest(input)
+    if (!context.structuredOutput) throw new Error('Structured observation ownership is unavailable for this Browser.')
+    const owner = context.structuredOutput.source()
+    const info = context.pageInfo()
+    let send = session.sendCommand
+    let sessionId: string | undefined
+    let backendNodeId: number | undefined
+    if (request.withinRef) {
+      if (!issued?.has(request.withinRef) || !current || expired.has(request.withinRef)) {
+        throw new Error('Structured withinRef requires an issued ref from this run’s latest snapshot(). Take a current snapshot before extraction.')
+      }
+      const target = await handleIn(current, request.withinRef)
+      send = target.send
+      sessionId = target.node.sessionId
+      backendNodeId = target.node.backendNodeId
+      await send('Runtime.releaseObject', { objectId: target.objectId }).catch(() => {})
+    }
+    const target = await resolveBrowserStructuredTarget(send, {
+      ...(request.within ? { within: request.within } : {}), ...(backendNodeId !== undefined ? { backendNodeId } : {})
+    })
+    try {
+      const receipt = await extractBrowserStructuredOutput(request, {
+        source: { ...owner, url: info.url, document: target.document,
+          scope: { kind: request.within || request.withinRef ? 'subtree' : 'page',
+            ...(request.within ? { within: request.within } : {}), ...(request.withinRef ? { withinRef: request.withinRef } : {}) } },
+        isCurrent: async () => {
+          if (!context.structuredOutput!.isCurrent(owner.navigationId) ||
+              context.pageInfo().navigationId !== owner.navigationId || session.endedReason !== null ||
+              (sessionId ? session.frames.get(sessionId) !== send : send !== session.sendCommand)) return false
+          return await target.isCurrent() && context.structuredOutput!.isCurrent(owner.navigationId)
+        },
+        read: async (functionDeclaration, value) => {
+          const response = await send('Runtime.callFunctionOn', { objectId: target.objectId, functionDeclaration,
+            arguments: [{ value }], awaitPromise: true, returnByValue: true }) as {
+            result?: { value?: unknown }; exceptionDetails?: { text?: string }
+          }
+          if (response.exceptionDetails) throw new Error(`Structured observation could not read its rooted document: ${pageAuthoredText(response.exceptionDetails.text)}`)
+          return response.result?.value
+        },
+        register: async (value, source) => {
+          if (!context.resultArtifacts) throw new Error('Durable structured results are unavailable for this Browser.')
+          return await context.resultArtifacts.store.registerJSON({ workspaceId: source.workspaceId,
+            browserId: source.browserId, operationId: source.operationId, navigationId: source.navigationId }, value)
+        }
+      })
+      if (receipt.warning) context.note(receipt.warning)
+      return receipt
+    } finally {
+      await target.release()
+    }
+  }
+
   /** 等一个条件成立，超时就说清等的是什么、等了多久——"timeout" 三个字帮不了任何人。 */
   async function until(what: string, timeoutMs: number, probe: () => Promise<boolean>): Promise<void> {
     const deadline = Date.now() + timeoutMs
@@ -349,6 +406,8 @@ export function createBrowserPageDispatch(
       }
       case 'pageInfo':
         return context.pageInfo()
+      case 'extractStructured':
+        return await extractStructured(args[0])
       case 'captureScreenshot':
         return await context.captureScreenshot()
       case 'elementContext': {

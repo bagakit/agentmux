@@ -1,0 +1,44 @@
+import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
+
+const file = 'apps/desktop/src/renderer/src/components/BrowserStructuredFields.tsx'
+const css = 'apps/desktop/src/renderer/src/styles/browser-structured-fields.css'
+await verifyRendererSourceMutations({
+  name: `browser-structured-fields-mutations-${Date.now()}`,
+  tests: ['apps/desktop/test/browser-structured-fields.test.tsx'],
+  sources: [file, css, 'apps/desktop/src/shared/browser-structured-output.ts', 'apps/desktop/test/helpers/styles.ts',
+    'apps/desktop/src/renderer/src/styles/index.css'],
+  mutations: [
+    { label: 'empty-zero-false-rendered-as-missing', file, before: '{JSON.stringify(field.value)}',
+      after: "{field.value ? JSON.stringify(field.value) : 'Missing'}" },
+    { label: 'preview-claims-observed-complete-value', file,
+      before: 'Preview · full value was not saved', after: 'Observed' },
+    { label: 'raw-result-read-before-open', file, before: 'setRaw(null); setLoading(false)',
+      after: 'setRaw(null); setLoading(false); void readResult?.(reference!, {offset:0,maxBytes:BROWSER_RESULT_MAX_READ_BYTES}).catch(() => {})' },
+    { label: 'foreign-original-operation-result-accepted', file,
+      before: 'returned.operationId !== reference.operationId', after: 'false' },
+    { label: 'wrong-read-offset-accepted', file, before: 'chunk.offset !== offset', after: 'false' },
+    { label: 'old-selection-result-not-discarded', file, before: 'if (active.current !== key) return', after: 'if (false) return' },
+    { label: 'duplicate-pending-read-allowed', file, before: '|| busy.current ||', after: '||' },
+    { label: 'utf8-chunk-carry-discarded', file, before: '{ stream: chunk.nextOffset !== null }', after: '{ stream: false }' },
+    { label: 'existing-evidence-grid-splits-field-rows', file: css,
+      before: 'grid-template-columns: minmax(0, 1fr);', after: 'grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);' },
+    { label: 'long-preview-default-expanded', file,
+      before: '<details className="browser-structured-fields__preview">', after: '<details className="browser-structured-fields__preview" open>' },
+    { label: 'expanded-preview-loses-retained-tail', file,
+      before: '</summary>\n    <code>{text}</code>', after: '</summary>\n    <code />' },
+    { label: 'truncated-preview-claims-complete-saved-value', file,
+      before: 'Preview · observed portion only', after: 'Preview · full value in recorded JSON' },
+    { label: 'collapsed-preview-height-unbounded', file: css,
+      before: '-webkit-line-clamp: 3;', after: '-webkit-line-clamp: unset;' },
+    { label: 'expanded-preview-still-hidden', file: css,
+      before: '.browser-structured-fields__preview > code { display: block; }', after: '.browser-structured-fields__preview > code { display: none; }' },
+    { label: 'recorded-json-height-unbounded', file: css,
+      before: 'max-height: min(24vh, 12rem);', after: 'max-height: none;' },
+    { label: 'recorded-json-clipped-instead-of-scrollable', file: css,
+      before: 'max-height: min(24vh, 12rem); overflow: auto;', after: 'max-height: min(24vh, 12rem); overflow: hidden;' },
+    { label: 'recorded-json-css-disconnected', file,
+      before: 'className="browser-structured-fields__raw"', after: 'className="browser-unbounded-result"' },
+    { label: 'recorded-json-not-keyboard-reachable', file,
+      before: 'tabIndex={0} aria-label="Recorded JSON chunk"', after: 'tabIndex={-1} aria-label="Recorded JSON chunk"' }
+  ]
+})

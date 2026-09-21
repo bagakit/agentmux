@@ -95,6 +95,7 @@ import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_J
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
+import type { BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
 import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder, BROWSER_DEMONSTRATION_FILE } from './browser-demonstration-recorder.js'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore, BROWSER_TASK_ASSETS_FILE } from './browser-task-assets.js'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets.js'
@@ -873,6 +874,10 @@ export async function registerIpc(args: {
   handleWithEvent('browser:getStepEvidence', async (event, operationId: string, sequence: number) => {
     requireTrustedSender('browser:getStepEvidence', event)
     return await browsers.getStepEvidence(operationId, sequence)
+  })
+  handleWithEvent('browser:readStepResult', async (event, operationId: string, sequence: number, options?: BrowserResultReadOptions) => {
+    requireTrustedSender('browser:readStepResult', event)
+    return await browsers.readStepResult(operationId, sequence, options)
   })
   // 取消不过 `agentAutomation` 闸，而 runScript 过。这不是漏了：那个闸挡的是「让 Agent 去驱动页面」，
   // 而这条是**停下**驱动。开关关掉之后仍然能停掉一个正在跑的操作，否则用户一旦关掉总开关就再也

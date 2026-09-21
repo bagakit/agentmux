@@ -1160,6 +1160,7 @@ const mockApi: AgentMuxDesktopApi = {
     // 而"这条操作我这儿没有"本来就是这条入口的合法答案之一。
     getOperation: async () => null,
     getStepEvidence: async (operationId, sequence) => ({ operationId, sequence, status: 'unavailable', items: [], warning: 'Recorded Browser evidence requires the desktop app.' }),
+    readStepResult: async () => { throw new Error('Recorded Browser results require the desktop app.') },
     // 同上：没有在飞的操作可停，答"没有这条"而不是抛。取消一个不存在的操作在真实实现里也是
     // 幂等成功答 null（RED-LINES 第 2 类：我们查不到 ≠ Browser 坏了）。
     stopOperationById: async () => null,

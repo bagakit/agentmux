@@ -8,10 +8,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence } from '../src/main/browser-step-evidence'
 import type { BrowserOperation, BrowserOperationStep } from '../src/shared/browser-operation'
 import type { BrowserStepEvidenceRead } from '../src/shared/browser-step-evidence'
+import type { BrowserStructuredOutputReceipt } from '../src/shared/browser-structured-output'
 import { BrowserStepEvidence } from '../src/renderer/src/components/BrowserStepEvidence'
 
-const bridge = vi.hoisted(() => ({ get: vi.fn() }))
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: { getStepEvidence: bridge.get } } }))
+const bridge = vi.hoisted(() => ({ get: vi.fn(), read: vi.fn() }))
+vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: { getStepEvidence: bridge.get, readStepResult: bridge.read } } }))
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 const identity = { operationId: 'op-a', sequence: 1, browserId: 'browser-a', navigationId: 'nav-a' }
@@ -61,6 +62,47 @@ function response(operationId: string, sequence: number, text: string): BrowserS
 }
 
 describe('selected step evidence in the production component', () => {
+  it('mounts saved structured fields and reads their JSON only on demand through the actual step identity', async () => {
+    const bytes = Buffer.from(JSON.stringify({ zero: 0, empty: '', flag: false }))
+    const artifact = { kind: 'browser-result-artifact' as const, id: 'structured-result', format: 'json' as const,
+      workspaceId: 'workspace-a', operationId: identity.operationId, browserId: identity.browserId,
+      navigationId: identity.navigationId, capturedAt: 1, byteLength: bytes.byteLength, maxReadBytes: 65536 }
+    const receipt: BrowserStructuredOutputReceipt = { kind: 'browser-structured-output', status: 'partial',
+      source: { workspaceId: 'workspace-a', operationId: identity.operationId, browserId: identity.browserId,
+        navigationId: identity.navigationId, url: 'https://fixture.invalid/', document: 'document:11',
+        documentUrl: 'https://fixture.invalid/', scope: { kind: 'page' } },
+      fields: [
+        { key: 'zero', type: 'number', source: { selector: '#zero', read: 'text' }, status: 'observed', inline: true, value: 0 },
+        { key: 'empty', type: 'string', source: { selector: '#empty', read: 'value' }, status: 'observed', inline: true, value: '' },
+        { key: 'flag', type: 'boolean', source: { selector: '#flag', read: 'checked' }, status: 'observed', inline: true, value: false },
+        { key: 'missing', type: 'string', source: { selector: '.absent', read: 'text' }, status: 'missing', inline: false },
+        { key: 'invalid', type: 'number', source: { selector: '#empty', read: 'value' }, status: 'type-error', inline: false, actual: '' }
+      ], work: null, artifactStatus: 'available', artifact }
+    bridge.get.mockReset().mockResolvedValue({ operationId: identity.operationId, sequence: identity.sequence,
+      status: 'available', items: [{ reference: { ...identity, id: 'structured-evidence', kind: 'structured-output',
+        capturedAt: 1, byteLength: Buffer.byteLength(JSON.stringify(receipt)) }, content: { kind: 'structured-output', receipt } }] })
+    bridge.read.mockReset().mockResolvedValue({ reference: artifact, encoding: 'base64', data: bytes.toString('base64'),
+      offset: 0, returnedBytes: bytes.byteLength, totalBytes: bytes.byteLength, nextOffset: null,
+      readCost: { metadataBytes: 1, payloadBytes: bytes.byteLength } })
+    const host = document.createElement('div'), root = createRoot(host)
+    try {
+      await act(async () => root.render(createElement(BrowserStepEvidence, {
+        operation: { ...operation(identity.operationId), phase: 'completed' },
+        step: { ...step(identity.sequence), method: 'extractStructured', status: 'completed' }
+      })))
+      expect([...host.querySelectorAll('.browser-structured-fields__values > div')].map(row =>
+        [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]))
+        .toEqual([['zero', '0'], ['empty', '""'], ['flag', 'false'], ['missing', 'Missing'], ['invalid', 'Type mismatch""']])
+      expect(bridge.read).not.toHaveBeenCalled()
+      const raw = [...host.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Recorded JSON')
+      expect(raw).toBeDefined()
+      await act(async () => { raw!.open = true; raw!.dispatchEvent(new Event('toggle')) })
+      expect(bridge.read.mock.calls).toEqual([[identity.operationId, identity.sequence, { offset: 0, maxBytes: 65536 }]])
+      expect(host.querySelector('pre')?.textContent).toBe(bytes.toString('utf8'))
+      expect(bridge.get.mock.calls).toEqual([[identity.operationId, identity.sequence]])
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it('does not show late evidence from the previous selection or a foreign Browser', async () => {
     let first!: (value: BrowserStepEvidenceRead) => void
     let second!: (value: BrowserStepEvidenceRead) => void

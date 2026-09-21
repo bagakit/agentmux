@@ -1,3 +1,4 @@
+import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets'
 import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
@@ -312,6 +313,7 @@ const api: AgentMuxPreloadApi = {
     listOperationHistory: () => ipcRenderer.invoke('browser:listOperationHistory') as Promise<BrowserOperation[]>,
     getOperation: (operationId: string) => ipcRenderer.invoke('browser:getOperation', operationId) as Promise<BrowserOperation | null>,
     getStepEvidence: (operationId: string, sequence: number) => ipcRenderer.invoke('browser:getStepEvidence', operationId, sequence) as Promise<BrowserStepEvidenceRead>,
+    readStepResult: (operationId: string, sequence: number, options?: BrowserResultReadOptions) => ipcRenderer.invoke('browser:readStepResult', operationId, sequence, options) as Promise<BrowserResultArtifactChunk>,
     stopOperationById: (operationId: string) => ipcRenderer.invoke('browser:stopOperationById', operationId) as Promise<BrowserOperation | null>,
     replayPlan: (operationId: string) => ipcRenderer.invoke('browser:replayPlan', operationId) as Promise<BrowserReplayPlan | null>,
     runReplay: (id: string, plan: BrowserReplayPlan, operator?: BrowserOperator) => ipcRenderer.invoke('browser:runReplay', id, plan, operator),
