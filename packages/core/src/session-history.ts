@@ -83,3 +83,5 @@ export function normalizeSessionHistoryPage(
   })
   return { source: { ...source }, items, nextCursor: page.nextCursor as string | null }
 }
+
+export * from './session-user-messages.js'

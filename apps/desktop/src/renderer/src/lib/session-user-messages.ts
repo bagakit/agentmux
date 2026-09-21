@@ -1,0 +1,260 @@
+import { useEffect, useCallback, useSyncExternalStore } from 'react'
+import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
+import { projectSessionUserMessages } from '@agentmux/core'
+import type { AgentSessionControl } from '../../../shared/contracts'
+import { api } from './api'
+import { useAppStore } from '../store'
+
+export type AgentSessionControlInput = AgentSessionControl
+
+type SessionEntry = {
+  key: string
+  hostId: string
+  agentSessionId: string
+  runId: string
+  subscribers: Set<() => void>
+  historyPage: AgentSessionHistoryPage | null
+  items: AgentSessionHistoryPage['items']
+  nextCursor: string | null
+  loading: boolean
+  error: Error | null
+  inFlight: Promise<AgentSessionHistoryPage | null> | null
+  version: number
+  latestRequestedId: number
+  latestAppliedId: number
+  consumerLifetimeId: number
+  queuedRefresh: boolean
+}
+
+const sessionRegistry = new Map<string, SessionEntry>()
+
+function encodeSegment(s: string): string {
+  return s.replace(/%/g, '%25').replace(/:/g, '%3A')
+}
+
+function makeSessionControlKey(control: AgentSessionControlInput): string {
+  return `${encodeSegment(control.hostId)}:${encodeSegment(control.agentSessionId)}:${encodeSegment(control.run.runId)}`
+}
+
+function getOrCreateEntry(control: AgentSessionControlInput): SessionEntry {
+  const key = makeSessionControlKey(control)
+  let entry = sessionRegistry.get(key)
+  if (!entry) {
+    entry = {
+      key,
+      hostId: control.hostId,
+      agentSessionId: control.agentSessionId,
+      runId: control.run.runId,
+      subscribers: new Set(),
+      historyPage: null,
+      items: [],
+      nextCursor: null,
+      loading: false,
+      error: null,
+      inFlight: null,
+      version: 0,
+      latestRequestedId: 0,
+      latestAppliedId: 0,
+      consumerLifetimeId: 0,
+      queuedRefresh: false
+    }
+    sessionRegistry.set(key, entry)
+  }
+  return entry
+}
+
+function notifySubscribers(entry: SessionEntry) {
+  entry.version++
+  for (const listener of entry.subscribers) {
+    listener()
+  }
+}
+
+async function fetchSessionHistoryPage(
+  control: AgentSessionControlInput,
+  entry: SessionEntry,
+  cursor?: string,
+  isExplicitRefresh?: boolean
+): Promise<AgentSessionHistoryPage | null> {
+  // If an in-flight request is already active for this session:
+  if (entry.inFlight) {
+    if (isExplicitRefresh) {
+      entry.queuedRefresh = true
+    }
+    return entry.inFlight
+  }
+
+  entry.loading = true
+  entry.error = null
+  notifySubscribers(entry)
+
+  const requestId = ++entry.latestRequestedId
+  const requestLifetimeId = entry.consumerLifetimeId
+
+  const promise = (async () => {
+    try {
+      const page = await api.sessions.historyPage(control, { limit: 30, ...(cursor ? { cursor } : {}) })
+
+      // Check if consumers left or consumer lifetime changed while in flight
+      if (entry.subscribers.size === 0 || requestLifetimeId !== entry.consumerLifetimeId) {
+        return null
+      }
+
+      // Generation check: discard older request if a newer request already applied
+      if (requestId < entry.latestAppliedId) {
+        return entry.historyPage
+      }
+
+      if (page && page.agentSessionId === control.agentSessionId) {
+        entry.latestAppliedId = requestId
+        if (cursor) {
+          // Prepend earlier items so canonical chronological order (0..30) is preserved!
+          const combinedItems = [...page.items, ...entry.items]
+          entry.items = combinedItems
+          entry.nextCursor = page.nextCursor
+          entry.historyPage = { ...page, items: combinedItems }
+        } else {
+          entry.items = page.items
+          entry.nextCursor = page.nextCursor
+          entry.historyPage = page
+        }
+        entry.error = null
+      }
+      return entry.historyPage
+    } catch (err) {
+      if (entry.subscribers.size > 0 && requestLifetimeId === entry.consumerLifetimeId) {
+        entry.error = err instanceof Error ? err : new Error(String(err))
+      }
+      // Preserve existing observed items across transport failures
+      return entry.historyPage
+    } finally {
+      if (requestLifetimeId === entry.consumerLifetimeId) {
+        entry.inFlight = null
+        if (!entry.queuedRefresh && requestId === entry.latestRequestedId) {
+          entry.loading = false
+        }
+      }
+      notifySubscribers(entry)
+
+      // If an explicit refresh was queued while this request was in flight, execute it now
+      if (entry.queuedRefresh && entry.subscribers.size > 0 && requestLifetimeId === entry.consumerLifetimeId) {
+        entry.queuedRefresh = false
+        void fetchSessionHistoryPage(control, entry, undefined, false)
+      }
+    }
+  })()
+
+  entry.inFlight = promise
+  return promise
+}
+
+export function useSessionUserMessages(
+  control?: AgentSessionControlInput | undefined,
+  options?: { enabled?: boolean }
+): {
+  messages: AgentSessionUserMessage[]
+  nextCursor: string | null
+  hasMore: boolean
+  loading: boolean
+  error: Error | null
+  loadEarlier: () => Promise<void>
+  refresh: () => Promise<void>
+} {
+  const enabled = options?.enabled ?? true
+  const isAgent = control?.kind === 'agent'
+  const active = Boolean(enabled && isAgent && control)
+  const controlKey = active && control ? makeSessionControlKey(control) : ''
+
+  const timeline = useAppStore((state) =>
+    active && control ? state.timelines[control.agentSessionId] : undefined
+  )
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      if (!active || !control) return () => {}
+      const entry = getOrCreateEntry(control)
+      const wasEmpty = entry.subscribers.size === 0
+      entry.subscribers.add(onStoreChange)
+
+      if (wasEmpty) {
+        entry.consumerLifetimeId++
+      }
+
+      return () => {
+        entry.subscribers.delete(onStoreChange)
+        if (entry.subscribers.size === 0) {
+          // When all consumers leave, release entry and cache so future consumers read fresh source
+          entry.consumerLifetimeId++
+          entry.inFlight = null
+          entry.loading = false
+          entry.historyPage = null
+          entry.items = []
+          entry.nextCursor = null
+          entry.error = null
+          entry.queuedRefresh = false
+          sessionRegistry.delete(controlKey)
+        }
+      }
+    },
+    [active, controlKey]
+  )
+
+  const getSnapshot = useCallback(() => {
+    if (!active || !control) return 0
+    return sessionRegistry.get(controlKey)?.version ?? 0
+  }, [active, controlKey])
+
+  useSyncExternalStore(subscribe, getSnapshot, () => 0)
+
+  useEffect(() => {
+    if (!active || !control) return
+    const entry = sessionRegistry.get(controlKey)
+    if (entry && !entry.historyPage && !entry.inFlight && !entry.loading) {
+      void fetchSessionHistoryPage(control, entry)
+    }
+  }, [active, controlKey])
+
+  const refresh = useCallback(async () => {
+    if (!active || !control) return
+    const entry = sessionRegistry.get(controlKey)
+    if (!entry) return
+    await fetchSessionHistoryPage(control, entry, undefined, true /* isExplicitRefresh */)
+  }, [active, controlKey])
+
+  const loadEarlier = useCallback(async () => {
+    if (!active || !control) return
+    const entry = sessionRegistry.get(controlKey)
+    if (!entry || !entry.nextCursor || entry.loading) return
+    await fetchSessionHistoryPage(control, entry, entry.nextCursor)
+  }, [active, controlKey])
+
+  const entry = active && control ? sessionRegistry.get(controlKey) : undefined
+
+  if (!active || !control || !entry) {
+    return {
+      messages: [],
+      nextCursor: null,
+      hasMore: false,
+      loading: false,
+      error: null,
+      loadEarlier: async () => {},
+      refresh: async () => {}
+    }
+  }
+
+  const messages = projectSessionUserMessages({
+    agentSessionId: control.agentSessionId,
+    historyPage: entry.historyPage ?? undefined,
+    timeline
+  })
+
+  return {
+    messages,
+    nextCursor: entry.nextCursor,
+    hasMore: Boolean(entry.nextCursor),
+    loading: entry.loading,
+    error: entry.error,
+    loadEarlier,
+    refresh
+  }
+}
