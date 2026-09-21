@@ -43,6 +43,8 @@ import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
+import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
+import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
 import {
   ScreenshotEditor,
@@ -150,6 +152,9 @@ export function BrowserPane({
   const [selectedStep, setSelectedStep] = useState<{ operationId: string; sequence: number } | null>(null)
   const [demonstrationBusy, setDemonstrationBusy] = useState(false)
   const demonstrationRequest = useRef(0)
+  const [taskBusy, setTaskBusy] = useState(false)
+  const [selectedTaskAssetId, setSelectedTaskAssetId] = useState<string | null>(null)
+  const taskRequest = useRef(0)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
@@ -169,6 +174,9 @@ export function BrowserPane({
     setReplayOutcome(undefined)
     demonstrationRequest.current += 1
     setDemonstrationBusy(false)
+    taskRequest.current += 1
+    setTaskBusy(false)
+    setSelectedTaskAssetId(null)
   }, [tab.browserId])
 
   // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
@@ -510,6 +518,7 @@ export function BrowserPane({
     setTimelineOpen(true)
     void loadOperationHistory()
     void api.browser.getDemonstration(tab.browserId).catch(reportError)
+    void api.browser.getTaskAssets(tab.browserId).catch(reportError)
   }
 
   async function controlDemonstration(event: MouseEvent<HTMLButtonElement>, action: 'start' | 'stop'): Promise<void> {
@@ -525,6 +534,29 @@ export function BrowserPane({
     } finally {
       if (browserIdentity.current.id === browserId && demonstrationRequest.current === request) setDemonstrationBusy(false)
     }
+  }
+
+  const taskAsset = tab.taskAssets?.assets.find(asset => asset.id === selectedTaskAssetId) ?? tab.taskAssets?.assets.at(-1) ?? null
+  const taskRun = taskAsset ? tab.taskAssets?.runs.filter(run => run.assetId === taskAsset.id).at(-1) ?? null : null
+
+  async function taskAction(event: MouseEvent<HTMLButtonElement>, action: () => Promise<unknown>): Promise<void> {
+    if (event.nativeEvent.isTrusted !== true) return
+    const id = tab.browserId
+    const request = ++taskRequest.current
+    setTaskBusy(true)
+    try { await action() }
+    finally { if (browserIdentity.current.id === id && taskRequest.current === request) setTaskBusy(false) }
+  }
+
+  async function importTaskAsset(event: MouseEvent<HTMLButtonElement>): Promise<void> {
+    try { await taskAction(event, async () => { const asset = await api.browser.importTaskAsset(tab.browserId); setSelectedTaskAssetId(asset.id) }) }
+    catch (error) { reportError(error) }
+  }
+
+  async function saveTaskAsset(content: BrowserTaskContent, event: MouseEvent<HTMLButtonElement>, asVersion: boolean): Promise<void> {
+    if (!taskAsset) return
+    await taskAction(event, async () => await (asVersion ? api.browser.saveTaskAssetVersion : api.browser.saveTaskAssetDraft)(
+      tab.browserId, taskAsset.id, taskAsset.revision, content))
   }
 
   function operationForTimeline(): BrowserOperation | null {
@@ -863,6 +895,24 @@ export function BrowserPane({
             busy={demonstrationBusy || tab.driving}
             onStart={event => void controlDemonstration(event, 'start')}
             onStop={event => void controlDemonstration(event, 'stop')}
+          />
+          {tab.taskAssets && tab.taskAssets.assets.length > 1 ? <label className="browser-task-asset__field"><span>Task asset</span><select aria-label="Browser task asset" value={taskAsset?.id ?? ''} onChange={event => setSelectedTaskAssetId(event.target.value)}>{tab.taskAssets.assets.map(asset => <option key={asset.id} value={asset.id}>{asset.draft.name}</option>)}</select></label> : null}
+          <BrowserTaskAssetEditor
+            asset={taskAsset}
+            recording={tab.demonstration?.draft ?? null}
+            run={taskRun}
+            {...(tab.taskAssets?.warning ? { warning: tab.taskAssets.warning } : {})}
+            busy={taskBusy || tab.driving || demonstrationBusy}
+            onImport={event => void importTaskAsset(event)}
+            onSaveDraft={(content, event) => saveTaskAsset(content, event, false)}
+            onSaveVersion={(content, event) => saveTaskAsset(content, event, true)}
+            onLocateStep={(stepId, event) => { if (event.nativeEvent.isTrusted !== true || !taskAsset) return; void taskAction(event, () => api.browser.locateTaskAssetStep(tab.browserId, taskAsset.id, taskAsset.revision, stepId)).catch(reportError) }}
+            onRun={(input, event) => taskAction(event, async () => {
+              if (!taskAsset) return
+              applyBrowserEvent({ type: 'updated', browser: await api.browser.returnControl(tab.browserId) })
+              await api.browser.runTaskAsset({ ...input, assetId: taskAsset.id, browserId: tab.browserId })
+            })}
+            onStop={(runId, event) => { if (event.nativeEvent.isTrusted !== true) return; void api.browser.stopTaskAsset(tab.browserId, runId).catch(reportError) }}
           />
           <BrowserOperationHistory
             operations={[

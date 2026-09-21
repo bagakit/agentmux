@@ -52,7 +52,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { privateTracker } from './helpers/continuous-progress-tracker'
-import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/continuous-progress'
+import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/contracts'
 import { CONTROL_REQUEST_CHANNEL } from '../src/shared/contracts'
 
 // Target product owners run: Composer → leaf → preload → registered IPC → Main loop → public
@@ -69,7 +69,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   directory = await mkdtemp(join(tmpdir(), 'amx-progress-product-'))
   bridge.storagePath = join(directory, 'chromium')
-  await mkdir(join(bridge.storagePath, 'Local Storage'), { recursive: true })
+  await mkdir(join(bridge.storagePath, 'Local Storage', 'leveldb'), { recursive: true })
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))

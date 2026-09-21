@@ -3,16 +3,16 @@ import type { BrowserCdpSender, BrowserPageCapture } from './browser-page-snapsh
 
 /** The caller proves its actual main-document DOM handle and owns the existing CDP session. */
 export async function verifyBrowserSemanticTarget(input: {
-  send: BrowserCdpSender
+  sendCommand: BrowserCdpSender
   objectId: string
   getSnapshot: () => Promise<BrowserPageCapture>
   isCurrent: () => boolean
 }): Promise<BrowserReplayTarget | undefined> {
   if (!input.isCurrent()) return undefined
-  const described = await input.send('DOM.describeNode', { objectId: input.objectId }) as { node?: { backendNodeId?: number } }
+  const described = await input.sendCommand('DOM.describeNode', { objectId: input.objectId }) as { node?: { backendNodeId?: number } }
   const backendNodeId = described.node?.backendNodeId
   if (!backendNodeId || !input.isCurrent()) return undefined
-  const partial = await input.send('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: false }) as { nodes?: { backendDOMNodeId?: number; ignored?: boolean; role?: { value?: string }; name?: { value?: string } }[] }
+  const partial = await input.sendCommand('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: false }) as { nodes?: { backendDOMNodeId?: number; ignored?: boolean; role?: { value?: string }; name?: { value?: string } }[] }
   const actual = partial.nodes?.find(node => node.backendDOMNodeId === backendNodeId && !node.ignored)
   // Exact selected/event node. Neither CSS nor an ancestor is substituted for an unknown target.
   if (!actual?.role?.value || !actual.name?.value?.trim()) return undefined

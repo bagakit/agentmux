@@ -1,4 +1,5 @@
-import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress'
+import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets'
+import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
@@ -300,6 +301,13 @@ const api: AgentMuxPreloadApi = {
     startDemonstration: (id: string) => ipcRenderer.invoke('browser:startDemonstration', id),
     stopDemonstration: (id: string) => ipcRenderer.invoke('browser:stopDemonstration', id),
     getDemonstration: (id: string) => ipcRenderer.invoke('browser:getDemonstration', id),
+    getTaskAssets: (id: string) => ipcRenderer.invoke('browser:getTaskAssets', id),
+    importTaskAsset: (id: string, name?: string) => ipcRenderer.invoke('browser:importTaskAsset', id, name),
+    saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: BrowserTaskContent) => ipcRenderer.invoke('browser:saveTaskAssetDraft', id, assetId, revision, content),
+    saveTaskAssetVersion: (id: string, assetId: string, revision: number, content: BrowserTaskContent) => ipcRenderer.invoke('browser:saveTaskAssetVersion', id, assetId, revision, content),
+    locateTaskAssetStep: (id: string, assetId: string, revision: number, stepId: string) => ipcRenderer.invoke('browser:locateTaskAssetStep', id, assetId, revision, stepId),
+    runTaskAsset: (input: BrowserTaskAssetRunInput) => ipcRenderer.invoke('browser:runTaskAsset', input),
+    stopTaskAsset: (id: string, runId: string) => ipcRenderer.invoke('browser:stopTaskAsset', id, runId),
     runScript: (id: string, code: string, operator?: BrowserOperator, operationId?: string) => ipcRenderer.invoke('browser:runScript', id, code, operator, operationId),
     listOperationHistory: () => ipcRenderer.invoke('browser:listOperationHistory') as Promise<BrowserOperation[]>,
     getOperation: (operationId: string) => ipcRenderer.invoke('browser:getOperation', operationId) as Promise<BrowserOperation | null>,
