@@ -58,6 +58,7 @@ import {
   regionAncestorOf,
   rendererCssBoundsToWindowDip
 } from '../lib/browser-bounds-sync'
+import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -317,16 +318,12 @@ export function BrowserPane({
     }
     // 把重算入口交给焦点那条 effect，让它能在**不拆掉这个 synchronizer** 的前提下重算边界。
     recomputeBoundsRef.current = update
-    const observer = new ResizeObserver(update)
-    observer.observe(stage)
-    window.addEventListener('resize', update)
-    update()
+    const stopObserving = observeBrowserStageGeometry(stage, update, visible && !released && !restoring)
     return () => {
       recomputeBoundsRef.current = null
       cancelAnimationFrame(frame)
       synchronizer.dispose()
-      observer.disconnect()
-      window.removeEventListener('resize', update)
+      stopObserving()
       void api.browser.setBounds(tab.browserId, null).catch(() => {})
     }
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
