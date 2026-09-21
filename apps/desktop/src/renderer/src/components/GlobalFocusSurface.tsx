@@ -144,7 +144,7 @@ export function GlobalFocusSurface() {
         : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} onSelect={focusExecutionSession} />
+    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} />
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={focusExecutionSession} /> : null}
   </section>
 }
