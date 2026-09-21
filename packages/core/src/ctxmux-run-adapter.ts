@@ -44,8 +44,8 @@ import {
 // by CTXMUX_MANIFEST_SHA256). Bundled artifact diagnostics and terminalEnvironment import these
 // instead of retyping them. The serving listener's identity comes from public RuntimeIdentity;
 // its source commit is not exposed by that protocol and must not be inferred from this bundle.
-export const CTXMUX_COMMIT = '5c2fb50394bbf5d3b984e5f30608ba38566a3389'
-const CTXMUX_TREE = '8e44d969da590351167e3a1784279e47201a3056'
+export const CTXMUX_COMMIT = 'e4d3dd7d32dccc82e6dcd54620e0c79dec0f4943'
+const CTXMUX_TREE = 'f1f7fdf6e62541e18181340a0d3dc91a0b8e94db'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {

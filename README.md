@@ -46,10 +46,10 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 
 当前 Local Run、Codex 代表纵切与 Desktop Control 纵切已经跑通：
 
-- 固定 CtxMux clean commit `c168c0ab9cd849bfade68461b62684982c71f688`、protocol 17；
+- 固定 CtxMux clean commit `e4d3dd7d32dccc82e6dcd54620e0c79dec0f4943`、protocol 18；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
 - Core typecheck 与构建直接消费固定 tarball 的官方 SDK 类型和实现，不保留手写 wire 声明；公开包仍不暴露 CtxMux 类型，也不读取相邻 checkout、全局安装或下载；
-- Local endpoint 由 exact artifact identity 隔离，调用方不能插入另一个同协议 daemon；
+- Local endpoint 使用稳定宿主 namespace；已有服务按公开身份、协议与能力核验，产物更新不另建 Runtime；
 - `AgentMuxRunRef` 只包含 CtxMux `runId`，没有第二个 incarnation identity；
 - Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
 - Remote/SSH 明确返回 `REMOTE_UNSUPPORTED`；

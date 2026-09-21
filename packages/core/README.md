@@ -4,7 +4,7 @@
 
 当前 Local Run 只由随包 [manifest](vendor/ctxmux/darwin-arm64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
-Local Client 不接受外部 socket/state 注入。Endpoint 路径由 exact artifact identity 派生，只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已存在的 peer 还必须匹配 owner receipt、daemon instance、persistent runtime lineage、runtime build 和五项必需 capability；bootstrap 只读取一次原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配完整 expected Runtime identity。同协议的替换 daemon 也会在业务帧发送前失败关闭。
+Local Client 不接受外部 socket/state 注入。默认 Endpoint 与持久状态使用稳定宿主 namespace，产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
 
 ## Runtime 边界
 
