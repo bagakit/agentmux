@@ -25,6 +25,26 @@ async function fixture(value: unknown = 'seed') {
 }
 
 describe('bounded durable Browser result continuation', () => {
+  it('Main JSON registration shares retained bytes, original ownership and restart reads with script imports', async () => {
+    const { store, storePath } = await fixture()
+    const value = { fields: [{ key: 'empty', value: '' }, { key: 'zero', value: 0 }, { key: 'flag', value: false }], text: '中文🙂'.repeat(8000) }
+    const reference = await store.registerJSON(context, value)
+    expect(reference).toMatchObject({ ...context, kind: 'browser-result-artifact', byteLength: Buffer.byteLength(JSON.stringify(value)) })
+    const restarted = new BrowserResultArtifactStore(storePath)
+    const first = await restarted.read(reference, owner, { maxBytes: 65536 })
+    expect(first.returnedBytes).toBe(65536)
+    expect(first.nextOffset).toBe(65536)
+    const second = await restarted.read(reference, owner, { offset: first.nextOffset!, maxBytes: 65536 })
+    expect(second.returnedBytes).toBeGreaterThan(0)
+    expect(second.nextOffset).toBeNull()
+    expect(JSON.parse(Buffer.concat([Buffer.from(first.data, 'base64'), Buffer.from(second.data, 'base64')]).toString('utf8'))).toEqual(value)
+    await expect(restarted.read({ ...reference, navigationId: 'forged' }, owner)).rejects.toThrow(/original operation/)
+    await expect(store.registerJSON({ ...context, workspaceId: null }, value)).rejects.toThrow(/Workspace binding/)
+    await expect(store.registerJSON(context, undefined)).rejects.toThrow(/not JSON/)
+    await expect(store.registerJSON(context, 'x'.repeat(BROWSER_RESULT_MAX_BYTES))).rejects.toThrow(/storage budget/)
+    expect((await store.read(reference, owner)).returnedBytes).toBeGreaterThan(0)
+  })
+
   it('real runner returns a bounded artifact; restart/byte slices recover JSON without rerunning actions', async () => {
     const { store, storePath } = await fixture()
     let actions = 0
