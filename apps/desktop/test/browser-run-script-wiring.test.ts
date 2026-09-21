@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import { mkdtempSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
+import { LocalExecutionHost } from '@agentmux/core'
+import { BrowserDownloads } from '../src/main/browser-downloads.js'
+import { WorkspaceFiles } from '../src/main/workspace-files.js'
+import type { WorkspaceRecord } from '../src/shared/contracts.js'
+import type { BrowserDownloadReceipt, BrowserDownloadChunk } from '../src/shared/browser-download.js'
 import vm from 'node:vm'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -55,14 +61,20 @@ const fakeElectron = vi.hoisted(() => {
   }
 
   class FakeWebContents {
+    static nextId = 1
+    readonly id = FakeWebContents.nextId++
     url = 'https://example.invalid/'
     title = 'Example'
     destroyed = false
     readonly debugger = new FakeDebugger()
     readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>()
     readonly session = {
-      setPermissionCheckHandler: vi.fn(),
-      setPermissionRequestHandler: vi.fn()
+      listeners: new Map<string, ((...args: unknown[]) => void)[]>(),
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(),
+      on(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]); return this },
+      removeListener(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, (this.listeners.get(event) ?? []).filter(item => item !== listener)); return this },
+      emit(event: string, ...args: unknown[]) { for (const listener of [...this.listeners.get(event) ?? []]) listener(...args) },
+      listenerCount(event: string) { return this.listeners.get(event)?.length ?? 0 }
     }
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     readonly executeJavaScriptInIsolatedWorld = vi.fn(async () => true)
@@ -169,7 +181,7 @@ function fakeWindow(): any {
 }
 
 async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore,
-  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets): Promise<{
+  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets, downloads?: BrowserDownloads): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -187,7 +199,7 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal, evidence, results, demonstrations, assets)
+  }, journal, evidence, results, demonstrations, assets, downloads)
   await manager.create('b1', 'https://example.invalid/', workspaceId)
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
@@ -715,6 +727,8 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
       pageInfo: 'pageInfo()',
       extractStructured: 'extractStructured({fields:[{key:"title",type:"string",source:{selector:"h1",read:"text"}}]})',
       readResult: 'readResult({})',
+      readDownload: 'readDownload({})',
+      download: 'download("@e1", {path: "export.bin"})',
       captureScreenshot: 'captureScreenshot()',
       elementContext: 'elementContext("@e1")',
       click: 'click("@e1")',
@@ -2147,6 +2161,175 @@ describe('versioned task assets via the actual Browser Manager', () => {
         await expect(restored.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {}, runId: 'uncertain-run' })).rejects.toThrow('cannot be continued automatically')
         expect(await restored.manager.runScript('b1', 'return 75')).toMatchObject({ result: 75, outcome: { kind: 'completed' } })
       } finally { restored.manager.dispose() }
+    } finally { await f.close() }
+  }, 30_000)
+})
+
+describe('native downloads via the actual Manager → dispatch → Workspace owner', () => {
+  class Download extends EventEmitter {
+    path: string | null = null
+    bytes = 0
+    constructor(readonly total: number) { super() }
+    setSavePath(path: string) { this.path = path }
+    getFilename() { return 'export.bin' }
+    getMimeType() { return 'application/octet-stream' }
+    getReceivedBytes() { return this.bytes }
+    getTotalBytes() { return this.total }
+    cancel() { this.emit('done', {}, 'cancelled') }
+  }
+  async function fixture() {
+    const root = mkdtempSync(join(tmpdir(), 'amx-manager-download-'))
+    const workspace: WorkspaceRecord = { id: 'workspace-download', name: 'Files', hostId: 'local', path: root, kind: 'folder' }
+    const files = new WorkspaceFiles(() => new LocalExecutionHost())
+    const resolve = (id: string) => { if (id !== workspace.id) throw new Error('Unknown Workspace'); return workspace }
+    const downloads = new BrowserDownloads(join(root, 'browser-downloads'), files, resolve)
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'operations.json')))
+    const f = await managerWithBrowser(journal, undefined, undefined, workspace.id, undefined, undefined, downloads)
+    const dispatchModule = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const payload = Buffer.from([0, 255, 128, 13, 10, 2])
+    let clicks = 0
+    const install = (mode: 'complete' | 'cancel' | 'none' = 'complete') => {
+      f.contents.debugger.sendCommandImpl = async (method: string) => {
+        if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11,
+          role: { value: 'link' }, name: { value: 'Export file' }, childIds: [] }] }
+        if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'object-download' } }
+        if (method === 'Runtime.callFunctionOn') {
+          clicks += 1
+          expect(f.contents.session.listenerCount('will-download')).toBe(1)
+          if (mode !== 'none') {
+            const item = new Download(payload.length)
+            f.contents.session.emit('will-download', {}, item, f.contents)
+            expect(item.path).not.toBeNull()
+            if (mode === 'complete') { await writeFile(item.path!, payload); item.bytes = payload.length; item.emit('done', {}, 'completed') }
+            else item.cancel()
+          }
+          return { result: { value: null } }
+        }
+        return {}
+      }
+      createDispatch.mockImplementationOnce(context => dispatchModule.createBrowserPageDispatch(context))
+    }
+    return { ...f, root, workspace, files, downloads, resolve, journal, payload, install, actualDispatch: dispatchModule.createBrowserPageDispatch, clicks: () => clicks,
+      close: async () => { f.manager.dispose(); await rm(root, { recursive: true, force: true }) } }
+  }
+
+  it('registers before the actual ref click, binds real source operation, publishes bytes and continues after navigation/restart without another click', async () => {
+    const f = await fixture()
+    try {
+      f.install()
+      const report = await f.manager.runScript('b1', 'const page = await snapshot(); return await download(page.nodes[0].ref, {path:"published.bin", timeoutMs:2000})')
+      expect(report.outcome).toEqual({ kind: 'completed' })
+      const receipt = report.result as BrowserDownloadReceipt
+      expect(receipt).toMatchObject({ status: 'completed', workspaceId: f.workspace.id, browserId: 'b1', operationId: report.runOperation.id })
+      expect(receipt.reference).toMatchObject({ path: 'published.bin', operationId: report.runOperation.id, byteLength: f.payload.length })
+      expect(report.runOperation.steps).toEqual([expect.objectContaining({ method: 'snapshot' }), expect.objectContaining({ method: 'download' })])
+      expect(f.clicks()).toBe(1)
+      expect(await readFile(join(f.root, 'published.bin'))).toEqual(f.payload)
+      const names = await f.files.readDirectory(f.workspace, '')
+      expect(names.map(entry => entry.name)).toContain('published.bin')
+      await f.manager.create('b2', 'https://example.invalid/', f.workspace.id)
+      createDispatch.mockImplementationOnce(context => f.actualDispatch(context))
+      const foreign = await f.manager.runScript('b2', `return await readDownload(${JSON.stringify(receipt.reference)})`)
+      expect(foreign.outcome.kind).toBe('script-failed')
+      expect(foreign.runOperation.summary).toEqual(expect.stringContaining('does not belong to this Workspace and Browser'))
+      expect(f.clicks()).toBe(1)
+      await f.manager.navigate('b1', 'https://example.invalid/another-document')
+      f.install('none')
+      const read = await f.manager.runScript('b1', `return await readDownload(${JSON.stringify(receipt.reference)}, {offset:1,maxBytes:3})`)
+      expect(read.outcome).toEqual({ kind: 'completed' })
+      const chunk = read.result as BrowserDownloadChunk
+      expect(chunk).toMatchObject({ returnedBytes: 3, offset: 1, nextOffset: 4, revision: receipt.reference!.revision })
+      expect(Buffer.from(chunk.data, 'base64')).toEqual(f.payload.subarray(1, 4))
+      expect(f.clicks()).toBe(1)
+      f.manager.dispose()
+      const restartedStore = new BrowserDownloads(join(f.root, 'browser-downloads'), f.files, f.resolve)
+      const restored = await managerWithBrowser(undefined, undefined, undefined, f.workspace.id, undefined, undefined, restartedStore)
+      try {
+        createDispatch.mockImplementationOnce(context => f.actualDispatch(context))
+        const resumed = await restored.manager.runScript('b1', `return await readDownload(${JSON.stringify(receipt.reference)}, {offset:4,maxBytes:2})`)
+        expect(resumed.outcome).toEqual({ kind: 'completed' })
+        expect(Buffer.from((resumed.result as BrowserDownloadChunk).data, 'base64')).toEqual(f.payload.subarray(4))
+        expect(f.clicks()).toBe(1)
+      } finally { restored.manager.dispose() }
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('rejects unknown Workspace and script-owned callbacks before triggering a download, while preserving healthy small programs', async () => {
+    const f = await fixture()
+    try {
+      await f.manager.create('b2', 'https://example.invalid/', null)
+      createDispatch.mockImplementationOnce(context => f.actualDispatch(context))
+      const unavailable = await f.manager.runScript('b2', 'return await download("@e1", {path:"unknown.bin",timeoutMs:100})')
+      expect(unavailable.outcome.kind).toBe('script-failed')
+      expect(unavailable.runOperation.summary).toEqual(expect.stringContaining('verified Workspace'))
+      expect(f.clicks()).toBe(0)
+      expect(await f.manager.runScript('b2', 'return 18')).toMatchObject({ result: 18, outcome: { kind: 'completed' } })
+      f.install()
+      const invalid = await f.manager.runScript('b1', 'return await download("@e1", {path:"unsafe.bin",signal:{aborted:false}})')
+      expect(invalid.outcome.kind).toBe('script-failed')
+      expect(f.clicks()).toBe(0)
+      expect(f.contents.session.listenerCount('will-download')).toBe(0)
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('keeps actual cancellation and timeout receipts visible, retains no fabricated file, and permits a healthy next run', async () => {
+    const f = await fixture()
+    try {
+      for (const mode of ['cancel', 'none'] as const) {
+        f.install(mode)
+        const report = await f.manager.runScript('b1', `const page = await snapshot(); return await download(page.nodes[0].ref, {path:"${mode}.bin",timeoutMs:100})`)
+        expect(report.outcome.kind).toBe('indeterminate')
+        const receipt = report.result as BrowserDownloadReceipt
+        expect(receipt.status).toBe(mode === 'cancel' ? 'cancelled' : 'failed')
+        expect(receipt.reference).toBeUndefined()
+        expect(report.runOperation.warning).toEqual(expect.stringMatching(mode === 'cancel' ? /cancelled/ : /did not complete within/i))
+        if (receipt.warning) expect(report.runOperation.warning).toBe(receipt.warning)
+        expect(f.sentEvents().at(-1)?.browser.activity.warning).toBe(report.runOperation.warning)
+        await expect(readFile(join(f.root, `${mode}.bin`))).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(f.contents.session.listenerCount('will-download')).toBe(0)
+        expect(await f.manager.runScript('b1', 'return 94')).toMatchObject({ result: 94, outcome: { kind: 'completed' } })
+      }
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('releases a pending native listener on real operation Stop without publishing a file', async () => {
+    const f = await fixture()
+    try {
+      f.install('none')
+      const pending = f.manager.runScript('b1', 'const page = await snapshot(); return await download(page.nodes[0].ref, {path:"stopped.bin",timeoutMs:2000})', undefined, undefined, 'download-stop')
+      await vi.waitFor(() => expect(f.clicks()).toBe(1))
+      expect(f.contents.session.listenerCount('will-download')).toBe(1)
+      await f.manager.stopOperationById('download-stop')
+      expect((await pending).outcome.kind).toBe('stopped')
+      expect(f.contents.session.listenerCount('will-download')).toBe(0)
+      await expect(readFile(join(f.root, 'stopped.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
+      f.manager.returnControl('b1')
+      expect(await f.manager.runScript('b1', 'return 37')).toMatchObject({ result: 37, outcome: { kind: 'completed' } })
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('refuses native download action after human input without preventing read-only continuation', async () => {
+    const f = await fixture()
+    try {
+      f.install()
+      const report = await f.manager.runScript('b1', 'const page = await snapshot(); return await download(page.nodes[0].ref, {path:"human.bin",timeoutMs:100})')
+      const reference = (report.result as BrowserDownloadReceipt).reference
+      expect(reference).toBeDefined()
+      createDispatch.mockImplementationOnce(context => {
+        const dispatch = f.actualDispatch(context)
+        return async (name, args) => {
+          const result = await dispatch(name, args)
+          if (name === 'snapshot') f.contents.emit('input-event', { type: 'mouseDown' })
+          return result
+        }
+      })
+      const blocked = await f.manager.runScript('b1', `const page = await snapshot(); await readDownload(${JSON.stringify(reference)}); return await download(page.nodes[0].ref, {path:"must-not-publish.bin",timeoutMs:100})`)
+      expect(blocked.outcome.kind).toBe('stopped')
+      expect(f.clicks()).toBe(1)
+      expect(blocked.runOperation.steps).toEqual([expect.objectContaining({ method: 'snapshot' }), expect.objectContaining({ method: 'readDownload', status: 'completed' })])
+      expect(f.contents.session.listenerCount('will-download')).toBe(0)
+      await expect(readFile(join(f.root, 'must-not-publish.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await f.close() }
   }, 30_000)
 })

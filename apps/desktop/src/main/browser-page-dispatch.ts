@@ -9,6 +9,8 @@ import { resolveBrowserRef } from './browser-ref-resolve.js'
 import { buildBrowserElementContextDeclaration } from './browser-selection-script.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import { readBrowserResultArtifact, type BrowserResultArtifactStore } from './browser-result-artifact.js'
+import { waitForBrowserDownload, readBrowserDownload, type BrowserDownloads, type BrowserDownloadContext } from './browser-downloads.js'
+import type { BrowserDownloadReference, BrowserDownloadReadOptions } from '../shared/browser-download.js'
 import type { BrowserResultArtifactReference, BrowserResultContext, BrowserResultCurrentOwner, BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
 import { extractBrowserStructuredOutput, parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
@@ -56,6 +58,7 @@ export type BrowserPageContext = {
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
   /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */
   structuredOutput?: { source(): BrowserResultContext; isCurrent(navigationId: string): boolean }
+  downloads?: { store: BrowserDownloads; context: () => BrowserDownloadContext; signal: AbortSignal }
 }
 
 /** 默认的等待上限。脚本整体还有自己的超时兜底，这里只防"一个 wait 把整轮吃光"。 */
@@ -396,6 +399,38 @@ export function createBrowserPageDispatch(
         return await readBrowserResultArtifact(context.resultArtifacts.store,
           args[0] as BrowserResultArtifactReference, context.resultArtifacts.owner,
           options as BrowserResultReadOptions | undefined)
+      }
+      case 'download': {
+        if (!context.downloads) throw new Error('Downloads are unavailable for this Browser. Existing Browser work remains.')
+        const options = args[1]
+        if (!options || typeof options !== 'object' || Array.isArray(options) ||
+            Object.keys(options).some(key => !['path', 'timeoutMs', 'maxBytes'].includes(key))) {
+          throw new TypeError('download requires {path, timeoutMs?, maxBytes?}.')
+        }
+        const input = options as Record<string, unknown>
+        if ((input.timeoutMs !== undefined && typeof input.timeoutMs !== 'number') ||
+            (input.maxBytes !== undefined && typeof input.maxBytes !== 'number')) throw new TypeError('Download budgets must be numbers.')
+        const ref = requireString(args[0], 'ref')
+        const receipt = await waitForBrowserDownload(context.downloads.store, context.downloads.context(),
+          async () => await callOn(ref, 'function () { this.scrollIntoView({block: "center"}); this.click() }'),
+          { path: requireString(input.path, 'path'), signal: context.downloads.signal,
+            ...(typeof input.timeoutMs === 'number' ? { timeoutMs: input.timeoutMs } : {}),
+            ...(typeof input.maxBytes === 'number' ? { maxBytes: input.maxBytes } : {}) })
+        const warning = receipt.warning ?? (receipt.status !== 'completed'
+          ? `Chromium download ${receipt.status}; no completed Workspace file is available. Inspect the page before triggering it again.` : undefined)
+        if (warning) context.note(warning)
+        return receipt
+      }
+      case 'readDownload': {
+        if (!context.downloads) throw new Error('Download reading is unavailable for this Browser.')
+        const options = args[1]
+        if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options) ||
+            Object.keys(options).some(key => !['offset', 'maxBytes'].includes(key)))) {
+          throw new TypeError('readDownload accepts only {offset?, maxBytes?}.')
+        }
+        const owner = context.downloads.context()
+        return await readBrowserDownload(context.downloads.store, args[0] as BrowserDownloadReference,
+          { workspaceId: owner.workspaceId, browserId: owner.browserId }, options as BrowserDownloadReadOptions | undefined)
       }
       // ── 观察 ──────────────────────────────────────────────────────────
       case 'snapshot':
