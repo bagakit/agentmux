@@ -2,6 +2,7 @@ import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
+import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
@@ -275,6 +276,9 @@ export async function registerIpc(args: {
       pid: process.pid, package: args.loadedPackage ?? null,
       renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
       generation: () => args.runtime.rendererGeneration(args.window.webContents),
+      storage: () => observeWorkbenchStorageAuthority(args.window.webContents.session, {
+        userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
+      }),
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
@@ -597,8 +601,11 @@ export async function registerIpc(args: {
   handleWithEvent('resourceUsage:unsubscribe', (event) => {
     stopUsageSubscription(event.sender.id)
   })
-  handleWithEvent('ui:requestStorageFlush', (event) => {
+  handleWithEvent('ui:requestStorageFlush', async (event) => {
     requireTrustedSender('ui:requestStorageFlush', event)
+    requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(args.window.webContents.session, {
+      userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
+    }))
     // Electron returns void: this requests flush without claiming a disk acknowledgement.
     args.window.webContents.session.flushStorageData()
   })

@@ -957,11 +957,12 @@ function workbenchIdentity(workbench) {
 }
 
 /** Actual loaded identity and complete Store topology, not process appearance. */
-async function qualifyUi(appPath, before = null) {
+async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
   const observation = await observeUiClient(appPath)
   assert(observation.main.package, 'The loaded Main package identity is unknown; no UI commit can be confirmed.')
   assertPackageIdentity(observation.main.package, await readPackageIdentity(appPath))
   assert(!observation.workbench.loading, 'The saved workbench is still loading; no UI commit can be confirmed.')
+  if (outgoing) requireOutgoingWorkbenchStorage(observation)
   const bundled = JSON.parse(await readFile(join(appPath, 'Contents/Resources/app/out/renderer/release.json'), 'utf8'))
   assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
     'The loaded Renderer does not belong to this application contract.')
@@ -980,6 +981,12 @@ async function qualifyUi(appPath, before = null) {
     }
   }
   return observation
+}
+
+/** Unknown storage refuses this update before GUI exit; it does not interrupt the serving Agent. */
+export function requireOutgoingWorkbenchStorage(observation) {
+  assert(observation.main.storage?.localStorage === 'present',
+    'The original workbench storage owner is unconfirmed. The existing interface and Runs were kept; restore storage access and retry the update.')
 }
 
 async function awaitUiActivation(appPath, before, runtimePlan = null) {
@@ -1038,7 +1045,7 @@ export async function installApplication(appPath, { intent = installIntent, home
   const previousScope = await scopedProcesses(currentPath)
   const running = previousScope.serving
   try {
-    if (running.length > 0) before = await qualifyUi(currentPath)
+    if (running.length > 0) before = await qualifyUi(currentPath, null, { outgoing: true })
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
     if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
     if (intent === 'ui-only') native = { status: 'deferred', reason: uiRuntime

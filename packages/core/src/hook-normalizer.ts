@@ -486,7 +486,8 @@ export function normalizeNativeHook(
   const payload = flattenNestedPayload(envelope.payload ?? {})
   // 事件名优先读取信封显式名，其次按该 Provider 声明的精确来源（仅当 payload 声明时读指定键，
   // 缺席/空白/非字符串时不读其他合法键；flag/generated-code 不借 payload 补名）。读不出时如实记为 'unknown'。
-  const eventName = resolveHookEventName(envelope.eventName, payload, specification.eventNameSource ?? null) ?? 'unknown'
+  // 来源声明读取原始负载，与 Hook 子进程一致；展开的 extra 只供事件规则和内容读取。
+  const eventName = resolveHookEventName(envelope.eventName, envelope.payload ?? {}, specification.eventNameSource ?? null) ?? 'unknown'
   const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
