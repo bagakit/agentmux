@@ -42,7 +42,13 @@ function useItemPointerHandlers({ disabled, onPointerMove, onPointerLeave, onPoi
     },
     onPointerLeave(event: PointerEvent<HTMLDivElement>) {
       onPointerLeave?.(event)
-      if (!event.defaultPrevented && menu.hover.current) event.preventDefault()
+      if (event.defaultPrevented || !menu.hover.current) return
+      event.preventDefault()
+      // The same leave reaches Content already cancelled for Radix focus. A direct exit
+      // therefore asks the original disclosure owner to close; crossing rows/gaps does not.
+      if (!(event.relatedTarget instanceof Node && menu.content.current?.contains(event.relatedTarget))) {
+        menu.leave(event)
+      }
     },
     onPointerDown(event: PointerEvent<HTMLDivElement>) {
       onPointerDown?.(event)
