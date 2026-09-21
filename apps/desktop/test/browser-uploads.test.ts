@@ -36,7 +36,7 @@ async function fixture() {
     throw new Error('Unexpected CDP method: '+method)
   })
   const context: BrowserUploadContext = {workspaceId:workspace.id,browserId:'browser',operationId:'operation',navigationId,
-    currentNavigationId:()=>navigationId,target:{objectId:'exact-object',send}}
+    currentNavigationId:()=>navigationId,target:{objectId:'exact-object',sendCommand:send}}
   return {owner,files,root,staging,context,send,selected:()=>selected,
     navigate:()=>{navigationId='document-2'},single:()=>{multiple=false},invalidate:()=>{valid=false}}
 }

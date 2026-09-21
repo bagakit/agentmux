@@ -6,11 +6,13 @@ import type { BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-
 
 const host = vi.hoisted(() => ({
   start: vi.fn(async () => ({ draft: null })), stop: vi.fn(async () => ({ draft: null })),
-  get: vi.fn(async () => ({ draft: null })), reportError: vi.fn(),
+  get: vi.fn(async () => ({ draft: null })), importTask: vi.fn(), saveDraft: vi.fn(), saveVersion: vi.fn(), runTask: vi.fn(), stopTask: vi.fn(), locateTask: vi.fn(), returnControl: vi.fn(), reportError: vi.fn(),
   executeControl: vi.fn(async () => ({ operation: 'browser.history', operations: [] }))
 }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: {
-  browser: { startDemonstration: host.start, stopDemonstration: host.stop, getDemonstration: host.get,
+  browser: { startDemonstration: host.start, stopDemonstration: host.stop, getDemonstration: host.get, getTaskAssets: async () => ({ assets: [], runs: [] }), importTaskAsset: host.importTask,
+    saveTaskAssetDraft: host.saveDraft, saveTaskAssetVersion: host.saveVersion, runTaskAsset: host.runTask,
+    stopTaskAsset: host.stopTask, locateTaskAssetStep: host.locateTask, returnControl: host.returnControl,
     cancelElementSelection: async () => {}, setAnnotationMarkers: async () => {}, setBounds: async () => {} },
   ui: { getZoomFactor: () => 1 }
 } }))
@@ -67,6 +69,47 @@ describe('human demonstration in the actual BrowserPane', () => {
       await act(async () => stop.click())
       expect(host.stop).not.toHaveBeenCalled()
       expect(host.reportError).not.toHaveBeenCalled()
+    } finally { await act(async () => root.unmount()); element.remove() }
+  })
+})
+
+
+describe('versioned tasks in the actual BrowserPane', () => {
+  it('consumes retained asset/version/cursor and refuses synthetic edit, locate, run, continue and stop', async () => {
+    for (const mock of [host.importTask, host.saveDraft, host.saveVersion, host.runTask, host.stopTask, host.locateTask, host.returnControl]) mock.mockClear()
+    const content = { name: 'Retained reviewed task', url: 'https://example.test/', parameters: [], steps: [
+      { id: 'task-step-1', kind: 'click' as const, url: 'https://example.test/', reviewed: true,
+        target: { role: 'button', name: 'Review preferences', ordinal: 1, count: 1 } }
+    ] }
+    const taskTab: BrowserWorkbenchSurface = { ...tab, taskAssets: {
+      assets: [{ id: 'asset-1', browserId: tab.browserId, sourceRecordingId: 'draft-1', revision: 3, draft: content,
+        versions: [{ ...content, version: 1, savedAt: 1 }], createdAt: 1, updatedAt: 2 }],
+      runs: [{ id: 'run-1', assetId: 'asset-1', version: 1, browserId: tab.browserId, nextStep: 0,
+        status: 'waiting-human', operationIds: ['real-operation-1'], startedAt: 1, updatedAt: 2 }]
+    } }
+    const element = document.createElement('div'); document.body.append(element)
+    const root = createRoot(element)
+    try {
+      await act(async () => root.render(createElement(BrowserPane, { tab: taskTab, visible: false })))
+      const trigger = element.querySelector<HTMLButtonElement>('[aria-label="More browser tools"]')!
+      expect(trigger).not.toBeNull()
+      await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+      const open = document.querySelector<HTMLElement>('[aria-label="Open human demonstration draft"]')!
+      expect(open).not.toBeNull()
+      await act(async () => { open.focus(); open.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+      const editor = element.querySelector<HTMLElement>('[aria-label="Editable Browser task asset"]')!
+      expect(editor).not.toBeNull()
+      expect(editor.getAttribute('data-task-asset-id')).toBe('asset-1')
+      expect(editor.querySelector<HTMLInputElement>('[aria-label="Task asset name"]')?.value).toBe(content.name)
+      expect(editor.querySelectorAll('[data-task-step-id]')).toHaveLength(1)
+      expect(editor.textContent).toContain('v1 · waiting-human · next step 1')
+      const buttons = [...editor.querySelectorAll<HTMLButtonElement>('button')].filter(button =>
+        ['Save draft', 'Save version', 'Run next step', 'Return control and continue', 'Stop task'].includes(button.textContent?.trim() ?? '') || button.getAttribute('aria-label') === 'Locate task step 1')
+      expect(buttons).toHaveLength(6)
+      for (const button of buttons) { expect(button.disabled).toBe(false); await act(async () => button.click()) }
+      expect(host.saveDraft).not.toHaveBeenCalled(); expect(host.saveVersion).not.toHaveBeenCalled()
+      expect(host.locateTask).not.toHaveBeenCalled(); expect(host.runTask).not.toHaveBeenCalled()
+      expect(host.stopTask).not.toHaveBeenCalled(); expect(host.returnControl).not.toHaveBeenCalled()
     } finally { await act(async () => root.unmount()); element.remove() }
   })
 })

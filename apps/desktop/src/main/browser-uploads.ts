@@ -19,7 +19,7 @@ export class BrowserUploadUnconfirmedError extends Error {
 export type BrowserUploadContext = BrowserUploadSource & {
   currentNavigationId(): string
   /** Exact current-snapshot resolution, on the target's original frame sender. Never semantic healing. */
-  target: { objectId: string; send: BrowserCdpSender }
+  target: { objectId: string; sendCommand: BrowserCdpSender }
 }
 
 /** Operation-owned snapshots survive script completion so the page can submit its FileList later. */
@@ -43,7 +43,7 @@ export class BrowserUploads {
     }
     const inspect = async (): Promise<{ multiple: boolean }> => {
       requireCurrent()
-      const result = await context.target.send('Runtime.callFunctionOn', {
+      const result = await context.target.sendCommand('Runtime.callFunctionOn', {
         objectId: context.target.objectId, returnByValue: true,
         functionDeclaration: 'function(){if(!(this instanceof HTMLInputElement)||this.type!=="file"||!this.isConnected||this.disabled)throw new Error("Current target is not an enabled file input");return {multiple:this.multiple}}'
       }) as { result?: { value?: { multiple: boolean } }; exceptionDetails?: unknown }
@@ -96,9 +96,9 @@ export class BrowserUploads {
       // objectId binds the exact document object across the final CDP call. backend ids can be reused
       // after navigation; no selector, stale ref healing or wrong-frame fallback is allowed here.
       actionStarted = true
-      await context.target.send('DOM.setFileInputFiles', { objectId: context.target.objectId, files: staged })
+      await context.target.sendCommand('DOM.setFileInputFiles', { objectId: context.target.objectId, files: staged })
       requireOwned()
-      const observed = await context.target.send('Runtime.callFunctionOn', { objectId: context.target.objectId, returnByValue: true,
+      const observed = await context.target.sendCommand('Runtime.callFunctionOn', { objectId: context.target.objectId, returnByValue: true,
         functionDeclaration: 'function(){return Array.from(this.files, file=>({name:file.name,byteLength:file.size}))}' }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
       requireOwned()
       const observedFiles = observed.result?.value

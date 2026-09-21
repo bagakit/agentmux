@@ -53,6 +53,13 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:startDemonstration': 'Browser demonstration',
   'browser:stopDemonstration': 'Browser demonstration',
   'browser:getDemonstration': 'Browser demonstration',
+  'browser:getTaskAssets': 'Browser task asset',
+  'browser:importTaskAsset': 'Browser task asset',
+  'browser:saveTaskAssetDraft': 'Browser task asset',
+  'browser:saveTaskAssetVersion': 'Browser task asset',
+  'browser:locateTaskAssetStep': 'Browser task asset',
+  'browser:runTaskAsset': 'Browser task asset',
+  'browser:stopTaskAsset': 'Browser task asset',
   'browser:cancelElementSelection': 'Browser selection',
   // 回答「要不要把这个应用链接交给系统」。伪造它等于替用户按下"允许"，于是任意页面能拿它选定的
   // 参数启动本机应用——这正是那一问要挡住的事，所以它和别的特权频道一样验发送方。

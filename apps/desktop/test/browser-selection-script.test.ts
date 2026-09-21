@@ -71,3 +71,56 @@ describe('Browser selection isolated-world scripts', () => {
     expect(buildCancelBrowserAnnotationMarkerScript(12)).toContain('state.revision === 12')
   })
 })
+
+it('retains only the actual chosen node for the current inspection, ignores synthetic events, and clears the retained DOM owner', async () => {
+  const { runInNewContext } = await import('node:vm')
+  const { buildSelectedBrowserElementExpression } = await import('../src/main/browser-selection-script.js')
+  const listeners = new Map<string, (event: unknown) => void>()
+  const document: any = {
+    title: 'Fixture', documentElement: null,
+    addEventListener: (name: string, listener: (event: unknown) => void) => listeners.set(name, listener),
+    removeEventListener: (name: string) => listeners.delete(name)
+  }
+  class Element {
+    readonly ownerDocument = document
+    readonly style: Record<string, string> = {}
+    readonly attributes: { name: string; value: string }[] = []
+    readonly tagName = 'BUTTON'
+    readonly innerText = 'Actual selected button'
+    readonly textContent = 'Actual selected button'
+    readonly outerHTML = '<button>Actual selected button</button>'
+    readonly parentElement = null
+    readonly previousElementSibling = null
+    readonly nextElementSibling = null
+    appendChild() {}
+    append() {}
+    setAttribute() {}
+    getAttribute() { return null }
+    contains() { return false }
+    remove() {}
+    attachShadow() { return { append() {} } }
+    getBoundingClientRect() { return { x: 0, y: 0, width: 200, height: 50 } }
+  }
+  document.body = new Element()
+  document.documentElement = document.body
+  document.createElement = () => new Element()
+  const world = { document, Element, getComputedStyle: () => ({ position: 'static' }),
+    CSS: { escape: (value: string) => value }, location: { href: 'https://example.test/' }, window: { scrollX: 0, scrollY: 0 } }
+  const context = (await import('node:vm')).createContext(world)
+  const node = new Element()
+  const event = (isTrusted: boolean) => ({ isTrusted, target: node, composedPath: () => [node], preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} })
+  const selecting = runInNewContext(buildBrowserElementSelectionScript(20, true), context) as Promise<unknown>
+  listeners.get('click')!(event(false))
+  expect(runInNewContext(buildSelectedBrowserElementExpression(20), context)).toBeUndefined()
+  expect(listeners.has('click')).toBe(true)
+  listeners.get('click')!(event(true))
+  expect(await selecting).toMatchObject({ accessibleName: 'Actual selected button' })
+  expect(runInNewContext(buildSelectedBrowserElementExpression(20), context)).toBe(node)
+  expect(runInNewContext(buildSelectedBrowserElementExpression(19), context)).toBeUndefined()
+  expect(listeners.size).toBe(0)
+  const retained = runInNewContext('globalThis.__agentMuxBrowserSelection', context)
+  runInNewContext(buildCancelBrowserElementSelectionScript(20), context)
+  expect(retained.selectedTarget).toBeNull()
+  expect(runInNewContext(buildSelectedBrowserElementExpression(20), context)).toBeUndefined()
+  expect(listeners.size).toBe(0)
+})

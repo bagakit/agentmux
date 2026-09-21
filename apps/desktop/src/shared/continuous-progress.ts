@@ -1,7 +1,6 @@
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { AgentSessionControl } from './contracts'
 
-export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
 export type ContinuousProgressInputRequest = {
   requestId: string
   operation: 'continuous-progress.observeInput'

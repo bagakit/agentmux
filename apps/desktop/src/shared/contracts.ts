@@ -47,6 +47,7 @@ export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcom
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
 import type { BrowserStepEvidenceRead } from './browser-step-evidence'
 import type { BrowserDemonstrationState } from './browser-demonstration'
+import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from './browser-task-assets'
 export type { BrowserStepEvidenceRead } from './browser-step-evidence'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
 export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
@@ -1070,6 +1071,7 @@ export type BrowserSnapshot = {
   activity?: BrowserActivityState
   /** Explicit human recording or recovered durable draft; recovery never starts capture. */
   demonstration?: BrowserDemonstrationState
+  taskAssets?: BrowserTaskAssetState
 }
 
 export type BrowserProfileImportedSource = {
@@ -1288,6 +1290,7 @@ export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
+export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
 /** Main -> renderer: a periodic CPU/RSS sample for the resource panel. */
 export const RESOURCE_USAGE_CHANNEL = 'agentmux:resource-usage'
 /** Main -> renderer: a watched workspace file changed on disk; re-read it. */
@@ -1508,6 +1511,13 @@ export type AgentMuxDesktopApi = {
     startDemonstration(id: string): Promise<BrowserDemonstrationState>
     stopDemonstration(id: string): Promise<BrowserDemonstrationState>
     getDemonstration(id: string): Promise<BrowserDemonstrationState>
+    getTaskAssets(id: string): Promise<BrowserTaskAssetState>
+    importTaskAsset(id: string, name?: string): Promise<BrowserTaskAsset>
+    saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
+    saveTaskAssetVersion(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
+    locateTaskAssetStep(id: string, assetId: string, expectedRevision: number, stepId: string): Promise<BrowserTaskAsset>
+    runTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun>
+    stopTaskAsset(id: string, runId: string): Promise<BrowserTaskAssetRun | null>
     /**
      * 在这个 Browser 上跑一段 Agent 写的程序，返回它的结局。
      *

@@ -92,12 +92,13 @@ const ELEMENT_EXTRACT_SOURCE = `
   };
 `
 
-export function buildBrowserElementSelectionScript(revision: number): string {
+export function buildBrowserElementSelectionScript(revision: number, retainTarget = false): string {
   return `(() => {
   'use strict';
   const stateKey = ${JSON.stringify(SELECTION_STATE_KEY)};
   const hostAttribute = ${JSON.stringify(SELECTION_HOST_ATTRIBUTE)};
   const revision = ${revision};
+  const retainTarget = ${retainTarget};
   const previous = globalThis[stateKey];
   if (previous && Number.isInteger(previous.revision) && previous.revision >= revision) return null;
   if (previous && typeof previous.cancel === 'function') previous.cancel();
@@ -134,7 +135,7 @@ export function buildBrowserElementSelectionScript(revision: number): string {
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
       host.remove();
-      if (globalThis[stateKey] === state) delete globalThis[stateKey];
+      if (globalThis[stateKey] === state && !state.selectedTarget) delete globalThis[stateKey];
     };
     const settle = (value) => {
       if (settled) return;
@@ -166,6 +167,7 @@ export function buildBrowserElementSelectionScript(revision: number): string {
       event.stopPropagation();
       event.stopImmediatePropagation();
       try {
+        if (retainTarget) state.selectedTarget = selected;
         settle(extract(selected));
       } catch (error) {
         fail(error);
@@ -178,13 +180,18 @@ export function buildBrowserElementSelectionScript(revision: number): string {
       event.stopPropagation();
       settle(null);
     };
-    const state = { revision, cancel: () => settle(null) };
+    const state = { revision, selectedTarget: null, cancel: () => { state.selectedTarget = null; if (settled) cleanup(); else settle(null); } };
     globalThis[stateKey] = state;
     document.addEventListener('pointermove', onPointerMove, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKeyDown, true);
   });
 })()`
+}
+
+/** Evaluated only in a proved isolated context while the Main selection owner is current. */
+export function buildSelectedBrowserElementExpression(revision: number): string {
+  return `(() => { const state = globalThis[${JSON.stringify(SELECTION_STATE_KEY)}]; return state?.revision === ${revision} && state.selectedTarget instanceof Element && state.selectedTarget.ownerDocument === document ? state.selectedTarget : undefined; })()`
 }
 
 export function buildCancelBrowserElementSelectionScript(revision: number): string {
