@@ -6,7 +6,7 @@ import { parseBrowserSnapshotQuery, projectBrowserSnapshot } from '../src/main/b
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserScopedSnapshot } from '../src/shared/browser-snapshot-query.js'
 
-function fixture(options: { failed?: string; empty?: string; changed?: string; discoveryFailed?: boolean; nestedAx?: boolean; wrongRoot?: boolean; pageInterference?: boolean; realmFailed?: boolean } = {}) {
+function fixture(options: { failed?: string; empty?: string; changed?: string; discoveryFailed?: boolean; nestedAx?: boolean; wrongRoot?: boolean; pageInterference?: boolean; selectorInterference?: boolean; evaluationFailure?: 'exception' | 'missing-value'; realmFailed?: boolean } = {}) {
   const calls: { session: string; method: string; params?: Record<string, unknown> }[] = []
   const actions: [string, number][] = []
   const backends = new Map([['doc-main', 11], ['doc-child', 21], ['doc-nested', 31], ['doc-remote', 11], ['doc-remote-child', 41]])
@@ -52,6 +52,13 @@ function fixture(options: { failed?: string; empty?: string; changed?: string; d
       ]
     }
     if (method === 'Runtime.evaluate' && String(params?.expression).includes('width: innerWidth')) return { result: { value: { width: 640, height: 480 } } }
+    if (method === 'Runtime.evaluate' && String(params?.expression).includes('Observation within must match exactly one region')) {
+      if (options.selectorInterference && params?.contextId !== 11) { hiddenEffects++; return { result: { objectId: 'node-21' } } }
+      return { result: { objectId: 'node-11' } }
+    }
+    if (method === 'Runtime.evaluate' && options.evaluationFailure && String(params?.expression).includes("document.querySelectorAll('[onclick]")) {
+      return options.evaluationFailure === 'exception' ? { exceptionDetails: { text: 'Observation context was destroyed' }, result: { value: '[]' } } : { result: {} }
+    }
     if (method === 'Runtime.evaluate' && options.pageInterference && String(params?.expression).includes("document.querySelectorAll('[onclick]")) {
       if (params?.contextId !== 11) { hiddenEffects++; return { result: { value: '["Foreign child clickable"]' } } }
     }
@@ -59,6 +66,7 @@ function fixture(options: { failed?: string; empty?: string; changed?: string; d
     if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
     if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params?.backendNodeId}` } }
     if (method === 'DOM.describeNode') return { node: { backendNodeId: Number(String(params?.objectId).split('-')[1]) } }
+    if (method === 'Runtime.callFunctionOn' && String(params?.functionDeclaration).includes('__agentmuxClickable.map')) return { result: { value: [] } }
     if (method === 'Runtime.callFunctionOn') { actions.push([session, Number(String(params?.objectId).split('-')[1])]); return { result: { value: null } } }
     throw new Error(`Unmodelled protocol command ${method}`)
   }
@@ -146,6 +154,28 @@ describe('native document facts within the sole snapshot owner', () => {
     const captured = await h.capture()
     expect(captured.nodes.map(node => node.frameId)).toEqual(['doc-main', 'doc-child', 'doc-nested', 'doc-remote', 'doc-remote-child'])
     expect(captured.missingFrames).toEqual([{frameId:'doc-main',reason:expect.stringMatching(/clickable observation is unavailable.*Accessibility content remains observable.*retry/)}])
+  })
+
+  it('CSS within resolves only in the actual Main isolated context, without page selector effects or foreign regions', async () => {
+    const h = fixture({ selectorInterference: true })
+    const pending = h.dispatch('snapshot', [{ within: '#scope' }])
+    await expect(pending).resolves.toMatchObject({ missingFrames: [] })
+    const local = await pending as BrowserScopedSnapshot
+    expect(local.nodes.map(node => [node.frameId, node.backendNodeId])).toEqual([['doc-main', 11]])
+    expect(local.observation).toMatchObject({ fullObserved: 5, scoped: 1, returned: 1, scope: { document: 'doc-main' } })
+    expect(local.missingFrames).toEqual([])
+    expect(h.hiddenEffects()).toBe(0)
+    expect(h.actions).toEqual([])
+    expect(h.calls.filter(call => call.method === 'Runtime.evaluate' && String(call.params?.expression).includes('Observation within must match exactly one region')).map(call => call.params?.contextId)).toEqual([11])
+  })
+
+  it.each(['exception', 'missing-value'] as const)('a %s during clickable evaluation is explicit incomplete observation and keeps actual AX content', async evaluationFailure => {
+    const h = fixture({ evaluationFailure })
+    const captured = await h.capture()
+    expect(captured.nodes.map(node => node.frameId)).toEqual(['doc-main', 'doc-child', 'doc-nested', 'doc-remote', 'doc-remote-child'])
+    expect(captured.missingFrames).toEqual([{ frameId: 'doc-main', reason: expect.stringMatching(/clickable observation is unavailable.*evaluation did not return.*Accessibility content remains observable.*retry/) }])
+    expect(h.calls.filter(call => call.method === 'Runtime.evaluate' && call.params?.expression === 'delete window.__agentmuxClickable').map(call => call.params?.contextId)).toEqual([11])
+    expect(h.actions).toEqual([])
   })
 
   it('reports a failed embedded AX tree while preserving all other actual documents', async () => {

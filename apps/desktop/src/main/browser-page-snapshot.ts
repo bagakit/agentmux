@@ -245,44 +245,41 @@ async function findClickableElements(
   executionContextId: number,
   within?: { objectId: string; backendNodes: Set<number> }
 ): Promise<BrowserPageNode[]> {
-  const evaluated = (await send('Runtime.evaluate', {
-    expression: CURSOR_INTERACTIVE_EXPRESSION,
-    contextId: executionContextId,
-    returnByValue: true
-  })) as { result?: { value?: string } }
-
-  const labels = JSON.parse(evaluated.result?.value ?? '[]') as string[]
   const found: BrowserPageNode[] = []
-  const membership = within ? (await send('Runtime.callFunctionOn', {
-    objectId: within.objectId,
-    functionDeclaration: 'function() { return window.__agentmuxClickable.map(element => this.contains(element)) }',
-    returnByValue: true
-  })) as { result?: { value?: boolean[] } } : null
-  if (within && !Array.isArray(membership?.result?.value)) throw new Error('The observation region could not be checked against clickable elements; retry snapshot().')
-
   try {
-  for (let index = 0; index < labels.length; index += 1) {
-    const handle = (await send('Runtime.evaluate', {
-      expression: `window.__agentmuxClickable[${index}]`, contextId: executionContextId
-    })) as { result?: { objectId?: string } }
-    const objectId = handle.result?.objectId
-    if (!objectId) continue
+    const evaluated = (await send('Runtime.evaluate', {
+      expression: CURSOR_INTERACTIVE_EXPRESSION,
+      contextId: executionContextId,
+      returnByValue: true
+    })) as { result?: { value?: string }; exceptionDetails?: unknown }
+    if (evaluated.exceptionDetails || typeof evaluated.result?.value !== 'string') throw new Error('Clickable evaluation did not return an observed result')
+    const labels = JSON.parse(evaluated.result.value) as string[]
+    const membership = within ? (await send('Runtime.callFunctionOn', {
+      objectId: within.objectId,
+      functionDeclaration: 'function() { return window.__agentmuxClickable.map(element => this.contains(element)) }',
+      returnByValue: true
+    })) as { result?: { value?: boolean[] } } : null
+    if (within && !Array.isArray(membership?.result?.value)) throw new Error('The observation region could not be checked against clickable elements; retry snapshot().')
 
-    try {
-    const described = (await send('DOM.describeNode', { objectId })) as {
-      node?: { backendNodeId?: number }
+    for (let index = 0; index < labels.length; index += 1) {
+      const handle = (await send('Runtime.evaluate', {
+        expression: `window.__agentmuxClickable[${index}]`, contextId: executionContextId
+      })) as { result?: { objectId?: string } }
+      const objectId = handle.result?.objectId
+      if (!objectId) continue
+
+      try {
+        const described = (await send('DOM.describeNode', { objectId })) as {
+          node?: { backendNodeId?: number }
+        }
+        const backendNodeId = described.node?.backendNodeId
+        if (backendNodeId && membership?.result?.value?.[index] === true) within?.backendNodes.add(backendNodeId)
+        // AX 已收的节点不重复发行 ref。
+        if (!backendNodeId || known.has(backendNodeId)) continue
+        known.add(backendNodeId)
+        found.push({ ref: '', role: 'clickable', name: normalizeName(labels[index]!), backendNodeId, depth: 0 })
+      } finally { await send('Runtime.releaseObject', { objectId }) }
     }
-    const backendNodeId = described.node?.backendNodeId
-    if (backendNodeId && membership?.result?.value?.[index] === true) within?.backendNodes.add(backendNodeId)
-    // AX 树已经收了这个节点就不重复收——重复的 ref 会让 Agent 以为页面上有两个一样的东西。
-    if (!backendNodeId || known.has(backendNodeId)) continue
-    known.add(backendNodeId)
-
-    // 这条路的名字取自 `el.textContent`（见 CURSOR_INTERACTIVE_EXPRESSION），里面带着 HTML 缩进的
-    // 换行，比 AX 名更脏——同样过一遍归一，理由见 normalizeName。
-    found.push({ ref: '', role: 'clickable', name: normalizeName(labels[index]!), backendNodeId, depth: 0 })
-    } finally { await send('Runtime.releaseObject', { objectId }) }
-  }
   } finally {
     await send('Runtime.evaluate', { expression: CURSOR_CLEANUP_EXPRESSION, contextId: executionContextId, returnByValue: true })
   }
@@ -402,11 +399,20 @@ export async function captureBrowserPageSnapshot(
     ? discovery.documents.find((document) => document.frameId !== null && document.frameId === input.withinTarget!.frameId && document.sessionId === input.withinTarget!.sessionId)
     : mainDocument
   if (!scopedDocument) throw new Error('The observation document could not be identified or went away. Take a new snapshot().')
-  const scopedSend = scopedDocument.send
+  const scopedSend = scopedDocument.sendCommand
   if (query.withinRef && !input.withinTarget) throw new Error('withinRef must be resolved through the authorized snapshot ref path.')
+  let mainObservationContextId: number | undefined
+  const mainObservationContext = async (frameId: string | null | undefined): Promise<number> => {
+    if (!frameId) throw new Error('The main document has no native frame identity. Read an unscoped snapshot() to inspect missingFrames, then retry.')
+    if (mainObservationContextId !== undefined) return mainObservationContextId
+    const realm = await mainSend('Page.createIsolatedWorld', { frameId, worldName: 'agentmux-snapshot-observation', grantUniveralAccess: false }) as { executionContextId?: number }
+    if (realm.executionContextId === undefined) throw new Error('The main document observation context is unavailable. Retry snapshot().')
+    mainObservationContextId = realm.executionContextId
+    return mainObservationContextId
+  }
   let regionObjectId = input.withinTarget?.objectId
   let regionBackendNodeId: number | undefined
-  if (query.within) regionObjectId = await resolveWithinSelector(scopedSend, query.within)
+  if (query.within) regionObjectId = await resolveWithinSelector(scopedSend, query.within, await mainObservationContext(mainDocument?.frameId))
   try {
     if (regionObjectId) {
       const described = await scopedSend('DOM.describeNode', { objectId: regionObjectId }) as { node?: { backendNodeId?: number } }
@@ -417,7 +423,7 @@ export async function captureBrowserPageSnapshot(
     for (const document of discovery.documents) {
       try {
         work.axTrees += 1
-        const tree = await collectAxNodes(document.send, document.frameId)
+        const tree = await collectAxNodes(document.sendCommand, document.frameId)
         work.axNodes += tree.length
         const root = tree[0]
         if (!root) throw new Error('The accessibility tree returned no document root. Retry snapshot().')
@@ -430,21 +436,19 @@ export async function captureBrowserPageSnapshot(
         if (document === mainDocument) {
           const actualFrameId = document.frameId ?? root.frameId
           try {
-            if (!actualFrameId) throw new Error('The main document has no native frame identity')
-            const realm = await document.send('Page.createIsolatedWorld', { frameId: actualFrameId, worldName: 'agentmux-snapshot-observation', grantUniveralAccess: false }) as { executionContextId?: number }
-            if (realm.executionContextId === undefined) throw new Error('The main document observation context is unavailable')
+            const executionContextId = await mainObservationContext(actualFrameId)
             let isolatedRegion: string | undefined
             try {
               if (regionBackendNodeId && document === scopedDocument && regionNodes) {
-                const resolved = await document.send('DOM.resolveNode', { backendNodeId: regionBackendNodeId, executionContextId: realm.executionContextId }) as { object?: { objectId?: string } }
+                const resolved = await document.sendCommand('DOM.resolveNode', { backendNodeId: regionBackendNodeId, executionContextId }) as { object?: { objectId?: string } }
                 isolatedRegion = resolved.object?.objectId
                 if (!isolatedRegion) throw new Error('The observation region could not be resolved in its actual document')
               }
               const known = new Set(observed.map((node) => node.backendNodeId))
-              for (const clickable of await findClickableElements(document.send, known, realm.executionContextId, isolatedRegion && regionNodes ? { objectId: isolatedRegion, backendNodes: regionNodes } : undefined)) {
+              for (const clickable of await findClickableElements(document.sendCommand, known, executionContextId, isolatedRegion && regionNodes ? { objectId: isolatedRegion, backendNodes: regionNodes } : undefined)) {
                 observed.push({ ...clickable, ref: nextRef() })
               }
-            } finally { if (isolatedRegion) await document.send('Runtime.releaseObject', { objectId: isolatedRegion }) }
+            } finally { if (isolatedRegion) await document.sendCommand('Runtime.releaseObject', { objectId: isolatedRegion }) }
           } catch (error) {
             missingFrames.push({ frameId: actualFrameId ?? '(unidentified main document)', reason: `Main-document clickable observation is unavailable (${error instanceof Error ? error.message : String(error)}). Accessibility content remains observable; retry snapshot().` })
           }

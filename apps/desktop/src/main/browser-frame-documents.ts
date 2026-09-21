@@ -7,7 +7,7 @@ export type BrowserFrameDocument = {
   loaderId: string | null
   depth: number
   sessionId?: string
-  send: BrowserCdpSender
+  sendCommand: BrowserCdpSender
 }
 
 type FrameTree = {
@@ -21,7 +21,7 @@ export type BrowserFrameDocuments = {
   documents: BrowserFrameDocument[]
   missingFrames: BrowserPageFrameFailure[]
   /** Actual sender roots retained only until this observation finishes. */
-  roots: { frameId: string; send: BrowserCdpSender }[]
+  roots: { frameId: string; sendCommand: BrowserCdpSender }[]
 }
 
 async function readTree(send: BrowserCdpSender): Promise<FrameTree> {
@@ -40,20 +40,20 @@ export async function discoverBrowserFrameDocuments(
   sessions: Map<string, BrowserCdpSender>
 ): Promise<BrowserFrameDocuments> {
   const facts = new Map<string, Frame>()
-  const owners = new Map<string, { send: BrowserCdpSender; sessionId?: string }>()
+  const owners = new Map<string, { sendCommand: BrowserCdpSender; sessionId?: string }>()
   const roots: BrowserFrameDocuments['roots'] = []
   const missingFrames: BrowserPageFrameFailure[] = []
   const unavailable = new Set<string>()
   let mainFrameId: string | null = null
   let budgetReported = false
-  const addTree = (tree: FrameTree, owner: { send: BrowserCdpSender; sessionId?: string }): void => {
+  const addTree = (tree: FrameTree, owner: { sendCommand: BrowserCdpSender; sessionId?: string }): void => {
     const previousOwner = owners.get(tree.frame.id)
-    if (previousOwner && previousOwner.send !== owner.send) {
+    if (previousOwner && previousOwner.sendCommand !== owner.sendCommand) {
       unavailable.add(tree.frame.id)
       missingFrames.push({ frameId: tree.frame.id, reason: 'More than one CDP session claims this document. Take a new snapshot().' })
     } else {
       owners.set(tree.frame.id, owner)
-      roots.push({ frameId: tree.frame.id, send: owner.send })
+      roots.push({ frameId: tree.frame.id, sendCommand: owner.sendCommand })
     }
     const pending = [{ tree, parentId: tree.frame.parentId }]
     while (pending.length) {
@@ -78,7 +78,7 @@ export async function discoverBrowserFrameDocuments(
   try {
     const tree = await readTree(main)
     mainFrameId = tree.frame.id
-    addTree(tree, { send: main })
+    addTree(tree, { sendCommand: main })
   } catch (error) {
     missingFrames.push({ frameId: '(document discovery)', reason: `Embedded document discovery is unavailable (${errorText(error)}). The main accessibility tree can still be read, but embedded coverage is unknown. Retry snapshot().` })
   }
@@ -88,19 +88,19 @@ export async function discoverBrowserFrameDocuments(
       missingFrames.push({ frameId: '(attached document discovery)', reason: `The ${MAX_BROWSER_FRAME_DOCUMENTS}-session discovery budget was reached. Further attached documents were not observed; retry a smaller page.` })
       break
     }
-    try { addTree(await readTree(send), { send, sessionId }) }
+    try { addTree(await readTree(send), { sendCommand: send, sessionId }) }
     catch (error) {
       // The session is known, its frame ID is not. Do not advertise the session as a document ID.
       missingFrames.push({ frameId: '(attached document discovery)', reason: `The document behind CDP session ${sessionId} could not be identified (${errorText(error)}). Retry snapshot().` })
     }
   }
   const documents: BrowserFrameDocument[] = []
-  if (!mainFrameId) documents.push({ frameId: null, loaderId: null, depth: 0, send: main })
+  if (!mainFrameId) documents.push({ frameId: null, loaderId: null, depth: 0, sendCommand: main })
   for (const frame of facts.values()) {
     if (unavailable.has(frame.id)) continue
     const ancestors = new Set<string>()
     let cursor: Frame | undefined = frame
-    let owner: { send: BrowserCdpSender; sessionId?: string } | undefined
+    let owner: { sendCommand: BrowserCdpSender; sessionId?: string } | undefined
     let depth = 0
     while (cursor && !ancestors.has(cursor.id)) {
       if (unavailable.has(cursor.id)) { cursor = undefined; break }
@@ -131,7 +131,7 @@ export async function changedBrowserFrameDocuments(
   const failedRoots = new Map<BrowserCdpSender, string>()
   for (const root of discovery.roots) {
     try {
-      const tree = await readTree(root.send)
+      const tree = await readTree(root.sendCommand)
       const pending = [tree]
       let read = 0
       while (pending.length && read++ < MAX_BROWSER_FRAME_DOCUMENTS) {
@@ -139,13 +139,13 @@ export async function changedBrowserFrameDocuments(
         current.set(node.frame.id, node.frame)
         pending.push(...[...node.childFrames ?? []].reverse())
       }
-    } catch (error) { failedRoots.set(root.send, errorText(error)) }
+    } catch (error) { failedRoots.set(root.sendCommand, errorText(error)) }
   }
   const changed = new Map<string, string>()
   for (const document of discovery.documents) {
     if (document.frameId === null) continue
     const frame = current.get(document.frameId)
-    const failure = failedRoots.get(document.send)
+    const failure = failedRoots.get(document.sendCommand)
     if (failure) changed.set(document.frameId, `Document currency could not be checked (${failure}). Retry snapshot().`)
     else if (!frame || document.loaderId === null || frame.loaderId !== document.loaderId) {
       changed.set(document.frameId, 'The document disappeared, changed, or has no known loader identity during observation. Take a new snapshot().')
