@@ -346,7 +346,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 - Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
 - Session 顶层 Tabbar 是最上方的工作面平面：单 Pane 时与窗口顶行合并为 36px；分屏时由左上方首个 Pane 的 Tabbar 承载一次必要的窗口 chrome，其余 Pane 直接从同一顶边开始使用 31px Tabbar，不再给没有 Tab 的全局 chrome 行预留 36px。
 - Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
-- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches`、`Agents` 或 `Browser Tools` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 与 Browser Tools 使用可读 `+` 和各自的可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。正文不重复栏头创建动作，也不以装饰图标、眉题、大标题与介绍占用一整块：Browser Tools 直接呈现已有 Browser bar、Profile 与 annotation 内容，保留忙碌与错误告知。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。创建作用域与失败恢复合同引用 interaction《顶部与项目栏》。
+- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches`、`Agents` 或 `Browser Tools` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 与 Browser Tools 使用可读 `+` 和各自的可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。正文不重复栏头创建动作，也不以装饰图标、眉题、大标题与介绍占用一整块：Browser Tools 让人一眼可开网页，配置、Profiles 与 annotations 以平坦紧凑的 section/list 呈现、设置按需展开，少用线框与层层卡片；删除 Main-owned、Universal Pane 等对用户无决策价值的 Runtime 实现文案，保留忙碌与错误告知。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。创建作用域与失败恢复合同引用 interaction《顶部与项目栏》。
 - Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
 - Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)。
 - 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park；跨 Workspace 隐藏的 Workbench 仍保持 warm，避免项目切换制造二次 replay。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。
@@ -767,7 +767,7 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 ### Browser RSI 操作表面
 
-- Browser 操作条是一个低高度的状态 rail：头像、Agent 名称、动作短名、目标 ref 和阶段组成一行；脚本正文、参数和完整结果进入展开面板，不把工具调用堆在页面上。
+- Browser 操作状态与详情的控件语言统一见《Browser 任务工具与证据的紧凑呈现》，本节不另定义常驻状态条。
 - 操作条上的 Agent 身份取自那个 Session 的真实事实（它自己的名字与 Provider），不得由 Session id 拼出一个名字。解析不到时显示 id 本身并让 Provider 图标缺席：一个显示 id 的操作条会让人去查这是谁，一个显示「Agent 7f3a9c2e」的操作条会让人以为那就是它的名字。
 - Agent 接管和交还使用同一条身份语言：驱动时显示头像与“正在操作”，人接管后变成安静的确认态并保留最后一步；不靠颜色或呼吸动画表达唯一事实。
 - 当前操作位置使用语义目标标记（ref、role、可访问名或页面内目标框），不显示猜测的鼠标坐标。标记不能遮挡页面，也不能阻止用户点击交还。
@@ -783,10 +783,12 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 - 页面仍是主内容，沿既有一侧 trace 展示步骤，状态融入已有 Browser 控件。普通工具行只显示动作、目标、状态和最相关结果；时间、文件、字段数与预算使用次级文字，失败和不确定结果能一眼定位。脚本、证据、完整结果与恢复经过按需展开，不常驻堆截图、JSON、技术 ID 或空面板。
 - 用户再次反馈「异步脚手架 UI 太多太大」「AI 正在操作用了土工具栏」，要求非常简要的符号或精妙方式。AI 操作不独立占一条工具栏：以融合现有 Browser 控件的符号、操作者头像或克制微动效表达；详情和停止在 hover、focus 或当前操作 popover 可达，不为每种异步阶段叠 banner。running、waiting、human、failed 在正常与窄窗口中仍须可辨，并尊重减少动态效果偏好。参考成熟产品的就地状态与渐进披露，独立真实看图判定是否简洁。
-- 小浮层沿现有浮层语言就地呈现，不把 Browser 换成静态预览或空白；hover tooltip 与 popover 两种形态均保留页面可见性与可操作区域。原生层级与相关 Browser 更新范围只归交互 SSOT 的本节，不另增浮层状态投影或常驻提示。
+- 小浮层沿现有浮层语言就地呈现，不把 Browser 换成静态预览或空白；hover tooltip 与 popover 两种形态均保留页面可见性与可操作区域。原生层级、真实 compositor frame 与相关 Browser 更新范围只归交互 SSOT 的本节；视觉证据注明原 Renderer、原生页面与 OS 整窗各自的捕获边界，不拼图冒充整窗，不另增浮层状态投影或常驻提示。
 - 复用现有 Graphite / Mint、字号、间距、状态 glyph 与 icon-button 命中区。分组靠对齐、轻表面差异和少量段距，少用嵌套卡片、每步框线、重复标题和装饰阴影；trace 脊线只表达步骤时序，不兼作选中信号。当前步骤、选中项、hover 与键盘焦点分别可辨，不靠颜色或单侧细线承担唯一状态。
-- 参数化资产的主对象是有名字的步骤与参数。录制、预览、编辑、运行、停止和当前待确认动作各有就地可发现入口；版本、来源与验收状态紧邻当前资产，详情再展开。秘密值显示需要重新输入的状态，不能用占位字符暗示已保存可回放。
-- 下载/上传用紧凑产物行表达文件名、传输状态和可执行动作；结构化输出优先可读字段，原始 JSON 按需展开。大结果显示准确范围、裁剪和继续读取入口；恢复结果、证据不可用和成果未确认沿同一服务窗呈现，不新增全局遮罩或重复警报。
+- 工具栏随当前 Pane 的真实可用宽度收拢，常用动作保留紧凑入口，次要动作进入 More；More 与 Close split 各有完整且互不交叠的命中区，不靠挤窄地址、画第二条工具栏或隐藏关闭动作解决。工具显示偏好不能关闭窄 Pane 所需的 overflow 入口，具体工具的启用偏好仍保持。行为与工作面保留只引用交互 SSOT《Browser 任务能力与可复用资产》。
+- 参数化资产的主对象是有名字的步骤与参数。录制、预览、编辑、运行、停止和当前待确认动作各有就地可发现入口；版本、来源与验收状态紧邻当前资产，详情再展开。原始演示草稿与导入后的编辑步骤按需切换或展开，不同时铺开两份重复列表；当前检查点沿已有控件就近表达，行为与状态真源引用交互 SSOT 的人工检查点合同。秘密值显示需要重新输入的状态，不能用占位字符暗示已保存可回放。
+- 下载/上传用紧凑产物行表达文件名、传输状态和可执行动作；结构化输出优先可读字段，原始 JSON 按需展开。大结果显示准确范围、裁剪和继续读取入口；嵌入文档的观察范围与缺失事实只引用交互 SSOT《Browser 任务能力与可复用资产》的局部观察合同；恢复结果、证据不可用和成果未确认沿同一服务窗呈现，不新增全局遮罩或重复警报。
+- 长值预览默认显示短摘要，并可明确展开保留的完整预览；展开原 JSON 保持有限高度，分页动作和键盘焦点可达，不让长值或原始内容把字段状态与任务主次撑走。完整值与准确字节范围仍按上述结果入口读取，不以摘要冒充完整结果。
 - 正常与窄分屏、短窗口、长文件名/参数/错误和键盘操作都保持可读内容与完整命中区。展开详情不盖住原生页面或误改 Terminal 尺寸；异步结果不能抢焦点。设计验收看实际挂载的 Browser/对话工具入口，非空真实步骤、失败、待确认和成果均可达；不能只用 gallery 或来源扫描替代真实工作流。
 
 ### Browser 控制权提示
@@ -990,7 +992,7 @@ Board 的可见文案、DOM 选择器和实现名称统一使用 Demand。`deman
 
 - Project 树的 idle、running/working、error 统一为同一宽度的“小图标 + 数字”状态槽；只换 glyph 和语义色，不换控件结构。完整状态名称进入 tooltip/无障碍名称，避免长文案破坏树的列对齐。停止/退出态使用中性颜色，error 只使用于明确故障事实。
 - working 与 idle 的计数口径归交互合同「活着和正在产出分开说」，本层只定义它们的视觉层级。
-- Browser 页面优先于控制提示。控制条是紧凑的 page-adjacent rail，只有 active operation、接管或交还时占用一行；空闲 Browser 不画大卡片或 `Browser ready / You have control` 占位文案，也不遮挡原生页面。
+- Browser 页面优先于控制提示；操作、接管与交还的状态密度统一见《Browser 任务工具与证据的紧凑呈现》，不另规定占用一行的控制条。
 - Space 的 Topics 分类与成员沿《Project Rail 与 Topic 行密度》共用当前导航节奏，不再显示另一个 Scratch 父行或伪造 Folder 层级。标题允许省略但操作和选中态完整；hover 与完整行选中 Surface 可辨。Topic 行的打开状态、更新时间或 Agent presence 用低对比度辅助信息表达，新增和空列表用明确但紧凑的引导；原 Topics 总览保持独立的已 polish 密度。
 
 ### Executor identity 的统一密度
