@@ -55,16 +55,21 @@ async function browse(input: HTMLInputElement, trigger: HTMLElement, items: HTML
   }
   await pointer(menu()!, 'pointerout', input)
   focused(input, value, caret)
+  await pause()
+  expect(menu()).toBeNull()
+  focused(input, value, caret)
+  // FocusScope releases its close callback in the following task. Complete that original
+  // lifecycle before opening an independent second path; neither close timer can mask it.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  await pointer(input, 'pointerout', trigger)
   await pointer(trigger, 'pointerover', input)
   expect(menu()).not.toBeNull()
   const direct = document.querySelector<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')!
   expect(direct).toBeTruthy()
+  await pointer(trigger, 'pointerout', direct)
   await pointer(direct, 'pointerover', trigger)
   await pointer(direct, 'pointermove')
   await pointer(direct, 'pointerout', input)
-  focused(input, value, caret)
-  await pause()
-  expect(menu()).toBeNull()
   focused(input, value, caret)
   await pause()
   expect(menu()).toBeNull()
