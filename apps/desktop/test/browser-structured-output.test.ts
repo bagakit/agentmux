@@ -281,6 +281,51 @@ describe('finite schema and observed source extraction', () => {
     expect(f.documents).toEqual([])
   })
 
+  it('awaits actual rooted current validation after registration, including same-nav disconnection during the store await', async () => {
+    document.body.innerHTML = '<main id="region"><span class="name">captured frame</span></main>'
+    const root = document.querySelector('#region')!
+    const input = { within: '#region', fields: [field('name', '.name')] }
+    const f = await fixture(input, root)
+    f.context.isCurrent = async () => root.isConnected
+    const register = f.context.register
+    f.context.register = async (document, source) => {
+      const artifact = await register(document, source)
+      root.remove()
+      await Promise.resolve()
+      return artifact
+    }
+    const receipt = await extractBrowserStructuredOutput(input, f.context)
+    expect(receipt).toMatchObject({ status: 'page-changed', artifactStatus: 'not-recorded', fields: [{ status: 'page-changed' }] })
+    expect(receipt.artifact).toBeUndefined()
+    expect(receipt.source.navigationId).toBe('navigation-at-observation')
+    expect(f.documents).toHaveLength(1)
+    expect(f.documents[0]?.fields[0]).toMatchObject({ status: 'observed', value: 'captured frame' })
+  })
+
+  it('unverified async current checks are unavailable, rather than guessed page changes or complete fields', async () => {
+    document.body.innerHTML = '<span class="name">healthy page</span>'
+    const input = request(field('name', '.name'))
+    const outcomes = []
+    for (const failAt of [1, 2, 3]) {
+      const f = await fixture(input)
+      let checks = 0
+      f.context.isCurrent = async () => {
+        checks += 1
+        if (checks === failAt) throw new Error('Current isolated document could not be verified')
+        return true
+      }
+      const receipt = await extractBrowserStructuredOutput(input, f.context)
+      expect(receipt).toMatchObject({ status: 'unavailable', artifactStatus: 'not-recorded', fields: [{ status: 'unavailable' }] })
+      expect(receipt.warning).toContain('could not be verified')
+      expect(receipt.artifact).toBeUndefined()
+      expect(f.reads()).toBe(failAt === 1 ? 0 : 1)
+      expect(f.documents).toHaveLength(failAt === 3 ? 1 : 0)
+      outcomes.push(receipt.status)
+    }
+    expect(outcomes).toEqual(['unavailable', 'unavailable', 'unavailable'])
+    expect(document.querySelector('.name')?.isConnected).toBe(true)
+  })
+
   it('a scope mismatch or unverified CDP result fails honestly, and failed CDP work remains unknown', async () => {
     const input = request(field('name', '.name'))
     const wrong = await fixture(input); wrong.context.source.scope = { kind: 'subtree', within: '#another' }

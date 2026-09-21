@@ -219,7 +219,7 @@ export type BrowserStructuredOutputContext = {
   /** Existing authorized rooted target and frame sender; CDP exceptions must throw. */
   read(declaration: string, request: BrowserStructuredOutputRequest): Promise<unknown>
   /** Actual current entry/view/navigation and resolved document, checked before and after work. */
-  isCurrent(): boolean
+  isCurrent(): boolean | Promise<boolean>
   /** The sole T003 Owner imports this exact document and returns its bound reference. */
   register(document: BrowserStructuredDocument, source: BrowserStructuredSource): Promise<BrowserResultArtifactReference>
 }
@@ -233,21 +233,32 @@ export async function extractBrowserStructuredOutput(input: unknown, context: Br
     kind: 'browser-structured-output', status, source, work, artifactStatus: 'not-recorded', warning,
     fields: request.fields.map(field => ({ ...field, status, inline: false, detail: warning }))
   })
+  let currentWarning: string | null = null
+  const awaitCurrent = async () => {
+    try { return await context.isCurrent() }
+    catch (error) {
+      currentWarning = `Current Browser document could not be verified: ${String(error instanceof Error ? error.message : error).slice(0, 512)}`
+      return false
+    }
+  }
+  const failedCurrent = (warning: string, work: BrowserStructuredWork | null = null) => currentWarning
+    ? failed('unavailable', currentWarning, work) : failed('page-changed', warning, work)
   if (owner.scope.kind !== (request.within || request.withinRef ? 'subtree' : 'page') ||
     owner.scope.within !== request.within || owner.scope.withinRef !== request.withinRef) {
     return failed('unavailable', 'The resolved document scope does not match the requested scope; no fields were read.')
   }
-  if (!context.isCurrent()) return failed('page-changed', 'The Browser document changed before extraction; no fields were read.')
+  if (!(await awaitCurrent())) return failedCurrent('The Browser document changed before extraction; no fields were read.')
   let read: DomRead
   try {
     read = domReadSchema.parse(await context.read(buildBrowserStructuredReadDeclaration(), request))
     if (read.fields.length !== request.fields.length || read.fields.some((field, index) => field.key !== request.fields[index]!.key)) throw new Error('DOM field identities do not match the requested schema.')
   } catch (error) {
-    if (!context.isCurrent()) return failed('page-changed', 'The Browser document changed before the DOM read could be verified.')
+    if (!(await awaitCurrent())) return failedCurrent('The Browser document changed before the DOM read could be verified.')
     return failed('unavailable', `Structured DOM read is unavailable: ${String(error instanceof Error ? error.message : error).slice(0, 512)}`)
   }
   source = { ...owner, documentUrl: read.documentUrl }
-  if (!read.current || !context.isCurrent()) return failed('page-changed', 'The Browser document changed during extraction; old fields were not registered as current.', read.work)
+  if (!read.current) return failed('page-changed', 'The rooted Browser document changed during extraction; old fields were not registered as current.', read.work)
+  if (!(await awaitCurrent())) return failedCurrent('The Browser document changed during extraction; old fields were not registered as current.', read.work)
   const fields = request.fields.map((field, index) => typedField(field, read.fields[index]!))
   const document: BrowserStructuredDocument = { schema: 'browser-structured-output.v1', request, source, fields, work: read.work }
   const receipt: BrowserStructuredOutputReceipt = { kind: 'browser-structured-output',
@@ -261,10 +272,10 @@ export async function extractBrowserStructuredOutput(input: unknown, context: Br
       artifact.byteLength !== Buffer.byteLength(JSON.stringify(document)) || artifact.maxReadBytes !== BROWSER_RESULT_MAX_READ_BYTES) {
       throw new Error('The registered artifact does not match the captured source or document bytes.')
     }
-    if (!context.isCurrent()) return failed('page-changed', 'The Browser document changed while saving; the captured artifact is not presented as current.', read.work)
+    if (!(await awaitCurrent())) return failedCurrent('The Browser document changed while saving; the captured artifact is not presented as current.', read.work)
     return { ...receipt, artifactStatus: 'available', artifact }
   } catch (error) {
-    if (!context.isCurrent()) return failed('page-changed', 'The Browser document changed before the artifact could be verified.', read.work)
+    if (!(await awaitCurrent())) return failedCurrent('The Browser document changed before the artifact could be verified.', read.work)
     return { ...receipt, status: 'partial', warning: `Observed fields remain available, but their result artifact could not be registered: ${String(error instanceof Error ? error.message : error).slice(0, 512)}` }
   }
 }
