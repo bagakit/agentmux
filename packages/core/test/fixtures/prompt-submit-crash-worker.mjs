@@ -117,6 +117,7 @@ await client.submitAgentPrompt({
   ...promptCondition,
   agentSessionId: session.agentSessionId,
   operationId: submissionId,
-  prompt: 'crash-between-phases'
+  prompt: 'crash-between-phases',
+  allowUncertainTurn: true
 })
 throw new Error('Prompt submission unexpectedly survived the crash checkpoint')
