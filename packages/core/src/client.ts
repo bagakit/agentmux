@@ -3188,11 +3188,12 @@ export class AgentMuxClient {
     lifecycleOperationId: string,
     capability: string
   ): Record<string, string> {
-    // usage 能力是 catalog 的 SSOT——在这里从 catalog 读出该 Provider 的 transcript 格式并注入 hook 环境，
-    // 好让轻量的 hook 命令进程不必导入整个 Provider registry 就知道「要不要读 transcript、按什么格式读」。
-    // 未声明 usage 的 Provider 不注入这个变量，hook 进程因此对它们连一次尾部读都不做。
-    const usage = this.providers.get(providerId).catalog.capabilities.usage
-    return {
+    const provider = this.providers.get(providerId)
+    // usage 与 eventNameSource 均从 catalog/hook 声明注入轻量元数据，不让子进程导入注册表。
+    // launch/resume 贡献当前声明，并在 flag/generated-code/source absent 时清除继承的旧 payload 声明。
+    const usage = provider.catalog.capabilities.usage
+    const source = provider.hook.eventNameSource
+    const resolved: Record<string, string> = {
       ...terminalEnvironment({ ...environment, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
       AGENTMUX_HOOK_URL: binding.endpoint.url,
       AGENTMUX_HOOK_TOKEN: binding.endpoint.token,
@@ -3203,8 +3204,18 @@ export class AgentMuxClient {
       // 这枚凭证是这个 Agent 说话时的身份证明。Core 只留它的 hash；公开的
       // AGENTMUX_AGENT_SESSION_ID 只是上下文提示，改一下就能冒充，故不能用于认证。
       AGENTMUX_AGENT_CAPABILITY: capability,
-      ...(usage ? { AGENTMUX_USAGE_TRANSCRIPT_FORMAT: usage.transcriptFormat } : {})
+      ...(usage ? { AGENTMUX_USAGE_TRANSCRIPT_FORMAT: usage.transcriptFormat } : {}),
+      ...(source?.kind === 'payload' ? { AGENTMUX_HOOK_PAYLOAD_KEY: source.payloadKey } : {})
     }
+    if (source?.kind !== 'payload') {
+      delete resolved.AGENTMUX_HOOK_PAYLOAD_KEY
+    }
+    if (source?.kind === 'flag') {
+      resolved.AGENTMUX_HOOK_EVENT_NAME_SOURCE = 'flag'
+    } else {
+      delete resolved.AGENTMUX_HOOK_EVENT_NAME_SOURCE
+    }
+    return resolved
   }
 
   /**
