@@ -1185,20 +1185,25 @@ export class BrowserViewManager {
       void this.releaseDemonstrationCapture(entry)
       const session = BrowserCdpSession.attach(contents)
       const contexts = new Set<number>()
+      let mainFrameId: string | undefined
       const unsubscribe = session.observe((method, params) => {
-        const created = (params as { context?: { id?: number } }).context?.id
-        if (method === 'Runtime.executionContextCreated' && typeof created === 'number' && contexts.size < 64) contexts.add(created)
+        const context = (params as { context?: { id?: number; auxData?: { isDefault?: boolean; type?: string; frameId?: string } } }).context
+        if (method === 'Runtime.executionContextCreated' && typeof context?.id === 'number' && contexts.size < 64 && mainFrameId !== undefined &&
+            context.auxData?.isDefault === false && context.auxData.type === 'isolated' && context.auxData.frameId === mainFrameId) contexts.add(context.id)
         if (method === 'Runtime.executionContextsCleared') contexts.clear()
         if (method === 'Runtime.executionContextDestroyed') contexts.delete((params as { executionContextId: number }).executionContextId)
       })
       try {
+        const tree = await session.sendCommand('Page.getFrameTree') as { frameTree?: { frame?: { id?: string } } }
+        mainFrameId = tree.frameTree?.frame?.id
+        if (!mainFrameId) throw new Error('The main Browser document could not be verified. The task draft was retained.')
         await session.sendCommand('Runtime.enable')
-        const selected = await this.selectElement(id, async revision => {
+        const selected = await this.selectElement(id, async (revision, inspectionToken) => {
           for (const contextId of contexts) {
             if (!live() || entry.selectionOperation !== revision) throw new Error('The selected Browser target changed.')
             let result: { result?: { objectId?: string }; exceptionDetails?: unknown }
             try {
-              result = await session.sendCommand('Runtime.evaluate', { contextId, expression: buildSelectedBrowserElementExpression(revision), returnByValue: false }) as typeof result
+              result = await session.sendCommand('Runtime.evaluate', { contextId, expression: buildSelectedBrowserElementExpression(revision, inspectionToken), returnByValue: false }) as typeof result
             } catch { continue }
             if (result.exceptionDetails || !result.result?.objectId) continue
             target = await verifyBrowserSemanticTarget({ sendCommand: session.sendCommand, objectId: result.result.objectId,
@@ -1516,7 +1521,7 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
-  async selectElement(id: string, inspectTarget?: (revision: number) => Promise<void>): Promise<BrowserElementSelection | null> {
+  async selectElement(id: string, inspectTarget?: (revision: number, inspectionToken: string) => Promise<void>): Promise<BrowserElementSelection | null> {
     const entry = this.require(id)
     const view = entry.view
     const navigationId = entry.navigationId
@@ -1536,13 +1541,14 @@ export class BrowserViewManager {
       return null
     }
     const operation = ++entry.selectionRevision
+    const inspectionToken = randomUUID()
     entry.selectionOperation = operation
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
       const raw = await Promise.race([
         view.webContents.executeJavaScriptInIsolatedWorld(
           BROWSER_SELECTION_WORLD_ID,
-          [{ code: buildBrowserElementSelectionScript(operation, Boolean(inspectTarget)) }],
+          [{ code: buildBrowserElementSelectionScript(operation, inspectTarget ? inspectionToken : undefined) }],
           true
         ),
         new Promise<never>((_resolve, reject) => {
@@ -1559,7 +1565,7 @@ export class BrowserViewManager {
       ) {
         throw new Error('Browser page changed while an element was being selected')
       }
-      if (inspectTarget) await inspectTarget(operation)
+      if (inspectTarget) await inspectTarget(operation, inspectionToken)
       return {
         browserId: id,
         navigationId,

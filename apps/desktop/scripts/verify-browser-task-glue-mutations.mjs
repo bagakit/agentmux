@@ -36,12 +36,18 @@ const cases = [
   ['task-raw-error-stack-persisted', manager, "privateTaskParameters && 'message' in failureOutcome", "false && 'message' in failureOutcome", managerTest],
   ['private-page-evidence-persisted', manager, "content.kind === 'page' && privateTaskParameters", "content.kind === 'page' && false", managerTest],
   ['private-ref-ledger-persisted', manager, 'if (privateTaskParameters) return', 'if (false) return', managerTest],
-  ['selection-target-not-inspected', manager, 'if (inspectTarget) await inspectTarget(operation)', 'void inspectTarget', managerTest],
+  ['selection-target-not-inspected', manager, 'if (inspectTarget) await inspectTarget(operation, inspectionToken)', 'void inspectTarget', managerTest],
+  ['selection-default-world-candidate-accepted', manager, "context.auxData?.isDefault === false && context.auxData.type === 'isolated'", "(context.auxData?.isDefault === true || context.auxData?.isDefault === false && context.auxData.type === 'isolated')", managerTest],
+  ['selection-worker-world-candidate-accepted', manager, "context.auxData.type === 'isolated'", 'true', managerTest],
+  ['selection-foreign-frame-candidate-accepted', manager, 'context.auxData.frameId === mainFrameId', 'true', managerTest],
+  ['selection-inspection-token-not-transferred', manager, 'buildSelectedBrowserElementExpression(revision, inspectionToken)', "buildSelectedBrowserElementExpression(revision, 'wrong-inspection')", managerTest],
+  ['selection-inspection-token-reused', manager, 'const inspectionToken = randomUUID()', "const inspectionToken = 'd5868e9f-b372-4f2d-8c45-df0b46dd76e1'", managerTest],
   ['synthetic-task-actions-accepted', pane, "async function taskAction(event: MouseEvent<HTMLButtonElement>, action: () => Promise<unknown>): Promise<void> {\n    if (event.nativeEvent.isTrusted !== true) return", "async function taskAction(event: MouseEvent<HTMLButtonElement>, action: () => Promise<unknown>): Promise<void> {\n    if (false) return", paneTest],
   ['renderer-task-asset-disconnected', pane, 'asset={taskAsset}', 'asset={null}', paneTest],
   ['untrusted-ipc-can-run-task', 'apps/desktop/src/main/ipc.ts', "    requireTrustedSender('browser:runTaskAsset', event)", '    void event', trustTest],
   ['selection-does-not-retain-actual-node', selection, 'if (retainTarget) state.selectedTarget = selected', 'if (false) state.selectedTarget = selected', selectionTest],
-  ['selection-revision-proof-removed', selection, 'state?.revision === ${revision} && state.selectedTarget instanceof Element', 'state.selectedTarget instanceof Element', selectionTest],
+  ['selection-revision-proof-removed', selection, 'state.revision === ${revision} && state.selectedTarget instanceof Element', 'state.selectedTarget instanceof Element', selectionTest],
+  ['selection-inspection-token-proof-removed', selection, 'state?.inspectionToken === ${JSON.stringify(inspectionToken)} && state.revision', 'state.revision', managerTest],
   ['selection-retained-node-not-released', selection, 'state.selectedTarget = null; if (settled)', 'if (settled)', selectionTest]
 ]
 const tests = [managerTest, paneTest, trustTest, selectionTest, assetsTest]
