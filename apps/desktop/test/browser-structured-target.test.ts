@@ -8,7 +8,7 @@ function fixture() {
   let exception: unknown
   let describedFrame: string | undefined = 'child-document'
   const send: BrowserCdpSender = async (method, params) => {
-    calls.push({ method, params })
+    calls.push({ method, ...(params ? { params } : {}) })
     if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document' } } }
     if (method === 'Page.createIsolatedWorld') return { executionContextId: params?.frameId === 'main-document' ? 11 : 22 }
     if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params?.executionContextId}` } }
