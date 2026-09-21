@@ -46,6 +46,7 @@ import type { BrowserStructuredOutputReceipt } from '../shared/browser-structure
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
+import type { BrowserDownloads } from './browser-downloads.js'
 import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from '../shared/browser-task-assets.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
@@ -307,7 +308,8 @@ export class BrowserViewManager {
     private readonly stepEvidence?: BrowserStepEvidenceStore,
     private readonly resultArtifacts?: BrowserResultArtifactStore,
     private readonly demonstrations?: BrowserDemonstrationRecorder,
-    private readonly taskAssets?: BrowserTaskAssets
+    private readonly taskAssets?: BrowserTaskAssets,
+    private readonly downloads?: BrowserDownloads
   ) {
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
       if (!this.entries.has(browserId)) return
@@ -787,7 +789,7 @@ export class BrowserViewManager {
         navigationId: resultNavigationId
       }
       const run = await runBrowserScript({ code, signal: stopController.signal,
-        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters),
+        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters, stopController.signal),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
           await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
       })
@@ -1330,7 +1332,8 @@ export class BrowserViewManager {
     notes: string[],
     takeover: BrowserTakeover,
     operation: BrowserOperation,
-    privateTaskParameters = false
+    privateTaskParameters = false,
+    signal?: AbortSignal
   ): (name: string, args: unknown[]) => Promise<unknown> {
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
@@ -1345,6 +1348,11 @@ export class BrowserViewManager {
     }
     const dispatch = createBrowserPageDispatch({
       session,
+      ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
+        const view = requireLive()
+        return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
+          navigationId: entry.navigationId, url: view.webContents.getURL(), contents: view.webContents }
+      } } } : {}),
       structuredOutput: {
         source: () => { requireLive(); if (entry.view !== observingView) throw new Error('The Browser view changed before structured observation.'); return { workspaceId: entry.workspaceId, browserId: entry.id,
           operationId: operation.id, navigationId: entry.navigationId } },

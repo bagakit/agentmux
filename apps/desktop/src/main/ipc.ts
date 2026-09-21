@@ -97,6 +97,7 @@ import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
 import type { BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
 import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder, BROWSER_DEMONSTRATION_FILE } from './browser-demonstration-recorder.js'
+import { BrowserDownloads } from './browser-downloads.js'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore, BROWSER_TASK_ASSETS_FILE } from './browser-task-assets.js'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets.js'
 import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
@@ -221,7 +222,8 @@ export async function registerIpc(args: {
     openExternal: (target) => shell.openExternal(target)
   }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')),
   new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')), browserDemonstrations,
-  new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE))))
+  new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE))),
+  new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)))
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
