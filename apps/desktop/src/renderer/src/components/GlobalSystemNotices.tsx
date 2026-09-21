@@ -21,6 +21,8 @@ export function GlobalSystemNotices() {
   const sending = useAppStore((state) => state.agentSteerInFlight)
   const lifecycleFailure = useAppStore(state => state.errorNoticeContext?.lifecycle)
   const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
+  const workbenchSaveWarning = useAppStore(state => state.workbenchSaveWarning)
+  const retryWorkbenchSave = useAppStore(state => state.retryWorkbenchSave)
   const id = useId()
   const [open, setOpen] = useState(false)
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
@@ -56,7 +58,15 @@ export function GlobalSystemNotices() {
     notice: agentLifecycleFailureNotice(lifecycleFailure, lifecycleMessage)
   })
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
-  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox]
+  const storage: ServiceNoticeItem[] = workbenchSaveWarning ? [{ id: 'workbench-save', notice: {
+    kind: 'indeterminate', notice: {
+      step: 'Saving the workbench is unconfirmed',
+      mode: 'Your current layout and drafts remain visible. Agent input was not disabled by this save request.',
+      restore: `${workbenchSaveWarning} Restore storage access, then retry saving before quitting or updating.`
+    }
+  }, action: { label: 'Retry saving', run: () => { void retryWorkbenchSave() } } }] : []
+  const storageInbox = useServiceNotices('global:workbench-save', storage, true)
+  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
@@ -71,7 +81,7 @@ export function GlobalSystemNotices() {
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox])
+  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox])
   return <div className="global-system-notices">
     <button type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
@@ -91,7 +101,11 @@ export function GlobalSystemNotices() {
       </div>
       {inboxes.map((inbox, index) => <div key={index}>
         {inbox.notices.map((item) => <div key={item.id} className="global-system-notices__item">
-          <ServiceWindowNotice notice={item.notice} />
+          <ServiceWindowNotice notice={item.notice} {...(inbox === storageInbox ? { summary: {
+            step: 'Saving the workbench is unconfirmed',
+            mode: 'Your window was kept. Agent input was not disabled by this save request.',
+            restore: 'Restore storage access, then retry saving before quitting or updating.'
+          } } : {})} />
           {item.action ? <button type="button" className="small-button global-system-notices__action" onClick={item.action.run}
             popoverTarget={id} popoverTargetAction="hide">{item.action.label}</button> : null}
         </div>)}

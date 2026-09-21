@@ -17,17 +17,17 @@ export async function observeWorkbenchStorageAuthority(
   if (resolve(directory) !== resolve(configured.sessionData)) {
     return { ...base, localStorage: 'unconfirmed', detail: 'The current Chromium storage owner and configured workbench root do not match.' }
   }
-  // Inspect the category directory, not a particular LevelDB generation or log file. Missing and
+  // Inspect Chromium's database directory, not a particular LevelDB generation or log file. Missing and
   // unreadable storage are local qualification gaps, never Agent death or proven database corruption.
   try {
-    const metadata = await stat(join(directory, 'Local Storage'))
+    const metadata = await stat(join(directory, 'Local Storage', 'leveldb'))
     return metadata.isDirectory()
       ? { ...base, localStorage: 'present', detail: null }
       : { ...base, localStorage: 'unconfirmed', detail: 'The local storage directory could not be confirmed.' }
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? { ...base, localStorage: 'missing', detail: 'The current Chromium local storage directory is absent.' }
-      : { ...base, localStorage: 'unconfirmed', detail: 'The current Chromium local storage directory could not be read.' }
+      ? { ...base, localStorage: 'missing', detail: 'The current Chromium local storage database directory is absent.' }
+      : { ...base, localStorage: 'unconfirmed', detail: 'The current Chromium local storage database directory could not be read.' }
   }
 }
 
