@@ -3,6 +3,16 @@ import { describe, expect, it } from 'vitest'
 import { clearsSemanticHues } from '../src/renderer/src/lib/conversation-avatar-color.js'
 import { allStyles, styleFiles } from './helpers/styles.js'
 
+/** The single ordered surface manifest lives in the design SSOT; do not copy another list into tests. */
+function documentedStyleFiles(): string[] {
+  const manifest = readFileSync(new URL('../../../docs/design/agentmux-surface-density.md', import.meta.url), 'utf8')
+  const block = manifest.match(/```\nstyles\/\n([\s\S]*?)```/)
+  expect(block, '文档里那段 `styles/` 清单不见了——它要么被删了，要么换了形状，这条守卫要跟着改').toBeDefined()
+  const files = [...block![1]!.matchAll(/^\s{2}([\w-]+\.css)/gm)].map((match) => match[1]!)
+  expect(files.length, '自证：清单里一个文件名都没抓到，正则与文档的形状对不上了').toBeGreaterThan(5)
+  return files
+}
+
 /**
  * 样式表按表面分文件。
  *
@@ -13,41 +23,8 @@ import { allStyles, styleFiles } from './helpers/styles.js'
 describe('样式表的组织', () => {
   it('每个表面一个文件，入口按顺序 @import——层叠顺序即文件顺序', () => {
     const files = styleFiles().map((file) => file.name)
-    expect(files).toEqual([
-      'tokens.css',
-      'base.css',
-      'chrome.css',
-      'selector.css',
-      'dock.css',
-      'topic-topology.css',
-      'file-explorer.css',
-      'source-control.css',
-      'workbench.css',
-      'terminal.css',
-      'surfaces.css',
-      'board.css',
-      'global-board.css',
-      'focus.css',
-      'pmo-teams-topic.css',
-      'browser.css',
-      'browser-operation-surface.css',
-      'browser-step-evidence.css',
-      'agent.css',
-      'agent-region-header.css',
-      'session-connecting.css',
-      'composer.css',
-      'activity.css',
-      'activity-conversation.css',
-      'conversation-tool-trace.css',
-      'session-history.css',
-      'workflow.css',
-      'conversation-avatar.css',
-      'conversation-axis.css',
-      'overlays.css',
-      'agent-panels.css',
-      'agent-avatar.css',
-      'full-page-loading.css'
-    ])
+    expect(files.length).toBeGreaterThan(1)
+    expect(files).toEqual(documentedStyleFiles().filter(name => name !== 'index.css'))
   })
 
   it('设计文档里的那张清单点名的就是真的这些文件——文档里的清单一样会腐烂', () => {

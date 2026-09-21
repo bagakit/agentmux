@@ -46,6 +46,7 @@ export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcom
 
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
 import type { BrowserStepEvidenceRead } from './browser-step-evidence'
+import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from './browser-result-artifact'
 import type { BrowserDemonstrationState } from './browser-demonstration'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from './browser-task-assets'
 export type { BrowserStepEvidenceRead } from './browser-step-evidence'
@@ -1539,6 +1540,7 @@ export type AgentMuxDesktopApi = {
      */
     getOperation(operationId: string): Promise<BrowserOperation | null>
     getStepEvidence(operationId: string, sequence: number): Promise<BrowserStepEvidenceRead>
+    readStepResult(operationId: string, sequence: number, options?: BrowserResultReadOptions): Promise<BrowserResultArtifactChunk>
     /**
      * 停下一个在飞的操作，凭 operationId，**与哪个 Browser、哪条连接无关**。
      *

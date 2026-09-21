@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { BrowserOperation, BrowserOperationStep } from '../../../shared/browser-operation'
 import type { BrowserStepEvidenceRead } from '../../../shared/browser-step-evidence'
 import { api } from '../lib/api'
+import { BrowserStructuredFields } from './BrowserStructuredFields'
 
 /** Reads saved facts for the selected step; never takes a new snapshot of today's page. */
 export function BrowserStepEvidence({ operation, step }: { operation: BrowserOperation; step: BrowserOperationStep }) {
@@ -51,7 +52,9 @@ export function BrowserStepEvidence({ operation, step }: { operation: BrowserOpe
         <a href={item.content.image.dataUrl} download={`browser-step-${step.sequence}.png`} aria-label="Save recorded screenshot">
           <img src={item.content.image.dataUrl} alt={`Recorded screenshot for step ${step.sequence}`} />
         </a>
-      </> : <><p>{item.content.message}</p><p>{item.content.nextAction}</p></>}
+      </> : item.content.kind === 'structured-output' ? <BrowserStructuredFields receipt={item.content.receipt}
+        readResult={(_reference, options) => api.browser.readStepResult(operation.id, step.sequence, options)} />
+        : <><p>{item.content.message}</p><p>{item.content.nextAction}</p></>}
       <details><summary>Source</summary><dl>
         <dt>Operation</dt><dd>{item.reference.operationId}</dd>
         <dt>Step</dt><dd>{item.reference.sequence}</dd>
@@ -62,6 +65,6 @@ export function BrowserStepEvidence({ operation, step }: { operation: BrowserOpe
   </section>
 }
 
-function label(kind: 'page' | 'screenshot' | 'diagnostic'): string {
-  return kind === 'page' ? 'Page' : kind === 'screenshot' ? 'Screenshot' : 'Diagnostics'
+function label(kind: 'page' | 'screenshot' | 'structured-output' | 'diagnostic'): string {
+  return kind === 'page' ? 'Page' : kind === 'screenshot' ? 'Screenshot' : kind === 'structured-output' ? 'Fields' : 'Diagnostics'
 }

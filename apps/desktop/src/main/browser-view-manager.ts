@@ -41,7 +41,8 @@ import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, 
 import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
 import type { BrowserPageSnapshot } from '../shared/contracts.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
-import type { BrowserResultContext } from '../shared/browser-result-artifact.js'
+import type { BrowserResultContext, BrowserResultReadOptions, BrowserResultArtifactChunk } from '../shared/browser-result-artifact.js'
+import type { BrowserStructuredOutputReceipt } from '../shared/browser-structured-output.js'
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
@@ -1127,6 +1128,26 @@ export class BrowserViewManager {
     return result
   }
 
+  /** Read only the result actually joined to this Main-recorded extraction step. No page is rerun. */
+  async readStepResult(operationId: string, sequence: number, options?: BrowserResultReadOptions): Promise<BrowserResultArtifactChunk> {
+    const operation = await this.getOperation(operationId)
+    const step = operation?.steps.find(item => item.sequence === sequence)
+    if (!operation || step?.method !== 'extractStructured' || !this.resultArtifacts) {
+      throw new Error('This step has no retained structured result.')
+    }
+    const evidence = await this.getStepEvidence(operationId, sequence)
+    const item = evidence.items.find(value => value.content.kind === 'structured-output')
+    if (!item || item.content.kind !== 'structured-output') throw new Error('The recorded structured result is unavailable.')
+    const { source, artifact, artifactStatus } = item.content.receipt
+    const entry = this.require(operation.browserId)
+    if (artifactStatus !== 'available' || !artifact || source.operationId !== operationId ||
+        source.browserId !== operation.browserId || source.workspaceId !== entry.workspaceId ||
+        source.navigationId !== item.reference.navigationId || artifact.operationId !== source.operationId ||
+        artifact.browserId !== source.browserId || artifact.workspaceId !== source.workspaceId ||
+        artifact.navigationId !== source.navigationId) throw new Error('The result does not belong to this recorded extraction.')
+    return await this.resultArtifacts.read(artifact, { workspaceId: entry.workspaceId, browserId: entry.id }, options)
+  }
+
   async getTaskAssets(id: string): Promise<BrowserTaskAssetState> {
     const entry = this.require(id)
     const view = entry.view
@@ -1314,6 +1335,7 @@ export class BrowserViewManager {
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
     let beforeWaiting: { phase: BrowserOperation['phase']; summary: string } | null = null
+    const observingView = entry.view
     const requireLive = (): WebContentsView => {
       const view = entry.view
       if (this.entries.get(entry.id) !== entry || view.webContents.isDestroyed()) {
@@ -1323,6 +1345,12 @@ export class BrowserViewManager {
     }
     const dispatch = createBrowserPageDispatch({
       session,
+      structuredOutput: {
+        source: () => { requireLive(); if (entry.view !== observingView) throw new Error('The Browser view changed before structured observation.'); return { workspaceId: entry.workspaceId, browserId: entry.id,
+          operationId: operation.id, navigationId: entry.navigationId } },
+        isCurrent: navigationId => this.entries.get(entry.id) === entry && entry.view === observingView && !observingView.webContents.isDestroyed() &&
+          entry.navigationId === navigationId
+      },
       ...(this.resultArtifacts ? { resultArtifacts: {
         store: this.resultArtifacts, owner: { workspaceId: entry.workspaceId, browserId: entry.id }
       } } : {}),
@@ -1344,7 +1372,12 @@ export class BrowserViewManager {
         if (privateTaskParameters) return
         await this.refLedgers.write(entry.id, ledger)
       },
-      note: (text) => notes.push(text),
+      note: (text) => {
+        notes.push(text)
+        operation.warning = notes.join('\n')
+        void this.operationJournal?.setPhase(operation.id, operation.phase, { summary: operation.summary, warning: operation.warning })
+        this.emit(entry)
+      },
       recordTarget: (target) => {
         if (!activeStep) return
         activeStep.target = target
@@ -1389,7 +1422,7 @@ export class BrowserViewManager {
       }
       const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string): Promise<void> => {
         if (!this.stepEvidence) return
-        if (content.kind === 'page' && privateTaskParameters) {
+        if ((content.kind === 'page' || content.kind === 'structured-output') && privateTaskParameters) {
           step.evidenceWarning = 'Automatic page observations were not retained because this task uses private invocation parameters. Inspect the live page for its current state.'
           return
         }
@@ -1414,6 +1447,9 @@ export class BrowserViewManager {
         } else if (this.stepEvidence && name === 'captureScreenshot') {
           const capture = value as BrowserScreenshotCapture
           await saveEvidence(screenshotStepEvidence(capture), capture.navigationId)
+        } else if (this.stepEvidence && name === 'extractStructured') {
+          const receipt = value as BrowserStructuredOutputReceipt
+          await saveEvidence({ kind: 'structured-output', receipt }, receipt.source.navigationId)
         }
         if (this.operationJournal) await this.operationJournal.finishStep(operation.id, step.sequence, {
           status: 'completed',

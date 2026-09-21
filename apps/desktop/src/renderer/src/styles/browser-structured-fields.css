@@ -1,0 +1,18 @@
+.browser-structured-fields { min-width: 0; }
+.browser-structured-fields__summary, .browser-structured-fields__state, .browser-structured-fields__detail, .browser-structured-fields__range { color: var(--text-2); }
+.browser-structured-fields .browser-structured-fields__values, .browser-structured-fields .browser-structured-fields__sources { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); margin: var(--sp-3) 0; }
+.browser-structured-fields__values > div, .browser-structured-fields__sources > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--sp-2); }
+.browser-structured-fields dt, .browser-structured-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.browser-structured-fields dt { color: var(--text-2); }
+.browser-structured-fields dd > code, .browser-structured-fields__state, .browser-structured-fields__detail { display: block; }
+.browser-structured-fields code { font: inherit; font-family: var(--font-mono); white-space: pre-wrap; }
+.browser-structured-fields details { margin-top: var(--sp-2); }
+.browser-structured-fields__detail { margin-top: var(--sp-1); }
+.browser-structured-fields details.browser-structured-fields__preview { margin-top: 0; }
+.browser-structured-fields__preview > summary { cursor: pointer; }
+.browser-structured-fields__preview > summary > .browser-structured-fields__state { display: inline; }
+.browser-structured-fields__preview > summary > code { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.browser-structured-fields__preview[open] > summary > code { display: none; }
+.browser-structured-fields__preview > code { display: block; }
+.browser-structured-fields pre.browser-structured-fields__raw { max-height: min(24vh, 12rem); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-family: var(--font-mono); }
+.browser-structured-fields summary:focus-visible, .browser-structured-fields__raw:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
