@@ -98,7 +98,7 @@
 .browser-menu [role="menuitemcheckbox"] > span:first-child { width: 14px; display: inline-flex; align-items: center; justify-content: center; }
 .browser-menu > [data-radix-menu-label], .browser-menu [role="group"] > [data-radix-menu-label] { padding:var(--sp-2) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .browser-menu__item { min-height: 28px; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-2) var(--sp-4); border-radius: var(--radius-sm); outline: none; font-size: var(--fs-body); user-select: none; cursor: pointer; }
-.browser-menu__item[data-highlighted] { color: var(--text); background: var(--surface-2); }
+.browser-menu__item[data-highlighted], .browser-menu__item:hover:where(:not([data-disabled])) { color: var(--text); background: var(--surface-2); }
 .browser-menu__indicator { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--green); }
 .browser-menu__item small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .browser-body { flex: 1; min-width: 0; min-height: 0; display: flex; }

@@ -7,7 +7,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 
 // Radix owns selection, dismissal, keyboard navigation and portals. This adapter adds mouse
 // disclosure and routes portals to the window overlay host or explicit container.
-export { Item, Separator, Label, RadioGroup, RadioItem, ItemIndicator } from '@radix-ui/react-dropdown-menu'
+export { Separator, Label, RadioGroup, ItemIndicator } from '@radix-ui/react-dropdown-menu'
 
 export function Portal({ container, ...props }: ComponentPropsWithoutRef<typeof Menu.Portal>) {
   return <Menu.Portal container={resolveOverlayContainer(container)} {...props} />
@@ -28,6 +28,40 @@ function useMenu() {
   if (!context) throw new Error('Hover menu parts require Root')
   return context
 }
+
+type ItemPointerProps = Pick<ComponentPropsWithoutRef<typeof Menu.Item>,
+  'disabled' | 'onPointerMove' | 'onPointerLeave' | 'onPointerDown'>
+
+function useItemPointerHandlers({ disabled, onPointerMove, onPointerLeave, onPointerDown }: ItemPointerProps) {
+  const menu = useMenu()
+  return {
+    onPointerMove(event: PointerEvent<HTMLDivElement>) {
+      onPointerMove?.(event)
+      // Radix moves focus on both item entry and item leave, including disabled items.
+      if (!event.defaultPrevented && menu.hover.current) event.preventDefault()
+    },
+    onPointerLeave(event: PointerEvent<HTMLDivElement>) {
+      onPointerLeave?.(event)
+      if (!event.defaultPrevented && menu.hover.current) event.preventDefault()
+    },
+    onPointerDown(event: PointerEvent<HTMLDivElement>) {
+      onPointerDown?.(event)
+      if (!event.defaultPrevented && !disabled) menu.hover.current = false
+    }
+  }
+}
+
+export const Item = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.Item>>(
+  function Item(props, ref) {
+    return <Menu.Item {...props} {...useItemPointerHandlers(props)} ref={ref} />
+  }
+)
+
+export const RadioItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.RadioItem>>(
+  function RadioItem(props, ref) {
+    return <Menu.RadioItem {...props} {...useItemPointerHandlers(props)} ref={ref} />
+  }
+)
 
 export function Root({ open: controlled, onOpenChange, children }: ComponentPropsWithoutRef<typeof Menu.Root>) {
   const [local, setLocal] = useState(false)
@@ -90,9 +124,13 @@ export const Trigger = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<ty
         onPointerEnter?.(event)
         if (!event.defaultPrevented && !event.currentTarget.disabled) menu.enter(event)
       }}
-      onPointerLeave={(event) => { onPointerLeave?.(event); menu.leave(event) }}
+      onPointerLeave={(event) => {
+        onPointerLeave?.(event)
+        if (!event.defaultPrevented) menu.leave(event)
+      }}
       onPointerDown={(event) => {
         onPointerDown?.(event)
+        if (event.defaultPrevented) return
         // A click after hovering must not close the menu just opened under the pointer.
         if (menu.open && menu.hover.current && event.button === 0) event.preventDefault()
       }}
@@ -122,19 +160,31 @@ export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeo
       if (typeof ref === 'function') ref(node)
       else if (ref) ref.current = node
     }}
-      onPointerEnter={(event) => { onPointerEnter?.(event); menu.enter(event) }}
-      onPointerLeave={(event) => { onPointerLeave?.(event); menu.leave(event) }}
+      onPointerEnter={(event) => {
+        onPointerEnter?.(event)
+        if (!event.defaultPrevented) menu.enter(event)
+      }}
+      onPointerLeave={(event) => {
+        onPointerLeave?.(event)
+        if (!event.defaultPrevented) menu.leave(event)
+      }}
       onPointerDownOutside={(event) => {
         if (menu.hover.current && menu.trigger.current?.contains(event.target as Node)) event.preventDefault()
         onPointerDownOutside?.(event)
       }}
-      onContextMenu={(event) => { menu.hover.current = false; onContextMenu?.(event) }}
+      onContextMenu={(event) => {
+        onContextMenu?.(event)
+        if (!event.defaultPrevented) menu.hover.current = false
+      }}
       onCloseAutoFocus={(event) => {
         if (menu.hover.current) event.preventDefault()
         onCloseAutoFocus?.(event)
         menu.hover.current = false
       }}
-      onKeyDown={(event) => { menu.hover.current = false; onKeyDown?.(event) }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event)
+        if (!event.defaultPrevented) menu.hover.current = false
+      }}
     />
   }
 )
