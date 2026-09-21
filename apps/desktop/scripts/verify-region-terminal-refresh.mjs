@@ -280,8 +280,12 @@ async function identity() {
  'apps/desktop/scripts/verify-region-terminal-refresh.mjs',
  'apps/desktop/src/renderer/src/store.ts','apps/desktop/src/renderer/src/components/SessionPane.tsx',
  'apps/desktop/src/renderer/src/components/AgentRegionHeader.tsx','apps/desktop/src/renderer/src/components/AgentLifecycleFeedback.tsx',
- 'apps/desktop/src/renderer/src/lib/service-window-notice.ts','packages/core/src/client-event-publisher.ts','apps/desktop/scripts/probe-process.mjs']
+ 'apps/desktop/src/renderer/src/lib/service-window-notice.ts','packages/core/src/client-event-publisher.ts','apps/desktop/scripts/probe-process.mjs',
+ 'pnpm-lock.yaml','patches/@xterm__xterm@6.1.0-beta.303.patch']
  const hashes=Object.fromEntries(await Promise.all(files.map(async name=>{const bytes=await readFile(join(repositoryRoot,name));assert.ok(bytes.length>0,name);return [name,digest(bytes)]})))
+ const xtermRoot=resolve(require.resolve('@xterm/xterm'),'../..')
+ const xtermFiles=['src/browser/CoreBrowserTerminal.ts','lib/xterm.js','lib/xterm.mjs']
+ const xtermHashes=Object.fromEntries(await Promise.all(xtermFiles.map(async name=>{const bytes=await readFile(join(xtermRoot,name));assert.ok(bytes.length>0,name);return [name,digest(bytes)]})))
  // Resolve with Node's real ESM import conditions from the Core package owner.
  // The SDK deliberately exposes import only; CJS require.resolve is a different contract.
  const {stdout:sdkUrl}=await exec(process.execPath,['--input-type=module','-e',"process.stdout.write(import.meta.resolve('@ctxmux/sdk'))"],{cwd:join(repositoryRoot,'packages/core'),timeout:5000,maxBuffer:4096})
@@ -289,7 +293,7 @@ async function identity() {
  const sdk=await import(sdkPath);assert.equal(sdk.PROTOCOL_VERSION,18,'The actual Core SDK must be protocol18')
  for(const binary of manifest.binaries)assert.equal(hashes[vendor+'/'+binary.path],binary.sha256)
  assert.equal(hashes[vendor+'/'+manifest.sdk.archive.path],manifest.sdk.archive.sha256)
- return {nodeVersion:process.version,manifest:manifest.product,hashes,electronSha:digest(await readFile(require('electron'))),sdkResolved:{url:sdkPath.href,protocolVersion:sdk.PROTOCOL_VERSION,sha256:digest(sdkBytes)},typescriptSha:digest(await readFile(require.resolve('typescript')))}
+ return {nodeVersion:process.version,manifest:manifest.product,hashes,xtermHashes,electronSha:digest(await readFile(require('electron'))),sdkResolved:{url:sdkPath.href,protocolVersion:sdk.PROTOCOL_VERSION,sha256:digest(sdkBytes)},typescriptSha:digest(await readFile(require.resolve('typescript')))}
 }
 async function captureDesktopCore(probe, trigger) {
  const path=join(repositoryRoot,'packages/core/dist/client.js'),source=await readFile(path,'utf8')
