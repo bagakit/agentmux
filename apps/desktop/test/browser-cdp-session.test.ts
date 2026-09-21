@@ -61,6 +61,31 @@ describe('接不上要说清怎么办', () => {
 })
 
 describe('够不着子 frame 要记下来，不能一声不响', () => {
+  it('only iframe targets become document senders; workers are not missing page documents', async () => {
+    const contents = fakeContents()
+    const session = BrowserCdpSession.attach(contents)
+    contents.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'worker', targetInfo: { type: 'worker' } })
+    contents.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'frame', targetInfo: { type: 'iframe' } })
+    await settle()
+    expect([...session.frames.keys()]).toEqual(['frame'])
+    expect(session.frameDiscoveryFailure).toBeNull()
+    session.detach()
+  })
+
+  it('nested attachment failure is reported without losing the readable parent sender', async () => {
+    const contents = fakeContents({ sendCommand: async (method, _params, sessionId) => {
+      if (method === 'Target.setAutoAttach' && sessionId) throw new Error('nested discovery unavailable')
+      return {}
+    } })
+    const session = BrowserCdpSession.attach(contents)
+    contents.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'frame', targetInfo: { type: 'iframe' } })
+    await settle()
+    expect([...session.frames.keys()]).toEqual(['frame'])
+    expect(session.frameDiscoveryFailure).toEqual(expect.stringMatching(/Nested.*nested discovery unavailable.*Retry/))
+    await expect(session.frames.get('frame')!('Accessibility.getFullAXTree')).resolves.toEqual({})
+    session.detach()
+  })
+
   it('setAutoAttach 失败时把原因留给上层读', async () => {
     const contents = fakeContents({
       sendCommand: async (method) => {
@@ -120,7 +145,7 @@ describe('收摊要摘干净', () => {
   it('destroyed contents 不再访问 dead debugger，仍释放本轮 frame 和观察者', async () => {
     const contents = fakeContents()
     const session = BrowserCdpSession.attach(contents)
-    contents.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'child' })
+    contents.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'child', targetInfo: { type: 'iframe' } })
     expect(session.frames.size).toBe(1)
     const observed = vi.fn()
     session.observe(observed)

@@ -1230,7 +1230,9 @@ export type BrowserPageNode = {
   backendNodeId: number
   /** 结构缩进层级，仅用于把树渲染成文本给 Agent 看。 */
   depth: number
-  /** 该节点所属 frame 的 CDP session；主 frame 为 undefined。派发动作时命令要发到这个 session。 */
+  /** 实际 CDP document frame；同一派发 session 可以服务多个不同 document。 */
+  frameId?: string
+  /** 该节点的 CDP 派发通道；共享主通道的 document 为 undefined。 */
   sessionId?: string
 }
 
