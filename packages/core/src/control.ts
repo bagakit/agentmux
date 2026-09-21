@@ -843,9 +843,9 @@ export const AGENTMUX_CONTROL_MAX_MESSAGE_BYTES = 256 * 1024
  * 写成 `Record<Operation, ...>` 之后，联合里加一个成员而这里不加一行，tsc 直接报缺键：定档从
  * 「你得记得改」变成「不改就编译不过」。
  *
- * 分档判据：`long` 是要等本进程之外的东西——`open.*` 等一个进程起来并交出 Region，`send` 等 composer
- * 就绪并把 prompt 打进去，`resume` 等 Provider 重建会话，`stop` 等进程真的收尾。`short` 是只读、只动
- * 本地状态、或只发一次不等结果的信号，2 秒之内不返回就是真的出事了。
+ * 分档判据：`long` 等外部能力或持久化完成——启动、输入、恢复、停止及设置写入都可能等待 I/O。
+ * `short` 用于只读、本地布局或不等结果的信号。预算到期只说明没有及时收到完整回复，不能据此判定
+ * owner 已坏或写入未提交。
  */
 const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
   'inspect.client': 'short',
@@ -868,15 +868,15 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'settings.hosts.list': 'short',
   'settings.hosts.test': 'long',
   'settings.executors.refresh': 'long',
-  'settings.set': 'short',
+  'settings.set': 'long',
   'settings.browser.links.list': 'short',
-  'settings.browser.links.forget': 'short',
-  'settings.workspaces.add': 'short',
+  'settings.browser.links.forget': 'long',
+  'settings.workspaces.add': 'long',
   'settings.resource.list': 'short',
   'settings.resource.get': 'short',
-  'settings.resource.add': 'short',
-  'settings.resource.update': 'short',
-  'settings.resource.remove': 'short',
+  'settings.resource.add': 'long',
+  'settings.resource.update': 'long',
+  'settings.resource.remove': 'long',
   interrupt: 'short',
   resume: 'long',
   stop: 'long',

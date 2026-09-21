@@ -1293,7 +1293,7 @@ async function readMessage(socket: Socket): Promise<unknown> {
     const chunks: Buffer[] = []
     let byteLength = 0
     let settled = false
-    const cleanup = (): void => { socket.off('data', onData); socket.off('end', onEnd); socket.off('close', onClose); socket.off('error', onError) }
+    const cleanup = (): void => { socket.off('data', onData); socket.off('end', onIncomplete); socket.off('close', onIncomplete); socket.off('error', onError) }
     const parse = (content: Buffer): void => { if (settled) return; settled = true; cleanup(); try { resolve(JSON.parse(content.toString('utf8')) as unknown) } catch { reject(new AgentMuxError('Control message is invalid JSON.', 'CONTROL_PROTOCOL_ERROR')) } }
     const onData = (chunk: Buffer): void => {
       if (settled) return
@@ -1304,10 +1304,13 @@ async function readMessage(socket: Socket): Promise<unknown> {
       if (content.subarray(newline + 1).toString('utf8').trim()) { settled = true; cleanup(); reject(new AgentMuxError('Control message has trailing data.', 'CONTROL_PROTOCOL_ERROR')); return }
       parse(content.subarray(0, newline))
     }
-    const onEnd = (): void => parse(Buffer.concat(chunks, byteLength))
-    const onClose = (): void => parse(Buffer.concat(chunks, byteLength))
+    const onIncomplete = (): void => {
+      if (settled) return
+      settled = true; cleanup()
+      reject(new AgentMuxError('Control connection closed before a complete message was received.', 'CONTROL_PROTOCOL_ERROR'))
+    }
     const onError = (error: Error): void => { if (!settled) { settled = true; cleanup(); reject(error) } }
-    socket.on('data', onData); socket.once('end', onEnd); socket.once('close', onClose); socket.once('error', onError)
+    socket.on('data', onData); socket.once('end', onIncomplete); socket.once('close', onIncomplete); socket.once('error', onError)
   })
 }
 
@@ -1496,7 +1499,7 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
   const request = parseAgentMuxControlRequest(value)
   const response = await new Promise<unknown>((resolve, reject) => {
     const socket = createConnection(path)
-    socket.setTimeout(agentMuxControlTimeoutMs(request.operation), () => socket.destroy(new AgentMuxError('Control request timed out.', 'CONTROL_TIMEOUT')))
+    socket.setTimeout(agentMuxControlTimeoutMs(request.operation), () => socket.destroy(new AgentMuxError('Control request timed out before a complete reply was received; the result is unconfirmed.', 'CONTROL_TIMEOUT')))
     socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n`))
     socket.once('error', (error: NodeJS.ErrnoException) => {
       if (error instanceof AgentMuxError) reject(error)
