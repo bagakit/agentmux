@@ -29,6 +29,8 @@ function harness(withFrames = false, initialLedger: BrowserRefLedger | null = nu
   ]
   const sender = (document: string): BrowserCdpSender => async (method, params) => {
     calls.push({ document, method, ...(params ? { params } : {}) })
+    if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: document === 'main' ? 'main-document' : document, loaderId: 'loader-' + document, ...(document === 'main' ? {} : { parentId: 'main-document' }) } } }
+    if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
     if (document === 'broken' && method === 'Accessibility.getFullAXTree') throw new Error('frame read unavailable')
     if (method === 'Accessibility.getFullAXTree') return { nodes: document === 'main' ? TREE : frameTree }
     if (method === 'Runtime.evaluate') {
@@ -49,7 +51,7 @@ function harness(withFrames = false, initialLedger: BrowserRefLedger | null = nu
       return { result: { value: null } }
     }
     if (method === 'DOMSnapshot.captureSnapshot') return {
-      documents: [{ scrollOffsetX: 0, scrollOffsetY: 100, nodes: { backendNodeId: [30, 40, 50, 70, 80] }, layout: {
+      strings: ['main-document'], documents: [{ frameId: 0, scrollOffsetX: 0, scrollOffsetY: 100, nodes: { backendNodeId: [30, 40, 50, 70, 80] }, layout: {
         nodeIndex: [0, 1, 2, 3, 4], bounds: [[0, 100, 100, 20], [0, 120, 100, 20], [0, 140, 100, 20], [200, 100, 100, 20], [0, 2000, 100, 20]]
       } }]
     }
@@ -72,7 +74,7 @@ describe('bounded Browser observation through production dispatch', () => {
     const h = harness()
     const result = await h.dispatch('snapshot', [{ within: '#left', interactiveOnly: true, maxNodes: 1 }]) as BrowserScopedSnapshot
     expect(result.nodes.map((node) => [node.ref, node.backendNodeId])).toEqual([['@e1', 30]])
-    expect(result.observation).toMatchObject({ fullObserved: 5, scoped: 3, matched: 2, returned: 1, truncated: true, scope: { kind: 'subtree', document: 'main' } })
+    expect(result.observation).toMatchObject({ fullObserved: 5, scoped: 3, matched: 2, returned: 1, truncated: true, scope: { kind: 'subtree', document: 'main-document' } })
     expect(h.ledger()?.entries).toEqual([{ ref: '@e1', role: 'button', name: 'Save', nth: 1 }])
     await expect(h.dispatch('click', ['@e1'])).resolves.toBeNull()
     expect(h.acted).toEqual([{ document: 'main', backend: 30 }])
@@ -114,7 +116,7 @@ describe('bounded Browser observation through production dispatch', () => {
     expect(target).toMatchObject({ ref: '@e5', backendNodeId: 30 })
     const scoped = await h.dispatch('snapshot', [{ withinRef: target.ref }]) as BrowserScopedSnapshot
     expect(scoped.nodes.map((node) => [node.ref, node.sessionId, node.backendNodeId])).toEqual([['@e10', 'frame-one', 30]])
-    expect(scoped.observation).toMatchObject({ scoped: 1, returned: 1, scope: { kind: 'subtree', document: 'frame-one', withinRef: '@e5' }, omittedFrames: ['main', 'broken'] })
+    expect(scoped.observation).toMatchObject({ scoped: 1, returned: 1, scope: { kind: 'subtree', document: 'frame-one', withinRef: '@e5' }, omittedFrames: ['main-document', 'broken'] })
     await expect(h.dispatch('click', [target.ref])).rejects.toThrow(/superseded/)
     await h.dispatch('fillInput', [scoped.nodes[0]!.ref, 'value'])
     expect(h.acted).toEqual([{ document: 'frame-one', backend: 30 }])
@@ -149,7 +151,7 @@ describe('bounded Browser observation through production dispatch', () => {
     const h = harness(true)
     const result = await h.dispatch('snapshot', [{ scope: 'viewport', interactiveOnly: true }]) as BrowserScopedSnapshot
     expect(result.nodes.map((node) => node.backendNodeId)).toEqual([30, 50, 70])
-    expect(result.observation).toMatchObject({ fullObserved: 6, scoped: 4, matched: 3, returned: 3, truncated: false, scope: { kind: 'viewport', document: 'main' }, omittedFrames: ['frame-one', 'broken'], work: { axTrees: 3, layoutTrees: 1 } })
+    expect(result.observation).toMatchObject({ fullObserved: 6, scoped: 4, matched: 3, returned: 3, truncated: false, scope: { kind: 'viewport', document: 'main-document' }, omittedFrames: ['frame-one', 'broken'], work: { axTrees: 3, layoutTrees: 1 } })
     expect(h.calls.filter((call) => call.method === 'Accessibility.getFullAXTree')).toHaveLength(3)
     expect(h.calls.filter((call) => call.method === 'DOMSnapshot.captureSnapshot')).toHaveLength(1)
   })

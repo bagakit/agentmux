@@ -26,6 +26,8 @@ function fakeSession(overrides: Partial<{
   ]
   return {
     sendCommand: async (method: string) => {
+      if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
       if (method === 'Accessibility.getFullAXTree') return { nodes }
       if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
       if (method === 'DOM.resolveNode') return { object: { objectId: 'obj-1' } }

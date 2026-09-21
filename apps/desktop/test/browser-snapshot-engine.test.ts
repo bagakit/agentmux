@@ -71,6 +71,8 @@ const TEXT_NODE: AxNodeFixture = {
 
 type SenderOptions = {
   nodes?: AxNodeFixture[]
+  frameId?: string
+  parentId?: string
   /** 页面里 cursor:pointer 提升出来的标签，按 index 对应 backendNodeId。 */
   clickable?: { label: string; backendNodeId: number | undefined }[]
 }
@@ -81,6 +83,8 @@ function makeSender(options: SenderOptions = {}): { send: BrowserCdpSender; call
   const clickable = options.clickable ?? []
   const send: BrowserCdpSender = async (method, params) => {
     calls.push(method)
+    if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
+    if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: options.frameId ?? 'main-document', loaderId: 'observed-loader', ...(options.parentId ? { parentId: options.parentId } : {}) } } }
     if (method === 'Accessibility.getFullAXTree') return { nodes: options.nodes ?? [] }
     if (method === 'Runtime.evaluate') {
       const expression = String((params as { expression?: string } | undefined)?.expression ?? '')
@@ -309,7 +313,7 @@ describe('页面快照：跨域 iframe 缺失必须浮现', () => {
 
     // 这条是本任务与原实现分道的地方：原实现是 catch 掉什么都不做。
     expect(result.missingFrames, '跨域 iframe 取不到却被静默跳过了').toHaveLength(1)
-    expect(result.missingFrames[0]!.frameId).toBe('frame-x')
+    expect(result.missingFrames[0]!.frameId).toBe('(attached document discovery)')
     expect(result.missingFrames[0]!.reason, '只说缺了，没说为什么缺').toContain('Session with given id not found')
 
     // 不阻断：主 frame 的内容照样在。少看一块不等于整张作废。
@@ -317,7 +321,7 @@ describe('页面快照：跨域 iframe 缺失必须浮现', () => {
   })
 
   it('取到的 frame，其节点带上自己的 sessionId', async () => {
-    const { send: frameSend } = makeSender({
+    const { send: frameSend } = makeSender({ frameId: 'actual-frame-ok', parentId: 'main-document',
       nodes: [
         { nodeId: '1', role: { value: 'RootWebArea' }, name: { value: 'f' }, childIds: ['2'] },
         { nodeId: '2', role: { value: 'button' }, name: { value: 'In frame' }, backendDOMNodeId: 200 }

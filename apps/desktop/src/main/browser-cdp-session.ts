@@ -18,7 +18,7 @@ import type { BrowserCdpSender } from './browser-page-snapshot.js'
 const AUTO_ATTACH_PARAMS = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }
 
 export class BrowserCdpSession {
-  /** sessionId → 该 frame 的 sender。主 frame 不在这里（它就是 {@link sendCommand}）。 */
+  /** sessionId → OOPIF target sender；同进程多个文档共用 sender。主 frame 不在这里（它就是 {@link sendCommand}）。 */
   private readonly frameSenders = new Map<string, BrowserCdpSender>()
   /** 非 null 表示会话已经没了，值是原因。之后每一次 send 都要拿它说话，而不是发出去等一句泛化错误。 */
   private gone: string | null = null
@@ -40,15 +40,15 @@ export class BrowserCdpSession {
     this.onMessage = (_event, method, params) => {
       for (const listener of this.listeners) listener(method, params)
       if (method === 'Target.attachedToTarget') {
-        const sessionId = (params as { sessionId?: string }).sessionId
-        if (!sessionId) return
+        const { sessionId, targetInfo } = params as { sessionId?: string; targetInfo?: { type?: string } }
+        if (!sessionId || targetInfo?.type !== 'iframe') return
         this.frameSenders.set(sessionId, (m, p) => this.sendTo(sessionId, m, p))
         // 这个 frame 里还能再嵌 frame。不往下递归的话，嵌套的那层会**静默缺席**——
         // 快照里少了一块，而 missingFrames 也不会提它，因为我们根本不知道它存在。
         void this.contents.debugger
           .sendCommand('Target.setAutoAttach', AUTO_ATTACH_PARAMS, sessionId)
-          .catch(() => {
-            /* 这个 target 不支持嵌套 attach；它自己的节点仍然收得到。 */
+          .catch((error: unknown) => {
+            if (this.frameSenders.has(sessionId) && this.gone === null) this.frameAttachFailure = `Nested frame discovery failed for CDP session ${sessionId} (${error instanceof Error ? error.message : String(error)}). Retry snapshot() to observe embedded documents.`
           })
         return
       }
