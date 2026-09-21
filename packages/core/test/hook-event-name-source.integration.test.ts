@@ -452,6 +452,31 @@ describe('Hook event name source end-to-end integration', () => {
     }
   })
 
+  it('nested declared fields cannot manufacture an event missing from the raw child payload', async () => {
+    const keys = ['hookEventName', 'eventName'] as const
+    expect(keys).toHaveLength(2)
+    for (const payloadKey of keys) {
+      const harness = await createTestHarness({ declaredSource: { kind: 'payload', payloadKey } })
+      try {
+        const payload = { hook_event_name: 'Notification', extra: { [payloadKey]: 'Stop' } }
+        expect(resolveHookEventName(undefined, payload, { kind: 'payload', payloadKey })).toBeUndefined()
+        const beforeReceiptId = (await harness.getStoredSession()).hookReceipt?.id
+        const result = await harness.runHookChild(payload, [], { AGENTMUX_HOOK_PAYLOAD_KEY: payloadKey })
+        expect([result.code, result.stdout]).toEqual([0, '{}\n'])
+        const session = await harness.getStoredSession()
+        expect(session.hookReceipt?.id).toBeDefined()
+        expect(session.hookReceipt?.id).not.toBe(beforeReceiptId)
+        expect(session.hookReceipt?.eventName).toBe('unknown')
+        expect(session.hookReceipt?.lifecycleEvent ?? null).toBeNull()
+        expect(session.semanticStatus?.state).toBe('working')
+        expect(session.pendingInteraction).toBeUndefined()
+        expect(session.terminalPromptReadiness).toBeUndefined()
+      } finally {
+        await harness.close()
+      }
+    }
+  })
+
   it('F1: flag missing explicit --event keeps receipt/trace with omitted eventName and does not fabricate Stop', async () => {
     const harness = await createTestHarness({
       declaredSource: { kind: 'flag' }
