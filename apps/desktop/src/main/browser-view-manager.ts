@@ -34,6 +34,8 @@ import {
 } from './browser-app-link.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { buildReplayScript } from './browser-replay-compiler.js'
+import { captureBrowserPageSnapshot } from './browser-page-snapshot.js'
+import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from './browser-step-evidence.js'
 import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
@@ -43,12 +45,15 @@ import type { BrowserResultContext } from '../shared/browser-result-artifact.js'
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
+import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js'
+import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from '../shared/browser-task-assets.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
   buildBrowserAnnotationMarkerScript,
   buildCancelBrowserAnnotationMarkerScript,
   buildBrowserElementSelectionScript,
+  buildSelectedBrowserElementExpression,
   buildCancelBrowserElementSelectionScript
 } from './browser-selection-script.js'
 
@@ -83,6 +88,7 @@ type BrowserEntry = {
   activeRun: { operationId: string; stop: () => void } | undefined
   runInFlight: boolean
   demonstration?: BrowserDemonstrationState
+  taskAssets?: BrowserTaskAssetState
 }
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
@@ -277,6 +283,9 @@ export class BrowserViewManager {
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private demonstrationCapture: { entry: BrowserEntry; view: WebContentsView; contents: WebContents; capture: BrowserDemonstrationCapture } | null = null
 
+  private readonly taskExecutions = new Map<string, { entry: BrowserEntry; assetId: string; version: number; runId: string | undefined; operationId: string | undefined }>()
+  private readonly unsubscribeTaskAssets: (() => void) | undefined
+
   constructor(
     private readonly window: BrowserWindow,
     private readonly profiles: BrowserProfileResolver,
@@ -296,8 +305,14 @@ export class BrowserViewManager {
     private readonly operationJournal?: BrowserOperationJournal,
     private readonly stepEvidence?: BrowserStepEvidenceStore,
     private readonly resultArtifacts?: BrowserResultArtifactStore,
-    private readonly demonstrations?: BrowserDemonstrationRecorder
-  ) {}
+    private readonly demonstrations?: BrowserDemonstrationRecorder,
+    private readonly taskAssets?: BrowserTaskAssets
+  ) {
+    this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
+      if (!this.entries.has(browserId)) return
+      void this.getTaskAssets(browserId).catch(() => {})
+    })
+  }
 
   resourceOwnerCounts(): { browserViews: number; releasedBrowserViews: number } {
     return {
@@ -441,6 +456,7 @@ export class BrowserViewManager {
         entry.demonstration = { draft: null, warning: 'The saved demonstration could not be read. The Browser remains usable; reopen its activity details to retry.' }
         this.emit(entry)
       })
+      if (this.taskAssets) void this.getTaskAssets(id).catch(() => {})
       void view.webContents.loadURL(url).catch((error) => {
         if (!this.owns(entry, view)) return
         entry.error = error instanceof Error ? error.message : String(error)
@@ -649,7 +665,7 @@ export class BrowserViewManager {
    *   这里绝不再补一个 `randomUUID()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
-  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string): Promise<BrowserScriptRunReport> {
+  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void, privateTaskParameters = false): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
     // Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.
     void this.releaseDemonstrationCapture(entry)
@@ -752,6 +768,7 @@ export class BrowserViewManager {
         this.emit(entry)
       }
     }
+    onOperationStarted?.(operation)
     operation.phase = 'running'
     operation.summary = 'Agent is operating the Browser'
     void this.operationJournal?.setPhase(operation.id, 'running', { summary: operation.summary })
@@ -764,7 +781,7 @@ export class BrowserViewManager {
         navigationId: resultNavigationId
       }
       const run = await runBrowserScript({ code, signal: stopController.signal,
-        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation),
+        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
           await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
       })
@@ -886,7 +903,10 @@ export class BrowserViewManager {
         entry.activity = { operation, control: 'agent' }
         return { result: run.value, logs: run.logs, outcome: { kind: 'completed' }, runOperation: operation }
       }
-      const outcome = browserRunOutcomeFromFailure(run.failure)
+      const failureOutcome = browserRunOutcomeFromFailure(run.failure)
+      const outcome = privateTaskParameters && 'message' in failureOutcome
+        ? { ...failureOutcome, message: `Browser task ${run.failure.kind} did not report completion. Raw error text is withheld because this invocation contains private parameters. Inspect the page before retrying.` }
+        : failureOutcome
       // 结局四支 → phase 四支，**逐支对上**。原来写的是 `stopped ? stopped : failed`，于是
       // `indeterminate` 被折进 `failed`：同一次崩溃，Agent 收到的收据说"做到哪一步不知道，先看
       // 一眼页面别重试"，而人在历史里看到的是"失败了，改完重跑"——两个相反的结论。phase 枚举里
@@ -1102,13 +1122,154 @@ export class BrowserViewManager {
     return result
   }
 
+  async getTaskAssets(id: string): Promise<BrowserTaskAssetState> {
+    const entry = this.require(id)
+    const view = entry.view
+    if (!this.taskAssets) return { assets: [], runs: [], warning: 'Task asset storage is unavailable. The Browser remains usable.' }
+    try {
+      const state = await this.taskAssets.state(id)
+      if (this.owns(entry, view) && !view.webContents.isDestroyed()) { entry.taskAssets = state; this.emit(entry) }
+      return state
+    } catch {
+      const state: BrowserTaskAssetState = { assets: entry.taskAssets?.assets ?? [], runs: entry.taskAssets?.runs ?? [],
+        warning: 'Saved task assets could not be read. Existing Browser work remains; reopen the details to retry.' }
+      if (this.owns(entry, view) && !view.webContents.isDestroyed()) { entry.taskAssets = state; this.emit(entry) }
+      return state
+    }
+  }
+
+  private async requireTaskAsset(id: string, assetId: string): Promise<BrowserTaskAsset> {
+    this.require(id)
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The Browser remains usable.')
+    const asset = await this.taskAssets.get(assetId)
+    if (!asset || asset.browserId !== id) throw new Error('This task asset does not belong to the Browser.')
+    return asset
+  }
+
+  async importTaskAsset(id: string, name?: string): Promise<BrowserTaskAsset> {
+    this.require(id)
+    if (!this.taskAssets || !this.demonstrations) throw new Error('Saved demonstrations and task asset storage are required.')
+    const draft = await this.demonstrations.get(id)
+    if (!draft || draft.browserId !== id || draft.status === 'recording') throw new Error('Stop a real demonstration before importing it.')
+    return await this.taskAssets.importRecording(draft, name)
+  }
+
+  async saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset> {
+    await this.requireTaskAsset(id, assetId)
+    return await this.taskAssets!.edit(assetId, expectedRevision, content)
+  }
+
+  async saveTaskAssetVersion(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset> {
+    const updated = await this.saveTaskAssetDraft(id, assetId, expectedRevision, content)
+    return await this.taskAssets!.saveVersion(assetId, updated.revision)
+  }
+
+  async locateTaskAssetStep(id: string, assetId: string, expectedRevision: number, stepId: string): Promise<BrowserTaskAsset> {
+    const asset = await this.requireTaskAsset(id, assetId)
+    const entry = this.require(id)
+    if (entry.runInFlight || entry.activeRun) throw new Error('Wait for the active Browser operation before locating a task target.')
+    const step = asset.draft.steps.find(step => step.id === stepId)
+    if (!step || step.kind === 'checkpoint') throw new Error('This task step has no page target.')
+    const view = entry.view
+    const contents = view.webContents
+    const navigationId = entry.navigationId
+    const live = () => this.owns(entry, view) && !contents.isDestroyed() && entry.navigationId === navigationId
+    const url = safeBrowserUrl(contents.getURL() || entry.requestedUrl)
+    let target: BrowserReplayStep['target']
+    if (step.kind !== 'navigate') {
+      void this.releaseDemonstrationCapture(entry)
+      const session = BrowserCdpSession.attach(contents)
+      const contexts = new Set<number>()
+      const unsubscribe = session.observe((method, params) => {
+        const created = (params as { context?: { id?: number } }).context?.id
+        if (method === 'Runtime.executionContextCreated' && typeof created === 'number' && contexts.size < 64) contexts.add(created)
+        if (method === 'Runtime.executionContextsCleared') contexts.clear()
+        if (method === 'Runtime.executionContextDestroyed') contexts.delete((params as { executionContextId: number }).executionContextId)
+      })
+      try {
+        await session.sendCommand('Runtime.enable')
+        const selected = await this.selectElement(id, async revision => {
+          for (const contextId of contexts) {
+            if (!live() || entry.selectionOperation !== revision) throw new Error('The selected Browser target changed.')
+            let result: { result?: { objectId?: string }; exceptionDetails?: unknown }
+            try {
+              result = await session.sendCommand('Runtime.evaluate', { contextId, expression: buildSelectedBrowserElementExpression(revision), returnByValue: false }) as typeof result
+            } catch { continue }
+            if (result.exceptionDetails || !result.result?.objectId) continue
+            target = await verifyBrowserSemanticTarget({ sendCommand: session.sendCommand, objectId: result.result.objectId,
+              isCurrent: () => live() && entry.selectionOperation === revision,
+              getSnapshot: () => captureBrowserPageSnapshot({ send: session.sendCommand, frames: session.frames,
+                navigationId, url, title: contents.getTitle() }) })
+            break
+          }
+          if (!target) throw new Error('The actual selected target is unknown or ambiguous. The task draft was retained; select a uniquely named interactive element.')
+        })
+        if (!selected) throw new Error('Target location was cancelled; the task draft was retained.')
+      } finally {
+        unsubscribe()
+        const warning = session.detach()
+        if (warning && live()) { entry.activity = { ...entry.activity, warning }; this.emit(entry) }
+      }
+    }
+    if (!live()) throw new Error('The Browser page changed before the task target could be saved.')
+    return await this.taskAssets!.edit(assetId, expectedRevision, { ...asset.draft,
+      steps: asset.draft.steps.map(item => item.id === stepId ? { ...item, url, ...(target ? { target } : {}), reviewed: false,
+        warning: 'Actual page target located. Review this draft step before saving a runnable version.' } : item) })
+  }
+
+  /** Trusted Client action. Existing Browser control is the only checkpoint authority. */
+  async runTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun> {
+    const entry = this.require(input.browserId)
+    const asset = await this.requireTaskAsset(input.browserId, input.assetId)
+    const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)
+    if (this.taskExecutions.has(entry.id) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
+    const execution = { entry, assetId: input.assetId, version: input.version, runId: input.runId, operationId: undefined as string | undefined }
+    this.taskExecutions.set(entry.id, execution)
+    try {
+      return await runBrowserTaskAsset(this.taskAssets!, input, {
+        control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
+        yieldControl: id => this.yieldControl(id),
+        runScript: async (id, code) => {
+          if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
+          const state = await this.taskAssets!.state(id)
+          const run = state.runs.find(run => run.assetId === execution.assetId && run.version === execution.version && run.status === 'running')
+          if (!run) throw new Error('The task cursor is unavailable; the action was not restarted.')
+          execution.runId = run.id
+          try {
+            return await this.runScript(id, code, undefined, undefined, undefined, operation => { execution.operationId = operation.id }, privateTaskParameters)
+          } finally { execution.operationId = undefined }
+        }
+      })
+    } finally {
+      if (this.taskExecutions.get(entry.id) === execution) this.taskExecutions.delete(entry.id)
+    }
+  }
+
+  async stopTaskAsset(id: string, runId: string): Promise<BrowserTaskAssetRun | null> {
+    const entry = this.require(id)
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable.')
+    const state = await this.taskAssets.state(id)
+    const run = state.runs.find(run => run.id === runId)
+    if (!run) throw new Error('This task run does not belong to the Browser.')
+    const execution = this.taskExecutions.get(id)
+    if (execution?.entry === entry && execution.runId === runId && execution.operationId &&
+        entry.activeRun?.operationId === execution.operationId) void this.stopOperationById(execution.operationId)
+    return await this.taskAssets.stop(runId)
+  }
+
+  private yieldControl(id: string): void {
+    const entry = this.require(id)
+    entry.humanControl = true
+    entry.driving = false
+    entry.activity = { ...entry.activity, control: 'human' }
+    this.emit(entry)
+  }
+
   returnControl(id: string): BrowserSnapshot {
     const entry = this.require(id)
     entry.humanControl = false
-    if (entry.activity.operation) {
-      const { warning: _warning, ...activity } = entry.activity
-      entry.activity = { ...activity, control: 'agent' }
-    }
+    const { warning: _warning, ...activity } = entry.activity
+    entry.activity = { ...activity, control: 'agent' }
     this.emit(entry)
     return this.snapshot(entry)
   }
@@ -1132,7 +1293,8 @@ export class BrowserViewManager {
     session: BrowserCdpSession,
     notes: string[],
     takeover: BrowserTakeover,
-    operation: BrowserOperation
+    operation: BrowserOperation,
+    privateTaskParameters = false
   ): (name: string, args: unknown[]) => Promise<unknown> {
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
@@ -1163,6 +1325,8 @@ export class BrowserViewManager {
       captureScreenshot: async () => await this.captureScreenshot(entry.id),
       readLedger: async () => await this.refLedgers.read(entry.id),
       writeLedger: async (ledger) => {
+        // Controlled parameterized task scripts return no refs. Do not retain page-derived echoes of their private values.
+        if (privateTaskParameters) return
         await this.refLedgers.write(entry.id, ledger)
       },
       note: (text) => notes.push(text),
@@ -1210,6 +1374,10 @@ export class BrowserViewManager {
       }
       const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string): Promise<void> => {
         if (!this.stepEvidence) return
+        if (content.kind === 'page' && privateTaskParameters) {
+          step.evidenceWarning = 'Automatic page observations were not retained because this task uses private invocation parameters. Inspect the live page for its current state.'
+          return
+        }
         try {
           const reference = await recordBrowserStepEvidence(this.stepEvidence, {
             operationId: operation.id, sequence: step.sequence, browserId: entry.id, navigationId
@@ -1245,7 +1413,9 @@ export class BrowserViewManager {
       } catch (error) {
         step.status = takeover.at !== null ? 'stopped' : 'failed'
         step.finishedAt = Date.now()
-        step.summary = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240)
+        step.summary = privateTaskParameters
+          ? 'Browser task page call did not report completion. Raw error text is withheld because this invocation contains private parameters; inspect the page before retrying.'
+          : (error instanceof Error ? error.message : String(error)).slice(0, 240)
         await saveEvidence({
           kind: 'diagnostic', code: 'page-call-failed',
           message: `Step ${step.sequence} (${name}) did not report completion. Side effects may already have occurred.`,
@@ -1336,7 +1506,7 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
-  async selectElement(id: string): Promise<BrowserElementSelection | null> {
+  async selectElement(id: string, inspectTarget?: (revision: number) => Promise<void>): Promise<BrowserElementSelection | null> {
     const entry = this.require(id)
     const view = entry.view
     const navigationId = entry.navigationId
@@ -1362,7 +1532,7 @@ export class BrowserViewManager {
       const raw = await Promise.race([
         view.webContents.executeJavaScriptInIsolatedWorld(
           BROWSER_SELECTION_WORLD_ID,
-          [{ code: buildBrowserElementSelectionScript(operation) }],
+          [{ code: buildBrowserElementSelectionScript(operation, Boolean(inspectTarget)) }],
           true
         ),
         new Promise<never>((_resolve, reject) => {
@@ -1379,6 +1549,7 @@ export class BrowserViewManager {
       ) {
         throw new Error('Browser page changed while an element was being selected')
       }
+      if (inspectTarget) await inspectTarget(operation)
       return {
         browserId: id,
         navigationId,
@@ -1539,6 +1710,7 @@ export class BrowserViewManager {
   }
 
   dispose(): void {
+    this.unsubscribeTaskAssets?.()
     for (const id of [...this.entries.keys()]) this.destroyOwner(id)
     for (const id of [...this.releasedEntries.keys()]) this.destroyOwner(id)
   }
@@ -1758,6 +1930,7 @@ export class BrowserViewManager {
       error: entry.error,
       driving: entry.driving,
       ...(entry.demonstration ? { demonstration: entry.demonstration } : {}),
+      ...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),
       appLinkPrompt: entry.appLinkPrompt,
       activity: persistenceWarning
         ? { ...entry.activity, warning: entry.activity.warning ?? persistenceWarning }

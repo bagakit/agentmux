@@ -1147,6 +1147,13 @@ const mockApi: AgentMuxDesktopApi = {
     startDemonstration: async () => { throw new Error('Recording a human demonstration requires the desktop app.') },
     stopDemonstration: async () => ({ draft: null, warning: 'Human demonstration recording requires the desktop app.' }),
     getDemonstration: async () => ({ draft: null, warning: 'Saved human demonstrations require the desktop app.' }),
+    getTaskAssets: async () => ({ assets: [], runs: [], warning: 'Saved Browser tasks require the desktop app.' }),
+    importTaskAsset: async () => { throw new Error('Browser task assets require the desktop app.') },
+    saveTaskAssetDraft: async () => { throw new Error('Browser task assets require the desktop app.') },
+    saveTaskAssetVersion: async () => { throw new Error('Browser task assets require the desktop app.') },
+    locateTaskAssetStep: async () => { throw new Error('Browser task assets require the desktop app.') },
+    runTaskAsset: async () => { throw new Error('Browser task assets require the desktop app.') },
+    stopTaskAsset: async () => { throw new Error('Browser task assets require the desktop app.') },
     listOperationHistory: async () => [],
     // 查不到是一次成功的回答（`null`），不是错误——Web 预览里没有 journal，所以每个 id 都查不到。
     // 与 `runScript` 抛"requires the desktop app"不同：那条抛是因为**谎称跑过了**会误导 Agent，

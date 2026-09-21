@@ -241,7 +241,7 @@ export class BrowserDemonstrationCapture {
       }) as { result?: { objectId?: string }; exceptionDetails?: unknown }
       const objectId = result.result?.objectId
       if (result.exceptionDetails || !objectId) return undefined
-      return await verifyBrowserSemanticTarget({ send: session.sendCommand, objectId, getSnapshot: snapshot, isCurrent: () => this.live(generation) })
+      return await verifyBrowserSemanticTarget({ sendCommand: session.sendCommand, objectId, getSnapshot: snapshot, isCurrent: () => this.live(generation) })
     } catch {
       if (this.live(generation)) this.warn('A recorded target could not be verified. The step remains blocked for review; the Browser is usable.')
       return undefined

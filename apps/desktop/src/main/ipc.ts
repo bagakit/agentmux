@@ -1,4 +1,4 @@
-import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/continuous-progress.js'
+import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
@@ -96,6 +96,8 @@ import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
 import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder, BROWSER_DEMONSTRATION_FILE } from './browser-demonstration-recorder.js'
+import { BrowserTaskAssets, BrowserTaskAssetFileStore, BROWSER_TASK_ASSETS_FILE } from './browser-task-assets.js'
+import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets.js'
 import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
@@ -217,7 +219,8 @@ export async function registerIpc(args: {
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
   }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')),
-  new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')), browserDemonstrations)
+  new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')), browserDemonstrations,
+  new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE))))
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
@@ -908,6 +911,35 @@ export async function registerIpc(args: {
   handleWithEvent('browser:getDemonstration', async (event, id: string) => {
     requireTrustedSender('browser:getDemonstration', event)
     return await browsers.getDemonstration(id)
+  })
+  handleWithEvent('browser:getTaskAssets', async (event, id: string) => {
+    requireTrustedSender('browser:getTaskAssets', event)
+    return await browsers.getTaskAssets(id)
+  })
+  handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
+    requireTrustedSender('browser:importTaskAsset', event)
+    return await browsers.importTaskAsset(id, name)
+  })
+  handleWithEvent('browser:saveTaskAssetDraft', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
+    requireTrustedSender('browser:saveTaskAssetDraft', event)
+    return await browsers.saveTaskAssetDraft(id, assetId, revision, content)
+  })
+  handleWithEvent('browser:saveTaskAssetVersion', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
+    requireTrustedSender('browser:saveTaskAssetVersion', event)
+    return await browsers.saveTaskAssetVersion(id, assetId, revision, content)
+  })
+  handleWithEvent('browser:locateTaskAssetStep', async (event, id: string, assetId: string, revision: number, stepId: string) => {
+    requireTrustedSender('browser:locateTaskAssetStep', event)
+    return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
+  })
+  handleWithEvent('browser:runTaskAsset', async (event, input: BrowserTaskAssetRunInput) => {
+    requireTrustedSender('browser:runTaskAsset', event)
+    if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
+    return await browsers.runTaskAsset(input)
+  })
+  handleWithEvent('browser:stopTaskAsset', async (event, id: string, runId: string) => {
+    requireTrustedSender('browser:stopTaskAsset', event)
+    return await browsers.stopTaskAsset(id, runId)
   })
   handleWithEvent('browser:answerAppLink', async (event, id: string, allow: boolean, remember: boolean) => {
     requireTrustedSender('browser:answerAppLink', event)

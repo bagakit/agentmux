@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
 import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
+import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../src/main/browser-task-assets.js'
+import type { BrowserTaskAsset, BrowserTaskContent } from '../src/shared/browser-task-assets.js'
 import type { BrowserDemonstrationDocument, BrowserDemonstrationDraft } from '../src/shared/browser-demonstration.js'
 
 /**
@@ -163,7 +165,7 @@ function fakeWindow(): any {
 }
 
 async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore,
-  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder): Promise<{
+  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -181,7 +183,7 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal, evidence, results, demonstrations)
+  }, journal, evidence, results, demonstrations, assets)
   await manager.create('b1', 'https://example.invalid/', workspaceId)
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
@@ -1534,5 +1536,218 @@ describe('durable result via the actual Manager → dispatch → runner chain', 
       createDispatch.mockImplementation(() => async (name, args) => { dispatchCalls.push({ name, args }); return `dispatched:${name}` })
       await rm(directory, { recursive: true, force: true })
     }
+  }, 30_000)
+})
+
+describe('versioned task assets via the actual Browser Manager', () => {
+  async function fixture() {
+    const directory = mkdtempSync(join(tmpdir(), 'amx-task-assets-owner-'))
+    const recorder = new BrowserDemonstrationRecorder(new BrowserDemonstrationFileStore(join(directory, 'drafts.json')))
+    const assets = new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(directory, 'assets.json')))
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json')))
+    const browser = await managerWithBrowser(journal, new BrowserStepEvidenceStore(join(directory, 'evidence')),
+      new BrowserResultArtifactStore(join(directory, 'results')), 'workspace-1', recorder, assets)
+    const draft = await recorder.start({ browserId: 'b1', navigationId: 'nav-1', url: 'https://example.invalid/' })
+    recorder.noteNativeInput({ browserId: 'b1', navigationId: draft.navigationId, type: 'mouseDown' })
+    await recorder.recordBrowserDemonstration({ browserId: 'b1', navigationId: draft.navigationId,
+      kind: 'click', isTrusted: true, target: { role: 'button', name: 'Review preferences', ordinal: 1, count: 1 } })
+    await recorder.stop('b1')
+    const imported = await browser.manager.importTaskAsset('b1', 'Preferences task')
+    return { ...browser, directory, journal, assets, recorder, imported,
+      close: async () => { browser.manager.dispose(); await rm(directory, { recursive: true, force: true }) } }
+  }
+  const snapshot = () => ({ navigationId: 'nav-1', title: 'Preferences', url: 'https://example.invalid/',
+    observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [],
+    nodes: [{ ref: '@e1', role: 'button', name: 'Review preferences' }, { ref: '@e2', role: 'text input', name: 'Private value' }] })
+  function pageDispatch(onClick: () => Promise<unknown> = async () => true) {
+    return async (name: string) => name === 'pageInfo' ? { url: 'https://example.invalid/' }
+      : name === 'snapshot' ? snapshot() : name === 'click' ? await onClick() : true
+  }
+  async function version(f: Awaited<ReturnType<typeof fixture>>, content: BrowserTaskContent = {
+    ...f.imported.draft, steps: f.imported.draft.steps.map(step => ({ ...step, reviewed: true }))
+  }): Promise<BrowserTaskAsset> {
+    return await f.manager.saveTaskAssetVersion('b1', f.imported.id, f.imported.revision, content)
+  }
+
+  it('imports only the actual Main draft, preserves saved versions, and projects real running progress before the call returns', async () => {
+    const f = await fixture()
+    let finishClick!: () => void
+    const held = new Promise<void>(resolve => { finishClick = resolve })
+    try {
+      expect(f.imported).toMatchObject({ browserId: 'b1', sourceRecordingId: expect.any(String), versions: [],
+        draft: { steps: [expect.objectContaining({ reviewed: false, target: { role: 'button', name: 'Review preferences', ordinal: 1, count: 1 } })] } })
+      const saved = await version(f)
+      const edited = await f.manager.saveTaskAssetDraft('b1', saved.id, saved.revision, { ...saved.draft, name: 'New draft', steps: [] })
+      expect(edited.versions).toEqual(saved.versions)
+      await expect(f.manager.saveTaskAssetVersion('b1', saved.id, saved.revision, saved.draft)).rejects.toThrow('changed')
+      f.manager.returnControl('b1')
+      createDispatch.mockImplementationOnce(() => pageDispatch(async () => { await held; return true }))
+      const running = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      await expect.poll(() => f.sentEvents().filter(event => event.browser?.taskAssets?.runs.some((run: any) => run.status === 'running')).length).toBeGreaterThan(0)
+      await expect.poll(() => f.sentEvents().at(-1)?.browser.driving).toBe(true)
+      finishClick()
+      const run = await running
+      expect(run).toMatchObject({ status: 'completed', nextStep: 1 })
+      expect(run.operationIds).toHaveLength(1)
+      expect(run.operationIds[0]).not.toBe(run.id)
+      expect(run.operationIds[0]).not.toBe(saved.id)
+      expect(await f.journal.get(run.operationIds[0]!)).toMatchObject({ id: run.operationIds[0], browserId: 'b1', phase: 'completed' })
+      await expect.poll(() => f.sentEvents().at(-1)?.browser.taskAssets?.runs.at(-1)?.status).toBe('completed')
+    } finally { finishClick(); await f.close() }
+  }, 30_000)
+
+  it('an initial checkpoint owns real idle control, refuses implicit continuation, and continues once after explicit return', async () => {
+    const f = await fixture()
+    try {
+      const saved = await version(f, { ...f.imported.draft, steps: [
+        { id: 'human-checkpoint', kind: 'checkpoint', url: f.imported.draft.url, reviewed: true },
+        ...f.imported.draft.steps.map(step => ({ ...step, reviewed: true }))
+      ] })
+      f.manager.returnControl('b1')
+      const paused = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      expect(paused).toMatchObject({ status: 'waiting-human', nextStep: 1, operationIds: [] })
+      expect(f.sentEvents().at(-1)?.browser.activity).toMatchObject({ operation: null, control: 'human' })
+      await expect(f.manager.runScript('b1', 'return 1')).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
+      await expect(f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} })).rejects.toThrow('Return control explicitly')
+      f.manager.returnControl('b1')
+      createDispatch.mockImplementationOnce(() => pageDispatch())
+      const completed = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} })
+      expect(completed).toMatchObject({ id: paused.id, status: 'completed', nextStep: 2 })
+      expect(completed.operationIds).toHaveLength(1)
+      await expect(f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} })).rejects.toThrow('cannot be continued automatically')
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('stops the associated real operation while retaining an unrelated healthy Browser operation', async () => {
+    const f = await fixture()
+    let releaseOther!: () => void
+    let releaseTask!: () => void
+    let activeTask: ReturnType<BrowserViewManager['runTaskAsset']> | undefined
+    let healthyOther: ReturnType<BrowserViewManager['runScript']> | undefined
+    const otherHeld = new Promise<void>(resolve => { releaseOther = resolve })
+    const taskHeld = new Promise<void>(resolve => { releaseTask = resolve })
+    try {
+      const saved = await version(f)
+      await f.manager.create('b2', 'https://example.invalid/', 'workspace-1')
+      f.manager.returnControl('b1')
+      createDispatch.mockImplementationOnce(() => pageDispatch(async () => { await taskHeld; return true }))
+      activeTask = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      await expect.poll(() => f.sentEvents().filter(event => event.browser?.id === 'b1' && event.browser.driving).length).toBeGreaterThan(0)
+      createDispatch.mockImplementationOnce(() => async () => { await otherHeld; return true })
+      healthyOther = f.manager.runScript('b2', "await waitForElement('Other pending fact'); return 82")
+      await expect.poll(() => f.sentEvents().filter(event => event.browser?.id === 'b2' && event.browser.activity?.operation?.phase === 'waiting').length).toBeGreaterThan(0)
+      const taskRun = (await f.assets.state('b1')).runs.at(-1)!
+      await expect(f.manager.stopTaskAsset('b2', taskRun.id)).rejects.toThrow('does not belong')
+      const stopped = await f.manager.stopTaskAsset('b1', taskRun.id)
+      expect(stopped).toMatchObject({ id: taskRun.id, status: 'stopped' })
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b1').at(-1)?.browser.activity.operation.phase).toBe('stopped')
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b2').at(-1)?.browser.activity.operation.phase).toBe('waiting')
+      expect((await activeTask).status).toBe('stopped')
+      releaseOther(); releaseTask()
+      expect(await healthyOther).toMatchObject({ result: 82, outcome: { kind: 'completed' } })
+      await expect(f.manager.saveTaskAssetDraft('b2', saved.id, saved.revision, saved.draft)).rejects.toThrow('does not belong')
+    } finally {
+      releaseOther(); releaseTask()
+      await Promise.allSettled([activeTask, healthyOther])
+      await f.close()
+    }
+  }, 30_000)
+
+  it('keeps temporary parameters, escaped errors and page echoes out of every actual durable owner', async () => {
+    const f = await fixture()
+    const secret = 'sentinel-PRIVATE-"\\\n-parameter'
+    let filled = false
+    let capturedContext: BrowserPageContext | undefined
+    try {
+      const saved = await version(f, { ...f.imported.draft, parameters: [{ key: 'private-value', label: 'Private value', secret: true }],
+        steps: [{ id: 'fill-private', kind: 'fill', url: f.imported.draft.url, reviewed: true, parameterKey: 'private-value',
+          target: { role: 'text input', name: 'Private value', ordinal: 1, count: 1 } },
+          ...f.imported.draft.steps.map(step => ({ ...step, reviewed: true }))] })
+      f.manager.returnControl('b1')
+      const dispatch = (context: BrowserPageContext) => {
+        capturedContext = context
+        return async (name: string, args: unknown[]) => {
+          if (name === 'pageInfo') return { url: f.imported.draft.url }
+          if (name === 'snapshot') {
+            const page = snapshot()
+            if (filled) page.nodes.push({ ref: '@e3', role: 'text', name: `Echo ${JSON.stringify(secret)}` })
+            await context.writeLedger({ url: page.url, entries: [{ ref: '@e3', role: 'button', name: secret, nth: 1 }] })
+            return page
+          }
+          if (name === 'fillInput') { expect(args).toEqual(['@e2', secret]); filled = true; return secret }
+          if (name === 'click') throw new Error(`Page echoed ${JSON.stringify(secret)}`)
+          return true
+        }
+      }
+      createDispatch.mockImplementationOnce(dispatch).mockImplementationOnce(dispatch)
+      const run = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: { 'private-value': secret } })
+      expect(run).toMatchObject({ status: 'failed', nextStep: 1 })
+      expect(run.operationIds).toHaveLength(2)
+      const failed = await f.journal.get(run.operationIds[1]!)
+      expect(failed?.summary).toContain('Raw error text is withheld')
+      expect(failed?.steps.find(step => step.method === 'click')?.summary).toContain('Raw error text is withheld')
+      const observed = failed?.steps.find(step => step.method === 'snapshot')!
+      expect(observed.evidenceWarning).toEqual(expect.stringContaining('private invocation parameters'))
+      expect(observed.evidence).toBeUndefined()
+      expect(await capturedContext!.readLedger()).toBeNull()
+      const files = await import('node:fs/promises').then(async fs => {
+        const names = await fs.readdir(f.directory, { recursive: true })
+        const data: string[] = []
+        for (const name of names.filter(name => name.endsWith('.json'))) data.push(await fs.readFile(join(f.directory, name), 'utf8'))
+        return data
+      })
+      expect(files.length).toBeGreaterThan(2)
+      const durable = files.join('\n')
+      expect(durable).not.toContain(secret)
+      expect(durable).not.toContain(JSON.stringify(secret).slice(1, -1))
+      expect(durable).not.toContain('Echo ')
+      createDispatch.mockImplementationOnce(() => async () => { throw new Error('Ordinary diagnostic retained') })
+      await f.manager.runScript('b1', 'await click("@e8")')
+      expect((await f.journal.list()).at(-1)?.summary).toContain('Ordinary diagnostic retained')
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('inspects the current selected DOM owner before cancellation and releases it when verification rejects', async () => {
+    const f = await fixture()
+    try {
+      const raw = { pageTitle: 'Fixture', pageUrl: 'https://example.invalid/', tagName: 'button', role: 'button',
+        accessibleName: 'Actual target', selector: 'button', text: 'Actual target', nearbyText: [], attributes: {},
+        html: '<button>Actual target</button>', rectViewport: { x: 0, y: 0, width: 200, height: 50 },
+        rectPage: { x: 0, y: 0, width: 200, height: 50 }, isFixed: false }
+      f.contents.executeJavaScriptInIsolatedWorld.mockImplementation(async (_world: number, scripts: { code: string }[]) =>
+        scripts[0]!.code.includes('Select an element') ? raw : true)
+      const inspect = vi.fn(async (revision: number) => {
+        expect(f.contents.executeJavaScriptInIsolatedWorld.mock.calls.at(-1)?.[1][0].code).toContain('const retainTarget = true')
+        expect(revision).toBeGreaterThan(0)
+        throw new Error('Actual backend is ambiguous')
+      })
+      await expect(f.manager.selectElement('b1', inspect)).rejects.toThrow('Actual backend is ambiguous')
+      expect(inspect).toHaveBeenCalledOnce()
+      expect(f.contents.executeJavaScriptInIsolatedWorld.mock.calls.at(-1)?.[1][0].code).toContain('const barrier =')
+    } finally { await f.close() }
+  })
+
+  it('hydrates retained versions and interrupted cursors through Main without attaching or replaying', async () => {
+    const f = await fixture()
+    try {
+      const saved = await version(f)
+      const document = JSON.parse(await readFile(join(f.directory, 'assets.json'), 'utf8'))
+      document.runs = [{ id: 'uncertain-run', assetId: saved.id, version: 1, browserId: 'b1', nextStep: 0,
+        status: 'running', operationIds: [], startedAt: 1, updatedAt: 2 }]
+      await writeFile(join(f.directory, 'assets.json'), JSON.stringify(document))
+      f.manager.dispose()
+      const restored = await managerWithBrowser(undefined, undefined, undefined, 'workspace-1', undefined,
+        new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(f.directory, 'assets.json'))))
+      try {
+        const state = await restored.manager.getTaskAssets('b1')
+        expect(state.assets).toEqual([saved])
+        expect(state.runs).toEqual([expect.objectContaining({ id: 'uncertain-run', status: 'interrupted', nextStep: 0, operationIds: [] })])
+        expect(restored.contents.debugger.isAttached()).toBe(false)
+        expect(dispatchCalls).toEqual([])
+        expect(restored.sentEvents().at(-1)?.browser.taskAssets).toEqual(state)
+        await expect(restored.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {}, runId: 'uncertain-run' })).rejects.toThrow('cannot be continued automatically')
+        expect(await restored.manager.runScript('b1', 'return 75')).toMatchObject({ result: 75, outcome: { kind: 'completed' } })
+      } finally { restored.manager.dispose() }
+    } finally { await f.close() }
   }, 30_000)
 })
