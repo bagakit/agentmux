@@ -124,14 +124,20 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
       if (nextOpen === false) {
         const target = returnFocusRef.current
         returnFocusRef.current = null
-        if (restoreFocus !== false && target) {
+        if (restoreFocus !== false && current.open) {
           requestAnimationFrame(() => {
             if (stateRef.current.open) return
             const active = document.activeElement
             if (active instanceof HTMLElement && active !== document.body && !active.closest('[data-pmo-teams-topic-floating]')) return
-            if (target.primary && target.primary !== document.body && document.contains(target.primary)) {
+            if (target?.primary && target.primary !== document.body && document.contains(target.primary)) {
               target.primary.focus({ preventScroll: true })
-            } else target.onReturnFocus?.()
+            } else if (target?.onReturnFocus) target.onReturnFocus()
+            else {
+              const launcher = document.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button[aria-controls]')
+              if (launcher && !launcher.disabled && !launcher.closest('[hidden], [aria-hidden="true"], [inert], [disabled]')) {
+                launcher.focus({ preventScroll: true })
+              }
+            }
           })
         }
       }
