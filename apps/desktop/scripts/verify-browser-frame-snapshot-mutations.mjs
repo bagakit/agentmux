@@ -21,14 +21,16 @@ const cases = [
   ['changed-document-refs-published', snapshot, 'for (let index = nodes.length - 1; index >= 0; index -= 1) if (nodes[index]!.frameId === frameId) nodes.splice(index, 1)', 'void frameId'],
   ['same-session-loader-change-ignored', documents, 'frame.loaderId !== document.loaderId', 'false'],
   ['document-read-budget-removed', documents, 'facts.size >= MAX_BROWSER_FRAME_DOCUMENTS', 'false'],
-  ['explicit-AX-document-removed', snapshot, 'collectAxNodes(document.send, document.frameId)', 'collectAxNodes(document.send, null)'],
+  ['explicit-AX-document-removed', snapshot, 'collectAxNodes(document.sendCommand, document.frameId)', 'collectAxNodes(document.sendCommand, null)'],
   ['nearest-native-sender-overwritten-by-parent', documents, 'owner ??= owners.get(cursor.id)', 'owner = owners.get(cursor.id)'],
   ['empty-embedded-tree-silently-skipped', snapshot, "if (!root) throw new Error('The accessibility tree returned no document root. Retry snapshot().')", 'if (!root) continue'],
   ['wrong-native-AX-root-accepted', snapshot, "if (document.frameId !== null && root.frameId !== undefined && root.frameId !== document.frameId) throw new Error('The accessibility root belongs to a different document. Take a new snapshot().')", 'void root.frameId'],
   ['foreign-AX-subtree-misattributed', snapshot, 'if (node.frameId !== undefined && frameId !== null && node.frameId !== frameId) return', 'void node.frameId'],
   ['viewport-uses-main-document-layout', snapshot, 'snapshot.documents?.find((item) => item.frameId !== undefined && snapshot.strings?.[item.frameId] === frameId)', 'snapshot.documents?.[0]'],
   ['viewport-uses-main-realm', snapshot, 'contextId: realm.executionContextId, returnByValue: true', 'returnByValue: true'],
-  ['Main-supplement-enters-page-world', snapshot, 'expression: CURSOR_INTERACTIVE_EXPRESSION,\n    contextId: executionContextId,', 'expression: CURSOR_INTERACTIVE_EXPRESSION,'],
+  ['Main-supplement-enters-page-world', snapshot, 'expression: CURSOR_INTERACTIVE_EXPRESSION,\n      contextId: executionContextId,', 'expression: CURSOR_INTERACTIVE_EXPRESSION,'],
+  ['CSS-within-enters-page-world', snapshot, 'resolveWithinSelector(scopedSend, query.within, await mainObservationContext(mainDocument?.frameId))', 'resolveWithinSelector(scopedSend, query.within)'],
+  ['clickable-failure-reported-as-empty-success', snapshot, "if (evaluated.exceptionDetails || typeof evaluated.result?.value !== 'string') throw new Error('Clickable evaluation did not return an observed result')\n    const labels = JSON.parse(evaluated.result.value) as string[]", "const labels = JSON.parse(evaluated.result?.value ?? '[]') as string[]"],
   ['nested-discovery-warning-removed', cdp, 'if (this.frameSenders.has(sessionId) && this.gone === null) this.frameAttachFailure = `Nested frame discovery failed for CDP session ${sessionId} (${error instanceof Error ? error.message : String(error)}). Retry snapshot() to observe embedded documents.`', 'void error'],
   ['workers-advertised-as-frame-documents', cdp, "if (!sessionId || targetInfo?.type !== 'iframe') return", 'if (!sessionId) return']
 ]
