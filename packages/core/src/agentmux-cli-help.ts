@@ -121,8 +121,8 @@ IDs and input paths are literal data, including --help; no shell or environment 
 performed. List returns items and partial scope, including an empty list. Get returns one item;
 add/update report the committed item and changed; remove reports the removed ID.
 No Agent caller or open View is required. An unavailable host returns CONTROL_UNAVAILABLE;
-the CLI never writes configuration files. A timeout does not prove a commit: read before
-deciding what to do next.${resource === 'executors' ? `\n\n${EXECUTOR_REFRESH_HELP}` : ''}`
+the CLI never writes configuration files. Without a complete success reply, the commit result
+is unconfirmed. Read current state before deciding; do not automatically retry the write.${resource === 'executors' ? `\n\n${EXECUTOR_REFRESH_HELP}` : ''}`
 }
 
 const SETTINGS_AUTHORITY = `Settings use the current Unix user's local configuration authority. Explicitly enabling
@@ -233,8 +233,8 @@ Values are positional data. Quote spaces; a literal --help in the value position
 No Agent caller or open View is required. The Desktop host must be running: an unavailable
 host returns CONTROL_UNAVAILABLE; the CLI never writes its configuration files directly.
 Success and failure use versioned JSON receipts. Set reports the committed entry only after
-persistence succeeds. A timeout does not prove whether a write committed; read before deciding
-what to do next. Run settings executors --help or settings prompts --help for resource input,
+persistence succeeds. Without a complete success reply, the commit result is unconfirmed.
+Read current state before deciding; do not automatically retry the write. Run settings executors --help or settings prompts --help for resource input,
 settings browser links --help for remembered link choices, or settings workspaces --help
 for project registration.
 ${SETTINGS_AUTHORITY}`],
@@ -266,8 +266,8 @@ positional data, so --help in the value position is sent literally; quote spaces
 The running Desktop host validates and persists the value before returning its committed
 entry. Unsupported keys return UNSUPPORTED_SETTING; invalid values return INVALID_SETTING_VALUE.
 No Agent caller or View is required. An unavailable host returns CONTROL_UNAVAILABLE without
-writing any configuration file. A timeout does not establish a committed result: inspect
-settings get before deciding what to do next.
+writing any configuration file. Without a complete success reply, the commit result is
+unconfirmed. Inspect settings get for current state; do not automatically retry the write.
 ${SETTINGS_AUTHORITY}`],
   ['whoami', `Report your own coordinates and available capabilities
 
@@ -973,7 +973,8 @@ key, current value, default, scalar kind and optional enum; partial means other 
 are not yet exposed. Use the returned exact keys and legal values. Success reports the
 committed entry after persistence. No managed Agent caller or open View is required.
 An offline host returns CONTROL_UNAVAILABLE; never substitute direct configuration-file
-writes. A timeout does not prove whether a write committed: read before deciding the next action.
+writes. Without a complete success reply, the commit result is unconfirmed. Read current state
+before deciding; do not automatically retry the write.
 ${SETTINGS_AUTHORITY}
 
 Browser links list returns exact scheme/choice entries. Forget atomically deletes the answer

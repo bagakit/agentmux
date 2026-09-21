@@ -972,9 +972,9 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     ).toBeGreaterThan(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
   })
 
-  it('慢的是「要等外面」的那些，快的是只读/只动本地状态的', () => {
-    // 判据落在**语义**上：等进程起来、等 composer 就绪、等 Provider 重建会话、等进程收尾——这四类要长
-    // 预算；inspect/focus/arrange/promote/list 两秒内不返回就是真出事了。
+  it('按操作语义穷尽分配等待预算，持久化写入沿用长档', () => {
+    // 等进程、composer、Provider 或持久化写入完成用长档；只读、布局和信号用短档。
+    // 到期说明未及时得到完整回复，不证明 owner 已坏或写入未提交。
     //
     // 为什么是一张 `Record<Operation, …>` 而不是两个 `as const` 数组：数组是**手抄的清单**，往联合里加
     // 一个操作时它不在任何一个数组里，这一条照旧全绿，新操作的档位就成了没人守的自由变量。实测过：
@@ -996,7 +996,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       send: 'long',
       resume: 'long',
       stop: 'long',
-      // 只读或只动本地状态的。
+      // 只读、本地布局与信号通常用短档；持久化写入另需长档。
       'inspect.client': 'short',
       'inspect.tab': 'short',
       'inspect.region': 'short',
@@ -1013,15 +1013,15 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'diagnostics.crash-log.reveal': 'short',
       'settings.hosts.list': 'short',
       'settings.hosts.test': 'long',
-      'settings.set': 'short',
+      'settings.set': 'long',
       'settings.browser.links.list': 'short',
-      'settings.browser.links.forget': 'short',
-      'settings.workspaces.add': 'short',
+      'settings.browser.links.forget': 'long',
+      'settings.workspaces.add': 'long',
       'settings.resource.list': 'short',
       'settings.resource.get': 'short',
-      'settings.resource.add': 'short',
-      'settings.resource.update': 'short',
-      'settings.resource.remove': 'short',
+      'settings.resource.add': 'long',
+      'settings.resource.update': 'long',
+      'settings.resource.remove': 'long',
       // interrupt 拿短预算是**判过**的：它只往 daemon 发一次信号（ctxmux-run-adapter.ts 的
       // `interrupt()` 就一个 await），不像 stop 要等 attachRecoverableStop 真的收尾。
       interrupt: 'short',

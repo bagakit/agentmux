@@ -62,6 +62,16 @@ async function runWithStdin(
 }
 
 describe('agentmux CLI discovery', () => {
+  it('explains unconfirmed writes without claiming current reads prove a prior commit', async () => {
+    for (const args of [['settings', '--help'], ['settings', 'set', '--help'], ['settings', 'prompts', '--help'], ['--skill']]) {
+      const help = await run(args)
+      expect(help.length).toBeGreaterThan(0)
+      const prose = help.replace(/\s+/g, ' ')
+      expect(prose).toContain('Without a complete success reply, the commit result is unconfirmed')
+      expect(prose).toContain('do not automatically retry the write')
+    }
+  })
+
   it('exposes only the intent-based Control surface', async () => {
     const help = await run(['--help'])
     expect(help).toContain('typed local Agent and Desktop control')

@@ -11,6 +11,7 @@ import {
   isLongAgentMuxControlOperation
 } from '@agentmux/core/control'
 import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
+import type { ContinuousProgressInputRequest } from '../src/shared/continuous-progress.js'
 
 function inspectRequest(requestId: string): AgentMuxControlRequest {
   return {
@@ -38,6 +39,30 @@ const AGMUX_CONTROL_SCHEMA_VERSION = AGENTMUX_CONTROL_SCHEMA_VERSION
 afterEach(() => vi.useRealTimers())
 
 describe('Desktop Control IPC bridge', () => {
+  it('uses the existing short budget for Desktop-only observeInput and rejects its late reply', async () => {
+    vi.useFakeTimers()
+    const request: ContinuousProgressInputRequest = { requestId: 'observe-timeout', operation: 'continuous-progress.observeInput',
+      control: { kind: 'agent', hostId: 'local', agentSessionId: 'owned-session', run: { runId: 'owned-run' } } }
+    const cancellations: unknown[] = [], sent: unknown[] = []
+    const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
+      sendRequest: input => sent.push(input), sendCancellation: input => cancellations.push(input) })
+    let settled = false
+    const pending = bridge.execute(request).then(value => { settled = true; return { ok: true, value } },
+      error => { settled = true; return { ok: false, error } })
+    try {
+      expect(sent).toEqual([request])
+      await vi.advanceTimersByTimeAsync(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS - 1)
+      expect(settled).toBe(false); expect(cancellations).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(cancellations).toEqual([{ requestId: request.requestId, code: 'CONTROL_TIMEOUT', message: 'Desktop Control request timed out.' }])
+      expect(settled).toBe(true)
+      expect(await pending).toMatchObject({ ok: false, error: { code: 'CONTROL_TIMEOUT' } })
+      expect(bridge.accept({ requestId: request.requestId, ok: true,
+        result: { operation: request.operation, control: request.control, occupied: false } })).toBe(false)
+      expect(cancellations).toHaveLength(1)
+    } finally { bridge.dispose(); await pending }
+  })
+
   it('cancels the Renderer transaction when a long request times out and ignores its late response', async () => {
     vi.useFakeTimers()
     const sent: unknown[] = []
@@ -126,8 +151,8 @@ describe('Control 等待预算只有一处', () => {
   })
 
   it('慢的是「要等外面」的那些，快的是只读/只动本地状态的', () => {
-    // 判据落在**语义**上而不是抄一份清单：等进程起来、等 composer 就绪、等 Provider 重建会话、
-    // 等进程收尾——这四类要长预算；inspect/focus/arrange/list 两秒内不返回就是真出事了。
+    // 等进程、composer、Provider 或进程收尾用长档；只读、布局和信号用短档。
+    // 到期说明未及时得到完整回复，不证明 owner 已坏。
     for (const operation of ['open.agent', 'open.terminal', 'open.browser', 'send', 'resume', 'stop'] as const) {
       expect(isLongAgentMuxControlOperation(operation), `${operation} 要等外面，必须走长预算`).toBe(true)
     }
@@ -160,7 +185,7 @@ describe('Control 等待预算只有一处', () => {
       expect(
         delay,
         `setTimeout 的延时位写着 \`${delay}\`，不是从 @agentmux/core/control 那一处取的`
-      ).toBe('agentMuxControlTimeoutMs(request.operation)')
+      ).toBe("agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation)")
     }
     // 自检：抽取器真的找到了那个调用点，否则上面那个循环跑零次、恒绿。
     expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那条守卫是死代码').toBe(1)
