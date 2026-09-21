@@ -6,12 +6,18 @@ import { ContinuousProgressPanel } from './ContinuousProgressPanel'
 import { ComposerTextarea } from './ComposerTextarea'
 import { agentProviderLabel } from './AgentProviderIcon'
 
-/** Existing Main loop owner is observed only for this Session. Closing the leaf does not stop it. */
-export function ContinuousProgressControl({ session }: { session: Extract<SessionSnapshot, { kind: 'agent' }> }) {
+export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
+
+/** Existing Main loop owner is observed only for this Session, even while its mailbox page is hidden. */
+export function ContinuousProgressControl({ session, onStatusChange }: {
+  session: Extract<SessionSnapshot, { kind: 'agent' }>
+  onStatusChange?: (status: ContinuousProgressStatus) => void
+}) {
   const target = useMemo(() => ({ hostId: session.hostId, agentSessionId: session.id,
     providerId: session.providerId, workspacePath: session.workspacePath }),
   [session.hostId, session.id, session.providerId, session.workspacePath])
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
+  const [observedTarget, setObservedTarget] = useState<typeof target>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [interval, setInterval] = useState('30')
@@ -31,9 +37,10 @@ export function ContinuousProgressControl({ session }: { session: Extract<Sessio
           loop.providerId !== target.providerId || loop.workspacePath !== target.workspacePath) return
       updates.current++
       setLoops(previous => [...previous.filter(value => value.loopId !== loop.loopId), loop])
+      setObservedTarget(target)
     })
     void api.continuousProgress.list(target).then(result => {
-      if (alive && updates.current === before) setLoops(result)
+      if (alive && updates.current === before) { setLoops(result); setObservedTarget(target) }
     }, failure => { if (alive) setError(failure instanceof Error ? failure.message : String(failure)) })
     return () => { alive = false; dispose() }
   }, [target])
@@ -43,19 +50,22 @@ export function ContinuousProgressControl({ session }: { session: Extract<Sessio
     setBusy(true)
     try {
       const result = await action()
-      if (current.current === captured && updates.current === before) setLoops(previous => [...previous.filter(loop => loop.loopId !== result.loopId), result])
+      if (current.current === captured && updates.current === before) {
+        setLoops(previous => [...previous.filter(loop => loop.loopId !== result.loopId), result]); setObservedTarget(target)
+      }
       if (current.current === captured) setError(undefined)
     } catch (failure) { if (current.current === captured) setError(failure instanceof Error ? failure.message : String(failure)) }
     finally { if (current.current === captured) setBusy(false) }
   }
-  const loop = loops.find(loop => loop.status !== 'stopped')
-  const displayed = loop ?? loops.at(-1)
+  const loop = observedTarget === target ? loops.find(loop => loop.status !== 'stopped') : undefined
+  const displayed = loop ?? (observedTarget === target ? loops.at(-1) : undefined)
+  const status: ContinuousProgressStatus = error || displayed?.lastOutcome === 'unknown' || observedTarget !== target
+    ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
+  useEffect(() => { onStatusChange?.(status) }, [onStatusChange, status])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
-  return <details className="continuous-progress-control">
-    <summary><span className="continuous-progress-control__label">↻ Continuous progress</span>
-      {error || displayed?.lastOutcome === 'unknown' ? <span className="continuous-progress-control__status">Unconfirmed</span>
-        : loop ? <span className="continuous-progress-control__status">{loop.status}</span> : null}
-    </summary>
+  return <div className="continuous-progress-control" data-progress-state={status}>
+    {!loop ? <h3>Continuous progress</h3> : null}
+    {status === 'inactive' ? <p>Not enabled.</p> : status === 'unconfirmed' ? <p role="status">Unconfirmed{observedTarget !== target && !error ? ' — waiting for loop status.' : '.'}</p> : null}
     <small className="continuous-progress-control__target">{agentProviderLabel(session.providerId)} · {target.hostId} · {target.agentSessionId}<br />{target.workspacePath}</small>
     {error ? <p role="status">Automatic progress is unconfirmed. Manual input follows terminal readiness. {error}</p> : null}
     {displayed?.taskSource ? <small>Task source: {displayed.taskSource.ownerId}<br />{displayed.taskSource.root}<br />{displayed.taskSource.readerPath}</small> : null}
@@ -76,5 +86,5 @@ export function ContinuousProgressControl({ session }: { session: Extract<Sessio
         </> : <small>Periodic continuation only. This loop is not bound to a business task source.</small>}
         <button type="submit" className="small-button" disabled={busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
       </form>}
-  </details>
+  </div>
 }

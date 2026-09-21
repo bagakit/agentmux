@@ -207,8 +207,11 @@
 
 .composer-mailbox__dot { display: inline-block; width: var(--sp-2); height: var(--sp-2); flex-shrink: 0; border-radius: 50%; background: var(--red); }
 .composer__mailbox > .composer-mailbox__dot { position: absolute; top: var(--sp-1); right: 0; }
-.composer-mailbox__folders { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-.composer-mailbox__folders > button { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-7); padding: 0 var(--sp-3); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
+.composer-mailbox__progress { position: absolute; bottom: 0; left: 0; color: var(--text-2); background: var(--surface-2); border-radius: var(--radius-sm); }
+.composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
+.composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }
+.composer-mailbox__folders { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-1); margin-bottom: var(--sp-3); }
+.composer-mailbox__folders > button { display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: 0 var(--sp-1); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
 .composer-mailbox__folders > button[aria-selected='true'] { background: var(--surface-3); color: var(--text); }
 .composer-mailbox__folders > button:focus-visible { outline: 1px solid var(--focus-line); }
 .composer-mailbox > [role='tabpanel'] > p { margin: var(--sp-3); color: var(--text-3); }
