@@ -110,14 +110,28 @@
 .recent-focus__playhead--ruler::before { position: absolute; top: 0; left: -3px; width: 7px; height: 5px; background: var(--green); clip-path: polygon(0 0, 100% 0, 50% 100%); content: ''; }
 .recent-focus__message { position: absolute; top: 4px; z-index: 3; display: grid; place-items: center; width: 14px; height: 15px; padding: 0; transform: translateX(-50%); border: 1px solid var(--text-3); border-radius: 2px; background: var(--surface-1); color: var(--text-2); cursor: pointer; }
 .recent-focus__message:hover, .recent-focus__message:focus-visible { color: var(--text); outline: 1px solid var(--green); }
+.recent-focus__message[data-message-author='agent'] { border-radius: 4px; color: var(--green); border-color: color-mix(in srgb, var(--green) 65%, var(--line)); }
 .recent-focus__tracks:has(.recent-focus__track) + .recent-focus__empty { display: none; }
 .recent-focus__empty { margin: 2px var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.recent-focus__message-preview { position: absolute; bottom: calc(100% + 6px); right: var(--sp-2); z-index: 6; width: min(420px, calc(100% - 16px)); max-height: min(320px, 50vh); overflow: auto; padding: var(--sp-2); border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); box-shadow: 0 4px 16px #0004; font-size: var(--fs-micro); }
+.recent-focus__message-preview { position: absolute; bottom: calc(100% + 6px); z-index: 6; box-sizing: border-box; width: min(332px, calc(100% - 16px)); max-height: min(440px, 60vh); overflow: auto; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: 0 4px 16px #0004; font-size: var(--fs-micro); }
+.recent-focus__message-preview[data-interactive='false'] { pointer-events: none; }
 .recent-focus__message-preview header { display: flex; align-items: center; gap: var(--sp-2); }
 .recent-focus__message-preview header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recent-focus__message-preview time { flex: 1; color: var(--text-3); white-space: nowrap; }
+.recent-focus__message-preview header > svg { flex: none; color: var(--green); }
+.recent-focus__message-preview time { flex: none; margin-left: auto; color: var(--text-3); white-space: nowrap; }
 .recent-focus__message-preview p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
 .recent-focus__message-preview > button { border: 1px solid var(--line); border-radius: 3px; background: var(--surface-1); color: var(--text-2); padding: 3px 6px; font: inherit; cursor: pointer; }
+.recent-focus__message-preview > button:disabled { opacity: .5; cursor: default; }
+.recent-focus__message-preview > button + button { margin-left: var(--sp-2); }
+.recent-focus__message-preview .recent-focus__message-caption, .recent-focus__message-preview .recent-focus__sender-run, .recent-focus__message-hint { color: var(--text-3); }
+.recent-focus__sender { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px var(--sp-2); margin: var(--sp-2) 0; }
+.recent-focus__sender dt { color: var(--text-3); }
+.recent-focus__sender dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text-2); }
+.recent-focus__sender small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font: var(--fs-micro) var(--font-mono); }
+.recent-focus__message-preview[data-interactive='false'] .recent-focus__sender dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-focus__message-body { border-top: 1px solid var(--line); padding-top: var(--sp-2); }
+.recent-focus__message-preview[data-interactive='false'] .recent-focus__message-body, .recent-focus__sender-work { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.recent-focus__message-preview .recent-focus__sender-link { display: inline-flex; align-items: center; gap: 4px; }
 
 .focus-pmo-attention { flex: none; display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
 

@@ -1,23 +1,25 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, MessageSquare, SquareTerminal, X } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, MessageSquare, SquareTerminal } from 'lucide-react'
 import type { AgentTimelineItem } from '@agentmux/core/timeline'
 import type { AgentFocusHistoryEntry } from '../lib/agent-focus'
 import type { FocusContext } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { FOCUS_TIMELINE_HEIGHT_MAX, FOCUS_TIMELINE_HEIGHT_MIN } from '../lib/focus-timeline-height'
 import { AgentAvatar } from './AgentAvatar'
+import { FocusMessagePreview } from './FocusMessagePreview'
+import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWorkSegment, localDateTime, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
 
 function clock(timestamp: number): string { return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
 function dateClock(timestamp: number): string { return new Date(timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 const NO_SEGMENTS: FocusTimeSegment[] = []
-const FocusTimeTrack = memo(function FocusTimeTrack({ context, segments, selected, window, now, onSelect, onPreview }: {
+const FocusTimeTrack = memo(function FocusTimeTrack({ context, segments, selected, window, now, onSelect, onPreview, onDismiss }: {
   context: FocusContext; segments: readonly FocusTimeSegment[]; selected: boolean; window: FocusTimeWindow; now: number
-  onSelect(id: string): void; onPreview(message: AgentTimelineItem): void
+  onSelect(id: string): void; onPreview(message: AgentTimelineItem, target: HTMLElement, interactive: boolean): void; onDismiss(messageId: string): void
 }) {
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
   const timeline = useAppStore(state => state.timelines[context.id])
-  const messages = useMemo(() => timeline?.items.filter(item => item.kind === 'user_message' && item.source === 'user' && item.authorAgentSessionId === undefined && item.createdAt >= window.start && item.createdAt <= window.end && item.createdAt <= now) ?? [], [timeline, window, now])
+  const messages = useMemo(() => timeline?.items.filter(item => item.kind === 'user_message' && item.source === 'user' && item.createdAt >= window.start && item.createdAt <= window.end && item.createdAt <= now) ?? [], [timeline, window, now])
   const position = focusTimePosition(now, window)
   const liveNow = context.processState === 'running' && position >= 0 && position <= 100
   const working = context.kind === 'agent' && context.processState === 'running' && context.state === 'working'
@@ -42,20 +44,24 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ context, segments, selecte
         aria-label={`Return to ${context.name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
         title={`${context.name} · ${context.workspaceName} · Focused ${dateClock(item.focusedAt)}${item.end === undefined ? ' · Next focus not recorded' : ''}`}
         onClick={() => onSelect(context.id)}><span>{clock(item.focusedAt)}</span></button>)}
-      {messages.map(message => <button key={message.id} type="button" className="recent-focus__message" data-message-id={message.id} data-message-at={message.createdAt}
-        style={{ left: `${focusTimePosition(message.createdAt, window)}%` }} aria-label={`Prompt in ${context.name} at ${clock(message.createdAt)}, sender not recorded`}
-        title={`${context.name} · ${dateClock(message.createdAt)} · Prompt · Sender not recorded\n${(message.content ?? message.title).slice(0, 160)}`} onClick={() => onPreview(message)}><MessageSquare size={10} /></button>)}
+      {messages.map(message => <button key={message.id} type="button" className="recent-focus__message" data-message-id={message.id} data-message-at={message.createdAt} data-message-author={message.authorAgentSessionId === undefined ? 'unknown' : 'agent'}
+        style={{ left: `${focusTimePosition(message.createdAt, window)}%` }} aria-label={message.authorAgentSessionId === undefined ? `Prompt in ${context.name} at ${clock(message.createdAt)}, sender not recorded` : `Agent message in ${context.name} at ${clock(message.createdAt)}, sender ${message.authorAgentSessionId}`}
+        title={`${context.name} · ${dateClock(message.createdAt)} · ${message.authorAgentSessionId === undefined ? 'Prompt · Sender not recorded' : `Agent message · Sender ${message.authorAgentSessionId}`}\n${(message.content ?? message.title).slice(0, 160)}`}
+        onMouseEnter={event => onPreview(message, event.currentTarget, false)} onMouseLeave={() => onDismiss(message.id)}
+        onFocus={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false) }} onBlur={() => onDismiss(message.id)}
+        onClick={event => onPreview(message, event.currentTarget, true)}>{message.authorAgentSessionId === undefined ? <MessageSquare size={10} /> : <Bot size={10} />}</button>)}
     </div>
   </div>
 })
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, contexts, onSelect }: {
-  entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]; onSelect(sessionId: string): void
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, contexts, lanes, hierarchy, onSelect }: {
+  entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
+  lanes?: readonly FocusProjectLane[]; hierarchy?: FocusHierarchyFacts; onSelect(sessionId: string): void
 }) {
   const [mode, setMode] = useState<'compact' | 'expanded' | 'collapsed'>('compact')
   const [hours, setHours] = useState<number>(4)
   const [anchor, setAnchor] = useState<number | null>(null)
   const [now, setNow] = useState(Date.now)
-  const [preview, setPreview] = useState<AgentTimelineItem | null>(null)
+  const [preview, setPreview] = useState<{ message: AgentTimelineItem; interactive: boolean; left: number } | null>(null)
   useEffect(() => {
     if (mode === 'collapsed') return
     let timer: ReturnType<typeof setInterval> | undefined
@@ -70,9 +76,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const saveHeight = useAppStore(state => state.setFocusTimelineHeight)
   const timelineRef = useRef<HTMLElement>(null)
   const headerRef = useRef<HTMLElement>(null)
-  const previewRef = useRef<HTMLDivElement>(null)
-  const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
-  const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
+  const closePreview = useCallback(() => setPreview(null), [])
+  const inspectMessage = useCallback((message: AgentTimelineItem, target: HTMLElement, interactive: boolean) => {
+    const bounds = timelineRef.current?.getBoundingClientRect()
+    const left = bounds ? Math.max(8, Math.min(target.getBoundingClientRect().left - bounds.left - 160, bounds.width - 340)) : 8
+    setPreview(current => !interactive && current?.interactive ? current : { message, interactive, left })
+  }, [])
+  const dismissMessage = useCallback((messageId: string) => setPreview(current => current?.message.id === messageId && !current.interactive ? null : current), [])
   const drag = useRef<{ y: number; height: number; next: number } | null>(null)
   const [draftHeight, setDraftHeight] = useState<number | null>(null)
   const [maximum, setMaximum] = useState(FOCUS_TIMELINE_HEIGHT_MAX)
@@ -118,15 +128,9 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const tracks = useMemo(() => focusTimeSegments(entries, range, now), [entries, range, now])
   const tickTimes = Array.from({ length: 5 }, (_, i) => range.start + (range.end - range.start) * i / 4)
   const position = focusTimePosition(now, range)
-  const previewContext = preview ? contexts.find(context => context.id === preview.agentSessionId) : undefined
-  useEffect(() => {
-    if (!preview || !previewContext) return
-    const previous = document.activeElement as HTMLElement | null
-    acquireOverlay(); previewRef.current?.focus()
-    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') setPreview(null) }
-    document.addEventListener('keydown', dismiss)
-    return () => { releaseOverlay(); document.removeEventListener('keydown', dismiss); if (previous?.isConnected) previous.focus() }
-  }, [preview, previewContext, acquireOverlay, releaseOverlay])
+  const previewContext = preview ? contexts.find(context => context.id === preview.message.agentSessionId) : undefined
+  const sender = preview?.message.authorAgentSessionId ? contexts.find(context => context.id === preview.message.authorAgentSessionId && context.kind === 'agent') : undefined
+  const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
   const inspectWindow = (next: number | null) => { setAnchor(next); setPreview(null) }
   return <section ref={timelineRef} style={{ height: mode === 'collapsed' ? 28 : height } as CSSProperties} className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-window-start={range.start} data-window-end={range.end}>
     {mode !== 'collapsed' ? <div className="recent-focus__resize" role="separator" tabIndex={0} aria-label="Resize Focus timeline" aria-orientation="horizontal" aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={height}
@@ -148,14 +152,11 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       <div className="recent-focus__canvas">
         <div className="recent-focus__ruler" aria-label="Focus time ruler"><span className="recent-focus__gutter">Context</span><div className="recent-focus__time-scale">{tickTimes.map((time, i) => <time key={i} style={{ left: `${focusTimePosition(time, range)}%` }}>{clock(time)}</time>)}{position >= 0 && position <= 100 ? <span className="recent-focus__playhead recent-focus__playhead--ruler" data-now={now} style={{ left: `${position}%` }} aria-label={`Current time ${clock(now)}`} /> : null}</div></div>
         <div className="recent-focus__tracks">
-          {contexts.map(context => <FocusTimeTrack key={context.id} context={context} segments={tracks.get(context.id) ?? NO_SEGMENTS} selected={context.id === currentSessionId} window={range} now={now} onSelect={onSelect} onPreview={setPreview} />)}
+          {contexts.map(context => <FocusTimeTrack key={context.id} context={context} segments={tracks.get(context.id) ?? NO_SEGMENTS} selected={context.id === currentSessionId} window={range} now={now} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} />)}
         </div>
         <p className="recent-focus__empty">No retained records in this window. Choose another time or return to Now.</p>
       </div>
     </div> : null}
-    {preview && previewContext ? <div ref={previewRef} tabIndex={-1} className="recent-focus__message-preview" role="dialog" aria-label="Message">
-      <header><strong>{previewContext.name}</strong><time>{dateClock(preview.createdAt)}</time><button type="button" className="icon-button" aria-label="Close message" onClick={() => setPreview(null)}><X size={12} /></button></header>
-      <p>Prompt · Sender not recorded</p><p>{preview.content ?? preview.title}</p><button type="button" onClick={() => { onSelect(preview.agentSessionId); setPreview(null) }}>Return to Context</button>
-    </div> : null}
+    {preview ? <FocusMessagePreview message={preview.message} recipient={previewContext} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} left={preview.left} onSelect={onSelect} onClose={closePreview} /> : null}
   </section>
 })
