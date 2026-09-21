@@ -97,7 +97,9 @@ describe('Needs you request panel', () => {
     const card = container.querySelector<HTMLElement>('[data-session-id="attention-a"]')
     expect(card).not.toBeNull()
     await act(async () => card!.click())
-    await act(async () => reviewButton().click())
+    const opener = reviewButton()
+    opener.focus()
+    await act(async () => opener.click())
     const request = container.querySelector('[aria-label="Agent permission request"]')
     expect(request?.getAttribute('data-request-id')).toBe('permission-a')
     const option = [...request!.querySelectorAll('button')].find(button => button.textContent?.trim() === label)
@@ -116,10 +118,95 @@ describe('Needs you request panel', () => {
     await act(async () => useAppStore.setState({ sessions: [{ ...completed, status: { state: 'working', source: 'native-hook', observedAt: 3 } }, neighbor] }))
     expect(container.querySelector('[data-request-id="permission-a"]')).toBeNull()
     expect(container.querySelector('.attention-request-panel__empty')?.textContent).toContain('All caught up')
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close request"]')!.click())
+    expect(opener.isConnected).toBe(false)
+    const close = container.querySelector<HTMLButtonElement>('[aria-label="Close request"]')!
+    close.focus()
+    await act(async () => close.click())
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
     expect(container.querySelector('.attention-request-panel')).toBeNull()
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="Search contexts"]'))
     expect(useAppStore.getState().mainSurface).toBe('agents')
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(permission.id)
     expect(useAppStore.getState().sessions[1]).toBe(neighbor)
+  })
+
+  it('keeps a later control focus when the request close callback runs', async () => {
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
+    await act(async () => container.querySelector<HTMLElement>('[data-session-id="attention-a"]')!.click())
+    const opener = reviewButton()
+    opener.focus()
+    await act(async () => opener.click())
+    const callbacks: FrameRequestCallback[] = []
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(callback => { callbacks.push(callback); return callbacks.length })
+    const close = container.querySelector<HTMLButtonElement>('[aria-label="Close request"]')!
+    close.focus()
+    await act(async () => close.click())
+    const laterControl = container.querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
+    laterControl.focus()
+    expect(callbacks).toHaveLength(1)
+    await act(async () => callbacks[0]!(0))
+    expect(document.activeElement).toBe(laterControl)
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
+    expect(useAppStore.getState().sessions).toEqual([session])
+  })
+
+  it('returns to a visible control after reviewing through the keyboard context menu', async () => {
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
+    await act(async () => container.querySelector<HTMLElement>('[data-session-id="attention-a"]')!.click())
+    const identity = container.querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
+    identity.focus()
+    await act(async () => identity.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'F10', shiftKey: true })))
+    const review = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Review request')
+    expect(review).toBeDefined()
+    review!.focus()
+    await act(async () => review!.click())
+    const panel = container.querySelector('.attention-request-panel')!
+    expect(panel).not.toBeNull()
+    expect(panel.contains(document.activeElement)).toBe(true)
+    expect(review!.isConnected).toBe(false)
+    const close = panel.querySelector<HTMLButtonElement>('[aria-label="Close request"]')!
+    close.focus()
+    await act(async () => close.click())
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="Search contexts"]'))
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
+    expect(useAppStore.getState().sessions).toEqual([session])
+  })
+
+  it('does not focus the old search when the user has already left Focus', async () => {
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
+    await act(async () => container.querySelector<HTMLElement>('[data-session-id="attention-a"]')!.click())
+    const opener = reviewButton()
+    opener.focus()
+    await act(async () => opener.click())
+    const { pendingInteraction: _answered, ...completed } = session
+    await act(async () => useAppStore.setState({ sessions: [{ ...completed, status: { state: 'working', source: 'native-hook', observedAt: 3 } }] }))
+    expect(opener.isConnected).toBe(false)
+    const callbacks: FrameRequestCallback[] = []
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(callback => { callbacks.push(callback); return callbacks.length })
+    const close = container.querySelector<HTMLButtonElement>('[aria-label="Close request"]')!
+    close.focus()
+    await act(async () => close.click())
+    await act(async () => useAppStore.getState().setMainSurface('workbench'))
+    expect(callbacks).toHaveLength(1)
+    await act(async () => callbacks[0]!(0))
+    expect(document.activeElement).toBe(document.body)
+    expect(useAppStore.getState().mainSurface).toBe('workbench')
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
+  })
+
+  it('returns to the search when Review was activated without first focusing its button', async () => {
+    await act(async () => root.render(createElement(GlobalFocusSurface)))
+    await act(async () => container.querySelector<HTMLElement>('[data-session-id="attention-a"]')!.click())
+    expect(document.activeElement).toBe(document.body)
+    await act(async () => reviewButton().click())
+    const panel = container.querySelector('.attention-request-panel')!
+    expect(panel.contains(document.activeElement)).toBe(true)
+    const close = panel.querySelector<HTMLButtonElement>('[aria-label="Close request"]')!
+    close.focus()
+    await act(async () => close.click())
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="Search contexts"]'))
+    expect(useAppStore.getState().sessions).toEqual([session])
   })
 })
