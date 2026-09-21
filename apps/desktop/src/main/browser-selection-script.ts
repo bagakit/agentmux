@@ -92,13 +92,14 @@ const ELEMENT_EXTRACT_SOURCE = `
   };
 `
 
-export function buildBrowserElementSelectionScript(revision: number, retainTarget = false): string {
+export function buildBrowserElementSelectionScript(revision: number, inspectionToken?: string): string {
   return `(() => {
   'use strict';
   const stateKey = ${JSON.stringify(SELECTION_STATE_KEY)};
   const hostAttribute = ${JSON.stringify(SELECTION_HOST_ATTRIBUTE)};
   const revision = ${revision};
-  const retainTarget = ${retainTarget};
+  const inspectionToken = ${JSON.stringify(inspectionToken ?? null)};
+  const retainTarget = ${Boolean(inspectionToken)};
   const previous = globalThis[stateKey];
   if (previous && Number.isInteger(previous.revision) && previous.revision >= revision) return null;
   if (previous && typeof previous.cancel === 'function') previous.cancel();
@@ -180,7 +181,7 @@ export function buildBrowserElementSelectionScript(revision: number, retainTarge
       event.stopPropagation();
       settle(null);
     };
-    const state = { revision, selectedTarget: null, cancel: () => { state.selectedTarget = null; if (settled) cleanup(); else settle(null); } };
+    const state = { revision, inspectionToken, selectedTarget: null, cancel: () => { state.selectedTarget = null; if (settled) cleanup(); else settle(null); } };
     globalThis[stateKey] = state;
     document.addEventListener('pointermove', onPointerMove, true);
     document.addEventListener('click', onClick, true);
@@ -189,9 +190,9 @@ export function buildBrowserElementSelectionScript(revision: number, retainTarge
 })()`
 }
 
-/** Evaluated only in a proved isolated context while the Main selection owner is current. */
-export function buildSelectedBrowserElementExpression(revision: number): string {
-  return `(() => { const state = globalThis[${JSON.stringify(SELECTION_STATE_KEY)}]; return state?.revision === ${revision} && state.selectedTarget instanceof Element && state.selectedTarget.ownerDocument === document ? state.selectedTarget : undefined; })()`
+/** Non-default main-document candidates must also prove this Main-owned inspection in world 1208. */
+export function buildSelectedBrowserElementExpression(revision: number, inspectionToken: string): string {
+  return `(() => { 'use strict'; const state = globalThis[${JSON.stringify(SELECTION_STATE_KEY)}]; return state?.inspectionToken === ${JSON.stringify(inspectionToken)} && state.revision === ${revision} && state.selectedTarget instanceof Element && state.selectedTarget.ownerDocument === document ? state.selectedTarget : undefined; })()`
 }
 
 export function buildCancelBrowserElementSelectionScript(revision: number): string {
