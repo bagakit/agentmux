@@ -61,3 +61,30 @@ it('Escape cancels inline rename while blur commits a user name including spaces
   await act(async () => input.blur())
   expect(useAppStore.getState().agentNames[id]).toBe('Keep this name')
 })
+it('clearing the search restores the same nonempty card set without changing execution focus', async () => {
+  const originalIds = [...container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].map(card => card.dataset.sessionId)
+  expect(originalIds.length).toBeGreaterThan(0)
+  const originalFocus = useAppStore.getState().agentFocus
+  const originalSessions = useAppStore.getState().sessions
+  const originalWorkspace = container.querySelector('.global-session-region')
+  expect(originalWorkspace).not.toBeNull()
+  const search = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  expect(search).not.toBeNull()
+  async function query(value: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value)
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  await query('no-context-matches-this-query')
+  expect(container.querySelectorAll('.focus-context[data-session-id]')).toHaveLength(0)
+  expect(container.querySelector('.focus-project-lanes__empty')?.textContent).toBe('No matching contexts')
+  expect(useAppStore.getState().agentFocus).toBe(originalFocus)
+  await query('')
+  expect(search.value).toBe('')
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].map(card => card.dataset.sessionId)).toEqual(originalIds)
+  expect(container.querySelector('.focus-project-lanes__empty')).toBeNull()
+  expect(useAppStore.getState().agentFocus).toBe(originalFocus)
+  expect(useAppStore.getState().sessions).toBe(originalSessions)
+  expect(container.querySelector('.global-session-region')).toBe(originalWorkspace)
+})
