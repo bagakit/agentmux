@@ -57,9 +57,12 @@ export function BrowserStructuredFields({ receipt, readResult }: {
   return <div className="browser-structured-fields" aria-label="Recorded structured fields">
     <p className="browser-structured-fields__summary">{receipt.fields.filter(field => field.status === 'observed').length} / {receipt.fields.length} observed · {label(receipt.status)}</p>
     {receipt.warning ? <p role="status">{receipt.warning}</p> : null}
+    {receipt.fields.some(field => field.preview !== undefined) ? <p className="browser-structured-fields__preview-note">
+      {reference ? readResult ? 'Previews · full result in Recorded JSON' : 'Previews · full result is saved' : 'Previews · full values were not saved'}
+    </p> : null}
     <dl className="browser-structured-fields__values">
       {receipt.fields.map(field => <div key={field.key} data-field-status={field.status}>
-        <dt>{field.key}</dt><dd>{fieldValue(field, reference !== undefined, receipt.warning)}</dd>
+        <dt>{field.key}</dt><dd>{fieldValue(field, receipt.warning)}</dd>
       </div>)}
     </dl>
     <details><summary>Field sources</summary><dl className="browser-structured-fields__sources">
@@ -81,25 +84,25 @@ export function BrowserStructuredFields({ receipt, readResult }: {
   </div>
 }
 
-function fieldValue(field: BrowserStructuredFieldSummary, recorded: boolean, warning: string | undefined) {
-  if (field.status === 'observed') return field.inline ? <code>{JSON.stringify(field.value)}</code> : fieldPreview(field, recorded)
+function fieldValue(field: BrowserStructuredFieldSummary, warning: string | undefined) {
+  if (field.status === 'observed') return field.inline ? <code>{JSON.stringify(field.value)}</code> : <FieldPreview field={field} />
   if (field.status === 'type-error') return <>
     <span className="browser-structured-fields__state">Type mismatch</span>
-    {field.actual !== undefined ? <code>{JSON.stringify(field.actual)}</code> : field.preview !== undefined ? fieldPreview(field, recorded) : null}
+    {field.actual !== undefined ? <code>{JSON.stringify(field.actual)}</code> : field.preview !== undefined ? <FieldPreview field={field} /> : null}
   </>
   return <><span className="browser-structured-fields__state">{label(field.status)}</span>
-    {field.status === 'truncated' && field.preview !== undefined ? fieldPreview(field, recorded) : null}
+    {field.status === 'truncated' && field.preview !== undefined ? <FieldPreview field={field} /> : null}
     {field.detail && field.detail !== warning ? <span className="browser-structured-fields__detail">{field.detail}</span> : null}
   </>
 }
-function fieldPreview(field: BrowserStructuredFieldSummary, recorded: boolean) {
+function FieldPreview({ field }: { field: BrowserStructuredFieldSummary }) {
+  const [open, setOpen] = useState(false)
   const text = `${field.preview ?? ''}${field.status === 'truncated' ? '…' : ''}`
-  return <details className="browser-structured-fields__preview">
+  return <details className="browser-structured-fields__preview" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary aria-label={`Field preview: ${field.key}`}>
-      <span className="browser-structured-fields__state">{field.status === 'truncated' ? 'Preview · observed portion only' : recorded ? 'Preview · full value in recorded JSON' : 'Preview · full value was not saved'}</span>
-      <code>{text}</code>
+      {open ? <span className="browser-structured-fields__state">{field.status === 'truncated' ? 'Preview · observed portion only' : 'Preview'}</span> : <code>{text}</code>}
     </summary>
-    <code>{text}</code>
+    {open ? <code>{text}</code> : null}
   </details>
 }
 function label(status: BrowserStructuredOutputReceipt['status'] | BrowserStructuredFieldSummary['status']) {

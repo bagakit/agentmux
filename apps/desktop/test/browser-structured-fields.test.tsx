@@ -49,11 +49,16 @@ describe('compact saved Browser structured fields', () => {
       expect(rows).toHaveLength(10)
       expect(rows.map(row => row.querySelector('dt')?.textContent)).toEqual(fields.map(field => field.key))
       expect(rows.slice(0, 3).map(row => row.querySelector('dd')?.textContent)).toEqual(['""', '0', 'false'])
-      expect(rows[3]?.textContent).toContain('Preview · full value was not saved')
+      expect(host.querySelectorAll('.browser-structured-fields__preview-note')).toHaveLength(1)
+      expect(host.querySelector('.browser-structured-fields__preview-note')?.textContent).toBe('Previews · full values were not saved')
+      expect(rows[3]?.textContent).toBe('longrecorded prefix')
       expect(rows[4]?.textContent).toContain('Missing')
       expect(rows[5]?.textContent).toContain('Multiple matches')
       expect(rows[6]?.textContent).toContain('Type mismatch""')
       expect(rows[7]?.getAttribute('data-field-status')).toBe('truncated')
+      const truncated = rows[7]!.querySelector<HTMLDetailsElement>('details')!
+      expect(truncated.querySelector(':scope > code')).toBeNull()
+      await act(async () => { truncated.open = true; truncated.dispatchEvent(new Event('toggle')) })
       expect(rows[7]?.querySelector('.browser-structured-fields__preview > code')?.textContent).toBe('partial…')
       expect(rows[7]?.querySelector('summary .browser-structured-fields__state')?.textContent).toBe('Preview · observed portion only')
       expect(rows[7]?.querySelector('.browser-structured-fields__detail')?.textContent).toBe('Budget ended.')
@@ -66,7 +71,8 @@ describe('compact saved Browser structured fields', () => {
   })
 
   it('discloses complete retained previews without reading again, and keeps chunk paging outside the keyboard-readable JSON region', async () => {
-    const preview = `${'L'.repeat(240)} retained tail`
+    const preview = `${'L'.repeat(240)} retained tail!!`
+    expect(new TextEncoder().encode(preview).byteLength).toBe(256)
     const fields = [field('title', { value: 'Section value' }), field('zero', { type: 'number', value: 0 }),
       field('flag', { type: 'boolean', value: false }), field('empty', { value: '' }),
       field('invalid', { status: 'type-error', type: 'number', actual: 'not a number' }),
@@ -83,19 +89,25 @@ describe('compact saved Browser structured fields', () => {
       await act(async () => root.render(createElement(BrowserStructuredFields, { receipt: receipt(fields, artifact), readResult: read })))
       expect(host.querySelector('.browser-structured-fields__summary')?.textContent).toBe('10 / 13 observed · Partial')
       expect(host.querySelectorAll('.browser-structured-fields__values > div')).toHaveLength(13)
+      expect(host.querySelectorAll('.browser-structured-fields__preview-note')).toHaveLength(1)
+      expect(host.querySelector('.browser-structured-fields__preview-note')?.textContent).toBe('Previews · full result in Recorded JSON')
+      expect(host.querySelector('.browser-structured-fields__values .browser-structured-fields__preview-note')).toBeNull()
       const previews = [...host.querySelectorAll<HTMLDetailsElement>('.browser-structured-fields__preview')]
       expect(previews).toHaveLength(6)
       expect(previews.map(details => details.open)).toEqual([false, false, false, false, false, false])
       expect(previews.map(details => details.querySelector('summary')?.getAttribute('aria-label')))
         .toEqual(Array.from({ length: 6 }, (_, index) => `Field preview: long${index + 1}`))
       expect(previews.map(details => details.querySelector('summary > code')?.textContent)).toEqual(Array(6).fill(preview))
-      expect(previews.map(details => details.querySelector(':scope > code')?.textContent)).toEqual(Array(6).fill(preview))
+      expect(previews.map(details => details.querySelector(':scope > code'))).toEqual(Array(6).fill(null))
+      expect(previews.map(details => details.querySelector('summary .browser-structured-fields__state'))).toEqual(Array(6).fill(null))
       const summary = previews[0]!.querySelector('summary')!
       summary.focus()
       // Native details disclosure is mounted here. Chromium keyboard/default handling remains
       // the canonical product proof; happy-dom does not implement that browser default action.
       await act(async () => { previews[0]!.open = true; previews[0]!.dispatchEvent(new Event('toggle')) })
       expect(previews[0]!.open).toBe(true)
+      expect(previews[0]!.querySelector('summary > code')).toBeNull()
+      expect(summary.textContent).toBe('Preview')
       expect(previews[0]!.querySelector(':scope > code')?.textContent).toBe(preview)
       expect(document.activeElement).toBe(summary)
       expect(read).toHaveBeenCalledTimes(0)
@@ -122,6 +134,9 @@ describe('compact saved Browser structured fields', () => {
       expect(host.querySelector('.browser-structured-fields__summary')?.textContent).toBe('10 / 13 observed · Partial')
       expect(read.mock.calls.map(call => call[1])).toEqual([{ offset: 0, maxBytes: 65536 }, { offset: 65536, maxBytes: 65536 }])
       expect(previews[0]!.querySelector(':scope > code')?.textContent).toBe(preview)
+      await act(async () => { previews[0]!.open = false; previews[0]!.dispatchEvent(new Event('toggle')) })
+      expect(previews[0]!.querySelector('summary > code')?.textContent).toBe(preview)
+      expect(previews[0]!.querySelector(':scope > code')).toBeNull()
     } finally { await act(async () => root.unmount()); host.remove() }
   })
 
@@ -134,6 +149,7 @@ describe('compact saved Browser structured fields', () => {
       await act(async () => root.render(createElement(BrowserStructuredFields, { receipt: receipt([field('value', { value: 'A🙂B' })], artifact), readResult: read })))
       expect(read).toHaveBeenCalledTimes(0)
       expect(host.querySelector('pre')).toBeNull()
+      expect(host.querySelector('.browser-structured-fields__preview-note')).toBeNull()
       await openRaw(host)
       expect(read).toHaveBeenCalledTimes(1)
       expect(read).toHaveBeenNthCalledWith(1, artifact, { offset: 0, maxBytes: 65536 })
@@ -146,6 +162,21 @@ describe('compact saved Browser structured fields', () => {
       expect(host.querySelector('pre')?.textContent).toBe('🙂B')
       expect(host.textContent).toContain('Bytes 3–5 of 6')
       expect(host.querySelector('button')).toBeNull()
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('states saved preview availability once without inventing a reader or reading an artifact', async () => {
+    const host = document.createElement('div'), root = createRoot(host)
+    try {
+      const fields = Array.from({ length: 6 }, (_, index) => field(`long${index + 1}`, { inline: false, preview: `prefix ${index}`, valueBytes: 16000 }))
+      await act(async () => root.render(createElement(BrowserStructuredFields, { receipt: receipt(fields) })))
+      expect(host.querySelectorAll('.browser-structured-fields__values > div')).toHaveLength(6)
+      expect(host.querySelectorAll('.browser-structured-fields__preview-note')).toHaveLength(1)
+      expect(host.querySelector('.browser-structured-fields__preview-note')?.textContent).toBe('Previews · full result is saved')
+      expect(host.textContent).not.toContain('Recorded JSON')
+      expect(host.querySelectorAll('button')).toHaveLength(0)
+      expect([...host.querySelectorAll('.browser-structured-fields__preview > summary > code')].map(node => node.textContent))
+        .toEqual(fields.map(field => field.preview))
     } finally { await act(async () => root.unmount()) }
   })
 
@@ -218,14 +249,15 @@ describe('compact saved Browser structured fields', () => {
     expect(declarations).not.toContain('background:')
     const preview = rules.find(rule => rule[1]?.trim() === '.browser-structured-fields__preview > summary > code')
     expect(preview).toBeDefined()
-    expect(preview?.[2]).toContain('-webkit-line-clamp: 3;')
-    expect(preview?.[2]).toContain('overflow: hidden;')
+    expect(preview?.[2]).toContain('white-space: nowrap;')
+    const previewSummary = rules.find(rule => rule[1]?.trim() === '.browser-structured-fields__preview > summary')
+    expect(previewSummary).toBeDefined()
+    expect(previewSummary?.[2]).toContain('white-space: nowrap;')
+    expect(previewSummary?.[2]).toContain('overflow: hidden;')
+    expect(previewSummary?.[2]).toContain('text-overflow: ellipsis;')
     const expanded = rules.find(rule => rule[1]?.trim() === '.browser-structured-fields__preview > code')
     expect(expanded).toBeDefined()
     expect(expanded?.[2]).toContain('display: block;')
-    const open = rules.find(rule => rule[1]?.trim() === '.browser-structured-fields__preview[open] > summary > code')
-    expect(open).toBeDefined()
-    expect(open?.[2]).toContain('display: none;')
     const raw = rules.find(rule => rule[1]?.trim() === '.browser-structured-fields pre.browser-structured-fields__raw')
     expect(raw).toBeDefined()
     expect(raw?.[2]).toContain('max-height: min(24vh, 12rem);')
