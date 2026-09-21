@@ -25,6 +25,14 @@ const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser
 const children = new Set(), connections = new Set()
 const deadline = Date.now() + 120_000
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
+const downloadCase = process.argv.includes('--case-download')
+const demonstrationCase = process.argv.includes('--case-demonstration')
+const overlayCase = process.argv.includes('--case-overlay')
+const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
+const downloadRequests = []
+if(downloadCase)receipt.case='download'
+if(demonstrationCase)receipt.case='demonstration'
+if(overlayCase)receipt.case='overlay'
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
 const captureDirectory = await mkdtemp(join(repositoryRoot,'.tmp/browser-operation-visual-'))
 receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-performed', frames: [],
@@ -81,7 +89,14 @@ async function identity() {
     'apps/desktop/src/renderer/src/components/BrowserStepEvidence.tsx', 'apps/desktop/src/renderer/src/styles/browser-step-evidence.css',
     'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/scripts/probe-process.mjs',
-    'apps/desktop/scripts/verify-browser-recovery-restart.mjs']
+    'apps/desktop/scripts/verify-browser-recovery-restart.mjs',
+    ...(demonstrationCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
+      'apps/desktop/src/main/browser-semantic-target.ts','apps/desktop/src/shared/browser-demonstration.ts','apps/desktop/src/main/browser-cdp-session.ts',
+      'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx','apps/desktop/scripts/browser-demonstration-probe-scenario.mjs',
+      'apps/desktop/scripts/verify-browser-demonstration.mjs'] : []),
+    ...(downloadCase ? ['apps/desktop/src/main/browser-downloads.ts','apps/desktop/src/shared/browser-download.ts',
+      'apps/desktop/src/main/workspace-files.ts','apps/desktop/src/shared/workspace-file-bytes.ts',
+      'packages/core/src/browser-page-capability.ts','apps/desktop/scripts/verify-browser-files.mjs'] : [])]
   const values = await Promise.all(files.map(async name => { const bytes = await readFile(join(repositoryRoot, name)); assert.ok(bytes.length > 0, name); return [name, digest(bytes)] }))
   const electron = require('electron'); values.push([electron, digest(await readFile(electron))])
   return Object.fromEntries(values)
@@ -213,26 +228,31 @@ async function observeNativeFrameReady(probe, url) {
     return insideStage && state.frame?.empty === false ? observation : null
   }, 5_000)
 }
-async function capture(probe, label) {
+async function capture(probe, label, content = 'operations', pageUrl) {
   await probe.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
   const observation = await probe.cdp.evaluate(`(() => {
     const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
     const rows=Array.from(document.querySelectorAll('.browser-rsi-timeline__step')).filter(visible);
-    const rail=Array.from(document.querySelectorAll('.browser-trace-rail')).find(visible),stage=rail?.previousElementSibling;
+    const rail=Array.from(document.querySelectorAll('.browser-trace-rail')).find(visible),stage=rail?.previousElementSibling??Array.from(document.querySelectorAll('[data-native-browser-stage]')).find(visible);
     const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
     return {viewport:{width:innerWidth,height:innerHeight},rows:rows.map(e=>({sequence:e.dataset.sequence,status:e.querySelector('.browser-rsi-timeline__status').textContent,
       selected:e.querySelector('button').getAttribute('aria-pressed'),expanded:e.querySelector('button').getAttribute('aria-expanded')})),
       operationStatus:(()=>{const s=document.querySelector('.browser-operation-status');return s&&{phase:s.dataset.phase,control:s.dataset.control,operationId:s.dataset.operationId,
         trigger:s.querySelector('button')?.getAttribute('aria-label'),insideToolbar:!!s.closest('.browser-toolbar')};})(),
       trace:rail&&rect(rail),stage:stage&&rect(stage),payloadCount:document.querySelectorAll('.browser-rsi-timeline__step-detail').length,
+      demonstration:(()=>{const surface=document.querySelector('[aria-label="Human demonstration draft"]');return surface&&{id:surface.dataset.demonstrationId,
+        status:surface.querySelector('[role="status"]')?.textContent,steps:Array.from(surface.querySelectorAll('[data-sequence]')).map(step=>({sequence:step.dataset.sequence,text:step.textContent}))};})(),
+      floatingContent:Array.from(document.body.children).filter(node=>node.id!=='root').flatMap(node=>[node,...node.querySelectorAll('[data-state="open"],[role="tooltip"],[role="dialog"],[role="menu"]')]).filter(visible).map(node=>({role:node.getAttribute('role'),state:node.getAttribute('data-state'),bounds:rect(node)})),
       focus:document.activeElement?.getAttribute('aria-label'),focusVisible:document.activeElement?.matches(':focus-visible')??false};
   })()`)
-  assert.ok(observation.rows.length>0,'Visual review must contain real operation steps')
+  if(content==='demonstration')assert.ok(observation.demonstration?.id&&observation.demonstration.steps.length>0,'Demonstration review must contain real recorded steps')
+  else if(content==='operations')assert.ok(observation.rows.length>0,'Visual review must contain real operation steps')
   assert.ok(observation.stage.width>0&&observation.stage.height>0,'The actual page keeps positive visible geometry')
-  assert.ok(observation.stage.x+observation.stage.width<=observation.trace.x+1,'Trace does not overlay the native stage')
+  if(observation.trace)assert.ok(observation.stage.x+observation.stage.width<=observation.trace.x+1,'Trace does not overlay the native stage')
+  else assert.equal(content,'overlay','Operation and demonstration review requires its actual details surface')
   const nativeBounds=await waitFor('native page bounds inside the actual stage',async()=>{
     const bounds=await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-      return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:')).map(v=>v.getBounds()); })()`)
+      return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&${pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"}).map(v=>v.getBounds()); })()`)
     const s=observation.stage
     return bounds.length===1&&bounds[0].width>0&&bounds[0].height>0&&bounds[0].x>=s.x-1&&bounds[0].y>=s.y-1&&
       bounds[0].x+bounds[0].width<=s.x+s.width+1&&bounds[0].y+bounds[0].height<=s.y+s.height+1?bounds:null
@@ -244,7 +264,7 @@ async function capture(probe, label) {
     return {size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   const pageFile=join(captureDirectory,`${label}-native-page.png`)
   const nativePage=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-    const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
+    const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&${pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"});
     const image=await view.webContents.capturePage();if(image.isEmpty())throw new Error('Empty native page frame');const png=image.toPNG();
     process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {file:${JSON.stringify(pageFile)},bounds:view.getBounds(),size:image.getSize(),
       sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
@@ -362,10 +382,99 @@ async function reviewOperationRows(probe, browserId) {
   await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
   return {completed:completed.runOperation,failed:failed.runOperation}
 }
+async function reviewDownloads(probe,browserId) {
+  phase='native-event-first-downloads'
+  const operator={id:'private-browser-files',name:'Private Browser files'}
+  const results=[]
+  for(const [name,path] of [['Download attribute','attribute.bin'],['Navigation attachment','attachment.bin']]){
+    const code=`const page=await snapshot({scope:'page',maxNodes:40});const targets=page.nodes.filter(node=>node.role==='link'&&node.name===${JSON.stringify(name)});if(targets.length!==1)throw new Error('Expected one actual download ref');return {observed:{url:page.url,navigationId:page.navigationId},download:await download(targets[0].ref,{path:${JSON.stringify(path)},timeoutMs:5000})};`
+    const report=await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`)
+    assert.equal(report.outcome.kind,'completed',JSON.stringify(report.outcome))
+    const transfer=report.result.download, reference=transfer.reference
+    assert.equal(transfer.status,'completed');assert.ok(reference)
+    assert.equal(reference.workspaceId,workspaceId);assert.equal(reference.browserId,browserId)
+    assert.equal(reference.operationId,report.runOperation.id);assert.equal(reference.navigationId,report.result.observed.navigationId)
+    assert.equal(reference.url,report.result.observed.url);assert.equal(reference.byteLength,downloadPayload.length)
+    assert.deepEqual(await readFile(join(workspacePath,path)),downloadPayload)
+    await openActivityTimeline(probe)
+    await waitFor('nonempty actual download operation timeline',()=>probe.cdp.evaluate('document.querySelectorAll(".browser-rsi-timeline__step").length>0'))
+    await click(probe.cdp,`${selectors('.browser-rsi-timeline__step > button')}.slice(-1)`)
+    for(const [size,width,height] of [['normal',1440,900],['narrow',980,700]]){
+      await resize(probe,width,height);await capture(probe,`${size}-${path}-completed`)
+    }
+    await resize(probe,1440,900)
+    await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
+    const readCode=`return await readDownload(${JSON.stringify(reference)},{offset:1,maxBytes:4});`
+    const read=await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(readCode)},${JSON.stringify(operator)})`)
+    assert.equal(read.outcome.kind,'completed',JSON.stringify(read.outcome));assert.deepEqual(Buffer.from(read.result.data,'base64'),downloadPayload.subarray(1,5))
+    assert.equal(read.result.offset,1);assert.equal(read.result.returnedBytes,4);assert.equal(read.result.totalBytes,downloadPayload.length)
+    assert.deepEqual(read.result.reference,reference)
+    results.push({trigger:name,operation:report.runOperation,reference,publicToolRead:read.result})
+  }
+  const entries=await probe.cdp.evaluate(`window.agentmux.files.readDirectory(${JSON.stringify(workspaceId)},'.')`)
+  assert.ok(entries.length>0);for(const path of ['attribute.bin','attachment.bin'])assert.ok(entries.some(entry=>entry.name===path&&!entry.isDirectory))
+  receipt.downloads={complete:results,workspaceEntries:entries,requests:downloadRequests,payloadSha256:digest(downloadPayload)}
+}
+async function startUnfinishedDownload(probe,browserId) {
+  phase='native-unfinished-download-before-ordinary-quit'
+  const code="const page=await snapshot({scope:'page',maxNodes:40});const targets=page.nodes.filter(node=>node.role==='link'&&node.name==='Unfinished attachment');if(targets.length!==1)throw new Error('Expected one actual unfinished download ref');return await download(targets[0].ref,{path:'unfinished.bin',timeoutMs:120000});"
+  const start=await probe.cdp.call('Runtime.evaluate',{expression:`globalThis.__privateUnfinishedDownload=window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},{id:'private-browser-files',name:'Private Browser files'})`,awaitPromise:false})
+  assert.equal(start.exceptionDetails,undefined)
+  await waitFor('actual server-held attachment response',()=>downloadRequests.some(request=>request.path==='/unfinished.bin'))
+  const ownedReceipt=await waitFor('durable unfinished receipt from the actual Main owner',async()=>{
+    const directory=join(userData,'browser-downloads')
+    try{
+      for(const name of await readdir(directory)){
+        if(!name.endsWith('.json'))continue
+        const record=JSON.parse(await readFile(join(directory,name),'utf8'))
+        if(record.receipt?.browserId===browserId&&record.receipt.path==='unfinished.bin')return record.receipt
+      }
+    }catch(error){if(error.code!=='ENOENT')throw error}
+    return null
+  })
+  await waitFor('actual pending download operation visible in its split',()=>probe.cdp.evaluate(`Array.from(document.querySelectorAll('.browser-operation-status')).map(element=>element.dataset.operationId).includes(${JSON.stringify(ownedReceipt.operationId)})`))
+  assert.equal(ownedReceipt.workspaceId,workspaceId);assert.equal(ownedReceipt.browserId,browserId)
+  assert.notEqual(ownedReceipt.status,'completed');assert.equal(ownedReceipt.reference,undefined)
+  await assert.rejects(readFile(join(workspacePath,'unfinished.bin')),{code:'ENOENT'})
+  receipt.downloads.unfinishedBeforeQuit=ownedReceipt
+}
+async function recoverDownloads(probe,browserId) {
+  phase='native-download-file-read-after-ordinary-restart'
+  for(const completed of receipt.downloads.complete){
+    const code=`return await readDownload(${JSON.stringify(completed.reference)},{offset:0,maxBytes:64});`
+    const report=await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},{id:'private-browser-files',name:'Private Browser files'})`)
+    assert.equal(report.outcome.kind,'completed',JSON.stringify(report.outcome));assert.deepEqual(Buffer.from(report.result.data,'base64'),downloadPayload)
+    assert.deepEqual(report.result.reference,completed.reference)
+    completed.afterRestartPublicToolRead=report.result
+  }
+  const before=receipt.downloads.unfinishedBeforeQuit
+  const record=JSON.parse(await readFile(join(userData,'browser-downloads',`${before.id}.json`),'utf8')).receipt
+  assert.ok(['failed','cancelled'].includes(record.status));assert.equal(record.reference,undefined)
+  await assert.rejects(readFile(join(workspacePath,'unfinished.bin')),{code:'ENOENT'})
+  const forged={...receipt.downloads.complete[0].reference,id:before.id,path:'unfinished.bin',operationId:before.operationId}
+  const rejection=await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(`return await readDownload(${JSON.stringify(forged)});`)})`)
+  assert.notEqual(rejection.outcome.kind,'completed')
+  receipt.downloads.unfinishedAfterRestart={receipt:record,publicToolRejected:rejection.outcome}
+}
 try {
+  const demonstration = demonstrationCase ? await import('./browser-demonstration-probe-scenario.mjs') : null
+  const overlay = overlayCase ? await import('./browser-overlay-probe-scenario.mjs') : null
+  const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,receipt,click,selectors,waitFor,nativePageScript,resize,
+    capture:(probe,label)=>capture(probe,label,demonstrationCase?'demonstration':overlayCase?'overlay':'operations',pageUrl),desktopRoot,userData,repositoryRoot})
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
-  server=createServer((request,response)=>{response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1></body></html>')})
+  server=createServer((request,response)=>{
+    if(downloadCase&&['/attribute.bin','/attachment.bin','/unfinished.bin'].includes(request.url)){
+      downloadRequests.push({path:request.url,at:Date.now()})
+      const headers={'content-type':'text/plain','content-length':request.url==='/unfinished.bin'?1024:downloadPayload.length,
+        ...(request.url==='/attribute.bin'?{}:{'content-disposition':`attachment; filename="${request.url.slice(1)}"`})}
+      response.writeHead(200,headers)
+      if(request.url==='/unfinished.bin'){response.flushHeaders();response.write(downloadPayload.subarray(0,2));return}
+      response.end(downloadPayload);return
+    }
+    response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1>'+
+      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
+  })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
   await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
@@ -379,13 +488,20 @@ try {
   // Observe genuine readiness; do not override the product's overlay/focus visibility decisions.
   await observeNativeFrameReady(first,urls[0])
   receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
-  await reviewOperationStates(first,initial.surface.browserId)
-  receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
+  if(downloadCase)await reviewDownloads(first,initial.surface.browserId)
+  else if(demonstration)await demonstration.reviewDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
+  else if(overlay)await overlay.reviewOverlay(scenarioContext(first,initial.surface.browserId,urls[0]))
+  else{
+    await reviewOperationStates(first,initial.surface.browserId)
+    receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
+  }
   const sibling=await openBrowser(urls[1],{kind:'split',direction:'right',region:{kind:'region',regionId:initial.surface.regionId}})
   await control('focus',{kind:'region',regionId:initial.surface.regionId})
   const pages=await nativePages(first,urls)
   const expected={tabId:initial.tab.id,focus:initial.surface.regionId,regions:[{browserId:initial.surface.browserId,regionId:initial.surface.regionId,url:urls[0],title:pages[0].title},{browserId:sibling.browserId,regionId:sibling.regionId,url:urls[1],title:pages[1].title}]}
   const before=await actualWorkbench(first,expected)
+  if(downloadCase)await startUnfinishedDownload(first,initial.surface.browserId)
+  if(demonstration)await demonstration.startInterruptedDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
   // The ordinary product quit path itself is the acceptance boundary. No manual flush or seed.
   receipt.firstUi={expected,pages,...before};receipt.firstExit=await normalQuit(first)
   second=await launch('second');phase='actual-second-process-recovery'
@@ -394,6 +510,9 @@ try {
   const ensure=await second.cdp.evaluate(`window.agentmux.browser.create(${JSON.stringify(expected.regions[0].browserId)},'http://127.0.0.1:1/stale')`)
   assert.equal(ensure.id,expected.regions[0].browserId);assert.equal(ensure.url,urls[0]);assert.equal(ensure.error,null)
   const pagesAfterEnsure=await nativePages(second,urls);assert.deepEqual(pagesAfterEnsure,restoredPages)
+  if(downloadCase)await recoverDownloads(second,expected.regions[0].browserId)
+  if(demonstration)await demonstration.recoverDemonstration(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(overlay)await overlay.recoverOverlay(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   receipt.secondUi={...after,pages:restoredPages,ensure};receipt.secondExit=await normalQuit(second)
   receipt.identityAfter=await identity();assert.deepEqual(receipt.identityAfter,receipt.identityBefore)
   receipt.completeGate=true
@@ -408,13 +527,13 @@ try {
   const sentinel=process.pid+1_000_000_000
   try{await stopProbeProcesses(sentinel,root)}catch(error){errors.push(error.message)}
   let remaining;try{remaining=await listProbeProcesses(sentinel,root);assert.deepEqual(remaining,[])}catch(error){errors.push(error.message)}
-  try{if(server)await new Promise((done,fail)=>server.close(error=>error?fail(error):done()))}catch(error){errors.push(error.message)}
+  try{if(server){server.closeAllConnections();await new Promise((done,fail)=>server.close(error=>error?fail(error):done()))}}catch(error){errors.push(error.message)}
   receipt.cleanup={remaining:remaining??null,errors,privateProcessesReaped:errors.length===0&&remaining?.length===0,temporaryRootRemoved:false}
   if(receipt.cleanup.privateProcessesReaped){try{await rm(root,{recursive:true,force:true});receipt.cleanup.temporaryRootRemoved=true}catch(error){errors.push(error.message)}}
   if(errors.length&&!failure)failure={phase:'cleanup',message:errors.join('; ')}
 }
 receipt.passed=!failure&&receipt.completeGate;receipt.failure=failure??null
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
-await writeFile(join(repositoryRoot,'.tmp/browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
+await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
 process.stdout.write(JSON.stringify({passed:receipt.passed,completeGate:receipt.completeGate,failure:receipt.failure,cleanup:receipt.cleanup})+'\n')
 process.exitCode=receipt.passed?0:1
