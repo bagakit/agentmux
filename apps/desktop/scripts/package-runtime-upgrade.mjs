@@ -1,7 +1,7 @@
 import { parseDesktopClientObservation } from '../src/shared/client-observation.ts'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -93,6 +93,26 @@ function socketOwners(output, socket) {
   return [...new Map(owners.map((entry) => [entry.pid, entry])).values()]
 }
 
+function processFiles(output, expectedPid) {
+  const files = []
+  let pid, file
+  for (const line of output.split('\n')) {
+    if (line.startsWith('p')) { pid = Number(line.slice(1)); file = undefined }
+    else if (line.startsWith('f')) { file = { pid, fd: line.slice(1) }; files.push(file) }
+    else if (file && ['t', 'D', 'i', 'n', 'l'].includes(line[0])) file[line[0]] = line.slice(1)
+  }
+  return files.filter(entry => entry.pid === expectedPid)
+}
+
+async function fileIdentity(file) {
+  fail(file.t === 'REG' && /^0x[0-9a-f]+$/i.test(file.D ?? '') && /^\d+$/.test(file.i ?? '') && file.n?.startsWith('/'),
+    'The Runtime file has no regular OS device/inode identity.')
+  const metadata = await lstat(file.n, { bigint: true })
+  fail(metadata.isFile() && metadata.dev === BigInt(file.D) && metadata.ino === BigInt(file.i),
+    'The Runtime OS mapping and its path do not identify the same regular file.')
+  return { device: metadata.dev.toString(), inode: metadata.ino.toString() }
+}
+
 async function processOwner(socket, executableSHA) {
   // lsof's file operands must come last. Field output avoids truncating names or
   // interpreting a socket name embedded in some other process's argv.
@@ -102,15 +122,73 @@ async function processOwner(socket, executableSHA) {
   fail(owners.length === 1 && Number.isSafeInteger(owners[0].pid) && owners[0].pid > 0 && owners[0].uid === process.getuid(),
     'The selected Runtime socket has no unique process owned by this user.')
   const { pid, uid } = owners[0]
-  const mapped = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-p', String(pid), '-d', 'txt', '-Fpn'],
-    { timeout: 5_000, maxBuffer: 1024 * 1024 })
-  const executables = mapped.stdout.split('\n').filter((line) => line.startsWith('n') && basename(line.slice(1)) === 'ctxmuxd')
-  fail(executables.length === 1, 'The Runtime process has no unique ctxmuxd executable mapping.')
-  const executable = executables[0].slice(1)
-  fail(hash(await readFile(executable)) === executableSHA, 'The socket owner executable is not the selected Runtime artifact.')
   const birth = (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,uid=,lstart='], { timeout: 5_000 })).stdout.trim()
   fail(new RegExp(`^${pid}\\s+${uid}\\s+\\S`).test(birth), 'The Runtime process birth identity is unavailable.')
-  return { pid, uid, birth, executable }
+  const mapped = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-p', String(pid), '-FpuftDinl'],
+    { timeout: 5_000, maxBuffer: 1024 * 1024 })
+  const files = processFiles(mapped.stdout, pid)
+  const executables = files.filter(file => file.fd === 'txt' && basename(file.n ?? '') === 'ctxmuxd')
+  fail(executables.length === 1, 'The Runtime process has no unique ctxmuxd executable mapping.')
+  const executable = executables[0].n
+  const executableIdentity = await fileIdentity(executables[0])
+  const image = await open(executable, 'r')
+  try {
+    const metadata = await image.stat({ bigint: true })
+    fail(metadata.dev.toString() === executableIdentity.device && metadata.ino.toString() === executableIdentity.inode,
+      'The Runtime executable changed while its mapped image was being read.')
+    fail(hash(await image.readFile()) === executableSHA, 'The socket owner executable is not the selected Runtime artifact.')
+    await fileIdentity(executables[0])
+  } finally { await image.close() }
+  const locks = files.filter(file => /^\d+[a-z]*$/i.test(file.fd) && basename(file.n ?? '') === 'state.lock')
+  fail(locks.length === 1, 'The Runtime process has no unique state.lock descriptor.')
+  const stateIdentity = await fileIdentity(locks[0])
+  // An open FD alone does not prove an OS lock. The exact qualified Native's
+  // StateLockGuard owns this descriptor for its persistent Runtime lifetime.
+  const state = { directory: dirname(locks[0].n), path: locks[0].n, ...stateIdentity,
+    fd: locks[0].fd, osLock: locks[0].l ?? null }
+  // Planned exec intentionally keeps PID, birth and socket. Re-read the file
+  // set too: those process facts alone cannot fence an exec during this read.
+  const finalFiles = processFiles((await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-p', String(pid), '-FpuftDinl'],
+    { timeout: 5_000, maxBuffer: 1024 * 1024 })).stdout, pid)
+  const finalImages = finalFiles.filter(file => file.fd === 'txt' && basename(file.n ?? '') === 'ctxmuxd')
+  const finalLocks = finalFiles.filter(file => /^\d+[a-z]*$/i.test(file.fd) && basename(file.n ?? '') === 'state.lock')
+  fail(finalImages.length === 1 && finalLocks.length === 1 && finalImages[0].n === executable && finalLocks[0].n === state.path,
+    'The Runtime files changed while its serving authority was being observed.')
+  const finalImageIdentity = await fileIdentity(finalImages[0]), finalStateIdentity = await fileIdentity(finalLocks[0])
+  fail(finalImageIdentity.device === executableIdentity.device && finalImageIdentity.inode === executableIdentity.inode &&
+    finalStateIdentity.device === state.device && finalStateIdentity.inode === state.inode,
+    'The Runtime file identities changed while its serving authority was being observed.')
+  const finalBirth = (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,uid=,lstart='], { timeout: 5_000 })).stdout.trim()
+  const finalSockets = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-U', '-Fpuftn', socket],
+    { timeout: 5_000, maxBuffer: 1024 * 1024 })
+  const finalOwners = socketOwners(finalSockets.stdout, socket)
+  fail(finalBirth === birth && finalOwners.length === 1 && finalOwners[0].pid === pid && finalOwners[0].uid === uid,
+    'The Runtime process changed while its serving authority was being observed.')
+  return { pid, uid, birth, executable, executableIdentity, state }
+}
+
+function assertServingOwner(original, current) {
+  fail(current.pid === original.pid && current.birth === original.birth && current.uid === original.uid,
+    'The Runtime process identity changed during handoff.')
+  fail(current.state.directory === original.state.directory && current.state.device === original.state.device &&
+    current.state.inode === original.state.inode, 'The Runtime state authority changed during handoff.')
+}
+
+async function ownerReceiptDiagnostic(path, old, before, owner) {
+  try {
+    const metadata = await lstat(path)
+    if (!metadata.isFile() || metadata.uid !== process.getuid() || (metadata.mode & 0o777) !== 0o600 || metadata.size > 65536)
+      return { status: 'unreadable', path, error: 'Owner receipt is not a bounded private regular file.' }
+    const receipt = JSON.parse(await readFile(path, 'utf8'))
+    const matches = metadata.isFile() && metadata.uid === process.getuid() && (metadata.mode & 0o777) === 0o600 &&
+      receipt.schema === 'agentmux.ctxmux-owner.v1' && receipt.socketPath === old.socketPath &&
+      receipt.stateDirectory === owner.state.directory && receipt.daemonSha256 === old.daemonSha256 &&
+      receipt.manifestSha256 === old.manifestSha256 && receipt.runtimeId === before.runtime.runtimeId &&
+      receipt.daemonInstanceId === before.runtime.daemonInstanceId && receipt.runtimeBuildId === before.runtime.buildId
+    return { status: matches ? 'matching' : 'mismatch', path,
+      recorded: { schema: receipt.schema, daemonSha256: receipt.daemonSha256, stateDirectory: receipt.stateDirectory,
+        runtimeId: receipt.runtimeId, daemonInstanceId: receipt.daemonInstanceId } }
+  } catch (error) { return { status: error.code === 'ENOENT' ? 'missing' : 'unreadable', path, error: error.message } }
 }
 
 function sameRuntime(before, after) {
@@ -226,28 +304,20 @@ export async function prepareRuntimeUpgrade(currentApp, candidateApp) {
     'The existing Runtime does not declare persistent planned-exec continuity.')
     const owner = await processOwner(old.socketPath, old.daemonSha256)
     const receiptPath = join(dirname(old.socketPath), 'owner.json')
-    const metadata = await lstat(receiptPath)
-    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
-    fail(metadata.isFile() && metadata.uid === process.getuid() && (metadata.mode & 0o777) === 0o600 &&
-      receipt.schema === 'agentmux.ctxmux-owner.v1' && receipt.socketPath === old.socketPath &&
-      receipt.stateDirectory === old.stateDirectory && receipt.daemonSha256 === old.daemonSha256 &&
-      receipt.manifestSha256 === old.manifestSha256 && receipt.runtimeId === before.runtime.runtimeId &&
-      receipt.daemonInstanceId === before.runtime.daemonInstanceId && receipt.runtimeBuildId === before.runtime.buildId,
-    'The selected listener has no matching AgentMux owner receipt. No application was changed.')
-    return { old, candidate, oldSdk, newSdk, before, owner, receiptPath, temporary }
+    const ownerReceipt = await ownerReceiptDiagnostic(receiptPath, old, before, owner)
+    return { old, candidate, oldSdk, newSdk, before, owner, ownerReceipt, receiptPath, temporary }
   } catch (error) {
     await rm(temporary, { recursive: true, force: true })
     throw error
   }
 }
 
-async function writeUpgradedReceipt(plan, current, runtime) {
-  const target = join(current, coreRelative, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd')
+async function writeUpgradedReceipt(plan, owner, runtime) {
   const temporary = join(dirname(plan.receiptPath), `.owner-install-${randomUUID()}.json`)
   const receipt = { schema: 'agentmux.ctxmux-owner.v1', sourceCommit: plan.candidate.manifest.source.commit,
     sourceTree: plan.candidate.manifest.source.tree, manifestSha256: plan.candidate.manifestSha256,
-    daemonSha256: plan.candidate.daemonSha256, daemonPath: target, socketPath: plan.old.socketPath,
-    stateDirectory: plan.old.stateDirectory, daemonInstanceId: runtime.daemonInstanceId,
+    daemonSha256: plan.candidate.daemonSha256, daemonPath: owner.executable, socketPath: plan.old.socketPath,
+    stateDirectory: owner.state.directory, daemonInstanceId: runtime.daemonInstanceId,
     runtimeId: runtime.runtimeId, runtimeBuildId: runtime.buildId }
   try {
     await writeFile(temporary, `${JSON.stringify(receipt)}\n`, { flag: 'wx', mode: 0o600 })
@@ -261,14 +331,16 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
   let sent = false, lastError
   try {
     const owner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
-    fail(owner.pid === plan.owner.pid && owner.birth === plan.owner.birth, 'The Runtime socket owner changed before handoff.')
+    assertServingOwner(plan.owner, owner)
     const before = await inspect(plan.oldSdk, plan.old.socketPath)
     await assertRunsKept(plan, before, plan.oldSdk)
     const current = await artifact(currentApp)
     fail(current.daemonSha256 === plan.candidate.daemonSha256 && current.manifestSha256 === plan.candidate.manifestSha256,
       'The canonical application is not the preflighted Runtime candidate.')
+    const candidateImage = await lstat(current.daemonPath, { bigint: true })
+    fail(candidateImage.isFile(), 'The canonical Runtime candidate is not a regular executable file.')
     const signalOwner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
-    fail(signalOwner.pid === owner.pid && signalOwner.birth === owner.birth, 'The Runtime process changed before the upgrade signal.')
+    assertServingOwner(plan.owner, signalOwner)
     process.kill(signalOwner.pid, 'SIGHUP')
     sent = true
     const deadline = Date.now() + 15_000
@@ -278,15 +350,18 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
         fail(after.protocol === plan.candidate.manifest.product.protocol && after.runtime.protocolGeneration === after.protocol,
           'The Runtime did not adopt the candidate protocol.')
         const upgradedOwner = await processOwner(plan.old.socketPath, plan.candidate.daemonSha256)
-        fail(upgradedOwner.pid === plan.owner.pid && upgradedOwner.birth === plan.owner.birth,
-          'The Runtime daemon process changed during handoff.')
+        assertServingOwner(plan.owner, upgradedOwner)
+        fail(upgradedOwner.executableIdentity.device === candidateImage.dev.toString() &&
+          upgradedOwner.executableIdentity.inode === candidateImage.ino.toString(),
+          'The Runtime has not mapped the preflighted canonical candidate file.')
         const statuses = await assertRunsKept(plan, after, plan.newSdk)
         // Once the new protocol is confirmed it is unsafe to restore a client
         // for the old protocol, even if receipt writing or GUI launch fails.
         const confirmed = { status: 'upgraded', daemonPid: upgradedOwner.pid,
           runtimeId: after.runtime.runtimeId, daemonInstanceId: after.runtime.daemonInstanceId,
-          protocol: after.protocol, originalRuns: statuses.length }
-        try { await writeUpgradedReceipt(plan, currentApp, after.runtime) }
+          protocol: after.protocol, originalRuns: statuses.length, stateDirectory: upgradedOwner.state.directory,
+          daemonPath: upgradedOwner.executable, previousOwnerReceipt: plan.ownerReceipt }
+        try { await writeUpgradedReceipt(plan, upgradedOwner, after.runtime) }
         catch (error) { return { ...confirmed, ownerReceiptError: error.message } }
         return confirmed
       } catch (error) { lastError = error }
@@ -299,7 +374,7 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
     // independent positive proof. Timeout alone is never a rollback oracle.
     try {
       const oldOwner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
-      fail(oldOwner.pid === plan.owner.pid && oldOwner.birth === plan.owner.birth, 'Old daemon identity changed.')
+      assertServingOwner(plan.owner, oldOwner)
       const old = await inspect(plan.oldSdk, plan.old.socketPath)
       await assertRunsKept(plan, old, plan.oldSdk)
       return { status: 'old-confirmed', signalSent: sent, protocol: old.protocol, daemonPid: oldOwner.pid, error: lastError.message }
