@@ -16,9 +16,13 @@ const files = [main, compiler, editor, test, 'apps/desktop/src/shared/browser-ta
   'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/browser-operation.ts',
   'apps/desktop/src/shared/browser-step-evidence.ts', 'packages/core/src/durable-write.ts', 'packages/core/src/browser-page-capability.ts']
 const originals = new Map(await Promise.all(files.map(async file => [file, await fs.readFile(path.join(root, file), 'utf8')])))
+const testCount = [...originals.get(test).matchAll(/^\s*it\(/gm)].length
+assert.ok(testCount > 0, 'The actual regression source must contain tests')
+const executedTests = new RegExp(`Tests\\s+${testCount} passed`)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const isolated = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-task-assets-mutations-')))
-const evidence = path.join(root, 'docs/reviews/evidence/browser-task-capabilities-2026-10-03/t011-source')
+await fs.mkdir(path.join(root, '.tmp'), { recursive: true })
+const evidence = await fs.mkdtemp(path.join(root, '.tmp/browser-task-assets-mutations-'))
 const cases = [
   [main, 'deleted-steps-resurrected', 'asset.draft = content(replacement)', 'asset.draft = content({ ...replacement, steps: replacement.steps.length ? replacement.steps : asset.draft.steps })'],
   [main, 'version-ignores-selection', 'asset.versions.find(item => item.version === input.version)', 'asset.versions.at(-1)'],
@@ -39,6 +43,7 @@ const cases = [
   [main, 'cursor-projection-not-notified', 'if (browserId) for (const listener of [...this.listeners])', 'if (false) for (const listener of [...this.listeners])'],
   [main, 'unrelated-browser-projection-updated', 'listener(browserId)', "listener('browser-other')"],
   [main, 'async-projection-rejection-unhandled', 'Promise.resolve(listener(browserId)).catch(() => {})', 'Promise.resolve(listener(browserId))'],
+  [main, 'later-blocked-step-preflight-removed', 'compileAssetStep(step, values)', "''"],
   [compiler, 'partial-observation-claimed-complete', "if (!observed || observed.scope.kind !== 'page' || observed.scope.document !== null ||\n            observed.truncated || observed.omittedFrames.length || (page.missingFrames && page.missingFrames.length))", 'if (false)'],
   [editor, 'editor-delete-does-nothing', 'draft.steps.filter(item => item.id !== step.id)', 'draft.steps'],
   [editor, 'unresolved-review-enabled', "step.kind !== 'navigate' && (!step.target || step.target.count !== 1)", 'false'],
@@ -51,7 +56,7 @@ async function run(name) {
   const log = `${result.stdout ?? ''}${result.stderr ?? ''}`
   const file = path.join(evidence, `${name}.log`)
   await fs.writeFile(file, log)
-  return { result, log, file: path.relative(root, file), sha256: digest(log) }
+  return { result, log, file: path.basename(file), sha256: digest(log) }
 }
 try {
   await fs.mkdir(evidence, { recursive: true })
@@ -69,7 +74,7 @@ try {
   }
   const baseline = await run('baseline-green')
   assert.equal(baseline.result.status, 0, baseline.log)
-  assert.match(baseline.log, /Tests\s+18 passed/, 'All real asset and Editor regression tests must run')
+  assert.match(baseline.log, executedTests, 'All real asset and Editor regression tests must run')
   for (const [file, name, before, after] of cases) {
     const source = originals.get(file), occurrences = source.split(before).length - 1
     assert.ok(occurrences > 0, `Mutation anchor missing: ${name}`)
@@ -84,7 +89,7 @@ try {
   }
   const green = await run('restored-green')
   assert.equal(green.result.status, 0, green.log)
-  assert.match(green.log, /Tests\s+18 passed/)
+  assert.match(green.log, executedTests)
   receipt.green = { exit: green.result.status, log: green.file, sha256: green.sha256 }
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message } }
@@ -96,4 +101,13 @@ finally {
 }
 assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Source and test inputs changed during the proof; this receipt cannot sign the new candidate')
 assert.equal(receipt.passed, true, receipt.failure?.message)
+const publishIndex = process.argv.indexOf('--publish-evidence')
+if (publishIndex >= 0) {
+  const destination = process.argv[publishIndex + 1]
+  assert.ok(destination, 'Publishing requires an explicit new immutable evidence directory')
+  const published = path.resolve(root, destination)
+  await fs.mkdir(path.dirname(published), { recursive: true })
+  await fs.mkdir(published)
+  await fs.cp(evidence, published, { force: false, errorOnExist: true })
+}
 console.log(JSON.stringify({ passed: true, cases: receipt.cases.length, originalSourceUnchanged: true, receipt: path.relative(root, path.join(evidence, 'receipt.json')) }))
