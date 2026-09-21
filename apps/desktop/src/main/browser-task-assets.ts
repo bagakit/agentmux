@@ -45,6 +45,8 @@ export class BrowserTaskAssetFileStore implements BrowserTaskAssetStore {
 
 /** Main is the one Browser control owner. This Client keeps progress, never a second approval bit. */
 export interface BrowserTaskAssetHost {
+  /** Bind the actual cursor before its first durable/public projection. */
+  onRunPrepared(runId: string): void
   runScript(browserId: string, script: string): Promise<BrowserScriptRunReport>
   yieldControl(browserId: string): void
   control(browserId: string): 'human' | 'agent'
@@ -173,6 +175,7 @@ export class BrowserTaskAssets {
           if (this.document.runs.length >= MAX_RUNS) throw new Error('Task run budget reached; previous run facts were retained.')
           this.document.runs.push(next)
         }
+        host.onRunPrepared(next.id)
         delete next.pendingCheckpointId; delete next.warning
         next.status = 'ready'
         await this.persist(next.browserId)
@@ -187,6 +190,7 @@ export class BrowserTaskAssets {
         if (step.kind === 'checkpoint') {
           host.yieldControl(browserId)
           await this.change(async () => {
+            if (run!.status === 'stopped') return
             run!.nextStep += 1; run!.status = 'waiting-human'; run!.pendingCheckpointId = step.id
             run!.warning = 'Human checkpoint reached. Review the page, then explicitly return control to continue the remaining steps.'
             await this.updateRun(run!)
@@ -195,12 +199,20 @@ export class BrowserTaskAssets {
         }
         const script = compileAssetStep(step, parameters)
         // Write-ahead cursor: restart during a call is uncertain, so no automatic replay is offered.
-        await this.change(async () => { run!.status = 'running'; await this.updateRun(run!) })
+        const started = await this.change(async () => {
+          if (run!.status === 'stopped') return false
+          run!.status = 'running'; await this.updateRun(run!)
+          return true
+        })
+        // A listener can stop the cursor across the await; discard the earlier loop narrowing.
+        if (!started || (run as BrowserTaskAssetRun).status === 'stopped') break
         let report: BrowserScriptRunReport
         try { report = await host.runScript(browserId, script) }
         catch {
           await this.change(async () => {
-            run!.status = 'interrupted'; run!.warning = 'The Browser call did not produce a known result. Inspect the page; this step was not replayed.'
+            if (run!.status !== 'stopped') {
+              run!.status = 'interrupted'; run!.warning = 'The Browser call did not produce a known result. Inspect the page; this step was not replayed.'
+            }
             await this.updateRun(run!)
           })
           return copy(run)

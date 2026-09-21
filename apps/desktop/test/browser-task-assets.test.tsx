@@ -57,7 +57,7 @@ function host() {
       id: `real-operation-${runScript.mock.calls.length}`, browserId, phase: completed ? 'completed' : 'failed', operator: { id: 'person', name: 'Person' }, startedAt: 1, summary: 'Actual generated script', url, steps: []
     } }
   })
-  const owner: BrowserTaskAssetHost = { runScript, yieldControl: vi.fn(() => { control = 'human' }), control: () => control }
+  const owner: BrowserTaskAssetHost = { onRunPrepared: vi.fn(), runScript, yieldControl: vi.fn(() => { control = 'human' }), control: () => control }
   return { owner, calls, runScript, returnControl: () => { control = 'agent' }, setObservation: (next: unknown, missing: unknown[] = []) => { observation = next; missingFrames = missing } }
 }
 
@@ -115,7 +115,12 @@ describe('versioned Browser task assets', () => {
   })
   it('refuses unreviewed, unknown and ambiguous targets without calling the Browser action owner', async () => {
     for (const alteration of ['unreviewed', 'unknown', 'ambiguous'] as const) {
-      const s = setup(), asset = await saved(s.assets, draft => ({ ...draft, steps: [{ ...draft.steps[0]!, ...(alteration === 'unreviewed' ? { reviewed: false } : alteration === 'unknown' ? { target: undefined } : { target: { role: 'button', name: 'Continue', ordinal: 1, count: 2 } }) }] })), h = host()
+      const s = setup(), asset = await saved(s.assets, draft => {
+        const { target: _target, ...unknown } = draft.steps[0]!
+        const step = alteration === 'unknown' ? unknown : { ...draft.steps[0]!, ...(alteration === 'unreviewed'
+          ? { reviewed: false } : { target: { role: 'button', name: 'Continue', ordinal: 1, count: 2 } }) }
+        return { ...draft, steps: [step] }
+      }), h = host()
       await expect(runBrowserTaskAsset(s.assets, { assetId: asset.id, version: 1, browserId: 'browser-1', parameters: {} }, h.owner)).rejects.toThrow(alteration === 'unreviewed' ? 'Review the demonstrated step' : 'unknown or ambiguous')
       expect(h.runScript).not.toHaveBeenCalled()
     }
@@ -214,6 +219,39 @@ describe('versioned Browser task assets', () => {
     expect(stopped).toMatchObject({ status: 'stopped', nextStep: 1, operationIds: ['real-operation-1'] })
     expect(h.calls.filter(call => call.method !== 'snapshot').map(call => call.method)).toEqual(['click'])
   })
+  it.each(['click', 'checkpoint'] as const)('keeps the first published ready cursor stopped before a queued %s step', async kind => {
+    const s = setup(), asset = await saved(s.assets, draft => ({ ...draft, steps: [kind === 'checkpoint'
+      ? { id: 'checkpoint', kind, url: draft.url, reviewed: true } : draft.steps[0]!] })), h = host()
+    let stopped: ReturnType<BrowserTaskAssets['stop']> | undefined
+    let publishedId: string | undefined
+    const unsubscribe = s.assets.subscribe(async () => {
+      const run = (await s.assets.state()).runs[0]
+      if (!run || publishedId) return
+      publishedId = run.id
+      stopped = s.assets.stop(run.id)
+    })
+    try {
+      const run = await runBrowserTaskAsset(s.assets, { assetId: asset.id, version: 1, browserId: 'browser-1', parameters: {} }, h.owner)
+      expect(publishedId).toBeTypeOf('string')
+      expect(h.owner.onRunPrepared).toHaveBeenCalledExactlyOnceWith(publishedId)
+      expect(await stopped).toMatchObject({ id: publishedId, status: 'stopped', nextStep: 0 })
+      expect(run).toMatchObject({ id: publishedId, status: 'stopped', nextStep: 0, operationIds: [] })
+      expect(h.runScript).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+  })
+  it('retains the actual stopped cursor when an already-started host call rejects', async () => {
+    const s = setup(), asset = await saved(s.assets), h = host()
+    let entered!: () => void, release!: () => void
+    const waiting = new Promise<void>(done => { entered = done }), paused = new Promise<void>(done => { release = done })
+    h.owner.runScript = async () => { entered(); await paused; throw new Error('Call result unavailable') }
+    const running = runBrowserTaskAsset(s.assets, { assetId: asset.id, version: 1, browserId: 'browser-1', parameters: { 'input-2': 'one-use' } }, h.owner)
+    try {
+      await waiting
+      const current = (await s.assets.state()).runs[0]!
+      await s.assets.stop(current.id); release()
+      expect(await running).toMatchObject({ id: current.id, status: 'stopped', nextStep: 0, operationIds: [] })
+    } finally { release(); await running }
+  })
   it('does not advance an uncertain call, wrong journal identity or storage failure into apparent completion', async () => {
     const s = setup(), asset = await saved(s.assets), h = host()
     h.owner.runScript = async () => { throw new Error('Unknown action completion') }
@@ -268,7 +306,8 @@ describe('BrowserTaskAssetEditor', () => {
     } finally { await m.close() }
   })
   it('forwards actual UI events without claiming trust and keeps unresolved targets blocked from review', async () => {
-    const s = setup(), asset = await s.assets.importRecording({ ...recording(), steps: [{ ...recording().steps[0]!, target: undefined }] }), m = await mount(asset)
+    const { target: _target, ...unknown } = recording().steps[0]!
+    const s = setup(), asset = await s.assets.importRecording({ ...recording(), steps: [unknown] }), m = await mount(asset)
     try {
       const review = m.host.querySelector<HTMLInputElement>('[aria-label="Review task step 1"]')!
       expect(review.disabled).toBe(true)
