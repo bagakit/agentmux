@@ -55,6 +55,17 @@ async function browse(input: HTMLInputElement, trigger: HTMLElement, items: HTML
   }
   await pointer(menu()!, 'pointerout', input)
   focused(input, value, caret)
+  await pointer(trigger, 'pointerover', input)
+  expect(menu()).not.toBeNull()
+  const direct = document.querySelector<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')!
+  expect(direct).toBeTruthy()
+  await pointer(direct, 'pointerover', trigger)
+  await pointer(direct, 'pointermove')
+  await pointer(direct, 'pointerout', input)
+  focused(input, value, caret)
+  await pause()
+  expect(menu()).toBeNull()
+  focused(input, value, caret)
   await pause()
   expect(menu()).toBeNull()
   focused(input, value, caret)
@@ -177,6 +188,10 @@ it.each(['item', 'radio'] as const)('disabled %s hover/move/leave retains input/
   focused(input, 'draft', 2)
   await pointer(item, 'pointerdown'); await act(async () => item.click())
   expect(choose).not.toHaveBeenCalled()
+  await pointer(item, 'pointerout', input)
+  await pause()
+  expect(menu()).toBeNull()
+  focused(input, 'draft', 2)
 })
 
 it('caller pointer handlers run once and defaultPrevented survives shared composition', async () => {
