@@ -1,5 +1,5 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { Check, ChevronDown, Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
@@ -204,7 +204,8 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
             <DropdownMenu.Content className="settings-section-menu" align="end" sideOffset={6} collisionPadding={{ top: 34, right: 8, bottom: 40, left: 8 }} onEscapeKeyDown={(event) => event.stopPropagation()} onCloseAutoFocus={(event) => {
               // Keep focus the user has already moved to another control.
               const focused = document.activeElement
-              if (focused instanceof HTMLElement && focused !== document.body
+              if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body
+                && !focused.closest('[hidden], [inert]')
                 && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
             }}>
               <DropdownMenu.RadioGroup value={active} onValueChange={(value) => setActive(value as SettingsSectionId)}>
