@@ -112,7 +112,7 @@ describe('Space tool actions on the real dock and Store', () => {
     expect(opened).toMatchObject({ kind: 'browser', workspaceId: workspace.id, navigationId: 'native-navigation' })
     expect(opened.kind).toBe('browser')
     if (opened.kind !== 'browser') throw new Error('Expected the created Browser surface')
-    expect(create).toHaveBeenCalledExactlyOnceWith(opened.regionId, 'about:blank')
+    expect(create).toHaveBeenCalledExactlyOnceWith(opened.regionId, 'about:blank', workspace.id)
     retainedFacts()
     expect(dom.container.querySelector('.surface-tool-error')).toBeNull()
   })
