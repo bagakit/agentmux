@@ -1,11 +1,13 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
-import { Mail, X } from 'lucide-react'
+import { CircleHelp, Mail, Pause, Repeat2, X } from 'lucide-react'
+import type { SessionSnapshot } from '../../../shared/contracts'
+import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
 import { useAppStore } from '../store'
 import { useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
 
-type Folder = 'inbox' | 'outbox' | 'system'
+type Folder = 'inbox' | 'outbox' | 'system' | 'progress'
 const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'system']
 
 function useMessageFingerprints(items: readonly AgentTimelineItem[]) {
@@ -44,10 +46,11 @@ function MessageHistory({ items, incoming, onCopy }: { items: readonly AgentTime
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued }: {
   system: ReturnType<typeof useServiceNotices>
   queued: readonly ComposerQueuedMessage[]
   timeline?: AgentTimelineSnapshot | undefined
+  progressSession?: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
   onRemoveQueued?: (id: string) => void
   onMoveQueued?: (id: string, direction: 'up' | 'down') => void
   onSendQueued?: (id: string) => void
@@ -56,6 +59,13 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onMov
   const id = useId()
   const [open, setOpen] = useState(false)
   const [folder, setFolder] = useState<Folder>('inbox')
+  const folders: readonly Folder[] = progressSession ? [...FOLDERS, 'progress'] : FOLDERS
+  const progressTarget = progressSession ? JSON.stringify([progressSession.hostId, progressSession.id, progressSession.providerId, progressSession.workspacePath]) : ''
+  const [progress, setProgress] = useState<{ target: string; status: ContinuousProgressStatus }>()
+  const onProgressStatus = useCallback((status: ContinuousProgressStatus) => setProgress({ target: progressTarget, status }), [progressTarget])
+  const progressStatus = progress?.target === progressTarget ? progress.status : 'unconfirmed'
+  const progressLabel = `Continuous progress: ${progressStatus}${progressStatus === 'inactive' ? ' (not enabled)' : ''}`
+  const ProgressIcon = progressStatus === 'active' ? Repeat2 : progressStatus === 'paused' ? Pause : CircleHelp
   const messages = useMemo(() => timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
     item.kind === 'user_message' && item.status !== 'streaming') ?? [], [timeline])
   const incoming = useMemo(() => messages.filter((item) => item.authorAgentSessionId !== undefined), [messages])
@@ -86,10 +96,11 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onMov
     if (folder === 'system' && system.unread.length) system.acknowledge(system.unread)
   }, [open, folder, receipts, system])
   return <>
-    <button type="button" className="composer__mailbox" data-unread={unread > 0}
-      aria-label={`Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending`}
-      title="Mailbox" popoverTarget={id} popoverTargetAction="toggle">
+    <button type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
+      aria-label={`Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending${progressSession ? `. ${progressLabel}` : ''}`}
+      title={progressSession ? `Mailbox · ${progressLabel}` : 'Mailbox'} popoverTarget={id} popoverTargetAction="toggle">
       <Mail size={14} aria-hidden="true" />
+      {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={9} className="composer-mailbox__progress" aria-hidden="true" /> : null}
       {pending.length ? <span aria-hidden="true">{pending.length}</span> : null}
       {unread ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
     </button>
@@ -99,18 +110,19 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onMov
       <div className="composer-mailbox__heading"><strong>Mailbox</strong>
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"><X size={14} /></button></div>
       <div className="composer-mailbox__folders" role="tablist" aria-label="Mailbox folders">
-        {FOLDERS.map((name, index) => <button key={name} type="button"
+        {folders.map((name, index) => <button key={name} type="button"
           id={`${id}-${name}-tab`} role="tab" aria-controls={`${id}-${name}`} aria-selected={folder === name}
           tabIndex={folder === name ? 0 : -1} onClick={() => setFolder(name)}
+          {...(name === 'progress' ? { 'aria-label': progressLabel, title: progressLabel } : {})}
           onKeyDown={(event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
             event.preventDefault()
-            const next = FOLDERS[event.key === 'Home' ? 0 : event.key === 'End' ? FOLDERS.length - 1 :
-              (index + (event.key === 'ArrowRight' ? 1 : FOLDERS.length - 1)) % FOLDERS.length]!
+            const next = folders[event.key === 'Home' ? 0 : event.key === 'End' ? folders.length - 1 :
+              (index + (event.key === 'ArrowRight' ? 1 : folders.length - 1)) % folders.length]!
             setFolder(next)
             document.getElementById(`${id}-${next}-tab`)?.focus()
           }}>
-          {`${name[0]!.toUpperCase()}${name.slice(1)} (${counts[name]})`}
+          {name === 'progress' ? 'Progress' : `${name[0]!.toUpperCase()}${name.slice(1)} (${counts[name]})`}
           {(name === 'inbox' && receipts.unread.length || name === 'system' && system.unread.length) ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
         </button>)}
       </div>
@@ -132,6 +144,9 @@ export function SessionMailbox({ system, queued, timeline, onRemoveQueued, onMov
           </div>
         </div>) : <p>{system.available ? 'No current notices.' : 'Waiting for Session status.'}</p>}
       </div>
+      {progressSession ? <div id={`${id}-progress`} role="tabpanel" aria-labelledby={`${id}-progress-tab`} hidden={folder !== 'progress'}>
+        <ContinuousProgressControl session={progressSession} onStatusChange={onProgressStatus} />
+      </div> : null}
     </div>
   </>
 }

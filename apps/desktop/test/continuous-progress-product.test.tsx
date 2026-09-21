@@ -14,6 +14,7 @@ import type { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
+  storagePath: '',
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
   deliver: (channel: string, ...args: any[]) => {}, reply: (channel: string, ...args: any[]) => {} }))
@@ -28,7 +29,7 @@ vi.mock('electron', () => ({
     removeHandler: (channel: string) => bridge.handlers.delete(channel),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => _hygiene_fixturePath("private/continuous-progress-fixture") },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
@@ -68,6 +69,8 @@ let snapshot: Extract<SessionSnapshot, { kind: 'agent' }>, ended: boolean
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   directory = await mkdtemp(join(tmpdir(), 'amx-progress-product-'))
+  bridge.storagePath = join(directory, 'chromium')
+  await mkdir(join(bridge.storagePath, 'Local Storage'), { recursive: true })
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
@@ -103,7 +106,7 @@ beforeEach(async () => {
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     () => now, (loop, tickId, time, signal) => runtime.observeContinuousProgress(loop, tickId, time, signal))
   bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false,
-    send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn() } })
+    send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
   bridge.deliver = (channel, ...args) => {
     if (channel === CONTROL_REQUEST_CHANNEL) {
       observations.push(args[0].control.agentSessionId)

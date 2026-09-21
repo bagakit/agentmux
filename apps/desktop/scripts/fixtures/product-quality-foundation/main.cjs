@@ -16,7 +16,7 @@ async function key(key, code, virtual, text) {
   for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: virtual, ...(type === 'keyDown' && text ? { text } : {}) })
 }
 async function point(expression) {
-  return evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');const r=e.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}}if(right<=left||bottom<=top)throw new Error('Actual target is clipped');return{x:(left+right)/2,y:(top+bottom)/2}})()`)
+  return evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');const r=e.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}if(p.matches(':popover-open'))break}if(right<=left||bottom<=top)throw new Error('Actual target is clipped');return{x:(left+right)/2,y:(top+bottom)/2}})()`)
 }
 async function click(expression) {
   const p = await point(expression)
@@ -49,14 +49,29 @@ const pane = `document.querySelector('[data-workbench-region-id="quality-target"
 const terminal = `(${pane}).querySelector('.terminal-view__xterm')`
 const details = `(${pane}).querySelector('.service-window__details')`
 const summary = `${details}?.querySelector('summary')`
+const mailbox = `(${pane}).querySelector('.composer-mailbox')`
+const mailboxTrigger = `(${pane}).querySelector('.composer__mailbox')`
+const progressControl = `(${pane}).querySelector('.continuous-progress-control')`
+async function openProgress() {
+  await click(mailboxTrigger)
+  await waitFor(`${mailbox}.matches(':popover-open') && ${mailbox}.dataset.state==='open'`); await painted()
+  const tab = `${mailbox}.querySelector('[id$="-progress-tab"]')`
+  assert.ok(await evaluate(`Boolean(${tab})`), 'Actual shared Mailbox must expose its Progress page')
+  await click(tab); await waitFor(`${tab}.getAttribute('aria-selected')==='true'`); await painted()
+}
+async function closeProgress() {
+  await key('Escape', 'Escape', 27)
+  await waitFor(`!${mailbox}.matches(':popover-open') && ${mailbox}.dataset.state==='closed'`); await painted()
+  assert.equal(await evaluate(`document.activeElement===${mailboxTrigger}`), true, 'Escape returns to the original Mailbox trigger')
+}
 const measure = `(()=>{
   const pane=${pane};if(!pane)throw new Error('Actual SessionPane missing');
   const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
-  const label=pane.querySelector('.continuous-progress-control__label'), lr=label&&document.createRange();if(lr)lr.selectNodeContents(label);
+  const trigger=pane.querySelector('.composer__mailbox'), mailbox=pane.querySelector('.composer-mailbox');
   const detail=pane.querySelector('.service-window__details');
   return {pane:rect(pane),terminal:rect(pane.querySelector('.terminal-view__xterm')),composer:rect(pane.querySelector('[data-agent-composer="true"]')),
-    progress:label?{label:rect(label),rects:[...lr.getClientRects()].map(r=>({width:r.width,height:r.height})),font:getComputedStyle(label).fontSize,
-      summary:pane.querySelector('.continuous-progress-control summary').innerText,summaryRect:rect(pane.querySelector('.continuous-progress-control summary')),open:pane.querySelector('.continuous-progress-control').open}:null,
+    progress:trigger?{status:trigger.dataset.progressState,label:trigger.getAttribute('aria-label'),rect:rect(trigger),
+      open:mailbox.matches(':popover-open'),page:mailbox.querySelector('[aria-selected="true"]')?.id}:null,
     header:{name:pane.querySelector('.agent-region-header').getAttribute('aria-label'),more:rect(pane.querySelector('.agent-region-header__more')),readonly:!!pane.querySelector('.agent-region-header__mode')},
     notices:[...pane.querySelectorAll('.service-window')].map(n=>({step:n.querySelector('.service-window__step').innerText,mode:n.querySelector('.service-window__mode').innerText,
       restore:n.querySelector('.service-window__restore').innerText,rect:rect(n),aria:n.getAttribute('aria-live'),kind:n.dataset.kind,detail:!!n.querySelector('details')})),
@@ -71,7 +86,7 @@ async function seed(mode, width, height, windowMode = false, appearance = 'dark'
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }] })
   await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)};qualityProbe.mode(${JSON.stringify(mode)},${windowMode})`)
   await waitFor(`Boolean(qualityProbe.terminal()) && !(${terminal}).classList.contains('terminal-view__xterm--hydrating')`)
-  if (mode === 'list-rejected') await waitFor(`(${pane}).querySelector('.continuous-progress-control summary').innerText.includes('Unconfirmed')`)
+  if (mode === 'list-rejected') await waitFor(`${progressControl}.textContent.includes('FINAL LIST CAUSE') && ${mailboxTrigger}.dataset.progressState==='unconfirmed'`)
   await painted()
 }
 async function keyboardReach(expression, backwards = false) {
@@ -161,7 +176,7 @@ async function auxiliaryDetails() {
   assert.equal(facts.notices.length, 2)
   assert.ok(facts.notices.every(notice => notice.step && notice.mode && notice.restore))
   assert.ok(facts.notices.some(notice => notice.kind === 'indeterminate'))
-  assert.equal(await evaluate(`(${pane}).querySelectorAll('.service-window__details').length`), 2)
+  assert.equal(await evaluate(`(${pane}).querySelectorAll('.service-window__details').length`), 2, 'Concurrent lifecycle notices must retain their original details')
   const before = await evaluate('qualityProbe.terminal()'), control = await evaluate('qualityProbe.facts().session')
   const witnesses = []
   async function fromHeader(expression) {
@@ -402,12 +417,21 @@ app.whenReady().then(async () => {
     if (process.argv.includes('--aux-only')) { await auxiliaryDetails(); result.passed = true; return }
     if (process.argv.includes('--narrow-only')) {
       await seed('normal', 320, 400)
+      await openProgress()
+      await evaluate(`window.progressProofForm=${progressControl}.querySelector('form'); void 0`)
+      const textarea = `${progressControl}.querySelector('textarea')`
+      await click(textarea)
+      await win.webContents.debugger.sendCommand('Input.insertText', { text: 'Kept continuation draft' })
+      await waitFor(`${textarea}.value==='Kept continuation draft'`)
+      await click(`${mailbox}.querySelector('[id$="-inbox-tab"]')`)
+      await closeProgress(); await openProgress()
+      assert.equal(await evaluate(`${progressControl}.querySelector('form')===window.progressProofForm`), true,
+        'Progress page must retain its original form through page and close transitions')
+      assert.equal(await evaluate(`${textarea}.value`), 'Kept continuation draft', 'Progress continuation draft must survive page and close transitions')
       const facts = await evaluate(measure)
       await capture('320x400-narrow-owning', facts)
       assert.equal(facts.pane.width, 320)
-      assert.equal(facts.progress.rects.length, 1, 'No-loop actual progress caption must fit one line')
-      assert.ok(facts.progress.label.x + facts.progress.label.width <= facts.progress.summaryRect.x + facts.progress.summaryRect.width + 1,
-        'Actual narrow progress summary must contain its complete one-line caption')
+      await closeProgress()
       const send = await evaluate(`(()=>{const e=(${pane}).querySelector('.composer-send'),r=e.getBoundingClientRect();return {width:r.width,height:r.height,hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('.composer-send')===e}})()`)
       assert.ok(send.width > 0 && send.height > 0 && send.hit, 'Existing actual composer control must remain reachable')
       result.narrowControls = send; result.passed = true; return
@@ -416,12 +440,12 @@ app.whenReady().then(async () => {
       for (const mode of ['normal', 'single', 'concurrent', 'unknown', 'lifecycle', 'readonly', 'list-rejected', 'progress-unknown', 'progress-action', 'progress-busy', 'history']) {
         await seed(mode === 'history' ? 'normal' : mode, width, height)
         if (mode === 'progress-action' || mode === 'progress-busy') {
-          const control = `(${pane}).querySelector('.continuous-progress-control')`
-          await click(`${control}.querySelector('summary')`)
+          const control = progressControl
+          await openProgress()
           await click(`${control}.querySelector('[aria-label="Pause continuous progress"]')`)
           if (mode === 'progress-action') {
             await waitFor(`${control}.innerText.includes('FINAL ACTION CAUSE')`)
-            await click(`${control}.querySelector('summary')`)
+            await closeProgress()
           } else {
             await waitFor(`${control}.querySelector('[aria-label="Pause continuous progress"]').disabled`)
             assert.ok(await evaluate(`${control}.querySelector('[aria-label="Pause continuous progress"]').disabled`))
@@ -442,11 +466,11 @@ app.whenReady().then(async () => {
         assert.equal(facts.pane.width, width, 'The actual constrained Region must match its requested width')
         assert.equal(facts.pane.height, height)
         if (mode !== 'history') assert.ok(facts.header.more.width === 22 && facts.header.more.height === 22)
-        if (mode === 'normal') { assert.equal(facts.notices.length, 0); assert.equal(facts.progress.rects.length, 1, 'No-loop actual progress caption must fit one line') }
+        if (mode === 'normal') { assert.equal(facts.notices.length, 0); assert.equal(facts.progress.status, 'inactive') }
         if (mode === 'single') assert.equal(facts.notices.length, 1)
         if (mode === 'concurrent') assert.equal(facts.notices.length, 2)
         if (mode === 'unknown') { assert.ok(facts.notices.length >= 2); assert.ok(facts.notices.some(notice => notice.kind === 'indeterminate')); assert.ok(facts.notices.every(notice => notice.step && notice.mode && notice.restore)) }
-        if (mode === 'list-rejected' || mode === 'progress-action' || mode === 'progress-unknown') assert.ok(facts.progress.summary.includes('Unconfirmed'))
+        if (mode === 'list-rejected' || mode === 'progress-action' || mode === 'progress-unknown') assert.equal(facts.progress.status, 'unconfirmed')
         if (mode === 'readonly') { assert.equal(facts.composer, null); assert.equal(facts.header.readonly, true) }
         if (mode === 'history') assert.equal(facts.history, true)
         await capture(`${width}x${height}-${mode}`, facts)
