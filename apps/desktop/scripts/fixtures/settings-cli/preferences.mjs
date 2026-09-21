@@ -266,7 +266,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     const rail = await one('projectRailDensity'), nextRail = rail.enum.find(value => value !== rail.value)
     await set(rail.key, nextRail); await waitFor('CLI rail density reaches actual rail', async () => await railUI() === nextRail)
     const otherValues = await allValues()
-    await activate(probe.cdp, `${nodes('.project-rail .sidebar__heading-actions button')}.filter(e=>/^Use .*project spacing$/.test(e.getAttribute('aria-label')??''))`)
+    await activate(probe.cdp, `${nodes('.project-rail button')}.filter(e=>/^Use .*project spacing$/.test(e.getAttribute('aria-label')??''))`)
     await waitFor('native rail action durably commits', async () => (await one(rail.key)).value !== nextRail)
     const afterRail = await allValues(); assert.equal(await railUI(), afterRail[rail.key]); assert.ok(rail.enum.includes(afterRail[rail.key]))
     assert.deepEqual(afterRail, { ...otherValues, [rail.key]: afterRail[rail.key] })
