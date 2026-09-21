@@ -283,7 +283,7 @@ export class BrowserViewManager {
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private demonstrationCapture: { entry: BrowserEntry; view: WebContentsView; contents: WebContents; capture: BrowserDemonstrationCapture } | null = null
 
-  private readonly taskExecutions = new Map<string, { entry: BrowserEntry; assetId: string; version: number; runId: string | undefined; operationId: string | undefined }>()
+  private readonly taskExecutions = new Map<string, { entry: BrowserEntry; runId: string | undefined; operationId: string | undefined; stopRequested: boolean }>()
   private readonly unsubscribeTaskAssets: (() => void) | undefined
 
   constructor(
@@ -769,13 +769,18 @@ export class BrowserViewManager {
       }
     }
     onOperationStarted?.(operation)
-    operation.phase = 'running'
-    operation.summary = 'Agent is operating the Browser'
-    void this.operationJournal?.setPhase(operation.id, 'running', { summary: operation.summary })
-    // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
-    // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
-    this.emit(entry)
+    if (!stopRequested) {
+      operation.phase = 'running'
+      operation.summary = 'Agent is operating the Browser'
+      void this.operationJournal?.setPhase(operation.id, 'running', { summary: operation.summary })
+      // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
+      // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
+      this.emit(entry)
+    }
     try {
+      if (stopRequested) return {
+        result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning! }, runOperation: operation
+      }
       const resultContext: BrowserResultContext = {
         workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
         navigationId: resultNavigationId
@@ -1223,20 +1228,23 @@ export class BrowserViewManager {
     const asset = await this.requireTaskAsset(input.browserId, input.assetId)
     const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)
     if (this.taskExecutions.has(entry.id) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
-    const execution = { entry, assetId: input.assetId, version: input.version, runId: input.runId, operationId: undefined as string | undefined }
+    const execution = { entry, runId: input.runId, operationId: undefined as string | undefined, stopRequested: false }
     this.taskExecutions.set(entry.id, execution)
     try {
       return await runBrowserTaskAsset(this.taskAssets!, input, {
+        onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
         yieldControl: id => this.yieldControl(id),
         runScript: async (id, code) => {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
-          const state = await this.taskAssets!.state(id)
-          const run = state.runs.find(run => run.assetId === execution.assetId && run.version === execution.version && run.status === 'running')
-          if (!run) throw new Error('The task cursor is unavailable; the action was not restarted.')
-          execution.runId = run.id
+          if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
           try {
-            return await this.runScript(id, code, undefined, undefined, undefined, operation => { execution.operationId = operation.id }, privateTaskParameters)
+            return await this.runScript(id, code, undefined, undefined, undefined, operation => {
+              execution.operationId = operation.id
+              // Preparation can finish after the person stopped this exact cursor.
+              // Hand that intent to the existing operation cancellation owner before any page work.
+              if (execution.stopRequested) void this.stopOperationById(operation.id)
+            }, privateTaskParameters)
           } finally { execution.operationId = undefined }
         }
       })
@@ -1252,8 +1260,10 @@ export class BrowserViewManager {
     const run = state.runs.find(run => run.id === runId)
     if (!run) throw new Error('This task run does not belong to the Browser.')
     const execution = this.taskExecutions.get(id)
-    if (execution?.entry === entry && execution.runId === runId && execution.operationId &&
-        entry.activeRun?.operationId === execution.operationId) void this.stopOperationById(execution.operationId)
+    if (execution?.entry === entry && execution.runId === runId) {
+      execution.stopRequested = true
+      if (execution.operationId && entry.activeRun?.operationId === execution.operationId) void this.stopOperationById(execution.operationId)
+    }
     return await this.taskAssets.stop(runId)
   }
 

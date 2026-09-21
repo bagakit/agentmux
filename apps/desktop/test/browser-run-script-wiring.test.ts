@@ -1572,6 +1572,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
   it('imports only the actual Main draft, preserves saved versions, and projects real running progress before the call returns', async () => {
     const f = await fixture()
     let finishClick!: () => void
+    let running: ReturnType<BrowserViewManager['runTaskAsset']> | undefined
     const held = new Promise<void>(resolve => { finishClick = resolve })
     try {
       expect(f.imported).toMatchObject({ browserId: 'b1', sourceRecordingId: expect.any(String), versions: [],
@@ -1582,7 +1583,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
       await expect(f.manager.saveTaskAssetVersion('b1', saved.id, saved.revision, saved.draft)).rejects.toThrow('changed')
       f.manager.returnControl('b1')
       createDispatch.mockImplementationOnce(() => pageDispatch(async () => { await held; return true }))
-      const running = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      running = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       await expect.poll(() => f.sentEvents().filter(event => event.browser?.taskAssets?.runs.some((run: any) => run.status === 'running')).length).toBeGreaterThan(0)
       await expect.poll(() => f.sentEvents().at(-1)?.browser.driving).toBe(true)
       finishClick()
@@ -1593,7 +1594,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
       expect(run.operationIds[0]).not.toBe(saved.id)
       expect(await f.journal.get(run.operationIds[0]!)).toMatchObject({ id: run.operationIds[0], browserId: 'b1', phase: 'completed' })
       await expect.poll(() => f.sentEvents().at(-1)?.browser.taskAssets?.runs.at(-1)?.status).toBe('completed')
-    } finally { finishClick(); await f.close() }
+    } finally { finishClick(); await Promise.allSettled([running]); await f.close() }
   }, 30_000)
 
   it('an initial checkpoint owns real idle control, refuses implicit continuation, and continues once after explicit return', async () => {
@@ -1622,20 +1623,28 @@ describe('versioned task assets via the actual Browser Manager', () => {
     const f = await fixture()
     let releaseOther!: () => void
     let releaseTask!: () => void
+    let otherEntered!: () => void
     let activeTask: ReturnType<BrowserViewManager['runTaskAsset']> | undefined
     let healthyOther: ReturnType<BrowserViewManager['runScript']> | undefined
     const otherHeld = new Promise<void>(resolve => { releaseOther = resolve })
     const taskHeld = new Promise<void>(resolve => { releaseTask = resolve })
+    const otherReady = new Promise<void>(resolve => { otherEntered = resolve })
+    const originalDispatch = createDispatch.getMockImplementation()!
     try {
       const saved = await version(f)
       await f.manager.create('b2', 'https://example.invalid/', 'workspace-1')
       f.manager.returnControl('b1')
-      createDispatch.mockImplementationOnce(() => pageDispatch(async () => { await taskHeld; return true }))
+      createDispatch.mockImplementation(context => {
+        expect(context.resultArtifacts?.owner.browserId).toMatch(/^b[12]$/)
+        return context.resultArtifacts!.owner.browserId === 'b1'
+          ? pageDispatch(async () => { await taskHeld; return true })
+          : async () => { otherEntered(); await otherHeld; return true }
+      })
       activeTask = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       await expect.poll(() => f.sentEvents().filter(event => event.browser?.id === 'b1' && event.browser.driving).length).toBeGreaterThan(0)
-      createDispatch.mockImplementationOnce(() => async () => { await otherHeld; return true })
       healthyOther = f.manager.runScript('b2', "await waitForElement('Other pending fact'); return 82")
-      await expect.poll(() => f.sentEvents().filter(event => event.browser?.id === 'b2' && event.browser.activity?.operation?.phase === 'waiting').length).toBeGreaterThan(0)
+      await otherReady
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b2' && event.browser.activity?.operation?.phase === 'waiting').length).toBeGreaterThan(0)
       const taskRun = (await f.assets.state('b1')).runs.at(-1)!
       await expect(f.manager.stopTaskAsset('b2', taskRun.id)).rejects.toThrow('does not belong')
       const stopped = await f.manager.stopTaskAsset('b1', taskRun.id)
@@ -1649,6 +1658,143 @@ describe('versioned task assets via the actual Browser Manager', () => {
     } finally {
       releaseOther(); releaseTask()
       await Promise.allSettled([activeTask, healthyOther])
+      createDispatch.mockImplementation(originalDispatch)
+      await f.close()
+    }
+  }, 30_000)
+
+  it('hands preparation-time Stop to the actual late operation without actions or running rebound and preserves another healthy Browser', async () => {
+    const f = await fixture()
+    let releasePreparation!: () => void
+    let releaseOther!: () => void
+    let otherEntered!: () => void
+    const preparing = new Promise<void>(resolve => { releasePreparation = resolve })
+    const otherHeld = new Promise<void>(resolve => { releaseOther = resolve })
+    const otherReady = new Promise<void>(resolve => { otherEntered = resolve })
+    let preparationReached = false
+    let preparedOperationId: string | undefined
+    let activeTask: ReturnType<BrowserViewManager['runTaskAsset']> | undefined
+    let healthyOther: ReturnType<BrowserViewManager['runScript']> | undefined
+    const taskCalls: string[] = []
+    let taskActions = 0
+    const originalDispatch = createDispatch.getMockImplementation()!
+    const originalStart = f.journal.start.bind(f.journal)
+    vi.spyOn(f.journal, 'start').mockImplementation(async input => {
+      const operation = await originalStart(input)
+      if (input.browserId === 'b1') {
+        preparedOperationId = operation.id
+        preparationReached = true
+        await preparing
+      }
+      return operation
+    })
+    try {
+      const saved = await version(f)
+      await f.manager.create('b2', 'https://example.invalid/', 'workspace-1')
+      createDispatch.mockImplementation(context => {
+        expect(context.resultArtifacts?.owner.browserId).toMatch(/^b[12]$/)
+        if (context.resultArtifacts!.owner.browserId === 'b2') return async () => { otherEntered(); await otherHeld; return true }
+        const dispatch = pageDispatch(async () => { taskActions += 1; return true })
+        return async (name: string) => { taskCalls.push(name); return await dispatch(name) }
+      })
+      healthyOther = f.manager.runScript('b2', "await waitForElement('Other pending fact'); return 82")
+      await otherReady
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b2' && event.browser.activity?.operation?.phase === 'waiting').length).toBeGreaterThan(0)
+      f.manager.returnControl('b1')
+      activeTask = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      await expect.poll(() => preparationReached).toBe(true)
+      const cursor = (await f.assets.state('b1')).runs.at(-1)!
+      expect(cursor).toMatchObject({ status: 'running', nextStep: 0, operationIds: [] })
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b1').at(-1)?.browser.driving).toBe(false)
+      expect(await f.journal.get(preparedOperationId!)).toMatchObject({ phase: 'preparing' })
+      expect(await f.manager.stopTaskAsset('b1', cursor.id)).toMatchObject({ id: cursor.id, status: 'stopped', nextStep: 0 })
+      releasePreparation()
+      const stopped = await activeTask
+      expect({ run: stopped, pageCalls: taskCalls, actions: taskActions }).toMatchObject({
+        run: { id: cursor.id, status: 'stopped', nextStep: 0, operationIds: [preparedOperationId] }, pageCalls: [], actions: 0
+      })
+      expect(await f.journal.get(preparedOperationId!)).toMatchObject({ id: preparedOperationId, browserId: 'b1', phase: 'stopped', steps: [] })
+      const phases = (await f.journal.events(preparedOperationId!)).filter(event => event.type === 'phase-changed')
+      expect(phases.map(event => event.type === 'phase-changed' ? event.phase : null)).toEqual(['stopped'])
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b2').at(-1)?.browser.activity.operation.phase).toBe('waiting')
+      releaseOther()
+      expect(await healthyOther).toMatchObject({ result: 82, outcome: { kind: 'completed' } })
+      expect(await f.assets.state('b1')).toMatchObject({ runs: [expect.objectContaining({ id: cursor.id, status: 'stopped', nextStep: 0 })] })
+    } finally {
+      releasePreparation(); releaseOther()
+      await Promise.allSettled([activeTask, healthyOther])
+      createDispatch.mockImplementation(originalDispatch)
+      await f.close()
+    }
+  }, 30_000)
+
+  it.each(['ready', 'running'] as const)('stops the first published %s cursor before its real operation is bound', async status => {
+    const f = await fixture()
+    const originalDispatch = createDispatch.getMockImplementation()!
+    const calls: string[] = []
+    let stopped: ReturnType<BrowserViewManager['stopTaskAsset']> | undefined
+    let publishedRunId: string | undefined
+    let activeTask: ReturnType<BrowserViewManager['runTaskAsset']> | undefined
+    const unsubscribe = f.assets.subscribe(async browserId => {
+      if (browserId !== 'b1' || publishedRunId) return
+      const run = (await f.assets.state(browserId)).runs.at(-1)
+      if (run?.status !== status || publishedRunId) return
+      publishedRunId = run.id
+      stopped = f.manager.stopTaskAsset(browserId, run.id)
+    })
+    try {
+      const saved = await version(f)
+      createDispatch.mockImplementation(() => {
+        const dispatch = pageDispatch()
+        return async name => { calls.push(name); return await dispatch(name) }
+      })
+      f.manager.returnControl('b1')
+      activeTask = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      const run = await activeTask
+      expect(publishedRunId).toBeTypeOf('string')
+      expect(await stopped).toMatchObject({ id: publishedRunId, status: 'stopped', nextStep: 0 })
+      expect({ run, calls }).toMatchObject({ run: { id: publishedRunId, status: 'stopped', nextStep: 0 }, calls: [] })
+      expect(await f.assets.state('b1')).toMatchObject({ runs: [expect.objectContaining({ id: publishedRunId, status: 'stopped', nextStep: 0 })] })
+      const operations = await f.journal.list()
+      expect(operations.length).toBe(run.operationIds.length)
+      expect(operations.map(operation => operation.phase)).toEqual(run.operationIds.map(() => 'stopped'))
+      expect(f.sentEvents().filter(event => event.browser?.id === 'b1' && event.browser.activity.operation?.phase === 'running')).toEqual([])
+    } finally {
+      unsubscribe()
+      await Promise.allSettled([activeTask, stopped])
+      createDispatch.mockImplementation(originalDispatch)
+      await f.close()
+    }
+  }, 30_000)
+
+  it('does not transfer an old cursor Stop to a fresh execution of the same asset and version', async () => {
+    const f = await fixture()
+    const originalDispatch = createDispatch.getMockImplementation()!
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    let preparedId: string | undefined
+    let running: ReturnType<BrowserViewManager['runTaskAsset']> | undefined
+    try {
+      const saved = await version(f)
+      createDispatch.mockImplementation(() => pageDispatch())
+      f.manager.returnControl('b1')
+      const old = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      expect(old).toMatchObject({ status: 'completed', nextStep: 1 })
+      const start = f.journal.start.bind(f.journal)
+      vi.spyOn(f.journal, 'start').mockImplementation(async input => {
+        const operation = await start(input); preparedId = operation.id; await held; return operation
+      })
+      running = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
+      await expect.poll(() => preparedId).toBeTypeOf('string')
+      const fresh = (await f.assets.state('b1')).runs.at(-1)!
+      expect(fresh.id).not.toBe(old.id)
+      expect(await f.manager.stopTaskAsset('b1', old.id)).toMatchObject({ id: old.id, status: 'completed' })
+      release()
+      expect(await running).toMatchObject({ id: fresh.id, status: 'completed', nextStep: 1, operationIds: [preparedId] })
+      expect(await f.journal.get(preparedId!)).toMatchObject({ id: preparedId, phase: 'completed', steps: expect.arrayContaining([expect.objectContaining({ method: 'click' })]) })
+    } finally {
+      release(); await Promise.allSettled([running])
+      createDispatch.mockImplementation(originalDispatch)
       await f.close()
     }
   }, 30_000)

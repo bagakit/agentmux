@@ -15,11 +15,22 @@ const paneTest = 'apps/desktop/test/browser-demonstration-wiring.test.tsx'
 const trustTest = 'apps/desktop/test/ipc-sender-trust.test.ts'
 const selection = 'apps/desktop/src/main/browser-selection-script.ts'
 const selectionTest = 'apps/desktop/test/browser-selection-script.test.ts'
+const assets = 'apps/desktop/src/main/browser-task-assets.ts'
+const assetsTest = 'apps/desktop/test/browser-task-assets.test.tsx'
 const cases = [
   ['live-cursor-listener-disconnected', manager, 'if (!this.entries.has(browserId)) return', 'if (true) return', managerTest],
   ['task-snapshot-projection-disconnected', manager, '...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),', '...{},', managerTest],
   ['checkpoint-does-not-yield-control', manager, "private yieldControl(id: string): void {\n    const entry = this.require(id)\n    entry.humanControl = true", "private yieldControl(id: string): void {\n    const entry = this.require(id)\n    entry.humanControl = false", managerTest],
   ['stop-loses-real-operation-association', manager, 'execution.operationId = operation.id', 'execution.operationId = undefined', managerTest],
+  ['preparation-stop-intent-lost', manager, 'execution.stopRequested = true', 'execution.stopRequested = false', managerTest],
+  ['preparation-stop-not-handed-to-operation', manager, 'if (execution.stopRequested) void this.stopOperationById(operation.id)', 'void operation.id', managerTest],
+  ['late-operation-rebounds-to-running', manager, "if (!stopRequested) {\n      operation.phase = 'running'", "if (true) {\n      operation.phase = 'running'", managerTest],
+  ['actual-cursor-not-bound-before-publication', manager, 'onRunPrepared: runId => { execution.runId = runId }', 'onRunPrepared: runId => { void runId }', managerTest],
+  ['history-stop-cancels-fresh-execution', manager, 'execution?.entry === entry && execution.runId === runId', 'execution?.entry === entry', managerTest],
+  ['write-ahead-revives-stopped-cursor', assets, "if (run!.status === 'stopped') return false", 'if (false) return false', assetsTest],
+  ['call-proceeds-after-stop', assets, "if (!started || (run as BrowserTaskAssetRun).status === 'stopped') break", 'void started', assetsTest],
+  ['checkpoint-advances-stopped-cursor', assets, "if (run!.status === 'stopped') return\n", 'if (false) return\n', assetsTest],
+  ['unknown-call-overwrites-stopped-cursor', assets, "if (run!.status !== 'stopped') {", 'if (true) {', assetsTest],
   ['foreign-browser-can-edit-asset', manager, 'if (!asset || asset.browserId !== id)', 'if (!asset)', managerTest],
   ['task-parameter-privacy-disconnected', manager, 'const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)', 'const privateTaskParameters = false', managerTest],
   ['task-raw-error-stack-persisted', manager, "privateTaskParameters && 'message' in failureOutcome", "false && 'message' in failureOutcome", managerTest],
@@ -33,7 +44,8 @@ const cases = [
   ['selection-revision-proof-removed', selection, 'state?.revision === ${revision} && state.selectedTarget instanceof Element', 'state.selectedTarget instanceof Element', selectionTest],
   ['selection-retained-node-not-released', selection, 'state.selectedTarget = null; if (settled)', 'if (settled)', selectionTest]
 ]
-const inputs = [...new Set([manager, pane, selection, selectionTest, ...cases.map(([, file]) => file), managerTest, paneTest, trustTest,
+const tests = [managerTest, paneTest, trustTest, selectionTest, assetsTest]
+const inputs = [...new Set([manager, pane, selection, selectionTest, ...cases.map(([, file]) => file), ...tests,
   'apps/desktop/src/main/browser-demonstration-capture.ts', 'apps/desktop/src/main/browser-demonstration-recorder.ts',
   'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts'])]
 const original = new Map(await Promise.all(inputs.map(async file => [file, await fs.readFile(path.join(root, file))])))
@@ -47,12 +59,12 @@ try {
   }
   await fs.symlink(path.join(root, 'apps/desktop/resources'), path.join(isolated, 'apps/desktop/resources'), 'dir')
   await fs.mkdir(path.join(isolated, 'apps/desktop/test'), { recursive: true })
-  for (const file of [managerTest, paneTest, trustTest, selectionTest]) await fs.writeFile(path.join(isolated, file), original.get(file))
+  for (const file of tests) await fs.writeFile(path.join(isolated, file), original.get(file))
   await fs.symlink(path.join(root, 'node_modules'), path.join(isolated, 'node_modules'), 'dir')
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   await fs.writeFile(path.join(isolated, 'package.json'), '{"type":"module"}\n')
   const config = path.join(isolated, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([managerTest, paneTest, trustTest, selectionTest])} } }\n`)
+  await fs.writeFile(config, `export default { esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, server: { fs: { allow: ${JSON.stringify([isolated, path.join(root, 'packages/core/bin')])} } }, test: { include: ${JSON.stringify(tests)} } }\n`)
   const run = async (name, test) => {
     const args = [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', test, '--root', isolated, '--config', config, '--maxWorkers=1']
     if (test === managerTest) args.push('-t', 'versioned task assets via')
@@ -61,7 +73,7 @@ try {
     await fs.writeFile(path.join(evidence, `${name}.log`), log)
     return { exit: result.status, log }
   }
-  for (const test of [managerTest, paneTest, trustTest, selectionTest]) assert.equal((await run(`baseline-${path.basename(test)}`, test)).exit, 0, `Baseline must pass: ${test}`)
+  for (const test of tests) assert.equal((await run(`baseline-${path.basename(test)}`, test)).exit, 0, `Baseline must pass: ${test}`)
   for (const [name, file, before, after, test] of cases) {
     const source = original.get(file).toString('utf8')
     assert.equal(source.split(before).length - 1, 1, `Unique source anchor: ${name}`)
@@ -73,7 +85,7 @@ try {
       receipt.cases.push({ name, file, redExit: red.exit, log: `${name}.log` })
     } finally { await fs.writeFile(path.join(isolated, file), original.get(file)) }
   }
-  for (const test of [managerTest, paneTest, trustTest, selectionTest]) assert.equal((await run(`restored-${path.basename(test)}`, test)).exit, 0, `Restored source must pass: ${test}`)
+  for (const test of tests) assert.equal((await run(`restored-${path.basename(test)}`, test)).exit, 0, `Restored source must pass: ${test}`)
   receipt.passed = true
 } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
 finally {
