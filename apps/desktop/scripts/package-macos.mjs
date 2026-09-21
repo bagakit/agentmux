@@ -989,7 +989,7 @@ async function awaitUiActivation(appPath, before, runtimePlan = null) {
   do {
     try {
       const observed = await qualifyUi(appPath, before)
-      if (runtimePlan) assertUiRuntimeObservation(observed, await confirmUiRuntime(runtimePlan))
+      if (runtimePlan) assertUiRuntimeObservation(observed, await confirmUiRuntime(runtimePlan), before)
       return observed
     }
     catch (error) { lastError = error }
