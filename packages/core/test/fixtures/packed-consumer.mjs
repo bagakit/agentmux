@@ -109,7 +109,7 @@ assert.throws(
  *
  * **没有挂钟预算。** 全部 54 处调用都是"等一件会到的事"，没有一处用超时表达"这件事不该发生"
  * （若要那样断言，写法是等对立事件成立，而不是等一个预算烧完）。上界由外层持有：跑这个脚本的
- * 那条 it 声明了 95 秒。
+ * 那条 it 声明了 240 秒。
  *
  * 原先是 8 秒。它在机器被压满时先于外层触发，把"慢"报成"没发生"——这就是 test:native 那个负载相关
  * flake 的真正位点。实测 2026-09-01：负载 ~120 时同机解一个 84KB tarball 花了 3 分 42 秒挂钟、
@@ -166,6 +166,137 @@ function output(events, runId) {
     .filter((event) => event.type === 'terminal-output' && event.run.runId === runId)
     .map((event) => event.data)
     .join('')
+}
+
+// A composer frame observes rendering; it does not confirm a previous native turn.
+async function assertUnconfirmedTurnKeepsInput(client, session, operationId, prompt) {
+  const before = await client.statusAgent(session.agentSessionId)
+  const beforeTimeline = await client.sessionTimeline(session.agentSessionId)
+  const condition = agentPromptCondition(client.agentSession(session.agentSessionId))
+  await assert.rejects(client.submitAgentPrompt({
+    ...condition, agentSessionId: session.agentSessionId, operationId, prompt
+  }), (error) => {
+    assert.equal(error?.code, 'AGENT_TURN_END_UNCONFIRMED')
+    assert.equal((error?.detail ?? '').includes(prompt), false)
+    return true
+  })
+  const after = await client.statusAgent(session.agentSessionId)
+  assert.equal(after.run.runId, before.run.runId)
+  assert.equal(after.run.pid, before.run.pid)
+  assert.equal(after.run.state, 'running')
+  assert.equal(after.run.acceptedInputBytes, before.run.acceptedInputBytes)
+  assert.deepEqual((await client.sessionTimeline(session.agentSessionId)).items, beforeTimeline.items)
+}
+
+// Hold the public Store scope after genuine Native delivery, before its lock is released.
+// The contender must see live ownership; retrying its unchanged intent later tests the predecessor.
+async function competeDuringHeldPromptScope(store, submitOwner, submitContender) {
+  const original = store.withPromptSubmission.bind(store)
+  let entered, release
+  const held = new Promise(resolve => { entered = resolve })
+  const released = new Promise(resolve => { release = resolve })
+  store.withPromptSubmission = (id, operation) => original(id, async () => {
+    const result = await operation()
+    entered()
+    await released
+    return result
+  })
+  const ownerResult = submitOwner().then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }))
+  let contenderResult
+  try {
+    await Promise.race([held, ownerResult.then(result => { throw result.reason ?? new Error('Prompt scope settled before its ownership barrier') })])
+    ;[contenderResult] = await Promise.allSettled([submitContender()])
+  } finally {
+    release()
+    store.withPromptSubmission = original
+  }
+  return [await ownerResult, contenderResult]
+}
+
+async function assertFrozenPromptKeepsInput(client, session, input) {
+  const before = await client.statusAgent(session.agentSessionId)
+  const beforeMessages = (await client.sessionTimeline(session.agentSessionId)).items.filter(item => item.kind === 'user_message')
+  await assert.rejects(client.submitAgentPrompt(input), error => {
+    assert.equal(error?.code, 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    assert.equal(error?.detail, 'unknown')
+    return true
+  })
+  const after = await client.statusAgent(session.agentSessionId)
+  assert.equal(after.run.runId, before.run.runId)
+  assert.equal(after.run.pid, before.run.pid)
+  assert.equal(after.run.state, 'running')
+  assert.equal(after.run.acceptedInputBytes, before.run.acceptedInputBytes)
+  assert.deepEqual((await client.sessionTimeline(session.agentSessionId)).items.filter(item => item.kind === 'user_message'), beforeMessages)
+}
+
+async function assertMissingComposerDoesNotBlockHealthyRuns() {
+  const client = await connectLocalAgentMux()
+  const events = [], sessions = []
+  client.onEvent(event => events.push(event))
+  try {
+    // Hook ingress has one semantic owner. Create distinct Runs through that owner,
+    // then observe their independent render waits concurrently.
+    for (const mode of ['after', 'after-assistant']) {
+      const session = await client.createAgent({
+        agentSessionId: `codex-unverified-${mode}`,
+        createOperationId: `packed-unverified-${mode}-create`,
+        providerId: 'codex', executorId: 'codex', workspacePath: process.cwd(),
+        commandOverride: fakeCodex, env: { AGENTMUX_FAKE_READY_MODE: mode }
+      })
+      sessions.push(session)
+      await reattachAgentWithReplay(client, session.agentSessionId, events)
+      await waitFor(`native Stop without composer (${mode})`, () => {
+        const readiness = client.agentSession(session.agentSessionId).terminalPromptReadiness
+        return readiness?.source === 'native-stop' && readiness.readyThroughByte === undefined &&
+          output(events, session.run.runId).includes('codex-controlled-ready-pending')
+      })
+    }
+    const submissions = await Promise.allSettled(sessions.map(async session => {
+      const before = await client.statusAgent(session.agentSessionId)
+      const prompt = `native-input-without-composer-${session.agentSessionId}`
+      const operationId = `packed-${session.agentSessionId}-submit`
+      await client.submitAgentPrompt({
+        ...agentPromptCondition(client.agentSession(session.agentSessionId)),
+        agentSessionId: session.agentSessionId, operationId, prompt
+      })
+      const after = await client.statusAgent(session.agentSessionId)
+      assert.equal(after.run.runId, before.run.runId)
+      assert.equal(after.run.pid, before.run.pid)
+      assert.equal(after.run.state, 'running')
+      assert.equal(after.run.acceptedInputBytes, before.run.acceptedInputBytes + Buffer.byteLength(prompt) + 1)
+      const persisted = (await new AgentMuxFileAgentSessionStore().load()).find(item => item.agentSessionId === session.agentSessionId)
+      assert.equal(persisted.terminalPromptSubmission.submissionId, operationId)
+      assert.equal(persisted.terminalPromptSubmission.submit.acknowledged, true)
+      assert.equal(persisted.terminalPromptDelivery.state, 'unverified')
+      assert.equal(persisted.terminalPromptDelivery.mode, 'degraded')
+      assert.equal(persisted.terminalPromptDelivery.reason, 'prompt-render-timeout')
+      assert.equal(persisted.terminalPromptDelivery.submissionId, operationId)
+      await waitFor(`unverified native input reached fake (${session.agentSessionId})`, () => (
+        output(events, session.run.runId).includes('codex-dropped-pre-ready-payload') &&
+        output(events, session.run.runId).includes('codex-ignored-early-enter')
+      ))
+      // Native accepted the bytes; this fixture deliberately drops them before its composer exists.
+      assert.equal(output(events, session.run.runId).includes(`codex-submit:${prompt}:accepted`), false)
+    }))
+    assert.equal(submissions.length, 2)
+    for (const submission of submissions) {
+      assert.equal(submission.status, 'fulfilled', submission.status === 'rejected' ? String(submission.reason?.stack ?? submission.reason) : undefined)
+    }
+    const reconnected = await connectLocalAgentMux()
+    try {
+      for (const session of sessions) {
+        const persisted = (await new AgentMuxFileAgentSessionStore().load()).find(item => item.agentSessionId === session.agentSessionId)
+        assert.deepEqual(reconnected.agentSession(session.agentSessionId).terminalPromptDelivery, persisted.terminalPromptDelivery)
+        assert.equal((await reconnected.statusAgent(session.agentSessionId)).run.runId, session.run.runId)
+      }
+    } finally { await reconnected.dispose() }
+  } finally {
+    const stopped = await Promise.allSettled(sessions.map(session => client.stopAgent(session.agentSessionId, session.run)))
+    await client.dispose()
+    for (const result of stopped) {
+      assert.equal(result.status, 'fulfilled', result.status === 'rejected' ? String(result.reason?.stack ?? result.reason) : undefined)
+    }
+  }
 }
 
 async function processIsGone(pid) {
@@ -594,11 +725,19 @@ const controlServer = new AgentMuxControlServer({
     if (request.operation === 'list.agents') {
       return { operation: request.operation, agents: [{ executorId: 'codex', label: 'Codex', providerId: 'codex', availability: 'available' }] }
     }
-    const targetId = request.target.kind === 'self'
+    const targetId = request.target?.kind === 'self'
       ? request.caller.agentSessionId
-      : request.target.agentSessionId
+      : request.target?.agentSessionId
     const controlClient = await connectLocalAgentMux()
     try {
+      if (request.operation === 'list.active-agents') {
+        return { operation: request.operation, agents: controlClient.agentSessions()
+          .filter(session => !request.agentSessionId || session.agentSessionId === request.agentSessionId)
+          .map(session => ({ agentSessionId: session.agentSessionId, promptCondition: agentPromptCondition(session),
+            projectId: null, projectName: null, workspacePath: session.workspacePath,
+            providerId: session.providerId, executorId: session.executorId,
+            processState: session.run.state === 'running' ? 'running' : 'exited', status: 'unknown', updatedAt: session.updatedAt })) }
+      }
       if (request.operation === 'send') {
         if (request.target.kind === 'tab') {
           throw Object.assign(new Error('Tab contains multiple Agent Sessions.'), {
@@ -678,11 +817,13 @@ assert.equal(controlRequests[2].content.prompt, '--help')
 await assert.rejects(
   cli(['send', `--to-tab=${agentRegion.tabId}`, '--text', 'review']),
   (error) => {
-    const receipt = JSON.parse(error.stderr)
+    const receiptLines = error.stderr.split('\n').filter(line => line.startsWith('{'))
+    assert.equal(receiptLines.length, 1, 'one structured error receipt alongside native warnings')
+    const receipt = JSON.parse(receiptLines[0])
     assert.equal(receipt.schemaVersion, AGENTMUX_CONTROL_SCHEMA_VERSION)
     assert.equal(receipt.ok, false)
     assert.equal(typeof receipt.requestId, 'string')
-    assert.equal(receipt.operation, 'send')
+    assert.equal(receipt.operation, 'send', JSON.stringify(receipt))
     assert.equal(receipt.error.code, 'MESSAGE_TARGET_NOT_UNIQUE')
     assert.deepEqual(receipt.error.candidates, [
       { agentSessionId: 'packed-writer', regionIds: ['packed-writer-region'] },
@@ -732,12 +873,14 @@ assert.equal(
     .result.session.run.runId,
   codex.run.runId
 )
-await cli(['send', '--to-session', codex.agentSessionId, '--text', 'continue\nwith details'])
-await cli(['interrupt', '--session', codex.agentSessionId])
-
+// Keep one semantic Client alive across the turn-end event. Short-lived Control Clients
+// correctly dispose their observers; a later raw reattachment cannot recreate that observation.
 const codexSecond = await connectLocalAgentMux()
 const codexSecondEvents = []
 codexSecond.onEvent((event) => codexSecondEvents.push(event))
+await cli(['send', '--to-session', codex.agentSessionId, '--text', 'continue\nwith details'])
+await cli(['interrupt', '--session', codex.agentSessionId])
+
 const codexReconnected = await codexSecond.statusAgent(codex.agentSessionId)
 assert.equal(codexReconnected.run.runId, codex.run.runId)
 assert.equal(codexReconnected.run.pid, codexPid)
@@ -1144,25 +1287,7 @@ assert.equal(pendingInitialReadiness?.readyThroughByte, undefined)
 await waitFor('fake Codex waiting before initial composer', () => (
   output(noStopEvents, noStop.run.runId).includes('codex-controlled-ready-pending')
 ))
-const packedPromptCondition6 = agentPromptCondition(noStopClient.agentSession(noStop.agentSessionId))
-await assert.rejects(
-  noStopClient.submitAgentPrompt({
-    ...packedPromptCondition6,
-    agentSessionId: noStop.agentSessionId,
-    operationId: 'packed-no-stop-too-early',
-    prompt: 'must-not-reach-pty-before-composer'
-  }),
-  (error) => (
-    error?.code === 'AGENT_PROMPT_NOT_READY' &&
-    /runId=\S+/.test(error?.detail ?? '') &&
-    error?.detail?.includes('readinessSource=initial-composer') &&
-    error?.detail?.includes('reason=observation-pending') &&
-    !error?.detail?.includes('must-not-reach-pty-before-composer')
-  )
-)
-assert.equal((await noStopClient.sessionTimeline(noStop.agentSessionId)).items.some((item) => (
-  item.kind === 'user_message' && item.content === 'must-not-reach-pty-before-composer'
-)), false)
+await assertUnconfirmedTurnKeepsInput(noStopClient, noStop, 'packed-no-stop-too-early', 'must-not-reach-pty-before-composer')
 assert.equal((await noStopClient.statusAgent(noStop.agentSessionId)).run.acceptedInputBytes, 5)
 assert.equal(output(noStopEvents, noStop.run.runId).includes('codex-dropped-pre-ready-payload'), false)
 await noStopClient.dispose()
@@ -1187,26 +1312,18 @@ await noStopReconnected.submitAgentPrompt({
     ...packedPromptCondition7,
   agentSessionId: noStop.agentSessionId,
   operationId: 'packed-no-stop-turn-zero',
-  prompt: 'turn-zero'
+  prompt: 'turn-zero',
+  allowUncertainTurn: true
 })
 await waitFor('Turn 0 prompt submitted without native Stop', () => (
   output(noStopReconnectedEvents, noStop.run.runId).includes('codex-submit:turn-zero:accepted')
 ))
-const packedPromptCondition8 = agentPromptCondition(noStopReconnected.agentSession(noStop.agentSessionId))
-await assert.rejects(
-  noStopReconnected.submitAgentPrompt({
-    ...packedPromptCondition8,
-    agentSessionId: noStop.agentSessionId,
-    operationId: 'packed-no-stop-second-prompt',
-    prompt: 'must-not-reuse-initial-readiness'
-  }),
-  (error) => (
-    error?.code === 'AGENT_PROMPT_READINESS_CONSUMED' &&
-    /runId=\S+/.test(error?.detail ?? '') &&
-    error?.detail?.includes('consumedBySubmissionId=packed-no-stop-turn-zero') &&
-    !error?.detail?.includes('must-not-reuse-initial-readiness')
-  )
-)
+const persistedUncertainTurn = (await new AgentMuxFileAgentSessionStore().load()).find(item => item.agentSessionId === noStop.agentSessionId)
+assert.equal(persistedUncertainTurn.terminalPromptDelivery.state, 'unverified')
+assert.equal(persistedUncertainTurn.terminalPromptDelivery.mode, 'degraded')
+assert.equal(persistedUncertainTurn.terminalPromptDelivery.reason, 'turn-end-unconfirmed')
+assert.equal(persistedUncertainTurn.terminalPromptDelivery.submissionId, 'packed-no-stop-turn-zero')
+await assertUnconfirmedTurnKeepsInput(noStopReconnected, noStop, 'packed-no-stop-second-prompt', 'must-confirm-previous-turn')
 await noStopReconnected.stopAgent(noStop.agentSessionId, noStop.run)
 await noStopReconnected.dispose()
 
@@ -1278,16 +1395,7 @@ assert.equal(
     .terminalPromptReadiness?.readyThroughByte,
   undefined
 )
-const packedPromptCondition9 = agentPromptCondition(initialAssistantClient.agentSession(initialAssistant.agentSessionId))
-await assert.rejects(
-  initialAssistantClient.submitAgentPrompt({
-    ...packedPromptCondition9,
-    agentSessionId: initialAssistant.agentSessionId,
-    operationId: 'packed-initial-assistant-too-early',
-    prompt: 'must-not-reach-pty'
-  }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
-)
+await assertUnconfirmedTurnKeepsInput(initialAssistantClient, initialAssistant, 'packed-initial-assistant-too-early', 'must-not-reach-pty')
 await initialAssistantClient.writeAgent({ agentSessionId: initialAssistant.agentSessionId, expectedRun: initialAssistantClient.agentSession(initialAssistant.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('real initial composer after misleading assistant marker', () => (
   initialAssistantClient.agentSession(initialAssistant.agentSessionId)
@@ -1318,16 +1426,7 @@ assert.equal(
     .terminalPromptReadiness?.readyThroughByte,
   undefined
 )
-const packedPromptCondition10 = agentPromptCondition(preHandshakeComposerClient.agentSession(preHandshakeComposer.agentSessionId))
-await assert.rejects(
-  preHandshakeComposerClient.submitAgentPrompt({
-    ...packedPromptCondition10,
-    agentSessionId: preHandshakeComposer.agentSessionId,
-    operationId: 'packed-pre-handshake-composer-too-early',
-    prompt: 'must-require-post-handshake-frame'
-  }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
-)
+await assertUnconfirmedTurnKeepsInput(preHandshakeComposerClient, preHandshakeComposer, 'packed-pre-handshake-composer-too-early', 'must-require-post-handshake-frame')
 await preHandshakeComposerClient.writeAgent({ agentSessionId: preHandshakeComposer.agentSessionId, expectedRun: preHandshakeComposerClient.agentSession(preHandshakeComposer.agentSessionId).run, data: '\u001d', source: 'user' })
 await waitFor('new complete composer frame after handshake boundary', () => (
   preHandshakeComposerClient.agentSession(preHandshakeComposer.agentSessionId)
@@ -1365,16 +1464,7 @@ await promptedNoStopClient.writeAgent({ agentSessionId: promptedNoStop.agentSess
 await waitFor('prompted Run empty composer', () => (
   output(promptedNoStopEvents, promptedNoStop.run.runId).includes('codex-composer-ready-frame')
 ))
-const packedPromptCondition11 = agentPromptCondition(promptedNoStopClient.agentSession(promptedNoStop.agentSessionId))
-await assert.rejects(
-  promptedNoStopClient.submitAgentPrompt({
-    ...packedPromptCondition11,
-    agentSessionId: promptedNoStop.agentSessionId,
-    operationId: 'packed-prompted-no-stop-submit',
-    prompt: 'must-wait-for-native-stop'
-  }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
-)
+await assertUnconfirmedTurnKeepsInput(promptedNoStopClient, promptedNoStop, 'packed-prompted-no-stop-submit', 'must-wait-for-native-stop')
 assert.equal(
   promptedNoStopClient.agentSession(promptedNoStop.agentSessionId).terminalPromptReadiness,
   undefined
@@ -1407,16 +1497,7 @@ await argsPromptClient.writeAgent({ agentSessionId: argsPrompt.agentSessionId, e
 await waitFor('args-prompt Run empty composer', () => (
   output(argsPromptEvents, argsPrompt.run.runId).includes('codex-composer-ready-frame')
 ))
-const packedPromptCondition12 = agentPromptCondition(argsPromptClient.agentSession(argsPrompt.agentSessionId))
-await assert.rejects(
-  argsPromptClient.submitAgentPrompt({
-    ...packedPromptCondition12,
-    agentSessionId: argsPrompt.agentSessionId,
-    operationId: 'packed-args-prompt-no-stop-submit',
-    prompt: 'must-wait-for-native-stop'
-  }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
-)
+await assertUnconfirmedTurnKeepsInput(argsPromptClient, argsPrompt, 'packed-args-prompt-no-stop-submit', 'must-wait-for-native-stop')
 await argsPromptClient.stopAgent(argsPrompt.agentSessionId, argsPrompt.run)
 await argsPromptClient.dispose()
 
@@ -1504,7 +1585,10 @@ await staleHookContender.dispose()
 await staleHookOwner.stopAgent(staleHookSession.agentSessionId, staleHookSession.run)
 await staleHookOwner.dispose()
 
-const afterCursorClient = await connectLocalAgentMux()
+await assertMissingComposerDoesNotBlockHealthyRuns()
+
+const afterCursorStore = new AgentMuxFileAgentSessionStore()
+const afterCursorClient = await connectLocalAgentMux({ store: afterCursorStore })
 const afterCursorEvents = []
 afterCursorClient.onEvent((event) => afterCursorEvents.push(event))
 const afterCursor = await afterCursorClient.createAgent({
@@ -1525,16 +1609,6 @@ const pendingAfterCursor = await waitFor('native Stop boundary before composer f
 ))
 assert.equal(pendingAfterCursor.source, 'native-stop')
 assert.equal(pendingAfterCursor.readyThroughByte, undefined)
-const packedPromptCondition15 = agentPromptCondition(afterCursorClient.agentSession(afterCursor.agentSessionId))
-await assert.rejects(
-  afterCursorClient.submitAgentPrompt({
-    ...packedPromptCondition15,
-    agentSessionId: afterCursor.agentSessionId,
-    operationId: 'packed-after-too-early',
-    prompt: 'too-early'
-  }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
-)
 await waitFor('after-cursor fake control readiness', () => (
   `${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`
     .includes('codex-controlled-ready-pending')
@@ -1548,28 +1622,53 @@ assert.ok(readyAfterCursor.readyThroughByte > readyAfterCursor.outputCursorBytes
 const afterCursorContender = await connectLocalAgentMux()
 const packedPromptCondition17 = agentPromptCondition(afterCursorContender.agentSession(afterCursor.agentSessionId))
 const packedPromptCondition16 = agentPromptCondition(afterCursorClient.agentSession(afterCursor.agentSessionId))
-const nativeStopConcurrentResults = await Promise.allSettled([
-  afterCursorClient.submitAgentPrompt({
-    ...packedPromptCondition16,
-    agentSessionId: afterCursor.agentSessionId,
-    operationId: 'packed-after-exit-owner',
-    prompt: 'exit'
-  }),
-  afterCursorContender.submitAgentPrompt({
-    ...packedPromptCondition17,
-    agentSessionId: afterCursor.agentSessionId,
-    operationId: 'packed-after-exit-contender',
-    prompt: 'exit'
-  })
-])
-assert.equal(nativeStopConcurrentResults.filter((result) => result.status === 'fulfilled').length, 1)
-assert.equal(
-  nativeStopConcurrentResults.find((result) => result.status === 'rejected')?.reason?.code,
-  'AGENT_PROMPT_READINESS_CONFLICT'
-)
+const nativeStopConcurrentBefore = await afterCursorClient.statusAgent(afterCursor.agentSessionId)
+const nativeStopPrompts = ['native-stop-owner', 'native-stop-contender']
+const nativeStopOwnerInput = {
+  ...packedPromptCondition16, agentSessionId: afterCursor.agentSessionId,
+  operationId: 'packed-after-owner', prompt: nativeStopPrompts[0]
+}
+const nativeStopContenderInput = {
+  ...packedPromptCondition17, agentSessionId: afterCursor.agentSessionId,
+  operationId: 'packed-after-contender', prompt: nativeStopPrompts[1]
+}
+const nativeStopConcurrentResults = await competeDuringHeldPromptScope(afterCursorStore,
+  () => afterCursorClient.submitAgentPrompt(nativeStopOwnerInput),
+  () => afterCursorContender.submitAgentPrompt(nativeStopContenderInput))
+assert.equal(nativeStopConcurrentResults.filter(result => result.status === 'fulfilled').length, 1)
+assert.equal(nativeStopConcurrentResults.filter(result => result.status === 'rejected').length, 1)
+const nativeStopFailure = nativeStopConcurrentResults.find(result => result.status === 'rejected')
+assert.equal(nativeStopFailure.reason.code, 'AGENT_PROMPT_SUBMISSION_BUSY')
+await assertFrozenPromptKeepsInput(afterCursorContender, afterCursor, nativeStopContenderInput)
+const nativeStopWinner = nativeStopPrompts[nativeStopConcurrentResults.findIndex(result => result.status === 'fulfilled')]
+const nativeStopConcurrentAfter = await afterCursorClient.statusAgent(afterCursor.agentSessionId)
+assert.equal(nativeStopConcurrentAfter.run.runId, nativeStopConcurrentBefore.run.runId)
+assert.equal(nativeStopConcurrentAfter.run.state, 'running')
+assert.equal(nativeStopConcurrentAfter.run.acceptedInputBytes, nativeStopConcurrentBefore.run.acceptedInputBytes + Buffer.byteLength(nativeStopWinner) + 1)
+await waitFor('exactly one native Stop concurrent prompt delivered', () => (
+  `${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`.includes(`codex-submit:${nativeStopWinner}:accepted`)
+))
+assert.equal((`${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`.match(/codex-submit:native-stop-(?:owner|contender):accepted/gu) ?? []).length, 1)
+await waitFor('new native Stop after concurrent prompt', () => {
+  const readiness = afterCursorClient.agentSession(afterCursor.agentSessionId).terminalPromptReadiness
+  return readiness?.source === 'native-stop' && readiness.id !== readyAfterCursor.id &&
+    output(afterCursorEvents, afterCursor.run.runId).includes('codex-controlled-ready-pending')
+})
+await afterCursorClient.writeAgent({ agentSessionId: afterCursor.agentSessionId, expectedRun: afterCursor.run, data: '\u001d', source: 'user' })
+await waitFor('next complete composer before explicit exit', () => (
+  afterCursorClient.agentSession(afterCursor.agentSessionId).terminalPromptReadiness?.readyThroughByte !== undefined
+))
+await afterCursorClient.submitAgentPrompt({
+  ...agentPromptCondition(afterCursorClient.agentSession(afterCursor.agentSessionId)),
+  agentSessionId: afterCursor.agentSessionId, operationId: 'packed-after-exit', prompt: 'exit'
+})
 await waitFor('after-cursor fake Codex exit', async () => (
   (await afterCursorClient.statusAgent(afterCursor.agentSessionId)).run.state === 'exited'
 ))
+const nativeStopExit = await afterCursorClient.statusAgent(afterCursor.agentSessionId)
+assert.equal(nativeStopExit.run.runId, afterCursor.run.runId)
+assert.equal(nativeStopExit.run.acceptedInputBytes, nativeStopConcurrentAfter.run.acceptedInputBytes + 1 + Buffer.byteLength('exit') + 1)
+assert.equal((output(afterCursorEvents, afterCursor.run.runId).match(/codex-submit:exit:accepted/gu) ?? []).length, 1)
 await afterCursorContender.dispose()
 await afterCursorClient.stopAgent(afterCursor.agentSessionId, afterCursor.run)
 await afterCursorClient.dispose()
@@ -1607,16 +1706,6 @@ assert.equal(
     .terminalPromptReadiness?.readyThroughByte,
   undefined
 )
-const packedPromptCondition18 = agentPromptCondition(assistantMarkerClient.agentSession(assistantMarker.agentSessionId))
-await assert.rejects(
-  assistantMarkerClient.submitAgentPrompt({
-    ...packedPromptCondition18,
-    agentSessionId: assistantMarker.agentSessionId,
-    operationId: 'packed-assistant-marker-too-early',
-    prompt: 'must-not-reach-pty'
-  }),
-  (error) => error?.code === 'AGENT_PROMPT_NOT_READY'
-)
 await waitFor('assistant-marker fake control readiness', () => (
   `${assistantMarkerReplay}${output(assistantMarkerEvents, assistantMarker.run.runId)}`
     .includes('codex-controlled-ready-pending')
@@ -1629,7 +1718,8 @@ await waitFor('real composer after misleading assistant marker', () => (
 await assistantMarkerClient.stopAgent(assistantMarker.agentSessionId, assistantMarker.run)
 await assistantMarkerClient.dispose()
 
-const concurrentOwner = await connectLocalAgentMux()
+const concurrentStore = new AgentMuxFileAgentSessionStore()
+const concurrentOwner = await connectLocalAgentMux({ store: concurrentStore })
 const concurrent = await concurrentOwner.createAgent({
   agentSessionId: 'codex-concurrent-stop',
   createOperationId: 'packed-codex-concurrent-create',
@@ -1655,27 +1745,30 @@ assert.equal(
 const concurrentContender = await connectLocalAgentMux()
 const packedPromptCondition20 = agentPromptCondition(concurrentContender.agentSession(concurrent.agentSessionId))
 const packedPromptCondition19 = agentPromptCondition(concurrentOwner.agentSession(concurrent.agentSessionId))
-const concurrentResults = await Promise.allSettled([
-  concurrentOwner.submitAgentPrompt({
-    ...packedPromptCondition19,
-    agentSessionId: concurrent.agentSessionId,
-    operationId: 'packed-concurrent-owner',
-    prompt: 'owner-wins-or-loses'
-  }),
-  concurrentContender.submitAgentPrompt({
-    ...packedPromptCondition20,
-    agentSessionId: concurrent.agentSessionId,
-    operationId: 'packed-concurrent-contender',
-    prompt: 'contender-wins-or-loses'
-  })
-])
+const concurrentBefore = await concurrentOwner.statusAgent(concurrent.agentSessionId)
+const concurrentOwnerInput = {
+  ...packedPromptCondition19, agentSessionId: concurrent.agentSessionId,
+  operationId: 'packed-concurrent-owner', prompt: 'owner-wins-or-loses', allowUncertainTurn: true
+}
+const concurrentContenderInput = {
+  ...packedPromptCondition20, agentSessionId: concurrent.agentSessionId,
+  operationId: 'packed-concurrent-contender', prompt: 'contender-wins-or-loses', allowUncertainTurn: true
+}
+const concurrentResults = await competeDuringHeldPromptScope(concurrentStore,
+  () => concurrentOwner.submitAgentPrompt(concurrentOwnerInput),
+  () => concurrentContender.submitAgentPrompt(concurrentContenderInput))
 assert.equal(concurrentResults.filter((result) => result.status === 'fulfilled').length, 1)
 const concurrentFailure = concurrentResults.find((result) => result.status === 'rejected')
-assert.equal(concurrentFailure?.reason?.code, 'AGENT_PROMPT_READINESS_CONFLICT')
-assert.match(
-  concurrentFailure?.reason?.detail ?? '',
-  /expectedRunId=\S+ reason=session-cas-rejected/
-)
+assert.equal(concurrentFailure?.reason?.code, 'AGENT_PROMPT_SUBMISSION_BUSY')
+await assertFrozenPromptKeepsInput(concurrentContender, concurrent, concurrentContenderInput)
+assert.equal(concurrentResults.filter(result => result.status === 'rejected').length, 1)
+const concurrentWinner = concurrentResults[0].status === 'fulfilled' ? 'owner-wins-or-loses' : 'contender-wins-or-loses'
+const concurrentAfter = await concurrentOwner.statusAgent(concurrent.agentSessionId)
+assert.equal(concurrentAfter.run.runId, concurrentBefore.run.runId)
+assert.equal(concurrentAfter.run.pid, concurrentBefore.run.pid)
+assert.equal(concurrentAfter.run.state, 'running')
+assert.equal(concurrentAfter.run.acceptedInputBytes, concurrentBefore.run.acceptedInputBytes + Buffer.byteLength(concurrentWinner) + 1)
+
 const concurrentReplay = await concurrentOwner.reattachAgent(concurrent.agentSessionId, 0)
 const concurrentOutput = concurrentReplay.attachment.replay.map((event) => event.data).join('')
 assert.equal(
@@ -1713,7 +1806,7 @@ const promptRecoveredAttachment = await promptRecovered.reattachAgent(
 )
 assert.equal(
   promptRecovered.agentSession(promptCrashCheckpoint.agentSessionId)
-    .terminalPromptSubmission?.readinessSource,
+    .terminalPromptSubmission?.readinessEvidence?.source,
   'initial-composer'
 )
 const replacementReadiness = await waitFor('native Stop replaces crash submission readiness', () => {
