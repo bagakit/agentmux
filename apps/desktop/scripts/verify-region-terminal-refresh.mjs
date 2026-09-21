@@ -247,8 +247,13 @@ function retainedReading(value) {
  // A nearby service window changes the available rows. Preserve the actual populated
  // history and reading state; trailing unused screen rows follow that real geometry.
  const lines=[...value.lines]
+ assert.ok(value.rows>0&&lines.length>0,'Actual terminal geometry and history must be nonempty')
+ assert.equal(value.lines.length,value.length,'Every public buffer line must have been read')
+ assert.equal(value.baseY,value.length-value.rows,'The bottom offset follows the real retained buffer and screen rows')
  while(lines.at(-1)==='')lines.pop()
- return {cols:value.cols,type:value.type,baseY:value.baseY,viewportY:value.viewportY,mouse:value.mouse,selection:value.selection,lines}
+ assert.ok(lines.length>0,'Populated retained history must be nonempty')
+ const reading=value.viewportY===value.baseY?{kind:'latest'}:{kind:'line',line:value.viewportY}
+ return {cols:value.cols,type:value.type,reading,mouse:value.mouse,selection:value.selection,lines}
 }
 async function selectVisibleWord(cdp,regionId){
  const point=await cdp.evaluate(`(() => {const e=document.querySelector('[data-workbench-region-id="${regionId}"] .xterm-screen');const r=e.getBoundingClientRect();return {x:r.x+24,y:r.y+9}})()`)

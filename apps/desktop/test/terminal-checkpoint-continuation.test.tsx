@@ -64,6 +64,7 @@ let container: HTMLDivElement
 let attach: MockInstance<typeof api.sessions.attach>
 let write: MockInstance<typeof api.sessions.write>
 let recover: MockInstance<typeof api.sessions.recover>
+let refreshObservation: (() => Promise<void>) | null = null
 const releases: Array<() => void> = []
 let configuration: AppConfig
 let receive: (event: RuntimeEvent) => void = () => {}
@@ -77,9 +78,10 @@ function replay(data: string, current: SessionSnapshot = session): SessionAttach
   return { attachmentId: 'wheel-attachment', session: current, currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: current.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
 }
-async function render(current: SessionSnapshot = session) {
+async function render(current: SessionSnapshot = session, visible = true) {
   await act(async () => root.render(createElement(TerminalView, { session: current,
-    interactiveResize: false, visible: true, autoFocus: false, themeId: configuration.appearance.terminalTheme, linkOrigin: origin })))
+    interactiveResize: false, visible, autoFocus: false, themeId: configuration.appearance.terminalTheme, linkOrigin: origin,
+    onObservationRefresh: (refresh: (() => Promise<void>) | null) => { refreshObservation = refresh } })))
 }
 async function ready(result: SessionAttachResult) {
   state(result.session); attach.mockResolvedValue(result); await render(result.session)
@@ -151,7 +153,7 @@ it('restores both buffers and declared mouse modes from an independent seed afte
   expect(terminal.buffer.active.type).toBe('normal')
   expect(contents(terminal)).toContain('normal-44')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
   expect(attach).toHaveBeenCalledExactlyOnceWith(session.control,0)
 })
 
@@ -213,7 +215,7 @@ it.each(['unknown','unavailable'] as const)('keeps %s continuation visible and a
   expect(terminal.buffer.active.type).toBe('normal')
   expect(terminal.modes.mouseTrackingMode).toBe('none')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
   expect(recover).not.toHaveBeenCalled()
 })
 
@@ -227,7 +229,7 @@ it('bounds synthetic parser writes without advancing the original byte cursor or
   await delivered(output(fence,'RAW'))
   expect(contents(terminal)).toContain('seed-tailRAW')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
 })
 
 it('shows a lost live geometry ordering proof without blocking the same Run input', async () => {
@@ -235,7 +237,7 @@ it('shows a lost live geometry ordering proof without blocking the same Run inpu
   await delivered(resized(fence,5,80,24))
   expect(container.textContent).toContain('source gap')
   await act(async () => terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
   expect(recover).not.toHaveBeenCalled()
 })
 
@@ -299,7 +301,7 @@ it('keeps healthy raw input available during a held reconnect seed and suppresse
   expect(readTerminalViewObservation({regionId:origin.regionId,sessionId:session.id,runId:session.control.run.runId}))
     .toMatchObject({liveReady:true,acceptsInput:true})
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
   await act(async()=>{held.release();await vi.waitFor(()=>expect(contents(terminal)).toContain('new-canvas'))})
   expect(write).toHaveBeenCalledTimes(1)
   expect(fixture.terminals).toEqual([terminal])
@@ -324,7 +326,7 @@ it.each(['unknown','unavailable'] as const)('keeps the canvas on %s reconnect, s
   expect(replaySpy).not.toHaveBeenCalled()
   expect(write).not.toHaveBeenCalled()
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
   const known=continuation('\x1bcproven-canvas')
   if(known.terminal.type==='basic-vt') known.terminal.checkpoint.throughByte=uncertain.session.latestOutputBytes+8
   known.session={...session,latestOutputBytes:uncertain.session.latestOutputBytes+8}
@@ -349,7 +351,7 @@ it('uses an empty unknown snapshot processing fence without historical backfill 
   expect(api.sessions.resize).toHaveBeenCalledTimes(resizeCalls)
   expect(write).not.toHaveBeenCalled()
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
 })
 
 it('reports an invalid reconnect checkpoint without closing healthy input or retrying unproven history', async () => {
@@ -369,7 +371,89 @@ it('reports an invalid reconnect checkpoint without closing healthy input or ret
   expect(replaySpy).not.toHaveBeenCalled()
   expect(container.textContent).toContain('existing display may be incomplete')
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
   expect(fixture.terminals).toEqual([terminal])
   expect(recover).not.toHaveBeenCalled()
+})
+
+
+it('preserves the same history reading line through ordered row shrink and growth, while latest keeps following', async () => {
+  const history = Array.from({ length: 600 }, (_, i) => `ROW${String(i).padStart(3, '0')}\r\n`).join('')
+  const terminal = await ready(continuation(history))
+  const populated = () => {
+    const buffer = terminal.buffer.active
+    const lines = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)!.translateToString(true))
+    while (lines.at(-1) === '') lines.pop()
+    return lines
+  }
+  const before = populated()
+  expect(before).toEqual(Array.from({ length: 600 }, (_, i) => `ROW${String(i).padStart(3, '0')}`))
+  await act(async () => terminal.scrollToLine(300))
+  expect(terminal.buffer.active.viewportY).toBe(300)
+  await delivered(resized(fence, 4, 80, 9))
+  expect(terminal.rows).toBe(9)
+  expect(terminal.buffer.active.baseY).toBe(terminal.buffer.active.length - terminal.rows)
+  expect(terminal.buffer.active.viewportY).toBe(300)
+  expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)!.translateToString(true)).toBe('ROW300')
+  expect(populated()).toEqual(before)
+  await delivered(resized(fence, 5, 80, 24))
+  expect(terminal.rows).toBe(24)
+  expect(terminal.buffer.active.viewportY).toBe(300)
+  expect(populated()).toEqual(before)
+  await act(async () => terminal.scrollToBottom())
+  await delivered(resized(fence, 6, 80, 9))
+  expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY)
+  await delivered(resized(fence, 7, 80, 24))
+  expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY)
+  expect(populated()).toEqual(before)
+  expect(write).not.toHaveBeenCalled()
+  expect(attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+})
+
+
+it('tracks retained reading and selection coordinates when a full normal buffer trims during row resize', async () => {
+  const history = Array.from({ length: 6000 }, (_, i) => `LONG${String(i).padStart(4, '0')}\r\n`).join('')
+  const terminal = await ready(continuation(history))
+  expect(terminal.buffer.active.length).toBe(5024)
+  expect(terminal.markers).toEqual([])
+  await act(async () => terminal.scrollToLine(300))
+  const anchor = terminal.buffer.active.getLine(300)!.translateToString(true)
+  expect(anchor).toBe('LONG1277')
+  await render(session, false)
+  vi.spyOn(terminal, 'getSelectionPosition').mockReturnValue({ start: { x: 0, y: 300 }, end: { x: 8, y: 300 } })
+  // open() omits DOM SelectionService; only selection API delivery is a fixture boundary.
+  // The public parser, markers, trim and reading viewport remain real.
+  const selected = vi.spyOn(terminal, 'select').mockImplementation(() => {})
+  await delivered(resized(fence, 4, 80, 9))
+  expect(terminal.rows).toBe(9)
+  expect(terminal.buffer.active.length).toBe(5009)
+  expect(terminal.buffer.active.viewportY).toBe(285)
+  expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)!.translateToString(true)).toBe(anchor)
+  expect(selected).toHaveBeenCalledExactlyOnceWith(0, 285, 8)
+  await render(session, true)
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
+  expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)!.translateToString(true)).toBe(anchor)
+  expect(terminal.markers).toEqual([])
+  expect(write).not.toHaveBeenCalled()
+})
+
+it('keeps the tracked reading line when a successful observation refresh applies a full-buffer row resize', async () => {
+  const history = Array.from({ length: 6000 }, (_, i) => `LONG${String(i).padStart(4, '0')}\r\n`).join('')
+  const terminal = await ready(continuation(history))
+  expect(terminal.buffer.active.length).toBe(5024)
+  await act(async () => terminal.scrollToLine(300))
+  expect(terminal.buffer.active.getLine(300)!.translateToString(true)).toBe('LONG1277')
+  vi.spyOn(api.sessions, 'refresh').mockResolvedValue({ ...session, latestOutputBytes: fence })
+  const refresh = vi.spyOn(api.sessions, 'refreshAttachment').mockResolvedValue(continuation('', '', [
+    { throughByte: fence, resizeRevision: 4, size: { cols: 80, rows: 9 } }
+  ]))
+  expect(refreshObservation).toBeTypeOf('function')
+  await act(async () => { await refreshObservation!() })
+  expect(refresh).toHaveBeenCalledExactlyOnceWith(session.control, 'wheel-attachment', fence)
+  expect(terminal.rows).toBe(9)
+  expect(terminal.buffer.active.viewportY).toBe(285)
+  expect(terminal.buffer.active.getLine(285)!.translateToString(true)).toBe('LONG1277')
+  expect(terminal.markers).toEqual([])
+  expect(write).not.toHaveBeenCalled()
+  expect(attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
 })
