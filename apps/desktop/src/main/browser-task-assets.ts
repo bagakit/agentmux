@@ -164,7 +164,7 @@ export class BrowserTaskAssets {
           throw new Error('This task cannot be continued automatically. Review completed and uncertain steps before creating another run.')
         }
         if (host.control(browserId) !== 'agent') throw new Error('The person has Browser control. Return control explicitly before running the task.')
-        validateParameters(version, parameters, existing?.nextStep ?? 0, input.mode)
+        validateTaskSegment(version, parameters, existing?.nextStep ?? 0, input.mode)
         const next = existing ?? {
           id: identity(this.id()), assetId: asset.id, version: version.version, browserId,
           nextStep: 0, status: 'ready' as const, operationIds: [], startedAt: this.now(), updatedAt: this.now()
@@ -297,7 +297,7 @@ function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, stri
   return `${compileBrowserSteps({ url: step.kind === 'navigate' ? 'about:blank' : step.url, steps: [replay] })}\nreturn { taskStepId: ${JSON.stringify(step.id)} }`
 }
 
-function validateParameters(version: BrowserTaskVersion, values: Record<string, string>, nextStep: number, mode?: 'run' | 'step'): void {
+function validateTaskSegment(version: BrowserTaskVersion, values: Record<string, string>, nextStep: number, mode?: 'run' | 'step'): void {
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Provide the task parameters for this invocation.')
   for (const step of version.steps.slice(nextStep)) {
     if (step.kind === 'checkpoint') break
@@ -307,6 +307,9 @@ function validateParameters(version: BrowserTaskVersion, values: Record<string, 
       throw new Error(`A fresh value is required for parameter ${definition?.label ?? step.parameterKey ?? 'unknown'}.`)
     }
     }
+    // Use the same compiler guards before any action in this invocation. A later blocked step
+    // must not leave earlier actions applied with a cursor that still appears to be running.
+    compileAssetStep(step, values)
     if (mode === 'step') break
   }
 }
