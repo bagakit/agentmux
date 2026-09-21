@@ -114,7 +114,9 @@ export function GlobalFocusSurface() {
         const tab = tabForFocusedSession(tabs, id)
         const region = tab && Object.values(tab.regions).find(region => region.kind === 'agent' && region.sessionId === id)
         if (tab && region && tab.layout.activeRegionId !== region.regionId) focusRegion(tab.workspaceId, tab.id, region.regionId)
-        requestPmoTeamsTopicFloatingOpen(tab ? { targetTabId: tab.id } : undefined)
+        requestPmoTeamsTopicFloatingOpen({ ...(tab ? { targetTabId: tab.id } : {}), onReturnFocus: () => {
+          if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
+        } })
       }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">

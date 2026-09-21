@@ -76,13 +76,14 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string; targetTabId?: string }): void {
+export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string; targetTabId?: string; onReturnFocus?: () => void }): void {
   const prompt = options?.prompt?.trim()
   const targetTabId = options?.targetTabId?.trim()
   window.dispatchEvent(new CustomEvent(EVENT_NAME, {
     detail: {
       open: true,
       targetTabId,
+      onReturnFocus: options?.onReturnFocus,
       pendingPrompt: prompt ? { id: crypto.randomUUID(), text: prompt } : undefined
     }
   }))
@@ -98,18 +99,19 @@ export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boo
 export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<FloatingState>) => void] {
   const [state, setState] = useState<FloatingState>(() => readState())
   const stateRef = useRef(state)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const returnFocusRef = useRef<{ primary: HTMLElement | null; onReturnFocus?: (() => void) | undefined } | null>(null)
   useEffect(() => { stateRef.current = state }, [state])
   useEffect(() => {
     const onEvent = (event: Event): void => {
-      const { restoreFocus, ...detail } = (event as CustomEvent<Partial<FloatingState> & { restoreFocus?: boolean }>).detail ?? {}
+      const { restoreFocus, onReturnFocus, ...detail } = (event as CustomEvent<Partial<FloatingState> & { restoreFocus?: boolean; onReturnFocus?: () => void }>).detail ?? {}
       const nextOpen = detail.open
       if (typeof nextOpen !== 'boolean' && detail.pendingPrompt === undefined) return
       const current = stateRef.current
       if (nextOpen === true && !current.open) {
         const active = document.activeElement
-        if (active instanceof HTMLElement && !active.closest('[data-pmo-teams-topic-floating]')) {
-          returnFocusRef.current = active
+        returnFocusRef.current = {
+          primary: active instanceof HTMLElement && !active.closest('[data-pmo-teams-topic-floating]') ? active : null,
+          onReturnFocus
         }
       }
       if (nextOpen === true && current.open) {
@@ -122,8 +124,15 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
       if (nextOpen === false) {
         const target = returnFocusRef.current
         returnFocusRef.current = null
-        if (restoreFocus !== false && target && document.contains(target)) {
-          requestAnimationFrame(() => target.focus({ preventScroll: true }))
+        if (restoreFocus !== false && target) {
+          requestAnimationFrame(() => {
+            if (stateRef.current.open) return
+            const active = document.activeElement
+            if (active instanceof HTMLElement && active !== document.body && !active.closest('[data-pmo-teams-topic-floating]')) return
+            if (target.primary && target.primary !== document.body && document.contains(target.primary)) {
+              target.primary.focus({ preventScroll: true })
+            } else target.onReturnFocus?.()
+          })
         }
       }
     }
