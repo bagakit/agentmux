@@ -3,6 +3,7 @@ import type {
   BrowserPageNode,
   BrowserPageSnapshot
 } from '../shared/contracts.js'
+import { discoverBrowserFrameDocuments, changedBrowserFrameDocuments } from './browser-frame-documents.js'
 import { browserSnapshotNodeIdentity, parseBrowserSnapshotQuery, type BrowserSnapshotScopeFacts, type NormalizedBrowserSnapshotQuery } from './browser-snapshot-query.js'
 
 /**
@@ -18,7 +19,7 @@ import { browserSnapshotNodeIdentity, parseBrowserSnapshotQuery, type BrowserSna
  * browser-cdp-render-domain.test.ts 单独判定，两者缺一不可。
  */
 
-/** 向某个 CDP 对端发一条命令。主 frame 与每个 iframe 各有自己的 sender。 */
+/** 向某个 CDP 对端发一条命令。一个 sender 可以承载多个同进程文档；OOPIF 才另有 session sender。 */
 export type BrowserCdpSender = (method: string, params?: Record<string, unknown>) => Promise<unknown>
 
 /** CDP `Accessibility.getFullAXTree` 返回的节点形状，只取我们用到的字段。 */
@@ -30,6 +31,7 @@ type AxNode = {
   properties?: { name: string; value?: { value?: unknown } }[]
   childIds?: string[]
   ignored?: boolean
+  frameId?: string
 }
 
 /**
@@ -133,12 +135,16 @@ function walk(
   byId: Map<string, AxNode>,
   depth: number,
   out: BrowserPageNode[],
-  nextRef: () => string
+  nextRef: () => string,
+  frameId: string | null
 ): void {
+  // A native AX subtree can name another document. That document is collected
+  // independently; never issue its nodes under the parent's identity/sender.
+  if (node.frameId !== undefined && frameId !== null && node.frameId !== frameId) return
   const descend = (childDepth: number): void => {
     for (const childId of node.childIds ?? []) {
       const child = byId.get(childId)
-      if (child) walk(child, byId, childDepth, out, nextRef)
+      if (child) walk(child, byId, childDepth, out, nextRef, frameId)
     }
   }
 
@@ -236,10 +242,12 @@ const CURSOR_CLEANUP_EXPRESSION = 'delete window.__agentmuxClickable'
 async function findClickableElements(
   send: BrowserCdpSender,
   known: Set<number>,
+  executionContextId: number,
   within?: { objectId: string; backendNodes: Set<number> }
 ): Promise<BrowserPageNode[]> {
   const evaluated = (await send('Runtime.evaluate', {
     expression: CURSOR_INTERACTIVE_EXPRESSION,
+    contextId: executionContextId,
     returnByValue: true
   })) as { result?: { value?: string } }
 
@@ -252,13 +260,15 @@ async function findClickableElements(
   })) as { result?: { value?: boolean[] } } : null
   if (within && !Array.isArray(membership?.result?.value)) throw new Error('The observation region could not be checked against clickable elements; retry snapshot().')
 
+  try {
   for (let index = 0; index < labels.length; index += 1) {
     const handle = (await send('Runtime.evaluate', {
-      expression: `window.__agentmuxClickable[${index}]`
+      expression: `window.__agentmuxClickable[${index}]`, contextId: executionContextId
     })) as { result?: { objectId?: string } }
     const objectId = handle.result?.objectId
     if (!objectId) continue
 
+    try {
     const described = (await send('DOM.describeNode', { objectId })) as {
       node?: { backendNodeId?: number }
     }
@@ -271,15 +281,17 @@ async function findClickableElements(
     // 这条路的名字取自 `el.textContent`（见 CURSOR_INTERACTIVE_EXPRESSION），里面带着 HTML 缩进的
     // 换行，比 AX 名更脏——同样过一遍归一，理由见 normalizeName。
     found.push({ ref: '', role: 'clickable', name: normalizeName(labels[index]!), backendNodeId, depth: 0 })
+    } finally { await send('Runtime.releaseObject', { objectId }) }
   }
-
-  await send('Runtime.evaluate', { expression: CURSOR_CLEANUP_EXPRESSION, returnByValue: true })
+  } finally {
+    await send('Runtime.evaluate', { expression: CURSOR_CLEANUP_EXPRESSION, contextId: executionContextId, returnByValue: true })
+  }
   return found
 }
 
-async function collectAxNodes(send: BrowserCdpSender): Promise<AxNode[]> {
+async function collectAxNodes(send: BrowserCdpSender, frameId: string | null): Promise<AxNode[]> {
   await send('Accessibility.enable')
-  const tree = (await send('Accessibility.getFullAXTree')) as { nodes?: AxNode[] }
+  const tree = (await send('Accessibility.getFullAXTree', frameId === null ? undefined : { frameId })) as { nodes?: AxNode[] }
   return tree.nodes ?? []
 }
 
@@ -294,11 +306,11 @@ export type BrowserPageSnapshotInput = {
   url: string
   title: string
   navigationId: string
-  /** frameId → 该 frame 的 sender。跨域 iframe 各有自己的 CDP session。 */
+  /** sessionId → OOPIF sender; actual documents are discovered through Page.getFrameTree. */
   frames?: Map<string, BrowserCdpSender>
   query?: NormalizedBrowserSnapshotQuery
   /** Resolved by the existing authorized-ref path, never a second ref registry. */
-  withinTarget?: { objectId: string; sessionId?: string }
+  withinTarget?: { objectId: string; sessionId?: string; frameId?: string }
   /** Dispatch owns the run's monotonically increasing ref sequence. */
   nextRef?: () => string
 }
@@ -335,12 +347,15 @@ function descendantBackendNodes(tree: AxNode[], rootBackendNodeId: number): Set<
   return found
 }
 
-async function viewportBackendNodes(send: BrowserCdpSender): Promise<{ visible: Set<number>; located: Set<number> }> {
+async function viewportBackendNodes(send: BrowserCdpSender, frameId: string | null): Promise<{ visible: Set<number>; located: Set<number> }> {
   const snapshot = await send('DOMSnapshot.captureSnapshot', { computedStyles: [], includeDOMRects: true }) as {
-    documents?: { scrollOffsetX?: number; scrollOffsetY?: number; nodes?: { backendNodeId?: number[] }; layout?: { nodeIndex?: number[]; bounds?: number[][] } }[]
+    strings?: string[]; documents?: { frameId?: number; scrollOffsetX?: number; scrollOffsetY?: number; nodes?: { backendNodeId?: number[] }; layout?: { nodeIndex?: number[]; bounds?: number[][] } }[]
   }
-  const metrics = await send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight })', returnByValue: true }) as { result?: { value?: { width: number; height: number } } }
-  const document = snapshot.documents?.[0]
+  if (frameId === null) throw new Error('Viewport document identity is unavailable. Use a page snapshot() and inspect missingFrames.')
+  const realm = await send('Page.createIsolatedWorld', { frameId, worldName: 'agentmux-snapshot-viewport', grantUniveralAccess: false }) as { executionContextId?: number }
+  if (realm.executionContextId === undefined) throw new Error('Viewport document context is unavailable. Retry snapshot().')
+  const metrics = await send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight })', contextId: realm.executionContextId, returnByValue: true }) as { result?: { value?: { width: number; height: number } } }
+  const document = frameId === null ? undefined : snapshot.documents?.find((item) => item.frameId !== undefined && snapshot.strings?.[item.frameId] === frameId)
   const size = metrics.result?.value
   if (!document?.nodes?.backendNodeId || !document.layout?.nodeIndex || !document.layout.bounds || !size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) throw new Error('Viewport geometry could not be read. Use a page snapshot() or retry the viewport observation.')
   const left = document.scrollOffsetX ?? 0
@@ -380,9 +395,14 @@ export async function captureBrowserPageSnapshot(
   }
   const mainSend = counted(input.send)
   const frames = new Map([...input.frames ?? []].map(([id, sender]) => [id, counted(sender)]))
-  const scopedDocument = input.withinTarget?.sessionId ?? 'main'
-  const scopedSend = scopedDocument === 'main' ? mainSend : frames.get(scopedDocument)
-  if (!scopedSend) throw new Error('The observation document went away. Take a new snapshot().')
+  const discovery = await discoverBrowserFrameDocuments(mainSend, frames)
+  missingFrames.push(...discovery.missingFrames)
+  const mainDocument = discovery.documents.find((document) => document.depth === 0 && !document.sessionId)
+  const scopedDocument = input.withinTarget
+    ? discovery.documents.find((document) => document.frameId !== null && document.frameId === input.withinTarget!.frameId && document.sessionId === input.withinTarget!.sessionId)
+    : mainDocument
+  if (!scopedDocument) throw new Error('The observation document could not be identified or went away. Take a new snapshot().')
+  const scopedSend = scopedDocument.send
   if (query.withinRef && !input.withinTarget) throw new Error('withinRef must be resolved through the authorized snapshot ref path.')
   let regionObjectId = input.withinTarget?.objectId
   let regionBackendNodeId: number | undefined
@@ -394,51 +414,69 @@ export async function captureBrowserPageSnapshot(
       if (!regionBackendNodeId) throw new Error('The observation region no longer has a DOM identity. Take a new snapshot().')
     }
     let regionNodes: Set<number> | null = null
-    const collect = async (send: BrowserCdpSender): Promise<AxNode[]> => {
-      work.axTrees += 1
-      const tree = await collectAxNodes(send)
-      work.axNodes += tree.length
-      return tree
-    }
-
-    const mainNodes = await collect(mainSend)
-    if (regionBackendNodeId && scopedDocument === 'main') regionNodes = descendantBackendNodes(mainNodes, regionBackendNodeId)
-    const mainRoot = mainNodes[0]
-    if (mainRoot) walk(mainRoot, indexById(mainNodes), 0, nodes, nextRef)
-
-    // AX 树先走完，可点元素提升才知道哪些 backendNodeId 已经收过了。
-    const known = new Set(nodes.map((node) => node.backendNodeId))
-    for (const clickable of await findClickableElements(mainSend, known, regionObjectId && scopedDocument === 'main' && regionNodes ? { objectId: regionObjectId, backendNodes: regionNodes } : undefined)) {
-      nodes.push({ ...clickable, ref: nextRef() })
-    }
-
-    for (const [frameId, frameSend] of frames) {
+    for (const document of discovery.documents) {
       try {
-        const frameNodes = await collect(frameSend)
-        if (regionBackendNodeId && scopedDocument === frameId) regionNodes = descendantBackendNodes(frameNodes, regionBackendNodeId)
-        const frameRoot = frameNodes[0]
-        if (!frameRoot) continue
-        const before = nodes.length
-        // iframe 内容从 depth 1 起，读起来就知道它嵌在父页面里。
-        walk(frameRoot, indexById(frameNodes), 1, nodes, nextRef)
-        // 这些节点的动作要发到 iframe 自己的 session，否则 backendNodeId 解不开。
-        for (let index = before; index < nodes.length; index += 1) {
-          nodes[index] = { ...nodes[index]!, sessionId: frameId }
+        work.axTrees += 1
+        const tree = await collectAxNodes(document.send, document.frameId)
+        work.axNodes += tree.length
+        const root = tree[0]
+        if (!root) throw new Error('The accessibility tree returned no document root. Retry snapshot().')
+        if (document.frameId !== null && root.frameId !== undefined && root.frameId !== document.frameId) throw new Error('The accessibility root belongs to a different document. Take a new snapshot().')
+        if (regionBackendNodeId && document === scopedDocument) regionNodes = descendantBackendNodes(tree, regionBackendNodeId)
+        const observed: BrowserPageNode[] = []
+        walk(root, indexById(tree), document.depth, observed, nextRef, document.frameId ?? root.frameId ?? null)
+        // The Main supplement belongs to the actual Main document too. Page
+        // prototypes/selectors cannot supply child nodes or execute callbacks.
+        if (document === mainDocument) {
+          const actualFrameId = document.frameId ?? root.frameId
+          try {
+            if (!actualFrameId) throw new Error('The main document has no native frame identity')
+            const realm = await document.send('Page.createIsolatedWorld', { frameId: actualFrameId, worldName: 'agentmux-snapshot-observation', grantUniveralAccess: false }) as { executionContextId?: number }
+            if (realm.executionContextId === undefined) throw new Error('The main document observation context is unavailable')
+            let isolatedRegion: string | undefined
+            try {
+              if (regionBackendNodeId && document === scopedDocument && regionNodes) {
+                const resolved = await document.send('DOM.resolveNode', { backendNodeId: regionBackendNodeId, executionContextId: realm.executionContextId }) as { object?: { objectId?: string } }
+                isolatedRegion = resolved.object?.objectId
+                if (!isolatedRegion) throw new Error('The observation region could not be resolved in its actual document')
+              }
+              const known = new Set(observed.map((node) => node.backendNodeId))
+              for (const clickable of await findClickableElements(document.send, known, realm.executionContextId, isolatedRegion && regionNodes ? { objectId: isolatedRegion, backendNodes: regionNodes } : undefined)) {
+                observed.push({ ...clickable, ref: nextRef() })
+              }
+            } finally { if (isolatedRegion) await document.send('Runtime.releaseObject', { objectId: isolatedRegion }) }
+          } catch (error) {
+            missingFrames.push({ frameId: actualFrameId ?? '(unidentified main document)', reason: `Main-document clickable observation is unavailable (${error instanceof Error ? error.message : String(error)}). Accessibility content remains observable; retry snapshot().` })
+          }
         }
+        for (const node of observed) nodes.push({ ...node,
+          ...(document.frameId !== null ? { frameId: document.frameId } : root.frameId ? { frameId: root.frameId } : {}),
+          ...(document.sessionId ? { sessionId: document.sessionId } : {})
+        })
       } catch (error) {
-        // 静默跳过是原实现的做法，这里不跟。取不到就说出来：缺了哪个 frame、为什么。
-        missingFrames.push({ frameId, reason: error instanceof Error ? error.message : String(error) })
+        if (document === mainDocument) throw error
+        missingFrames.push({ frameId: document.frameId!, reason: error instanceof Error ? error.message : String(error) })
       }
     }
+    const changed = await changedBrowserFrameDocuments(discovery)
+    for (const [frameId, reason] of changed) {
+      const previousFailure = missingFrames.find((failure) => failure.frameId === frameId)
+      if (previousFailure) previousFailure.reason += ` ${reason}`
+      else missingFrames.push({ frameId, reason })
+      // Refs consumed by a document that changed are never published or reused.
+      for (let index = nodes.length - 1; index >= 0; index -= 1) if (nodes[index]!.frameId === frameId) nodes.splice(index, 1)
+    }
+    if (scopedDocument.frameId && changed.has(scopedDocument.frameId) && (regionBackendNodeId || query.scope === 'viewport')) throw new Error('The observation document changed during capture. Take a new snapshot().')
 
     if (regionBackendNodeId && !regionNodes) throw new Error('The requested observation document could not be read. Take an unscoped snapshot() to inspect missingFrames, then retry.')
     const localScope = regionNodes !== null || query.scope === 'viewport'
-    const viewport = query.scope === 'viewport' ? await viewportBackendNodes(scopedSend) : null
+    if (localScope && scopedDocument.frameId === null) throw new Error('The observation document identity is unavailable. Read an unscoped snapshot() to inspect missingFrames, then retry.')
+    const viewport = query.scope === 'viewport' ? await viewportBackendNodes(scopedSend, scopedDocument.frameId) : null
     if (viewport) work.layoutTrees += 1
     const backendNodes = localScope ? new Set<string>() : null
     let unlocated = 0
     for (const node of nodes) {
-      if (!backendNodes || (node.sessionId ?? 'main') !== scopedDocument) continue
+      if (!backendNodes || node.frameId !== scopedDocument.frameId) continue
       if (regionNodes && !regionNodes.has(node.backendNodeId)) continue
       if (viewport && !viewport.located.has(node.backendNodeId)) { unlocated += 1; continue }
       if (viewport && !viewport.visible.has(node.backendNodeId)) continue
@@ -452,9 +490,9 @@ export async function captureBrowserPageSnapshot(
       nodes,
       missingFrames,
       scopeFacts: {
-        document: localScope ? scopedDocument : null,
+        document: localScope ? scopedDocument.frameId : null,
         backendNodes,
-        omittedFrames: localScope ? [...(scopedDocument === 'main' ? [] : ['main']), ...frames.keys()].filter((id) => id !== scopedDocument) : [],
+        omittedFrames: localScope ? discovery.documents.flatMap((document) => document !== scopedDocument && document.frameId !== null ? [document.frameId] : []) : [],
         unlocated,
         work
       }

@@ -201,16 +201,16 @@ export function createBrowserPageDispatch(
       ...(query ? { query } : {}),
       ...(withinTarget ? { withinTarget } : {})
     })
-    // 子 frame 的自动 attach 没建立起来时，跨域 iframe 一个都不会被枚举——于是 `missingFrames`
-    // 是空的，因为它只在**尝试过**某个 frame 时才写入。空的 missingFrames 在 Agent 眼里就是
-    // "这页没有 iframe"。这里把那个洞补上：够不着也要说出来，不阻断（原则 11 的第 2 类）。
+    // Discovery can fail after some embedded documents were attached and read.
+    // Preserve those observations, but disclose the unknown remainder rather
+    // than presenting an empty missingFrames list as complete discovery.
     const discovery = session.frameDiscoveryFailure
     if (discovery !== null) {
       snapshot.missingFrames.push({
-        frameId: '(all cross-origin frames)',
+        frameId: '(undiscovered embedded documents)',
         reason:
-          `Frame discovery could not be set up (${discovery}), so no cross-origin iframe on this page ` +
-          'was read. If this page embeds one, its contents are missing from this snapshot.'
+          `Frame discovery was incomplete (${discovery}). Some embedded documents may be missing; ` +
+          'see identified missingFrames and retry snapshot(). Already observed documents remain available.'
       })
     }
     if (context.pageInfo().navigationId !== info.navigationId) throw new Error('The page navigated during snapshot capture. Take a new snapshot() of the current page.')
@@ -231,7 +231,9 @@ export function createBrowserPageDispatch(
       for (const key of ['axTrees', 'axNodes', 'layoutTrees', 'cdpCommands'] as const) work[key] += capture.scopeFacts.work[key]
     }
     const within = query.withinRef ? await handleFor(query.withinRef, recordCapture) : undefined
-    const snapshot = await takeSnapshot(query, within ? { objectId: within.objectId, ...(within.node.sessionId ? { sessionId: within.node.sessionId } : {}) } : undefined, recordCapture)
+    const snapshot = await takeSnapshot(query, within ? { objectId: within.objectId,
+      ...(within.node.frameId ? { frameId: within.node.frameId } : {}),
+      ...(within.node.sessionId ? { sessionId: within.node.sessionId } : {}) } : undefined, recordCapture)
     // A prior-run withinRef can require an initial full capture for appearance
     // recovery. Count that capture too instead of hiding its AX work.
     snapshot.scopeFacts.work = work

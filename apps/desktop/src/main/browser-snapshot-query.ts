@@ -19,8 +19,8 @@ export type BrowserSnapshotScopeFacts = {
   work: BrowserSnapshotObservation['work']
 }
 
-export function browserSnapshotNodeIdentity(node: Pick<BrowserPageNode, 'sessionId' | 'backendNodeId'>): string {
-  return `${node.sessionId ?? 'main'}:${node.backendNodeId}`
+export function browserSnapshotNodeIdentity(node: Pick<BrowserPageNode, 'frameId' | 'sessionId' | 'backendNodeId'>): string {
+  return `${node.frameId ?? '(unidentified document)'}:${node.sessionId ?? 'main'}:${node.backendNodeId}`
 }
 
 export function parseBrowserSnapshotQuery(value: unknown): NormalizedBrowserSnapshotQuery {
