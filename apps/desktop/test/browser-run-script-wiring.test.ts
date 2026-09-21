@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import { mkdtempSync } from 'node:fs'
+import vm from 'node:vm'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +29,7 @@ const fakeElectron = vi.hoisted(() => {
     attached = false
     readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>()
     /** 被踢掉的原因；测试用它模拟"用户中途打开了 DevTools"。 */
-    sendCommandImpl: (method: string) => Promise<unknown> = async () => ({})
+    sendCommandImpl: (method: string, params?: Record<string, unknown>, sessionId?: string) => Promise<unknown> = async () => ({})
     /** 置成 true 就让 attach 抛——模拟"用户此刻开着 DevTools"，Electron 的真实行为。 */
     attachThrows = false
     attach(): void {
@@ -48,7 +49,9 @@ const fakeElectron = vi.hoisted(() => {
     emit(event: string, ...args: unknown[]): void {
       for (const listener of [...(this.listeners.get(event) ?? [])]) listener({}, ...args)
     }
-    async sendCommand(method: string): Promise<unknown> { return await this.sendCommandImpl(method) }
+    async sendCommand(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown> {
+      return await this.sendCommandImpl(method, params, sessionId)
+    }
   }
 
   class FakeWebContents {
@@ -1568,6 +1571,170 @@ describe('versioned task assets via the actual Browser Manager', () => {
   }): Promise<BrowserTaskAsset> {
     return await f.manager.saveTaskAssetVersion('b1', f.imported.id, f.imported.revision, content)
   }
+
+  // Real Manager, selection scripts, CDP session, AX verification and snapshot collector.
+  // Only Electron/CDP transport is doubled; this is not a native Chromium input proof.
+  function selectedWorlds(f: Awaited<ReturnType<typeof fixture>>) {
+    const listeners = new Map<string, (event: any) => void>()
+    const document: any = { title: 'Fixture', addEventListener: (name: string, listener: (event: any) => void) => listeners.set(name, listener),
+      removeEventListener: (name: string) => listeners.delete(name), querySelectorAll: () => [] }
+    class Element {
+      readonly ownerDocument = document
+      readonly style = {}
+      readonly attributes = []
+      readonly tagName = 'BUTTON'
+      readonly parentElement = null
+      readonly previousElementSibling = null
+      readonly nextElementSibling = null
+      textContent: string
+      constructor(readonly backendNodeId = 0, readonly innerText = '') { this.textContent = innerText }
+      get outerHTML() { return `<button>${this.innerText}</button>` }
+      appendChild() {} append() {} setAttribute() {} remove() {}
+      getAttribute() { return null }
+      contains() { return false }
+      attachShadow() { return { append() {} } }
+      getBoundingClientRect() { return { x: 0, y: 0, width: 200, height: 50 } }
+    }
+    document.body = document.documentElement = new Element()
+    document.createElement = () => new Element()
+    const chosen = new Element(11, 'Human chosen button'), decoy = new Element(22, 'Page nominated button')
+    const environment = { document, Element, getComputedStyle: () => ({ position: 'static' }),
+      CSS: { escape: (value: string) => value }, location: { href: 'https://example.invalid/' } }
+    const isolated = vm.createContext({ ...environment, window: { scrollX: 0, scrollY: 0 } })
+    const page = vm.createContext({ ...environment, __agentMuxBrowserSelection: { revision: 2, selectedTarget: decoy } })
+    const unrelated = vm.createContext({ ...environment, __agentMuxBrowserSelection: { revision: 2, inspectionToken: 'wrong-world-token', selectedTarget: decoy } })
+    const worlds = new Map([[3, page], [4, unrelated], [9, unrelated], [5, unrelated], [7, isolated]])
+    const calls: { method: string; params?: any }[] = []
+    const handles = new Map<string, Element>()
+    const inspectionTokens: string[] = []
+    let click: 'select' | 'cancel' = 'select'
+    let provenContext = true, ambiguous = false
+    f.contents.executeJavaScriptInIsolatedWorld.mockImplementation(async (worldId: number, scripts: { code: string }[]) => {
+      expect(worldId).toBe(1208)
+      const response = vm.runInContext(scripts[0]!.code, isolated)
+      if (scripts[0]!.code.includes('Select an element')) {
+        inspectionTokens.push(vm.runInContext('globalThis.__agentMuxBrowserSelection.inspectionToken', isolated))
+        const event = { isTrusted: true, target: chosen, composedPath: () => [chosen],
+          key: 'Escape', preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }
+        listeners.get(click === 'cancel' ? 'keydown' : 'click')!(event)
+      }
+      // Electron serializes an isolated-world result into the Main realm.
+      return structuredClone(await response)
+    })
+    f.contents.debugger.sendCommandImpl = async (method: string, params?: any) => {
+      calls.push({ method, params })
+      if (method === 'Runtime.enable') {
+        for (const [id, auxData] of [[3, { isDefault: true, type: 'default', frameId: 'main' }],
+          [4, { isDefault: false, type: 'worker', frameId: 'main' }],
+          [9, { isDefault: false, type: 'isolated', frameId: 'child' }],
+          [5, { isDefault: false, type: 'isolated', frameId: 'main' }],
+          [7, { isDefault: false, type: 'isolated', frameId: 'main' }]] as const) {
+          f.contents.debugger.emit('message', 'Runtime.executionContextCreated', { context: { id, ...(id !== 7 || provenContext ? { auxData } : {}) } })
+        }
+      }
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main', loaderId: 'loader-1' } } }
+      if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
+      if (method === 'Runtime.evaluate') {
+        const context = worlds.get(params.contextId)
+        if (!context) throw new Error('Unknown context')
+        const result = vm.runInContext(params.expression, context)
+        if (params.returnByValue) return { result: { value: result } }
+        if (!(result instanceof Element)) return { result: { type: 'undefined' } }
+        const objectId = `selected-${result.backendNodeId}`
+        handles.set(objectId, result)
+        return { result: { objectId } }
+      }
+      if (method === 'DOM.describeNode') return { node: { backendNodeId: handles.get(params.objectId)?.backendNodeId } }
+      if (method === 'Accessibility.getPartialAXTree') return { nodes: [{ backendDOMNodeId: params.backendNodeId, ignored: false,
+        role: { value: 'button' }, name: { value: params.backendNodeId === 11 ? chosen.innerText : decoy.innerText } }] }
+      if (method === 'Accessibility.getFullAXTree') return { nodes: [
+        { nodeId: 'root', role: { value: 'generic' }, frameId: 'main', childIds: ['human', 'decoy'] },
+        { nodeId: 'human', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: chosen.innerText } },
+        { nodeId: 'decoy', backendDOMNodeId: 22, role: { value: 'button' }, name: { value: ambiguous ? chosen.innerText : decoy.innerText } }
+      ] }
+      return {}
+    }
+    return { isolated, page, calls, listeners, inspectionTokens, cancel: () => { click = 'cancel' },
+      omitContextProof: () => { provenContext = false }, makeAmbiguous: () => { ambiguous = true } }
+  }
+
+  it('locates only the human selected target, rejecting default and unrelated isolated world nominations', async () => {
+    const f = await fixture()
+    try {
+      const worlds = selectedWorlds(f)
+      const asset = await f.manager.locateTaskAssetStep('b1', f.imported.id, f.imported.revision, f.imported.draft.steps[0]!.id)
+      expect(asset.draft.steps[0]).toMatchObject({ target: { role: 'button', name: 'Human chosen button', ordinal: 1, count: 1 }, reviewed: false })
+      const inspections = worlds.calls.filter(call => call.method === 'Runtime.evaluate' && call.params.returnByValue === false)
+      expect(inspections.map(call => call.params.contextId)).toEqual([5, 7])
+      expect(worlds.calls.filter(call => call.method === 'DOM.describeNode').map(call => call.params.objectId)).toEqual(['selected-11'])
+      expect(worlds.calls.filter(call => call.method === 'Accessibility.getPartialAXTree').map(call => call.params.backendNodeId)).toEqual([11])
+      expect(f.contents.debugger.isAttached()).toBe(false)
+      expect(worlds.listeners.size).toBe(0)
+      expect(vm.runInContext('globalThis.__agentMuxBrowserSelection.selectedTarget', worlds.isolated)).toBeUndefined()
+      expect(vm.runInContext('globalThis.__agentMuxBrowserSelection.selectedTarget.innerText', worlds.page)).toBe('Page nominated button')
+    } finally { await f.close() }
+  })
+
+  it('retains the draft when the selected context identity is unknown, without falling back to the page world', async () => {
+    const f = await fixture()
+    try {
+      const worlds = selectedWorlds(f)
+      worlds.omitContextProof()
+      await expect(f.manager.locateTaskAssetStep('b1', f.imported.id, f.imported.revision, f.imported.draft.steps[0]!.id))
+        .rejects.toThrow('actual selected target is unknown')
+      expect(await f.assets.get(f.imported.id)).toEqual(f.imported)
+      expect(worlds.calls.filter(call => call.method === 'Runtime.evaluate' && call.params.returnByValue === false).map(call => call.params.contextId)).toEqual([5])
+      expect(worlds.calls.filter(call => call.method === 'DOM.describeNode')).toEqual([])
+      expect(f.contents.debugger.isAttached()).toBe(false)
+      expect(worlds.listeners.size).toBe(0)
+      expect(vm.runInContext('globalThis.__agentMuxBrowserSelection.selectedTarget', worlds.isolated)).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('uses a fresh inspection token for each explicit relocation rather than a reusable selection revision', async () => {
+    const f = await fixture()
+    try {
+      const worlds = selectedWorlds(f)
+      const first = await f.manager.locateTaskAssetStep('b1', f.imported.id, f.imported.revision, f.imported.draft.steps[0]!.id)
+      const second = await f.manager.locateTaskAssetStep('b1', first.id, first.revision, first.draft.steps[0]!.id)
+      expect(second.draft.steps[0]!.target).toEqual({ role: 'button', name: 'Human chosen button', ordinal: 1, count: 1 })
+      expect(worlds.inspectionTokens).toHaveLength(2)
+      expect(worlds.inspectionTokens[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+      expect(worlds.inspectionTokens[1]).not.toBe(worlds.inspectionTokens[0])
+      expect(f.contents.debugger.isAttached()).toBe(false)
+      expect(worlds.listeners.size).toBe(0)
+      expect(vm.runInContext('globalThis.__agentMuxBrowserSelection.selectedTarget', worlds.isolated)).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('still rejects an ambiguous actual human target and releases its retained owner', async () => {
+    const f = await fixture()
+    try {
+      const worlds = selectedWorlds(f)
+      worlds.makeAmbiguous()
+      await expect(f.manager.locateTaskAssetStep('b1', f.imported.id, f.imported.revision, f.imported.draft.steps[0]!.id))
+        .rejects.toThrow('actual selected target is unknown')
+      expect(await f.assets.get(f.imported.id)).toEqual(f.imported)
+      expect(worlds.calls.filter(call => call.method === 'Accessibility.getPartialAXTree').map(call => call.params.backendNodeId)).toEqual([11])
+      expect(f.contents.debugger.isAttached()).toBe(false)
+      expect(worlds.listeners.size).toBe(0)
+      expect(vm.runInContext('globalThis.__agentMuxBrowserSelection.selectedTarget', worlds.isolated)).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('cancels actual selection without reading a page nominee, editing a task, or retaining the native session', async () => {
+    const f = await fixture()
+    try {
+      const worlds = selectedWorlds(f)
+      worlds.cancel()
+      await expect(f.manager.locateTaskAssetStep('b1', f.imported.id, f.imported.revision, f.imported.draft.steps[0]!.id))
+        .rejects.toThrow('Target location was cancelled')
+      expect(await f.assets.get(f.imported.id)).toEqual(f.imported)
+      expect(worlds.calls.filter(call => call.method === 'Runtime.evaluate')).toEqual([])
+      expect(f.contents.debugger.isAttached()).toBe(false)
+      expect(worlds.listeners.size).toBe(0)
+    } finally { await f.close() }
+  })
 
   it('imports only the actual Main draft, preserves saved versions, and projects real running progress before the call returns', async () => {
     const f = await fixture()
