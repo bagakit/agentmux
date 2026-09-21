@@ -593,6 +593,27 @@ export type AgentProviderSessionHistoryContext = {
 
 export type AgentProviderSessionHistoryPage = Omit<AgentSessionHistoryPage, 'agentSessionId'>
 
+export type AgentSessionUserMessageSource =
+  | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
+  | { kind: 'captured'; submissionId: string }
+
+export type AgentSessionUserMessageAuthor =
+  | { kind: 'agent'; agentSessionId: string }
+  | { kind: 'unknown' }
+
+export type AgentSessionUserMessage = {
+  id: string
+  rawId: string
+  agentSessionId: string
+  turnId?: string
+  source: AgentSessionUserMessageSource
+  author: AgentSessionUserMessageAuthor
+  content: string
+  contentParts: AgentSessionHistoryContentPart[]
+  recordedAt?: number
+  deliveryStatus?: 'complete' | 'unverified' | 'failed'
+}
+
 export type AgentMuxAgentSession = {
   kind: 'agent'
   agentSessionId: string
