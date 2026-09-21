@@ -346,14 +346,17 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }
       const normalized = normalizeNativeHook(definition.hook, envelope)
+      const resolvedEnvelope = envelope.eventName === normalized.eventName
+        ? envelope
+        : { ...envelope, eventName: normalized.eventName }
       const mainInteraction = definition.interaction && !nativeHookHasSubagentSubject(
         definition.hook, normalized.eventName, envelope.payload ?? {}
       ) ? definition.interaction : undefined
       const interaction = mainInteraction
-        ? normalizeTerminalInteraction(envelope, normalized.status.observedAt, mainInteraction)
+        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction)
         : undefined
       const interactionCompletion = mainInteraction
-        ? normalizeTerminalInteractionCompletion(envelope, normalized.status.observedAt, mainInteraction) : undefined
+        ? normalizeTerminalInteractionCompletion(resolvedEnvelope, normalized.status.observedAt, mainInteraction) : undefined
       return { ...normalized, ...(interaction ? { interaction } : {}),
         ...(interactionCompletion ? { interactionCompletion } : {}) }
     }

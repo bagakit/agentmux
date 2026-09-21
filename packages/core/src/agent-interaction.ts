@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { canonicalHookLifecycleEvent, resolveHookEventName } from './agent-hook-event.js'
+import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import { nativeHookToolCallId } from './hook-normalizer.js'
 import type {
   AgentMuxInteractionInputPlan,
@@ -271,10 +271,8 @@ export function normalizeTerminalInteraction(
   protocol: AgentTerminalInteractionDetection
 ): AgentMuxInteractionRequest | undefined {
   const payload = envelope.payload ?? {}
-  // 事件名按 Core 的同一份键顺序读取。此前这里只认 `hook_event_name`/`hookEventName`，漏掉裸
-  // `eventName`——一个只在负载里给 `eventName` 的 Provider，它的 permission/question 提问永远
-  // 检测不到。三个读取点（这里、normalizer、hook 子进程）现在共用 agent-hook-event.ts 那一份。
-  const eventName = resolveHookEventName(envelope.eventName, payload)
+  // 消费 adapter 已得到的 normalized.eventName（通过内部解析后的信封传递），不重新看 payload 字段猜名。
+  const eventName = envelope.eventName
   const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
   if (
     eventName &&
@@ -332,7 +330,8 @@ export function normalizeTerminalInteractionCompletion(
   protocol: AgentTerminalInteractionDetection
 ): NormalizedHookEvent['interactionCompletion'] {
   const payload = envelope.payload ?? {}
-  const eventName = resolveHookEventName(envelope.eventName, payload)
+  // 消费 adapter 已得到的 normalized.eventName，不重新看 payload 字段猜名。
+  const eventName = envelope.eventName
   const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
   const nativeToolCallId = nativeHookToolCallId(payload)
   if (!eventName || !toolName || !nativeToolCallId) return undefined
