@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -40,7 +40,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
     await writeFile(binary, bytes); await writeFile(join(vendor, 'sdk.tgz'), archive)
     await writeFile(join(vendor, 'manifest.json'), JSON.stringify({ schema: 'ctxmux.local-artifacts.v1',
       support: { platform: process.platform, architecture: process.arch }, source: { commit: `source-${index}`, tree: `tree-${index}` },
-      product: { protocol: 18 }, binaries: [{ name: 'ctxmuxd', path: 'bin/ctxmuxd', sha256: sha(bytes) }],
+      product: { protocol: 18 }, binaries: [{ name: 'ctxmuxd', path: 'bin/ctxmuxd', version: '0.1.0', sha256: sha(bytes) }],
       sdk: { archive: { path: 'sdk.tgz', sha256: sha(archive) } } }))
   }
   const receiptPath = join(dirname(socket), 'owner.json')
@@ -53,12 +53,22 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   let signalled = false, mapped = binaries[0]!, currentLock = lock
   let extraLock = false, wrongInode = false, changeBirth = false
   let insideImage: string | undefined, insideLock: string | undefined
+  let version = 'ctxmuxd 0.1.0 (protocol 18, handoff opaque-public-declaration)\n'
+  let versionError: Error | undefined, versionChange: 'inode' | 'bytes' | undefined
+  let versionCalls = 0
   const fields = async (fd: string, path: string) => {
     const metadata = await lstat(path, { bigint: true })
     return `f${fd}\ntREG\nD0x${metadata.dev.toString(16)}\ni${wrongInode && fd === 'txt' ? metadata.ino + 1n : metadata.ino}\nn${path}\n`
   }
   hooks.live.mockResolvedValue('alive')
   hooks.exec.mockImplementation(async (executable: string, args: string[]) => {
+    if (executable === binaries[1] && args.length === 1 && args[0] === '--version') {
+      expect(signalled).toBe(false); versionCalls++
+      if (versionError) throw versionError
+      if (versionChange === 'bytes') await writeFile(binaries[1]!, 'changed-private-image')
+      if (versionChange === 'inode') { const next = `${binaries[1]}.next`; await copyFile(binaries[1]!, next); await rename(next, binaries[1]!) }
+      return { stdout: version }
+    }
     if (executable === '/usr/bin/tar') return { stdout: '' }
     if (executable === '/bin/ps') return { stdout: changeBirth ? `${birth}-changed` : birth }
     if (executable === '/usr/sbin/lsof') {
@@ -89,7 +99,9 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
     async alternatePostImage() {
       const path = join(root, 'actual-post-image/ctxmuxd'); await mkdir(dirname(path)); await link(binaries[1]!, path)
       signal.mockImplementation(() => { signalled = true; mapped = path; return true }); return path
-    }, wasSignalled: () => signalled }
+    }, versionResponse(value: string) { version = value }, versionFailure(error: Error) { versionError = error },
+    driftDuringVersion(kind: 'inode' | 'bytes') { versionChange = kind },
+    versionCalls: () => versionCalls, wasSignalled: () => signalled }
 }
 
 it.each(['stale', 'missing', 'invalid'] as const)('qualifies actual authority despite a %s ledger and a different configured default', async ledger => {
@@ -136,6 +148,8 @@ it('records only the confirmed actual post-exec image and serving state, retaini
   const f = await fixture(), plan = await f.prepare(), mappedPath = await f.alternatePostImage()
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('upgraded'); expect(outcome.originalRuns).toBe(1); expect(f.wasSignalled()).toBe(true)
+  expect(f.versionCalls()).toBe(1)
+  expect(outcome.candidateVersion).toEqual({ version: '0.1.0', protocol: 18, handoff: 'opaque-public-declaration' })
   const receipt = JSON.parse(await readFile(f.receiptPath, 'utf8'))
   expect(receipt.daemonPath).toBe(mappedPath); expect(receipt.stateDirectory).toBe(f.state)
   expect(receipt.daemonSha256).toBe(sha(await readFile(f.binaries[1]!)))
@@ -154,4 +168,33 @@ it('does not claim same-native success from a signal while the original file rem
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('old-confirmed'); expect(outcome.signalSent).toBe(true)
   expect(outcome.error).toContain('has not mapped'); expect(await readFile(f.receiptPath)).toEqual(bytes)
+})
+
+it.each(['timed out', 'exit 1'])('keeps the positively confirmed old service and ledger when candidate version %s, without signaling', async reason => {
+  const f = await fixture(), plan = await f.prepare(), bytes = await readFile(f.receiptPath)
+  f.versionFailure(new Error(`Private candidate version ${reason}`))
+  const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
+  expect(outcome.status).toBe('old-confirmed'); expect(outcome.signalSent).toBe(false)
+  expect(outcome.error).toContain(reason); expect(f.versionCalls()).toBe(1); expect(f.signal).not.toHaveBeenCalled()
+  expect(await readFile(f.receiptPath)).toEqual(bytes)
+})
+it.each(['ctxmuxd 0.2.0 (protocol 18, handoff opaque)', 'ctxmuxd 0.1.0 (protocol 19, handoff opaque)',
+  'ctxmuxd 0.1.0 (protocol 18, handoff )', ''])('rejects an unbound public version declaration %j before signaling', async response => {
+  const f = await fixture(), plan = await f.prepare(), bytes = await readFile(f.receiptPath)
+  f.versionResponse(response)
+  const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
+  expect(outcome.status).toBe('old-confirmed'); expect(outcome.error).toContain('declare its selected')
+  expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(1); expect(f.signal).not.toHaveBeenCalled()
+  expect(await readFile(f.receiptPath)).toEqual(bytes)
+})
+it.each(['inode', 'bytes'] as const)('rejects candidate %s drift during its actual version response and preserves the old ledger', async kind => {
+  const f = await fixture(), plan = await f.prepare(), bytes = await readFile(f.receiptPath)
+  f.driftDuringVersion(kind)
+  // A broken pre-signal guard may reach the post-signal polling branch. Bound
+  // that owning counterexample too, so the RED is a behavioral assertion.
+  let clock = 0; vi.spyOn(Date, 'now').mockImplementation(() => clock += 16000)
+  const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
+  expect(outcome.status).toBe('old-confirmed'); expect(outcome.error).toContain('changed while its version response')
+  expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(1); expect(f.signal).not.toHaveBeenCalled()
+  expect(await readFile(f.receiptPath)).toEqual(bytes)
 })

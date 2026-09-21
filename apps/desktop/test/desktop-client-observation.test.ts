@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { EventEmitter } from 'node:events'
@@ -134,7 +135,7 @@ it('rejects additional body fields rather than accepting a truncated or expanded
 })
 
 it('binds the activated GUI serving identity and exact Run state to the existing confirmation, including a natural exit', async () => {
-  const { assertUiRuntimeObservation } = await import('../scripts/package-runtime-upgrade.mjs')
+  const { assertUiRuntimeObservation } = await import(pathToFileURL(process.env.AGENTMUX_UPGRADE_OWNER_PATH ?? resolve(import.meta.dirname, '../scripts/package-runtime-upgrade.mjs')).href)
   workbench()
   const result = await inspectDesktopClient(request, { pid: 123, package: packageIdentity, renderer: () => renderer,
     generation: () => 1, runtimes: () => [runtime], execute: input => useAppStore.getState().executeControl(input) })
@@ -144,17 +145,33 @@ it('binds the activated GUI serving identity and exact Run state to the existing
   if (region.kind !== 'agent') throw new Error('Expected original Agent Region')
   region.control = { kind: 'agent', hostId: 'local', agentSessionId: 'missing', run: { runId: 'confirmed-run' } }
   region.processState = 'running'
+  const original = structuredClone(observed)
   const confirmation = { runtime: { daemonInstanceId: 'private-instance', buildId: 'private-serving', protocolGeneration: 18 },
-    originalRuns: [{ id: 'confirmed-run', state: { type: 'running' } }] }
-  expect(() => assertUiRuntimeObservation(observed, confirmation)).not.toThrow()
-  expect(() => assertUiRuntimeObservation({ ...observed, main: { ...observed.main, runtimes: [] } }, confirmation)).toThrow('serving Runtime')
+    originalRuns: [{ id: 'confirmed-run', state: { type: 'running' } }, { id: 'unprojected-sibling', state: { type: 'running' } }] }
+  expect(original.workbench.tabs[0]!.regions).toHaveLength(3)
+  expect(confirmation.originalRuns.map(run => run.id)).toEqual(['confirmed-run', 'unprojected-sibling'])
+  expect(() => assertUiRuntimeObservation(observed, confirmation, original)).not.toThrow()
+  expect(() => assertUiRuntimeObservation({ ...observed, main: { ...observed.main, runtimes: [] } }, confirmation, original)).toThrow('serving Runtime')
   expect(() => assertUiRuntimeObservation(observed, { ...confirmation,
-    runtime: { ...confirmation.runtime, daemonInstanceId: 'different-instance' } })).toThrow('serving Runtime')
+    runtime: { ...confirmation.runtime, daemonInstanceId: 'different-instance' } }, original)).toThrow('serving Runtime')
   region.processState = 'interrupted'
-  expect(() => assertUiRuntimeObservation(observed, confirmation)).toThrow('original Run state')
+  expect(() => assertUiRuntimeObservation(observed, confirmation, original)).toThrow('original Run state')
   region.processState = 'exited'
   expect(() => assertUiRuntimeObservation(observed, { ...confirmation,
-    originalRuns: [{ id: 'confirmed-run', state: { type: 'exited' } }] })).not.toThrow()
+    originalRuns: [{ id: 'confirmed-run', state: { type: 'exited' } }, confirmation.originalRuns[1]] }, original)).not.toThrow()
+  region.processState = 'running'
+  region.control.run.runId = 'unprojected-sibling'
+  expect(() => assertUiRuntimeObservation(observed, confirmation, original)).toThrow('original Run state')
+  region.control.run.runId = 'confirmed-run'
+  const originalRegionId = region.regionId; region.regionId = 'different-region'
+  expect(() => assertUiRuntimeObservation(observed, confirmation, original)).toThrow('original Run state')
+  region.regionId = originalRegionId
+  const originalTabId = observed.workbench.tabs[0]!.id; observed.workbench.tabs[0]!.id = 'different-tab'
+  expect(() => assertUiRuntimeObservation(observed, confirmation, original)).toThrow('original Run state')
+  observed.workbench.tabs[0]!.id = originalTabId
   region.control = null
-  expect(() => assertUiRuntimeObservation(observed, confirmation)).toThrow('original Run state')
+  expect(() => assertUiRuntimeObservation(observed, confirmation, original)).toThrow('original Run state')
+  expect(() => assertUiRuntimeObservation(observed, confirmation, null)).not.toThrow()
+  expect(() => assertUiRuntimeObservation({ ...observed, main: { ...observed.main, runtimes: [] } }, confirmation, null)).toThrow('serving Runtime')
+  expect(() => assertUiRuntimeObservation(observed, confirmation, undefined)).toThrow()
 })

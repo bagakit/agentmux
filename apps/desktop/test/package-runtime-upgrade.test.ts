@@ -2,11 +2,19 @@ import { readFile } from 'node:fs/promises'
 import { expect, it } from 'vitest'
 import ts from 'typescript'
 
-const source = await readFile(new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
+const source = await readFile(process.env.AGENTMUX_UPGRADE_PRODUCT_PATH ?? new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
 const parsed = ts.createSourceFile('package-macos.mjs', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
 const functions = parsed.statements.filter(ts.isFunctionDeclaration)
 const install = functions.find((node) => node.name?.text === 'installApplication')!
 expect(install?.body).toBeDefined()
+
+it('passes the actual outgoing GUI baseline, including explicit null, into serving Runtime qualification', () => {
+  const activation = functions.find(node => node.name?.text === 'awaitUiActivation')
+  expect(activation?.body).toBeDefined()
+  const assertions = calls(activation!, 'assertUiRuntimeObservation')
+  expect(assertions).toHaveLength(1)
+  expect(assertions[0]!.arguments.map(argument => argument.getText(parsed))).toEqual(['observed', 'await confirmUiRuntime(runtimePlan)', 'before'])
+})
 
 function calls(node: ts.Node, name: string): ts.CallExpression[] {
   const found: ts.CallExpression[] = []

@@ -31,7 +31,7 @@ async function artifact(app) {
   fail(hash(await readFile(archivePath)) === manifest.sdk.archive.sha256, 'Runtime SDK archive digest does not match its artifact.')
   // Read the address from the actual App, not the packaging checkout's artifact.
   const paths = await import(pathToFileURL(join(core, 'dist/runtime-paths.js')).href)
-  return { root, manifest, manifestSha256: hash(bytes), daemonPath, daemonSha256: daemon.sha256,
+  return { root, manifest, manifestSha256: hash(bytes), daemonPath, daemonSha256: daemon.sha256, daemonVersion: daemon.version,
     archivePath, corePath: join(core, 'dist/index.js'), socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
 }
 
@@ -270,17 +270,24 @@ export async function confirmUiRuntime(plan) {
 }
 
 /** Match this GUI observation to the already-confirmed exact listener and Run facts. */
-export function assertUiRuntimeObservation(observation, confirmation) {
+export function assertUiRuntimeObservation(observation, confirmation, originalObservation) {
   const observed = parseDesktopClientObservation(observation)
   const local = observed.main.runtimes.find(entry => entry.hostId === 'local')?.identity
   const runtime = confirmation.runtime
   fail(local && local.instanceId === runtime.daemonInstanceId && local.buildIdentity === runtime.buildId &&
     local.protocolVersion === runtime.protocolGeneration, 'The activated GUI is not connected to the confirmed serving Runtime.')
-  for (const run of confirmation.originalRuns) {
-    const regions = observed.workbench.tabs.flatMap(tab => tab.regions.filter(region =>
-      (region.kind === 'agent' || region.kind === 'terminal') && region.control?.hostId === 'local' && region.control.run.runId === run.id))
-    fail(regions.length > 0 && regions.every(region => region.processState === run.state.type),
-      'The activated GUI has not observed the confirmed original Run state.')
+  // No outgoing GUI means no original Region baseline. Native preservation is
+  // independently confirmed above this caller; it cannot be inferred from UI.
+  if (originalObservation === null) return
+  const original = parseDesktopClientObservation(originalObservation)
+  for (const tab of original.workbench.tabs) for (const region of tab.regions) {
+    if ((region.kind !== 'agent' && region.kind !== 'terminal') || region.control?.hostId !== 'local') continue
+    const run = confirmation.originalRuns.find(entry => entry.id === region.control.run.runId)
+    if (!run) continue
+    const current = observed.workbench.tabs.find(entry => entry.id === tab.id)?.regions.find(entry => entry.regionId === region.regionId)
+    fail(current && current.kind === region.kind && current.control?.hostId === 'local' &&
+      current.control.run.runId === run.id && current.processState === run.state.type,
+    'The activated GUI has not observed the confirmed original Run state.')
   }
 }
 
@@ -328,7 +335,7 @@ async function writeUpgradedReceipt(plan, owner, runtime) {
 
 /** Call only after the candidate occupies the canonical App path, before GUI launch. */
 export async function finishRuntimeUpgrade(plan, currentApp) {
-  let sent = false, lastError
+  let sent = false, lastError, candidateVersion
   try {
     const owner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
     assertServingOwner(plan.owner, owner)
@@ -339,6 +346,21 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
       'The canonical application is not the preflighted Runtime candidate.')
     const candidateImage = await lstat(current.daemonPath, { bigint: true })
     fail(candidateImage.isFile(), 'The canonical Runtime candidate is not a regular executable file.')
+    const response = await exec(current.daemonPath, ['--version'], { timeout: 10_000, maxBuffer: 4096 })
+    const declared = /^ctxmuxd (\S+) \(protocol (\d+), handoff ([^\s(),]+)\)\s*$/.exec(response.stdout)
+    fail(declared && declared[1] === current.daemonVersion && Number(declared[2]) === current.manifest.product.protocol,
+      'The canonical Runtime candidate did not declare its selected version, protocol and handoff.')
+    const respondingImage = await open(current.daemonPath, 'r')
+    try {
+      const metadata = await respondingImage.stat({ bigint: true })
+      fail(metadata.isFile() && metadata.dev === candidateImage.dev && metadata.ino === candidateImage.ino &&
+        hash(await respondingImage.readFile()) === current.daemonSha256,
+      'The canonical Runtime candidate changed while its version response was being checked.')
+      const finalImage = await lstat(current.daemonPath, { bigint: true })
+      fail(finalImage.isFile() && finalImage.dev === candidateImage.dev && finalImage.ino === candidateImage.ino,
+        'The canonical Runtime candidate changed while its version response was being checked.')
+    } finally { await respondingImage.close() }
+    candidateVersion = { version: declared[1], protocol: Number(declared[2]), handoff: declared[3] }
     const signalOwner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
     assertServingOwner(plan.owner, signalOwner)
     process.kill(signalOwner.pid, 'SIGHUP')
@@ -360,7 +382,7 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
         const confirmed = { status: 'upgraded', daemonPid: upgradedOwner.pid,
           runtimeId: after.runtime.runtimeId, daemonInstanceId: after.runtime.daemonInstanceId,
           protocol: after.protocol, originalRuns: statuses.length, stateDirectory: upgradedOwner.state.directory,
-          daemonPath: upgradedOwner.executable, previousOwnerReceipt: plan.ownerReceipt }
+          daemonPath: upgradedOwner.executable, candidateVersion, previousOwnerReceipt: plan.ownerReceipt }
         try { await writeUpgradedReceipt(plan, upgradedOwner, after.runtime) }
         catch (error) { return { ...confirmed, ownerReceiptError: error.message } }
         return confirmed
@@ -377,9 +399,9 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
       assertServingOwner(plan.owner, oldOwner)
       const old = await inspect(plan.oldSdk, plan.old.socketPath)
       await assertRunsKept(plan, old, plan.oldSdk)
-      return { status: 'old-confirmed', signalSent: sent, protocol: old.protocol, daemonPid: oldOwner.pid, error: lastError.message }
+      return { status: 'old-confirmed', signalSent: sent, protocol: old.protocol, daemonPid: oldOwner.pid, candidateVersion, error: lastError.message }
     } catch (confirmationError) {
-      return { status: 'unknown', signalSent: sent, error: lastError.message, confirmationError: confirmationError.message }
+      return { status: 'unknown', signalSent: sent, candidateVersion, error: lastError.message, confirmationError: confirmationError.message }
     }
   }
 }
