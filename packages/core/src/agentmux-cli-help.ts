@@ -491,6 +491,16 @@ evicted results are explicit. A Browser without a verified Workspace still runs 
 durable result capture is unavailable. If capture fails, actions may already have happened:
 inspect the page and do not automatically rerun the script.
 
+For binary files, use \`return await download(ref, {path: "report.bin", timeoutMs: 30000})\`.
+The native listener is registered before the current ref is clicked. Only a completed transfer
+published into this Browser's verified Workspace returns a \`browser-download-file\` reference;
+cancelled/failed receipts have no file reference. Retain the original reference and use
+\`return await readDownload(reference, {offset: 0, maxBytes: 65536})\` to read base64 bytes,
+revision, totalBytes and nextOffset without triggering the download again. Navigation and
+ordinary application restart preserve completed references. Read cost also reports the complete
+bounded file scan used to verify its revision. Unknown Workspace binding is explicit; a failed
+transfer never fabricates a Workspace file or blocks later healthy Browser programs.
+
 The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
 including on failure), and \`outcome\`, which is one of four:
   completed      the program finished
