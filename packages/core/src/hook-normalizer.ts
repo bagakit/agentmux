@@ -17,6 +17,7 @@ import {
 import {
   canonicalHookLifecycleEvent,
   resolveHookEventName,
+  type AgentHookEventNameSource,
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
 import { agentDisplayState } from './agent-status-freshness.js'
@@ -92,20 +93,7 @@ export type AgentNativeHookSpecification = {
   eventNameSource?: AgentHookEventNameSource
 }
 
-/**
- * 事件名来源的判别联合。三个分支对应事件名到达服务端的三条**真实在用**的路。
- *
- * 前两条是「子进程解析」：Provider 装的是一条命令，`agent-hook-command` 从 argv 或负载里解析事件名。
- * 第三条是「生成代码直送」：装的是代码文件，代码自己 POST，不经子进程——它与前两条互斥，别混。
- *
- * 刻意不含 `env` 分支：子进程确实也读 `AGENTMUX_HOOK_EVENT`，但今天没有任何 Provider 靠它送事件名
- * （client.ts 注入 url/token/provider 三样，从不注入事件名）。真到有 Provider 需要时再加，不预支一个
- * 没有消费者的分支。
- */
-export type AgentHookEventNameSource =
-  | { kind: 'flag' }
-  | { kind: 'payload'; payloadKey: HookEventNamePayloadKey }
-  | { kind: 'generated-code' }
+export type { AgentHookEventNameSource }
 
 /**
  * 一个 run 一份子代理花名册。
@@ -496,9 +484,9 @@ export function normalizeNativeHook(
   envelope: NativeHookEnvelope
 ): NormalizedHookEvent {
   const payload = flattenNestedPayload(envelope.payload ?? {})
-  // 事件名可能在信封上，也可能藏在负载的三个拼法之一里——读取顺序由 agent-hook-event.ts 唯一持有，
-  // 与 hook 子进程共用同一份，故不会再出现「一边认得出、另一边读成 null」。读不出时如实记为 'unknown'。
-  const eventName = resolveHookEventName(envelope.eventName, payload) ?? 'unknown'
+  // 事件名优先读取信封显式名，其次按该 Provider 声明的精确来源（仅当 payload 声明时读指定键，
+  // 缺席/空白/非字符串时不读其他合法键；flag/generated-code 不借 payload 补名）。读不出时如实记为 'unknown'。
+  const eventName = resolveHookEventName(envelope.eventName, payload, specification.eventNameSource ?? null) ?? 'unknown'
   const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。

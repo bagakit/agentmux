@@ -38,6 +38,18 @@ export const HOOK_EVENT_NAME_PAYLOAD_KEYS = ['hook_event_name', 'hookEventName',
 export type HookEventNamePayloadKey = (typeof HOOK_EVENT_NAME_PAYLOAD_KEYS)[number]
 
 /**
+ * 事件名来源的判别联合。三个分支对应事件名到达服务端的三条真实在用的路。
+ *
+ * - flag：安装计划里每条 hook 命令都带 `--event <eventName>`（无 payload 字段）
+ * - payload：Provider 负载自带事件名，只读取指定的 payloadKey
+ * - generated-code：生成代码直接上报，不经 hook 命令解析
+ */
+export type AgentHookEventNameSource =
+  | { kind: 'flag' }
+  | { kind: 'payload'; payloadKey: HookEventNamePayloadKey }
+  | { kind: 'generated-code' }
+
+/**
  * 一个 Provider 的方言声明：它把自己的原始事件名映射到 Core canonical 生命周期事件。
  *
  * **按 Provider 分块而不是一张全局表**，是为了让「新接一个 Provider」只动它自己的模块。全局表会让
@@ -335,19 +347,23 @@ function boundedEventName(value: unknown): string | undefined {
 /**
  * 从信封与负载里读出这条 hook 事件的**原始**名字。
  *
- * 信封上的显式 `eventName` 优先（它来自 hook 命令的 `--event` 旗标或环境变量，是投递方明说的），
- * 其次按 `HOOK_EVENT_NAME_PAYLOAD_KEYS` 依次读负载。读不出就是 `undefined`——由调用方决定缺席怎么办，
- * 这里不替它编一个名字。
+ * 显式 `eventName` 优先（来自信封、hook 命令的 `--event` 旗标或环境变量）。
+ * 当 Provider 声明 payload 来源时，只读指定的 payloadKey，指定键缺席、空白或类型不符时如实缺席；
+ * flag、generated-code 或未声明来源只认显式发送合同，绝不从 payload 字段猜名。
+ * 读不出就是 `undefined`——由调用方决定缺席怎么办，这里不替它编一个名字。
  */
 export function resolveHookEventName(
   envelopeEventName: unknown,
-  payload: Record<string, unknown> = {}
+  payload: Record<string, unknown> = {},
+  source?: AgentHookEventNameSource | null
 ): string | undefined {
   const explicit = boundedEventName(envelopeEventName)
   if (explicit) return explicit
-  for (const key of HOOK_EVENT_NAME_PAYLOAD_KEYS) {
-    const value = boundedEventName(payload[key])
-    if (value) return value
+  if (source?.kind === 'payload') {
+    const key = source.payloadKey
+    if ((HOOK_EVENT_NAME_PAYLOAD_KEYS as readonly string[]).includes(key)) {
+      return boundedEventName(payload[key])
+    }
   }
   return undefined
 }

@@ -411,14 +411,12 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
 
         let payload: Record<string, unknown> = { session_id: 'sess-1' }
         if (source.kind === 'flag') {
+          vi.stubEnv('AGENTMUX_HOOK_EVENT_NAME_SOURCE', 'flag')
           feedArgv(eventName!)
         } else if (source.kind === 'payload') {
-          // payload provider：事件名只从负载来（不给 flag/env）。放进它声明的那个键，断言子进程确实能
-          // 从**负载**这条通路解析出事件名并发 POST。这条会在「子进程整个不读负载事件名」这类回归上红
-          // （实测：把 resolveHookEventName 那行改成 null，7 个 payload provider 全红），从而钉住
-          // 「声明 payload 的 Provider，其负载通路真的是活的」。
-          // 刻意不拿它去证「拼法必须逐字对上」——子进程三拼法同权，写哪个都能解析，那不是运行时缺陷；
-          // 「payloadKey 必须是三拼法之一」由上面的静态面负责，避免用被测对象自己算出的期望值假绿。
+          // payload provider：事件名只从负载来（不给 flag/env）。由 Core 注入其声明的 payloadKey，
+          // 断言子进程确实能从声明的负载通路解析出事件名并发 POST。
+          vi.stubEnv('AGENTMUX_HOOK_PAYLOAD_KEY', source.payloadKey)
           payload = { ...payload, [source.payloadKey]: eventName }
         } else {
           // 上面的过滤保证 generated-code 不进这一组；真进来了说明过滤写坏了，别静默按 payload 处理。
@@ -438,9 +436,8 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
     }
   )
 
-  it('反证：三条来源全落空（无 flag/env、负载不带任何事件名键）时 POST 被丢——正是 copilot 的原缺陷形状', async () => {
-    // 这条钉住「静默丢 POST」这个具体失败，防止有人把上面的断言弱化成「只要没抛异常就算过」。
-    // 它是 copilot 修复前的确切运行时链路：url+token 都在，只有 eventName 解析不出。
+  it('来源未知仍有认证 receipt/trace（body 中 eventName 省略）且不能伪造 success', async () => {
+    vi.stubEnv('AGENTMUX_ENV', '1')
     vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
     vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
@@ -451,6 +448,21 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
 
     await runAgentHookCommand()
 
-    expect(bodies, '事件名解析不出时，当前实现就是静默跳过整条 POST——这正是本 task 要让 Provider 侧不再触发的缺陷').toHaveLength(0)
+    expect(bodies, 'F1: 来源未知但有认证 context 时保留 unknown receipt/trace，不能静默丢弃').toHaveLength(1)
+    expect(bodies[0]!.eventName).toBeUndefined()
+    expect(bodies[0]!.payload).toMatchObject({ toolName: 'bash', sessionId: 's-1' })
+  })
+
+  it('未托管外国进程（非 AGENTMUX_ENV）则为被动空操作，绝不发送 POST', async () => {
+    vi.stubEnv('AGENTMUX_ENV', '')
+    vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+    vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+    vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
+    const { bodies } = captureHookPost()
+    feedStdin(JSON.stringify({ toolName: 'bash', sessionId: 'foreign-1' }))
+
+    await runAgentHookCommand()
+
+    expect(bodies, '外部非受管调用绝不发 POST').toHaveLength(0)
   })
 })

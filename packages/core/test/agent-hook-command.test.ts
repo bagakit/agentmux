@@ -223,6 +223,7 @@ describe('agent hook command usage relay', () => {
         // 关键：不给旗标、不给环境变量——事件名只能从 stdin 负载的这个拼法读出来。
         vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
         vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+        vi.stubEnv('AGENTMUX_HOOK_PAYLOAD_KEY', key)
         const { bodies } = captureHookPost()
         feedStdin(JSON.stringify({ [key]: 'Stop', session_id: 'sess-spelling', transcript_path: transcriptPath }))
 
@@ -282,7 +283,7 @@ describe('agent hook command usage relay', () => {
    * `AGENTMUX_HOOK_EVENT` 会让事件名变 falsy，于是整段 POST 被跳过、状态与用量双双静默丢失。
    * 下面三条各让一项为假、另两项为真，于是每一项都成为那个现场里唯一还站着的守卫。
    */
-  it('三项闸各自都能拦下 POST：缺 url / 缺 token / 事件名读不出来', async () => {
+  it('认证闸拦下 POST：缺 url / 缺 token', async () => {
     // 把「缺」的那一项显式置空串（falsy）而非靠缺席：本进程跑在 AgentMux.app 里，宿主注入了真实的
     // AGENTMUX_HOOK_URL / AGENTMUX_HOOK_TOKEN，靠缺席会让被测项从环境里恒真、闸门大开。
     const cases = [
@@ -293,19 +294,10 @@ describe('agent hook command usage relay', () => {
       {
         name: '缺 token',
         env: { AGENTMUX_HOOK_URL: 'http://127.0.0.1:65535/hook', AGENTMUX_HOOK_TOKEN: '', AGENTMUX_HOOK_EVENT: 'Stop' }
-      },
-      {
-        // url 与 token 都齐，只有事件名读不出来：旗标没给、环境变量是空串（读作「没设」）、
-        // stdin 负载里也没有任何一种事件名拼法。这正是那条 P0 注释描述的现场。
-        name: '事件名读不出来',
-        env: {
-          AGENTMUX_HOOK_URL: 'http://127.0.0.1:65535/hook',
-          AGENTMUX_HOOK_TOKEN: 'test-token',
-          AGENTMUX_HOOK_EVENT: ''
-        }
       }
     ]
     for (const scenario of cases) {
+      vi.stubEnv('AGENTMUX_ENV', '1')
       for (const [key, value] of Object.entries(scenario.env)) vi.stubEnv(key, value)
       const { bodies } = captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-gate' }))
@@ -317,6 +309,22 @@ describe('agent hook command usage relay', () => {
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
     }
+  })
+
+  it('F1：有认证 managed 上下文但事件名读不出来时仍投递 POST，body 省略 eventName 并保留 raw 负载', async () => {
+    vi.stubEnv('AGENTMUX_ENV', '1')
+    vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+    vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+    vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
+    vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', '')
+    const { bodies } = captureHookPost()
+    feedStdin(JSON.stringify({ session_id: 'sess-unknown-trace' }))
+
+    await runAgentHookCommand()
+
+    expect(bodies, '有认证 context 时不能静默丢弃 receipt').toHaveLength(1)
+    expect(bodies[0]!.eventName).toBeUndefined()
+    expect(bodies[0]!.payload).toMatchObject({ session_id: 'sess-unknown-trace' })
   })
 })
 

@@ -4,7 +4,14 @@ import {
   HOOK_PAYLOAD_USAGE_KEY,
   readTurnUsageFromTranscript
 } from './agent-usage-transcript.js'
-import { canonicalHookLifecycleEvent, rawEventNamesForLifecycle, resolveHookEventName } from './agent-hook-event.js'
+import {
+  canonicalHookLifecycleEvent,
+  rawEventNamesForLifecycle,
+  resolveHookEventName,
+  HOOK_EVENT_NAME_PAYLOAD_KEYS,
+  type AgentHookEventNameSource,
+  type HookEventNamePayloadKey
+} from './agent-hook-event.js'
 import type { AgentUsageCapability } from './types.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
@@ -82,6 +89,26 @@ export function resolveHookProvider(env: NodeJS.ProcessEnv = process.env): strin
     env.AGENTMUX_PROVIDER_ID ??
     (env.AGENTMUX_ANTIGRAVITY_EVENT ? 'antigravity' : null)
   )
+}
+
+/**
+ * 从环境元数据读出当前 Provider 声明的事件名来源。
+ * 由 Core (client.ts agentEnvironment) 注入当前 Provider 的来源，不让子进程导入注册表。
+ */
+export function resolveHookEventNameSource(
+  env: NodeJS.ProcessEnv = process.env
+): AgentHookEventNameSource | null {
+  if (env.AGENTMUX_HOOK_EVENT_NAME_SOURCE === 'flag') {
+    return { kind: 'flag' }
+  }
+  if (env.AGENTMUX_HOOK_EVENT_NAME_SOURCE === 'generated-code') {
+    return { kind: 'generated-code' }
+  }
+  const key = env.AGENTMUX_HOOK_PAYLOAD_KEY
+  if (key && (HOOK_EVENT_NAME_PAYLOAD_KEYS as readonly string[]).includes(key)) {
+    return { kind: 'payload', payloadKey: key as HookEventNamePayloadKey }
+  }
+  return null
 }
 
 /**
@@ -176,21 +203,18 @@ export async function runAgentHookCommand(): Promise<void> {
     }
   }
 
-  // 负载里的事件名按 Core 的同一份键顺序读取（`hook_event_name` / `hookEventName` / `eventName`）。
-  // 此前这里只认前者与 `eventName`，漏掉 `hookEventName`——normalizer 认得出的事件，这个子进程却
-  // 读成 null，于是既不抽用量、POST 也被整条跳过。现在两侧共用 agent-hook-event.ts 那一份。
-  const stdinEvent = resolveHookEventName(undefined, payload) ?? null
-
-  const eventName = flagEvent ?? envEvent ?? stdinEvent
+  // 显式旗标优先；payload 消费当前 Provider 交付的声明来源，缺席/空白/非字符串保持 unknown，不从其他合法字段猜名。
+  const source = resolveHookEventNameSource()
+  const eventName = resolveHookEventName(flagEvent ?? envEvent, payload, source)
 
   const url = process.env.AGENTMUX_HOOK_URL
   const token = process.env.AGENTMUX_HOOK_TOKEN
 
-  if (url && token && eventName) {
+  if (url && token) {
     // 在收尾事件上，为声明了 usage 能力的 Provider 读一次 transcript 尾部，把本 turn 的真实 token 数并进
     // 既有回执——usage 由此「随既有事件流到达」，不新增轮询、不新增通道。读失败/无用量一律不写，缺席保持缺席。
     const usageCapability = resolveUsageCapability()
-    if (usageCapability && USAGE_FINALIZATION_EVENTS.has(eventName)) {
+    if (eventName && usageCapability && USAGE_FINALIZATION_EVENTS.has(eventName)) {
       const transcriptPath = transcriptPathFromPayload(payload)
       if (transcriptPath) {
         const usage = await readTurnUsageFromTranscript(usageCapability, transcriptPath, Date.now())
@@ -198,6 +222,12 @@ export async function runAgentHookCommand(): Promise<void> {
       }
     }
     const receiptId = randomUUID()
+    // 无法解析的 eventName 在 body 中省略（不能写 null，Ingress validator 只接受 undefined 或 string）。
+    const bodyObj: Record<string, unknown> = {
+      receiptId,
+      ...(eventName ? { eventName } : {}),
+      payload
+    }
     let response: Response | null = null
     let lastError: unknown
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -208,11 +238,11 @@ export async function runAgentHookCommand(): Promise<void> {
             authorization: `Bearer ${token}`,
             'content-type': 'application/json'
           },
-          body: JSON.stringify({ receiptId, eventName, payload }),
+          body: JSON.stringify(bodyObj),
           signal: AbortSignal.timeout(2_000)
         })
         if (response.ok) break
-        throw new Error(`AgentMux hook ingress rejected ${eventName}: ${response.status}`)
+        throw new Error(`AgentMux hook ingress rejected ${eventName ?? 'unknown'}: ${response.status}`)
       } catch (error) {
         lastError = error
         response = null

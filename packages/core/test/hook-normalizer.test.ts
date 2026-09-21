@@ -634,6 +634,18 @@ describe('native hook normalization', () => {
    * 花名册是进程级跨事件状态，所以每条用例用**互不相同**的 runId，避免相互串味。
    */
   describe('子代理在途压制主 done', () => {
+    // 真实声明的 completed fixture（codex 声明 Stop -> done 并配置完整 subagentTracking）承担通用 roster 行为验证。
+    const completedRun = (runId: string) =>
+      (eventName: string, payload: Record<string, unknown>, receiptId = `r-${eventName}-${Math.random()}`) =>
+        providers.get('codex').normalizeHook({
+          receiptId,
+          agentSessionId: `sess-${runId}`,
+          runId,
+          providerId: 'codex',
+          eventName,
+          payload
+        })
+
     const claudeRun = (runId: string) =>
       (eventName: string, payload: Record<string, unknown>, receiptId = `r-${eventName}-${Math.random()}`) =>
         providers.get('claude').normalizeHook({
@@ -645,8 +657,19 @@ describe('native hook normalization', () => {
           payload
         })
 
+    it('Claude provisional 单列：Stop 与 SubagentStop 保持 unknown 且 lifecycleEvent 为 null，绝不伪造 done', () => {
+      const hook = claudeRun('run-claude-provisional')
+      hook('SubagentStart', { agent_id: 'sub-1', agent_type: 'Explore' })
+      const stop = hook('Stop', { last_assistant_message: 'All done.' })
+      expect(stop.semanticState).toBe('unknown')
+      expect(stop.lifecycleEvent).toBeNull()
+      const subStop = hook('SubagentStop', { agent_id: 'sub-1' })
+      expect(subStop.semanticState).toBe('unknown')
+      expect(subStop.lifecycleEvent).toBeNull()
+    })
+
     it('子代理存活时，主 Agent 的 Stop 被压成 working 而不是 done', () => {
-      const hook = claudeRun('run-suppress')
+      const hook = completedRun('run-suppress')
       hook('SubagentStart', { agent_id: 'sub-1', agent_type: 'Explore' })
       const stop = hook('Stop', { last_assistant_message: 'All done.' })
       // 主 Agent 说完成了，但子代理还在跑——不许翻成 done。
@@ -655,7 +678,7 @@ describe('native hook normalization', () => {
     })
 
     it('两个子代理，只结束一个时主 Stop 仍被压住', () => {
-      const hook = claudeRun('run-partial')
+      const hook = completedRun('run-partial')
       hook('SubagentStart', { agent_id: 'a' })
       hook('SubagentStart', { agent_id: 'b' })
       hook('SubagentStop', { agent_id: 'a' })
@@ -664,7 +687,7 @@ describe('native hook normalization', () => {
     })
 
     it('子代理全部结束后，主 Agent 正常收敛到 done', () => {
-      const hook = claudeRun('run-converge')
+      const hook = completedRun('run-converge')
       hook('SubagentStart', { agent_id: 'only' })
       const stopWhileAlive = hook('Stop', { last_assistant_message: 'wait' })
       expect(stopWhileAlive.semanticState).toBe('working')
@@ -674,14 +697,14 @@ describe('native hook normalization', () => {
     })
 
     it('没有子代理时，主 Agent 的 Stop 照旧直接判 done——压制不误伤常规收尾', () => {
-      const hook = claudeRun('run-nosubs')
+      const hook = completedRun('run-nosubs')
       const stop = hook('Stop', { last_assistant_message: 'finished' })
       expect(stop.semanticState).toBe('done')
       expect(stop.status.state).toBe('done')
     })
 
     it('子代理结束但主 Agent 尚未收尾时，不贡献主轮状态', () => {
-      const hook = claudeRun('run-noStopYet')
+      const hook = completedRun('run-noStopYet')
       hook('SubagentStart', { agent_id: 'x' })
       const subStop = hook('SubagentStop', { agent_id: 'x' })
       // 主 turn 还没结束（没有 Stop pending），子代理归零不该独自宣布完成。
@@ -689,7 +712,7 @@ describe('native hook normalization', () => {
     })
 
     it('重复投递的 SubagentStart（同一 agent_id）幂等，不会虚增在途数', () => {
-      const hook = claudeRun('run-dupe')
+      const hook = completedRun('run-dupe')
       hook('SubagentStart', { agent_id: 'dup' }, 'same-receipt')
       hook('SubagentStart', { agent_id: 'dup' }, 'same-receipt')
       // 只结束一次就应归零——若按裸计数器实现，这里会残留 1 个在途，主 Stop 被永远压住。
@@ -716,11 +739,11 @@ describe('native hook normalization', () => {
     })
 
     it('花名册按 runId 隔离：另一个 run 的子代理不会压住本 run 的 Stop', () => {
-      const other = claudeRun('run-other')
+      const other = completedRun('run-other')
       other('SubagentStart', { agent_id: 'foreign' })
       // 本 run 自己没有子代理，Stop 应正常 done，不被别的 run 的在途污染——若 roster key 把并发的
       // run 混成一格，foreign 会压住这里，断言随即变红。
-      const mine = claudeRun('run-mine')
+      const mine = completedRun('run-mine')
       const stop = mine('Stop', { last_assistant_message: 'ok' })
       expect(stop.semanticState).toBe('done')
     })
@@ -730,7 +753,7 @@ describe('native hook normalization', () => {
       // 花名册那条 id 永不删除。releaseSubagentRoster 是 run 进程退出时的终结路径（client.acceptKernelEvent
       // 在 exit 事件里调它）。这里断言：release 后同一 runId 的记账被彻底清空——真删掉过才返回 true，
       // 且此后该 run 的 Stop 不再被幽灵子代理压制。
-      const hook = claudeRun('run-lost-substop')
+      const hook = completedRun('run-lost-substop')
       hook('SubagentStart', { agent_id: 'ghost' })
       const suppressed = hook('Stop', { last_assistant_message: 'main thinks it is done' })
       expect(suppressed.semanticState).toBe('working')
@@ -744,7 +767,7 @@ describe('native hook normalization', () => {
     })
 
     it('releaseSubagentRoster 只清指定 runId，不误伤并发 run 的在途', () => {
-      const victim = claudeRun('run-keep')
+      const victim = completedRun('run-keep')
       victim('SubagentStart', { agent_id: 'still-alive' })
       // 清另一个不相干的 run 不该动到本 run。
       expect(releaseSubagentRoster('run-unrelated')).toBe(false)
@@ -760,7 +783,7 @@ describe('native hook normalization', () => {
       // 客户端 2s 超时又发同一条）再次进入 normalizer 时 roster 已不存在。此前硬编码返回 'working'，
       // 会被 client 落库并发布，把刚 done 的主 Agent 翻回运行中——归零后迟到的 stop 成了反向假信号。
       // 现在退回 baseState：SubagentStop 无匹配 rule，baseState 即 'unknown'，落点中性、client 不落库。
-      const hook = claudeRun('run-late-substop')
+      const hook = completedRun('run-late-substop')
       hook('SubagentStart', { agent_id: 'only' })
       hook('Stop', { last_assistant_message: 'main thinks done' }) // 被压住
       const converge = hook('SubagentStop', { agent_id: 'only' })
@@ -770,7 +793,7 @@ describe('native hook normalization', () => {
       expect(redelivered.semanticState).toBe('unknown')
       expect(redelivered.semanticState).not.toBe('working')
       // 一个从没记过子代理的 run 收到孤立 SubagentStop 也一样中性，不虚构 working。
-      const neverTracked = claudeRun('run-never-tracked')
+      const neverTracked = completedRun('run-never-tracked')
       expect(neverTracked('SubagentStop', { agent_id: 'ghost' }).semanticState).toBe('unknown')
     })
   })
