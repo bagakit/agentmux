@@ -39,7 +39,7 @@ afterEach(async () => {
  * 等打包出来的 ctxmuxd 起来接受 ping。
  *
  * **没有挂钟预算。** 三条真正的终止条件都在环内：spawn 失败、进程自己退出、ping 成功。这三条覆盖了
- * 所有失败模式，剩下的"还没起来"只是慢。上界由外层持有——这条 it 自己声明了 125 秒。
+ * 所有失败模式，剩下的"还没起来"只是慢。上界由外层持有——这条 it 自己声明了 240 秒。
  *
  * 原先环上另有一个 5 秒 deadline。它在机器被压满时会**先于**外层触发，把"慢"报成"起不来"：实测
  * 2026-09-01 负载 ~120 时，同一份构建里解一个 84KB tarball 花了 3 分 42 秒挂钟而只用 0.01 秒 CPU，
@@ -390,7 +390,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       // packing/install steps share the owning test deadline, never a shorter competing budget.
       // 下面这些 `execFileAsync` 都没有挂钟预算，判据同 `waitForDaemonReady` 那段（见 :92 起）：
       // npm 的 pack/install、tsc、以及本测试自己起的那几个 worker fixture，都是**本机对固定输入的
-      // 确定性步骤**——它们一定会答，被压满时只是慢。期限由外层 `it(…, 125_000)` 持有；再插一个更短的
+      // 确定性步骤**——它们一定会答，被压满时只是慢。期限由外层 `it(…, 240_000)` 持有；再插一个更短的
       // 预算只贡献假阴性，而且 `execFile` 的超时错误从不说自己是超时，会把「慢」伪装成「坏」。
       // 保留 `timeout` 的是另一类：`ps`、以及经 socket 找/停守护进程那几处——socket 在而进程卡住时，
       // 对端可能永不回答。
@@ -584,7 +584,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       let stopResponseLossProxy: StopResponseLossProxy | null = null
       let cleanupSentinelPid: number | null = null
       try {
-        // 这里**没有**挂钟预算。期限由外层那个 `it(…, 125_000)` 持有，两个预算守同一件事时，短的
+        // 这里**没有**挂钟预算。期限由外层那个 `it(…, 240_000)` 持有，两个预算守同一件事时，短的
         // 那个只贡献假阴性：它一到点就 SIGTERM 掉整个消费者进程，而进程本来只是在被压满的机器上
         // 变慢。实测（2026-09-01，负载 ~55）：`[packed-consumer] still waiting for handshake race
         // controlled composer pending` 一路数到 50s，然后在 63.55s 整个测试失败——不是里面哪个
@@ -629,7 +629,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           replayStartByte: 7,
           sharedReplayWhileAttached: true,
           agentSharedReplayWhileAttached: true,
-          multiViewAcknowledgementMonotonic: true,
+          freshViewReplayIndependentOfDurableSession: true,
           resize: '101x37',
           interruptStillLive: true,
           dedupOccurrences: 1,
@@ -921,9 +921,10 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       if (cleanupSentinelPid !== null) {
         expect(processIsGone(cleanupSentinelPid)).toBe(true)
       }
-    // Two independent missing-composer probes run together but must each observe the real
-    // ten-second render deadline. Include that added work and offline tarball installation
-    // within one bounded outer budget; every behavioral assertion and cleanup remains active.
-    }, 125_000)
+    // Cold offline pack/install/types take about 28s. The native scenarios observed about
+    // 85s before the concurrency oracle; remaining real render/crash/lifecycle observations
+    // and cleanup require another 90s. One 240s outer bound covers this measured work and
+    // scheduling variance. No behavioral assertion or cleanup is skipped or shortened.
+    }, 240_000)
   }
 )
