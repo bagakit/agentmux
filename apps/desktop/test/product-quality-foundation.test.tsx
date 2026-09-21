@@ -4,7 +4,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { ServiceWindowNotice } from '../src/renderer/src/components/ServiceWindowNotice'
-import { ContinuousProgressControl } from '../src/renderer/src/components/ContinuousProgressControl'
 import { TerminalServiceNotices } from '../src/renderer/src/components/TerminalServiceNotices'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { AgentLifecycleFeedback } from '../src/renderer/src/components/AgentLifecycleFeedback'
@@ -16,7 +15,6 @@ import { composerSession } from './helpers/composer-dom-fixture'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import type { RenderableServiceNotice } from '../src/renderer/src/lib/service-window-notice'
-import { allStyleRules } from './helpers/styles'
 
 let container: HTMLDivElement, root: Root
 const initial = useAppStore.getState()
@@ -33,6 +31,19 @@ const notice: RenderableServiceNotice = { kind: 'process-degraded', notice: {
   restore: 'Resize this pane to retry the current screen; historical layout cannot be reconstructed. FINAL RESTORATION FACT.'
 } }
 const summary = { step: 'Replay layout unconfirmed', mode: 'Terminal usable; retained layout is unknown.', restore: 'Resize to retry; historical layout remains unconfirmed.' }
+const progressTrigger = () => container.querySelector<HTMLButtonElement>('.composer__mailbox')!
+async function renderProgress() {
+  useAppStore.setState({ config: composerConfig, sessions: [composerSession()] })
+  await act(async () => root.render(<AgentSessionComposer sessionId="agent-1" />))
+}
+async function mailboxToggle(newState: 'open' | 'closed') {
+  const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: newState })
+  await act(async () => container.querySelector('.composer-mailbox')!.dispatchEvent(event))
+}
+async function openProgress() {
+  await mailboxToggle('open')
+  await act(async () => container.querySelector<HTMLButtonElement>('[id$="-progress-tab"]')!.click())
+}
 
 it('mounts persistent truthful three-fact summary and explicit complete details without taking existing input focus', async () => {
   const input = document.createElement('textarea'); document.body.append(input); input.focus()
@@ -58,15 +69,15 @@ it('mounts persistent truthful three-fact summary and explicit complete details 
   } finally { input.remove() }
 })
 
-it('a rejected real mounted progress list remains unconfirmed while details are closed, with complete cause and manual input kept', async () => {
+it('a rejected mounted progress list remains unconfirmed on the closed mailbox, with complete cause and manual input kept', async () => {
   const dispose = vi.fn()
   vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => dispose)
   vi.spyOn(api.continuousProgress, 'list').mockRejectedValue(new Error('Original list cause FINAL CAUSE'))
-  await act(async () => root.render(<ContinuousProgressControl session={composerSession()} />))
+  await renderProgress()
   await vi.waitFor(() => expect(container.textContent).toContain('FINAL CAUSE'))
-  const details = container.querySelector<HTMLDetailsElement>('.continuous-progress-control')!
-  expect(details.open).toBe(false)
-  expect(details.querySelector('summary')!.textContent).toContain('Unconfirmed')
+  expect(container.querySelector('.composer-mailbox')!.getAttribute('data-state')).toBe('closed')
+  expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed')
+  expect(progressTrigger().title).toContain('unconfirmed')
   expect(container.textContent).toContain('Manual input follows terminal readiness')
   await act(async () => root.unmount())
   expect(dispose).toHaveBeenCalledTimes(1)
@@ -95,20 +106,29 @@ it('allocates no notice track when all existing facts are healthy', async () => 
   expect(container.innerHTML).toBe('')
 })
 
-it('binds the mounted progress label to a nonempty source-derived narrow layout rule without shrinking text', async () => {
-  vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
-  vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
-  await act(async () => root.render(<ContinuousProgressControl session={composerSession()} />))
-  expect(container.querySelectorAll('.continuous-progress-control__label')).toHaveLength(1)
-  const rules = [...allStyleRules().matchAll(/([^{}]*)\{([^{}]*)\}/g)]
-    .filter(([, selector]) => selector!.trim() === '.continuous-progress-control__label')
-  expect(rules).toHaveLength(1)
-  expect(rules[0]![2]).toMatch(/white-space:\s*nowrap/)
-  expect(rules[0]![2]).not.toMatch(/font-size:/)
-  const rows = [...allStyleRules().matchAll(/([^{}]*)\{([^{}]*)\}/g)]
-    .filter(([, selector]) => selector!.trim() === '.continuous-progress-control')
-  expect(rows).toHaveLength(1)
-  expect(rows[0]![2]).toMatch(/grid-column:\s*1\s*\/\s*-1/)
+it('keeps the real Progress form mounted through page switching and mailbox closing, without another observer or action', async () => {
+  const observe = vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
+  const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
+  const action = vi.spyOn(api.continuousProgress, 'action')
+  await renderProgress()
+  expect(container.querySelectorAll('[id$="-progress-tab"]')).toHaveLength(1)
+  expect(container.querySelectorAll('.composer__mailbox')).toHaveLength(1)
+  expect(container.querySelector('.composer > .continuous-progress-control')).toBeNull()
+  await openProgress()
+  const form = container.querySelector<HTMLFormElement>('.continuous-progress-control form')!
+  expect(form).not.toBeNull()
+  const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Kept continuation draft')
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    container.querySelector<HTMLButtonElement>('[id$="-inbox-tab"]')!.click()
+  })
+  await mailboxToggle('closed'); await openProgress()
+  expect(container.querySelector('.continuous-progress-control form')).toBe(form)
+  expect(textarea.value).toBe('Kept continuation draft')
+  expect(observe).toHaveBeenCalledTimes(1)
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(action).not.toHaveBeenCalled()
 })
 
 it('global and lifecycle consumers retain their complete three facts, polite ARIA and only their own recovery actions', async () => {
@@ -145,20 +165,19 @@ it('global and lifecycle consumers retain their complete three facts, polite ARI
 const loop: ContinuousProgressLoop = { loopId: 'owned-loop', hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex',
   workspacePath: '/repo', intervalMs: 60_000, prompt: 'Continue the original task', nextCheckAt: 60_000, status: 'active' }
 
-it('a rejected real mounted progress action is visible after collapse, preserves complete cause and keeps the existing exact target', async () => {
+it('a rejected mounted progress action remains visible on closing, preserves complete cause and keeps the exact target', async () => {
   vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([loop])
   const action = vi.spyOn(api.continuousProgress, 'action').mockRejectedValue(new Error('Original action cause FINAL ACTION CAUSE'))
-  await act(async () => root.render(<ContinuousProgressControl session={composerSession()} />))
+  await renderProgress()
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Pause continuous progress"]')).not.toBeNull())
-  const details = container.querySelector<HTMLDetailsElement>('details')!
-  details.open = true
+  await openProgress()
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Pause continuous progress"]')!.click())
-  details.open = false
-  expect(details.querySelector('summary')!.textContent).toContain('Unconfirmed')
+  await mailboxToggle('closed')
+  expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(container.textContent).toContain('FINAL ACTION CAUSE')
   expect(action.mock.calls).toEqual([[{ hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: '/repo' }, 'owned-loop', 'pause']])
-  expect(container.querySelectorAll('.continuous-progress-control__label')).toHaveLength(1)
+  expect(container.querySelectorAll('.continuous-progress-control')).toHaveLength(1)
 })
 
 it('current loop unknown outcome remains visible even without a rejected call, and disposal rejects unrelated or late list updates', async () => {
@@ -166,10 +185,10 @@ it('current loop unknown outcome remains visible even without a rejected call, a
   let changed: ((loop: ContinuousProgressLoop) => void) | undefined
   vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(fn => { changed = fn; return dispose })
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([{ ...loop, lastOutcome: 'unknown', lastDecision: 'Original admission unknown' }])
-  await act(async () => root.render(<ContinuousProgressControl session={composerSession()} />))
-  await vi.waitFor(() => expect(container.querySelector('summary')!.textContent).toContain('Unconfirmed'))
+  await renderProgress()
+  await vi.waitFor(() => expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed'))
   await act(async () => changed!({ ...loop, agentSessionId: 'unrelated-agent', lastOutcome: 'sent' }))
-  expect(container.querySelector('summary')!.textContent).toContain('Unconfirmed')
+  expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   await act(async () => root.unmount())
   expect(dispose).toHaveBeenCalledTimes(1)
 })
@@ -185,7 +204,7 @@ it.each(['interrupted', 'attachment-pending'] as const)('the actual Session Comp
   // Interrupted hosts deliberately keep a writable restore draft; that is not proof of a ready Run.
   expect(container.querySelector('.tiptap')!.getAttribute('contenteditable')).toBe(state === 'attachment-pending' ? 'false' : 'true')
   if (state === 'interrupted') expect(container.querySelector('.tiptap')!.getAttribute('data-placeholder')).toContain('restore this Agent')
-  expect(container.querySelector('.continuous-progress-control summary')!.textContent).toContain('Unconfirmed')
+  expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(container.textContent).not.toMatch(/manual input remains available/i)
   expect(useAppStore.getState().agentComposerDrafts['agent-1']).toBe('Preserved draft')
 })

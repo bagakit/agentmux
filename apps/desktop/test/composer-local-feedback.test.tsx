@@ -174,9 +174,13 @@ it('two tool results in one React batch both append to the Launcher draft', asyn
 })
 async function twoProviderLauncher() {
   const config = useAppStore.getState().config!
+  const detections = await Promise.all(['codex', 'claude'].map(async executorId => {
+    const result = await api.executors.detect(executorId, 'local')
+    return [executorDetectionKey('local', executorId), { state: 'ready' as const, input: result.input, result }] as const
+  }))
   useAppStore.setState({ config: { ...config, executors: { ...config.executors,
     claude: { ...config.executors.codex!, providerId: 'claude', command: 'claude', label: 'Claude' }
-  } }, executorDetections: { [executorDetectionKey('local', 'codex')]: { state: 'ready' }, [executorDetectionKey('local', 'claude')]: { state: 'ready' } } })
+  } }, executorDetections: Object.fromEntries(detections) })
   await launcher()
 }
 async function selectClaude() {

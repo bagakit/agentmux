@@ -1,4 +1,3 @@
-import { ContinuousProgressControl } from './ContinuousProgressControl'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { useRef } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '../lib/composer-insertion'
@@ -238,10 +237,10 @@ export function AgentSessionComposer({
 
   return (
     <AgentComposer key={sessionId}
-      feedback={!readOnly && session?.kind === 'agent' ? <ContinuousProgressControl session={session} /> : undefined}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
       mailbox={<SessionMailbox system={inbox} timeline={timeline}
+        progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           text: entry.text,

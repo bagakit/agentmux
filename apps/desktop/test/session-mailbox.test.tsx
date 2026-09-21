@@ -5,6 +5,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import type { ContinuousProgressLoop } from '@agentmux/core'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -20,6 +21,10 @@ beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipt
 const trigger = () => dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
 const mailbox = () => dom.container.querySelector<HTMLDivElement>('.composer-mailbox')!
 const unread = () => trigger().getAttribute('data-unread')
+const progressLoop = (status: 'active' | 'paused' = 'active'): ContinuousProgressLoop => ({
+  loopId: 'mailbox-loop', hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: '/repo',
+  intervalMs: 60_000, prompt: 'Continue', nextCheckAt: 60_000, status
+})
 /**
  * 打开之前先把指纹等出来。
  *
@@ -48,7 +53,7 @@ async function toggle(state: 'open' | 'closed') {
   Object.defineProperty(event, 'newState', { value: state })
   await act(async () => mailbox().dispatchEvent(event))
 }
-async function folder(name: 'inbox' | 'outbox' | 'system') {
+async function folder(name: 'inbox' | 'outbox' | 'system' | 'progress') {
   await dom.click(`[role="tab"][id$="-${name}-tab"]`)
 }
 
@@ -310,7 +315,7 @@ it('separates actual incoming Agent messages, sent user history and system facts
   useAppStore.setState({ timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 2, items } },
     agentSteerQueues: { 'agent-1': [{ operationId: 'sent', runId: 'run-agent-1', text: 'Body sent', status: 'queued' }] } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  expect([...mailbox().querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(['Inbox (1)', 'Outbox (1)', 'System (1)'])
+  expect([...mailbox().querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(['Inbox (1)', 'Outbox (1)', 'System (1)', 'Progress'])
   expect(trigger().textContent).toBe('') // Durable sent item is never shown as pending again.
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox (1)')
@@ -367,4 +372,79 @@ it('keeps unconfirmed initial input visible and copyable without calling it Sent
   expect(visible.querySelector('.composer-mailbox__messages strong')?.textContent).not.toBe('Sent')
   await dom.click('.composer-mailbox__messages button')
   expect(copy).toHaveBeenCalledExactlyOnceWith('Body initial')
+})
+
+it('projects loop status without adding unread or pending mail, switching pages, or treating a pending list as inactive', async () => {
+  let resolveList!: (loops: ContinuousProgressLoop[]) => void
+  let changed!: (loop: ContinuousProgressLoop) => void
+  vi.spyOn(api.continuousProgress, 'list').mockImplementation(() => new Promise(resolve => { resolveList = resolve }))
+  const dispose = vi.fn()
+  vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(listener => { changed = listener; return dispose })
+  useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [
+    { operationId: 'manual', runId: 'run-agent-1', text: 'Manual pending', status: 'queued' }
+  ] } })
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
+  expect(trigger().getAttribute('aria-label')).toContain('0 unread')
+  expect(trigger().getAttribute('aria-label')).toContain('1 pending')
+  await act(async () => resolveList([]))
+  expect(trigger().getAttribute('data-progress-state')).toBe('inactive')
+  expect(mailbox().querySelector('[id$="-progress"]')?.textContent).toContain('Not enabled.')
+  await toggle('open')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Outbox (1)')
+  for (const loop of [progressLoop(), progressLoop('paused'), { ...progressLoop('paused'), lastOutcome: 'unknown' as const }]) {
+    await act(async () => changed(loop))
+    expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Outbox (1)')
+    expect(trigger().getAttribute('data-progress-state')).toBe(loop.lastOutcome === 'unknown' ? 'unconfirmed' : loop.status)
+    expect(unread()).toBe('false')
+    expect(trigger().textContent).toBe('1')
+  }
+  await folder('progress')
+  await act(async () => changed({ ...progressLoop(), workspacePath: '/unrelated' }))
+  expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Progress')
+  await dom.render(null)
+  expect(dispose).toHaveBeenCalledTimes(1)
+})
+
+it('retains every progress field and unconfirmed composition through page, close and Composer mode changes with one observer', async () => {
+  const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
+  const observe = vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
+  const create = vi.spyOn(api.continuousProgress, 'create')
+  const action = vi.spyOn(api.continuousProgress, 'action')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const mainDrafts = structuredClone(useAppStore.getState().agentComposerDrafts)
+  const mainQueues = structuredClone(useAppStore.getState().agentSteerQueues)
+  await toggle('open'); await folder('progress')
+  const form = mailbox().querySelector<HTMLFormElement>('.continuous-progress-control form')!
+  expect(form).not.toBeNull()
+  await act(async () => form.querySelector<HTMLInputElement>('[type="checkbox"]')!.click())
+  const fields = [form.querySelector<HTMLInputElement>('[type="number"]')!,
+    ...['Tracker root', 'Feature ID', 'Public Tracker script'].map(label => form.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!)]
+  expect(fields).toHaveLength(4)
+  const values = ['17', '/tracker', 'f-private', '/reader.sh']
+  await act(async () => fields.forEach((field, index) => {
+    expect(field).not.toBeNull()
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, values[index])
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  }))
+  const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => {
+    textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '未确认续行候选')
+    textarea.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: '未确认续行候选' }))
+  })
+  await folder('inbox'); await toggle('closed'); await toggle('open'); await folder('progress')
+  for (let index = 0; index < 3; index++) await dom.click('.composer-tool--mode')
+  expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
+  expect(form.querySelector('textarea')).toBe(textarea)
+  expect(textarea.value).toBe('未确认续行候选')
+  expect(fields.map(field => field.value)).toEqual(values)
+  expect(form.querySelector<HTMLInputElement>('[type="checkbox"]')!.checked).toBe(true)
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(observe).toHaveBeenCalledTimes(1)
+  expect(create).not.toHaveBeenCalled()
+  expect(action).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(mainDrafts)
+  expect(useAppStore.getState().agentSteerQueues).toEqual(mainQueues)
 })

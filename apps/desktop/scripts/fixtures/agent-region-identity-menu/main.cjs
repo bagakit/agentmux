@@ -98,8 +98,11 @@ async function composerVisual(layoutOwning=false) {
   result.captureOnly=true;result.aestheticReview='not-performed'
   const composer=`${surface}.querySelector('.composer')`,editor=`${composer}.querySelector('[role="textbox"]')`
   const toggle=`${composer}.querySelector('.composer-tool--mode')`,control=`${composer}.querySelector('.continuous-progress-control')`
+  const trigger=`${composer}.querySelector('.composer__mailbox')`,mailbox=`${composer}.querySelector('.composer-mailbox')`
+  const progressTab=`${mailbox}.querySelector('[role="tab"][id$="-progress-tab"]')`
+  const form=`${control}.querySelector('form')`
   async function frame(width,state){
-    result.stage={width,state};await waitFor(visible(editor));await waitFor(visible(`${control}?.querySelector('summary')`));await painted()
+    result.stage={width,state};await waitFor(visible(editor));await waitFor(visible(trigger));await painted()
     const file=`${width}-composer-${state}.png`,png=await capture(file.slice(0,-4))
     result.frames.push({width,state,file,png})
     if(layoutOwning&&state==='progress-open'){
@@ -133,18 +136,56 @@ async function composerVisual(layoutOwning=false) {
     await win.webContents.debugger.sendCommand('Input.insertText',{text})
     await waitFor(`${editor}.textContent.includes(${JSON.stringify(text.split('\n').at(-1))})`)
   }
+  async function fill(expression,text){
+    await evaluate(`${expression}.scrollIntoView({block:'nearest'})`);await click(expression)
+    win.webContents.selectAll();await key('Backspace','Backspace',8)
+    await waitFor(`${expression}.value===''`);await win.webContents.insertText(text)
+    await waitFor(`${expression}.value===${JSON.stringify(text)}`)
+  }
+  async function openProgress(width){
+    await click(trigger);await waitFor(`${mailbox}.matches(':popover-open') && ${mailbox}.dataset.state==='open'`);await painted()
+    if(width!==undefined)await frame(width,'mailbox-open')
+    assert.equal(await evaluate(`Boolean(${progressTab})`),true,'Actual shared Mailbox must expose its Progress tab')
+    await click(progressTab);await waitFor(`${progressTab}.getAttribute('aria-selected')==='true'`)
+    await waitFor(visible(control))
+  }
+  async function dismiss(){
+    await key('Escape','Escape',27);await waitFor(`!${mailbox}.matches(':popover-open')`)
+    assert.equal(await evaluate(`document.activeElement===${trigger}`),true,'Native Escape returns focus to the same Mailbox trigger')
+  }
+  const readForm=()=>evaluate(`Array.from(${form}.elements).filter(node=>node.matches('input,textarea')).map(node=>node.type==='checkbox'?node.checked:node.value)`)
   async function phase(expected){
     await waitFor(visible(toggle));await click(toggle)
     await waitFor(`${composer}.querySelector('.composer-tools').dataset.mode===${JSON.stringify(expected)}`)
   }
   for(const width of [640,320]){
-    result.stage={width,state:'one-line-short'};await seed(width);await waitFor(visible(editor));await waitFor(visible(`${control}?.querySelector('summary')`))
+    result.stage={width,state:'one-line-short'};await evaluate("identityMenu.progress('inactive')");await seed(width);await waitFor(visible(editor));await waitFor(`${trigger}?.dataset.progressState==='inactive'`)
     await draft('Review this workspace and keep the current draft.');await frame(width,'one-line-short')
     await phase('current');await frame(width,'tools-short')
     await phase('expanded');await draft('Review the current workspace.\nExplain the finding and its impact.\nKeep the original working surface.\nSuggest a focused next step.\nThis draft remains unsent.');await frame(width,'expanded-long')
-    await click(`${control}.querySelector('summary')`);await waitFor(`${control}.open`);await waitFor(visible(`${control}.querySelector('form')`));await frame(width,'progress-open')
-    await click(`${control}.querySelector('summary')`);await waitFor(`!${control}.open`);await frame(width,'progress-closed')
+    const terminalBefore=await evaluate('identityMenu.terminal()'),observationsBefore=await evaluate('identityMenu.progressFacts()')
+    await openProgress(width);await waitFor(visible(form));await frame(width,'progress-open')
+    await fill(`${form}.querySelector('input[type="number"]')`,'17')
+    await fill(`${form}.querySelector('textarea')`,'继续当前任务，保留用户输入。')
+    await click(`${form}.querySelector('input[type="checkbox"]')`)
+    for(const [label,text] of [['Tracker root','/private/visual-task-source'],['Feature ID','visual-task'],['Public Tracker script','/private/visual-task-source/feature-tracker.sh']])
+      await fill(`${form}.querySelector('[aria-label="${label}"]')`,text)
+    const settings=await readForm();assert.deepEqual(settings,['17','继续当前任务，保留用户输入。',true,'/private/visual-task-source','visual-task','/private/visual-task-source/feature-tracker.sh'])
+    await frame(width,'progress-filled')
+    await click(`${mailbox}.querySelector('[role="tab"][id$="-inbox-tab"]')`)
+    await waitFor(`${progressTab}.getAttribute('aria-selected')==='false'`);await click(progressTab)
+    assert.deepEqual(await readForm(),settings,'Switching message/Progress pages preserves the actual unsent settings')
+    await dismiss();await openProgress()
+    assert.deepEqual(await readForm(),settings,'Native close/reopen preserves the actual unsent settings')
+    assert.deepEqual(await evaluate('identityMenu.progressFacts()'),observationsBefore,'Disclosure does not relist or recreate loop observers')
+    await dismiss();assert.deepEqual(await evaluate('identityMenu.terminal()'),terminalBefore,'Progress disclosure retains the original terminal instance and layout')
+    await frame(width,'progress-closed')
     await phase('collapsed');await frame(width,'one-line-return')
+    for(const state of ['active','paused','unconfirmed']){
+      await evaluate(`identityMenu.progress(${JSON.stringify(state)})`);await waitFor(`${trigger}.dataset.progressState===${JSON.stringify(state)}`)
+      await frame(width,`progress-${state}-closed`);await openProgress();await frame(width,`progress-${state}-open`);await dismiss()
+    }
+    result.progressBehavior??=[];result.progressBehavior.push({width,settings,observationsBefore,observationsAfter:await evaluate('identityMenu.progressFacts()'),terminalBefore,terminalAfter:await evaluate('identityMenu.terminal()')})
   }
   assert.ok(result.frames.length>0,'Actual composer scenes are nonempty')
   if(layoutOwning)assert.equal(result.progressLayouts?.length,2,'Both actual widths have a nonempty form observation')

@@ -21,7 +21,8 @@ const own = (headerOnly ? [
 ] : [
   'components/ServiceWindowNotice.tsx', 'components/TerminalServiceNotices.tsx', 'components/TerminalView.tsx',
   'components/ContinuousProgressControl.tsx', 'styles/agent.css', 'styles/terminal.css', 'styles/agent-region-header.css',
-  'components/AgentLifecycleFeedback.tsx', 'components/SessionPane.tsx'
+  'components/AgentLifecycleFeedback.tsx', 'components/SessionPane.tsx',
+  'components/SessionMailbox.tsx', 'components/AgentSessionComposer.tsx', 'styles/composer.css'
 ]).map(name => 'apps/desktop/src/renderer/src/' + name)
 const focused = headerOnly ? ['agent-region-identity-menu.test.tsx', 'region-context-menu.test.tsx', 'hover-dropdown-menu.test.tsx',
   'session-pane-composer.test.tsx', 'product-quality-foundation.test.tsx', 'sliced-scan-surface-not-empty.test.ts', 'vacuous-on-empty-predicate.test.ts'] : ['product-quality-foundation.test.tsx', 'service-window-notice-component.test.tsx', 'agent-region-identity-menu.test.tsx',
@@ -50,7 +51,8 @@ async function callers() {
   ] : [
     ['ServiceWindowNotice', 'components/ServiceWindowNotice.tsx'],
     ['TerminalServiceNotices', 'components/TerminalServiceNotices.tsx'],
-    ['ContinuousProgressControl', 'components/ContinuousProgressControl.tsx']
+    ['ContinuousProgressControl', 'components/ContinuousProgressControl.tsx'],
+    ['SessionMailbox', 'components/SessionMailbox.tsx']
   ]), found = Object.fromEntries([...symbols.keys()].map(symbol => [symbol, []]))
   async function scan(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -78,7 +80,8 @@ async function callers() {
     assert.ok(found.RegionMenuEntryView.some(hit => hit.file.endsWith('/AgentRegionHeader.tsx')))
   } else {
     assert.ok(found.TerminalServiceNotices.some(hit => hit.file.endsWith('/TerminalView.tsx')))
-    assert.ok(found.ContinuousProgressControl.some(hit => hit.file.endsWith('/AgentSessionComposer.tsx')))
+    assert.ok(found.ContinuousProgressControl.some(hit => hit.file.endsWith('/SessionMailbox.tsx')))
+    assert.ok(found.SessionMailbox.some(hit => hit.file.endsWith('/AgentSessionComposer.tsx')))
   }
   return found
 }
@@ -147,7 +150,7 @@ try {
       { name: 'persistent-owned-summary', file: own[0], before: 'const visible = summary ?? notice.notice', after: 'const visible = notice.notice' },
       { name: 'complete-original-last-line', file: own[0], before: '<span>{notice.notice.restore}</span>', after: '<span>{null}</span>' },
       { name: 'closed-error-unknown-status', file: own[3], before: "error || displayed?.lastOutcome === 'unknown'", after: 'false' },
-      { name: 'narrow-summary-full-composer-row', file: own[4], before: '.continuous-progress-control { grid-column: 1 / -1;', after: '.continuous-progress-control { grid-column: auto;' }
+      { name: 'progress-page-retains-form', file: own[9], before: '{progressSession ? <div id={`${id}-progress`}', after: '{progressSession && open && folder === \'progress\' ? <div id={`${id}-progress`}' }
     ]
     result.cases = []
     async function narrowGeometry(label, flag = '--narrow-only') {
@@ -181,11 +184,11 @@ try {
           positive(red.log); assert.notEqual(red.exit, 0, 'The owning behavior must fail when the production bearing point is broken')
           assert.match(red.log, /AssertionError:/, 'Environment or compilation failures do not prove the behavior')
         }
-        if (mutation.name === 'narrow-summary-full-composer-row') {
+        if (mutation.name === 'progress-page-retains-form') {
           record.geometryRed = await narrowGeometry('narrow-geometry-red')
           assert.equal(record.geometryRed.exit, 1)
           assert.equal(record.geometryRed.native.failure?.name, 'AssertionError')
-          assert.match(record.geometryRed.native.failure.message, /No-loop actual progress caption must fit one line|Actual narrow progress summary must contain/)
+          assert.match(record.geometryRed.native.failure.message, /Progress page must retain its original form|Progress continuation draft must survive/)
         }
       } finally { await writeFile(file, original) }
       assert.equal(sha(await readFile(file)), result.inputs[mutation.file], 'Exact production source must be restored before GREEN')
@@ -197,7 +200,7 @@ try {
         const green = runTests([focused[0]], copy); positive(green.log); assert.equal(green.exit, 0, green.log)
         record.green = { exit: green.exit, command: green.command, log: await artifact(`${mutation.name}-restore-green.log`, green.log) }
       }
-      if (mutation.name === 'narrow-summary-full-composer-row') {
+      if (mutation.name === 'progress-page-retains-form') {
         record.geometryGreen = await narrowGeometry('narrow-geometry-restored-green')
         assert.equal(record.geometryGreen.exit, 0); assert.equal(record.geometryGreen.native.passed, true)
       }
@@ -219,7 +222,7 @@ try {
       }
       record.geometryRed = await narrowGeometry('concurrent-aux-summary-red', '--aux-only')
       assert.equal(record.geometryRed.exit, 1); assert.equal(record.geometryRed.native.failure?.name, 'AssertionError')
-      assert.match(record.geometryRed.native.failure.message, /Concurrent lifecycle notices must retain at least three/)
+      assert.match(record.geometryRed.native.failure.message, /Concurrent lifecycle notices must retain (?:at least three readable original Terminal rows|their original details)/)
     } finally { for (const [file, original] of originals) { await writeFile(file, original); assert.equal(sha(await readFile(file)), sha(original)) } }
     record.geometryGreen = await narrowGeometry('concurrent-aux-summary-restored-green', '--aux-only')
     assert.equal(record.geometryGreen.exit, 0); assert.equal(record.geometryGreen.native.passed, true)

@@ -4,12 +4,26 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { formatRegionAddress } from '../../../src/renderer/src/lib/agent-address'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import type { ContinuousProgressLoop } from '@agentmux/core'
 
 const workspaceId = useAppStore.getState().activeWorkspaceId!
 const tabId = 'region-actions-tab', leftId = 'region-actions-target', rightId = 'region-actions-survivor'
 const names = ['Layout coordinator · investigate recovery without losing this original Agent', 'Notes researcher', 'Build reviewer']
 const original = (window as any).regionActions
 const first = useAppStore.getState().sessions[0]!
+// Controlled API facts for the real UI: no timer, delivery or second loop manager.
+let progressLoops: ContinuousProgressLoop[] = []
+const progressListeners = new Set<(loop: ContinuousProgressLoop) => void>()
+const progressReads: unknown[] = []
+api.continuousProgress.list = async target => {
+  progressReads.push(target)
+  return progressLoops.filter(loop => loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId &&
+    loop.providerId === target.providerId && loop.workspacePath === target.workspacePath)
+}
+api.continuousProgress.onChanged = listener => {
+  progressListeners.add(listener)
+  return () => { progressListeners.delete(listener) }
+}
 const third = (await api.sessions.launchAgent({ executorId: first.executorId!, hostId: 'local', workspacePath: first.workspacePath })).session
 const clipboard: string[] = [], resizes: unknown[] = [], selections: unknown[] = []
 const copy = api.ui.writeClipboardText, resize = api.sessions.resize
@@ -30,6 +44,18 @@ function naming() {
 }
 const probe = {
   names,
+  progress(state: 'inactive' | 'active' | 'paused' | 'unconfirmed') {
+    const loop: ContinuousProgressLoop = { loopId: 'visual-progress', hostId: first.hostId, agentSessionId: first.id,
+      providerId: first.providerId, workspacePath: first.workspacePath, intervalMs: 1_800_000,
+      prompt: 'Continue the current task without replacing user input.', nextCheckAt: Date.parse('2026-10-03T12:00:00Z'),
+      status: state === 'inactive' ? 'stopped' : state === 'active' ? 'active' : 'paused',
+      ...(state === 'unconfirmed' ? { lastOutcome: 'unknown' as const,
+        lastDecision: 'Previous continuation delivery is unconfirmed. No retry has been sent.' }
+        : state === 'paused' ? { lastDecision: 'Paused while the user is editing.' } : {}) }
+    progressLoops = state === 'inactive' ? [] : [loop]
+    flushSync(() => { for (const listener of progressListeners) listener(loop) })
+  },
+  progressFacts() { return { reads: [...progressReads], subscribers: progressListeners.size } },
   terminalLoading() {
     const attach = api.sessions.attach
     let release!: () => void
