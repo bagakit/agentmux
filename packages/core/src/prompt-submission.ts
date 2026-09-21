@@ -227,20 +227,58 @@ export class AgentPromptSubmissionCoordinator {
       }
       return uncertain
     }
+    const settledDelivery = (
+      stored: AgentMuxStoredAgentSession,
+      uncertain: boolean
+    ): AgentTerminalPromptDeliveryState | undefined => {
+      if (uncertain) {
+        return {
+          state: 'unverified',
+          mode: 'degraded',
+          reason: 'turn-end-unconfirmed',
+          submissionId,
+          run: { ...stored.run },
+          observedAt: Date.now()
+        }
+      }
+      if (
+        stored.terminalPromptDelivery?.submissionId === submissionId &&
+        stored.terminalPromptDelivery?.reason === 'input-unconfirmed'
+      ) {
+        return undefined
+      }
+      return stored.terminalPromptDelivery
+    }
+    const publishSettledNotice = async (uncertain: boolean): Promise<void> => {
+      if (uncertain) {
+        await this.publishDeliveryDegrade(session, {
+          state: 'unverified',
+          mode: 'degraded',
+          reason: 'turn-end-unconfirmed',
+          submissionId,
+          run: { ...session.run },
+          observedAt: Date.now()
+        })
+      } else {
+        await this.clearDelivery(session, submissionId)
+      }
+    }
     const claimInput = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number, uncertainTurn: boolean): AgentMuxStoredAgentSession => {
       const completionId = agentTurnCompletionIdentity(current)
       const ended = agentTurnEndBoundary(current) !== undefined
       const observedAt = Date.now()
-      const next = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
+      const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
         submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte,
         intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan) },
-        acknowledged: false
+        acknowledged: false,
+        ...(uncertainTurn ? { uncertainTurn: true } : {})
       }, ...(ended ? { terminalPromptReadiness: { ...current.terminalPromptReadiness!, consumedBySubmissionId: submissionId } } : {}),
       ...(uncertainTurn ? { terminalPromptDelivery: {
         state: 'unverified' as const, mode: 'degraded' as const, reason: 'turn-end-unconfirmed' as const,
         submissionId, run: { ...current.run }, observedAt
       } } : {}) }
       delete next.terminalPromptSubmission
+      if (!uncertainTurn) delete next.terminalPromptDelivery
       return next
     }
     const cancelConsumedNativeReadiness = (current: AgentMuxAgentSession): void => {
@@ -262,8 +300,7 @@ export class AgentPromptSubmissionCoordinator {
             throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
           }
           if (run.acceptedInputBytes === null || run.acceptedInputBytes < admitted.endByte) assertInteraction(stored)
-          uncertainTurn = stored.terminalPromptDelivery?.reason === 'turn-end-unconfirmed' &&
-            stored.terminalPromptDelivery.submissionId === submissionId
+          uncertainTurn = admitted.uncertainTurn === true
           return stored
         }
         assertAdmission(stored)
@@ -299,11 +336,25 @@ export class AgentPromptSubmissionCoordinator {
         if (stored.promptCompletionAdmission?.operationId !== operationId) {
           throw new AgentMuxError('Prompt admission changed before receipt settlement.', 'STALE_AGENT_SESSION')
         }
-        return { ...stored, promptCompletionAdmission: { ...stored.promptCompletionAdmission, acknowledged: true, notApplied: false },
-          updatedAt: Math.max(stored.updatedAt, Date.now()) }
+        const delivery = settledDelivery(stored, uncertainTurn)
+        const next: AgentMuxStoredAgentSession = {
+          ...stored,
+          promptCompletionAdmission: {
+            ...stored.promptCompletionAdmission,
+            acknowledged: true,
+            notApplied: false,
+            ...(uncertainTurn ? { uncertainTurn: true } : {})
+          },
+          ...(delivery ? { terminalPromptDelivery: delivery } : {}),
+          updatedAt: Math.max(stored.updatedAt, Date.now())
+        }
+        if (!delivery && next.terminalPromptDelivery?.submissionId === submissionId) {
+          delete next.terminalPromptDelivery
+        }
+        return next
       })
       this.deps.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
-      if (!uncertainTurn) await this.clearDelivery(session, submissionId)
+      await publishSettledNotice(uncertainTurn)
       return
     }
     if (!plan.payload || !plan.renderedText || !plan.submit) {
@@ -361,8 +412,7 @@ export class AgentPromptSubmissionCoordinator {
         assertSubmission(existing)
         // A pending interaction permits receipt recovery only, never additional input bytes.
         if (run.acceptedInputBytes === null || run.acceptedInputBytes < existing.submit.inputByteRange.endByte) assertInteraction(stored)
-        uncertainTurn = stored.terminalPromptDelivery?.reason === 'turn-end-unconfirmed' &&
-          stored.terminalPromptDelivery.submissionId === submissionId
+        uncertainTurn = stored.promptCompletionAdmission?.uncertainTurn === true
         return stored
       }
       assertAdmission(stored)
@@ -517,26 +567,57 @@ export class AgentPromptSubmissionCoordinator {
         }
         assertSubmission(state)
         if (state.submit.acknowledged) return stored
-        return {
+        const delivery = settledDelivery(stored, uncertainTurn)
+        const next: AgentMuxStoredAgentSession = {
           ...stored,
-          promptCompletionAdmission: { ...stored.promptCompletionAdmission!, acknowledged: true, notApplied: false },
+          promptCompletionAdmission: {
+            ...stored.promptCompletionAdmission!,
+            acknowledged: true,
+            notApplied: false,
+            ...(uncertainTurn ? { uncertainTurn: true } : {})
+          },
           terminalPromptSubmission: {
             ...state,
             payload: { ...state.payload, acknowledged: true },
             submit: { ...state.submit, acknowledged: true }
           },
+          ...(delivery ? { terminalPromptDelivery: delivery } : {}),
           updatedAt: Date.now()
         }
+        if (!delivery && next.terminalPromptDelivery?.submissionId === submissionId) {
+          delete next.terminalPromptDelivery
+        }
+        return next
       }
       current = await this.deps.updateExactAgentSession(
         session.agentSessionId, session.run, acknowledgePhase
       )
       submission = current.terminalPromptSubmission
       this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+      if (uncertainTurn) {
+        await this.publishDeliveryDegrade(session, {
+          state: 'unverified',
+          mode: 'degraded',
+          reason: 'turn-end-unconfirmed',
+          submissionId,
+          run: { ...session.run },
+          observedAt: Date.now()
+        })
+      }
     }
 
     if (submission.submit.acknowledged) {
       await applyPhase('submit', plan.submit)
+      if (uncertainTurn) {
+        await this.publishDeliveryDegrade(session, {
+          state: 'unverified',
+          mode: 'degraded',
+          reason: 'turn-end-unconfirmed',
+          submissionId,
+          run: { ...session.run },
+          observedAt: Date.now()
+        })
+      }
       return
     }
     await applyPhase('payload', plan.payload)
@@ -730,6 +811,7 @@ export class AgentPromptSubmissionCoordinator {
       session.run,
       (current) => {
         if (current.terminalPromptDelivery?.submissionId !== submissionId) return current
+        if (current.terminalPromptDelivery?.reason === 'turn-end-unconfirmed') return current
         const cleared = { ...current }
         delete cleared.terminalPromptDelivery
         return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }

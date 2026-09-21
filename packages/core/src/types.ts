@@ -631,6 +631,7 @@ export type AgentMuxAgentSession = {
     }
     acknowledged?: boolean
     notApplied?: boolean
+    uncertainTurn?: boolean
   }
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
