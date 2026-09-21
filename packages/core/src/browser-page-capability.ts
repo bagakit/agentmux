@@ -78,6 +78,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'snapshot', effect: 'observe', summary: 'read a bounded ref tree with {scope: "page"|"viewport", within, withinRef, interactiveOnly, maxNodes}; includes counts, truncation, omitted documents and missing frames' },
   { name: 'snapshotText', effect: 'observe', summary: 'read the same bounded observation as text, with refs and completeness; each call replaces the previous snapshot refs' },
   { name: 'pageInfo', effect: 'observe', summary: 'read the current url and title' },
+  { name: 'extractStructured', effect: 'observe', summary: 'read 1–32 declared string/number/boolean fields from the current document or {within, withinRef}; explicit per-field status, bounded previews and a retained JSON result reference, without default values or page actions' },
   { name: 'readResult', effect: 'observe', summary: 'read a retained result reference with {offset, maxBytes} (at most 65536 bytes); base64 bytes, totals and nextOffset, without rerunning its actions' },
   { name: 'captureScreenshot', effect: 'observe', summary: 'capture what the page looks like' },
   { name: 'elementContext', effect: 'observe', summary: 'read one element in full: selector, role, accessible name, attributes, sanitized html' },
