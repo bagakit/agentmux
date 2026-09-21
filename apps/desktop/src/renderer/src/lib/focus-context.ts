@@ -160,7 +160,10 @@ export function createTerminalFocusProjectionSelector() {
       cached.sessions = input.sessions
       return false
     }
-    if (previousContexts === base.contexts && previousTabs === input.tabs && !Array.from(names.values()).some(labelsChanged)) return result
+    if (previousContexts === base.contexts && previousTabs === input.tabs && !Array.from(names.values()).some(labelsChanged)) {
+      if (result.pmoAttention !== base.pmoAttention) result = { ...result, pmoAttention: base.pmoAttention }
+      return result
+    }
 
     if (previousTabs !== input.tabs) {
       const nextOrder = Object.keys(input.tabs)
