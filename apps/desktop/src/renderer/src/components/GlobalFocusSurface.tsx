@@ -145,6 +145,8 @@ export function GlobalFocusSurface() {
     </aside></> : null}
     </div>
     <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} />
-    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onSessionChange={focusExecutionSession} /> : null}
+    {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
+      if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
+    }} onSessionChange={focusExecutionSession} /> : null}
   </section>
 }

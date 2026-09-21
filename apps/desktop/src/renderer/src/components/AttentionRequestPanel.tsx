@@ -36,10 +36,12 @@ function interactionRunId(
 export function AttentionRequestPanel({
   sessionId,
   onClose,
+  onReturnFocus,
   onSessionChange
 }: {
   sessionId: string
   onClose: () => void
+  onReturnFocus?: () => void
   onSessionChange?: (sessionId: string) => void
 }) {
   const panelRef = useRef<HTMLElement>(null)
@@ -141,10 +143,15 @@ export function AttentionRequestPanel({
   }, [activeSessionId, session, sessions, submitted, onSessionChange])
 
   function close(): void {
+    const restoreFocus = panelRef.current?.contains(document.activeElement)
     onClose()
+    if (!restoreFocus) return
     requestAnimationFrame(() => {
+      // A later control selection owns focus. BODY means closing removed its current owner.
+      if (document.activeElement !== document.body) return
       const opener = openerRef.current
-      if (opener && opener.isConnected) opener.focus()
+      if (opener && opener !== document.body && opener.isConnected) opener.focus()
+      else onReturnFocus?.()
     })
   }
 
