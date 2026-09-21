@@ -129,6 +129,18 @@ describe('versioned Browser task assets', () => {
       expect(h.calls).toEqual([{ method: 'snapshot', args: [{ maxNodes: 1000 }] }])
     }
   })
+  it('checks the entire current segment before its first action, while a single step may finish before a later blocked step', async () => {
+    const s = setup(), asset = await saved(s.assets, draft => ({ ...draft, steps: [draft.steps[0]!, { ...draft.steps[1]!, reviewed: false }] })), h = host()
+    const input = { assetId: asset.id, version: 1, browserId: 'browser-1', parameters: { 'input-2': 'temporary' } }
+    await expect(runBrowserTaskAsset(s.assets, input, h.owner)).rejects.toThrow('Review the demonstrated step')
+    expect(h.runScript).not.toHaveBeenCalled()
+    expect((await s.assets.state()).runs).toEqual([])
+    const first = await runBrowserTaskAsset(s.assets, { ...input, mode: 'step' }, h.owner)
+    expect(first).toMatchObject({ status: 'ready', nextStep: 1, operationIds: ['real-operation-1'] })
+    await expect(runBrowserTaskAsset(s.assets, { ...input, runId: first.id }, h.owner)).rejects.toThrow('Review the demonstrated step')
+    expect(h.runScript).toHaveBeenCalledTimes(1)
+    expect((await s.assets.state()).runs).toEqual([first])
+  })
   it('requires current-segment parameters and rejects mismatched Browser, version or continuation identity before action', async () => {
     const s = setup(), asset = await saved(s.assets), h = host()
     await expect(runBrowserTaskAsset(s.assets, { assetId: asset.id, version: 1, browserId: 'browser-1', parameters: {} }, h.owner)).rejects.toThrow('fresh value')
