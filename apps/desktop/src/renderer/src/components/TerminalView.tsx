@@ -695,22 +695,45 @@ export function TerminalView({
     // this decoder never participates in the byte cursor, overlap, or terminal writes.
     const kittyOutputDecoder = new TextDecoder()
     let renderReady: { dispose(): void } | null = null
-    const preserveRowResizeSelection = (resize: () => void): void => {
+    const preserveRowResizeReading = (resize: () => void): void => {
       const selected = terminal.getSelectionPosition()
       const cols = terminal.cols
+      const rows = terminal.rows
       const buffer = terminal.buffer.active
-      resize()
-      // xterm clears selections even when only unused screen rows change. A nearby
-      // service window must retain the user's selected history at the same columns.
-      if (selected && terminal.cols === cols && terminal.buffer.active === buffer) {
-        const length = (selected.end.y - selected.start.y) * cols + selected.end.x - selected.start.x
-        terminal.select(selected.start.x, selected.start.y, length)
+      const reading = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
+      const markLine = (line: number) => buffer.type === 'normal'
+        ? terminal.registerMarker(line - buffer.baseY - buffer.cursorY) : undefined
+      const readingMarker = reading.kind === 'line' ? markLine(reading.line) : undefined
+      const selectionStart = selected ? markLine(selected.start.y) : undefined
+      const selectionEnd = selected ? markLine(selected.end.y) : undefined
+      try {
+        resize()
+        // Public markers follow retained lines when a full buffer trims its oldest rows.
+        if (selected && terminal.cols === cols && terminal.buffer.active === buffer && !selectionEnd?.isDisposed) {
+          const startY = selectionStart ? Math.max(0, selectionStart.line) : selected.start.y
+          const startX = selectionStart?.isDisposed ? 0 : selected.start.x
+          const endY = selectionEnd?.line ?? selected.end.y
+          const length = (endY - startY) * cols + selected.end.x - startX
+          if (length > 0) terminal.select(startX, startY, length)
+        }
+        if (terminal.cols === cols && terminal.rows !== rows &&
+          terminal.buffer.active === buffer && buffer.type === 'normal') {
+          const anchored = readingMarker ? { kind: 'line' as const, line: Math.max(0, readingMarker.line) } : reading
+          const target = restoreTerminalViewport(anchored, buffer.baseY)
+          if (target.kind === 'latest') terminal.scrollToBottom()
+          else terminal.scrollToLine(target.line)
+          viewportMemoryRef.current = anchored
+        }
+      } finally {
+        readingMarker?.dispose()
+        selectionStart?.dispose()
+        selectionEnd?.dispose()
       }
     }
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
-      fit: () => preserveRowResizeSelection(() => fit.fit()),
-      applyOwnerGrid: ({ cols, rows }) => preserveRowResizeSelection(() => terminal.resize(cols, rows)),
+      fit: () => preserveRowResizeReading(() => fit.fit()),
+      applyOwnerGrid: ({ cols, rows }) => preserveRowResizeReading(() => terminal.resize(cols, rows)),
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => {
         // 进程已死时不向 PTY 发 resize（effect 不再随 processState 重挂，
@@ -1143,6 +1166,7 @@ export function TerminalView({
 
     const attach = async (refresh = false): Promise<void> => {
       const preserve = refresh && readyForLiveOutput
+      let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
         if (refresh) {
           const metadata = await refreshSession(session.id)
@@ -1153,7 +1177,12 @@ export function TerminalView({
         }
         await outputTail
         if (disposed) return
-        const remembered = rememberTerminalViewport(terminal.buffer.active.viewportY, terminal.buffer.active.baseY)
+        const readingBuffer = terminal.buffer.active
+        const readingCols = terminal.cols
+        const remembered = rememberTerminalViewport(readingBuffer.viewportY, readingBuffer.baseY)
+        if (preserve && readingBuffer.type === 'normal' && remembered.kind === 'line') {
+          readingMarker = terminal.registerMarker(remembered.line - readingBuffer.baseY - readingBuffer.cursorY)
+        }
         observationPending = refresh
         const result = refresh
           ? await api.sessions.refreshAttachment(session.control, attachmentId, cursor)
@@ -1183,7 +1212,9 @@ export function TerminalView({
         setAttachFailed(false)
         setAttachmentFailure(null)
         if (preserve) {
-          const position = restoreTerminalViewport(remembered, terminal.buffer.active.baseY)
+          const anchored = readingMarker && terminal.buffer.active === readingBuffer && terminal.cols === readingCols
+            ? { kind: 'line' as const, line: Math.max(0, readingMarker.line) } : remembered
+          const position = restoreTerminalViewport(anchored, terminal.buffer.active.baseY)
           if (position.kind === 'latest') terminal.scrollToBottom()
           else terminal.scrollToLine(position.line)
           reveal()
@@ -1243,6 +1274,7 @@ export function TerminalView({
           reveal(false, false)
         }
       } finally {
+        readingMarker?.dispose()
         observationPending = false
         if (!disposed && readyForLiveOutput && liveOutputQueue.length) scheduleLiveOutputDrain()
       }
