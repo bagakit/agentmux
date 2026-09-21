@@ -18,7 +18,8 @@ await verifyRendererSourceMutations({
     { label: 'element-budget-disconnected', file, before: 'work.visitedElements < limits.elements', after: 'true' },
     { label: 'text-node-budget-disconnected', file, before: 'work.textNodes >= limits.textNodes', after: 'false' },
     { label: 'actual-frame-disconnection-ignored', file,
-      before: 'if (!read.current || !context.isCurrent())', after: 'if (!context.isCurrent())' },
+      before: "if (!read.current) return failed('page-changed', 'The rooted Browser document changed during extraction; old fields were not registered as current.', read.work)",
+      after: "if (false) return failed('page-changed', 'The rooted Browser document changed during extraction; old fields were not registered as current.', read.work)" },
     { label: 'wrong-original-navigation-accepted', file,
       before: 'artifact.navigationId !== source.navigationId', after: 'false' },
     { label: 'sole-result-registration-disconnected', file,
@@ -28,6 +29,12 @@ await verifyRendererSourceMutations({
     { label: 'document-parser-accepts-different-field-source', file,
       before: 'field.source.selector === requested.source.selector', after: 'true' },
     { label: 'document-parser-accepts-wrong-observed-type', file,
-      before: 'typeof field.value === field.type', after: 'true' }
+      before: 'typeof field.value === field.type', after: 'true' },
+    { label: 'postsave-current-promise-not-awaited', file,
+      before: "if (!(await awaitCurrent())) return failedCurrent('The Browser document changed while saving; the captured artifact is not presented as current.', read.work)",
+      after: "if (!awaitCurrent()) return failedCurrent('The Browser document changed while saving; the captured artifact is not presented as current.', read.work)" },
+    { label: 'unverified-current-claims-page-change', file,
+      before: "? failed('unavailable', currentWarning, work) : failed('page-changed', warning, work)",
+      after: "? failed('page-changed', currentWarning, work) : failed('page-changed', warning, work)" }
   ]
 })
