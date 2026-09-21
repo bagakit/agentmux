@@ -8,7 +8,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-
 import { api } from '../src/renderer/src/lib/api'
 import { createTerminalFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
-import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { addWorkbenchRegion, createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
@@ -95,10 +95,18 @@ it('publishes PMO request changes in the mounted Focus without any execution cha
   }
 })
 
-it('opens the original pending Mote tab and closes back to its Focus entry', async () => {
+it.each([false, true])('opens the original pending Mote tab and closes back to its Focus entry (split=%s)', async (split) => {
   const selectedMote = mote('mote-one', true), otherMote = mote('mote-two')
   const work = createWorkbenchTab('work-tab', { kind: 'agent', phase: 'attached', workspaceId: 'project', regionId: 'work-region', sessionId: execution.id })
-  const target = { ...createWorkbenchTab('pending-mote-tab', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'pending-region', sessionId: selectedMote.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  let target: WorkbenchTab = { ...createWorkbenchTab('pending-mote-tab', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'pending-region', sessionId: selectedMote.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  if (split) {
+    // The first Region is a decoy: finding any Agent instead of the request owner
+    // must also fail, even when its Tab and provider happen to match.
+    target = { ...createWorkbenchTab(target.id, { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'other-active-region', sessionId: otherMote.id }), topicId: PMO_TEAMS_TOPIC_ID }
+    target = addWorkbenchRegion(target, 'other-active-region', 'right', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'pending-region', sessionId: selectedMote.id })
+    target = { ...target, layout: { ...target.layout, activeRegionId: 'other-active-region' } }
+    expect(Object.keys(target.regions)).toEqual(['other-active-region', 'pending-region'])
+  }
   const decoy = { ...createWorkbenchTab('other-mote-tab', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'other-region', sessionId: otherMote.id }), topicId: PMO_TEAMS_TOPIC_ID }
   const tabs = { [work.id]: work, [decoy.id]: decoy, [target.id]: target }
   const layouts = { project: createWorkspaceLayout('work-group', [work.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [decoy.id, target.id]) }
@@ -118,6 +126,7 @@ it('opens the original pending Mote tab and closes back to its Focus entry', asy
   expect(document.activeElement).toBe(dialog)
   expect(container.querySelector('[data-pmo-workbench-target]')?.getAttribute('data-pmo-workbench-target')).toBe(target.id)
   expect(useAppStore.getState().agentFocus.pmo.sessionId).toBe(selectedMote.id)
+  expect(useAppStore.getState().tabs[target.id]?.layout.activeRegionId).toBe('pending-region')
   expect(ensure).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
   expect(open).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: target.id })
   const close = dialog.querySelector<HTMLButtonElement>('button[title="Close"]')!
@@ -129,8 +138,12 @@ it('opens the original pending Mote tab and closes back to its Focus entry', asy
   expect(document.activeElement).toBe(entry)
   const state = useAppStore.getState()
   expect(state.agentFocus.execution).toBe(original.agentFocus.execution)
-  expect(state.tabs).toBe(tabs)
-  expect(state.layouts).toBe(layouts)
+  expect(state.tabs[work.id]).toBe(work)
+  expect(state.tabs[decoy.id]).toBe(decoy)
+  expect(state.tabs[target.id]?.regions).toBe(target.regions)
+  expect(state.tabs[target.id]?.layout.root).toBe(target.layout.root)
+  expect(state.layouts.project).toBe(layouts.project)
+  if (!split) { expect(state.tabs).toBe(tabs); expect(state.layouts).toBe(layouts) }
   expect(state.sessions).toEqual([execution, selectedMote, otherMote])
   expect(state.agentComposerDrafts).toBe(original.agentComposerDrafts)
   expect(state.activeWorkspaceId).toBe('project')
