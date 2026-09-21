@@ -83,6 +83,22 @@ it('accepts a single file and rejects multiple files on a current single-file in
   expect((await uploadBrowserFiles(f.owner,f.context,['file.bin'])).files.map(file=>file.name)).toEqual(['file.bin'])
 })
 
+it('verifies native FileList values independent of CDP object property order', async () => {
+  const f = await fixture()
+  await writeFile(join(f.root, 'native.bin'), Buffer.from([0, 255, 1, 9]))
+  const send = f.send.getMockImplementation()!
+  f.send.mockImplementation(async (method, params) => {
+    const response = await send(method, params)
+    if (method === 'Runtime.callFunctionOn' && String(params!.functionDeclaration).includes('Array.from(this.files'))
+      return { result: { value: [{ byteLength: 4, name: 'native.bin' }] } }
+    return response
+  })
+  await expect(uploadBrowserFiles(f.owner, f.context, ['native.bin'])).resolves.toMatchObject({
+    files: [{ name: 'native.bin', byteLength: 4 }], byteLength: 4
+  })
+  await expect(readFile(f.selected()[0]!)).resolves.toEqual(Buffer.from([0, 255, 1, 9]))
+})
+
 it('rejects navigation during the pinned file read before assigning any file', async () => {
   const f=await fixture();await writeFile(join(f.root,'file.bin'),'one')
   const actual=f.files.snapshotBytes.bind(f.files)

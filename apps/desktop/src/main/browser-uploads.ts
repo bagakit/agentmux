@@ -101,7 +101,9 @@ export class BrowserUploads {
       const observed = await context.target.send('Runtime.callFunctionOn', { objectId: context.target.objectId, returnByValue: true,
         functionDeclaration: 'function(){return Array.from(this.files, file=>({name:file.name,byteLength:file.size}))}' }) as { result?: { value?: unknown }; exceptionDetails?: unknown }
       requireOwned()
-      if (observed.exceptionDetails || JSON.stringify(observed.result?.value) !== JSON.stringify(selection.files.map(file => ({ name: file.name, byteLength: file.byteLength })))) {
+      const observedFiles = observed.result?.value
+      if (observed.exceptionDetails || !Array.isArray(observedFiles) || observedFiles.length === 0 || observedFiles.length !== selection.files.length ||
+        observedFiles.some((file, index) => !file || file.name !== selection.files[index]!.name || file.byteLength !== selection.files[index]!.byteLength)) {
         throw new Error('Files were sent to the current input, but its FileList could not be verified. Check the original page before retrying; selected-file snapshots remain available.')
       }
       return { kind: 'browser-upload-files', workspaceId: context.workspaceId, browserId: context.browserId,
