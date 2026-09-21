@@ -241,6 +241,7 @@ export function AgentSessionComposer({
       insertionRef={insertionRef}
       mailbox={<SessionMailbox system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
+        control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           text: entry.text,
