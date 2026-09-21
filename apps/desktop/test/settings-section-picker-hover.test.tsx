@@ -138,13 +138,15 @@ it('hover Escape keeps input; keyboard Escape returns to trigger without closing
   await act(async () => font().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
   await pause()
   expect(menu()).toBeNull(); focused(font(), '18', null)
-  picker().focus()
-  await act(async () => picker().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' })))
-  expect(menu()).not.toBeNull()
-  await act(async () => menu()!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
-  await pause()
-  expect(menu()).toBeNull()
-  expect(document.activeElement).toBe(picker())
+  for (const key of ['ArrowDown', 'Enter', ' ']) {
+    picker().focus()
+    await act(async () => picker().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key })))
+    expect(menu()).not.toBeNull()
+    await act(async () => menu()!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
+    await pause()
+    expect(menu()).toBeNull()
+    expect(document.activeElement).toBe(picker())
+  }
   expect(close).not.toHaveBeenCalled()
 })
 
