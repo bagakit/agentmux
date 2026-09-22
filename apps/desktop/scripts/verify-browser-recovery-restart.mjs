@@ -30,6 +30,7 @@ const launchedProbes = new Set()
 const deadline = Date.now() + 120_000
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
 const downloadCase = process.argv.includes('--case-download')
+const uploadCase = process.argv.includes('--case-upload')
 const demonstrationCase = process.argv.includes('--case-demonstration')
 const overlayCase = process.argv.includes('--case-overlay')
 const taskAssetsCase = process.argv.includes('--case-task-assets')
@@ -41,10 +42,11 @@ assert.ok(!observeStageDelivery || structuredCase, 'Stage delivery observation b
 assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belongs to one private structured-output diagnostic')
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
+if(uploadCase)receipt.case='upload'
 if(demonstrationCase)receipt.case='demonstration'
 if(overlayCase)receipt.case='overlay'
 if(taskAssetsCase)receipt.case='task-assets'
@@ -102,7 +104,9 @@ async function identity() {
     'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/main/browser-step-evidence.ts',
     'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/store.ts',
     'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/lib/browser-state.ts',
-    'apps/desktop/src/renderer/src/lib/browser-stage-geometry.ts', 'apps/desktop/package.json', 'pnpm-lock.yaml',
+    'apps/desktop/src/renderer/src/hooks/useBrowserAnnotationMarkers.ts',
+    'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx',
+    'apps/desktop/src/renderer/src/lib/browser-stage-geometry.ts', 'apps/desktop/package.json', 'packages/core/package.json', 'pnpm-lock.yaml',
     'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx', 'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
     'apps/desktop/src/renderer/src/components/BrowserStepEvidence.tsx', 'apps/desktop/src/renderer/src/styles/browser-step-evidence.css',
     'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
@@ -122,12 +126,19 @@ async function identity() {
       'apps/desktop/scripts/verify-browser-task-assets.mjs'] : []),
     ...(overlayCase ? ['apps/desktop/src/main/native-overlay-surfaces.ts','apps/desktop/src/shared/native-overlay.ts',
       'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts','apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts',
+      'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
+      'apps/desktop/src/renderer/src/components/browser-screenshot/canvas-render.ts',
+      'apps/desktop/src/renderer/src/components/browser-screenshot/drawing-model.ts',
       'apps/desktop/scripts/browser-overlay-probe-scenario.mjs','apps/desktop/scripts/browser-native-chrome-stage-observer.mjs',
       'apps/desktop/scripts/verify-browser-overlay-visibility.mjs'] : []),
     ...(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1' ? ['apps/desktop/scripts/browser-overlay-paint-observer.mjs'] : []),
     ...(downloadCase ? ['apps/desktop/src/main/browser-downloads.ts','apps/desktop/src/shared/browser-download.ts',
       'apps/desktop/src/main/workspace-files.ts','apps/desktop/src/shared/workspace-file-bytes.ts',
       'packages/core/src/browser-page-capability.ts','apps/desktop/scripts/verify-browser-files.mjs'] : []),
+    ...(uploadCase ? ['apps/desktop/src/main/browser-uploads.ts','apps/desktop/src/shared/browser-upload.ts',
+      'apps/desktop/src/main/workspace-files.ts','apps/desktop/src/main/browser-page-dispatch.ts',
+      'apps/desktop/src/shared/workspace-file-bytes.ts','packages/core/src/browser-page-capability.ts',
+      'packages/core/src/control-host.ts','apps/desktop/scripts/verify-browser-files.mjs'] : []),
     ...(browserToolsCase ? ['apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx',
       'apps/desktop/src/renderer/src/components/BrowserProfilesPanel.tsx','apps/desktop/src/renderer/src/lib/browser-annotations.ts',
       'apps/desktop/src/main/browser-profile-store.ts','apps/desktop/src/main/browser-profile-manager.ts',
@@ -545,7 +556,7 @@ async function reviewDownloads(probe,browserId) {
   const results=[]
   for(const [name,path] of [['Download attribute','attribute.bin'],['Navigation attachment','attachment.bin']]){
     const code=`const page=await snapshot({scope:'page',maxNodes:40});const targets=page.nodes.filter(node=>node.role==='link'&&node.name===${JSON.stringify(name)});if(targets.length!==1)throw new Error('Expected one actual download ref');return {observed:{url:page.url,navigationId:page.navigationId},download:await download(targets[0].ref,{path:${JSON.stringify(path)},timeoutMs:5000})};`
-    const report=await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`)
+    const report=name==='Navigation attachment'?await runBrowser(browserId,code):await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`)
     assert.equal(report.outcome.kind,'completed',JSON.stringify(report.outcome))
     const transfer=report.result.download, reference=transfer.reference
     assert.equal(transfer.status,'completed');assert.ok(reference)
@@ -562,7 +573,7 @@ async function reviewDownloads(probe,browserId) {
     await resize(probe,1440,900)
     await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
     const readCode=`return await readDownload(${JSON.stringify(reference)},{offset:1,maxBytes:4});`
-    const read=await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(readCode)},${JSON.stringify(operator)})`)
+    const read=name==='Navigation attachment'?await runBrowser(browserId,readCode):await probe.cdp.evaluate(`window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(readCode)},${JSON.stringify(operator)})`)
     assert.equal(read.outcome.kind,'completed',JSON.stringify(read.outcome));assert.deepEqual(Buffer.from(read.result.data,'base64'),downloadPayload.subarray(1,5))
     assert.equal(read.result.offset,1);assert.equal(read.result.returnedBytes,4);assert.equal(read.result.totalBytes,downloadPayload.length)
     assert.deepEqual(read.result.reference,reference)
@@ -571,6 +582,47 @@ async function reviewDownloads(probe,browserId) {
   const entries=await probe.cdp.evaluate(`window.agentmux.files.readDirectory(${JSON.stringify(workspaceId)},'.')`)
   assert.ok(entries.length>0);for(const path of ['attribute.bin','attachment.bin'])assert.ok(entries.some(entry=>entry.name===path&&!entry.isDirectory))
   receipt.downloads={complete:results,workspaceEntries:entries,requests:downloadRequests,payloadSha256:digest(downloadPayload)}
+}
+
+async function reviewUploads(probe,browserId,pageUrl) {
+  phase='native-upload-filelists-through-public-control'
+  const binary=Buffer.from([0,255,128,13,10,1]),text=Buffer.from('hello')
+  await writeFile(join(workspacePath,'upload.bin'),binary);await writeFile(join(workspacePath,'second.txt'),text)
+  const fileLists=()=>nativePageScript(probe,`(async()=>{const roots=Array.from(document.querySelectorAll('input[type=file]')),frame=document.querySelector('iframe[title="Upload frame"]'),embedded=Array.from(frame?.contentDocument?.querySelectorAll('input[type=file]')??[]);if(roots.length!==2||embedded.length!==1)throw new Error('Expected two root and one embedded native file inputs');return await Promise.all([...roots,...embedded].map(async input=>({name:input.getAttribute('aria-label'),files:await Promise.all(Array.from(input.files).map(async file=>({name:file.name,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer()))})))})))})()`,pageUrl)
+  const reports=[]
+  for(const [label,paths] of [['Single file',['upload.bin']],['Multiple files',['upload.bin','second.txt']],['Frame file',['upload.bin']]]) {
+    const code=`const page=await snapshot({scope:'page',maxNodes:80});const targets=page.nodes.filter(node=>node.name===${JSON.stringify(label)});if(targets.length!==1)throw new Error('Expected exactly one observed file input');return {page:{url:page.url,navigationId:page.navigationId},targetFrameId:targets[0].frameId,upload:await uploadFiles(targets[0].ref,${JSON.stringify(paths)})};`
+    const report=await runBrowser(browserId,code);assert.equal(report.outcome.kind,'completed',JSON.stringify(report.outcome))
+    const upload=report.result.upload
+    assert.equal(upload.kind,'browser-upload-files');assert.equal(upload.workspaceId,workspaceId);assert.equal(upload.browserId,browserId)
+    assert.equal(upload.operationId,report.runOperation.id);assert.equal(upload.navigationId,report.result.page.navigationId)
+    assert.deepEqual(upload.files.map(file=>file.path),paths);assert.equal(upload.byteLength,paths.length===1?binary.length:binary.length+text.length)
+    assert.ok(report.result.targetFrameId,'The public snapshot must observe the actual target frame')
+    if(label==='Frame file')assert.notEqual(report.result.targetFrameId,reports[0].report.result.targetFrameId,'The embedded upload must use its own actual frame identity')
+    assert.ok(!JSON.stringify(upload).includes(workspacePath),'The public upload receipt must not expose native absolute paths')
+    const lists=await fileLists();assert.equal(lists.length,3)
+    const selected=lists.find(input=>input.name===label);assert.ok(selected)
+    assert.deepEqual(selected.files,paths.map(path=>({name:path,size:path==='upload.bin'?binary.length:text.length,bytes:Array.from(path==='upload.bin'?binary:text)})))
+    reports.push({label,report,fileLists:lists})
+  }
+  await writeFile(join(workspacePath,'upload.bin'),'changed after native assignment')
+  const retained=await fileLists();assert.equal(retained.length,3)
+  for(const input of retained)assert.deepEqual(input.files[0].bytes,Array.from(binary),'The native FileList must retain the pinned original bytes')
+  await openActivityTimeline(probe)
+  await waitFor('the nonempty actual upload evidence step',()=>probe.cdp.evaluate('document.querySelectorAll(".browser-rsi-timeline__step").length>0'))
+  await click(probe.cdp,`${selectors('.browser-rsi-timeline__step > button')}.slice(-1)`)
+  await capture(probe,'normal-upload-evidence','operations',pageUrl)
+  await click(probe.cdp,selectors('[aria-label="Close browser activity timeline"]'))
+  receipt.uploads={reports,retainedFileLists:retained,physicalDeviceTested:false}
+}
+
+async function recoverUploads(probe,browserId,pageUrl) {
+  const lists=await nativePageScript(probe,'[...document.querySelectorAll("input[type=file]"),...(document.querySelector(\'iframe[title="Upload frame"]\')?.contentDocument?.querySelectorAll("input[type=file]")??[])].map(input=>({name:input.getAttribute("aria-label"),count:input.files.length}))',pageUrl)
+  assert.deepEqual(lists,[{name:'Single file',count:0},{name:'Multiple files',count:0},{name:'Frame file',count:0}],'Ordinary restart must not replay uploads into root or embedded documents')
+  const operations=await probe.cdp.evaluate('window.agentmux.browser.listOperationHistory()')
+  assert.ok(operations.length>0)
+  for(const item of receipt.uploads.reports)assert.ok(operations.some(operation=>operation.id===item.report.runOperation.id&&operation.browserId===browserId),'The original upload observation must remain in the durable journal')
+  receipt.uploads.restartedFileLists=lists;receipt.uploads.complete=true
 }
 async function startUnfinishedDownload(probe,browserId) {
   phase='native-unfinished-download-before-ordinary-quit'
@@ -625,6 +677,9 @@ try {
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
+    if(uploadCase&&request.url==='/upload-frame'){
+      response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><input type="file" aria-label="Frame file">');return
+    }
     if(downloadCase&&['/attribute.bin','/attachment.bin','/unfinished.bin'].includes(request.url)){
       downloadRequests.push({path:request.url,at:Date.now()})
       const headers={'content-type':'text/plain','content-length':request.url==='/unfinished.bin'?1024:downloadPayload.length,
@@ -634,7 +689,7 @@ try {
       response.end(downloadPayload);return
     }
     response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1>'+
-      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
+      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':uploadCase?'<input type="file" aria-label="Single file"><input type="file" multiple aria-label="Multiple files"><iframe title="Upload frame" src="/upload-frame"></iframe>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
   })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
@@ -650,6 +705,7 @@ try {
   await observeNativeFrameReady(first,urls[0])
   receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
   if(downloadCase)await reviewDownloads(first,initial.surface.browserId)
+  else if(uploadCase)await reviewUploads(first,initial.surface.browserId,urls[0])
   else if(browserTools)await browserTools.reviewBrowserTools(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(structured)await structured.reviewStructuredOutput(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(taskAssets)await taskAssets.reviewTaskAssets(scenarioContext(first,initial.surface.browserId,urls[0]))
@@ -675,6 +731,7 @@ try {
   assert.equal(ensure.id,expected.regions[0].browserId);assert.equal(ensure.url,urls[0]);assert.equal(ensure.error,null)
   const pagesAfterEnsure=await nativePages(second,urls);assert.deepEqual(pagesAfterEnsure,restoredPages)
   if(downloadCase)await recoverDownloads(second,expected.regions[0].browserId)
+  if(uploadCase)await recoverUploads(second,expected.regions[0].browserId,urls[0])
   if(demonstrationCase)await demonstration.recoverDemonstration(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(taskAssets)await taskAssets.recoverTaskAssets(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(browserTools)await browserTools.recoverBrowserTools(scenarioContext(second,expected.regions[0].browserId,urls[0]))
@@ -701,6 +758,6 @@ try {
 }
 receipt.passed=!failure&&receipt.completeGate;receipt.failure=failure??null
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
-await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
+await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
 process.stdout.write(JSON.stringify({passed:receipt.passed,completeGate:receipt.completeGate,failure:receipt.failure,cleanup:receipt.cleanup})+'\n')
 process.exitCode=receipt.passed?0:1
