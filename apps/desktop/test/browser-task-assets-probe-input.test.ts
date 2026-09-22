@@ -50,7 +50,7 @@ function fixture(mode: Mode = 'trusted', options: Option[] = [
         typed += input.text ?? ''
         const matches = options.filter(option => !option.disabled && option.label.toLowerCase().startsWith(typed.toLowerCase()))
         if (matches.length !== 1) return
-        select.value = matches[0].value
+        select.value = matches[0]!.value
         emit('input')
         if (mode !== 'no-change') emit('change', undefined, mode !== 'untrusted-change')
         // A prior trusted target change is insufficient if the current control
@@ -113,4 +113,22 @@ it('bounds real Tab navigation and rejects an unreachable control', async () => 
   await expect(f.select()).rejects.toThrow(/navigation/i)
   expect(f.inputs.length).toBe(160)
   expect(f.inputs.filter(input => input.type === 'char')).toEqual([])
+})
+
+it('parses nonempty actual completion-observation programs without assigning the parameter or changing focus', () => {
+  const start = source.indexOf("ctx.setPhase('task-assets-temporary-secret-disposal')")
+  const end = source.indexOf('receipt.taskAssets.complete = true', start)
+  expect(start).toBeGreaterThan(-1)
+  expect(end).toBeGreaterThan(start)
+  const completion = source.slice(start, end)
+  expect(completion).toContain('Saving the inspection draft cannot change the completed v1 cursor')
+  const templates = [...completion.matchAll(/probe\.cdp\.evaluate\((`[^`]*`)\)/g)]
+  expect(templates).toHaveLength(2)
+  const context = createContext({ quoted: JSON.stringify, taskSurface: '[aria-label="Editable Browser task asset"]' })
+  for (const [_, template] of templates) {
+    const expression = runInContext(template!, context) as string
+    expect(expression.length).toBeGreaterThan(0)
+    expect(() => new Function(expression)).not.toThrow()
+    expect(expression).not.toMatch(/\.(?:value|selectedIndex)\s*=(?!=)|\.focus\s*\(|dispatchEvent\s*\(/)
+  }
 })
