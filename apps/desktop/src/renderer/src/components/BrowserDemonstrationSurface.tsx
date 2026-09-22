@@ -13,6 +13,11 @@ type Props = {
 /** Draft review lives in the Browser's existing details surface; it never runs recorded actions. */
 export function BrowserDemonstrationSurface({ draft, warning, busy = false, onStart, onStop }: Props) {
   const recording = draft?.status === 'recording'
+  if (!draft) return <section className="browser-demonstration-entry" aria-label="Human demonstration draft">
+    <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
+      aria-label="Start recording demonstration" onClick={onStart}><Circle size={11} aria-hidden="true" />Record demonstration</button>
+    {warning ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{warning}</p> : null}
+  </section>
   return <section className="browser-rsi-replay" aria-label="Human demonstration draft" data-demonstration-id={draft?.id}>
     <header className="browser-rsi-replay__header">
       <strong>Demonstration</strong>

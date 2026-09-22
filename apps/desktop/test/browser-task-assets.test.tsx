@@ -289,6 +289,33 @@ async function mount(asset: BrowserTaskAsset | null, overrides: Record<string, u
   return { host, handlers, close: async () => { await act(async () => root.unmount()); host.remove() } }
 }
 describe('BrowserTaskAssetEditor', () => {
+  it('mounts no unused asset panel and keeps a warning visible without inventing an importable draft', async () => {
+    const empty = await mount(null, { recording: null })
+    try {
+      expect(empty.host.childElementCount).toBe(0)
+      expect(empty.handlers.onImport).not.toHaveBeenCalled()
+    } finally { await empty.close() }
+    const failed = await mount(null, { recording: null, warning: 'Saved task data could not be restored; live Browser remains available.' })
+    try {
+      expect(failed.host.querySelector('[role="status"]')?.textContent).toContain('could not be restored')
+      expect(failed.host.querySelector('header')).toBeNull()
+      expect(failed.host.querySelector('button')).toBeNull()
+    } finally { await failed.close() }
+  })
+  it('keeps the compact import entry disabled during recording or busy work, while retaining its warning', async () => {
+    for (const overrides of [{ recording: { ...recording(), status: 'recording' } }, { busy: true }]) {
+      const m = await mount(null, { ...overrides, warning: 'Live draft retained; storage unavailable.' })
+      try {
+        expect(m.host.querySelector('header')).toBeNull()
+        expect(m.host.querySelector<HTMLButtonElement>('button')?.textContent).toBe('Edit demonstration')
+        expect(m.host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
+        expect(m.host.querySelector('[role="status"]')?.textContent).toContain('Live draft retained')
+        await act(async () => m.host.querySelector<HTMLButtonElement>('button')!.click())
+        expect(m.handlers.onImport).not.toHaveBeenCalled()
+        expect(m.handlers.onRun).not.toHaveBeenCalled()
+      } finally { await m.close() }
+    }
+  })
   it('renders nonempty draft and immutable version preview, keeps deleted steps absent and shows checkpoint progress', async () => {
     const s = setup(), asset = await saved(s.assets), m = await mount(asset, { run: { id: 'run-1', assetId: asset.id, version: 1, browserId: 'browser-1', nextStep: 1, status: 'waiting-human', operationIds: ['op-1'], pendingCheckpointId: 'cp-1', warning: 'Inspect before returning control', startedAt: 1, updatedAt: 2 } })
     try {
