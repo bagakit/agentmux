@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useSyncExternalStore } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core'
+import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
 import { useAppStore } from '../store'
