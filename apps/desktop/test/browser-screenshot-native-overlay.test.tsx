@@ -98,3 +98,87 @@ it('the source tooltip surface is opaque and accepted by the same collector', ()
   overlays = observeNativeOverlayRegions(document.body, () => 1, publish)
   expect(publish.mock.calls[0]).toEqual([[{ id: 'chrome-1', bounds: { x: 20, y: 40, width: 248, height: 38 }, radius: 9 }], undefined])
 })
+
+async function mountGestureEditor() {
+  prepareCss()
+  const container = document.createElement('div'); container.id = 'root'; document.body.append(container)
+  const anchor = document.createElement('div'); anchor.dataset.nativeBrowserStage = ''; container.append(anchor)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect(0, 0, 400, 300))
+  const complete = vi.fn(), cancel = vi.fn()
+  const mount = document.createElement('div'); container.append(mount); root = createRoot(mount)
+  await act(async () => root!.render(<ScreenshotEditor anchor={anchor} image={{ mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }} busy={false} onCancel={cancel} onComplete={complete} />))
+  const editor = document.querySelector<HTMLElement>('[data-overlay-host] .browser-screenshot-editor')!
+  expect(editor).not.toBeNull()
+  await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load')))
+  const canvas = editor.querySelector('canvas')!
+  canvas.setPointerCapture = vi.fn()
+  const copy = [...editor.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Copy PNG'))!
+  expect(copy.disabled).toBe(false)
+  const pointer = (type: string, x: number, y: number) => canvas.dispatchEvent(new PointerEvent(type, {
+    bubbles: true, button: 0, buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1,
+    pointerId: 1, clientX: x, clientY: y
+  }))
+  const button = (name: string) => {
+    const found = editor.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!
+    expect(found).not.toBeNull(); return found
+  }
+  return { complete, copy, pointer, button }
+}
+
+it('commits all continuous moves before pointer up renders, including shape endpoints and pointer cancel', async () => {
+  const { complete, copy, pointer, button } = await mountGestureEditor()
+  for (const [label, kind] of [['Pen', 'pen'], ['Highlighter', 'highlight'], ['Arrow', 'arrow'], ['Rectangle', 'rect'], ['Ellipse', 'ellipse']] as const) {
+    await act(async () => button(label).click())
+    await act(async () => pointer('pointerdown', 25, 30)) // The start has rendered.
+    await act(async () => {
+      pointer('pointermove', 60, 35)
+      pointer('pointermove', 100, 40)
+      pointer('pointermove', 150, 45)
+      pointer(kind === 'highlight' ? 'pointercancel' : 'pointerup', 150, 45)
+    }) // No render is inserted between the continuous movement and its ending event.
+    await act(async () => copy.click())
+    const expected = kind === 'pen' || kind === 'highlight'
+      ? { kind, points: [{ x: 25, y: 30 }, { x: 60, y: 35 }, { x: 100, y: 40 }, { x: 150, y: 45 }] }
+      : { kind, from: { x: 25, y: 30 }, to: { x: 150, y: 45 } }
+    expect(complete.mock.lastCall![0].shapes).toEqual([expect.objectContaining(expected)])
+    // Finishing twice is not a second shape, and the existing real undo/redo handlers retain it.
+    await act(async () => pointer('pointerup', 150, 45))
+    await act(async () => copy.click())
+    expect(complete.mock.lastCall![0].shapes).toEqual([expect.objectContaining(expected)])
+    expect(button('Undo').disabled).toBe(false)
+    await act(async () => button('Undo').click())
+    await act(async () => copy.click())
+    expect(complete.mock.lastCall![0].shapes).toEqual([])
+    expect(button('Redo').disabled).toBe(false)
+    await act(async () => button('Redo').click())
+    await act(async () => copy.click())
+    expect(complete.mock.lastCall![0].shapes).toEqual([expect.objectContaining(expected)])
+    await act(async () => button('Clear all').click())
+  }
+})
+
+it('retains a gesture whose down, moves and up all precede the next render', async () => {
+  const { complete, copy, pointer } = await mountGestureEditor()
+  await act(async () => {
+    pointer('pointerdown', 25, 30)
+    pointer('pointermove', 100, 40)
+    pointer('pointerup', 100, 40)
+  })
+  await act(async () => copy.click())
+  expect(complete.mock.lastCall![0].shapes).toEqual([expect.objectContaining({ kind: 'pen', points: [{ x: 25, y: 30 }, { x: 100, y: 40 }] })])
+})
+
+it('clearing the document also ends a pending gesture before its later pointer up', async () => {
+  const { complete, copy, pointer, button } = await mountGestureEditor()
+  await act(async () => pointer('pointerdown', 10, 20))
+  await act(async () => pointer('pointerup', 10, 20))
+  expect(button('Clear all').disabled).toBe(false)
+  await act(async () => pointer('pointerdown', 50, 60))
+  await act(async () => {
+    pointer('pointermove', 100, 80)
+    button('Clear all').click()
+    pointer('pointerup', 100, 80)
+  })
+  await act(async () => copy.click())
+  expect(complete.mock.lastCall![0].shapes).toEqual([])
+})

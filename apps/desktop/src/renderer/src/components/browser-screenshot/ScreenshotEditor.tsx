@@ -84,6 +84,9 @@ export function ScreenshotEditor({
   const viewportRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Continuous pointer events can finish before React renders their queued preview.
+  // The current gesture owns input; inProgress is only its canvas projection.
+  const currentGestureRef = useRef<ScreenshotShape | null>(null)
   const committedLayerRef = useRef<HTMLCanvasElement | null>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') {
@@ -204,25 +207,28 @@ export function ScreenshotEditor({
     }
     event.currentTarget.setPointerCapture(event.pointerId)
     const id = crypto.randomUUID()
-    setInProgress(tool === 'pen' || tool === 'highlight'
+    const shape: ScreenshotShape = tool === 'pen' || tool === 'highlight'
       ? { id, kind: tool, color, width, points: [at] }
-      : { id, kind: tool, color, width, from: at, to: at })
+      : { id, kind: tool, color, width, from: at, to: at }
+    currentGestureRef.current = shape
+    setInProgress(shape)
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLCanvasElement>): void {
+    const current = currentGestureRef.current
+    if (!current || current.kind === 'text') return
     const to = point(event)
-    setInProgress((current) => {
-      if (!current) return current
-      if (current.kind === 'pen' || current.kind === 'highlight') {
-        return { ...current, points: [...current.points, to] }
-      }
-      if (current.kind === 'text') return current
-      return { ...current, to }
-    })
+    const next = current.kind === 'pen' || current.kind === 'highlight'
+      ? { ...current, points: [...current.points, to] }
+      : { ...current, to }
+    currentGestureRef.current = next
+    setInProgress(next)
   }
 
   function onPointerUp(): void {
-    if (inProgress) setDocumentState((current) => commitShape(current, inProgress))
+    const finished = currentGestureRef.current
+    currentGestureRef.current = null
+    if (finished) setDocumentState((current) => commitShape(current, finished))
     setInProgress(null)
   }
 
@@ -360,6 +366,7 @@ export function ScreenshotEditor({
             aria-label="Clear all"
             disabled={busy || documentState.shapes.length === 0}
             onClick={() => {
+              currentGestureRef.current = null
               setPendingText(null)
               setInProgress(null)
               setDocumentState((current) => clearShapes(current))
