@@ -170,6 +170,10 @@ describe('Kimi provider', () => {
       // 字段断言会红，但「到底会不会去装」没人守。
       expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: '/tmp/agentmux-kimi', env: {} }) ?? null)).toBeNull()
     })
+
+    it('暴露原生会话历史读取接口', () => {
+      expect(kimi.readSessionHistoryPage).toBeTypeOf('function')
+    })
   })
 
   describe('两种收尾都算 done，缺一条就卡在 working', () => {

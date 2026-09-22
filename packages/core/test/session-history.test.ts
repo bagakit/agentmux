@@ -40,6 +40,7 @@ describe('public native Session history pages', () => {
     expect(providers.get('codex').readSessionHistoryPage).toBeTypeOf('function')
     expect(providers.get('claude').readSessionHistoryPage).toBeTypeOf('function')
     expect(providers.get('pi').readSessionHistoryPage).toBeTypeOf('function')
+    expect(providers.get('kimi').readSessionHistoryPage).toBeTypeOf('function')
     expect(providers.get('traex').readSessionHistoryPage).toBeUndefined()
   })
 
