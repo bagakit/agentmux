@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { captureOsWindow } from './browser-window-visual-capture.mjs'
 import { installNativeBoundsObserver } from './browser-native-bounds-observer.mjs'
+import { createNativeRestartLifecycleObserver } from './browser-native-restart-lifecycle-observer.mjs'
 import { observeOriginalStageDelivery } from './browser-stage-delivery-observer.mjs'
 
 // Actual product Main/Renderer/Browser owners, ordinary quit and the same private userData.
@@ -36,10 +37,13 @@ const overlayCase = process.argv.includes('--case-overlay')
 const taskAssetsCase = process.argv.includes('--case-task-assets')
 const browserToolsCase = process.argv.includes('--case-browser-tools')
 const structuredCase = process.argv.includes('--case-structured-output')
+const observeRestartLifecycle = process.env.AGENTMUX_OBSERVE_RESTART_LIFECYCLE === '1'
+assert.ok(!observeRestartLifecycle || overlayCase, 'Restart lifecycle observation belongs to the private overlay recovery case')
 const observeStageDelivery = process.argv.includes('--observe-stage-delivery')
 const observeNativeBounds = observeStageDelivery || process.argv.includes('--observe-native-bounds')
 assert.ok(!observeStageDelivery || structuredCase, 'Stage delivery observation belongs to one private structured-output diagnostic')
 assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belongs to one private structured-output diagnostic')
+if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
 assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
@@ -114,6 +118,7 @@ async function identity() {
     'apps/desktop/scripts/verify-browser-recovery-restart.mjs',
     'apps/desktop/scripts/browser-window-visual-capture.mjs',
     ...(observeNativeBounds ? ['apps/desktop/scripts/browser-native-bounds-observer.mjs'] : []),
+    ...(observeRestartLifecycle ? ['apps/desktop/scripts/browser-native-restart-lifecycle-observer.mjs'] : []),
     ...(observeStageDelivery ? ['apps/desktop/scripts/browser-stage-delivery-observer.mjs'] : []),
     ...(demonstrationCase || taskAssetsCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
       'apps/desktop/src/main/browser-semantic-target.ts','apps/desktop/src/shared/browser-demonstration.ts','apps/desktop/src/main/browser-cdp-session.ts',
@@ -215,6 +220,17 @@ async function launch(label) {
       }); return true })()`, returnByValue: true
     })
     assert.equal(observed.exceptionDetails, undefined, 'Private passive observer bootstrap must install without replacing any Browser fact')
+  }
+  if (observeRestartLifecycle && label === 'second') {
+    const observation = await main.call('Debugger.evaluateOnCallFrame', {
+      callFrameId: paused.callFrames[0].callFrameId,
+      expression: `(() => { const {app,View,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+        globalThis.__agentMuxPrivateRestartObserver=(${createNativeRestartLifecycleObserver.toString()})({app,View,BrowserWindow,enabled:true});
+        return globalThis.__agentMuxPrivateRestartObserver.drain(); })()`, returnByValue: true
+    })
+    assert.equal(observation.exceptionDetails, undefined, 'Only the imports-complete private second process installs the passive observer')
+    probe.restartLifecycleObserver = true
+    receipt.restartLifecycleBootstrap = { pid: child.pid, label, ...observation.result.value }
   }
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
   await main.call('Debugger.resume')
@@ -318,6 +334,17 @@ async function normalQuit(probe) {
         receipt.boundsStages[probe.child.pid] = {installed:false,error:String(error.message).slice(0,512)}
       }
     }
+  }
+  if (probe.restartLifecycleObserver) {
+    receipt.restartLifecycle ??= {}
+    try {
+      receipt.restartLifecycle[probe.child.pid] = await probe.main.evaluate(`(() => {
+        const observer=globalThis.__agentMuxPrivateRestartObserver;
+        if(!observer)return {installed:false,error:'Private restart observer was unavailable'};
+        const result=observer.restore();delete globalThis.__agentMuxPrivateRestartObserver;return result;
+      })()`)
+    } catch (error) { receipt.restartLifecycle[probe.child.pid] = { installed: false, error: String(error.message).slice(0,512) } }
+    probe.restartLifecycleObserver = false
   }
   let replyFailure
   try { await probe.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app.quit()` ) }
