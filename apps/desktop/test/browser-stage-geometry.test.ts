@@ -14,12 +14,14 @@ vi.stubGlobal('ResizeObserver', class {
   observe = resize.observe
   disconnect = resize.disconnect
 })
-afterEach(() => { observation.update = null; resize.callback = null; vi.clearAllMocks() })
+afterEach(() => { observation.update = null; resize.callback = null; document.body.replaceChildren(); vi.clearAllMocks() })
 
 describe('native Browser stage position observation', () => {
   it('sends a position-only movement through the existing bounds owner and releases observation', async () => {
     const stage = document.createElement('div')
     let rect = { x: 510, y: 74, width: 242, height: 794 }
+    stage.getBoundingClientRect = () => new DOMRect(rect.x, rect.y, rect.width, rect.height)
+    document.body.append(stage)
     const apply = vi.fn(async () => {})
     const sync = new LatestBrowserBoundsSynchronizer(apply, vi.fn())
     const update = () => sync.observe(rect)
