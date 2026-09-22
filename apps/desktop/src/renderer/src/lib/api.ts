@@ -683,6 +683,9 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   ui: {
+    onNativeBrowserPointer: () => () => {},
+    publishNativeOverlays: async () => ({ projected: 0, capturedPixels: 0 }),
+    onNativeOverlayWarning: () => () => {},
     requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },

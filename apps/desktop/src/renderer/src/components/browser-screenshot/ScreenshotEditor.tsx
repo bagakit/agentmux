@@ -14,8 +14,11 @@ import {
   Undo2,
   X
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { BrowserPng } from '../../../../shared/contracts'
+import { WindowOverlayPortal } from '../WindowOverlayHost'
+import { observeBrowserStageGeometry } from '../../lib/browser-stage-geometry'
+import { hasPositiveBrowserStageGeometry } from '../../lib/browser-bounds-sync'
 import { renderCommittedLayer, renderScreenshotScene } from './canvas-render'
 import {
   canRedo,
@@ -64,16 +67,19 @@ export type ScreenshotCompleteInput = {
 }
 
 export function ScreenshotEditor({
+  anchor,
   image,
   busy,
   onCancel,
   onComplete
 }: {
+  anchor: HTMLElement | null
   image: BrowserPng
   busy: boolean
   onCancel(): void
   onComplete(input: ScreenshotCompleteInput): void
 }) {
+  const [bounds, setBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -92,6 +98,17 @@ export function ScreenshotEditor({
   const [color, setColor] = useState(DEFAULT_SCREENSHOT_COLOR)
   const [width, setWidth] = useState(DEFAULT_SCREENSHOT_WIDTH)
   const [fontSize, setFontSize] = useState(DEFAULT_SCREENSHOT_FONT_SIZE)
+
+  useLayoutEffect(() => {
+    if (!anchor) return
+    const update = (): void => {
+      const rect = anchor.getBoundingClientRect()
+      setBounds(hasPositiveBrowserStageGeometry(rect)
+        ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        : null)
+    }
+    return observeBrowserStageGeometry(anchor, update, true)
+  }, [anchor])
 
   useEffect(() => {
     const container = containerRef.current
@@ -118,7 +135,7 @@ export function ScreenshotEditor({
       observer.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [image.height, image.width])
+  }, [image.height, image.width, bounds?.width, bounds?.height])
 
   useEffect(() => {
     const committed = committedLayerRef.current
@@ -237,8 +254,11 @@ export function ScreenshotEditor({
     })
   }
 
+  if (!bounds) return null
   return (
-    <div ref={containerRef} className="browser-screenshot-editor" aria-label="Screenshot editor">
+    <WindowOverlayPortal layer="dialog">
+    <div ref={containerRef} className="browser-screenshot-editor" role="dialog" data-state="open" aria-label="Screenshot editor"
+      style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height }}>
       <div
         ref={viewportRef}
         className="browser-screenshot-editor__viewport"
@@ -357,5 +377,6 @@ export function ScreenshotEditor({
         </div>
       </div>
     </div>
+    </WindowOverlayPortal>
   )
 }
