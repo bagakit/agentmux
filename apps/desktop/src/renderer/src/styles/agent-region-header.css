@@ -6,7 +6,9 @@
 .agent-region-header-home { position: absolute; top: 0; right: 0; z-index: 41; width: max-content; max-width: 100%; pointer-events: none; }
 .agent-region-header-home > .agent-region-header-host { pointer-events: none; }
 .agent-region-header { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0; min-height: 0; padding: 0 var(--region-close-clearance, var(--sp-3)) 0 var(--sp-3); background: transparent; }
-.agent-region-header-home .agent-region-header { align-items: flex-start; pointer-events: none; }
+.agent-region-header-home .agent-region-header { position: relative; align-items: flex-start; pointer-events: none; }
+/* The independently themed Terminal need not match the UI palette: back only the quiet glyph band. */
+.agent-region-header-home .agent-region-header::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 15px; background: var(--surface-0); pointer-events: none; }
 .agent-region-header-home :is(.agent-region-header__name, .agent-region-header__mode, .agent-region-header__more) { pointer-events: auto; }
 .agent-region-header-home .agent-region-header__name, .agent-region-header-home .agent-region-header__mode { line-height: 14px; }
 .agent-region-header-home .agent-region-header__more { align-items: flex-start; }

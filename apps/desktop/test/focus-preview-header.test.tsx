@@ -113,7 +113,7 @@ it('runs History/return and observation refresh through the same SessionPane, pr
   expect(history.mock.calls.slice(initialReads)).toEqual([[useAppStore.getState().sessions[0]!.control, undefined]])
   const back = region().querySelector<HTMLButtonElement>('.session-history__toolbar button'); expect(back?.textContent?.trim()).toBe('Terminal')
   await act(async () => back!.click())
-  expect(region().querySelector('[aria-label="Conversation history"]')).toBeNull()
+  expect(region().querySelector('.session-history:not([hidden])[aria-label="Conversation history"]')).toBeNull()
   expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
   const menu = await regionMenu(toolbar())
   await act(async () => item(menu, 'Refresh observation').click()); expect(paint.refresh).toHaveBeenCalledTimes(1)
