@@ -130,6 +130,7 @@ async function identity() {
       'apps/desktop/src/renderer/src/components/browser-screenshot/canvas-render.ts',
       'apps/desktop/src/renderer/src/components/browser-screenshot/drawing-model.ts',
       'apps/desktop/scripts/browser-overlay-probe-scenario.mjs','apps/desktop/scripts/browser-native-chrome-stage-observer.mjs',
+      'apps/desktop/scripts/browser-native-page-paint-diagnostic.mjs',
       'apps/desktop/scripts/verify-browser-overlay-visibility.mjs'] : []),
     ...(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1' ? ['apps/desktop/scripts/browser-overlay-paint-observer.mjs'] : []),
     ...(downloadCase ? ['apps/desktop/src/main/browser-downloads.ts','apps/desktop/src/shared/browser-download.ts',
