@@ -616,6 +616,37 @@ export function BrowserPane({
   // operation after the user selects another record; the timeline and warning must share one identity.
   const timelineWarning = timelineOperation?.id === tab.activity?.operation?.id ? tab.activity?.warning : undefined
 
+  const selectElementDisabled = tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || elementSelection !== null
+  const screenshotDisabled = tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || selectionBusy || elementSelection !== null
+  const pageToolDisabled = tab.url === 'about:blank' || busy
+  const selectElement = () => selectionBusy ? cancelElementSelection() : void beginElementSelection()
+  const openDevTools = () => void runCommand(async () => await api.browser.openDevTools(tab.browserId))
+  const saveBookmark = () => void runCommand(async () => {
+    await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
+  })
+  const viewBookmarkSource = () => void runCommand(async () => {
+    const origin = tab.bookmarkOrigin
+    if (!origin || origin.binary) return
+    await openFile(origin.path, undefined, undefined, tab.workspaceId, true)
+  })
+  const viewportOptions = (
+    <DropdownMenu.RadioGroup
+      value={tab.viewport}
+      onValueChange={(viewport) => void run(() => api.browser.setViewport(tab.browserId, viewport as BrowserViewport))}
+    >
+      {(Object.keys(BROWSER_VIEWPORT_PRESETS) as BrowserViewport[]).map((viewport) => {
+        const size = BROWSER_VIEWPORT_PRESETS[viewport]
+        return (
+          <DropdownMenu.RadioItem key={viewport} value={viewport} className="browser-menu__item" disabled={busy}>
+            <span className="browser-menu__indicator"><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></span>
+            <span>{VIEWPORT_LABELS[viewport]}</span>
+            <small>{size ? `${size.width} × ${size.height}` : 'Fit pane'}</small>
+          </DropdownMenu.RadioItem>
+        )
+      })}
+    </DropdownMenu.RadioGroup>
+  )
+
   if (released || restoring) {
     if (restoring) {
       return (
@@ -654,9 +685,9 @@ export function BrowserPane({
         >
           <ArrowUpRight size={14} />
         </button>
-        <button type="button" aria-label="Back" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ArrowLeft size={13} /></button>
-        <button type="button" aria-label="Forward" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ArrowRight size={13} /></button>
-        <button type="button" aria-label="Reload" title="Reload" disabled={busy} onClick={() => void run(() => api.browser.reload(tab.browserId))}>
+        <button type="button" className="browser-toolbar__navigation" aria-label="Back" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ArrowLeft size={13} /></button>
+        <button type="button" className="browser-toolbar__navigation" aria-label="Forward" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ArrowRight size={13} /></button>
+        <button type="button" className="browser-toolbar__reload" aria-label="Reload" title="Reload" disabled={busy} onClick={() => void run(() => api.browser.reload(tab.browserId))}>
           {tab.loading || busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
         <label>
@@ -682,10 +713,11 @@ export function BrowserPane({
         {toolbar?.selectElement ? (
           <button
             type="button"
+            className="browser-toolbar__secondary"
             aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'}
             title={selectionBusy ? 'Cancel element selection' : 'Select an element for context or annotation'}
-            disabled={tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || elementSelection !== null}
-            onClick={() => selectionBusy ? cancelElementSelection() : void beginElementSelection()}
+            disabled={selectElementDisabled}
+            onClick={selectElement}
           >
             {selectionBusy ? <LoaderCircle className="spin" size={14} /> : <ScanSearch size={14} />}
           </button>
@@ -693,9 +725,10 @@ export function BrowserPane({
         {toolbar?.screenshot ? (
           <button
             type="button"
+            className="browser-toolbar__secondary"
             aria-label="Screenshot"
             title="Capture and mark up this viewport"
-            disabled={tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || selectionBusy || elementSelection !== null}
+            disabled={screenshotDisabled}
             onClick={() => void beginScreenshot()}
           >
             {screenshotBusy && !screenshot ? <LoaderCircle className="spin" size={14} /> : <Camera size={14} />}
@@ -704,10 +737,11 @@ export function BrowserPane({
         {toolbar?.devTools ? (
           <button
             type="button"
+            className="browser-toolbar__secondary"
             aria-label="Open DevTools"
             title="Open DevTools"
-            disabled={tab.url === 'about:blank' || busy}
-            onClick={() => void runCommand(async () => await api.browser.openDevTools(tab.browserId))}
+            disabled={pageToolDisabled}
+            onClick={openDevTools}
           >
             <Wrench size={14} />
           </button>
@@ -715,32 +749,14 @@ export function BrowserPane({
         {toolbar?.viewport ? (
           <DropdownMenu.Root onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" aria-label="Viewport" title="Viewport" disabled={busy}>
+              <button type="button" className="browser-toolbar__secondary" aria-label="Viewport" title="Viewport" disabled={busy}>
                 <Monitor size={14} />
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
                 <DropdownMenu.Label>Viewport</DropdownMenu.Label>
-                <DropdownMenu.RadioGroup
-                  value={tab.viewport}
-                  onValueChange={(viewport) => void run(() => api.browser.setViewport(tab.browserId, viewport as BrowserViewport))}
-                >
-                  {(Object.keys(BROWSER_VIEWPORT_PRESETS) as BrowserViewport[]).map((viewport) => {
-                    const size = BROWSER_VIEWPORT_PRESETS[viewport]
-                    return (
-                      <DropdownMenu.RadioItem key={viewport} value={viewport} className="browser-menu__item">
-                        <span className="browser-menu__indicator">
-                          <DropdownMenu.ItemIndicator>
-                            <Check size={12} />
-                          </DropdownMenu.ItemIndicator>
-                        </span>
-                        <span>{VIEWPORT_LABELS[viewport]}</span>
-                        <small>{size ? `${size.width} × ${size.height}` : 'Fit pane'}</small>
-                      </DropdownMenu.RadioItem>
-                    )
-                  })}
-                </DropdownMenu.RadioGroup>
+                {viewportOptions}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
@@ -748,12 +764,11 @@ export function BrowserPane({
         {toolbar?.saveBookmark ? (
           <button
             type="button"
+            className="browser-toolbar__secondary"
             aria-label="Save this page as a bookmark"
             title="Save this page as a .webloc bookmark in the workspace"
-            disabled={tab.url === 'about:blank' || busy}
-            onClick={() => void runCommand(async () => {
-              await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
-            })}
+            disabled={pageToolDisabled}
+            onClick={saveBookmark}
           >
             <Bookmark size={14} />
           </button>
@@ -761,6 +776,7 @@ export function BrowserPane({
         {tab.bookmarkOrigin ? (
           <button
             type="button"
+            className="browser-toolbar__secondary"
             aria-label="View bookmark source"
             // 二进制 plist 过 `files.read` 的 utf8 会坏，那一档不给看源码（§2.7）。表达方式按用户原话
             // 「按钮灰掉，hover 告知」——不弹框不 toast 不插警告条；这句只说清为什么这一个不行。
@@ -768,36 +784,52 @@ export function BrowserPane({
               ? "This bookmark is a binary file — its source can't be shown as text"
               : "View this bookmark's source"}
             disabled={tab.bookmarkOrigin.binary || busy}
-            onClick={() => void runCommand(async () => {
-              const origin = tab.bookmarkOrigin
-              if (!origin || origin.binary) return
-              await openFile(origin.path, undefined, undefined, tab.workspaceId, true)
-            })}
+            onClick={viewBookmarkSource}
           >
             <FileCode2 size={14} />
           </button>
         ) : null}
-        {toolbar?.more ? (
           <DropdownMenu.Root onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
+              <button type="button" className={toolbar?.more ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
                 <DropdownMenu.Label>Page</DropdownMenu.Label>
-                <DropdownMenu.Item className="browser-menu__item" onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Back" disabled={!tab.canGoBack || busy} onSelect={() => void run(() => api.browser.back(tab.browserId))}>
+                  <ArrowLeft size={12} /><span>Back</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Forward" disabled={!tab.canGoForward || busy} onSelect={() => void run(() => api.browser.forward(tab.browserId))}>
+                  <ArrowRight size={12} /><span>Forward</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" disabled={busy} onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
                   <RefreshCw size={12} /><span>Reload page</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={openOperationTimeline}>
                   <History size={12} /><span>Demonstration</span>
                 </DropdownMenu.Item>
+                {toolbar?.selectElement ? <DropdownMenu.Item className="browser-menu__item" aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'} disabled={selectElementDisabled} onSelect={selectElement}>
+                  <ScanSearch size={12} /><span>{selectionBusy ? 'Cancel element selection' : 'Select element'}</span>
+                </DropdownMenu.Item> : null}
+                {toolbar?.screenshot ? <DropdownMenu.Item className="browser-menu__item" aria-label="Screenshot" disabled={screenshotDisabled} onSelect={() => void beginScreenshot()}>
+                  <Camera size={12} /><span>Screenshot</span>
+                </DropdownMenu.Item> : null}
+                {toolbar?.devTools ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open DevTools" disabled={pageToolDisabled} onSelect={openDevTools}>
+                  <Wrench size={12} /><span>Open DevTools</span>
+                </DropdownMenu.Item> : null}
+                {toolbar?.saveBookmark ? <DropdownMenu.Item className="browser-menu__item" aria-label="Save this page as a bookmark" disabled={pageToolDisabled} onSelect={saveBookmark}>
+                  <Bookmark size={12} /><span>Save bookmark</span>
+                </DropdownMenu.Item> : null}
+                {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={viewBookmarkSource}>
+                  <FileCode2 size={12} /><span>View bookmark source</span>
+                </DropdownMenu.Item> : null}
+                {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
                 <DropdownMenu.Item className="browser-menu__item" onSelect={() => setWorkspaceTool('browser-tools')}>
                   <SlidersHorizontal size={12} /><span>Customize toolbar…</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
-        ) : null}
       </form>
       <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与轨迹是左右两块，不是上下两块。原生 WebContentsView 的矩形取自 `.browser-stage`
