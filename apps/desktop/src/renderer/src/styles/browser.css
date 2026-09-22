@@ -184,6 +184,7 @@
 .browser-trace-rail > * + * { border-top: 1px solid var(--line-soft); }
 .browser-trace-rail .browser-rsi-timeline { flex: 1 1 auto; min-height: 0; }
 .browser-trace-rail .browser-rsi-history__actions { flex: none; }
+.browser-trace-rail :is(.browser-demonstration-entry, .browser-task-asset-entry) > .browser-rsi-button { max-width: 100%; white-space: normal; }
 /* Keep edge actions clear of the overlay scrollbar at their full hit size. */
 .browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }
 
