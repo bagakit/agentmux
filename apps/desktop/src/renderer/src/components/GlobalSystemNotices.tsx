@@ -9,7 +9,7 @@ import { sessionServiceNotices } from '../lib/session-service-notices'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
-export function GlobalSystemNotices() {
+export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
   const warning = useAppStore((state) => state.environmentWarning)
   const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)
   const sessions = useAppStore((state) => state.sessions)
@@ -66,7 +66,13 @@ export function GlobalSystemNotices() {
     }
   }, action: { label: 'Retry saving', run: () => { void retryWorkbenchSave() } } }] : []
   const storageInbox = useServiceNotices('global:workbench-save', storage, true)
-  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox]
+  const chromeInbox = useServiceNotices('global:native-chrome', nativeOverlayWarning ? [{
+    id: 'floating-chrome', notice: { kind: 'process-degraded', notice: {
+      step: 'Native floating content is unavailable', mode: nativeOverlayWarning,
+      restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
+    } }
+  }] : [], true)
+  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
@@ -81,7 +87,7 @@ export function GlobalSystemNotices() {
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox])
+  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox])
   return <div className="global-system-notices">
     <button type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
