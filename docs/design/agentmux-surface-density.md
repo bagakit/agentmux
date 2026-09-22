@@ -44,7 +44,7 @@ Focus 的未知时间输入与旧窗覆盖说明沿既有紧凑输入入口和�
 
 ### Agent 输入行密度
 
-- Agent 身份位置按交互合同《Agent Region 关闭与身份入口》。Region 顶部单行基线：名字为主，Executor/Provider 与短 Session 标识弱化；长名字省略，X 与 More 的完整命中区先保留。身份/动作行给原 22px X 留出上下余量，不挤小控件、不盖原生正文；输入区仅保留原输入模式与动作密度。
+- Agent 身份的来源与行为按交互合同《Agent Region 关闭与身份入口》，顶栏呈现只按上节《Agent Region 的关闭与动作密度》执行；输入区仅保留原输入模式与动作密度，不重复名字或补一条身份 toolbar。
 - Terminal/Activity 视图切换使用一个 28px 左右的图标按钮，不使用常驻的双按钮分段控件；图标只表达下一步动作，焦点环和 tooltip 保留可发现性。
 - Scratch Topic 点击后右侧必须有内容面或明确的 loading/failed surface；不可用状态沿用同一 Region 几何，不留无文字、无动作的空白区域。
 
@@ -473,20 +473,25 @@ styles/
   source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
   workbench.css   Pane、Region、分屏、拖放
   terminal.css    终端表面与它的状态覆盖层
-  session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
   surfaces.css    Settings、New Tab、Launch、Welcome
   board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
+  goals.css       现有 Agent Goal 与任务约束表面
   focus.css       Focus 三段工作面：历史、状态、选中的 Session
   pmo-teams-topic.css  PMO Teams Topic 的悬浮窗口、标题栏和 compact 入口
   browser.css     Browser 工具与地址栏
   browser-operation-surface.css  Browser 操作轨迹与回放表面
   browser-step-evidence.css  Browser 步骤证据详情
+  browser-structured-fields.css  Browser 有限结构化字段与来源
+  browser-task-assets.css  Browser 版本资产与参数编辑
   agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点
+  agent-region-header.css  Agent Region 身份与就地操作
+  session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
   composer.css    Composer——Agent 那格底部的输入条
   activity.css    Activity 时间线、机器步骤与标尺
   activity-conversation.css  Activity 对话回合与 Markdown 内容
   conversation-tool-trace.css  原生对话工具调用与结果
+  session-history.css  持久会话记录的内联阅读
   workflow.css    Workflow 观察画廊：组件目录、章节与流程图
   conversation-avatar.css    两条对话轴共用的说话人身份标记
   conversation-axis.css      说话人轴与 this-agent 轴（标尺之上的身份轨）
@@ -783,14 +788,14 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 用户要求界面「简洁、聪明、紧凑」，尽量少线框。行为与 Owner 只引用交互 SSOT《Browser 任务能力与可复用资产》；本节不把 Browser 变成第二个工作流控制台。
 
-- 页面仍是主内容，沿既有一侧 trace 展示步骤，状态融入已有 Browser 控件。普通工具行只显示动作、目标、状态和最相关结果；时间、文件、字段数与预算使用次级文字，失败和不确定结果能一眼定位。脚本、证据、完整结果与恢复经过按需展开，不常驻堆截图、JSON、技术 ID 或空面板。
+- 工具栏随当前 Pane 的真实可用宽度收拢，常用动作保留紧凑入口，次要动作进入 More；More 与 Close split 各有完整且互不交叠的命中区，不靠挤窄地址、画第二条工具栏或隐藏关闭动作解决。工具显示偏好不能关闭窄 Pane 所需的 overflow 入口，具体工具的启用偏好仍保持。行为与工作面保留只引用交互 SSOT《Browser 任务能力与可复用资产》。
+- 页面仍是主内容，沿既有一侧 trace 展示步骤，状态融入已有 Browser 控件。普通工具行只显示动作、目标、状态和最相关结果；时间、文件、字段数与预算使用次级文字，失败和不确定结果能一眼定位。脚本、证据、完整结果与恢复经过按需展开，不常驻堆截图、JSON、技术 ID 或空面板。未使用的演示记录与可复用任务默认只留最小可发现入口，按需展开，不以两块空脚手架占据 trace 首屏；同一工具结果不叠同义标题。已有记录、当前执行、失败告示、停止与人工检查点仍按上述层级可达。
 - 用户再次反馈「异步脚手架 UI 太多太大」「AI 正在操作用了土工具栏」，要求非常简要的符号或精妙方式。AI 操作不独立占一条工具栏：以融合现有 Browser 控件的符号、操作者头像或克制微动效表达；详情和停止在 hover、focus 或当前操作 popover 可达，不为每种异步阶段叠 banner。running、waiting、human、failed 在正常与窄窗口中仍须可辨，并尊重减少动态效果偏好。参考成熟产品的就地状态与渐进披露，独立真实看图判定是否简洁。
 - 小浮层沿现有浮层语言就地呈现，不把 Browser 换成静态预览或空白；hover tooltip 与 popover 两种形态均保留页面可见性与可操作区域。原生层级、真实 compositor frame 与相关 Browser 更新范围只归交互 SSOT 的本节；视觉证据注明原 Renderer、原生页面与 OS 整窗各自的捕获边界，不拼图冒充整窗，不另增浮层状态投影或常驻提示。
 - 复用现有 Graphite / Mint、字号、间距、状态 glyph 与 icon-button 命中区。分组靠对齐、轻表面差异和少量段距，少用嵌套卡片、每步框线、重复标题和装饰阴影；trace 脊线只表达步骤时序，不兼作选中信号。当前步骤、选中项、hover 与键盘焦点分别可辨，不靠颜色或单侧细线承担唯一状态。
-- 工具栏随当前 Pane 的真实可用宽度收拢，常用动作保留紧凑入口，次要动作进入 More；More 与 Close split 各有完整且互不交叠的命中区，不靠挤窄地址、画第二条工具栏或隐藏关闭动作解决。工具显示偏好不能关闭窄 Pane 所需的 overflow 入口，具体工具的启用偏好仍保持。行为与工作面保留只引用交互 SSOT《Browser 任务能力与可复用资产》。
 - 参数化资产的主对象是有名字的步骤与参数。录制、预览、编辑、运行、停止和当前待确认动作各有就地可发现入口；版本、来源与验收状态紧邻当前资产，详情再展开。原始演示草稿与导入后的编辑步骤按需切换或展开，不同时铺开两份重复列表；当前检查点沿已有控件就近表达，行为与状态真源引用交互 SSOT 的人工检查点合同。秘密值显示需要重新输入的状态，不能用占位字符暗示已保存可回放。
 - 下载/上传用紧凑产物行表达文件名、传输状态和可执行动作；结构化输出优先可读字段，原始 JSON 按需展开。大结果显示准确范围、裁剪和继续读取入口；嵌入文档的观察范围与缺失事实只引用交互 SSOT《Browser 任务能力与可复用资产》的局部观察合同；恢复结果、证据不可用和成果未确认沿同一服务窗呈现，不新增全局遮罩或重复警报。
-- 长值预览默认显示短摘要，并可明确展开保留的完整预览；展开原 JSON 保持有限高度，分页动作和键盘焦点可达，不让长值或原始内容把字段状态与任务主次撑走。完整值与准确字节范围仍按上述结果入口读取，不以摘要冒充完整结果。
+- 长字段默认摘要只占一行；完整 JSON 可读或完整值未保存的提示只在当前结果区说明一次。展开时保留原有有界预览的全部内容，摘要不再重复铺同一前缀；展开原 JSON 保持有限高度，分页动作和键盘焦点可达，不让长值或原始内容把字段状态与任务主次撑走。完整值与准确字节范围仍按上述结果入口读取，不以摘要冒充完整结果；零值、false、空字符串、Partial 与每字段错误仍须准确可辨。
 - 正常与窄分屏、短窗口、长文件名/参数/错误和键盘操作都保持可读内容与完整命中区。展开详情不盖住原生页面或误改 Terminal 尺寸；异步结果不能抢焦点。设计验收看实际挂载的 Browser/对话工具入口，非空真实步骤、失败、待确认和成果均可达；不能只用 gallery 或来源扫描替代真实工作流。
 
 ### Browser 控制权提示
