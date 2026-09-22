@@ -1,6 +1,7 @@
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog } from './shared.js'
+import { readKimiSessionHistoryPage } from './kimi-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -70,6 +71,7 @@ export const KIMI_HOOKS: AgentNativeHookSpecification = {
 
 export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
+    readSessionHistoryPage: readKimiSessionHistoryPage,
     catalog: catalog({
       id: 'kimi', label: 'Kimi', executable: 'kimi',
       // **不是** `kimi`。这个 CLI 启动时把自己的进程名改成 `Kimi Code`
