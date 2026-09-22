@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
 import { catalog } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -223,6 +224,7 @@ export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): Ag
         // 既有两个 reader（claude-jsonl / codex-rollout）都不适用。按「未核实就不声明」留空。
       }
     }),
+    readSessionHistoryPage: readOpenCodeSessionHistoryPage,
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: OPENCODE_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
