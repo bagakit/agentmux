@@ -319,7 +319,9 @@ async function headerScenes(layoutOnly = false) {
       const hit=e=>{if(!e)return null;const r=e.getBoundingClientRect();return [[.1,.1],[.5,.5],[.9,.9]].map(([x,y])=>document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)?.closest('button')===e)};
       const p={x:s.getBoundingClientRect().x+8,y:s.getBoundingClientRect().y+17},at=document.elementFromPoint(p.x,p.y);
       return{...(${measure}),blankCornerHit:{...p,target:at?.className,intercepted:!!at?.closest('.agent-region-header-home')},header:{rect:rect(h),name:rect(n),nameText:n.innerText,title:n.title,aria:h.getAttribute('aria-label'),font:getComputedStyle(n).fontSize,weight:getComputedStyle(n).fontWeight,ellipsis:getComputedStyle(n).textOverflow,
-        more:rect(m),moreHits:hit(m),close:rect(x),closeHits:hit(x),rightInset:parseFloat(getComputedStyle(h).paddingRight),readOnly:!!h.querySelector('.agent-region-header__mode'),meta:h.querySelectorAll('.agent-region-header__meta').length},body:rect(s.querySelector('.agent-body')),owner:rect(owner),firstLine:${JSON.stringify(firstLine ?? null)}}
+        more:rect(m),moreHits:hit(m),close:rect(x),closeHits:hit(x),rightInset:parseFloat(getComputedStyle(h).paddingRight),readOnly:!!h.querySelector('.agent-region-header__mode'),meta:h.querySelectorAll('.agent-region-header__meta').length,
+        quietBacking:{height:getComputedStyle(h,'::before').height,background:getComputedStyle(h,'::before').backgroundColor}},
+        terminalReadingInset:getComputedStyle(s.querySelector('.terminal-view__xterm')).marginTop,body:rect(s.querySelector('.agent-body')),owner:rect(owner),firstLine:${JSON.stringify(firstLine ?? null)}}
     })()`)
     await capture(`${width}x${height}-header-${mode}-${appearance}`, facts)
     assert.equal(facts.header.meta, 0)
