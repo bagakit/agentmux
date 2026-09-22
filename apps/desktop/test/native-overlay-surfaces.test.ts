@@ -370,6 +370,121 @@ describe('actual native Chrome owner', () => {
     ])
     owner.dispose()
   })
+  it.each([
+    ['left', 'leftbuttondown'], ['middle', 'middlebuttondown'], ['right', 'rightbuttondown']
+  ] as const)('retains the actual %s button across modifier-less native mouse moves', async (button, held) => {
+    const { owner, contents } = fixture()
+    try {
+      await owner.update([float])
+      const view = fake.views[0]
+      // Electron 43.4.1 WebMouseEvent::ToV8 omits modifiers from input-event.
+      // This is the native producer's shape, not a synthetic DOM pointer event.
+      for (const input of [
+        { type: 'mouseDown', x: 5, y: 7, button },
+        { type: 'mouseMove', x: 15, y: 7, button },
+        { type: 'mouseMove', x: 25, y: 7, button, modifiers: ['shift'] },
+        { type: 'mouseUp', x: 25, y: 7, button },
+        { type: 'mouseMove', x: 35, y: 7, button }
+      ]) view.listeners['input-event']({}, input)
+      expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
+        { type: 'mouseDown', x: 125, y: 157, button },
+        { type: 'mouseMove', x: 135, y: 157, button, modifiers: [held] },
+        { type: 'mouseMove', x: 145, y: 157, button, modifiers: ['shift', held] },
+        { type: 'mouseUp', x: 145, y: 157, button },
+        { type: 'mouseMove', x: 155, y: 157, button }
+      ])
+    } finally { owner.dispose() }
+  })
+  it('releases buttons independently and retains the same gesture through an owner repaint', async () => {
+    const { owner, contents } = fixture()
+    try {
+      await owner.update([float])
+      const view = fake.views[0]
+      view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+      view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'right' })
+      await owner.update([{ ...float, bounds: { ...float.bounds, x: 200 } }])
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 15, y: 7, button: 'right' })
+      view.listeners['input-event']({}, { type: 'mouseUp', x: 15, y: 7, button: 'left' })
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 25, y: 7, button: 'right' })
+      view.listeners['input-event']({}, { type: 'mouseUp', x: 25, y: 7, button: 'right' })
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 35, y: 7, button: 'none' })
+      expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
+        { type: 'mouseDown', x: 125, y: 157, button: 'left' },
+        { type: 'mouseDown', x: 125, y: 157, button: 'right' },
+        { type: 'mouseMove', x: 215, y: 157, button: 'right', modifiers: ['leftbuttondown', 'rightbuttondown'] },
+        { type: 'mouseUp', x: 215, y: 157, button: 'left' },
+        { type: 'mouseMove', x: 225, y: 157, button: 'right', modifiers: ['rightbuttondown'] },
+        { type: 'mouseUp', x: 225, y: 157, button: 'right' },
+        { type: 'mouseMove', x: 235, y: 157, button: 'none' }
+      ])
+    } finally { owner.dispose() }
+  })
+  it('continues and releases an accepted gesture at actual View bounds during a held repaint', async () => {
+    const { owner, contents, warning } = fixture()
+    let finishContent: (() => void) | undefined
+    let repaint: Promise<unknown> | undefined
+    try {
+      await owner.update([float])
+      const view = fake.views[0]
+      view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+      fake.image = new Promise(resolve => { finishContent = resolve })
+      const moved = { ...float, bounds: { ...float.bounds, x: 200, y: 230 } }
+      repaint = owner.update([moved])
+      await vi.waitFor(() => expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(2))
+      // The requested region has moved, but the original native View still has its old rectangle.
+      expect(view.getBounds()).toEqual(float.bounds)
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 15, y: 7, button: 'left' })
+      view.listeners['input-event']({}, { type: 'mouseUp', x: 25, y: 7, button: 'left' })
+      // No new gesture or keyboard input is authorized by an unfinished paint.
+      view.listeners['input-event']({}, { type: 'mouseDown', x: 30, y: 7, button: 'right' })
+      view.listeners['input-event']({}, { type: 'keyDown', keyCode: 'Escape' })
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 30, y: 7, button: 'none' })
+      finishContent!()
+      expect(await repaint).toEqual({ projected: 1, capturedPixels: 8000 })
+      expect(view.getBounds()).toEqual(moved.bounds)
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 35, y: 7, button: 'none' })
+      expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
+        { type: 'mouseDown', x: 125, y: 157, button: 'left' },
+        { type: 'mouseMove', x: 135, y: 157, button: 'left', modifiers: ['leftbuttondown'] },
+        { type: 'mouseUp', x: 145, y: 157, button: 'left' },
+        { type: 'mouseMove', x: 235, y: 237, button: 'none' }
+      ])
+      expect(contents.focus).toHaveBeenCalledTimes(1)
+      expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[false]])
+      expect(fake.views).toHaveLength(1)
+      expect(warning).not.toHaveBeenCalled()
+    } finally {
+      finishContent?.()
+      await repaint?.catch(() => {})
+      owner.dispose()
+    }
+  })
+  it('never transfers a held button to another, recreated or disposed native owner', async () => {
+    const { owner, contents } = fixture()
+    try {
+      await owner.update([float])
+      const old = fake.views[0]
+      old.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+      const sibling = { ...float, id: 'chrome-2', bounds: { ...float.bounds, x: 400 } }
+      await owner.update([float, sibling])
+      const other = fake.views[1]
+      other.listeners['input-event']({}, { type: 'mouseMove', x: 15, y: 7, button: 'none' })
+      old.listeners['input-event']({}, { type: 'mouseMove', x: 15, y: 7, button: 'left' })
+      await owner.update([sibling])
+      old.listeners['input-event']({}, { type: 'mouseMove', x: 25, y: 7, button: 'left' })
+      await owner.update([sibling, float])
+      expect(fake.views).toHaveLength(3)
+      fake.views[2].listeners['input-event']({}, { type: 'mouseMove', x: 15, y: 7, button: 'none' })
+      owner.dispose()
+      other.listeners['input-event']({}, { type: 'mouseMove', x: 25, y: 7, button: 'none' })
+      expect(contents.sendInputEvent.mock.calls.map(call => call[0])).toEqual([
+        { type: 'mouseDown', x: 125, y: 157, button: 'left' },
+        { type: 'mouseMove', x: 415, y: 157, button: 'none' },
+        { type: 'mouseMove', x: 135, y: 157, button: 'left', modifiers: ['leftbuttondown'] },
+        { type: 'mouseMove', x: 135, y: 157, button: 'none' }
+      ])
+    } finally { owner.dispose() }
+  })
   it('paint failure reports degradation while preserving the Browser and cleaning the failed Chrome owner', async () => {
     const { owner, contents } = fixture()
     contents.capturePage.mockRejectedValueOnce(new Error('compositor unavailable'))
