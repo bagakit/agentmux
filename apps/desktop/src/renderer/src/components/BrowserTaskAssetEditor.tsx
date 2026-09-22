@@ -8,6 +8,9 @@ type Props = {
   asset: BrowserTaskAsset | null
   recording: BrowserDemonstrationDraft | null
   run?: BrowserTaskAssetRun | null
+  /** A one-time Client viewing intent. It is never an execution or approval fact. */
+  reviewRequest?: { assetId: string; version: number }
+  onReviewRequestConsumed?: () => void
   warning?: string
   busy?: boolean
   onImport: (event: ActionEvent) => void
@@ -19,16 +22,24 @@ type Props = {
 }
 
 /** An editable Client asset inside existing Browser details. Values never enter its draft or versions. */
-export function BrowserTaskAssetEditor({ asset, recording, run, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop }: Props) {
+export function BrowserTaskAssetEditor({ asset, recording, run, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop }: Props) {
   const [draft, setDraft] = useState<BrowserTaskContent | null>(asset?.draft ?? null)
   const [versionNumber, setVersionNumber] = useState(asset?.versions.at(-1)?.version ?? 0)
   const [values, setValues] = useState<Record<string, string>>({})
   const [error, setError] = useState<string>()
   useEffect(() => { setDraft(asset?.draft ?? null); setVersionNumber(asset?.versions.at(-1)?.version ?? 0) }, [asset?.id, asset?.revision])
   useEffect(() => { setValues({}); setError(undefined) }, [asset?.id])
+  useEffect(() => {
+    if (reviewRequest && reviewRequest.assetId === asset?.id && asset?.versions.some(item => item.version === reviewRequest.version)) {
+      setVersionNumber(reviewRequest.version); setValues({})
+      onReviewRequestConsumed?.()
+    }
+  }, [asset?.id, reviewRequest, onReviewRequestConsumed])
   const version = asset?.versions.find(item => item.version === versionNumber)
-  const continuing = Boolean(run && asset && run.assetId === asset.id && run.version === versionNumber && (run.status === 'ready' || run.status === 'waiting-human'))
-  const pending = version?.steps.slice(continuing && run ? run.nextStep : 0) ?? []
+  const actualRun = run && asset && run.assetId === asset.id && run.browserId === asset.browserId ? run : null
+  const runningVersion = asset?.versions.find(item => item.version === actualRun?.version)
+  const continuing = Boolean(actualRun && actualRun.version === versionNumber && (actualRun.status === 'ready' || actualRun.status === 'waiting-human'))
+  const pending = version?.steps.slice(continuing && actualRun ? actualRun.nextStep : 0) ?? []
   const checkpoint = pending.findIndex(step => step.kind === 'checkpoint')
   const segment = checkpoint >= 0 ? pending.slice(0, checkpoint) : pending
   const requiredKeys = new Set(segment.flatMap(step => step.kind === 'fill' && step.parameterKey ? [step.parameterKey] : []))
@@ -43,7 +54,7 @@ export function BrowserTaskAssetEditor({ asset, recording, run, warning, busy = 
   async function execute(event: ActionEvent, mode: 'run' | 'step'): Promise<void> {
     if (!version) return
     try {
-      await onRun({ version: version.version, parameters: { ...values }, mode, ...(continuing && run ? { runId: run.id } : {}) }, event)
+      await onRun({ version: version.version, parameters: { ...values }, mode, ...(continuing && actualRun ? { runId: actualRun.id } : {}) }, event)
       setError(undefined)
     } catch (error) { setError(error instanceof Error ? error.message : 'Task execution could not start. Inspect the page before retrying.') }
     finally {
@@ -57,10 +68,22 @@ export function BrowserTaskAssetEditor({ asset, recording, run, warning, busy = 
     {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{message}</p>)}
   </section> : null
   return <section className="browser-rsi-replay browser-task-asset" aria-label="Editable Browser task asset" data-task-asset-id={asset.id}>
-    <header className="browser-rsi-replay__header"><strong>Task asset</strong>
-      <small>{asset.id} · draft r{asset.revision}</small>
+    <header className="browser-rsi-replay__header"><strong>{asset.draft.name || 'Reusable task'}</strong>
+      <small>Draft</small>
     </header>
-    {warning || error ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{warning ?? error}</p> : null}
+    {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{message}</p>)}
+    {actualRun ? <div className="browser-task-asset__progress" role="status" data-run-id={actualRun.id} data-run-status={actualRun.status} data-run-version={actualRun.version}>
+      <strong>{runningVersion?.name ?? 'Retained task run'} · v{actualRun.version}</strong>
+      <span>{actualRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : actualRun.status === 'ready' ? 'Ready to continue' : actualRun.status}
+        {runningVersion && actualRun.nextStep < runningVersion.steps.length ? ` · next step ${actualRun.nextStep + 1}` : ''}</span>
+      {actualRun.warning ? <p>{actualRun.warning}</p> : null}
+      {!runningVersion ? <p>The running version is unavailable. Its progress was retained; inspect the saved task before another run.</p> : null}
+      <span className="browser-task-asset__run-actions">
+        {runningVersion && actualRun.version !== versionNumber && (actualRun.status === 'ready' || actualRun.status === 'waiting-human') ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
+          onClick={() => { setVersionNumber(actualRun.version); setValues({}) }}>Review and continue v{actualRun.version}</button> : null}
+        {actualRun.status === 'running' || actualRun.status === 'ready' || actualRun.status === 'waiting-human' ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={event => onStop(actualRun.id, event)}><Square size={11} aria-hidden="true" />Stop task</button> : null}
+      </span>
+    </div> : null}
     {draft ? <>
       <label className="browser-task-asset__field"><span>Name</span><input aria-label="Task asset name" maxLength={240} value={draft.name} onChange={event => change({ ...draft, name: event.target.value })} /></label>
       <ol className="browser-rsi-replay__steps">{draft.steps.length ? draft.steps.map((step, index) => <li key={step.id} className={!step.reviewed ? 'is-blocked' : undefined} data-task-step-id={step.id}>
@@ -82,8 +105,7 @@ export function BrowserTaskAssetEditor({ asset, recording, run, warning, busy = 
         <label className="browser-task-asset__field"><span>Run saved version</span><select aria-label="Task asset version" value={versionNumber} onChange={event => { setVersionNumber(Number(event.target.value)); setValues({}) }}>{asset.versions.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.name}</option>)}</select></label>
         <details><summary>Preview v{versionNumber} · {version?.steps.length ?? 0} steps</summary><ol className="browser-rsi-replay__steps">{version?.steps.map((step, index) => <li key={step.id}><span>{index + 1}</span><span><strong>{step.label ?? step.target?.name ?? step.kind}</strong><small>{step.reviewed ? step.parameterKey ? `Fresh ${step.parameterKey}` : step.kind : 'Needs review'}</small></span></li>)}</ol></details>
         {parameters.map(parameter => <label key={parameter.key} className="browser-task-asset__field"><span>{parameter.label}</span><input type={parameter.secret ? 'password' : 'text'} autoComplete="off" aria-label={`Task parameter ${parameter.label}`} maxLength={16_384} value={values[parameter.key] ?? ''} onChange={event => setValues(current => ({ ...current, [parameter.key]: event.target.value }))} /></label>)}
-        {run && run.assetId === asset.id ? <p className="browser-task-asset__progress" role="status">v{run.version} · {run.status} · next step {run.nextStep + 1}{run.warning ? ` · ${run.warning}` : ''}</p> : null}
-        <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={!canRun} onClick={event => void execute(event, 'step')}>Run next step</button><button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={!canRun} onClick={event => void execute(event, 'run')}><Play size={11} aria-hidden="true" />{continuing ? 'Return control and continue' : 'Run version'}</button>{run && (busy || run.status === 'ready' || run.status === 'waiting-human') ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={event => onStop(run.id, event)}><Square size={11} aria-hidden="true" />Stop task</button> : null}</footer>
+        <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={!canRun} onClick={event => void execute(event, 'step')}>Run next step</button><button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={!canRun} onClick={event => void execute(event, 'run')}><Play size={11} aria-hidden="true" />{continuing ? 'Return control and continue' : 'Run version'}</button></footer>
       </div> : <p className="browser-rsi-replay__origin">Save a reviewed version before running. Editing the draft never changes an existing version.</p>}
     </> : null}
   </section>
