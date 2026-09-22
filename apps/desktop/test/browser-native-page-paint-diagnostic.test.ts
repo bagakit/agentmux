@@ -14,25 +14,26 @@ const next = source.indexOf('export async function diagnoseNativePagePaint(', st
 assert.ok(start >= 0 && next > start, 'Both actual diagnostic functions must be present')
 const observeSource = source.slice(start, next).replace(/^export /, '')
 const diagnoseSource = source.slice(next).replace(/^export /, '')
-assert.ok(observeSource.includes('wc.invalidate()') && diagnoseSource.includes('ctx.probe.main.evaluate'))
+assert.ok(observeSource.includes('const view = pages[0]') && diagnoseSource.includes('ctx.probe.main.evaluate'))
 const recoverStart = scenario.indexOf('export async function recoverOverlay(')
 assert.ok(recoverStart >= 0, 'The actual ordinary-restart scenario must be present')
 const recoverSource = scenario.slice(recoverStart).replace(/^export /, '')
 assert.ok(recoverSource.includes('unforcedRestoredFrame') && recoverSource.includes('inputAfterRestart'))
 
-type Mode = 'ready' | 'wrong-pid' | 'wrong-owner' | 'duplicate' | 'loading' | 'hidden' | 'zero' | 'minimized' | 'detached-after-wait' | 'navigated-after-wait' | 'frame-changed-after-wait' | 'invalidate-throws' | 'capture-throws' | 'empty-capture'
+type Mode = 'ready' | 'wrong-pid' | 'wrong-owner' | 'duplicate' | 'loading' | 'hidden' | 'zero' | 'minimized' | 'detached-after-wait' | 'navigated-after-wait' | 'frame-changed-after-wait' | 'setter-throws' | 'capture-throws' | 'empty-capture' | 'policy-already-disabled' | 'policy-changed-after-wait'
 function fixture(mode: Mode = 'ready', ownedOutput = false) {
   const originalError = new Error('Original unforced frame gate failed')
   const calls: string[] = [], waits: number[] = [], emitted: string[] = []
   const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]), files: { path: string; bytes: number[]; flag: string }[] = []
+  let currentPolicy = mode !== 'policy-already-disabled'
   let currentUrl = 'http://127.0.0.1:12345/a'
   const bounds = { x: 1, y: 74, width: mode === 'zero' ? 0 : 738, height: 833 }
   const frame = { processId: 11, routingId: 22 }
   const wc = {
     id: 2, mainFrame: frame,
     isDestroyed: () => false, getURL: () => currentUrl, getOwnerBrowserWindow: (): object | null => mode === 'wrong-owner' ? null : window,
-    isLoading: () => mode === 'loading', getBackgroundThrottling: () => true, getOSProcessId: () => 333,
-    invalidate() { calls.push('invalidate'); if (mode === 'invalidate-throws') throw new Error('invalidate refused') },
+    isLoading: () => mode === 'loading', getBackgroundThrottling: () => currentPolicy, getOSProcessId: () => 333,
+    setBackgroundThrottling(value: boolean) { calls.push('setBackgroundThrottling:' + value); if (mode === 'setter-throws') throw new Error('setter refused'); currentPolicy = value },
     async capturePage() { calls.push('capturePage'); if (mode === 'capture-throws') throw new Error('surface still unavailable'); return { isEmpty: () => mode === 'empty-capture', getSize: () => ({ width: 1476, height: 1666 }), toPNG() { calls.push('same-image.toPNG'); return png } } }
   }
   const view = { webContents: wc, getVisible: () => mode !== 'hidden', getBounds: () => ({ ...bounds }) }
@@ -47,6 +48,7 @@ function fixture(mode: Mode = 'ready', ownedOutput = false) {
     if (mode === 'detached-after-wait') window.contentView.children = []
     if (mode === 'navigated-after-wait') currentUrl += '#new-navigation'
     if (mode === 'frame-changed-after-wait') frame.routingId++
+    if (mode === 'policy-changed-after-wait') currentPolicy = !currentPolicy
     done()
   } })
   const observe = runInContext(`(${observeSource})`, vm)
@@ -62,33 +64,34 @@ function fixture(mode: Mode = 'ready', ownedOutput = false) {
     chromeOwners: runInContext('() => []', vm), assert, diagnoseNativePagePaint: diagnose,
     pageInput: async () => { calls.push('pageInput'); return {} }, screenshotEditor: async () => { calls.push('screenshotEditor'); return {} } })
   const recover = runInContext(`(${recoverSource})`, vm)
-  return { ctx, receipt, calls, waits, emitted, files, png, originalError, diagnose: () => diagnose(ctx, originalError),
-    recover: (enabled: boolean) => { (vm.process as { env: Record<string, string> }).env = enabled ? { AGENTMUX_NATIVE_PAGE_PAINT_DIAGNOSTIC: '1' } : {}; return recover(ctx) } }
+  return { ctx, receipt, calls, waits, emitted, files, png, originalError, diagnose: (requestedPolicy: unknown = false) => diagnose(ctx, originalError, requestedPolicy),
+    recover: (mode?: string) => { (vm.process as { env: Record<string, string> }).env = mode ? { AGENTMUX_NATIVE_PAGE_THROTTLING_DIAGNOSTIC: mode } : {}; return recover(ctx) } }
 }
 
-it('parses and executes every actual emitted Main expression, with one actuator and one capture on the exact attached owner', async () => {
-  const f = fixture(); await f.diagnose()
-  expect(f.calls).toEqual(['invalidate', 'capturePage'])
+it.each([true, false])('parses every actual emitted Main expression, with one exact setter(%s) and one capture', async requestedPolicy => {
+  const f = fixture(); await f.diagnose(requestedPolicy)
+  expect(f.calls).toEqual(['setBackgroundThrottling:' + requestedPolicy, 'capturePage'])
   expect(f.waits).toEqual([1500])
   expect(f.emitted).toHaveLength(1)
   const methods: string[] = []
   const file = ts.createSourceFile('actual-emitted.js', f.emitted[0], ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   const visit = (node: ts.Node) => { if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) methods.push(node.expression.name.text); ts.forEachChild(node, visit) }
   visit(file)
-  expect(methods.filter(name => name === 'invalidate')).toEqual(['invalidate'])
+  expect(methods.filter(name => name === 'setBackgroundThrottling')).toEqual(['setBackgroundThrottling'])
   expect(methods.filter(name => name === 'capturePage')).toEqual(['capturePage'])
-  expect(methods.filter(name => /^(focus|show|setSize|setBounds|setVisible|setBackgroundThrottling|loadURL|reload|sendInputEvent|beginFrameSubscription)$/.test(name))).toEqual([])
+  expect(methods.filter(name => /^(focus|show|setSize|setBounds|setVisible|invalidate|loadURL|reload|sendInputEvent|beginFrameSubscription)$/.test(name))).toEqual([])
   const d = f.receipt.nativePagePaintDiagnostic
   expect(d.originalPreflight).toEqual({ url: f.ctx.pageUrl, attemptCount: 1, last: { frame: { error: 'surface unavailable' } } })
-  expect(d.observation).toMatchObject({ diagnosticOnly: true, invalidateCalls: 1, captureCalls: 1, invalidateReturned: true,
-    before: { pid: 123, ownerWindowId: 1, ownerMatches: true, attached: true, loading: false, visible: true, window: { focused: false } },
-    afterWait: { ownerWindowId: 1, attached: true }, afterCapture: { ownerWindowId: 1, attached: true }, frame: { empty: false, size: { width: 1476, height: 1666 } } })
+  expect(d.observation).toMatchObject({ diagnosticOnly: true, setterCalls: 1, captureCalls: 1, setterReturned: true, requestedPolicy,
+    mode: requestedPolicy ? 'same-value-true' : 'disable-false',
+    before: { backgroundThrottling: true, pid: 123, ownerWindowId: 1, ownerMatches: true, attached: true, loading: false, visible: true, window: { focused: false } },
+    afterWait: { backgroundThrottling: requestedPolicy, ownerWindowId: 1, attached: true }, afterCapture: { backgroundThrottling: requestedPolicy, ownerWindowId: 1, attached: true }, frame: { empty: false, size: { width: 1476, height: 1666 } } })
   expect(d.diagnosticError).toBeUndefined()
 })
 
 it('saves only the same nonempty captured image to the owned fresh directory with its exact hash, without another capture', async () => {
   const f = fixture('ready', true); await f.diagnose()
-  expect(f.calls).toEqual(['invalidate', 'capturePage', 'same-image.toPNG']); expect(f.waits).toEqual([1500]); expect(f.emitted).toHaveLength(1)
+  expect(f.calls).toEqual(['setBackgroundThrottling:false', 'capturePage', 'same-image.toPNG']); expect(f.waits).toEqual([1500]); expect(f.emitted).toHaveLength(1)
   const file = '/private-probe/fresh-visual/restarted-native-page-paint-diagnostic.png'
   expect(f.files).toEqual([{ path: file, bytes: Array.from(f.png), flag: 'wx' }])
   expect(f.receipt.nativePagePaintDiagnostic.observation.frame).toEqual({ empty: false, size: { width: 1476, height: 1666 }, file, sha256: createHash('sha256').update(f.png).digest('hex') })
@@ -96,55 +99,73 @@ it('saves only the same nonempty captured image to the owned fresh directory wit
 
 it('does not encode or save an empty captured image', async () => {
   const f = fixture('empty-capture', true); await f.diagnose()
-  expect(f.calls).toEqual(['invalidate', 'capturePage']); expect(f.files).toEqual([])
+  expect(f.calls).toEqual(['setBackgroundThrottling:false', 'capturePage']); expect(f.files).toEqual([])
   expect(f.receipt.nativePagePaintDiagnostic.observation.frame).toEqual({ empty: true, size: { width: 1476, height: 1666 } })
+})
+
+it('skips an already disabled policy and an invalid requested policy without an experiment', async () => {
+  const f = fixture('policy-already-disabled'); await f.diagnose(false)
+  expect(f.calls).toEqual([]); expect(f.waits).toEqual([])
+  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ setterCalls: 0, captureCalls: 0, skipped: 'policy-not-true-before-experiment' })
+  const invalid = fixture(); await invalid.diagnose('false')
+  expect(invalid.calls).toEqual([]); expect(invalid.waits).toEqual([])
+  expect(invalid.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ setterCalls: 0, captureCalls: 0, skipped: 'requested-policy-not-boolean' })
 })
 
 it.each(['wrong-pid', 'wrong-owner', 'duplicate', 'loading', 'hidden', 'zero', 'minimized'] as const)('skips %s before any actuator or capture', async mode => {
   const f = fixture(mode); await f.diagnose()
   expect(f.calls).toEqual([]); expect(f.waits).toEqual([])
   expect(f.emitted).toHaveLength(1)
-  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ invalidateCalls: 0, captureCalls: 0, skipped: expect.any(String) })
+  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ setterCalls: 0, captureCalls: 0, skipped: expect.any(String) })
 })
 
-it.each(['detached-after-wait', 'navigated-after-wait', 'frame-changed-after-wait'] as const)('does not capture a changed %s after the single invalidate', async mode => {
+it.each(['detached-after-wait', 'navigated-after-wait', 'frame-changed-after-wait', 'policy-changed-after-wait'] as const)('does not capture a changed %s after the single setter', async mode => {
   const f = fixture(mode); await f.diagnose()
-  expect(f.calls).toEqual(['invalidate']); expect(f.waits).toEqual([1500])
-  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ invalidateCalls: 1, captureCalls: 0, skipped: 'page-owner-layout-or-frame-changed-after-invalidate' })
+  expect(f.calls).toEqual(['setBackgroundThrottling:false']); expect(f.waits).toEqual([1500])
+  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ setterCalls: 1, captureCalls: 0, skipped: 'page-owner-layout-frame-or-policy-changed-after-setter' })
 })
 
 it('records an actuator failure without retry, wait or capture', async () => {
-  const f = fixture('invalidate-throws'); await f.diagnose()
-  expect(f.calls).toEqual(['invalidate']); expect(f.waits).toEqual([])
-  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ invalidateCalls: 1, captureCalls: 0, invalidateError: 'Error: invalidate refused', afterInvalidate: { attached: true } })
+  const f = fixture('setter-throws'); await f.diagnose()
+  expect(f.calls).toEqual(['setBackgroundThrottling:false']); expect(f.waits).toEqual([])
+  expect(f.receipt.nativePagePaintDiagnostic.observation).toMatchObject({ setterCalls: 1, captureCalls: 0, setterError: 'Error: setter refused', afterSetter: { attached: true } })
 })
 
 it('leaves the default original recovery failure unchanged and issues no diagnostic action', async () => {
-  const f = fixture(); await expect(f.recover(false)).rejects.toBe(f.originalError)
+  const f = fixture(); await expect(f.recover()).rejects.toBe(f.originalError)
   expect(f.calls).toEqual(['original-gate']); expect(f.emitted).toEqual([]); expect(f.waits).toEqual([])
   expect(f.receipt.nativePagePaintDiagnostic).toBeUndefined()
   expect(f.receipt.overlay.unforcedRestoredFrame).toBeUndefined(); expect(f.receipt.overlay.complete).toBeUndefined()
 })
 
 it.each(['ready', 'capture-throws'] as const)('keeps the same original error after opt-in diagnostic %s and never reaches input or editor', async mode => {
-  const f = fixture(mode); await expect(f.recover(true)).rejects.toBe(f.originalError)
-  expect(f.calls).toEqual(['original-gate', 'invalidate', 'capturePage']); expect(f.waits).toEqual([1500])
+  const f = fixture(mode); await expect(f.recover('false')).rejects.toBe(f.originalError)
+  expect(f.calls).toEqual(['original-gate', 'setBackgroundThrottling:false', 'capturePage']); expect(f.waits).toEqual([1500])
   expect(f.receipt.nativePagePaintDiagnostic.originalError).toBe(String(f.originalError))
   expect(f.receipt.overlay.unforcedRestoredFrame).toBeUndefined(); expect(f.receipt.overlay.inputAfterRestart).toBeUndefined(); expect(f.receipt.overlay.complete).toBeUndefined()
+})
+
+it('maps the true control to only one true setter and leaves an unknown opt-in disabled', async () => {
+  const f = fixture(); await expect(f.recover('true')).rejects.toBe(f.originalError)
+  expect(f.calls).toEqual(['original-gate', 'setBackgroundThrottling:true', 'capturePage'])
+  expect(f.receipt.nativePagePaintDiagnostic).toMatchObject({ requestedPolicy: true, mode: 'same-value-true' })
+  const unknown = fixture(); await expect(unknown.recover('unknown')).rejects.toBe(unknown.originalError)
+  expect(unknown.calls).toEqual(['original-gate']); expect(unknown.emitted).toEqual([])
 })
 
 it('preserves the original recovery error when the diagnostic Main transport fails', async () => {
   const f = fixture()
   f.ctx.probe.main.evaluate = async () => { throw new Error('Private diagnostic transport failed') }
-  await expect(f.recover(true)).rejects.toBe(f.originalError)
+  await expect(f.recover('false')).rejects.toBe(f.originalError)
   expect(f.calls).toEqual(['original-gate']); expect(f.waits).toEqual([]); expect(f.emitted).toEqual([])
+  expect(f.receipt.nativePagePaintDiagnostic).toBeTruthy()
   expect(f.receipt.nativePagePaintDiagnostic.diagnosticError).toBe('Error: Private diagnostic transport failed')
   expect(f.receipt.overlay.complete).toBeUndefined()
 })
 
 it('includes the actual outside diagnostic consumer and new script in canonical source identity', () => {
   expect(scenario).toContain("import { diagnoseNativePagePaint } from './browser-native-page-paint-diagnostic.mjs'")
-  expect(recoverSource).toContain('await diagnoseNativePagePaint(ctx, error)')
+  expect(recoverSource).toContain("await diagnoseNativePagePaint(ctx, error, mode === 'true')")
   const identityStart = recovery.indexOf('async function identity()'), identityEnd = recovery.indexOf('\nasync function launch(', identityStart)
   expect(identityStart).toBeGreaterThan(-1); expect(identityEnd).toBeGreaterThan(identityStart)
   const identity = recovery.slice(identityStart, identityEnd)
