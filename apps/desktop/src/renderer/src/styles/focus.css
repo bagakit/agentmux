@@ -156,6 +156,8 @@
 .focus-toolbar__context .icon-button { width: 24px; height: 24px; flex: none; }
 .focus-toolbar__rename { flex: 1; min-width: 0; height: 24px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: 0 var(--sp-1); font: inherit; font-size: var(--fs-meta); }
 .focus-toolbar__review { display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 2px var(--sp-1); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.focus-toolbar__region-slot { flex: none; min-width: 0; }
+.focus-toolbar__region-slot .agent-region-header { min-height: 24px; padding: 0; }
 @media (max-width: 900px) {
   .focus-filters .global-board-toolbar__controls { gap: 3px; }
   .focus-filters .global-board-select { flex: 0 1 64px; }
