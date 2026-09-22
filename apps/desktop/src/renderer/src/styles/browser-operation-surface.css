@@ -21,6 +21,7 @@
 .browser-rsi-button:focus-visible, .browser-rsi-icon-button:focus-visible, .browser-rsi-history__item:focus-visible, .browser-rsi-timeline__step-button:focus-visible { outline: 2px solid var(--green-line); outline-offset: -2px; }
 .browser-rsi-icon-button { width: 25px; padding: 0; }
 .browser-rsi-timeline, .browser-rsi-replay { min-width: 0; overflow: hidden; color: var(--text-2); }
+.browser-demonstration-entry, .browser-task-asset-entry { min-width: 0; padding: var(--sp-2) var(--sp-3); }
 .browser-rsi-timeline--empty { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .browser-rsi-timeline__header, .browser-rsi-replay__header { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .browser-rsi-timeline__header > span, .browser-rsi-replay__header > span { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }

@@ -88,8 +88,17 @@ describe('selected step evidence in the production component', () => {
     try {
       await act(async () => root.render(createElement(BrowserStepEvidence, {
         operation: { ...operation(identity.operationId), phase: 'completed' },
-        step: { ...step(identity.sequence), method: 'extractStructured', status: 'completed' }
+        step: { ...step(identity.sequence), method: 'extractStructured', label: 'extractStructured', status: 'completed' }
       })))
+      expect(host.querySelector('section.browser-step-evidence')?.getAttribute('aria-label')).toBe('Evidence for step 1: extractStructured')
+      expect(host.querySelector('.browser-step-evidence > header')?.textContent).toBe('completed')
+      expect(host.querySelector('.browser-step-evidence__time')?.textContent).not.toContain('Fields')
+      expect(host.querySelector('.browser-structured-fields__summary')?.textContent).toContain('Partial')
+      const source = [...host.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Source')!
+      expect(source).toBeDefined()
+      expect(source.open).toBe(false)
+      expect([...source.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Action', 'Operation', 'Step', 'Browser', 'Navigation'])
+      expect([...source.querySelectorAll('dd')].map(term => term.textContent)).toEqual(['extractStructured', identity.operationId, String(identity.sequence), identity.browserId, identity.navigationId])
       expect([...host.querySelectorAll('.browser-structured-fields__values > div')].map(row =>
         [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]))
         .toEqual([['zero', '0'], ['empty', '""'], ['flag', 'false'], ['missing', 'Missing'], ['invalid', 'Type mismatch""']])

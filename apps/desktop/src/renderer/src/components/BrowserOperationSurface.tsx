@@ -158,7 +158,7 @@ function BrowserStepRow({ step, selected, onSelectStep }: {
         <ChevronRight className="browser-rsi-timeline__chevron" size={11} aria-hidden="true" />
       </button>
       {open ? <div id={panelId} className="browser-rsi-timeline__step-detail">
-        <span><code>{step.method}</code><time>{formatClock(step.startedAt)}</time></span>
+        <span>{step.label !== step.method ? <code>{step.method}</code> : null}<time>{formatClock(step.startedAt)}</time></span>
         {step.summary ? <p>{step.summary}</p> : null}
       </div> : null}
     </li>

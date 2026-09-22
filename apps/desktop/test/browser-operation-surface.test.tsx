@@ -1,4 +1,6 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrowserActivityState, BrowserOperation, BrowserReplayPlan } from '../src/shared/browser-operation.js'
@@ -41,6 +43,7 @@ const operation: BrowserOperation = {
 }
 
 const activity: BrowserActivityState = { operation, control: 'agent' }
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 const plan: BrowserReplayPlan = {
   schema: 'agentmux.browser-replay.v1',
@@ -119,6 +122,28 @@ describe('BrowserOperationHistory', () => {
 })
 
 describe('BrowserOperationTimeline', () => {
+  it('shows a repeated method label once after real inspection, retaining differing methods, time and failure facts', async () => {
+    const host = document.createElement('div'), root = createRoot(host), inspect = vi.fn()
+    const steps = [
+      { ...operation.steps[0]!, method: 'extractStructured', label: 'extractStructured' },
+      { ...operation.steps[1]!, status: 'failed' as const, summary: 'The action failed; recorded fields remain available.' }
+    ]
+    try {
+      await act(async () => root.render(createElement(BrowserOperationTimeline, { operation: { ...operation, steps }, onSelectStep: inspect })))
+      expect(host.querySelectorAll('[data-sequence]')).toHaveLength(2)
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Inspect step 1: extractStructured"]')!.click())
+      const first = host.querySelector('[data-sequence="1"]')!
+      expect(first.querySelector('.browser-rsi-timeline__step-content strong')?.textContent).toBe('extractStructured')
+      expect(first.querySelector('.browser-rsi-timeline__step-detail code')).toBeNull()
+      expect(first.querySelector('.browser-rsi-timeline__step-detail time')?.textContent).toBe(formatClock(steps[0]!.startedAt))
+      expect(inspect.mock.calls).toEqual([[steps[0]]])
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Inspect step 2: Open settings"]')!.click())
+      const second = host.querySelector('[data-sequence="2"]')!
+      expect(second.querySelector('code')?.textContent).toBe('click')
+      expect(second.querySelector('.browser-rsi-timeline__status')?.textContent).toBe('failed')
+      expect(second.textContent).toContain('The action failed; recorded fields remain available.')
+    } finally { await act(async () => root.unmount()) }
+  })
   it('renders ordered facts and keeps step inspection optional', () => {
     const inspect = vi.fn()
     const markup = renderToStaticMarkup(createElement(BrowserOperationTimeline, {
