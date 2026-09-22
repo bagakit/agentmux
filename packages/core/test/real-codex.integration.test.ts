@@ -1,106 +1,24 @@
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AgentProviderRegistry, AgentManagedHookInstaller, AgentMuxFileAgentSessionStore, connectLocalAgentMux, type AgentMuxClientEvent } from '../dist/index.js'
+import { assertExitedAdmission, ObservedPromptStore, prepareRealCodexScope, privateCodexConfigArgs, type RealCodexScope } from './helpers/real-codex-fixture.js'
+import { AgentProviderRegistry, AgentManagedHookInstaller, AgentMuxClient, type AgentMuxClientEvent } from '../dist/index.js'
 
 const execFileAsync = promisify(execFile)
-const roots: string[] = []
-const runtimeDirectories: string[] = []
-const createdCodexSessions: Array<{ command: string; sessionId: string; cwd: string }> = []
-const activeAgentSessions: Array<{ store: AgentMuxFileAgentSessionStore; agentSessionId: string }> = []
-const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
-const originalStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
+const scopes: RealCodexScope[] = []
 const ctxmuxDaemon = fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
 
-async function stopOwnedTestDaemon(runtimeDirectory: string): Promise<void> {
-  const processes = await execFileAsync('ps', ['-axo', 'pid=,command='], {
-    timeout: 5_000,
-    maxBuffer: 4 * 1024 * 1024
-  })
-  const pids = processes.stdout.split('\n').flatMap((line) => {
-    const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
-    if (!match) return []
-    const command = match[2]!
-    return command.includes(ctxmuxDaemon) &&
-      command.includes(`--socket ${join(runtimeDirectory, 'ctxmux.sock')}`) &&
-      command.includes(`--state-dir ${join(runtimeDirectory, 'state')}`)
-      ? [Number(match[1])]
-      : []
-  })
-  if (pids.length > 1) throw new Error('Multiple CtxMux daemons occupy the isolated real Codex runtime.')
-  const pid = pids[0]
-  if (pid === undefined) return
-  try {
-    process.kill(pid, 'SIGTERM')
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
-  }
-  const deadline = Date.now() + 5_000
-  while (Date.now() <= deadline) {
-    try {
-      process.kill(pid, 0)
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return
-      throw error
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-  throw new Error(`Isolated real Codex CtxMux daemon ${pid} did not stop.`)
-}
-
 afterEach(async () => {
-  const cleanupErrors: unknown[] = []
-  const cleanupClients: Array<Awaited<ReturnType<typeof connectLocalAgentMux>>> = []
-  for (const active of activeAgentSessions.splice(0)) {
-    try {
-      const client = await connectLocalAgentMux({ store: active.store })
-      if (client.agentSessions().some((session) => session.agentSessionId === active.agentSessionId)) {
-        const session = client.agentSession(active.agentSessionId)
-        await client.stopAgent(active.agentSessionId, session.run)
-      }
-      cleanupClients.push(client)
-    } catch (error) {
-      cleanupErrors.push(error)
-    }
-  }
-  for (const session of createdCodexSessions.splice(0)) {
-    try {
-      await execFileAsync(session.command, ['delete', '--force', session.sessionId], {
-        cwd: session.cwd,
-        timeout: 15_000,
-        maxBuffer: 1024 * 1024
-      })
-    } catch (error) {
-      cleanupErrors.push(error)
-    }
-  }
-  for (const client of cleanupClients) {
-    try {
-      await client.dispose()
-    } catch (error) {
-      cleanupErrors.push(error)
-    }
-  }
-  for (const runtimeDirectory of runtimeDirectories.splice(0)) {
-    try {
-      await stopOwnedTestDaemon(runtimeDirectory)
-    } catch (error) {
-      cleanupErrors.push(error)
-    }
-  }
-  if (originalRuntimeDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY
-  else process.env.AGENTMUX_RUNTIME_DIRECTORY = originalRuntimeDirectory
-  if (originalStateDirectory === undefined) delete process.env.AGENTMUX_STATE_DIRECTORY
-  else process.env.AGENTMUX_STATE_DIRECTORY = originalStateDirectory
-  await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
-  if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Real Codex E2E session cleanup failed.')
+  const failures = await Promise.allSettled(scopes.splice(0).map(scope => scope.cleanup()))
+  const errors = failures.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+  if (errors.length) throw new AggregateError(errors, 'Real Codex private cleanup failed; scope preserved.')
 }, 30_000)
 
 async function waitFor<T>(
+  scope: RealCodexScope,
   description: string,
   predicate: () => T | Promise<T>,
   timeoutMs = 120_000,
@@ -108,7 +26,8 @@ async function waitFor<T>(
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() <= deadline) {
-    const result = await predicate()
+    scope.assertOpen()
+    const result = await scope.perform(async () => await predicate())
     if (result) return result
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
@@ -123,33 +42,45 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       timeout: 5_000,
       maxBuffer: 64 * 1024
     })).stdout.trim()
-    const [version, auth] = await Promise.all([
-      execFileAsync(command, ['--version'], { timeout: 5_000, maxBuffer: 64 * 1024 }),
-      execFileAsync(command, ['login', 'status'], { timeout: 10_000, maxBuffer: 64 * 1024 })
-    ])
-    const authStatus = `${auth.stdout}${auth.stderr}`.trim()
-    if (!/^codex-cli 0\./u.test(version.stdout.trim()) || !authStatus.includes('Logged in')) {
-      throw new Error(
-        `REAL_CODEX_E2E_UNAVAILABLE: executable=${command} version=${version.stdout.trim()} auth=${authStatus}`
-      )
+    // Missing isolated seed fails before any Native/Agent launch; no user HOME/Keychain fallback.
+    const scope = await prepareRealCodexScope(owner => scopes.push(owner))
+    const root = scope.root
+    const preflight = await scope.perform(async () => await Promise.allSettled([
+      execFileAsync(command, [...privateCodexConfigArgs, '--version'], { timeout: 5_000, maxBuffer: 64 * 1024 }),
+      execFileAsync(command, [...privateCodexConfigArgs, 'login', 'status'], { timeout: 10_000, maxBuffer: 64 * 1024 }),
+      execFileAsync(command, [...privateCodexConfigArgs, 'mcp', 'list', '--json'], { timeout: 10_000, maxBuffer: 64 * 1024 }),
+      execFileAsync(command, [...privateCodexConfigArgs, 'features', 'list'], { timeout: 10_000, maxBuffer: 64 * 1024 })
+    ]))
+    if (preflight.some(result => result.status === 'rejected')) throw new Error('Private Codex version/auth/MCP/features preflight failed; no Native or Agent launched.')
+    const [version, auth, mcp, features] = preflight.map(result => {
+      if (result.status !== 'fulfilled') throw new Error('Private Codex preflight is incomplete.')
+      return result.value
+    }) as [{ stdout: string; stderr: string }, { stdout: string; stderr: string }, { stdout: string; stderr: string }, { stdout: string; stderr: string }]
+    // Do not include authentication/configuration output in failures.
+    expect(/^codex-cli 0\./u.test(version.stdout.trim())).toBe(true)
+    expect(`${auth.stdout}${auth.stderr}`.includes('Logged in')).toBe(true)
+    let noMcpServers = false
+    try {
+      const configured: unknown = JSON.parse(mcp.stdout)
+      noMcpServers = Array.isArray(configured) && configured.length === 0
+    } catch { /* Invalid output is an honest preflight failure, without printing its values. */ }
+    expect(noMcpServers).toBe(true)
+    const featureRows = features.stdout.trim().split('\n').map(line => line.trim().split(/\s+/u))
+    expect(featureRows.length).toBeGreaterThan(0)
+    for (const [name, enabled] of [['hooks', 'true'], ['plugins', 'false'], ['plugin_hooks', 'false'], ['memories', 'false'], ['chronicle', 'false']]) {
+      expect(featureRows.filter(row => row[0] === name).map(row => row.at(-1))).toEqual([enabled])
     }
-
-    const root = await mkdtemp('/tmp/agentmux-real-codex-')
-    roots.push(root)
-    const runtimeDirectory = join(root, 'runtime')
-    runtimeDirectories.push(runtimeDirectory)
-    process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDirectory
-    process.env.AGENTMUX_STATE_DIRECTORY = join(runtimeDirectory, 'durable')
     const invocationId = root.slice(root.lastIndexOf('-') + 1)
     const agentSessionId = `real-codex-${invocationId}`
     const workspace = join(root, 'workspace')
-    await mkdir(workspace, { mode: 0o700 })
-    await execFileAsync('git', ['init', '--quiet', workspace], { timeout: 5_000, maxBuffer: 64 * 1024 })
+    await scope.perform(async () => await execFileAsync('git', ['init', '--quiet', workspace], { timeout: 5_000, maxBuffer: 64 * 1024 }))
     const installer = new AgentManagedHookInstaller(join(root, 'hook-state'))
-    const preview = await installer.preview((new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: workspace })!))
-    const hookReceipt = await installer.install(preview.id)
+    const provider = new AgentProviderRegistry().get('codex')
+    const preview = await scope.perform(async () => await installer.preview(provider.planManagedHooks!({ workspacePath: workspace })!))
+    const hookReceipt = await scope.perform(async () => await installer.install(preview.id))
     const trustOverride = `projects={${JSON.stringify(workspace)}={trust_level="trusted"}}`
     const codexArgs = [
+      ...privateCodexConfigArgs,
       '--dangerously-bypass-hook-trust',
       '--no-alt-screen',
       '--ask-for-approval', 'never',
@@ -157,9 +88,9 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       '--config', 'model_reasoning_effort="low"',
       '--config', trustOverride
     ]
-    const store = new AgentMuxFileAgentSessionStore(join(root, 'agent-sessions.json'))
-    activeAgentSessions.push({ store, agentSessionId })
-    let client = await connectLocalAgentMux({ store })
+    const store = new ObservedPromptStore(join(root, 'agent-sessions.json'))
+    await scope.startNative(ctxmuxDaemon)
+    let client = await scope.connect(new AgentMuxClient({ store }))
     let output = ''
     const assistantMarkers = new Set<string>()
     const observe = (event: AgentMuxClientEvent): void => {
@@ -173,7 +104,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       }
     }
     client.onEvent(observe)
-    const created = await client.createAgent({
+    const created = await scope.perform(async () => await client.createAgent({
       agentSessionId,
       createOperationId: `real-codex-create-${invocationId}`,
       providerId: 'codex',
@@ -183,16 +114,16 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       commandOverride: command,
       args: codexArgs,
       prompt: 'Reply with exactly AGENTMUX_REAL_CODEX_READY and do not use tools.'
-    })
+    }))
     expect(created.terminalHandshake).toMatchObject({
       run: { runId: created.run.runId },
       inputByteRange: { startByte: 0, endByte: 5 },
       acknowledged: true
     })
-    const firstAttachment = await client.reattachAgent(created.agentSessionId, 0)
+    const firstAttachment = await scope.perform(async () => await client.reattachAgent(created.agentSessionId, 0))
     output += firstAttachment.attachment.replay.map((event) => event.data).join('')
     expect(output).toContain('\u001b[?u')
-    const nativeSessionId = await waitFor('real Codex SessionStart hook', () => {
+    const nativeSessionId = await waitFor(scope, 'real Codex SessionStart hook', () => {
       const session = client.agentSession(created.agentSessionId)
       return session.nativeHandle?.kind === 'provider' &&
         session.hookReceipt?.eventName === 'SessionStart' &&
@@ -200,8 +131,7 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
         ? session.nativeHandle.sessionId
         : ''
     })
-    createdCodexSessions.push({ command, sessionId: nativeSessionId, cwd: root })
-    await waitFor('real Codex initial completed response', () => {
+    await waitFor(scope, 'real Codex initial completed response', () => {
       const session = client.agentSession(created.agentSessionId)
       return output.includes('AGENTMUX_REAL_CODEX_READY') &&
         [...assistantMarkers].some((content) => content.includes('AGENTMUX_REAL_CODEX_READY')) &&
@@ -224,27 +154,27 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     expect(initialReadiness?.readyThroughByte).toBeGreaterThanOrEqual(
       initialReadiness?.outputCursorBytes ?? Number.MAX_SAFE_INTEGER
     )
-    const firstStatus = await client.statusAgent(created.agentSessionId)
-    await client.dispose()
+    const firstStatus = await scope.perform(async () => await client.statusAgent(created.agentSessionId))
+    await scope.dispose(client)
 
-    client = await connectLocalAgentMux({ store })
+    client = await scope.connect(new AgentMuxClient({ store }))
     output = ''
     client.onEvent(observe)
-    const reattached = await client.reattachAgent(created.agentSessionId, 0)
+    const reattached = await scope.perform(async () => await client.reattachAgent(created.agentSessionId, 0))
     output += reattached.attachment.replay.map((event) => event.data).join('')
-    const reconnectedStatus = await client.statusAgent(created.agentSessionId)
+    const reconnectedStatus = await scope.perform(async () => await client.statusAgent(created.agentSessionId))
     expect(reconnectedStatus.run.runId).toBe(firstStatus.run.runId)
     expect(reconnectedStatus.run.pid).toBe(firstStatus.run.pid)
     expect(output).toContain('AGENTMUX_REAL_CODEX_READY')
-    const firstPreExit = await client.statusAgent(created.agentSessionId)
+    const firstPreExit = await scope.perform(async () => await client.statusAgent(created.agentSessionId))
     expect(firstPreExit.run.acceptedInputBytes).toBe(5)
-    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(created.agentSessionId)),
+    await scope.perform(async () => await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(created.agentSessionId)),
       agentSessionId: created.agentSessionId,
       operationId: `real-codex-exit-${invocationId}`,
       prompt: '/exit'
-    })
-    const firstExit = await waitFor('real Codex initial Run terminal receipt', async () => {
-      const status = await client.statusAgent(created.agentSessionId)
+    }))
+    const firstExit = await waitFor(scope, 'real Codex initial Run terminal receipt', async () => {
+      const status = await scope.perform(async () => await client.statusAgent(created.agentSessionId))
       return status.run.state === 'exited' &&
         status.run.acceptedInputBytes === 11
         ? status
@@ -252,30 +182,32 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     })
     expect(firstExit!.run.exitCode).toBe(0)
     expect(firstExit!.run.exitSignal).toBeUndefined()
-    expect(client.agentSession(created.agentSessionId).terminalPromptSubmission).toMatchObject({
+    const firstSubmission = await assertExitedAdmission(scope, store, created.agentSessionId, created.run,
+      `real-codex-exit-${invocationId}`, provider.planPromptInput('/exit'), 5)
+    expect(firstSubmission).toMatchObject({
       readinessEvidence: { source: 'native-stop', id: initialReadiness?.id, outputCursorBytes: initialReadiness?.outputCursorBytes, readyThroughByte: initialReadiness?.readyThroughByte },
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })
-    await client.releaseRunAttachment(created.run)
-    const firstExitReplay = await client.reattachAgent(
+    await scope.perform(async () => await client.releaseRunAttachment(created.run))
+    const firstExitReplay = await scope.perform(async () => await client.reattachAgent(
       created.agentSessionId,
       firstPreExit.run.latestOutputBytes
-    )
+    ))
     expect(firstExitReplay.attachment.replay.map((event) => event.data).join('')).toContain('/exit')
-    await client.dispose()
+    await scope.dispose(client)
 
-    client = await connectLocalAgentMux({ store })
+    client = await scope.connect(new AgentMuxClient({ store }))
     output = ''
     client.onEvent(observe)
     const resumedPrompt = 'Reply with exactly AGENTMUX_REAL_CODEX_RESUMED and do not use tools.'
-    const resumed = await client.resumeAgent({
+    const resumed = await scope.perform(async () => await client.resumeAgent({
       agentSessionId: created.agentSessionId,
       operationId: `real-codex-resume-${invocationId}`,
       prompt: resumedPrompt,
       args: codexArgs,
       commandOverride: command
-    })
+    }))
     expect(resumed.agentSessionId).toBe(created.agentSessionId)
     expect(resumed.run.runId).not.toBe(created.run.runId)
     expect(resumed.terminalHandshake).toMatchObject({
@@ -283,13 +215,13 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       inputByteRange: { startByte: 0, endByte: 5 },
       acknowledged: true
     })
-    const resumedAttachment = await client.reattachAgent(resumed.agentSessionId, 0)
+    const resumedAttachment = await scope.perform(async () => await client.reattachAgent(resumed.agentSessionId, 0))
     output += resumedAttachment.attachment.replay.map((event) => event.data).join('')
     expect(output).toContain('\u001b[?u')
     expect(client.agentSession(resumed.agentSessionId).nativeHandle).toMatchObject({
       kind: 'provider', providerId: 'codex', sessionId: nativeSessionId
     })
-    await waitFor('real Codex resumed completed response', () => {
+    await waitFor(scope, 'real Codex resumed completed response', () => {
       const session = client.agentSession(resumed.agentSessionId)
       return output.includes('AGENTMUX_REAL_CODEX_RESUMED') &&
         [...assistantMarkers].some((content) => content.includes('AGENTMUX_REAL_CODEX_RESUMED')) &&
@@ -309,15 +241,15 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
       }
     })
     const resumedReadiness = client.agentSession(resumed.agentSessionId).terminalPromptReadiness
-    const resumedConnectedStatus = await client.statusAgent(resumed.agentSessionId)
-    await client.dispose()
+    const resumedConnectedStatus = await scope.perform(async () => await client.statusAgent(resumed.agentSessionId))
+    await scope.dispose(client)
 
-    client = await connectLocalAgentMux({ store })
+    client = await scope.connect(new AgentMuxClient({ store }))
     output = ''
     client.onEvent(observe)
-    const resumedReattachment = await client.reattachAgent(resumed.agentSessionId, 0)
+    const resumedReattachment = await scope.perform(async () => await client.reattachAgent(resumed.agentSessionId, 0))
     output += resumedReattachment.attachment.replay.map((event) => event.data).join('')
-    const resumedReconnectedStatus = await client.statusAgent(resumed.agentSessionId)
+    const resumedReconnectedStatus = await scope.perform(async () => await client.statusAgent(resumed.agentSessionId))
     expect(resumedReconnectedStatus.run.runId).toBe(resumedConnectedStatus.run.runId)
     expect(resumedReconnectedStatus.run.pid).toBe(resumedConnectedStatus.run.pid)
     expect(client.agentSession(resumed.agentSessionId)).toMatchObject({
@@ -325,16 +257,16 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     })
     expect(output).toContain('AGENTMUX_REAL_CODEX_RESUMED')
     const resumedPromptAcceptedInputBytes = 5
-    const resumedPreExit = await client.statusAgent(resumed.agentSessionId)
+    const resumedPreExit = await scope.perform(async () => await client.statusAgent(resumed.agentSessionId))
     expect(resumedPreExit.run.acceptedInputBytes).toBe(resumedPromptAcceptedInputBytes)
-    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(resumed.agentSessionId)),
+    await scope.perform(async () => await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(resumed.agentSessionId)),
       agentSessionId: resumed.agentSessionId,
       operationId: `real-codex-resumed-exit-${invocationId}`,
       prompt: '/exit'
-    })
+    }))
     const resumedExpectedInputBytes = resumedPromptAcceptedInputBytes + Buffer.byteLength('/exit\r')
-    const resumedExit = await waitFor('real Codex resumed Run terminal receipt', async () => {
-      const status = await client.statusAgent(resumed.agentSessionId)
+    const resumedExit = await waitFor(scope, 'real Codex resumed Run terminal receipt', async () => {
+      const status = await scope.perform(async () => await client.statusAgent(resumed.agentSessionId))
       return status.run.state === 'exited' &&
         status.run.acceptedInputBytes === resumedExpectedInputBytes
         ? status
@@ -342,21 +274,22 @@ describe.runIf(process.env.AGENTMUX_REAL_CODEX_E2E === '1')('installed real Code
     })
     expect(resumedExit!.run.exitCode).toBe(0)
     expect(resumedExit!.run.exitSignal).toBeUndefined()
-    expect(client.agentSession(resumed.agentSessionId).terminalPromptSubmission).toMatchObject({
+    const resumedSubmission = await assertExitedAdmission(scope, store, resumed.agentSessionId, resumed.run,
+      `real-codex-resumed-exit-${invocationId}`, provider.planPromptInput('/exit'), 5)
+    expect(resumedSubmission).toMatchObject({
       readinessEvidence: { source: 'native-stop', id: resumedReadiness?.id, outputCursorBytes: resumedReadiness?.outputCursorBytes, readyThroughByte: resumedReadiness?.readyThroughByte },
       payload: { acknowledged: true },
       submit: { acknowledged: true }
     })
-    await client.releaseRunAttachment(resumed.run)
-    const resumedExitReplay = await client.reattachAgent(
+    await scope.perform(async () => await client.releaseRunAttachment(resumed.run))
+    const resumedExitReplay = await scope.perform(async () => await client.reattachAgent(
       resumed.agentSessionId,
       resumedPreExit.run.latestOutputBytes
-    )
+    ))
     expect(resumedExitReplay.attachment.replay.map((event) => event.data).join('')).toContain('/exit')
-    await client.stopAgent(resumed.agentSessionId, resumed.run)
-    activeAgentSessions.splice(0)
+    await scope.perform(async () => await client.stopAgent(resumed.agentSessionId, resumed.run))
     expect(client.agentSessions()).toEqual([])
-    await client.dispose()
-    await installer.uninstall(hookReceipt)
+    await scope.dispose(client)
+    await scope.perform(async () => await installer.uninstall(hookReceipt))
   }, 180_000)
 })
