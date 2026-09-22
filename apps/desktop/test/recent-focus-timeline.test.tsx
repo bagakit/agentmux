@@ -61,13 +61,13 @@ describe('Recent Focus timeline', () => {
     useAppStore.setState({ timelines: { one: { agentSessionId: 'one', revision: 1, items: [message('first'), message('reply', 'one', NOW - HOUR_MS, 'assistant_message'), message('old', 'one', NOW - 4 * HOUR_MS), message('future', 'one', NOW + HOUR_MS / 2)] }, two: { agentSessionId: 'two', revision: 1, items: [message('second', 'two', NOW - HOUR_MS / 2)] } } })
     const onSelect = vi.fn(); await render(onSelect, [])
     const markers = [...container.querySelectorAll<HTMLButtonElement>('.recent-focus__message')]
-    expect(markers.map(marker => [marker.dataset.messageId, marker.closest<HTMLElement>('.recent-focus__track')!.dataset.focusTimelineId, marker.style.left])).toEqual([['first', 'one', '50%'], ['second', 'two', '62.5%']])
+    expect(markers.map(marker => [marker.dataset.messageId, marker.closest<HTMLElement>('.recent-focus__track')!.dataset.focusTimelineId, marker.style.left])).toEqual([['captured:first', 'one', '50%'], ['captured:second', 'two', '62.5%']])
     await act(async () => markers[0]!.click())
     expect(container.querySelector('[role="dialog"]')!.textContent).toContain('Original message first'); expect(onSelect).not.toHaveBeenCalled()
     await act(async () => container.querySelector<HTMLButtonElement>('[role="dialog"] > button')!.click()); expect(onSelect).toHaveBeenCalledWith('one'); expect(container.querySelector('[role="dialog"]')).toBeNull()
     const before = markers[1]
     await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [message('unrelated', 'unrelated')] } } })))
-    expect(container.querySelector('[data-message-id="second"]')).toBe(before)
+    expect(container.querySelector('[data-message-id="captured:second"]')).toBe(before)
     expect(container.querySelector('.recent-focus__range')!.getAttribute('title')).toContain('retained')
   })
 

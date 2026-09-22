@@ -111,7 +111,7 @@ it('actual Store Control send and Core recording show a nonempty known Agent mar
     expect(h.writes).toEqual([{ runId: h.session.run.runId, data: prompt + '\r' }]);
     await h.render();
     const markers = [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')];
-    expect(markers.map(marker => marker.dataset.messageId)).toEqual(['prompt:private-control-send']);
+    expect(markers.map(marker => marker.dataset.messageId)).toEqual(['captured:prompt:private-control-send']);
     expect(markers[0]!.dataset.messageAuthor).toBe('agent');
     expect(markers[0]!.getAttribute('aria-label')).toMatch(/^Agent message in .+, sender private-author$/);
     expect(markers[0]!.title).toContain('Agent message · Sender private-author');
@@ -134,7 +134,7 @@ it('actual public Core plain send retains two identical prompts without claiming
     expect(captured.items.map(item => [item.id, item.content, item.authorAgentSessionId])).toEqual([['prompt:human-one', prompt, undefined], ['prompt:human-two', prompt, undefined]]);
     await h.render();
     const markers = [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')];
-    expect(markers.map(item => item.dataset.messageId)).toEqual(['prompt:human-one', 'prompt:human-two']);
+    expect(markers.map(item => item.dataset.messageId)).toEqual(['captured:prompt:human-one', 'captured:prompt:human-two']);
     expect(markers.map(item => Number(item.dataset.messageAt))).toEqual(captured.items.map(item => item.createdAt));
     expect(markers.map(item => item.getAttribute('aria-label'))).toEqual([
         expect.stringMatching(/^Prompt in .+, sender not recorded$/),
@@ -177,7 +177,7 @@ it('actual continuous-progress caller through Runtime/Core/Store presents an aut
     expect(h.writes).toEqual([{ runId: h.session.run.runId, data: loop.prompt + '\r' }]);
     await h.render();
     const markers = [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')];
-    expect(markers.map(marker => marker.dataset.messageId)).toEqual(['prompt:private-automation']);
+    expect(markers.map(marker => marker.dataset.messageId)).toEqual(['captured:prompt:private-automation']);
     expect(Number(markers[0]!.dataset.messageAt)).toBe(captured.items[0]!.createdAt);
     expect(markers[0]!.getAttribute('aria-label')).toMatch(/^Prompt in .+, sender not recorded$/);
     expect(markers[0]!.title).toContain('Prompt · Sender not recorded');
@@ -200,6 +200,8 @@ it('does not infer Human authorship from a non-user source even when its kind sa
     expect(captured.items).toEqual([item]);
     useAppStore.setState({ timelines: { [h.session.agentSessionId]: captured } });
     await h.render();
-    expect(h.element.querySelectorAll('.recent-focus__message')).toHaveLength(0);
+    const markers = [...h.element.querySelectorAll<HTMLElement>('.recent-focus__message')];
+    expect(markers.map(marker => [marker.dataset.messageId, marker.dataset.messageAuthor])).toEqual([['captured:non-user-source-record', 'unknown']]);
+    expect(markers[0]!.getAttribute('aria-label')).toContain('sender not recorded');
     expect(useAppStore.getState().timelines[h.session.agentSessionId]!.items).toEqual([item]);
 });
