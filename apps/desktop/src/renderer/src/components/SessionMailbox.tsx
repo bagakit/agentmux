@@ -151,7 +151,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
   }, [sessionFactsKey, refresh])
 
   const messages = useMemo(() => timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
-    item.kind === 'user_message' && item.status !== 'streaming') ?? [], [timeline])
+    item.kind === 'user_message') ?? [], [timeline])
   const incoming = useMemo(() => messages.filter((item) => item.authorAgentSessionId !== undefined), [messages])
   const timelineSent = useMemo(() => messages.filter((item) => item.authorAgentSessionId === undefined), [messages])
 
