@@ -1,21 +1,32 @@
 import { useLayoutEffect, useRef } from 'react'
 import { ArrowUpRight, Bot, MessageSquare, X } from 'lucide-react'
-import type { AgentTimelineItem } from '@agentmux/core/timeline'
+import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { useAppStore } from '../store'
+import { ConversationMessage } from './ConversationMessage'
+import { api } from '../lib/api'
 
-/** One inspected captured record. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ message, sender, recipient, lane, hierarchy, interactive, left, onSelect, onClose }: {
-  message: AgentTimelineItem; sender: FocusContext | undefined; recipient: FocusContext | undefined
+export type FocusMessageReader = {
+  contexts: readonly FocusContext[]; contextId: string | null; messages: readonly AgentSessionUserMessage[]
+  loading: boolean; coverage: string; error: string | null; canContinue: boolean
+  onContext(id: string): void; onMessage(message: AgentSessionUserMessage): void
+  onContinue(): void; onRefresh(): void
+}
+const readPastedImage = (path: string) => api.ui.readPastedImage(path)
+
+/** One inspected Core input. Current Context facts never become its historical author or Run. */
+export function FocusMessagePreview({ message, sender, recipient, lane, hierarchy, interactive, left, reader, onSelect, onClose }: {
+  message: AgentSessionUserMessage | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
-  interactive: boolean; left: number; onSelect(id: string): void; onClose(): void
+  interactive: boolean; left: number; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
 }) {
   const element = useRef<HTMLDivElement>(null)
   const returnFocus = useRef(true)
   const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
   const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
-  const agent = message.authorAgentSessionId !== undefined
+  const agent = message?.author.kind === 'agent'
+  const authorId = message?.author.kind === 'agent' ? message.author.agentSessionId : undefined
   const topic = sender?.topicId && lane ? hierarchy?.topics[lane.workspaceId]?.find(item => item.id === sender.topicId) : undefined
   const branch = sender?.workspace?.branch ?? hierarchy?.worktrees.find(item => item.hostId === sender?.hostId && item.path === sender.workspacePath)?.branch
   const project = lane?.projectWorkspaceId ? lane.labels[0] : sender?.workspace?.name
@@ -35,7 +46,7 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
       document.removeEventListener('pointerdown', outside)
       if (interactive && returnFocus.current && previous?.isConnected && surface?.contains(document.activeElement)) previous.focus()
     }
-  }, [interactive, message.id, acquireOverlay, releaseOverlay, onClose])
+  }, [interactive, acquireOverlay, releaseOverlay, onClose])
   const navigate = (context: FocusContext | undefined) => {
     if (!context) return
     returnFocus.current = false
@@ -43,20 +54,34 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
     onClose()
   }
   return <div ref={element} tabIndex={interactive ? -1 : undefined} className="recent-focus__message-preview" data-interactive={interactive}
-    style={{ left }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
-    <header>{agent ? <Bot size={14} aria-hidden="true" /> : <MessageSquare size={14} aria-hidden="true" />}<strong>{agent ? sender?.name ?? 'Agent' : 'Prompt'}</strong>
-      <time>{new Date(message.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
+    style={{ left: `clamp(8px, ${left}px, calc(100% - 340px))` }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
+    <header>{agent ? <Bot size={14} aria-hidden="true" /> : <MessageSquare size={14} aria-hidden="true" />}<strong>{reader ? 'Input records' : agent ? sender?.name ?? 'Agent' : 'Prompt'}</strong>
+      {message ? <time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Record time unknown'}</time> : null}
       {interactive ? <button type="button" className="icon-button" aria-label="Close message" onClick={onClose}><X size={12} /></button> : null}</header>
-    <p className="recent-focus__message-caption">{agent ? `Agent message · To ${recipient?.name ?? message.agentSessionId}` : 'Prompt · Sender not recorded'}</p>
+    {reader ? <div className="recent-focus__input-reader">
+      <label>Context <select aria-label="Input records Context" value={reader.contextId ?? ''} onChange={event => reader.onContext(event.target.value)}><option value="" disabled>Choose a Context</option>{reader.contexts.map(context => <option key={context.id} value={context.id}>{context.name} · {context.workspaceName}</option>)}</select></label>
+      <p role="status" className="recent-focus__input-coverage">{reader.loading ? 'Reading input records… ' : ''}{reader.coverage}</p>
+      {reader.error ? <p role="status" className="recent-focus__input-error">{reader.error} Existing records and live input are preserved.</p> : null}
+      <div className="recent-focus__input-actions"><button type="button" disabled={reader.loading || !reader.canContinue} onClick={reader.onContinue}>Read earlier records</button><button type="button" disabled={reader.loading} onClick={reader.onRefresh}>Refresh source</button></div>
+      <div className="recent-focus__input-list" aria-label="Available input records">{reader.messages.map(item => <button type="button" key={item.id} data-input-message-id={item.id} data-input-source={item.source.kind} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
+        {item.author.kind === 'agent' ? <Bot size={12} aria-hidden="true" /> : <MessageSquare size={12} aria-hidden="true" />}<span>{item.content || 'Input with resources'}</span><small>{item.source.kind === 'native' ? 'Native' : 'Submission'} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : new Date(item.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
+      </button>)}</div>
+      {!reader.loading && reader.messages.length === 0 ? <p>No input records read in this view. Coverage may be incomplete.</p> : null}
+    </div> : null}
+    {message ? <><p className="recent-focus__message-caption">{agent ? `Agent message · To ${recipient?.name ?? message.agentSessionId}` : 'Prompt · Sender not recorded'} · {message.source.kind === 'native' ? 'Native record' : 'Submission record'}</p>
     {agent ? <><dl className="recent-focus__sender">
-      <dt>Sender</dt><dd>{sender?.name ?? 'Context unavailable'}<small title={message.authorAgentSessionId}>{message.authorAgentSessionId}</small></dd>
+      <dt>Sender</dt><dd>{sender?.name ?? 'Context unavailable'}<small title={authorId}>{authorId}</small></dd>
       <dt>Current project</dt><dd>{project ?? 'Not recorded'}</dd>
       <dt>Current branch</dt><dd>{branch ?? 'Not recorded'}</dd>
       <dt>Current topic</dt><dd>{topic && !topic.readError ? topic.title || 'Untitled topic' : 'Not recorded'}</dd>
     </dl>{interactive && sender ? <p className="recent-focus__sender-work">Current: {sender.stateLabel} · {sender.detail}</p> : null}
       <p className="recent-focus__sender-run">Sender Run not recorded · Execution relationship unknown</p></> : null}
-    <p className="recent-focus__message-body">{message.content ?? message.title}</p>
+    <div className="recent-focus__message-body" data-input-preview-id={message.id} data-input-source={message.source.kind}><ConversationMessage messageId={message.id}
+      {...(authorId ? { speaker: { role: 'agent' as const, id: authorId } } : {})}
+      name={agent ? sender?.name ?? 'Agent' : 'Sender not recorded'} content={message.contentParts}
+      {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
+      workspaceRoot={recipient?.workspacePath ?? ''} readPastedImage={readPastedImage} /></div>
     {interactive && agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ArrowUpRight size={12} aria-hidden="true" /></button> : null}
-    {interactive ? <button type="button" disabled={!recipient} onClick={() => navigate(recipient)}>Return to Context</button> : <span className="recent-focus__message-hint">Click or press Enter to view actions</span>}
+    {interactive ? <button type="button" disabled={!recipient} onClick={() => navigate(recipient)}>Return to Context</button> : <span className="recent-focus__message-hint">Click or press Enter to view actions</span>}</> : null}
   </div>
 }

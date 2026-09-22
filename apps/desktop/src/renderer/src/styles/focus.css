@@ -132,6 +132,21 @@
 .recent-focus__message-body { border-top: 1px solid var(--line); padding-top: var(--sp-2); }
 .recent-focus__message-preview[data-interactive='false'] .recent-focus__message-body, .recent-focus__sender-work { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .recent-focus__message-preview .recent-focus__sender-link { display: inline-flex; align-items: center; gap: 4px; }
+.recent-focus__input-reader { margin: var(--sp-2) 0; }
+.recent-focus__input-reader label { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); }
+.recent-focus__input-reader select { flex: 1; min-width: 0; height: 24px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-1); color: var(--text-2); font: inherit; }
+.recent-focus__input-coverage, .recent-focus__input-error { margin: var(--sp-2) 0; font-size: var(--fs-micro); }
+.recent-focus__input-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.recent-focus__input-actions button { border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; background: var(--surface-1); color: var(--text-2); font: inherit; cursor: pointer; }
+.recent-focus__input-actions button:disabled { opacity: .5; cursor: default; }
+.recent-focus__input-list { max-height: 120px; overflow: auto; margin-top: var(--sp-2); }
+.recent-focus__input-list button { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px var(--sp-2); width: 100%; padding: 4px; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 3px; background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; user-select: none; }
+.recent-focus__input-list button[aria-pressed='true'] { background: var(--surface-3); }
+.recent-focus__input-list button:hover { background: var(--surface-1); }
+.recent-focus__input-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-focus__input-list button small { grid-column: 2; color: var(--text-3); font-size: var(--fs-micro); }
+.recent-focus__message-body .log-turn { padding: 0; border: 0; background: transparent; }
+.recent-focus__message-body .log-turn__body { font-size: var(--fs-micro); }
 
 .focus-pmo-attention { flex: none; display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
 
