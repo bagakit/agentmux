@@ -51,6 +51,11 @@ await verifyRendererSourceMutations({
       after: '.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-3); }'
     },
     {
+      label: 'minimum-trace-entry-horizontal-overflow', file: css,
+      before: '.browser-trace-rail :is(.browser-demonstration-entry, .browser-task-asset-entry) > .browser-rsi-button { max-width: 100%; white-space: normal; }',
+      after: ''
+    },
+    {
       label: 'required-overflow', file: css,
       before: '.browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }',
       after: '.browser-toolbar > .browser-toolbar__more--optional { display: none; }'
