@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { NativeOverlaySurfaces } from '../src/main/native-overlay-surfaces'
 
-const fake = vi.hoisted(() => ({ views: [] as any[], load: null as Promise<void> | null, image: null as Promise<void> | null }))
+const fake = vi.hoisted(() => ({ views: [] as any[], load: null as Promise<void> | null, image: null as Promise<void> | null, radiusError: null as Error | null }))
 vi.mock('electron', () => ({ WebContentsView: class {
   webContents = { loadURL: vi.fn(async () => {
     this.loadStates.push({ ownerWindow: this.ownerWindow, bounds: this.bounds && { ...this.bounds }, visible: this.visible })
@@ -25,7 +26,11 @@ vi.mock('electron', () => ({ WebContentsView: class {
   bounds: any
   setBounds = vi.fn(bounds => { this.bounds = bounds })
   getBounds = () => this.bounds
-  setBorderRadius = vi.fn()
+  setBorderRadius = vi.fn((radius: number) => {
+    if (fake.radiusError) throw fake.radiusError
+    // Electron's original View boundary accepts integer pixels, including after UI zoom.
+    if (!Number.isInteger(radius)) throw new TypeError('Native radius requires an integer')
+  })
   visible = false
   setVisible = vi.fn(value => { this.visible = value })
   getVisible = () => this.visible
@@ -45,8 +50,119 @@ function fixture() {
 }
 const float = { id: 'chrome-1', bounds: { x: 120, y: 150, width: 100, height: 80 }, radius: 8 }
 
-beforeEach(() => { fake.views.length = 0; fake.load = null; fake.image = null })
+// A separate process observes real unhandled-rejection delivery without changing Vitest's
+// own handler. It compiles the current production module; only Electron's native boundary is modeled.
+function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
+  projected: number; warning: string; views: number; closed: boolean; unhandled: string[]
+} {
+  const script = String.raw`
+    const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+    const ts = require('typescript'), { createRequire } = require('node:module');
+    const root = process.cwd(), requirePackage = createRequire(path.join(root, 'package.json'));
+    const geometry = process.argv[1], modules = new Map(), views = [], unhandled = [];
+    let rejectDocument, attachmentCount = 0;
+    process.on('unhandledRejection', error => unhandled.push(error.message));
+    class View {
+      constructor() {
+        views.push(this);
+        this.webContents = {
+          loadURL: () => new Promise((_resolve, reject) => { rejectDocument = reject }),
+          setWindowOpenHandler() {}, on() {}, isDestroyed: () => this.closed === true,
+          close: () => {
+            this.closed = true;
+            setImmediate(() => rejectDocument(new Error('Original document interrupted by owner close')));
+          }
+        };
+      }
+      setBackgroundColor() {} setBounds(bounds) { this.bounds = bounds } setVisible() {}
+      setBorderRadius() { if (geometry === 'radius') throw new Error('Original native radius rejected') }
+    }
+    function load(file) {
+      if (modules.has(file)) return modules.get(file).exports;
+      const module = { exports: {} }; modules.set(file, module);
+      const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+      }).outputText;
+      const requireModule = id => id === 'electron' ? { WebContentsView: View }
+        : id.startsWith('.') ? load(path.resolve(path.dirname(file), id.replace(/\.js$/, '.ts')))
+        : requirePackage(id);
+      vm.runInThisContext('(function(require,module,exports){' + code + '\n})', { filename: file })
+        (requireModule, module, module.exports);
+      return module.exports;
+    }
+    (async () => {
+      const Owner = load(path.join(root, 'apps/desktop/src/main/native-overlay-surfaces.ts')).NativeOverlaySurfaces;
+      const window = {
+        getContentBounds: () => ({ width: 800, height: 600 }), isDestroyed: () => false,
+        webContents: { isDestroyed: () => false },
+        contentView: {
+          addChildView() {
+            if (++attachmentCount === 2 && geometry === 'reorder') throw new Error('Original native reorder rejected');
+          }, removeChildView() {}
+        }
+      };
+      const owner = new Owner(window, () => [{ x: 0, y: 0, width: 800, height: 600 }], () => {}, () => {});
+      const receipt = await owner.update([{ id: 'chrome-1', bounds: { x: 20, y: 20, width: 100, height: 100 }, radius: 11.25 }]);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      owner.dispose();
+      console.log(JSON.stringify({ projected: receipt.projected, warning: receipt.warning,
+        views: views.length, closed: views[0].closed, unhandled }));
+    })().catch(error => { console.error(error); process.exitCode = 1 });
+  `
+  return JSON.parse(execFileSync(process.execPath, ['-e', script, geometry], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+  })) as ReturnType<typeof lateDocumentAfterRemoval>
+}
+
+beforeEach(() => { fake.views.length = 0; fake.load = null; fake.image = null; fake.radiusError = null })
 describe('actual native Chrome owner', () => {
+  it.each(['radius', 'reorder'] as const)('consumes a removed owner document rejection after synchronous %s failure', geometry => {
+    const result = lateDocumentAfterRemoval(geometry)
+    expect(result.views).toBe(1)
+    expect(result.closed).toBe(true)
+    expect(result.projected).toBe(0)
+    expect(result.warning).toContain(`Chrome geometry: Original native ${geometry} rejected`)
+    expect(result.unhandled).toEqual([])
+  })
+  it.each([[11.25, 11], [7.2, 7], [0.625, 1]])('paints a visible interactive owner for fractional zoom radius %s', async (radius, nativeRadius) => {
+    const { owner, contents } = fixture()
+    await expect(owner.update([{ ...float, radius }])).resolves.toEqual({ projected: 1, capturedPixels: 8000 })
+    expect(fake.views).toHaveLength(1)
+    const view = fake.views[0]
+    expect(view.setBorderRadius).toHaveBeenCalledExactlyOnceWith(nativeRadius)
+    expect(view.contentLoaded).toBe(true)
+    expect(view.getVisible()).toBe(true)
+    expect(contents.capturePage).toHaveBeenCalledTimes(1)
+    view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+    expect(contents.sendInputEvent).toHaveBeenCalledWith({ type: 'mouseDown', x: 125, y: 157, button: 'left' })
+    owner.dispose()
+  })
+  it('cleans a rejected native radius while reporting the failed step and retaining Browser ownership', async () => {
+    fake.radiusError = new Error('Native radius configuration rejected')
+    const { owner, contents } = fixture()
+    await expect(owner.update([float])).resolves.toMatchObject({ projected: 0, warning: expect.stringContaining('Native radius configuration rejected') })
+    expect(fake.views).toHaveLength(1)
+    const view = fake.views[0]
+    expect(view.webContents.close).toHaveBeenCalledTimes(1)
+    expect(view.ownerWindow).toBeNull()
+    expect(contents.capturePage).not.toHaveBeenCalled()
+    view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+    expect(contents.sendInputEvent).not.toHaveBeenCalled()
+    owner.dispose()
+  })
+  it('cleans a rejected native reorder without leaving empty Chrome over a healthy page', async () => {
+    const { owner, window, contents } = fixture()
+    window.contentView.addChildView.mockImplementationOnce(view => { view.ownerWindow = window })
+      .mockImplementationOnce(() => { throw new Error('Native child reorder rejected') })
+    await expect(owner.update([float])).resolves.toMatchObject({ projected: 0, warning: expect.stringContaining('Native child reorder rejected') })
+    expect(fake.views).toHaveLength(1)
+    const view = fake.views[0]
+    expect(view.webContents.close).toHaveBeenCalledTimes(1)
+    expect(view.ownerWindow).toBeNull()
+    expect(contents.capturePage).not.toHaveBeenCalled()
+    expect(contents.focus).not.toHaveBeenCalled()
+    owner.dispose()
+  })
   it('synchronizes throttling once on the attached owner after document and content load, never during subsequent paints', async () => {
     let finishDocument!: () => void, finishContent!: () => void
     fake.load = new Promise(resolve => { finishDocument = resolve })
