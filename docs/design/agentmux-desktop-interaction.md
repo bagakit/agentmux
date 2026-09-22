@@ -87,6 +87,7 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 - 界面层级由 Surface、明度、局部高光和紧凑密度建立，不靠连续边框、重复标题或极小字号制造“专业感”。
 - 选择、键盘、拖拽、菜单和可访问性交互使用维护中的成熟依赖与平台模式。
 - Desktop 只组合 Core 的公共能力。所有 Agent 生命周期都经过 `packages/core`；所有 PTY、进程、Run、Replay 和 Attachment 事实都由 ctxmux 持有。
+- Renderer 等无 Node client 消费 Core 的纯投影时，公开入口的运行期依赖必须保持环境无关，不能把 Provider、Runtime 或 Node 内置模块带入 client 构建；同一投影继续由 Core 持有，不在 client 复制逻辑或替换 Node API 来掩盖边界错误。
 
 ### Agent 主观审美的端到端验证
 
