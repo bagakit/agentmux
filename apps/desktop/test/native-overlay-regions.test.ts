@@ -21,6 +21,90 @@ function node(role: string, bounds = { x: 20, y: 50, width: 120, height: 80 }): 
   document.querySelector('[data-overlay-host]')!.appendChild(element)
   return element
 }
+function flushFrame(): void { const pending = frame; frame = undefined; pending?.() }
+it.each([false, true])('root terminal scroll performs zero new overlay work with unrelated float=%s', withFloat => {
+  const root = document.getElementById('root')!
+  const terminal = document.createElement('div'), rows = document.createElement('div')
+  terminal.appendChild(rows); root.appendChild(terminal)
+  const popup = withFloat ? node('tooltip') : null
+  const geometry = popup ? vi.spyOn(popup, 'getBoundingClientRect') : null
+  const publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
+  expect(publish.mock.calls).toEqual([[withFloat ? [{ id: 'chrome-1', bounds: { x: 20, y: 50, width: 120, height: 80 }, radius: 8 }] : [], undefined]])
+  publish.mockClear(); geometry?.mockClear()
+  for (let index = 0; index < 10; index++) {
+    rows.dispatchEvent(new Event('scroll'))
+    terminal.dispatchEvent(new Event('scroll'))
+    root.dispatchEvent(new Event('scroll'))
+  }
+  flushFrame()
+  expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+  expect(publish.mock.calls).toEqual([])
+  if (geometry) expect(geometry).not.toHaveBeenCalled()
+})
+it('scrolling float content, its ancestor or the document keeps current nonempty geometry', () => {
+  const bounds = { x: 20, y: 50, width: 120, height: 80 }, popup = node('menu', bounds)
+  const content = document.createElement('div'); popup.appendChild(content)
+  const publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
+  expect(publish.mock.calls).toEqual([[ [{ id: 'chrome-1', bounds: { ...bounds }, radius: 8 }], undefined]])
+  for (const target of [content, popup, popup.parentElement!, document, window]) {
+    bounds.y += 10
+    target.dispatchEvent(new Event('scroll'))
+    flushFrame()
+    expect(publish.mock.calls.at(-1)![0], target === document ? 'document scroll' : target === window ? 'window scroll' : 'element scroll').toEqual([{ id: 'chrome-1', bounds: { ...bounds }, radius: 8 }])
+  }
+  expect(publish).toHaveBeenCalledTimes(6)
+})
+it('closed floating content does not turn ancestor scrolling into overlay work', () => {
+  const popup = node('menu'); popup.setAttribute('data-state', 'closed')
+  const observe = vi.fn(); vi.stubGlobal('ResizeObserver', class { observe = observe; disconnect() {} })
+  const publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
+  expect(publish.mock.calls).toEqual([[[], undefined]])
+  expect(observe).not.toHaveBeenCalled()
+  popup.parentElement!.dispatchEvent(new Event('scroll')); flushFrame()
+  expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+  expect(publish.mock.calls).toEqual([[[], undefined]])
+})
+it('a top-layer popover follows its actual toggle invoker scroll and releases that relationship on close', () => {
+  const bounds = { x: 20, y: 50, width: 120, height: 80 }, popup = node('dialog', bounds)
+  popup.setAttribute('popover', 'auto')
+  const root = document.getElementById('root')!, viewport = document.createElement('div'), invoker = document.createElement('button')
+  viewport.appendChild(invoker); root.append(viewport, popup)
+  const publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
+  expect(publish.mock.calls).toEqual([[[], undefined]])
+  const open = new Event('toggle')
+  Object.defineProperties(open, { newState: { value: 'open' }, source: { value: invoker } })
+  popup.dispatchEvent(open); flushFrame()
+  expect(publish.mock.calls.at(-1)![0]).toEqual([{ id: 'chrome-1', bounds: { ...bounds }, radius: 8 }])
+  bounds.y += 30
+  viewport.dispatchEvent(new Event('scroll')); flushFrame()
+  expect(publish.mock.calls.at(-1)![0]).toEqual([{ id: 'chrome-1', bounds: { ...bounds }, radius: 8 }])
+  const close = new Event('toggle')
+  Object.defineProperty(close, 'newState', { value: 'closed' })
+  popup.dispatchEvent(close); flushFrame()
+  expect(publish.mock.calls.at(-1)![0]).toEqual([])
+  publish.mockClear(); vi.mocked(window.requestAnimationFrame).mockClear()
+  viewport.dispatchEvent(new Event('scroll')); flushFrame()
+  expect(publish.mock.calls).toEqual([])
+  expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+})
+it('portal positioning style changes remain observed even when an unrelated terminal scroll is ignored', async () => {
+  const bounds = { x: 20, y: 50, width: 120, height: 80 }, popup = node('tooltip', bounds)
+  const terminal = document.createElement('div'); document.getElementById('root')!.appendChild(terminal)
+  const publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
+  expect(publish.mock.calls).toEqual([[ [{ id: 'chrome-1', bounds: { ...bounds }, radius: 8 }], undefined]])
+  publish.mockClear()
+  terminal.dispatchEvent(new Event('scroll')); flushFrame()
+  expect(publish.mock.calls).toEqual([])
+  bounds.x += 40
+  popup.parentElement!.style.transform = 'translateX(40px)'
+  await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
+  expect(publish.mock.calls).toEqual([[ [{ id: 'chrome-1', bounds: { ...bounds }, radius: 8 }], undefined]])
+})
 it('real tooltip and popover geometry scales into the same BrowserWindow coordinates', () => {
   node('tooltip')
   node('menu', { x: 160, y: 50, width: 100, height: 100 }).setAttribute('data-state', 'open')
