@@ -175,12 +175,29 @@ describe('Hermes provider', () => {
   })
 
   describe('会话收尾与子代理', () => {
-    it('on_session_end 与 post_llm_call 都判 done，且都是用量落定点', () => {
-      for (const eventName of ['post_llm_call', 'on_session_end']) {
-        expect(hook(eventName, { completed: true, interrupted: false }).semanticState).toBe('done')
-        expect(canonicalHookLifecycleEvent(eventName)).toBe('turn-end')
-        expect(USAGE_FINALIZATION_EVENTS.has(eventName)).toBe(true)
-      }
+    it('on_session_end 依据 completed/interrupted/failed 判定状态，post_llm_call 为 provisional working', () => {
+      // 显式完成且无中断/失败时判定为 done
+      expect(hook('on_session_end', { completed: true, interrupted: false }).semanticState).toBe('done')
+      // 显式中断或未完成时判定为 unknown，不冒称成功完成
+      expect(hook('on_session_end', { completed: false, interrupted: true }).semanticState).toBe('unknown')
+      expect(hook('on_session_end', { completed: false, interrupted: false }).semanticState).toBe('unknown')
+      // 显式失败或 api_error 时判定为 error
+      expect(hook('on_session_end', { completed: false, failed: true }).semanticState).toBe('error')
+      expect(hook('on_session_end', { turn_exit_reason: 'api_error' }).semanticState).toBe('error')
+
+      // 缺失 completed（空 extra 或未提供 completion 事实）必须判定为 unknown，绝不 fallback 为 done
+      expect(hook('on_session_end', {}).semanticState).toBe('unknown')
+      // 异常类型（字符串、null、数字）不得被隐式真值判定为 done，必须判定为 unknown
+      expect(hook('on_session_end', { completed: 'true' }).semanticState).toBe('unknown')
+      expect(hook('on_session_end', { completed: null }).semanticState).toBe('unknown')
+      expect(hook('on_session_end', { completed: 1 }).semanticState).toBe('unknown')
+
+      const postLlm = hook('post_llm_call', { assistant_response: 'provisional' })
+      expect(postLlm.semanticState).toBe('working')
+      expect(postLlm.lifecycleEvent).toBeNull()
+
+      expect(canonicalHookLifecycleEvent('on_session_end')).toBe('turn-end')
+      expect(USAGE_FINALIZATION_EVENTS.has('on_session_end')).toBe(true)
     })
 
     it('subagent_stop 判 working——主 Agent 还在干活，且不冒称按 id 记账', () => {
