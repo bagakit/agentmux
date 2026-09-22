@@ -156,6 +156,7 @@ export function BrowserPane({
   const demonstrationRequest = useRef(0)
   const [taskBusy, setTaskBusy] = useState(false)
   const [selectedTaskAssetId, setSelectedTaskAssetId] = useState<string | null>(null)
+  const [taskAssetReview, setTaskAssetReview] = useState<{ assetId: string; version: number } | null>(null)
   const taskRequest = useRef(0)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
@@ -179,6 +180,7 @@ export function BrowserPane({
     taskRequest.current += 1
     setTaskBusy(false)
     setSelectedTaskAssetId(null)
+    setTaskAssetReview(null)
   }, [tab.browserId])
 
   // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
@@ -668,6 +670,9 @@ export function BrowserPane({
         </label>
         <BrowserOperationStatus
           activity={browserActivity}
+          browserId={tab.browserId}
+          {...(tab.taskAssets ? { taskAssets: tab.taskAssets } : {})}
+          onOpenTaskRun={(assetId, version) => { setSelectedTaskAssetId(assetId); setTaskAssetReview({ assetId, version }); openOperationTimeline() }}
           onTakeControl={() => void stopBrowserOperation()}
           onStop={() => void stopBrowserOperation()}
           onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
@@ -887,6 +892,7 @@ export function BrowserPane({
         <aside className="browser-trace-rail" aria-label="Browser activity trace">
           <BrowserDemonstrationSurface
             draft={tab.demonstration?.draft ?? null}
+            collapseSteps={Boolean(taskAsset)}
             {...(tab.demonstration?.warning ? { warning: tab.demonstration.warning } : {})}
             busy={demonstrationBusy || tab.driving}
             onStart={event => void controlDemonstration(event, 'start')}
@@ -895,6 +901,8 @@ export function BrowserPane({
           {tab.taskAssets && tab.taskAssets.assets.length > 1 ? <label className="browser-task-asset__field"><span>Task asset</span><select aria-label="Browser task asset" value={taskAsset?.id ?? ''} onChange={event => setSelectedTaskAssetId(event.target.value)}>{tab.taskAssets.assets.map(asset => <option key={asset.id} value={asset.id}>{asset.draft.name}</option>)}</select></label> : null}
           <BrowserTaskAssetEditor
             asset={taskAsset}
+            {...(taskAssetReview ? { reviewRequest: taskAssetReview } : {})}
+            onReviewRequestConsumed={() => setTaskAssetReview(null)}
             recording={tab.demonstration?.draft ?? null}
             run={taskRun}
             {...(tab.taskAssets?.warning ? { warning: tab.taskAssets.warning } : {})}

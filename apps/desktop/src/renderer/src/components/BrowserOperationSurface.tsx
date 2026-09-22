@@ -21,12 +21,16 @@ import type {
   BrowserReplayPlan
 } from '../../../shared/browser-operation'
 import type { BrowserScriptRunReport } from '../../../shared/contracts'
+import type { BrowserTaskAssetState } from '../../../shared/browser-task-assets'
 import { SemanticIcon } from './semantic-icons'
 import * as DropdownMenu from './HoverDropdownMenu'
 
 /** One toolbar disclosure owns Browser operation state and its optional actions. */
 export function BrowserOperationStatus({
   activity,
+  browserId,
+  taskAssets,
+  onOpenTaskRun,
   onTakeControl,
   onReturnControl,
   onStop,
@@ -34,6 +38,9 @@ export function BrowserOperationStatus({
   onOpenChange
 }: {
   activity: BrowserActivityState
+  browserId?: string
+  taskAssets?: BrowserTaskAssetState
+  onOpenTaskRun?: (assetId: string, version: number) => void
   onTakeControl?: () => void
   onReturnControl?: () => void
   onStop?: () => void
@@ -42,18 +49,34 @@ export function BrowserOperationStatus({
 }) {
   const operation = activity.operation
   const terminal = operation && ['completed', 'failed', 'stopped', 'indeterminate'].includes(operation.phase)
-  const phase = operation
+  // A cursor is a workflow fact, not the completed Journal action or the editor's selected version.
+  // Order by the Owner's invocation timestamps; an old array position is not a current-run identity.
+  const latestRun = taskAssets?.runs.filter(run => run.browserId === browserId)
+    .sort((left, right) => right.startedAt - left.startedAt || right.updatedAt - left.updatedAt)[0]
+  const taskAsset = taskAssets?.assets.find(asset => asset.id === latestRun?.assetId && asset.browserId === browserId)
+  const taskVersion = taskAsset?.versions.find(version => version.version === latestRun?.version)
+  const taskRun = latestRun && taskVersion && (latestRun.status === 'waiting-human' || latestRun.status === 'ready') &&
+    (operation ? terminal && operation.browserId === browserId &&
+      (latestRun.operationIds.at(-1) === operation.id || (latestRun.operationIds.length === 0 && operation.startedAt < latestRun.startedAt))
+      : activity.control === 'human') ? latestRun : null
+  const phase = taskRun ? taskRun.status === 'waiting-human' ? 'human' : 'waiting' : operation
     ? !terminal && activity.control === 'human' ? 'human' : operation.phase
     : activity.control === 'agent' ? 'unknown' : 'idle'
-  const label = phase === 'unknown' ? 'Agent control active · Activity details are loading'
+  const label = taskRun ? taskRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : 'Task ready to continue'
+    : phase === 'unknown' ? 'Agent control active · Activity details are loading'
     : phase === 'idle' ? 'You have control' : phaseLabel(phase)
-  const target = operation ? currentTarget(operation) ?? operation.summary : null
-  const description = [operation?.operator.name, label, target].filter(Boolean).join(' · ')
+  const checkpoint = taskVersion?.steps.find(step => step.id === taskRun?.pendingCheckpointId)
+  const target = taskRun ? [`v${taskRun.version}`, checkpoint?.label,
+    taskRun.nextStep < taskVersion!.steps.length ? `Next step ${taskRun.nextStep + 1}` : 'Review final checkpoint'].filter(Boolean).join(' · ')
+    : operation ? currentTarget(operation) ?? operation.summary : null
+  const identity = taskRun ? taskVersion!.name : operation?.operator.name
+  const description = [identity, label, target].filter(Boolean).join(' · ')
   const canStop = Boolean(operation && !terminal)
   const canTakeControl = canStop && activity.control === 'agent'
   const canReturnControl = canStop && activity.control === 'human'
   return (
-    <span className="browser-operation-status" data-phase={phase} data-control={activity.control} data-operation-id={operation?.id}>
+    <span className="browser-operation-status" data-phase={phase} data-control={activity.control} data-operation-id={operation?.id}
+      data-task-run-id={taskRun?.id} data-task-version={taskRun?.version}>
       <DropdownMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
         <DropdownMenu.Trigger asChild>
           <button type="button" className="browser-operation-status__trigger" aria-label={`Browser activity: ${description}`} title={description}>
@@ -64,9 +87,11 @@ export function BrowserOperationStatus({
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="browser-menu browser-operation-menu" align="end" sideOffset={5} collisionPadding={8}>
             <DropdownMenu.Label className="browser-operation-menu__identity">
-              <strong>{operation?.operator.name ?? 'Browser activity'}</strong><span>{label}</span>
+              <strong>{identity ?? 'Browser activity'}</strong><span>{label}</span>
               {target ? <small>{target}</small> : null}
             </DropdownMenu.Label>
+            {taskRun && onOpenTaskRun ? <DropdownMenu.Item className="browser-menu__item" aria-label={`Review and continue task v${taskRun.version}`}
+              onSelect={() => onOpenTaskRun(taskRun.assetId, taskRun.version)}><UserRound size={13} aria-hidden="true" /><span>Review and continue v{taskRun.version}</span></DropdownMenu.Item> : null}
             {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><Hand size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
             {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><RotateCcw size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
             {canStop && onStop ? <DropdownMenu.Item className="browser-menu__item" aria-label="Stop browser operation" onSelect={() => onStop()}><Square size={12} aria-hidden="true" /><span>Stop operation</span></DropdownMenu.Item> : null}

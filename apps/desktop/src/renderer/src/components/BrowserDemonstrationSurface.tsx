@@ -6,12 +6,13 @@ type Props = {
   draft: BrowserDemonstrationDraft | null
   warning?: string
   busy?: boolean
+  collapseSteps?: boolean
   onStart: (event: MouseEvent<HTMLButtonElement>) => void
   onStop: (event: MouseEvent<HTMLButtonElement>) => void
 }
 
 /** Draft review lives in the Browser's existing details surface; it never runs recorded actions. */
-export function BrowserDemonstrationSurface({ draft, warning, busy = false, onStart, onStop }: Props) {
+export function BrowserDemonstrationSurface({ draft, warning, busy = false, collapseSteps = false, onStart, onStop }: Props) {
   const recording = draft?.status === 'recording'
   if (!draft) return <section className="browser-demonstration-entry" aria-label="Human demonstration draft">
     <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
@@ -32,7 +33,9 @@ export function BrowserDemonstrationSurface({ draft, warning, busy = false, onSt
       {recording ? 'Recording human input · main document' : draft?.status === 'interrupted' ? 'Interrupted · review before recording again' : draft ? 'Draft saved for review' : 'Record a demonstration to create a reviewable draft'}
     </p>
     {warning || draft?.warning ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{warning ?? draft?.warning}</p> : null}
-    {draft ? <ol className="browser-rsi-replay__steps">
+    {draft ? <details className="browser-demonstration__steps" open={recording || !collapseSteps}>
+      <summary aria-label="Recorded demonstration steps">{draft.steps.length} recorded {draft.steps.length === 1 ? 'step' : 'steps'}</summary>
+      <ol className="browser-rsi-replay__steps">
       {draft.steps.length === 0 ? <li className="browser-rsi-timeline__empty">No demonstrated steps yet</li> : draft.steps.map(step => <li key={step.id} className="browser-rsi-replay__step" data-sequence={step.sequence}>
         <span className="browser-rsi-replay__step-number">{step.sequence}</span>
         <span className="browser-rsi-replay__step-copy"><strong>{step.method === 'fillInput' ? 'Fill' : step.method === 'gotoUrl' ? 'Navigate' : 'Click'}</strong>
@@ -41,6 +44,7 @@ export function BrowserDemonstrationSurface({ draft, warning, busy = false, onSt
           {step.blockedReason ? <small className="browser-rsi-replay__blocked">{step.blockedReason}</small> : null}
         </span>
       </li>)}
-    </ol> : null}
+      </ol>
+    </details> : null}
   </section>
 }
