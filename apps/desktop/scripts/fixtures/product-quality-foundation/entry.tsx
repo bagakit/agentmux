@@ -18,8 +18,14 @@ const workspaceId = useAppStore.getState().config!.workspaces[0]!.id
 const root = createRoot(document.getElementById('root')!)
 const output = Array.from({ length: 100 }, (_, n) => `OUTPUT ${String(n).padStart(3, '0')} ${n === 0 ? 'FIRST' : n === 50 ? 'MIDDLE' : n === 99 ? 'LATEST' : 'retained original byte line'}`).join('\r\n') + '\r\n'
 const bytes = new TextEncoder().encode(output)
-const originalAttach = api.sessions.attach, originalWrite = api.sessions.write, originalRefresh = api.sessions.refresh, originalRefreshAttachment = api.sessions.refreshAttachment
+const originalAttach = api.sessions.attach, originalWrite = api.sessions.write, originalRefresh = api.sessions.refresh, originalRefreshAttachment = api.sessions.refreshAttachment, originalEvents = api.sessions.onEvent
 let mode = 'normal', generation = 0, screenshots = 0, observationFailures = 0
+const terminalEvents = new Set<{ listener: Parameters<typeof api.sessions.onEvent>[0]; control: Parameters<typeof api.sessions.onEvent>[1] }>()
+api.sessions.onEvent = (listener, control) => {
+  const registration = { listener, control }, dispose = originalEvents(listener, control)
+  terminalEvents.add(registration)
+  return () => { terminalEvents.delete(registration); dispose() }
+}
 const writes: unknown[] = [], refreshes: unknown[] = [], attachmentRefreshes: unknown[] = [], recoveries: unknown[] = [], actions: unknown[] = [], events: unknown[] = [], clipboard: string[] = []
 const loops = originals.map(session => ({ loopId: 'loop-' + session.id, hostId: session.hostId, agentSessionId: session.id,
   providerId: session.providerId, workspacePath: session.workspacePath, intervalMs: 60_000, prompt: 'Continue the original task',
@@ -106,6 +112,11 @@ const probe = {
       visibleLines: Array.from({ length: record.terminal.rows }, (_, i) => buffer.getLine(buffer.viewportY + i)?.translateToString(true) ?? ''),
       length: buffer.length, baseY: buffer.baseY }
   },
+  selection() {
+    const id = probe.terminal()?.id
+    const records = (window as any).qualityTerminals as Array<{ id: number; disposed: boolean; terminal: any }>
+    return records.find(record => record.id === id && !record.disposed)?.terminal.getSelection() ?? ''
+  },
   arriveLifecycle() {
     const session = useAppStore.getState().sessions.find(session => session.id === originals[0]!.id)!
     flushSync(() => useAppStore.setState({ error: 'Original recovery observation cause. '.repeat(7) + 'FINAL LIFECYCLE CAUSE', errorDismissed: false,
@@ -113,10 +124,22 @@ const probe = {
   },
   header(next: string) {
     probe.mode(next === 'readonly' ? 'readonly' : next === 'notice' ? 'unknown' : 'normal', next !== 'readonly')
-    const name = next === 'long' ? 'Original Agent — preserve the complete investigation name and precise Session while reading this wide Terminal' : 'Agent'
+    const name = next === 'long' || next === 'full' ? 'Original Agent — preserve the complete investigation name and precise Session while reading this wide Terminal' : 'Agent'
     flushSync(() => useAppStore.setState(state => ({ agentNames: { [originals[0]!.id]: name, [originals[1]!.id]: name },
       sessions: state.sessions.map(session => session.id === originals[1]!.id ? { ...session, providerId: originals[0]!.providerId, executorId: originals[0]!.executorId } : session) })))
     return name
+  },
+  paintFirstLine() {
+    const terminal = probe.terminal(), session = useAppStore.getState().sessions.find(s => s.id === originals[0]!.id)!
+    if (!terminal || terminal.cols < 20) throw new Error('Actual retained Terminal geometry required')
+    const line = 'FIRST-' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(Math.ceil(terminal.cols / 26)).slice(0, terminal.cols - 10) + '-END'
+    const data = '\x1b[2J\x1b[H' + line, dataBytes = new TextEncoder().encode(data)
+    const targets = [...terminalEvents].filter(r => r.control?.hostId === session.hostId && r.control.run.runId === session.control.run.runId)
+    if (targets.length !== 1) throw new Error('Exactly one original Terminal event consumer required')
+    targets[0]!.listener({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run, data, dataBytes,
+      evidence: { source: 'terminal-output', observedAt: Date.now(), run: session.control.run,
+        outputByteRange: { startByte: bytes.byteLength, endByte: bytes.byteLength + dataBytes.byteLength } } } })
+    return { line, cols: terminal.cols, ownerCount: targets.length, startByte: bytes.byteLength, endByte: bytes.byteLength + dataBytes.byteLength }
   },
   focusNeighbor() { flushSync(() => useAppStore.getState().focusRegion(workspaceId, 'quality-tab', 'quality-neighbor', 'pointer')) },
   facts() { return { generation, mode, writes, refreshes, attachmentRefreshes, recoveries, actions, events, screenshots,
