@@ -16,6 +16,7 @@ export function observeNativeOverlayRegions(
   let frame = 0
   let watched: Element[] = []
   const topLayers = new Set<Element>()
+  const topLayerSources = new WeakMap<Element, Element>()
   const win = body.ownerDocument.defaultView!
   const resize = new ResizeObserver(() => schedule())
   const portals = (): Element[] => Array.from(body.children).filter(node => node.id !== 'root')
@@ -39,6 +40,7 @@ export function observeNativeOverlayRegions(
     })
     const floats = candidates.filter(node => !candidates.some(parent => parent !== node && parent.contains(node)))
     const regions: NativeOverlayRegion[] = []
+    const activeFloats: Element[] = []
     let pixels = 0
     let warning: string | undefined
     for (const node of floats) {
@@ -46,6 +48,7 @@ export function observeNativeOverlayRegions(
       if (style.display === 'none' || style.visibility === 'hidden' || node.getAttribute('data-state') === 'closed') continue
       const rect = node.getBoundingClientRect()
       if (rect.width <= 0 || rect.height <= 0) continue
+      activeFloats.push(node)
       const bounds = rendererCssBoundsToWindowDip(rect, zoomFactor())
       const emptyScrim = node.children.length === 0 && (node.textContent ?? '').trim() === '' && style.backgroundColor !== 'rgba(0, 0, 0, 0)'
       // Chrome capture is composited against the Renderer. Only an opaque content box with
@@ -72,10 +75,10 @@ export function observeNativeOverlayRegions(
       if (!id) { id = `chrome-${++nextId}`; ids.set(node, id) }
       regions.push({ id, bounds, radius: (Number.parseFloat(style.borderTopLeftRadius) || 0) * zoomFactor(), ...(emptyScrim ? { scrim: style.backgroundColor } : {}) })
     }
-    if (watched.length !== floats.length || watched.some((node, index) => node !== floats[index])) {
+    if (watched.length !== activeFloats.length || watched.some((node, index) => node !== activeFloats[index])) {
       resize.disconnect()
-      for (const node of floats) resize.observe(node)
-      watched = floats
+      for (const node of activeFloats) resize.observe(node)
+      watched = activeFloats
     }
     publish(regions, warning)
   }
@@ -103,15 +106,30 @@ export function observeNativeOverlayRegions(
   const onToggle = (event: Event): void => {
     const target = event.target
     if (!(target instanceof Element) || !target.hasAttribute('popover')) return
-    if ((event as ToggleEvent).newState === 'open') topLayers.add(target)
-    else topLayers.delete(target)
+    if ((event as ToggleEvent).newState === 'open') {
+      topLayers.add(target)
+      // ToggleEvent.source is the actual HTML popover invoker/implicit anchor; never scan #root.
+      const source = (event as ToggleEvent & { source?: Element | null }).source
+      if (source instanceof Element) topLayerSources.set(target, source)
+      else topLayerSources.delete(target)
+    } else {
+      topLayers.delete(target)
+      topLayerSources.delete(target)
+    }
     bind()
     schedule()
+  }
+  const onScroll = (event: Event): void => {
+    if (watched.length === 0) return
+    const target = event.target
+    if (target === event.currentTarget || target === body.ownerDocument) { schedule(); return }
+    if (!(target instanceof Element)) return
+    if (watched.some(node => node.contains(target) || target.contains(node) || target.contains(topLayerSources.get(node) ?? null))) schedule()
   }
   bind()
   collect()
   win.addEventListener('resize', schedule)
-  win.addEventListener('scroll', schedule, true)
+  win.addEventListener('scroll', onScroll, true)
   body.addEventListener('toggle', onToggle, true)
   body.ownerDocument.fonts?.addEventListener('loadingdone', schedule)
   return { dismissAtPoint(point) {
@@ -134,7 +152,7 @@ export function observeNativeOverlayRegions(
     observer.disconnect()
     resize.disconnect()
     win.removeEventListener('resize', schedule)
-    win.removeEventListener('scroll', schedule, true)
+    win.removeEventListener('scroll', onScroll, true)
     body.removeEventListener('toggle', onToggle, true)
     body.ownerDocument.fonts?.removeEventListener('loadingdone', schedule)
     publish([])
