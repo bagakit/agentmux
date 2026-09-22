@@ -130,6 +130,7 @@ export class NativeJsonlHistoryReader {
         return failure('TIMEOUT', 'Native transcript page timed out.')
       }
       const current = await file.stat()
+      context.signal.throwIfAborted()
       if (!current.isFile()) return failure('INVALID_TRANSCRIPT', 'Native transcript is not a regular file.')
       if (cursor && (cursor.dev !== current.dev || cursor.ino !== current.ino || cursor.cut > current.size)) {
         return failure('SOURCE_CHANGED', 'Native transcript was replaced or truncated; reopen its newest page.')

@@ -5,6 +5,7 @@ import type { PostureControlDeclaration } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { readGrokSessionHistoryPage } from './grok-native-history.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -121,6 +122,7 @@ export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentP
     posture: GROK_POSTURE,
     hook: GROK_HOOKS,
     launchOptions: GROK_LAUNCH_OPTIONS,
+    readSessionHistoryPage: readGrokSessionHistoryPage,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? ['--', prompt] : [])
     ]

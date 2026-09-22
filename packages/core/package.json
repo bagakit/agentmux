@@ -111,6 +111,7 @@
   ],
   "dependencies": {
     "@agentmux/demand": "workspace:*",
+    "@noble/hashes": "2.4.0",
     "@xterm/headless": "5.5.0",
     "fs-native-extensions": "1.5.1",
     "yaml": "2.9.0"
