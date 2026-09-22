@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { captureOsWindow } from './browser-window-visual-capture.mjs'
 import { installNativeChromeStageObserver } from './browser-native-chrome-stage-observer.mjs'
 import { observeOriginalOverlayPaint } from './browser-overlay-paint-observer.mjs'
+import { diagnoseNativePagePaint } from './browser-native-page-paint-diagnostic.mjs'
 
 export const overlayFixture = '<style>body{font:18px system-ui;background:#f5fff8;color:#203628;padding:24px}button,input{display:block;margin:20px 0;padding:10px}</style><button id="page-action">Continue on the page</button><input aria-label="Page name"><script>globalThis.pageClicks=0;globalThis.pageEvents=[];const button=document.querySelector("button");button.onclick=e=>{pageClicks++;globalThis.pageTrusted=e.isTrusted};for(const type of ["mousedown","mouseup","click"])button.addEventListener(type,e=>pageEvents.push({type:e.type,target:e.target.id,trusted:e.isTrusted}))</script>'
 
@@ -274,7 +275,15 @@ export async function recoverOverlay(ctx) {
   const pages=pageOwner(ctx,await owners(ctx));assert.equal(pages.length,1);assert.equal(pages[0].visible,true)
   assert.deepEqual(chromeOwners(await owners(ctx)),[],'Ordinary restart must not revive stale floating Chrome')
   ctx.receipt.overlay.restoredPage=pages[0]
-  ctx.receipt.overlay.unforcedRestoredFrame=await ctx.nativeFrameReady(ctx.pageUrl)
+  try {
+    ctx.receipt.overlay.unforcedRestoredFrame=await ctx.nativeFrameReady(ctx.pageUrl)
+  } catch (error) {
+    if (process.env.AGENTMUX_NATIVE_PAGE_PAINT_DIAGNOSTIC === '1') {
+      try { await diagnoseNativePagePaint(ctx, error) }
+      catch (diagnosticError) { ctx.receipt.nativePagePaintDiagnostic = { diagnosticOnly: true, originalError: String(error), diagnosticError: String(diagnosticError) } }
+    }
+    throw error
+  }
   ctx.receipt.overlay.inputAfterRestart=await pageInput(ctx)
   ctx.receipt.screenshotEditor.push(await screenshotEditor(ctx,'restarted'))
   ctx.receipt.overlay.complete=true
