@@ -16,7 +16,7 @@ export async function native(ctx, selector, value) {
     if(!window.isVisible()||window.isMinimized()||!view.getVisible()||bounds.width<=0||bounds.height<=0)throw new Error('Native input requires a visible actual Browser');
     app.focus({steal:true});window.focus();contents.focus();
     const before=await contents.executeJavaScript('({...globalThis.demoTrusted})');
-    const cssPoint=await contents.executeJavaScript(${JSON.stringify(`(()=>{const matches=document.querySelectorAll(${JSON.stringify(selector)});if(matches.length!==1)throw new Error('Native fixture target must be unique');const target=matches[0],r=target.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(document.elementFromPoint(x,y)!==target)throw new Error('Actual fixture target is covered');return {x,y,targetId:target.id}})()`)});
+    const cssPoint=await contents.executeJavaScript(${JSON.stringify(`(()=>{const matches=document.querySelectorAll(${JSON.stringify(selector)});if(matches.length!==1)throw new Error('Native fixture target must be unique');const target=matches[0],r=target.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(document.elementFromPoint(x,y)!==target)throw new Error('Actual fixture target is covered');return {x,y,targetId:target.id,targetTag:target.tagName,targetConnected:target.isConnected,targetBounds:{x:r.x,y:r.y,width:r.width,height:r.height},document:{visibilityState:document.visibilityState,hasFocus:document.hasFocus(),readyState:document.readyState,activeElement:{id:document.activeElement?.id??null,tag:document.activeElement?.tagName??null}}}})()`)});
     const zoomFactor=contents.getZoomFactor(),point={x:Math.round(cssPoint.x*zoomFactor),y:Math.round(cssPoint.y*zoomFactor)};
     if(point.x<0||point.y<0||point.x>=bounds.width||point.y>=bounds.height)throw new Error('Native fixture target is outside its actual page bounds');
     const types=[],listener=(_event,input)=>types.push(input.type);contents.on('input-event',listener);
@@ -25,10 +25,13 @@ export async function native(ctx, selector, value) {
       for(const type of ['mouseDown','mouseUp'])contents.sendInputEvent({type,button:'left',clickCount:1,...point});
       ${value === undefined ? '' : `for(const keyCode of ${JSON.stringify(value)})contents.sendInputEvent({type:'char',keyCode});`}
       await new Promise(done=>setTimeout(done,100));
-      const after=await contents.executeJavaScript('({...globalThis.demoTrusted})');
-      return {before,after,types,windowFocused:window.isFocused(),pageFocused:contents.isFocused(),bounds,cssPoint,point,zoomFactor};
+      const observedAfter=await contents.executeJavaScript(${JSON.stringify(`(()=>{const matches=document.querySelectorAll(${JSON.stringify(selector)}),target=matches.length===1?matches[0]:null,r=target?.getBoundingClientRect();return {trusted:{...globalThis.demoTrusted},document:{visibilityState:document.visibilityState,hasFocus:document.hasFocus(),readyState:document.readyState,activeElement:{id:document.activeElement?.id??null,tag:document.activeElement?.tagName??null}},target:{count:matches.length,id:target?.id??null,tag:target?.tagName??null,connected:target?.isConnected??null,bounds:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null}}})()`)});
+      const after=observedAfter.trusted;
+      return {before,after,types,windowFocused:window.isFocused(),pageFocused:contents.isFocused(),bounds,cssPoint,point,zoomFactor,
+        owner:{windowId:window.id,webContentsId:contents.id,url:contents.getURL(),windowVisible:window.isVisible(),windowMinimized:window.isMinimized(),viewVisible:view.getVisible(),pageLoading:contents.isLoading(),appActive:app.isActive()},documentAfter:observedAfter.document,targetAfter:observedAfter.target};
     }finally{contents.removeListener('input-event',listener)}
   })()`)
+  ;(ctx.receipt.nativeInputAttempts ??= []).push({ browserId: ctx.browserId, selector, typing: value !== undefined, ...result })
   assert.ok(result.after.click > result.before.click, 'Real native input must reach a trusted page click')
   assert.equal(result.after.lastTarget, result.cssPoint.targetId, 'Real native input must reach the intended fixture target')
   assert.ok(result.types.includes('mouseUp'), 'Native Electron input must be observed by the actual owner')
