@@ -16,9 +16,13 @@ await verifyRendererSourceMutations({
     { label: 'idle-frame-polling', file: observer, before: 'animationFrame: false', after: 'animationFrame: true' },
     { label: 'same-target-resize-loop', file: observer, before: 'elementResize: false', after: 'elementResize: true' },
     { label: 'size-observation-lost', file: observer, before: 'resize.observe(stage)', after: 'void stage' },
-    { label: 'size-callback-disconnected', file: observer, before: 'new ResizeObserver(update)', after: 'new ResizeObserver(() => {})' },
-    { label: 'position-cleanup-lost', file: observer, before: 'stop(); resize.disconnect()', after: 'resize.disconnect()' },
-    { label: 'size-cleanup-lost', file: observer, before: 'stop(); resize.disconnect()', after: 'stop()' },
+    { label: 'size-callback-disconnected', file: observer, before: '    bindPosition()\n    update()', after: '    bindPosition()' },
+    { label: 'position-cleanup-lost', file: observer, before: 'stop?.(); resize.disconnect()', after: 'resize.disconnect()' },
+    { label: 'size-cleanup-lost', file: observer, before: 'stop?.(); resize.disconnect()', after: 'stop?.()' },
+    { label: 'attached-stage-position-binding-lost', file: observer, before: '    bindPosition()\n    update()', after: '    update()' },
+    { label: 'position-binding-before-real-attachment', file: observer,
+      before: 'if (stop || !stage.isConnected || !hasPositiveBrowserStageGeometry(stage.getBoundingClientRect())) return', after: 'if (stop) return' },
+    { label: 'late-resize-reanimates-disposed-stage', file: observer, before: 'if (disposed) return', after: 'if (false) return' },
     { label: 'product-observer-disconnected', file: pane,
       before: 'observeBrowserStageGeometry(stage, update, visible && !released && !restoring)', after: '(() => {})' }
   ]
