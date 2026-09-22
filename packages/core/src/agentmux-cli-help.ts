@@ -501,6 +501,15 @@ ordinary application restart preserve completed references. Read cost also repor
 bounded file scan used to verify its revision. Unknown Workspace binding is explicit; a failed
 transfer never fabricates a Workspace file or blocks later healthy Browser programs.
 
+Use \`return await uploadFiles(ref, ["attachments/report.bin"])\` on an actual file input from
+this run's latest \`snapshot()\`. Upload refs are never recovered from an earlier run's ledger;
+expired refs and a changed document require a fresh snapshot. The verified Workspace supplies
+1–4 bounded files (16 MiB each); their exact bytes are pinned before assignment and the actual
+FileList is verified. The receipt contains relative paths, names, byte counts and revisions.
+Selected-file snapshots remain available after script completion until that Browser navigates
+or closes. If assignment or acknowledgement is uncertain, inspect the original input and do
+not automatically repeat it. File chooser dialogs are unsupported; select the actual input.
+
 The receipt carries \`result\` (whatever the program returned), \`logs\` (everything it printed,
 including on failure), and \`outcome\`, which is one of four:
   completed      the program finished

@@ -9,6 +9,7 @@ import { resolveBrowserRef } from './browser-ref-resolve.js'
 import { buildBrowserElementContextDeclaration } from './browser-selection-script.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import { readBrowserResultArtifact, type BrowserResultArtifactStore } from './browser-result-artifact.js'
+import { uploadBrowserFiles, BrowserUploadUnconfirmedError, type BrowserUploads, type BrowserUploadContext } from './browser-uploads.js'
 import { waitForBrowserDownload, readBrowserDownload, type BrowserDownloads, type BrowserDownloadContext } from './browser-downloads.js'
 import type { BrowserDownloadReference, BrowserDownloadReadOptions } from '../shared/browser-download.js'
 import type { BrowserResultArtifactReference, BrowserResultContext, BrowserResultCurrentOwner, BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
@@ -58,6 +59,7 @@ export type BrowserPageContext = {
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
   /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */
   structuredOutput?: { source(): BrowserResultContext; isCurrent(navigationId: string): boolean }
+  uploads?: { store: BrowserUploads; context: () => Omit<BrowserUploadContext, 'target'> }
   downloads?: { store: BrowserDownloads; context: () => BrowserDownloadContext; signal: AbortSignal }
 }
 
@@ -420,6 +422,28 @@ export function createBrowserPageDispatch(
           ? `Chromium download ${receipt.status}; no completed Workspace file is available. Inspect the page before triggering it again.` : undefined)
         if (warning) context.note(warning)
         return receipt
+      }
+      case 'uploadFiles': {
+        if (!context.uploads) throw new Error('Uploads are unavailable for this Browser. Existing Browser work remains.')
+        const ref = requireString(args[0], 'ref')
+        if (!current || !issued?.has(ref) || expired.has(ref)) {
+          throw new Error('Upload requires a ref issued by the latest snapshot in this run. Take a fresh snapshot and choose the actual file input.')
+        }
+        const snapshot = current
+        const target = await handleIn(snapshot, ref)
+        if (current !== snapshot || !issued?.has(ref) || expired.has(ref) || context.pageInfo().navigationId !== snapshot.navigationId) {
+          throw new Error('The upload snapshot changed. Take a fresh snapshot and choose the actual file input again.')
+        }
+        const same = snapshot.nodes.filter(node => node.role === target.node.role && node.name === target.node.name)
+        context.recordTarget?.({ role: target.node.role, name: target.node.name,
+          ordinal: same.findIndex(node => node.ref === ref) + 1, count: same.length })
+        try {
+          return await uploadBrowserFiles(context.uploads.store, { ...context.uploads.context(),
+            target: { objectId: target.objectId, sendCommand: target.send } }, args[1])
+        } catch (error) {
+          if (error instanceof BrowserUploadUnconfirmedError) context.note(error.message)
+          throw error
+        }
       }
       case 'readDownload': {
         if (!context.downloads) throw new Error('Download reading is unavailable for this Browser.')
