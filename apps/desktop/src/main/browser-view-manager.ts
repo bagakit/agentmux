@@ -604,6 +604,7 @@ export class BrowserViewManager {
       entry.error = null
       committed = true
       if (!authoritativeView.webContents.isDestroyed()) authoritativeView.webContents.close()
+      this.synchronizeVisiblePage(entry, candidate)
       this.emit(entry)
       return this.snapshot(entry)
     } finally {
@@ -1739,28 +1740,23 @@ export class BrowserViewManager {
     if (!normalized) {
       throw new Error('Browser bounds must be finite with a positive size')
     }
+    const becomingVisible = !entry.visible
     entry.bounds = normalized
     entry.visible = true
     entry.view.setBounds(entry.bounds)
     entry.view.setVisible(true)
+    if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
   }
 
   /**
-   * 页面首帧画出来之后，强制原生视图重绘一次它当前的、已可见的矩形。
-   *
-   * Electron 43 在 macOS 上有一个 `WebContentsView` 合成器 bug：视图在 renderer 挂载时就拿到
-   * `setBounds`+`setVisible(true)`（那时页面还没画），首帧要等到 `did-finish-load` 才落地，而合成器
-   * 一直显示挂载时那层空白，直到一次几何变化把它作废——于是"页面加载了却空白，resize 一下才出现"。
-   * `webContents.invalidate()` 帮不上：它在 Electron 43 里只对 offscreen 渲染有效。
-   *
-   * 所以在首帧信号处把当前 bounds 原样重设一遍：`setBounds` 的调用本身就是让合成器作废旧层、
-   * 重绘新内容的那次几何事件（值不必变，用户手动 resize 起作用也是同一个机制）。只有在视图确实
-   * 已可见、且有一份真实矩形时才做——否则它还在被 `visible`/`released`/overlay 等分支正当地藏着，
-   * 不能替那些分支把它显示出来。
+   * Synchronize the loaded, visible embedded page without changing its policy or geometry.
+   * Electron's setter also synchronizes its owner and platform view; reapplying bounds alone
+   * does not guarantee a drawable surface. Run at load/show/promotion edges, not every layout.
+   * Actual same-policy recovery evidence: browser-main-retained-policy-native-diagnostic-2026-10-03.md.
    */
-  private repaintAfterFirstFrame(entry: BrowserEntry, view: WebContentsView): void {
-    if (!entry.visible || !entry.bounds) return
-    view.setBounds(entry.bounds)
+  private synchronizeVisiblePage(entry: BrowserEntry, view: WebContentsView): void {
+    if (!this.owns(entry, view) || !entry.visible || !entry.bounds || view.webContents.isLoading() || !view.webContents.getURL()) return
+    view.webContents.setBackgroundThrottling(view.webContents.getBackgroundThrottling())
   }
 
   close(id: string): void {
@@ -1857,7 +1853,6 @@ export class BrowserViewManager {
       if (!this.owns(entry, view)) return
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry, view)
-      this.repaintAfterFirstFrame(entry, view)
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame || !this.owns(entry, view)) return
@@ -1894,6 +1889,9 @@ export class BrowserViewManager {
     })
     contents.on('did-stop-loading', () => {
       if (!this.owns(entry, view)) return
+      // did-finish-load can still report isLoading() === true; synchronize only once
+      // Electron's public loading state has settled, retaining the current page policy.
+      this.synchronizeVisiblePage(entry, view)
       this.emit(entry)
     })
     contents.on('did-navigate', (_event, url) => {
