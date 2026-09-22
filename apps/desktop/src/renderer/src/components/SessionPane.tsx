@@ -102,7 +102,17 @@ export function SessionPane({
   )
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const [historyOpen, setHistoryOpen] = useState(false)
-  useEffect(() => { setHistoryOpen(false) }, [sessionId, viewMode])
+  const historyEverOpenedRef = useRef(false)
+  if (historyOpen) historyEverOpenedRef.current = true
+  const [historyDisclosures, setHistoryDisclosures] = useState<Set<string>>(() => new Set())
+  useEffect(() => {
+    setHistoryOpen(false)
+    historyEverOpenedRef.current = false
+    setHistoryDisclosures(new Set())
+  }, [sessionId])
+  useEffect(() => {
+    setHistoryOpen(false)
+  }, [viewMode])
   const closeHistory = (): void => {
     setHistoryOpen(false)
     if (linkOrigin.tabId && linkOrigin.regionId) {
@@ -388,9 +398,12 @@ export function SessionPane({
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
-        {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
-          <div className="agent-terminal-stage">
-            {pendingAgentRestore ? (inlineHistory ? null :
+        <div
+          className="agent-terminal-stage"
+          style={session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore ? { display: 'none' } : undefined}
+        >
+          {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
+            pendingAgentRestore ? (inlineHistory ? null :
               <div className="terminal-cold-parked" role="status">
                 <strong>Ready to restore</strong>
                 <span>Existing history and your draft are kept. Send your next request or use Resume.</span>
@@ -406,62 +419,73 @@ export function SessionPane({
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
                 interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
-                visible={visible && !historyOpen}
+                visible={visible && !historyOpen && viewMode === 'terminal'}
                 readOnly={!projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
                 onObservationRefresh={bindObservationRefresh}
               />
-            )}
-            {(historyOpen || inlineHistory) && session.kind === 'agent' ? <SessionHistoryView
-              key={`${session.control.hostId}:${session.id}:${session.control.run.runId}`}
-              control={session.control}
-              label={agentInputIdentity ?? session.label}
-              {...(!inlineHistory ? { onClose: closeHistory } : {})}
-              visible={visible}
-              themeId={terminalThemeId}
-              fontSize={terminalFontSize}
-              workspaceRoot={activeWorkspaceRoot}
-              openWorkspaceFile={openWorkspaceFile}
-              openHttpLink={onProseLinkClick}
-              {...(pendingAgentRestore ? {
-                returnLabel: 'Session',
-                serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
-              } : {})}
-            /> : null}
-            {(disconnected || missing || exited) && !(pendingAgentRestore && (historyOpen || inlineHistory)) ? (
-              <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
-                <span className="terminal-recovery__icon">
-                  {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
-                </span>
-                <div>
-                  <strong>{recoveryTitle}</strong>
-                  <span>{
-                    continuityNotice
-                      ? continuityNotice.reason
-                      : humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
-                  }</span>
-                </div>
-                <div className="terminal-recovery__actions">
-                  {!projectionPolicy.allowsRecovery ? (
-                    <span className="terminal-recovery__readonly">Open this Session in its Project to recover it.</span>
-                  ) : session.kind === 'terminal' ? (
-                    disconnected ? (
-                      <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
-                        <RefreshCw size={12} /> {refreshing ? 'Checking…' : 'Check again'}
-                      </button>
-                    ) : (
-                      // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
-                      <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                        <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
-                      </button>
-                    )
-                  ) : agentRecoveryAction}
-                </div>
+            )
+          ) : null}
+          {(historyOpen || inlineHistory || historyEverOpenedRef.current) && session.kind === 'agent' ? <SessionHistoryView
+            key={JSON.stringify([session.control.hostId, session.id, session.control.run.runId])}
+            control={session.control}
+            label={agentInputIdentity ?? session.label}
+            {...(!inlineHistory ? { onClose: closeHistory } : {})}
+            visible={visible && (historyOpen || inlineHistory) && (viewMode === 'terminal' || inlineHistory)}
+            themeId={terminalThemeId}
+            fontSize={terminalFontSize}
+            workspaceRoot={activeWorkspaceRoot}
+            openWorkspaceFile={openWorkspaceFile}
+            openHttpLink={onProseLinkClick}
+            expandedTraces={historyDisclosures}
+            onToggleTrace={(traceId, open) => {
+              setHistoryDisclosures((prev) => {
+                const next = new Set(prev)
+                if (open) next.add(traceId)
+                else next.delete(traceId)
+                return next
+              })
+            }}
+            {...(pendingAgentRestore ? {
+              returnLabel: 'Session',
+              serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
+            } : {})}
+          /> : null}
+          {(disconnected || missing || exited) && !(pendingAgentRestore && (historyOpen || inlineHistory)) ? (
+            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
+              <span className="terminal-recovery__icon">
+                {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
+              </span>
+              <div>
+                <strong>{recoveryTitle}</strong>
+                <span>{
+                  continuityNotice
+                    ? continuityNotice.reason
+                    : humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
+                }</span>
               </div>
-            ) : null}
-          </div>
-        ) : (
+              <div className="terminal-recovery__actions">
+                {!projectionPolicy.allowsRecovery ? (
+                  <span className="terminal-recovery__readonly">Open this Session in its Project to recover it.</span>
+                ) : session.kind === 'terminal' ? (
+                  disconnected ? (
+                    <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
+                      <RefreshCw size={12} /> {refreshing ? 'Checking…' : 'Check again'}
+                    </button>
+                  ) : (
+                    // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
+                    <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
+                      <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
+                    </button>
+                  )
+                ) : agentRecoveryAction}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        {session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore ? (
           <ActivityView
+            sessionId={session.id}
             items={timeline}
             capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
             displayState={session.status.state}
@@ -472,7 +496,7 @@ export function SessionPane({
             onAnnotate={annotateMessage}
             describeSpeaker={describeSpeaker}
           />
-        )}
+        ) : null}
       </div>
       {session.kind === 'agent' ? (
         <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} />

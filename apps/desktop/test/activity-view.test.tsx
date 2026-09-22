@@ -26,7 +26,7 @@ function render(
   capability: 'unavailable' | 'complete-events' | 'streaming',
   items: AgentTimelineItem[] = []
 ): string {
-  return renderToStaticMarkup(createElement(ActivityView, { capability, items }))
+  return renderToStaticMarkup(createElement(ActivityView, { sessionId: 'test-session', capability, items }))
 }
 
 /**

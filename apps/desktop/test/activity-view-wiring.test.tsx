@@ -58,7 +58,7 @@ function activity(id: string, overrides: Partial<AgentTimelineItem> = {}): Agent
 }
 
 function render(items: AgentTimelineItem[]): string {
-  return renderToStaticMarkup(createElement(ActivityView, { capability: 'streaming' as const, items }))
+  return renderToStaticMarkup(createElement(ActivityView, { sessionId: 'test-session', capability: 'streaming' as const, items }))
 }
 
 const EDIT_INPUT = JSON.stringify({

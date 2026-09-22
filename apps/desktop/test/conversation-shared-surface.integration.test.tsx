@@ -88,6 +88,7 @@ async function mount(entry: Entry, content = SOURCE, parts?: AgentSessionHistory
     root.render(
       entry === 'live' ? (
         <ActivityView
+          sessionId={control.agentSessionId}
           capability="complete-events"
           displayState="done"
           items={[item(content)]}
