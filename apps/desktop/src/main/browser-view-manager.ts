@@ -1350,6 +1350,7 @@ export class BrowserViewManager {
       session,
       ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
         const view = requireLive()
+        if (view !== observingView) throw new Error('The Browser view changed before download.')
         return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
           navigationId: entry.navigationId, url: view.webContents.getURL(), contents: view.webContents }
       } } } : {}),

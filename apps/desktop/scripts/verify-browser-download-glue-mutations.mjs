@@ -12,6 +12,7 @@ const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const dispatch = 'apps/desktop/src/main/browser-page-dispatch.ts'
 const test = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const cases = [
+  ['download-original-view-proof-removed', manager, "if (view !== observingView) throw new Error('The Browser view changed before download.')", 'void view'],
   ['download-owner-disconnected', manager, 'this.downloads && signal ? { downloads:', 'false && signal ? { downloads:'],
   ['download-stop-signal-disconnected', manager, 'store: this.downloads, signal, context:', 'store: this.downloads, signal: new AbortController().signal, context:'],
   ['foreign-browser-can-read-reference', dispatch, '{ workspaceId: owner.workspaceId, browserId: owner.browserId }, options as BrowserDownloadReadOptions', '{ workspaceId: (args[0]).workspaceId, browserId: (args[0]).browserId }, options as BrowserDownloadReadOptions'],
