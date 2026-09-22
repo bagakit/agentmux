@@ -41,6 +41,11 @@ export const HERMES_HOOK_EVENTS = [
   'pre_approval_request', 'post_approval_response', 'subagent_stop', 'on_session_end'
 ] as const
 
+function extraField(payload: Readonly<Record<string, unknown>>, field: string): unknown {
+  const extra = payload.extra && typeof payload.extra === 'object' ? payload.extra as Record<string, unknown> : undefined
+  return extra?.[field] ?? payload[field]
+}
+
 export const HERMES_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：Hermes 的 `_serialize_payload` 每条事件都写 `hook_event_name`（本机第一方源码
   // 实测：`~/.hermes/.../shell_hooks.py`）。所以它虽不带 `--event`、也不注入 env，仍然安全。
@@ -50,7 +55,30 @@ export const HERMES_HOOKS: AgentNativeHookSpecification = {
     // 判 working 会让「等我点一下」和「正在干活」在界面上长得一模一样。
     { events: ['pre_approval_request'], state: 'waiting' },
     { events: ['pre_tool_call'], toolNames: ['clarify'], state: 'waiting' },
-    { events: ['post_llm_call', 'on_session_end'], state: 'done' },
+    // on_session_end 根据第一方 turn_finalizer.py 导出的 completed / interrupted / failed 事实如实映射：
+    {
+      events: ['on_session_end'],
+      matches: (payload) => extraField(payload, 'failed') === true || extraField(payload, 'turn_exit_reason') === 'api_error',
+      state: 'error',
+      lifecycleEvent: 'turn-end'
+    },
+    {
+      events: ['on_session_end'],
+      matches: (payload) => extraField(payload, 'completed') === true && extraField(payload, 'interrupted') !== true && extraField(payload, 'failed') !== true,
+      state: 'done',
+      lifecycleEvent: 'turn-end'
+    },
+    {
+      events: ['on_session_end'],
+      state: 'unknown',
+      lifecycleEvent: 'turn-end'
+    },
+    // post_llm_call 是一轮模型计算的临时回复（可能包含非正常退出的解释性内容），在最终 turn 结算前保持 working，不提前闭合 lifecycle
+    {
+      events: ['post_llm_call'],
+      state: 'working',
+      lifecycleEvent: null
+    },
     // `post_approval_response` 是「决定已经给了」——不论决定是允许还是拒绝，Agent 都从等待里出来了。
     // `subagent_stop` 同理：主 Agent 仍在干活。
     {
