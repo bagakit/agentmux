@@ -6,8 +6,8 @@ import { LatestBrowserBoundsSynchronizer } from '../src/renderer/src/lib/browser
 // Use the installed Floating UI implementation. Model the browser observer protocol,
 // not autoUpdate: a new RO registration gets its initial delivery, repeated observe
 // on an existing registration is deduplicated, and unobserve makes the next one new.
-function model() {
-  let rectangle = new DOMRect(510, 74, 242, 794), frameId = 0
+function model(mounted = true) {
+  let rectangle = mounted ? new DOMRect(510, 74, 242, 794) : new DOMRect(), frameId = 0
   const frames = new Map<number, FrameRequestCallback>()
   const resizes: ModeledResizeObserver[] = [], intersections: ModeledIntersectionObserver[] = []
   class ModeledResizeObserver {
@@ -43,7 +43,7 @@ function model() {
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
   const stage = document.createElement('div')
   stage.getBoundingClientRect = () => rectangle
-  document.body.append(stage)
+  if (mounted) document.body.append(stage)
   const apply = vi.fn(async () => {})
   const sync = new LatestBrowserBoundsSynchronizer(apply, vi.fn())
   const update = vi.fn(() => {
@@ -58,6 +58,11 @@ function model() {
   }
   const idle = () => { for (let count = 0; count < 20; count++) tick() }
   return { stage, apply, update, sync, resizes, intersections, frames, idle, tick,
+    mount() {
+      document.body.append(stage)
+      rectangle = new DOMRect(510, 74, 242, 794)
+      for (const observer of resizes) if (observer.targets.has(stage)) observer.pending.add(stage)
+    },
     resize() {
       rectangle = new DOMRect(rectangle.x, rectangle.y, 300, rectangle.height)
       for (const observer of resizes) if (observer.targets.has(stage)) observer.pending.add(stage)
@@ -70,6 +75,29 @@ function model() {
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren() })
 
 describe('actual Floating UI stage observation protocol', () => {
+  it('starts position and ancestor observation when the retained stage really attaches, then follows its position-only movement', async () => {
+    const f = model(false), stop = observeBrowserStageGeometry(f.stage, f.update, true)
+    try {
+      f.idle(); await Promise.resolve()
+      expect(f.stage.isConnected).toBe(false)
+      expect(f.intersections).toEqual([])
+      f.mount(); f.tick(); await Promise.resolve()
+      expect(f.intersections).toHaveLength(1)
+      expect(f.intersections[0]!.targets.has(f.stage)).toBe(true)
+      expect(f.apply.mock.calls.at(-1)).toEqual([{ x: 510, y: 74, width: 242, height: 794 }])
+      f.move(); f.tick(); await Promise.resolve()
+      expect(f.apply.mock.calls.at(-1)).toEqual([{ x: 510, y: 71, width: 242, height: 794 }])
+      const settled = f.update.mock.calls.length
+      f.idle(); expect(f.update).toHaveBeenCalledTimes(settled)
+      expect(f.frames.size).toBe(0)
+      stop()
+      expect(f.intersections.map(observer => observer.targets.size)).toEqual([0, 0])
+      const callback = f.resizes[0]!.callback
+      callback([], f.resizes[0] as unknown as ResizeObserver)
+      expect(f.update).toHaveBeenCalledTimes(settled)
+      expect(f.frames.size).toBe(0)
+    } finally { stop(); f.dispose() }
+  })
   it('settles after initial delivery instead of silently polling an unchanged stage every frame', async () => {
     const f = model(), stop = observeBrowserStageGeometry(f.stage, f.update, true)
     try {
