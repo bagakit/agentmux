@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, screen } = require('electron')
 const assert = require('node:assert/strict'), { createHash } = require('node:crypto')
 const fs = require('node:fs/promises'), path = require('node:path')
 const [html, privateRoot, evidence] = process.argv.slice(2)
@@ -78,11 +78,12 @@ const measure = `(()=>{
     track:rect(pane.querySelector('.terminal-service-window')),xterm:qualityProbe.terminal(),draft:qualityProbe.facts().draft,
     screenshotCalls:qualityProbe.facts().screenshots,appearance:document.documentElement.dataset.appearance,
     reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
-    history:!!pane.querySelector('.session-history:not(.session-history--inline)')}
+    history:!!pane.querySelector('.session-history:not(.session-history--inline):not([hidden])')}
 })()`
 async function seed(mode, width, height, windowMode = false, appearance = 'dark', reduced = false) {
   result.stage = { mode, width, height, windowMode, appearance, step: 'seed' }
-  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+  const deviceScaleFactor = process.argv.includes('--header-only') ? screen.getDisplayMatching(win.getBounds()).scaleFactor : 1
+  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor, mobile: false })
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }] })
   await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)};qualityProbe.mode(${JSON.stringify(mode)},${windowMode})`)
   await waitFor(`Boolean(qualityProbe.terminal()) && !(${terminal}).classList.contains('terminal-view__xterm--hydrating')`)
@@ -298,18 +299,27 @@ async function observationDetails() {
 }
 async function headerScenes(layoutOnly = false) {
   result.scope = 'header-only'
+  const scaleFactor = screen.getDisplayMatching(win.getBounds()).scaleFactor
+  result.displayScaleFactor = scaleFactor
   async function scene(mode, width, height, appearance = 'dark') {
     result.stage = { mode, width, height, appearance, step: 'header-scene' }
-    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scaleFactor, mobile: false })
     await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)};qualityProbe.header(${JSON.stringify(mode)})`)
     await waitFor(`Boolean(qualityProbe.terminal()) && !(${terminal}).classList.contains('terminal-view__xterm--hydrating')`)
     await painted()
+    let firstLine
+    if (mode === 'full') {
+      firstLine = await evaluate('qualityProbe.paintFirstLine()')
+      await waitFor(`qualityProbe.terminal().visibleLines[0]===${JSON.stringify(firstLine.line)}`)
+      await painted()
+    }
     const facts = await evaluate(`(()=>{
       const s=${pane},h=s.querySelector('.agent-region-header'),n=h.querySelector('.agent-region-header__name'),m=h.querySelector('.agent-region-header__more'),owner=s.closest('[data-workbench-region-id]'),x=owner?.querySelector('.workbench-region__close');
       const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
       const hit=e=>{if(!e)return null;const r=e.getBoundingClientRect();return [[.1,.1],[.5,.5],[.9,.9]].map(([x,y])=>document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)?.closest('button')===e)};
-      return{...(${measure}),header:{rect:rect(h),name:rect(n),nameText:n.innerText,title:n.title,aria:h.getAttribute('aria-label'),font:getComputedStyle(n).fontSize,weight:getComputedStyle(n).fontWeight,ellipsis:getComputedStyle(n).textOverflow,
-        more:rect(m),moreHits:hit(m),close:rect(x),closeHits:hit(x),rightInset:parseFloat(getComputedStyle(h).paddingRight),readOnly:!!h.querySelector('.agent-region-header__mode'),meta:h.querySelectorAll('.agent-region-header__meta').length},owner:rect(owner)}
+      const p={x:s.getBoundingClientRect().x+8,y:s.getBoundingClientRect().y+17},at=document.elementFromPoint(p.x,p.y);
+      return{...(${measure}),blankCornerHit:{...p,target:at?.className,intercepted:!!at?.closest('.agent-region-header-home')},header:{rect:rect(h),name:rect(n),nameText:n.innerText,title:n.title,aria:h.getAttribute('aria-label'),font:getComputedStyle(n).fontSize,weight:getComputedStyle(n).fontWeight,ellipsis:getComputedStyle(n).textOverflow,
+        more:rect(m),moreHits:hit(m),close:rect(x),closeHits:hit(x),rightInset:parseFloat(getComputedStyle(h).paddingRight),readOnly:!!h.querySelector('.agent-region-header__mode'),meta:h.querySelectorAll('.agent-region-header__meta').length},body:rect(s.querySelector('.agent-body')),owner:rect(owner),firstLine:${JSON.stringify(firstLine ?? null)}}
     })()`)
     await capture(`${width}x${height}-header-${mode}-${appearance}`, facts)
     assert.equal(facts.header.meta, 0)
@@ -319,23 +329,42 @@ async function headerScenes(layoutOnly = false) {
     assert.equal(facts.header.more.width, 22); assert.equal(facts.header.more.height, 22)
     assert.equal(facts.header.moreHits.length, 3); assert.ok(facts.header.moreHits.every(Boolean))
     assert.ok(Math.abs(facts.header.more.right - (facts.header.rect.right - facts.header.rightInset)) < 1, 'Header action row must align to its right inset')
-    assert.ok(facts.header.rect.height <= Math.max(facts.header.more.height, facts.header.close?.height ?? 0) + 2, 'The single Header row must only reserve its existing action and focus geometry')
-    assert.ok(facts.terminal.y >= facts.header.rect.bottom - 1, 'Header must not cover the original xterm reading surface')
+    if (mode !== 'notice') assert.ok(Math.abs(facts.body.y - facts.pane.y) < 1, 'Adaptive corner identity must not reserve a full Header row')
+    if (mode === 'long' || mode === 'full') assert.equal(facts.blankCornerHit.intercepted, false, 'Quiet corner host must not intercept the original left reading area')
     if (facts.header.close) {
       assert.equal(facts.header.close.width, 22); assert.equal(facts.header.close.height, 22)
       assert.equal(facts.header.closeHits.length, 3); assert.ok(facts.header.closeHits.every(Boolean))
-      assert.ok(facts.header.close.bottom <= facts.header.rect.bottom + 1, 'Original X must remain inside this compact action row')
+      assert.ok(facts.header.close.bottom <= facts.header.rect.bottom + 1, 'Original X must remain alongside this corner group')
       assert.ok(facts.header.more.right <= facts.header.close.x)
     }
     if (mode === 'readonly') { assert.equal(facts.header.readOnly, true); assert.equal(facts.composer, null) }
     if (width === 641) assert.ok(Math.abs(facts.owner.width - 320) < 1, 'Actual narrow split Region must be 320px')
     assert.ok(facts.xterm.rows >= 3 && facts.terminal.height > 40)
+    if (mode === 'full') {
+      assert.ok(facts.xterm.visibleLines.length > 0)
+      assert.ok(facts.xterm.visibleLines[0].startsWith('FIRST-'), 'Actual replay must paint its full first row, not an empty Terminal')
+      assert.equal(facts.xterm.visibleLines[0].length, facts.xterm.cols, 'The first row must reach the actual last Terminal column')
+      assert.ok(facts.xterm.visibleLines.some(line => line.includes('-END')), 'Actual complete replay suffix must remain readable')
+      const selectionPoints = await evaluate(`(()=>{const e=(${terminal}).querySelector('.xterm-screen'),r=e.getBoundingClientRect(),t=qualityProbe.terminal();return{from:{x:r.x+1,y:r.y+r.height/t.rows/2},to:{x:r.x+r.width/t.cols*6.5,y:r.y+r.height/t.rows/2}}})()`)
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...selectionPoints.from, buttons: 0 })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...selectionPoints.from, button: 'left', buttons: 1, clickCount: 1 })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...selectionPoints.to, buttons: 1 })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', ...selectionPoints.to, button: 'left', buttons: 0, clickCount: 1 })
+      await waitFor(`qualityProbe.selection().includes('FIRST')`)
+      const selected = await evaluate('qualityProbe.selection()'), original = await evaluate('qualityProbe.facts()'), writes = original.writes.length
+      await click(terminal); await key('q', 'KeyQ', 81, 'q')
+      await waitFor(`qualityProbe.facts().writes.length>${writes}`)
+      const after = await evaluate('qualityProbe.facts()')
+      assert.deepEqual(after.writes.at(-1).slice(0,2), [original.session, 'q'])
+      assert.equal(after.draft, original.draft); assert.equal((await evaluate('qualityProbe.terminal()')).id, facts.xterm.id)
+      ;(result.headerFirstLineInteraction ??= []).push({ width, appearance, selectionPoints, selected, writes: after.writes.at(-1), terminalId: facts.xterm.id })
+    }
     assert.equal(facts.draft, 'Preserved draft'); assert.equal(facts.screenshotCalls, 0)
     return facts
   }
-  await scene('normal', 1281, 600)
+  await scene(layoutOnly ? 'long' : 'normal', 1281, 600)
   if (layoutOnly) { assert.equal(result.frames.length, 1); return }
-  for (const args of [['long',1281,600,'dark'],['long',641,600,'dark'],['readonly',320,400,'dark'],['notice',641,600,'dark'],['long',641,600,'light'],['normal',1281,600,'light']]) await scene(...args)
+  for (const args of [['long',1281,600,'dark'],['long',641,600,'dark'],['readonly',320,400,'dark'],['notice',641,600,'dark'],['long',641,600,'light'],['normal',1281,600,'light'],['full',641,600,'dark'],['full',1281,600,'light']]) await scene(...args)
   await scene('long', 641, 600)
   const before = await evaluate('qualityProbe.terminal()'), origin = await evaluate('qualityProbe.facts()')
   const semanticName = await evaluate(`(${pane}).querySelector('.agent-region-header__name').title`)
@@ -376,12 +405,12 @@ async function headerScenes(layoutOnly = false) {
   assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
   await click(more); await waitFor(`Boolean(document.querySelector('.agent-region-menu'))`)
   await click(`[...document.querySelectorAll('.agent-region-menu [role="menuitem"]')].find(e=>e.innerText.trim()==='Conversation history')`)
-  await waitFor(`Boolean((${pane}).querySelector('.session-history:not(.session-history--inline)'))`)
+  await waitFor(`Boolean((${pane}).querySelector('.session-history:not(.session-history--inline):not([hidden])'))`)
   assert.equal(await evaluate(`(${pane}).querySelector('.agent-region-header__name').title`), semanticName)
   assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
   await capture('320-header-original-history-subject', { ...await evaluate(measure), origin: origin.session })
   await click(`(${pane}).querySelector('.session-history__toolbar button')`)
-  await waitFor(`!(${pane}).querySelector('.session-history:not(.session-history--inline)')`)
+  await waitFor(`!(${pane}).querySelector('.session-history:not(.session-history--inline):not([hidden])')`)
   assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
   await click(terminal); await key('v','KeyV',86,'v'); await waitFor(`qualityProbe.facts().writes.some(args=>args[1]==='v')`)
   assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
