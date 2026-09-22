@@ -1,4 +1,4 @@
-import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/contracts.js'
+import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_POINTER_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
@@ -91,6 +91,8 @@ import {
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { NativeOverlaySurfaces } from './native-overlay-surfaces.js'
+import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
@@ -226,12 +228,18 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE))),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   new BrowserUploads(join(app.getPath('userData'), 'browser-uploads'), files, id => workspace(config, id)))
+  const warnNativeChrome = (warning: string): void => {
+    if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, warning)
+  }
+  const nativeChrome = new NativeOverlaySurfaces(args.window, () => browsers.visibleNativeBounds(), warnNativeChrome,
+    point => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_POINTER_CHANNEL, point) })
+  browsers.onNativePointer = (bounds, input) => nativeChrome.forwardBrowserPointer(bounds, input)
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
-      rendererPids: args.window.webContents.mainFrame.framesInSubtree
+      rendererPids: [...args.window.webContents.mainFrame.framesInSubtree
         .filter((frame) => !frame.detached && frame.osProcessId > 0)
-        .map((frame) => frame.osProcessId),
+        .map((frame) => frame.osProcessId), ...nativeChrome.resourceProcessIds()],
       browserPids: browsers.resourceProcessIds()
     }),
     mainOwners: () => ({
@@ -636,6 +644,10 @@ export async function registerIpc(args: {
     requireTrustedSender('ui:captureScreenshot', event)
     return await captureComposerScreenshot(app.getPath('home'))
   })
+  handleWithEvent('ui:publishNativeOverlays', async (event, regions: NativeOverlayRegion[]) => {
+    requireTrustedSender('ui:publishNativeOverlays', event)
+    return await nativeChrome.update(regions)
+  })
   handleWithEvent('ui:listAgentSkills', async (event, sessionId: string) => {
     requireTrustedSender('ui:listAgentSkills', event)
     const session = await args.runtime.resolveSession(sessionId, config)
@@ -967,7 +979,10 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:setAnnotationMarkers', event)
     await browsers.setAnnotationMarkers(id, navigationId, markers)
   })
-  handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => browsers.setBounds(id, bounds))
+  handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => {
+    browsers.setBounds(id, bounds)
+    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+  })
   handle('browser:release', async (id: string) => await browsers.release(id))
   handle('browser:restore', async (
     id: string,
@@ -1027,6 +1042,7 @@ export async function registerIpc(args: {
         releaseResourceObservation()
       },
       () => notifier.dispose(),
+      () => { browsers.onNativePointer = undefined; nativeChrome.dispose() },
       () => browsers.dispose(),
       async () => await browserProfiles.dispose(),
       async () => await fileObservations.dispose(),
