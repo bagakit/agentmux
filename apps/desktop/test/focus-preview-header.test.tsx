@@ -106,9 +106,11 @@ it('runs History/return and observation refresh through the same SessionPane, pr
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const history = vi.spyOn(api.sessions, 'historyPage')
   await mount(); const originalPaint = region().querySelector('[data-terminal-paint]')
+  expect(history.mock.calls).toEqual([[useAppStore.getState().sessions[0]!.control, { limit: 30 }]])
+  const initialReads = history.mock.calls.length
   await openAgentHistory(toolbar())
   expect(region().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
-  expect(history).toHaveBeenCalledTimes(1)
+  expect(history.mock.calls.slice(initialReads)).toEqual([[useAppStore.getState().sessions[0]!.control, undefined]])
   const back = region().querySelector<HTMLButtonElement>('.session-history__toolbar button'); expect(back?.textContent?.trim()).toBe('Terminal')
   await act(async () => back!.click())
   expect(region().querySelector('[aria-label="Conversation history"]')).toBeNull()
@@ -218,6 +220,8 @@ it('does no further slot lookup or History I/O for unrelated observation timesta
   const headerLookups = () => lookup.mock.calls.filter(([id]) => id === 'focus-workspace-slot-header').length
   await mount(); const host = toolbar().querySelector('.agent-region-header-host'), beforeLookups = headerLookups()
   expect(host).not.toBeNull(); expect(beforeLookups).toBeGreaterThan(0)
+  expect(history.mock.calls).toEqual([[useAppStore.getState().sessions[0]!.control, { limit: 30 }]])
+  const initialReads = history.mock.calls.length
   const before = useAppStore.getState(), originalPaint = region().querySelector('[data-terminal-paint]')
   await act(async () => {
     useAppStore.setState({ sessions: before.sessions.map(session => session.id === sessionIds[1] ? {
@@ -225,7 +229,7 @@ it('does no further slot lookup or History I/O for unrelated observation timesta
     } : session) })
     container.append(document.createElement('span')); await new Promise(resolve => setTimeout(resolve, 0))
   })
-  expect(headerLookups()).toBe(beforeLookups); expect(history).not.toHaveBeenCalled()
+  expect(headerLookups()).toBe(beforeLookups); expect(history.mock.calls.slice(initialReads)).toEqual([])
   expect(toolbar().querySelector('.agent-region-header-host')).toBe(host); expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
 })
 
