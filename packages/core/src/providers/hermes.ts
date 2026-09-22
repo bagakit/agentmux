@@ -4,6 +4,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { HERMES_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { readHermesSessionHistoryPage } from './hermes-native-history.js'
 import { catalog, hermesHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -91,9 +92,13 @@ export const HERMES_HOOKS: AgentNativeHookSpecification = {
   ]
 }
 
-export function createHermesManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
+export function resolveHermesHome(env?: Readonly<Record<string, string | undefined>>): string {
   const hermesHome = env?.HERMES_HOME?.trim()
-  const home = hermesHome ? resolve(hermesHome) : join(homedir(), '.hermes')
+  return hermesHome ? resolve(hermesHome) : join(homedir(), '.hermes')
+}
+
+export function createHermesManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
+  const home = resolveHermesHome(env)
   const command = hermesHookCommand()
   const hooks = Object.fromEntries(
     HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, ...hookCommandTimeout('hermes') }]])
@@ -133,6 +138,7 @@ export function createHermesProvider(defineAgentProvider: ProviderFactory): Agen
       }
     }),
     buildArgs: (prompt, args) => prompt ? ['chat', '--query', prompt, ...args, '--tui'] : [...args, '--tui'],
+    readSessionHistoryPage: readHermesSessionHistoryPage,
     hook: HERMES_HOOKS,
     launchOptions: HERMES_LAUNCH_OPTIONS
   })
