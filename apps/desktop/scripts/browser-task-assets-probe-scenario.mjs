@@ -20,24 +20,59 @@ async function type(ctx, label, value) {
 async function asset(ctx) { return (await current(ctx)).assets.find(item => item.id === ctx.receipt.taskAssets.assetId) }
 async function run(ctx) { return (await current(ctx)).runs.find(item => item.id === ctx.receipt.taskAssets.runId) }
 async function selectVersion(ctx, version) {
-  const selector=taskSurface+' [aria-label="Task asset version"]'
-  const read=()=>ctx.probe.cdp.evaluate(`(()=>{const select=document.querySelector(${quoted(selector)});if(!select)throw new Error('The actual task version control is missing');return {value:select.value,focused:document.activeElement===select,options:Array.from(select.options).map(option=>option.value),changes:globalThis.__privateTaskVersionChanges??[]}})()`)
-  const key=async(key,code,windowsVirtualKeyCode)=>{for(const type of ['keyDown','keyUp'])await ctx.probe.cdp.call('Input.dispatchKeyEvent',{type,key,code,windowsVirtualKeyCode})}
-  await ctx.probe.cdp.evaluate(`(()=>{globalThis.__privateTaskVersionChanges=[];const select=document.querySelector(${quoted(selector)});select.addEventListener('change',event=>{globalThis.__privateTaskVersionChanges.push({trusted:event.isTrusted,value:select.value});},{once:true});return true})()`)
-  let observation=await read()
-  const evidence={before:observation,focusInput:'trusted Tab navigation to closed native select; no mouse popup or DOM focus/value assignment',keys:[]}
-  ctx.receipt.taskAssets.versionSelection=evidence
-  for(let count=0;!observation.focused&&count<80;count++){await key('Tab','Tab',9);evidence.keys.push('Tab');observation=await read()}
-  assert.equal(observation.focused,true,'Real keyboard navigation must reach the actual version control')
-  const wanted=observation.options.indexOf(String(version))
-  assert.ok(wanted>=0,'The requested real version option must exist')
-  for(let count=0;observation.value!==String(version)&&count<observation.options.length;count++){
-    const direction=observation.options.indexOf(observation.value)>wanted?'ArrowUp':'ArrowDown'
-    await key(direction,direction,direction==='ArrowUp'?38:40);evidence.keys.push(direction);observation=await read()
+  const selector = taskSurface + ' [aria-label="Task asset version"]'
+  const read = () => ctx.probe.cdp.evaluate(`(()=>{const select=document.querySelector(${quoted(selector)});if(!select)throw new Error('The actual task version control is missing');const events=globalThis.__privateTaskVersionEvents??[];return {value:select.value,focused:document.activeElement===select,documentFocused:document.hasFocus(),options:Array.from(select.options).map(option=>({value:option.value,label:option.label.trimStart(),disabled:option.disabled})),events,changes:events.filter(event=>event.type==='change')}})()`)
+  const evidence = { focusInput: 'trusted Tab navigation and actual option-label keyboard typeahead; no popup-opening input, DOM focus/value assignment or product callback', keys: [], inputs: [] }
+  ctx.receipt.taskAssets.versionSelection = evidence
+  const send = async input => {
+    evidence.inputs.push({ ...input })
+    await ctx.probe.cdp.call('Input.dispatchKeyEvent', input)
   }
-  evidence.after=observation
-  assert.equal(observation.value,String(version),'Closed-select real arrow input must change the actual selected version')
-  if(evidence.before.value!==String(version)){assert.ok(observation.changes.length>0,'Selection must produce a real change');assert.equal(observation.changes[0].trusted,true,'Native selection change must be trusted')}
+  await ctx.probe.cdp.evaluate(`(()=>{globalThis.__privateTaskVersionCleanup?.();globalThis.__privateTaskVersionEvents=[];const select=document.querySelector(${quoted(selector)});const types=['keydown','keypress','input','change'];const record=event=>{const events=globalThis.__privateTaskVersionEvents;if(events.length<256)events.push({type:event.type,key:event.key??null,trusted:event.isTrusted,value:select.value})};for(const type of types)select.addEventListener(type,record);globalThis.__privateTaskVersionCleanup=()=>{for(const type of types)select.removeEventListener(type,record);delete globalThis.__privateTaskVersionCleanup};return true})()`)
+  try {
+    let observation = await read()
+    evidence.before = observation
+    for (let count = 0; !observation.focused && count < 80; count++) {
+      for (const type of ['keyDown', 'keyUp']) await send({ type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+      evidence.keys.push('Tab')
+      observation = await read()
+      evidence.after = observation
+    }
+    assert.equal(observation.focused, true, 'Real keyboard navigation must reach the actual version control')
+    assert.ok(observation.options.length > 0, 'Actual version options must be nonempty')
+    const target = observation.options.find(option => option.value === String(version) && !option.disabled)
+    assert.ok(target, 'The requested real enabled version option must exist')
+    if (observation.value === String(version)) { evidence.after = observation; return }
+    // Native selects support printable keypress prefix matching. On macOS, arrows
+    // open a native popup instead of committing a closed select's value.
+    let prefix = ''
+    for (let length = 1; length <= Math.min(64, target.label.length); length++) {
+      const candidate = target.label.slice(0, length)
+      if (!/^[ -~]+$/.test(candidate)) break
+      const matches = observation.options.filter(option => !option.disabled && option.label.toLowerCase().startsWith(candidate.toLowerCase()))
+      if (matches.length === 1) { prefix = candidate; break }
+    }
+    assert.ok(prefix, 'The actual option label needs a unique bounded printable prefix')
+    evidence.prefix = prefix
+    evidence.selectionStartedAt = Date.now()
+    for (const character of prefix) {
+      await send({ type: 'rawKeyDown', key: character })
+      await send({ type: 'char', key: character, text: character, unmodifiedText: character })
+      await send({ type: 'keyUp', key: character })
+      evidence.keys.push(character)
+    }
+    observation = await ctx.waitFor('actual version value and trusted selection change', async () => {
+      const next = await read()
+      evidence.after = next
+      return next.value === String(version) && next.changes.some(event => event.trusted && event.value === String(version)) ? next : null
+    })
+    evidence.selectionElapsedMs = Date.now() - evidence.selectionStartedAt
+    assert.equal(observation.value, String(version), 'Real label keyboard input must change the actual selected version')
+    assert.ok(observation.changes.length > 0, 'Selection must produce a real change')
+    assert.ok(observation.changes.some(event => event.trusted && event.value === String(version)), 'The actual target selection change must be trusted')
+  } finally {
+    await ctx.probe.cdp.evaluate('globalThis.__privateTaskVersionCleanup?.(); true')
+  }
 }
 async function pageCount(ctx) { return ctx.nativePageScript(ctx.probe, 'globalThis.assetButtonCount') }
 async function persistent(ctx, secret) {
