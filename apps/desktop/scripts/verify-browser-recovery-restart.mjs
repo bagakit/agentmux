@@ -7,6 +7,9 @@ import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { captureOsWindow } from './browser-window-visual-capture.mjs'
+import { installNativeBoundsObserver } from './browser-native-bounds-observer.mjs'
+import { observeOriginalStageDelivery } from './browser-stage-delivery-observer.mjs'
 
 // Actual product Main/Renderer/Browser owners, ordinary quit and the same private userData.
 // No saved Workbench seeding, Store setter, bridge replacement or manual storage flush.
@@ -23,20 +26,34 @@ const userData = join(root, 'user-data'), privateHome = join(root, 'home'), runt
 const workspacePath = join(root, 'workspace'), codexHome = join(privateHome, 'codex')
 const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser recovery'
 const children = new Set(), connections = new Set()
+const launchedProbes = new Set()
 const deadline = Date.now() + 120_000
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
 const downloadCase = process.argv.includes('--case-download')
 const demonstrationCase = process.argv.includes('--case-demonstration')
 const overlayCase = process.argv.includes('--case-overlay')
+const taskAssetsCase = process.argv.includes('--case-task-assets')
+const browserToolsCase = process.argv.includes('--case-browser-tools')
+const structuredCase = process.argv.includes('--case-structured-output')
+const observeStageDelivery = process.argv.includes('--observe-stage-delivery')
+const observeNativeBounds = observeStageDelivery || process.argv.includes('--observe-native-bounds')
+assert.ok(!observeStageDelivery || structuredCase, 'Stage delivery observation belongs to one private structured-output diagnostic')
+assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belongs to one private structured-output diagnostic')
+if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
+if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
+assert.ok([downloadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
 if(demonstrationCase)receipt.case='demonstration'
 if(overlayCase)receipt.case='overlay'
+if(taskAssetsCase)receipt.case='task-assets'
+if(browserToolsCase)receipt.case='browser-tools'
+if(structuredCase)receipt.case='structured-output'
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
 const captureDirectory = await mkdtemp(join(repositoryRoot,'.tmp/browser-operation-visual-'))
 receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-performed', frames: [],
-  compositorBoundary: 'Full BrowserWindow Renderer frames and native WebContentsView page frames are captured separately without compositing. Actual DOM and native bounds prove their shared geometry.' }
+  compositorBoundary: 'The original Renderer webContents and native Browser WebContentsView are captured separately without compositing. These images are not an OS whole-window capture. Actual DOM and native bounds prove their shared geometry.' }
 const fixtureEnvironment = { HOME: privateHome, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 let phase = 'prepare', failure, first, second, server
@@ -85,18 +102,47 @@ async function identity() {
     'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/main/browser-step-evidence.ts',
     'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/store.ts',
     'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/lib/browser-state.ts',
+    'apps/desktop/src/renderer/src/lib/browser-stage-geometry.ts', 'apps/desktop/package.json', 'pnpm-lock.yaml',
     'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx', 'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
     'apps/desktop/src/renderer/src/components/BrowserStepEvidence.tsx', 'apps/desktop/src/renderer/src/styles/browser-step-evidence.css',
     'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/index.css',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/verify-browser-recovery-restart.mjs',
-    ...(demonstrationCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
+    'apps/desktop/scripts/browser-window-visual-capture.mjs',
+    ...(observeNativeBounds ? ['apps/desktop/scripts/browser-native-bounds-observer.mjs'] : []),
+    ...(observeStageDelivery ? ['apps/desktop/scripts/browser-stage-delivery-observer.mjs'] : []),
+    ...(demonstrationCase || taskAssetsCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
       'apps/desktop/src/main/browser-semantic-target.ts','apps/desktop/src/shared/browser-demonstration.ts','apps/desktop/src/main/browser-cdp-session.ts',
       'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx','apps/desktop/scripts/browser-demonstration-probe-scenario.mjs',
+      'apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs',
       'apps/desktop/scripts/verify-browser-demonstration.mjs'] : []),
+    ...(taskAssetsCase ? ['apps/desktop/src/main/browser-task-assets.ts','apps/desktop/src/main/browser-replay-compiler.ts',
+      'apps/desktop/src/shared/browser-task-assets.ts','apps/desktop/src/renderer/src/components/BrowserTaskAssetEditor.tsx',
+      'apps/desktop/src/renderer/src/styles/browser-task-assets.css','apps/desktop/scripts/browser-task-assets-probe-scenario.mjs',
+      'apps/desktop/scripts/verify-browser-task-assets.mjs'] : []),
+    ...(overlayCase ? ['apps/desktop/src/main/native-overlay-surfaces.ts','apps/desktop/src/shared/native-overlay.ts',
+      'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts','apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts',
+      'apps/desktop/scripts/browser-overlay-probe-scenario.mjs','apps/desktop/scripts/browser-native-chrome-stage-observer.mjs',
+      'apps/desktop/scripts/verify-browser-overlay-visibility.mjs'] : []),
+    ...(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1' ? ['apps/desktop/scripts/browser-overlay-paint-observer.mjs'] : []),
     ...(downloadCase ? ['apps/desktop/src/main/browser-downloads.ts','apps/desktop/src/shared/browser-download.ts',
       'apps/desktop/src/main/workspace-files.ts','apps/desktop/src/shared/workspace-file-bytes.ts',
-      'packages/core/src/browser-page-capability.ts','apps/desktop/scripts/verify-browser-files.mjs'] : [])]
+      'packages/core/src/browser-page-capability.ts','apps/desktop/scripts/verify-browser-files.mjs'] : []),
+    ...(browserToolsCase ? ['apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx',
+      'apps/desktop/src/renderer/src/components/BrowserProfilesPanel.tsx','apps/desktop/src/renderer/src/lib/browser-annotations.ts',
+      'apps/desktop/src/main/browser-profile-store.ts','apps/desktop/src/main/browser-profile-manager.ts',
+      'apps/desktop/src/main/config-owner.ts','apps/desktop/src/main/config-store.ts',
+      'apps/desktop/scripts/browser-tools-probe-scenario.mjs','apps/desktop/scripts/verify-browser-tools.mjs',
+      'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : []),
+    ...(structuredCase ? ['apps/desktop/src/main/browser-structured-output.ts','apps/desktop/src/main/browser-structured-target.ts',
+      'apps/desktop/src/main/browser-page-dispatch.ts','apps/desktop/src/main/browser-page-snapshot.ts',
+      'apps/desktop/src/main/browser-snapshot-query.ts','apps/desktop/src/main/browser-frame-documents.ts',
+      'apps/desktop/src/main/browser-cdp-session.ts','apps/desktop/src/main/browser-result-artifact.ts',
+      'apps/desktop/src/shared/browser-structured-output.ts','apps/desktop/src/shared/browser-result-artifact.ts',
+      'apps/desktop/src/shared/browser-step-evidence.ts','apps/desktop/src/renderer/src/components/BrowserStructuredFields.tsx',
+      'apps/desktop/src/renderer/src/styles/browser-structured-fields.css','packages/core/src/browser-page-capability.ts',
+      'packages/core/src/control.ts','packages/core/src/control-host.ts','packages/core/dist/browser-page-capability.js',
+      'apps/desktop/scripts/browser-structured-probe-scenario.mjs','apps/desktop/scripts/verify-browser-structured-output.mjs'] : [])]
   const values = await Promise.all(files.map(async name => { const bytes = await readFile(join(repositoryRoot, name)); assert.ok(bytes.length > 0, name); return [name, digest(bytes)] }))
   const electron = require('electron'); values.push([electron, digest(await readFile(electron))])
   return Object.fromEntries(values)
@@ -120,6 +166,8 @@ async function launch(label) {
   })
   const alive = () => { if (spawnError) throw spawnError; if (child.exitCode !== null || child.signalCode !== null) throw new Error(`${label} exited ${child.exitCode}/${child.signalCode}: ${diagnostics}`) }
   const main = await connectCdp(await waitFor(`${label} Main inspector`, () => { alive(); return mainUrl }))
+  const probe = { child, main }
+  launchedProbes.add(probe)
   await main.call('Runtime.enable')
   // Imports must finish before querying Electron. Pause before the first home-dependent constant;
   // require() during Node's --inspect-brk bootstrap can run an uninitialized module loader.
@@ -143,29 +191,119 @@ async function launch(label) {
   assert.equal(isolated.exceptionDetails, undefined, 'Public Electron home isolation must succeed')
   const home = isolated.result.value
   assert.equal(home, privateHome, 'Home must be private before the home-dependent constant is evaluated')
+  if (observeNativeBounds) {
+    const observed = await main.call('Debugger.evaluateOnCallFrame', {
+      callFrameId: paused.callFrames[0].callFrameId,
+      expression: `(() => { app.once('browser-window-created', () => {
+        try { globalThis.__agentMuxPrivateBoundsObserver = (${installNativeBoundsObserver.toString()})(BrowserViewManager.prototype) }
+        catch { globalThis.__agentMuxPrivateBoundsObserverError = 'Original Main bounds observer could not be installed' }
+      }); return true })()`, returnByValue: true
+    })
+    assert.equal(observed.exceptionDetails, undefined, 'Private passive observer bootstrap must install without replacing any Browser fact')
+  }
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
   await main.call('Debugger.resume')
-  const ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } })
+  let ready
+  try { ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }) }
+  catch (error) {
+    const observed = { pid: child.pid, exitCode: child.exitCode, signal: child.signalCode, stderr: diagnostics,
+      mainUrl, rendererUrl, readyFile: { exists: false }, mainPauses: main.pauses.slice(-4).map(pause => ({ reason: pause.reason,
+        hitBreakpoints: pause.hitBreakpoints, frames: pause.callFrames.slice(0,4).map(frame => ({ name: frame.functionName, url: frame.url, location: frame.location })) })) }
+    const bounded = action => Promise.race([action, new Promise((_, reject) => setTimeout(() => reject(new Error('Launch diagnostic timed out after 2s')), 2000))])
+    try { observed.readyFile = { exists: true, text: (await readFile(readyFile, 'utf8')).slice(0,4096) } }
+    catch (failure) { observed.readyFile.error = failure.code ?? failure.message }
+    try { observed.main = await bounded(main.evaluate(`(()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return{ready:app.isReady(),windows:BrowserWindow.getAllWindows().slice(0,8).map(window=>({id:window.id,visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),bounds:window.getBounds(),url:window.webContents.getURL(),loading:window.webContents.isLoading(),views:window.contentView.children.slice(0,16).map(view=>({id:view.webContents?.id,url:view.webContents?.getURL(),visible:view.getVisible(),bounds:view.getBounds()}))}))}})()`)) }
+    catch (failure) { observed.mainError = failure.message }
+    if (rendererUrl) {
+      try { observed.rendererTargets = (await (await fetch(`http://${new URL(rendererUrl).host}/json/list`, { signal: AbortSignal.timeout(2000) })).json()).slice(0,8).map(target=>({id:target.id,type:target.type,url:target.url,title:target.title})) }
+      catch (failure) { observed.rendererError = failure.message }
+    }
+    receipt.launchDiagnostics ??= {}; receipt.launchDiagnostics[label] = observed
+    throw error
+  }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl); await cdp.call('Runtime.enable')
-  await waitFor(`${label} trusted UI`, () => cdp.evaluate('Boolean(window.agentmux && document.querySelector(".project-list"))'))
+  probe.cdp = cdp
+  receipt.launchUiObservations ??= {}
+  receipt.launchUiObservations[label] = await cdp.evaluate('({bridgePresent:Boolean(window.agentmux),projectListPresent:Boolean(document.querySelector(".project-list")),navigationPresent:Boolean(document.querySelector(".surface-navigation")),regionCount:document.querySelectorAll("[data-workbench-region-id]").length,body:document.body.innerText.slice(0,1500)})')
+  try {
+    // The project sidebar is a persisted user choice. Original window navigation
+    // confirms the mounted product shell; actualWorkbench verifies the retained regions below.
+    await waitFor(`${label} trusted UI`, () => cdp.evaluate('Boolean(window.agentmux && document.querySelector(".surface-navigation"))'))
+  } catch (error) {
+    receipt.launchUiObservations[label].afterOriginalTimeout = await cdp.evaluate('({bridgePresent:Boolean(window.agentmux),projectListPresent:Boolean(document.querySelector(".project-list")),navigationPresent:Boolean(document.querySelector(".surface-navigation")),regionCount:document.querySelectorAll("[data-workbench-region-id]").length,body:document.body.innerText.slice(0,2000)})')
+    throw error
+  }
   const nativeHome = await cdp.evaluate('(async () => (await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, privateHome)
+  const drainStageDelivery = observeStageDelivery ? await observeOriginalStageDelivery(cdp,desktopRoot) : undefined
   receipt[label] = { pid: child.pid, home, nativeHome, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
-  return { child, main, cdp }
+  probe.drainStageDelivery = drainStageDelivery
+  return probe
 }
 async function click(cdp, expression, button = 'left') {
-  const point = await waitFor('exact visible UI control', () => cdp.evaluate(`(() => { const matches = ${expression}; if (matches.length !== 1) return null; const element = matches[0]; if (element.disabled || !element.getClientRects().length) return null; element.scrollIntoView({block:'nearest'}); const r = element.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()`))
-  await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button, clickCount: 1, ...point })
-  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button, clickCount: 1, ...point })
+  let point
+  try { point = await waitFor('exact visible UI control', () => cdp.evaluate(`(async () => {
+    const matches = ${expression}; if (matches.length !== 1) return null;
+    const element = matches[0]; if (element.disabled || !element.getClientRects().length) return null;
+    element.scrollIntoView({block:'nearest'}); await new Promise(done=>requestAnimationFrame(done));
+    if(!element.isConnected)return null;
+    const r=element.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);
+    if(!r.width||!r.height||!hit||!element.contains(hit))return null;
+    const observed={received:null,ariaLabel:element.getAttribute('aria-label'),tag:element.tagName};
+    const listener=event=>{observed.received=event.isTrusted&&element.contains(event.target)};
+    document.addEventListener('pointerdown',listener,{capture:true,once:true});
+    globalThis.__privateBrowserRecoveryClick={observed,dispose:()=>document.removeEventListener('pointerdown',listener,true)};
+    return {x,y};
+  })()`)) } catch(error) {
+    receipt.visual.failedClick={expression,candidates:await cdp.evaluate(`(()=>(${expression}).slice(0,8).map(element=>{
+      const r=element.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
+      const identity=e=>({tag:e.tagName,ariaLabel:e.getAttribute('aria-label'),classes:typeof e.className==='string'?e.className:undefined,regionId:e.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId});
+      return {expected:identity(element),rect:{x:r.x,y:r.y,width:r.width,height:r.height},center:{x,y},disabled:Boolean(element.disabled),connected:element.isConnected,hits:document.elementsFromPoint(x,y).slice(0,8).map(identity)};
+    }))()`)}
+    throw error
+  }
+  try {
+    await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button, clickCount: 1, ...point })
+    await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button, clickCount: 1, ...point })
+    const observed=await cdp.evaluate('globalThis.__privateBrowserRecoveryClick?.observed')
+    receipt.visual.clicks??=[]; assert.ok(receipt.visual.clicks.length<256,'Private UI click observation budget')
+    receipt.visual.clicks.push({point,...observed})
+    assert.equal(observed?.received,true,'Trusted native UI input must reach the intended control')
+  } finally { await cdp.evaluate('globalThis.__privateBrowserRecoveryClick?.dispose();delete globalThis.__privateBrowserRecoveryClick;null') }
 }
 const selectors = selector => `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')`
 async function state(cdp) { return cdp.evaluate(`(() => { const raw = localStorage.getItem('agentmux-workbench-v1'); return raw ? JSON.parse(raw).state.restoredWorkbench : null })()`) }
 async function control(operation, target) { return requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation,target}, join(runtimeDirectory,'control.sock')) }
+async function runBrowser(browserId, code) {
+  const operationId=randomUUID()
+  const reply=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'browser.run',browserId,operationId,code},join(runtimeDirectory,'control.sock'))
+  assert.equal(reply.operation,'browser.run');assert.equal(reply.result.runOperation.id,operationId)
+  return reply.result
+}
 async function openBrowser(url, destination) { const result=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'open.browser',url,destination},join(runtimeDirectory,'control.sock')); assert.equal(result.operation,'open.browser');return result.result.region }
 async function normalQuit(probe) {
   phase = 'normal-quit'
+  if(probe.drainStageDelivery){
+    receipt.stageDelivery??={}
+    try{receipt.stageDelivery[probe.child.pid]=await probe.drainStageDelivery()}
+    catch(error){receipt.stageDelivery[probe.child.pid]={installed:false,error:String(error.message).slice(0,512)}}
+    probe.drainStageDelivery=undefined
+  }
+  if (observeNativeBounds) {
+    receipt.boundsStages ??= {}
+    if (!Object.hasOwn(receipt.boundsStages, String(probe.child.pid))) {
+      try {
+        receipt.boundsStages[probe.child.pid] = await probe.main.evaluate(`(() => {
+          const observer=globalThis.__agentMuxPrivateBoundsObserver;
+          return observer ? {installed:true,...observer.restore()} : {installed:false,error:globalThis.__agentMuxPrivateBoundsObserverError??'Private observer was unavailable'};
+        })()`)
+      } catch (error) {
+        receipt.boundsStages[probe.child.pid] = {installed:false,error:String(error.message).slice(0,512)}
+      }
+    }
+  }
   let replyFailure
   try { await probe.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app.quit()` ) }
   catch (error) { replyFailure = error.message }
@@ -204,14 +342,15 @@ async function actualWorkbench(probe, expected) {
 async function resize(probe, width, height) {
   const actual = await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
     const win=BrowserWindow.getAllWindows()[0];win.setSize(${width},${height});return win.getSize() })()`)
-  await waitFor('actual Renderer resize',()=>probe.cdp.evaluate(`innerWidth===${actual[0]}`))
+  await waitFor('actual Renderer resize',()=>probe.cdp.evaluate(`Math.abs(innerWidth-${actual[0]}/window.agentmux.ui.getZoomFactor())<=1`))
   return actual
 }
 async function observeNativeFrameReady(probe, url) {
   const attempts = []
-  receipt.visual.nativeFramePreflight = { captureOnly: true, attempts }
+  receipt.visual.nativeFramePreflight ??= { captureOnly: true, runs: [] }
+  receipt.visual.nativeFramePreflight.runs.push({url,attempts})
   return waitFor('visible, loaded native page with a nonempty compositor frame', async () => {
-    const stage = await probe.cdp.evaluate(`(() => {const e=document.querySelector('[data-native-browser-stage]');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,visible:!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'};})()`)
+    const stage = await probe.cdp.evaluate(`(() => {const surfaces=Array.from(document.querySelectorAll('.browser-surface')).filter(surface=>surface.querySelector('[aria-label="Browser address"]')?.value.split('#')[0]===${JSON.stringify(url)});if(surfaces.length!==1)return null;const e=surfaces[0].querySelector('[data-native-browser-stage]');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,visible:!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'};})()`)
     const state = await probe.main.evaluate(`(async () => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];
       const view=win.contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL()===${JSON.stringify(url)});
       const window={visible:win.isVisible(),minimized:win.isMinimized(),focused:win.isFocused(),bounds:win.getBounds()};
@@ -238,35 +377,51 @@ async function capture(probe, label, content = 'operations', pageUrl) {
     return {viewport:{width:innerWidth,height:innerHeight},rows:rows.map(e=>({sequence:e.dataset.sequence,status:e.querySelector('.browser-rsi-timeline__status').textContent,
       selected:e.querySelector('button').getAttribute('aria-pressed'),expanded:e.querySelector('button').getAttribute('aria-expanded')})),
       operationStatus:(()=>{const s=document.querySelector('.browser-operation-status');return s&&{phase:s.dataset.phase,control:s.dataset.control,operationId:s.dataset.operationId,
-        trigger:s.querySelector('button')?.getAttribute('aria-label'),insideToolbar:!!s.closest('.browser-toolbar')};})(),
+        taskRunId:s.dataset.taskRunId,taskVersion:s.dataset.taskVersion,trigger:s.querySelector('button')?.getAttribute('aria-label'),insideToolbar:!!s.closest('.browser-toolbar')};})(),
       trace:rail&&rect(rail),stage:stage&&rect(stage),payloadCount:document.querySelectorAll('.browser-rsi-timeline__step-detail').length,
       demonstration:(()=>{const surface=document.querySelector('[aria-label="Human demonstration draft"]');return surface&&{id:surface.dataset.demonstrationId,
-        status:surface.querySelector('[role="status"]')?.textContent,steps:Array.from(surface.querySelectorAll('[data-sequence]')).map(step=>({sequence:step.dataset.sequence,text:step.textContent}))};})(),
+        status:surface.querySelector('[role="status"]')?.textContent,stepsOpen:surface.querySelector('.browser-demonstration__steps')?.open,
+        steps:Array.from(surface.querySelectorAll('[data-sequence]')).map(step=>({sequence:step.dataset.sequence,text:step.textContent}))};})(),
+      taskAsset:(()=>{const surface=document.querySelector('[aria-label="Editable Browser task asset"]');return surface&&{id:surface.dataset.taskAssetId,
+        steps:Array.from(surface.querySelectorAll('[data-task-step-id]')).map(step=>({id:step.dataset.taskStepId,text:step.textContent})),
+        version:surface.querySelector('[aria-label="Task asset version"]')?.value,progress:(()=>{const p=surface.querySelector('.browser-task-asset__progress');return p&&{text:p.textContent,status:p.dataset.runStatus,runId:p.dataset.runId,version:p.dataset.runVersion,bounds:rect(p)}})()};})(),
+      structured:(()=>{const surface=document.querySelector('[aria-label="Recorded structured fields"]');return surface&&{summary:surface.querySelector('.browser-structured-fields__summary')?.textContent,
+        fields:Array.from(surface.querySelectorAll('.browser-structured-fields__values > div')).map(field=>({key:field.querySelector('dt')?.textContent,status:field.dataset.fieldStatus,text:field.querySelector('dd')?.textContent})),
+        rawRange:surface.querySelector('.browser-structured-fields__range')?.textContent,rawCharacters:surface.querySelector('pre')?.textContent.length??0};})(),
       floatingContent:Array.from(document.body.children).filter(node=>node.id!=='root').flatMap(node=>[node,...node.querySelectorAll('[data-state="open"],[role="tooltip"],[role="dialog"],[role="menu"]')]).filter(visible).map(node=>({role:node.getAttribute('role'),state:node.getAttribute('data-state'),bounds:rect(node)})),
       focus:document.activeElement?.getAttribute('aria-label'),focusVisible:document.activeElement?.matches(':focus-visible')??false};
   })()`)
+  observation.uiZoomFactor=await probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return BrowserWindow.getAllWindows()[0].webContents.getZoomFactor()})()`)
+  assert.ok(Number.isFinite(observation.uiZoomFactor)&&observation.uiZoomFactor>0,'Actual Renderer zoom is required for native geometry')
+  observation.coordinateSpace='renderer-css'
+  receipt.visual.lastCaptureObservation={label,content,observation}
   if(content==='demonstration')assert.ok(observation.demonstration?.id&&observation.demonstration.steps.length>0,'Demonstration review must contain real recorded steps')
+  else if(content==='task-assets')assert.ok(observation.taskAsset?.id&&observation.taskAsset.steps.length>0&&Number(observation.taskAsset.version)>0,'Asset review must contain a real editable draft and saved version')
+  else if(content==='structured-output')assert.ok(observation.rows.length>0&&observation.structured?.fields.length>0,'Structured review contains the actual selected operation and nonempty retained fields')
   else if(content==='operations')assert.ok(observation.rows.length>0,'Visual review must contain real operation steps')
   assert.ok(observation.stage.width>0&&observation.stage.height>0,'The actual page keeps positive visible geometry')
   if(observation.trace)assert.ok(observation.stage.x+observation.stage.width<=observation.trace.x+1,'Trace does not overlay the native stage')
-  else assert.equal(content,'overlay','Operation and demonstration review requires its actual details surface')
+  else assert.ok(content==='overlay'||content==='page','Operation and demonstration review requires its actual details surface')
   const nativeBounds=await waitFor('native page bounds inside the actual stage',async()=>{
     const bounds=await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
       return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&${pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"}).map(v=>v.getBounds()); })()`)
-    const s=observation.stage
+    const factor=observation.uiZoomFactor,s={x:observation.stage.x*factor,y:observation.stage.y*factor,width:observation.stage.width*factor,height:observation.stage.height*factor}
     return bounds.length===1&&bounds[0].width>0&&bounds[0].height>0&&bounds[0].x>=s.x-1&&bounds[0].y>=s.y-1&&
       bounds[0].x+bounds[0].width<=s.x+s.width+1&&bounds[0].y+bounds[0].height<=s.y+s.height+1?bounds:null
   })
+  if (!receipt.visual.osFrames?.some(frame => frame.label === label)) {
+    await captureOsWindow({probe,desktopRoot,receipt},label)
+  }
   const file=join(captureDirectory,`${label}.png`)
   const frame=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-    const image=await BrowserWindow.getAllWindows()[0].capturePage();if(image.isEmpty())throw new Error('Empty compositor frame');
+    const image=await BrowserWindow.getAllWindows()[0].webContents.capturePage();if(image.isEmpty())throw new Error('Empty Renderer frame');
     const png=image.toPNG();process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(file)},png);
-    return {size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
+    return {captureSource:'renderer-webcontents',size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   const pageFile=join(captureDirectory,`${label}-native-page.png`)
   const nativePage=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
     const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&${pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"});
     const image=await view.webContents.capturePage();if(image.isEmpty())throw new Error('Empty native page frame');const png=image.toPNG();
-    process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {file:${JSON.stringify(pageFile)},bounds:view.getBounds(),size:image.getSize(),
+    process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {captureSource:'native-browser-webcontents',file:${JSON.stringify(pageFile)},bounds:view.getBounds(),size:image.getSize(),
       sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   receipt.visual.frames.push({label,file,...frame,observation,nativeBounds,nativePage})
 }
@@ -279,12 +434,14 @@ async function pressKey(probe, key, code = key, windowsVirtualKeyCode) {
   await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',...value})
   await probe.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...value})
 }
-async function nativePageScript(probe, expression) {
+async function nativePageScript(probe, expression, pageUrl) {
+  assert.ok(typeof pageUrl==='string'&&pageUrl.length>0,'The fixture read requires the actual scenario page URL')
   return probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-    const views=BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
-    if(views.length!==1)throw new Error('Expected exactly one private native page');return views[0].webContents.executeJavaScript(${JSON.stringify(expression)});})()`)
+    const views=BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)});
+    if(views.length!==1)throw new Error('Expected exactly one native owner for the actual scenario page');return views[0].webContents.executeJavaScript(${JSON.stringify(expression)});})()`)
 }
-async function reviewOperationStates(probe, browserId) {
+async function reviewOperationStates(probe, browserId, pageUrl) {
+  const pageScript=expression=>nativePageScript(probe,expression,pageUrl)
   const operator={id:'private-browser-status',name:'Private Browser status'}
   const start=async code=>{
     const expression=`globalThis.__privateStatusRun=window.agentmux.browser.runScript(${JSON.stringify(browserId)},${JSON.stringify(code)},${JSON.stringify(operator)})`
@@ -316,20 +473,20 @@ async function reviewOperationStates(probe, browserId) {
   }
   assert.equal(navigation.at(-1).label,'Stop browser operation','Keyboard can reach the real Stop item')
   await pressKey(probe,'Enter','Enter',13)
-  await nativePageScript(probe,'globalThis.__finishPrivateStatus?.();null')
+  await pageScript('globalThis.__finishPrivateStatus?.();null')
   const stopped=await probe.cdp.evaluate('globalThis.__privateStatusRun')
   assert.equal(stopped.outcome.kind,'stopped')
   receipt.visual.states.running={operation:stopped.runOperation,keyboard:navigation,outcome:stopped.outcome}
   await probe.cdp.evaluate(`window.agentmux.browser.returnControl(${JSON.stringify(browserId)})`)
   await start('await waitForElement("Private delayed ready",30000); return "observed ready element";')
   await frames('waiting')
-  await nativePageScript(probe,'(()=>{const button=document.createElement("button");button.id="private-delayed-ready";button.textContent="Private delayed ready";document.body.append(button);return true})()')
+  await pageScript('(()=>{const button=document.createElement("button");button.id="private-delayed-ready";button.textContent="Private delayed ready";document.body.append(button);return true})()')
   const waited=await probe.cdp.evaluate('globalThis.__privateStatusRun')
   assert.equal(waited.outcome.kind,'completed')
   receipt.visual.states.waiting={operation:waited.runOperation,outcome:waited.outcome}
-  await nativePageScript(probe,'document.querySelector("#private-delayed-ready").remove();null')
+  await pageScript('document.querySelector("#private-delayed-ready").remove();null')
   await start(held);await status('running')
-  await nativePageScript(probe,'globalThis.__privateTrustedInput=0;document.addEventListener("mousedown",event=>{if(event.isTrusted)globalThis.__privateTrustedInput++},{once:true});null')
+  await pageScript('globalThis.__privateTrustedInput=0;document.addEventListener("mousedown",event=>{if(event.isTrusted)globalThis.__privateTrustedInput++},{once:true});null')
   const nativeInput=await probe.main.evaluate(`(async()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
     const window=BrowserWindow.getAllWindows()[0],views=window.contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL().startsWith('http://127.0.0.1:'));
     if(views.length!==1)throw new Error('Expected exactly one private native input owner');const view=views[0],bounds=view.getBounds();
@@ -339,10 +496,10 @@ async function reviewOperationStates(probe, browserId) {
     if(!window.isFocused())throw new Error('Native input requires the actual BrowserWindow focused');
     const observed={windowFocused:window.isFocused(),pageFocused:view.webContents.isFocused(),visible:view.getVisible(),bounds};
     for(const type of ['mouseDown','mouseUp'])view.webContents.sendInputEvent({type,button:'left',clickCount:1,x:20,y:80});return observed;})()`)
-  const trustedInput=await waitFor('trusted native page input',async()=>{const count=await nativePageScript(probe,'globalThis.__privateTrustedInput');return count>0?count:null},2000)
+  const trustedInput=await waitFor('trusted native page input',async()=>{const count=await pageScript('globalThis.__privateTrustedInput');return count>0?count:null},2000)
   await frames('human')
   assert.ok(trustedInput>0,'The native page received trusted input, not a page-authored event')
-  await nativePageScript(probe,'globalThis.__finishPrivateStatus?.();null')
+  await pageScript('globalThis.__finishPrivateStatus?.();null')
   const human=await probe.cdp.evaluate('globalThis.__privateStatusRun')
   assert.equal(human.outcome.kind,'stopped')
   receipt.visual.states.human={operation:human.runOperation,nativeInput,trustedInput,inputSource:'Electron native sendInputEvent; physical hardware not tested',outcome:human.outcome}
@@ -457,10 +614,14 @@ async function recoverDownloads(probe,browserId) {
   receipt.downloads.unfinishedAfterRestart={receipt:record,publicToolRejected:rejection.outcome}
 }
 try {
-  const demonstration = demonstrationCase ? await import('./browser-demonstration-probe-scenario.mjs') : null
+  const demonstration = demonstrationCase || taskAssetsCase ? await import('./browser-demonstration-probe-scenario.mjs') : null
   const overlay = overlayCase ? await import('./browser-overlay-probe-scenario.mjs') : null
-  const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,receipt,click,selectors,waitFor,nativePageScript,resize,
-    capture:(probe,label)=>capture(probe,label,demonstrationCase?'demonstration':overlayCase?'overlay':'operations',pageUrl),desktopRoot,userData,repositoryRoot})
+  const taskAssets = taskAssetsCase ? await import('./browser-task-assets-probe-scenario.mjs') : null
+  const browserTools = browserToolsCase ? await import('./browser-tools-probe-scenario.mjs') : null
+  const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
+  const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
+    diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
+    capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,repositoryRoot})
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
@@ -473,7 +634,7 @@ try {
       response.end(downloadPayload);return
     }
     response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1>'+
-      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
+      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
   })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
@@ -481,7 +642,7 @@ try {
   first=await launch('first');phase='create-actual-browser-split'
   await click(first.cdp,selectors(`.project-rail-row[data-workspace-id="${workspaceId}"]`))
   await click(first.cdp,selectors('[aria-label="Browser Tools"]'))
-  await click(first.cdp,`${selectors('button')}.filter(e=>e.textContent.trim()==='New Browser')`)
+  await click(first.cdp,selectors('[aria-label="New Browser"]'))
   const initial=await waitFor('actual UI-created Browser Region',async()=>{const s=await state(first.cdp);if(!s)return null;return Object.values(s.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='browser'&&x.surface.workspaceId===workspaceId)})
   await first.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.surface.browserId)},${JSON.stringify(urls[0])})`)
   await waitFor('actual first page before visual operation',()=>nativePages(first,[urls[0]]))
@@ -489,10 +650,13 @@ try {
   await observeNativeFrameReady(first,urls[0])
   receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
   if(downloadCase)await reviewDownloads(first,initial.surface.browserId)
+  else if(browserTools)await browserTools.reviewBrowserTools(scenarioContext(first,initial.surface.browserId,urls[0]))
+  else if(structured)await structured.reviewStructuredOutput(scenarioContext(first,initial.surface.browserId,urls[0]))
+  else if(taskAssets)await taskAssets.reviewTaskAssets(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(demonstration)await demonstration.reviewDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(overlay)await overlay.reviewOverlay(scenarioContext(first,initial.surface.browserId,urls[0]))
   else{
-    await reviewOperationStates(first,initial.surface.browserId)
+    await reviewOperationStates(first,initial.surface.browserId,urls[0])
     receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
   }
   const sibling=await openBrowser(urls[1],{kind:'split',direction:'right',region:{kind:'region',regionId:initial.surface.regionId}})
@@ -501,7 +665,7 @@ try {
   const expected={tabId:initial.tab.id,focus:initial.surface.regionId,regions:[{browserId:initial.surface.browserId,regionId:initial.surface.regionId,url:urls[0],title:pages[0].title},{browserId:sibling.browserId,regionId:sibling.regionId,url:urls[1],title:pages[1].title}]}
   const before=await actualWorkbench(first,expected)
   if(downloadCase)await startUnfinishedDownload(first,initial.surface.browserId)
-  if(demonstration)await demonstration.startInterruptedDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
+  if(demonstrationCase)await demonstration.startInterruptedDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
   // The ordinary product quit path itself is the acceptance boundary. No manual flush or seed.
   receipt.firstUi={expected,pages,...before};receipt.firstExit=await normalQuit(first)
   second=await launch('second');phase='actual-second-process-recovery'
@@ -511,7 +675,10 @@ try {
   assert.equal(ensure.id,expected.regions[0].browserId);assert.equal(ensure.url,urls[0]);assert.equal(ensure.error,null)
   const pagesAfterEnsure=await nativePages(second,urls);assert.deepEqual(pagesAfterEnsure,restoredPages)
   if(downloadCase)await recoverDownloads(second,expected.regions[0].browserId)
-  if(demonstration)await demonstration.recoverDemonstration(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(demonstrationCase)await demonstration.recoverDemonstration(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(taskAssets)await taskAssets.recoverTaskAssets(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(browserTools)await browserTools.recoverBrowserTools(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(structured)await structured.recoverStructuredOutput(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(overlay)await overlay.recoverOverlay(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   receipt.secondUi={...after,pages:restoredPages,ensure};receipt.secondExit=await normalQuit(second)
   receipt.identityAfter=await identity();assert.deepEqual(receipt.identityAfter,receipt.identityBefore)
@@ -521,7 +688,7 @@ try {
   if(active&&active.child.exitCode===null&&active.child.signalCode===null){try{receipt.failureWorkbench=await state(active.cdp);receipt.failureDom=await active.cdp.evaluate('document.body.innerText.slice(-5000)')}catch(error){receipt.diagnosticError=error.message}}
 } finally {
   const errors=[]
-  for(const probe of [second,first]){if(probe&&probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
+  for(const probe of [...launchedProbes].reverse()){if(probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
   for(const connection of connections){try{connection.close()}catch(error){errors.push(error.message)}}
   for(const child of children){if(child.pid===undefined)continue;try{assert.ok(child.pid>1);await stopProbeProcesses(child.pid,root)}catch(error){errors.push(error.message)}}
   const sentinel=process.pid+1_000_000_000
@@ -534,6 +701,6 @@ try {
 }
 receipt.passed=!failure&&receipt.completeGate;receipt.failure=failure??null
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
-await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
+await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
 process.stdout.write(JSON.stringify({passed:receipt.passed,completeGate:receipt.completeGate,failure:receipt.failure,cleanup:receipt.cleanup})+'\n')
 process.exitCode=receipt.passed?0:1
