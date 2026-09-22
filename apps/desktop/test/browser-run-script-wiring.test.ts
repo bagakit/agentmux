@@ -475,7 +475,7 @@ describe('human demonstration via the actual Manager → capture → recorder ch
     } finally { start.mockRestore(); manager.dispose() }
   }, 30_000)
 
-  it('a recovered recording draft is interrupted and has no native capture or input listener', async () => {
+  it('a recovered recording draft is interrupted and has no capture listener beyond its ordinary window pointer owner', async () => {
     const draft: BrowserDemonstrationDraft = { id: 'prior-draft', browserId: 'b1', navigationId: 'prior-nav',
       url: 'https://example.invalid/', revision: 2, status: 'recording', startedAt: 1, updatedAt: 2,
       steps: [{ id: 'prior-step', sequence: 1, recordedAt: 2, navigationId: 'prior-nav', source: 'native-human',
@@ -489,7 +489,7 @@ describe('human demonstration via the actual Manager → capture → recorder ch
       expect(restored.warning).toContain('restart')
       expect(sentEvents().at(-1)?.browser.demonstration).toEqual(restored)
       expect(contents.debugger.isAttached()).toBe(false)
-      expect(contents.listeners.get('input-event') ?? []).toEqual([])
+      expect(contents.listeners.get('input-event') ?? []).toHaveLength(1)
       await expect(manager.runScript('b1', 'return 7')).resolves.toMatchObject({ result: 7, outcome: { kind: 'completed' } })
     } finally { manager.dispose() }
   }, 30_000)
@@ -877,6 +877,8 @@ ${probes.map((name) => `        ['${name}', () => ${callFor[name]}]`).join(',\n'
     // 挂在整个 entry 生命周期上的话，人平时正常用浏览器就一直在写这个字段，下一次 run 一启动
     // 就以为自己被接管了。这条连跑两次来判：第一次的输入不许影响第二次。
     const { manager, contents } = await managerWithBrowser()
+    const ordinaryPointerListeners = [...contents.listeners.get('input-event') ?? []]
+    expect(ordinaryPointerListeners).toHaveLength(1)
 
     takeoverOnFirstCall(contents)
     const first = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
@@ -886,8 +888,8 @@ ${probes.map((name) => `        ['${name}', () => ${callFor[name]}]`).join(',\n'
     const second = await manager.runScript('b1', 'await click("@e1"); return "done"')
 
     expect(second.outcome.kind, '上一次的接管漏到了下一次运行——监听器没摘干净').toBe('completed')
-    expect(contents.listeners.get('input-event') ?? [], 'input-event 的监听没摘掉——每轮泄漏一个')
-      .toHaveLength(0)
+    expect(contents.listeners.get('input-event') ?? [], 'run-owned input listener leaked into the window pointer owner')
+      .toEqual(ordinaryPointerListeners)
   }, 30_000)
 
   it('人接管后必须显式交还方向盘，交还会清掉锁', async () => {

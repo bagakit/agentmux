@@ -1,6 +1,6 @@
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets'
-import { CONTINUOUS_PROGRESS_CHANGED } from '../shared/contracts'
+import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_POINTER_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
@@ -165,6 +165,17 @@ const api: AgentMuxPreloadApi = {
     decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
   },
   ui: {
+    onNativeBrowserPointer(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, point: import('../shared/native-overlay').NativeBrowserPointer): void => listener(point)
+      ipcRenderer.on(NATIVE_BROWSER_POINTER_CHANNEL, wrapped)
+      return () => ipcRenderer.off(NATIVE_BROWSER_POINTER_CHANNEL, wrapped)
+    },
+    publishNativeOverlays: (regions) => ipcRenderer.invoke('ui:publishNativeOverlays', regions),
+    onNativeOverlayWarning(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, warning: string): void => listener(warning)
+      ipcRenderer.on(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
+      return () => ipcRenderer.off(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
+    },
     requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
