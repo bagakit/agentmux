@@ -1324,10 +1324,6 @@ export function WorkspaceWorkbench({
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
-  // 观察到的 portal 浮层数。与手工租约在下面合并一次——两者生命周期不同（整体写入 vs 增量
-  // acquire/release），所以分开存、只在这一处相加，而不是让两边往同一个数上加减。
-  const portalOverlayCount = useAppStore((state) => state.portalOverlayCount)
-  const nativeSurfaceOverlayCount = useAppStore((state) => state.nativeSurfaceOverlayCount)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
@@ -1415,7 +1411,7 @@ export function WorkspaceWorkbench({
           allLayout={viewOwnership === 'owner' ? storedLayout ?? layout : layout}
           splitTarget={splitTarget}
           surfaceVisible={visible && !focusTab}
-          nativeSurfacesVisible={visible && !focusTab && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
+          nativeSurfacesVisible={visible && !focusTab && activeDrag === null}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={!rootIsLeaf}
@@ -1432,7 +1428,7 @@ export function WorkspaceWorkbench({
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
             surfaceVisible={tabVisible}
-            nativeSurfacesVisible={tabVisible && activeDrag === null && nativeSurfaceOverlayCount === 0 && portalOverlayCount === 0}
+            nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}
           /> : <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />}
         </StableWorkbenchView>

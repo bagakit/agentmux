@@ -19,7 +19,7 @@ import {
   SlidersHorizontal,
   Wrench
 } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 import {
   BROWSER_VIEWPORT_PRESETS,
   type BrowserScreenshotCapture,
@@ -33,8 +33,9 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { narrowBrowserOperation, narrowBrowserReplayPlan, type BrowserOperation } from '../../../shared/browser-operation'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { useBrowserAnnotationMarkers } from '../hooks/useBrowserAnnotationMarkers'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
-  browserAnnotationMarkers,
   formatBrowserElementContext,
   normalizeBrowserAnnotationNote,
   type BrowserAnnotation
@@ -245,17 +246,11 @@ export function BrowserPane({
     void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
   }, [tab.browserId, tab.navigationId])
 
-  useEffect(() => {
-    // A parked Browser has no Main-owned WebContentsView. Annotation writes must wait for restore
-    // instead of turning the expected parked state into a spurious "Unknown browser" error.
-    if (released) return
-    const current = annotations.filter(({ navigationId }) => navigationId === tab.navigationId)
-    void api.browser.setAnnotationMarkers(
-      tab.browserId,
-      tab.navigationId,
-      browserAnnotationMarkers(current)
-    ).catch(reportError)
-  }, [annotations, released, reportError, tab.browserId, tab.navigationId])
+  const annotationOwnerPresent = useCallback(() => nativeLifecycleRef.current === 'present', [])
+  const annotationSync = useBrowserAnnotationMarkers({
+    browserId: tab.browserId, navigationId: tab.navigationId, annotations,
+    active: !released && !restoring, nativeOwnerPresent: annotationOwnerPresent
+  })
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -273,8 +268,6 @@ export function BrowserPane({
           !visible ||
           released ||
           restoring ||
-          menuOpen ||
-          screenshot !== null ||
           elementSelection !== null ||
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
@@ -329,7 +322,7 @@ export function BrowserPane({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [elementSelection, menuOpen, released, restoring, screenshot, toolsOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, released, restoring, toolsOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible])
 
   // 焦点环内缩是一件与「边界同步的生命周期」正交的事，所以它有自己的依赖数组（#545）。焦点结论翻转时
   // 只重算一次边界——复用上面那个还活着的 synchronizer（recomputeBoundsRef），不拆不建，因此没有那道
@@ -805,15 +798,21 @@ export function BrowserPane({
       {/* 页面与轨迹是左右两块，不是上下两块。原生 WebContentsView 的矩形取自 `.browser-stage`
           的 getBoundingClientRect（见上面那个 ResizeObserver），所以轨迹 rail 作为 flex 兄弟把
           stage 挤窄时，原生视图会跟着收——轨迹不是盖在页面上，是页面真的让出了那条竖带。 */}
+      {annotationSync.notice ? <div>
+        <ServiceWindowNotice notice={annotationSync.notice} />
+        {annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null}
+      </div> : null}
       <div className="browser-body">
       <div className="browser-stage" data-native-browser-stage ref={stageRef}>
         {screenshot ? (
+          visible && !released && !restoring ?
           <ScreenshotEditor
+            anchor={stageRef.current}
             image={screenshot.image}
             busy={screenshotBusy}
             onCancel={cancelScreenshot}
             onComplete={(input) => void copyScreenshot(input)}
-          />
+          /> : null
         ) : elementSelection ? (
           <section className="browser-selection-result" aria-label="Selected element context">
             <header><ScanSearch size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
