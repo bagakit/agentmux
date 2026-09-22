@@ -84,6 +84,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'captureScreenshot', effect: 'observe', summary: 'capture what the page looks like' },
   { name: 'elementContext', effect: 'observe', summary: 'read one element in full: selector, role, accessible name, attributes, sanitized html' },
   { name: 'download', effect: 'act', summary: 'register a native download before clicking a current ref with {path, timeoutMs?, maxBytes?}; only completed Workspace publication yields a file reference' },
+  { name: 'uploadFiles', effect: 'act', summary: 'select 1-4 Workspace files in an actual file input from this run’s latest snapshot; verified FileList, pinned bytes retained until navigation or close' },
   { name: 'click', effect: 'act', summary: 'click the element a ref points at' },
   { name: 'fillInput', effect: 'act', summary: 'replace an input value' },
   { name: 'typeText', effect: 'act', summary: 'type into the focused element' },

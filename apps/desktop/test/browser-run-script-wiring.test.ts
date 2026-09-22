@@ -3,6 +3,8 @@ import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agen
 import { mkdtempSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { LocalExecutionHost } from '@agentmux/core'
+import { BrowserUploads } from '../src/main/browser-uploads.js'
+import type { BrowserUploadReceipt } from '../src/shared/browser-upload.js'
 import { BrowserDownloads } from '../src/main/browser-downloads.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
@@ -63,6 +65,7 @@ const fakeElectron = vi.hoisted(() => {
   class FakeWebContents {
     static nextId = 1
     readonly id = FakeWebContents.nextId++
+    emitMainNavigation = false
     url = 'https://example.invalid/'
     title = 'Example'
     destroyed = false
@@ -110,6 +113,7 @@ const fakeElectron = vi.hoisted(() => {
     isDestroyed(): boolean { return this.destroyed }
     async loadURL(url: string): Promise<void> {
       this.url = url
+      if (this.emitMainNavigation) for (const listener of this.listeners.get('did-start-navigation') ?? []) listener({ url, isMainFrame: true, isSameDocument: false })
       for (const listener of this.listeners.get('did-stop-loading') ?? []) listener({})
     }
     close(): void { this.destroyed = true }
@@ -183,7 +187,7 @@ function fakeWindow(): any {
 }
 
 async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore,
-  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets, downloads?: BrowserDownloads): Promise<{
+  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets, downloads?: BrowserDownloads, uploads?: BrowserUploads): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -201,7 +205,7 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal, evidence, results, demonstrations, assets, downloads)
+  }, journal, evidence, results, demonstrations, assets, downloads, uploads)
   await manager.create('b1', 'https://example.invalid/', workspaceId)
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
@@ -730,6 +734,7 @@ describe('runScript：人接管之后，动作停、观察放行', () => {
       extractStructured: 'extractStructured({fields:[{key:"title",type:"string",source:{selector:"h1",read:"text"}}]})',
       readResult: 'readResult({})',
       readDownload: 'readDownload({})',
+      uploadFiles: 'uploadFiles("@e1", ["export.bin"])',
       download: 'download("@e1", {path: "export.bin"})',
       captureScreenshot: 'captureScreenshot()',
       elementContext: 'elementContext("@e1")',
@@ -2358,6 +2363,284 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       expect(blocked.runOperation.steps).toEqual([expect.objectContaining({ method: 'snapshot' }), expect.objectContaining({ method: 'readDownload', status: 'completed' })])
       expect(f.contents.session.listenerCount('will-download')).toBe(0)
       await expect(readFile(join(f.root, 'must-not-publish.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await f.close() }
+  }, 30_000)
+})
+
+describe('file upload via exact current ref and sole Workspace snapshot owner', () => {
+  async function fixture(frame = false) {
+    const root = mkdtempSync(join(tmpdir(), 'amx-manager-upload-'))
+    const workspace: WorkspaceRecord = { id: 'workspace-upload', name: 'Upload', hostId: 'local', path: root, kind: 'folder' }
+    const files = new WorkspaceFiles(() => new LocalExecutionHost())
+    const uploads = new BrowserUploads(join(root, 'browser-uploads'), files, id => {
+      if (id !== workspace.id) throw new Error('Unknown Workspace')
+      return workspace
+    })
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'operations.json')))
+    const f = await managerWithBrowser(journal, undefined, undefined, workspace.id, undefined, undefined, undefined, uploads)
+    f.contents.emitMainNavigation = true
+    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const payload = Buffer.from([0, 128, 255, 10])
+    await writeFile(join(root, 'attachment.bin'), payload)
+    let staged: string[] = []
+    let assignments = 0
+    let loseAcknowledgement = false
+    const targetSessions: (string | undefined)[] = []
+    f.contents.debugger.sendCommandImpl = async (method: string, args: any, sessionId?: string) => {
+      if (method === 'Target.setAutoAttach' && frame && !sessionId) {
+        f.contents.debugger.emit('message','Target.attachedToTarget',{sessionId:'actual-file-frame',targetInfo:{type:'iframe'}})
+        return {}
+      }
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: sessionId ? 'native-file-document' : 'native-main-document', loaderId: 'actual-observed-loader', ...(sessionId ? { parentId: 'native-main-document' } : {}) } } }
+      if (method === 'Accessibility.getFullAXTree') return { nodes: frame && !sessionId ? [{nodeId:'root',role:{value:'RootWebArea'}}] : [{ nodeId: '1', backendDOMNodeId: 11,
+        role: { value: 'button' }, name: { value: 'Choose file' }, childIds: [] }] }
+      if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
+      if (['DOM.resolveNode','DOM.setFileInputFiles','Runtime.callFunctionOn'].includes(method)) {
+        targetSessions.push(sessionId)
+        expect(sessionId).toBe(frame ? 'actual-file-frame' : undefined)
+      }
+      if (method === 'DOM.resolveNode') return { object: { objectId: 'actual-current-file-input' } }
+      if (method === 'DOM.setFileInputFiles') {
+        expect(args.objectId).toBe('actual-current-file-input')
+        expect(args.backendNodeId).toBeUndefined()
+        staged = args.files
+        assignments += 1
+        if (loseAcknowledgement) throw new Error('Native assignment acknowledgement lost')
+        return {}
+      }
+      if (method === 'Runtime.callFunctionOn') {
+        expect(args.objectId).toBe('actual-current-file-input')
+        if (args.functionDeclaration.includes('HTMLInputElement')) return { result: { value: { multiple: true } } }
+        return { result: { value: [{ name: 'attachment.bin', byteLength: payload.length }] } }
+      }
+      return {}
+    }
+    const install = () => createDispatch.mockImplementationOnce(context => actual.createBrowserPageDispatch(context))
+    return { ...f, root, workspace, files, uploads, payload, install, actualDispatch: actual.createBrowserPageDispatch, targetSessions,
+      staged: () => staged, assignments: () => assignments, loseAcknowledgement: () => { loseAcknowledgement = true },
+      close: async () => { f.manager.dispose(); await uploads.dispose(); await rm(root, { recursive: true, force: true }) } }
+  }
+
+  it('binds the real operation, pins exact file bytes beyond run completion, and releases only the related document', async () => {
+    const f = await fixture()
+    try {
+      const releases = vi.spyOn(f.uploads, 'releaseBrowser')
+      f.install()
+      const report = await f.manager.runScript('b1', 'const page=await snapshot(); return await uploadFiles(page.nodes[0].ref, ["attachment.bin"])')
+      expect(report.outcome.kind, JSON.stringify(report.outcome)).toBe('completed')
+      const receipt = report.result as BrowserUploadReceipt
+      expect(receipt).toMatchObject({ kind: 'browser-upload-files', workspaceId: f.workspace.id, browserId: 'b1', operationId: report.runOperation.id,
+        byteLength: f.payload.length, files: [{ path: 'attachment.bin', name: 'attachment.bin', byteLength: f.payload.length }] })
+      expect(JSON.stringify(receipt)).not.toContain(f.root)
+      expect(f.assignments()).toBe(1)
+      expect(f.staged()).toHaveLength(1)
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      await writeFile(join(f.root, 'attachment.bin'), Buffer.from('workspace changed after selection'))
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      expect(await f.manager.runScript('b1', 'return 29')).toMatchObject({ result: 29, outcome: { kind: 'completed' } })
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      for (const listener of f.contents.listeners.get('did-start-navigation') ?? []) listener({ url: 'https://example.invalid/#section', isMainFrame: true, isSameDocument: true })
+      expect(releases).toHaveBeenCalledTimes(0)
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      await f.manager.create('b2', 'https://example.invalid/', f.workspace.id)
+      fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents.emitMainNavigation = true
+      await f.manager.navigate('b2', 'https://example.invalid/unrelated')
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      await f.manager.navigate('b1', 'https://example.invalid/next')
+      await vi.waitFor(async () => await expect(readFile(f.staged()[0]!)).rejects.toMatchObject({ code: 'ENOENT' }))
+      expect(await f.manager.runScript('b1', 'return 31')).toMatchObject({ result: 31, outcome: { kind: 'completed' } })
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('rejects original-view source callbacks after an actual profile replacement and keeps the replacement healthy', async () => {
+    const f = await fixture()
+    const rejectionFacts: string[] = []
+    try {
+      const assignments = vi.spyOn(f.uploads, 'upload')
+      createDispatch.mockImplementationOnce(context => {
+        const originalSource = context.uploads!.context()
+        const dispatch = f.actualDispatch(context)
+        return async (name, args) => {
+          const value = await dispatch(name, args)
+          if (name === 'snapshot') {
+            await f.manager.switchProfile('b1', 'another-profile')
+            try { context.uploads!.context() } catch (error) { rejectionFacts.push((error as Error).message) }
+            try { originalSource.currentNavigationId() } catch (error) { rejectionFacts.push((error as Error).message) }
+          }
+          return value
+        }
+      })
+      const report = await f.manager.runScript('b1', 'const page=await snapshot(); return await uploadFiles(page.nodes[0].ref,["attachment.bin"])')
+      const replacement = fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents
+      expect(f.contents.isDestroyed()).toBe(true)
+      expect(replacement.id).not.toBe(f.contents.id)
+      expect(rejectionFacts).toEqual(['The Browser view changed before upload.', 'The Browser view changed during upload.'])
+      expect(report.outcome.kind).toBe('script-failed')
+      expect(assignments).toHaveBeenCalledTimes(0)
+      expect(f.assignments()).toBe(0)
+      expect(f.staged()).toEqual([])
+      expect(await f.manager.runScript('b1', 'return 59')).toMatchObject({result:59,outcome:{kind:'completed'}})
+      expect(replacement.isDestroyed()).toBe(false)
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('rejects ledger-only, superseded and cross-navigation refs before any file assignment', async () => {
+    const f = await fixture()
+    try {
+      f.install()
+      const previous = await f.manager.runScript('b1', 'return await snapshot()')
+      const ref = (previous.result as { nodes: {ref:string}[] }).nodes[0]!.ref
+      expect(ref).toBeTruthy()
+      f.install()
+      const ledgerOnly = await f.manager.runScript('b1', `return await uploadFiles(${JSON.stringify(ref)}, ["attachment.bin"])`)
+      expect(ledgerOnly.outcome.kind).toBe('script-failed')
+      expect(ledgerOnly.runOperation.summary).toEqual(expect.stringContaining('latest snapshot in this run'))
+      f.install()
+      const superseded = await f.manager.runScript('b1', 'const old=await snapshot(); await snapshot(); return await uploadFiles(old.nodes[0].ref, ["attachment.bin"])')
+      expect(superseded.outcome.kind).toBe('script-failed')
+      createDispatch.mockImplementationOnce(context => {
+        const dispatch = f.actualDispatch(context)
+        return async (name,args) => {
+          const result = await dispatch(name,args)
+          if (name === 'snapshot') await f.manager.navigate('b1','https://example.invalid/cross-document')
+          return result
+        }
+      })
+      const crossDocument = await f.manager.runScript('b1', 'const page=await snapshot(); return await uploadFiles(page.nodes[0].ref, ["attachment.bin"])')
+      expect(crossDocument.outcome.kind).toBe('script-failed')
+      expect(crossDocument.runOperation.summary).toEqual(expect.stringContaining('navigated since that snapshot'))
+      expect(f.assignments()).toBe(0)
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('resolves and assigns an observed iframe file input only through that actual frame sender', async () => {
+    const f = await fixture(true)
+    try {
+      f.install()
+      const report = await f.manager.runScript('b1', 'const page=await snapshot(); const input=page.nodes.find(node=>node.name==="Choose file"); return await uploadFiles(input.ref,["attachment.bin"])')
+      expect(report.outcome.kind,JSON.stringify(report.outcome)).toBe('completed')
+      expect(f.assignments()).toBe(1)
+      expect(f.targetSessions).toEqual(['actual-file-frame','actual-file-frame','actual-file-frame','actual-file-frame','actual-file-frame'])
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('rejects a guessed ref omitted by the observation budget even when it exists in the full identity graph', async () => {
+    const f = await fixture()
+    try {
+      const send = f.contents.debugger.sendCommandImpl
+      f.contents.debugger.sendCommandImpl = async (method: string, args: any, sessionId?: string) => {
+        if (method === 'Accessibility.getFullAXTree') return { nodes: [
+          { nodeId: '0', backendDOMNodeId: 10, role: { value: 'button' }, name: { value: 'Other action' }, childIds: [] },
+          { nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Choose file' }, childIds: [] }
+        ] }
+        return await send(method,args,sessionId)
+      }
+      f.install()
+      const report = await f.manager.runScript('b1','const page=await snapshot({maxNodes:1}); if(page.nodes.length!==1)throw new Error("nonempty bounded observation required"); const hiddenRef="@e"+(Number(page.nodes[0].ref.slice(2))+1); return await uploadFiles(hiddenRef,["attachment.bin"])')
+      expect(report.outcome.kind).toBe('script-failed')
+      expect(report.runOperation.summary).toEqual(expect.stringContaining('latest snapshot in this run'))
+      expect(f.assignments()).toBe(0)
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('rejects unknown Workspace before assigning files and permits a healthy next program', async () => {
+    const f = await fixture()
+    try {
+      await f.manager.create('b2','https://example.invalid/',null)
+      const b2 = fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents
+      b2.debugger.sendCommandImpl = f.contents.debugger.sendCommandImpl
+      f.install()
+      const report = await f.manager.runScript('b2', 'const page=await snapshot(); return await uploadFiles(page.nodes[0].ref, ["attachment.bin"])')
+      expect(report.outcome.kind).toBe('script-failed')
+      expect(report.runOperation.summary).toEqual(expect.stringContaining('verified Workspace'))
+      expect(f.assignments()).toBe(0)
+      expect(await f.manager.runScript('b2', 'return 41')).toMatchObject({ result: 41, outcome: { kind: 'completed' } })
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('retains possible FileList bytes when native acknowledgement is lost, reports uncertainty, and never repeats assignment', async () => {
+    const f = await fixture()
+    try {
+      f.loseAcknowledgement(); f.install()
+      const report = await f.manager.runScript('b1', 'const page=await snapshot(); return await uploadFiles(page.nodes[0].ref, ["attachment.bin"])')
+      expect(report.outcome.kind).toBe('indeterminate')
+      expect(report.runOperation.warning).toEqual(expect.stringMatching(/may.*selected|possibly.*selected|uncertain|acknowledgement/i))
+      expect(f.assignments()).toBe(1)
+      await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      expect(await f.manager.runScript('b1','return 43')).toMatchObject({ result: 43, outcome: { kind: 'completed' } })
+      expect(f.assignments()).toBe(1)
+      await f.manager.close('b1')
+      await vi.waitFor(async () => await expect(readFile(f.staged()[0]!)).rejects.toMatchObject({ code: 'ENOENT' }))
+    } finally { await f.close() }
+  }, 30_000)
+
+  for (const boundary of ['stop', 'human-takeover'] as const) {
+    it(`does not assign files after ${boundary} while the real Workspace snapshot IO is still pending`, async () => {
+      const f = await fixture()
+      let releaseIO!: () => void
+      const held = new Promise<void>(resolve => { releaseIO = resolve })
+      let entered = false
+      let uploadSettled = false
+      const snapshotBytes = f.files.snapshotBytes.bind(f.files)
+      vi.spyOn(f.files, 'snapshotBytes').mockImplementation(async (...args) => {
+        entered = true
+        await held
+        return await snapshotBytes(...args)
+      })
+      const actualUpload = f.uploads.upload.bind(f.uploads)
+      vi.spyOn(f.uploads, 'upload').mockImplementation(async (...args) => {
+        try { return await actualUpload(...args) } finally { uploadSettled = true }
+      })
+      try {
+        f.install()
+        const pending = f.manager.runScript('b1', 'const page=await snapshot(); return await uploadFiles(page.nodes[0].ref,["attachment.bin"])', undefined, undefined, `upload-held-${boundary}`)
+        await vi.waitFor(() => expect(entered).toBe(true))
+        expect(f.assignments()).toBe(0)
+        await f.manager.create('b2', 'https://example.invalid/healthy', f.workspace.id)
+        expect(await f.manager.runScript('b2', 'return 71')).toMatchObject({result:71,outcome:{kind:'completed'}})
+        if (boundary === 'stop') await f.manager.stopOperationById(`upload-held-${boundary}`)
+        else f.contents.emit('input-event', {type:'mouseDown'})
+        releaseIO()
+        const report = await pending
+        await vi.waitFor(() => expect(uploadSettled).toBe(true))
+        expect(f.assignments()).toBe(0)
+        expect(f.staged()).toEqual([])
+        expect(report.outcome.kind).toBe('stopped')
+        expect(f.contents.isDestroyed()).toBe(false)
+        f.manager.returnControl('b1')
+        expect(await f.manager.runScript('b1', 'return 67')).toMatchObject({result:67,outcome:{kind:'completed'}})
+      } finally { releaseIO(); await f.close() }
+    }, 30_000)
+  }
+
+  it('refuses file selection after actual human takeover before the owner can assign files', async () => {
+    const f = await fixture()
+    try {
+      createDispatch.mockImplementationOnce(context => {
+        const dispatch = f.actualDispatch(context)
+        return async (name,args) => {
+          const result = await dispatch(name,args)
+          if (name === 'snapshot') f.contents.emit('input-event',{type:'mouseDown'})
+          return result
+        }
+      })
+      const report = await f.manager.runScript('b1','const page=await snapshot(); return await uploadFiles(page.nodes[0].ref,["attachment.bin"])')
+      expect(report.outcome.kind).toBe('stopped')
+      expect(f.assignments()).toBe(0)
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('keeps cleanup failure visible without blocking the new healthy Browser document', async () => {
+    const f = await fixture()
+    try {
+      f.install()
+      const report = await f.manager.runScript('b1','const page=await snapshot(); return await uploadFiles(page.nodes[0].ref,["attachment.bin"])')
+      expect(report.outcome.kind).toBe('completed')
+      vi.spyOn(f.uploads,'releaseBrowser').mockRejectedValueOnce(new Error('Owned cleanup IO failed'))
+      await f.manager.navigate('b1','https://example.invalid/retry-cleanup')
+      await vi.waitFor(() => expect(f.sentEvents().at(-1)?.browser.activity.warning).toEqual(expect.stringContaining('staging could not be fully released')))
+      expect(await f.manager.runScript('b1','return 47')).toMatchObject({result:47,outcome:{kind:'completed'}})
     } finally { await f.close() }
   }, 30_000)
 })

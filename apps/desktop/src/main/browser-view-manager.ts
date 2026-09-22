@@ -46,6 +46,7 @@ import type { BrowserStructuredOutputReceipt } from '../shared/browser-structure
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
+import type { BrowserUploads } from './browser-uploads.js'
 import type { BrowserDownloads } from './browser-downloads.js'
 import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from '../shared/browser-task-assets.js'
@@ -309,7 +310,8 @@ export class BrowserViewManager {
     private readonly resultArtifacts?: BrowserResultArtifactStore,
     private readonly demonstrations?: BrowserDemonstrationRecorder,
     private readonly taskAssets?: BrowserTaskAssets,
-    private readonly downloads?: BrowserDownloads
+    private readonly downloads?: BrowserDownloads,
+    private readonly uploads?: BrowserUploads
   ) {
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
       if (!this.entries.has(browserId)) return
@@ -358,6 +360,7 @@ export class BrowserViewManager {
   async release(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (!entry) return
+    this.releaseUploadFiles(entry)
     void this.releaseDemonstrationCapture(entry)
     this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
     const contents = entry.view.webContents
@@ -580,6 +583,7 @@ export class BrowserViewManager {
       candidate.setVisible(entry.visible)
       this.window.contentView.removeChildView(authoritativeView)
 
+      this.releaseUploadFiles(entry)
       void this.releaseDemonstrationCapture(entry)
       entry.pendingSwitch = null
       entry.view = candidate
@@ -1354,6 +1358,18 @@ export class BrowserViewManager {
         return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
           navigationId: entry.navigationId, url: view.webContents.getURL(), contents: view.webContents }
       } } } : {}),
+      ...(this.uploads ? { uploads: { store: this.uploads, context: () => {
+        const view = requireLive()
+        if (view !== observingView) throw new Error('The Browser view changed before upload.')
+        return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
+          navigationId: entry.navigationId, currentNavigationId: () => {
+            const currentView = requireLive()
+            if (currentView !== observingView) throw new Error('The Browser view changed during upload.')
+            if (signal?.aborted) throw new Error('This Browser operation stopped before file assignment could be confirmed.')
+            if (takeover.at !== null) throw new Error('Human took control before file assignment could be confirmed.')
+            return entry.navigationId
+          } }
+      } } } : {}),
       structuredOutput: {
         source: () => { requireLive(); if (entry.view !== observingView) throw new Error('The Browser view changed before structured observation.'); return { workspaceId: entry.workspaceId, browserId: entry.id,
           operationId: operation.id, navigationId: entry.navigationId } },
@@ -1747,6 +1763,7 @@ export class BrowserViewManager {
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
     if (!entry) return this.releasedEntries.delete(id)
+    this.releaseUploadFiles(entry)
     void this.releaseDemonstrationCapture(entry)
     this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
     if (!entry.view.webContents.isDestroyed()) {
@@ -1774,6 +1791,16 @@ export class BrowserViewManager {
     this.unsubscribeTaskAssets?.()
     for (const id of [...this.entries.keys()]) this.destroyOwner(id)
     for (const id of [...this.releasedEntries.keys()]) this.destroyOwner(id)
+    void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
+  }
+
+  /** Staging IO never blocks a healthy Browser; only this document's selected files are released. */
+  private releaseUploadFiles(entry: BrowserEntry): void {
+    void this.uploads?.releaseBrowser(entry.id).catch(() => {
+      if (this.entries.get(entry.id) !== entry) return
+      entry.activity = { ...entry.activity, warning: 'Selected-file staging could not be fully released. The Browser remains usable; navigate or close it to retry cleanup.' }
+      this.emit(entry)
+    })
   }
 
   private attach(entry: BrowserEntry, view: WebContentsView): void {
@@ -1831,6 +1858,7 @@ export class BrowserViewManager {
         // known-good projection with an unsupported target if an embedder emits this callback first.
         return
       }
+      if (!details.isSameDocument) this.releaseUploadFiles(entry)
       this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
       entry.selectionOperation = null
       const selectionRevision = ++entry.selectionRevision
@@ -1890,6 +1918,7 @@ export class BrowserViewManager {
       }
       if (!this.owns(entry, view)) return
       void this.releaseDemonstrationCapture(entry)
+      this.releaseUploadFiles(entry)
       this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch'))
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
