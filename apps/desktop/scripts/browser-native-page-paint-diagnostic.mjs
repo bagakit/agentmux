@@ -2,8 +2,10 @@ import { join } from 'node:path'
 
 // Serialized into the exact private Main after its original recovery gate failed.
 // This is an actuator diagnostic, never an alternate readiness/acceptance path.
-export async function observeSingleNativePagePaint({ BrowserWindow, expectedPid, pageUrl, outputFile }) {
-  const report = { diagnosticOnly: true, budgetMs: 1500, invalidateCalls: 0, captureCalls: 0 }
+export async function observeSingleNativePagePaint({ BrowserWindow, expectedPid, pageUrl, outputFile, requestedPolicy }) {
+  const report = { diagnosticOnly: true, budgetMs: 1500, setterCalls: 0, captureCalls: 0, requestedPolicy,
+    mode: requestedPolicy === true ? 'same-value-true' : requestedPolicy === false ? 'disable-false' : 'invalid' }
+  if (typeof requestedPolicy !== 'boolean') return { ...report, skipped: 'requested-policy-not-boolean' }
   if (!Number.isInteger(expectedPid) || expectedPid <= 1 || process.pid !== expectedPid) {
     return { ...report, skipped: 'private-pid-mismatch', actualPid: process.pid, expectedPid }
   }
@@ -20,6 +22,9 @@ export async function observeSingleNativePagePaint({ BrowserWindow, expectedPid,
       webContentsId: wc.id, url: wc.getURL(), bounds, loading: wc.isLoading(), visible: view.getVisible(),
       window: { visible: window.isVisible(), minimized: window.isMinimized(), focused: window.isFocused(), bounds: window.getBounds() },
       backgroundThrottling: wc.getBackgroundThrottling(),
+      childPolicies: window.contentView.children.filter(child => child.webContents && !child.webContents.isDestroyed()).map(child => ({
+        id: child.webContents.id, url: child.webContents.getURL(), ownerWindowId: child.webContents.getOwnerBrowserWindow()?.id ?? null,
+        visible: child.getVisible(), backgroundThrottling: child.webContents.getBackgroundThrottling() })),
       mainFrame: { processId: wc.mainFrame.processId, routingId: wc.mainFrame.routingId, osProcessId: wc.getOSProcessId() } }
   }
   const eligible = state => state.pid === expectedPid && state.ownerMatches && state.attached && state.url === pageUrl &&
@@ -27,20 +32,21 @@ export async function observeSingleNativePagePaint({ BrowserWindow, expectedPid,
     ['x', 'y', 'width', 'height'].every(key => Number.isFinite(state.bounds[key])) && state.bounds.width > 0 && state.bounds.height > 0
   report.before = observe()
   if (!eligible(report.before)) return { ...report, skipped: 'page-not-attached-loaded-visible-positive' }
+  if (report.before.backgroundThrottling !== true) return { ...report, skipped: 'policy-not-true-before-experiment' }
   try {
-    report.invalidateCalls++
-    wc.invalidate()
-    report.invalidateReturned = true
+    report.setterCalls++
+    wc.setBackgroundThrottling(requestedPolicy)
+    report.setterReturned = true
   } catch (error) {
-    report.invalidateError = String(error)
-    report.afterInvalidate = observe()
+    report.setterError = String(error)
+    report.afterSetter = observe()
     return report
   }
   await new Promise(done => setTimeout(done, 1500))
   report.afterWait = observe()
   const unchanged = ['x', 'y', 'width', 'height'].every(key => report.afterWait.bounds[key] === report.before.bounds[key]) &&
     ['processId', 'routingId', 'osProcessId'].every(key => report.afterWait.mainFrame[key] === report.before.mainFrame[key])
-  if (!eligible(report.afterWait) || !unchanged) return { ...report, skipped: 'page-owner-layout-or-frame-changed-after-invalidate' }
+  if (!eligible(report.afterWait) || !unchanged || report.afterWait.backgroundThrottling !== requestedPolicy) return { ...report, skipped: 'page-owner-layout-frame-or-policy-changed-after-setter' }
   try {
     report.captureCalls++
     const image = await wc.capturePage()
@@ -56,18 +62,19 @@ export async function observeSingleNativePagePaint({ BrowserWindow, expectedPid,
   return report
 }
 
-export async function diagnoseNativePagePaint(ctx, originalError) {
+export async function diagnoseNativePagePaint(ctx, originalError, requestedPolicy) {
   const run = ctx.receipt.visual.nativeFramePreflight?.runs.at(-1)
   const diagnostic = ctx.receipt.nativePagePaintDiagnostic = {
     schema: 'agentmux.private-native-page-paint-diagnostic.v1', diagnosticOnly: true,
+    requestedPolicy, mode: requestedPolicy === true ? 'same-value-true' : requestedPolicy === false ? 'disable-false' : 'invalid',
     originalError: String(originalError), originalPreflight: run && { url: run.url, attemptCount: run.attempts.length, last: run.attempts.at(-1) },
-    boundary: 'Original gate already failed; one invalidate, fixed 1500ms wait, at most one capture; original error still propagates.'
+    boundary: 'Original gate already failed; one background-throttling setter, fixed 1500ms wait, at most one capture; original error still propagates.'
   }
   try {
     const outputFile = typeof ctx.receipt.visual.captureDirectory === 'string' ? join(ctx.receipt.visual.captureDirectory, 'restarted-native-page-paint-diagnostic.png') : undefined
     diagnostic.observation = await ctx.probe.main.evaluate(`(async()=>{
       const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(ctx.desktopRoot, 'package.json'))})('electron');
-      return (${observeSingleNativePagePaint.toString()})({BrowserWindow,expectedPid:${JSON.stringify(ctx.probe.child.pid)},pageUrl:${JSON.stringify(ctx.pageUrl)},outputFile:${JSON.stringify(outputFile)}});
+      return (${observeSingleNativePagePaint.toString()})({BrowserWindow,expectedPid:${JSON.stringify(ctx.probe.child.pid)},pageUrl:${JSON.stringify(ctx.pageUrl)},outputFile:${JSON.stringify(outputFile)},requestedPolicy:${JSON.stringify(requestedPolicy)}});
     })()`)
   } catch (error) { diagnostic.diagnosticError = String(error) }
   return diagnostic
