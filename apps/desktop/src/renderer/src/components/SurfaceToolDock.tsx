@@ -100,29 +100,37 @@ export function BrowserToolbarPreferences({
 
   return (
     <section className="browser-tools-preferences" aria-label="Browser bar visibility">
-      <header><SlidersHorizontal size={14} /><span><strong>Browser bar</strong><small>External open is always visible.</small></span></header>
-      <div>
-        {BROWSER_TOOLBAR_ITEM_ORDER.map((item) => (
-          <label key={item}>
-            <input
-              type="checkbox"
-              checked={draft.value[item]}
-              disabled={busy}
-              onChange={(event) => setItem(item, event.target.checked)}
-            />
-            <span>{BROWSER_TOOLBAR_ITEM_LABELS[item]}</span>
-          </label>
-        ))}
-      </div>
-      <button
-        className="small-button"
-        type="button"
-        disabled={!draft.dirty || busy}
-        onClick={() => void save()}
-      >
-        {busy ? <LoaderCircle className="spin" size={12} /> : null}
-        {busy ? 'Saving…' : 'Save Browser bar'}
-      </button>
+      <details>
+        <summary aria-label="Browser bar settings">
+          {busy ? <LoaderCircle className="spin" size={14} /> : <SlidersHorizontal size={14} />}
+          <strong>Browser bar</strong>{draft.dirty ? <small>Unsaved</small> : null}<ChevronRight size={13} />
+        </summary>
+        <div className="browser-tools-preferences__body">
+          <p>External open is always visible. Narrow panes keep More available.</p>
+          <div className="browser-tools-preferences__items">
+            {BROWSER_TOOLBAR_ITEM_ORDER.map((item) => (
+              <label key={item}>
+                <input
+                  type="checkbox"
+                  checked={draft.value[item]}
+                  disabled={busy}
+                  onChange={(event) => setItem(item, event.target.checked)}
+                />
+                <span>{BROWSER_TOOLBAR_ITEM_LABELS[item]}</span>
+              </label>
+            ))}
+          </div>
+          <button
+            className="small-button"
+            type="button"
+            disabled={!draft.dirty || busy}
+            onClick={() => void save()}
+          >
+            {busy ? <LoaderCircle className="spin" size={12} /> : null}
+            {busy ? 'Saving…' : 'Save Browser bar'}
+          </button>
+        </div>
+      </details>
       {saveState.error ? <p className="settings-inline-error" role="alert">{saveState.error}</p> : null}
     </section>
   )
@@ -156,7 +164,7 @@ export function BrowserAnnotationsPanel({
 
   return (
     <section className="browser-annotations" aria-label="Browser annotations">
-      <header><MessageSquarePlus size={14} /><span><strong>Element annotations</strong><small>Desktop drafts stay out of Activity until you send them.</small></span></header>
+      <header><MessageSquarePlus size={14} /><span><strong>Element annotations</strong><small>Send current-page notes to an Agent.</small></span></header>
       {annotations.length === 0 ? (
         <p>Select an element in a Browser tab, then add an annotation.</p>
       ) : (
@@ -562,6 +570,7 @@ export function SurfaceToolDock({
         ) : null}
         {effectiveWorkspaceTool === 'browser-tools' && workspace && config ? (
           <section className="browser-tools-panel" aria-label="Browser Tools">
+            {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
             <BrowserToolbarPreferences
               toolbar={config.browser.toolbar}
               saving={savingBrowserToolbar}
@@ -585,7 +594,7 @@ export function SurfaceToolDock({
             />
           </section>
         ) : null}
-        {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
+        {error && effectiveWorkspaceTool !== 'browser-tools' ? <div className="surface-tool-error" role="alert">{error}</div> : null}
       </div>
     </aside>
   )

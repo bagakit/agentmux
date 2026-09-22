@@ -5,18 +5,25 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-.browser-tools-preferences { width: 100%; display: grid; gap:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
-.browser-tools-preferences > header { display: flex; align-items: center; gap:var(--sp-3); color: var(--text-2); }
-.browser-tools-preferences > header > svg { color: var(--green-2); }
-.browser-tools-preferences > header > span { min-width: 0; display: grid; gap:var(--sp-1); }
-.browser-tools-preferences > header strong { font-size: var(--fs-meta); }
-.browser-tools-preferences > header small { color: var(--text-3); font-size: var(--fs-micro); }
-.browser-tools-preferences > div { display: grid; gap:1px; }
+.browser-tools-panel { display: flex; flex-direction: column; gap:var(--sp-5); padding:var(--sp-3) var(--sp-4); }
+.browser-tools-panel > * { flex: none; }
+.browser-tools-panel > section + section { padding-top:var(--sp-5); border-top: 1px solid var(--line-soft); }
+.browser-tools-preferences { width: 100%; display: grid; gap:var(--sp-3); }
+.browser-tools-preferences summary { min-height: 28px; display: flex; align-items: center; gap:var(--sp-3); color: var(--text-2); cursor: pointer; list-style: none; }
+.browser-tools-preferences summary::-webkit-details-marker { display: none; }
+.browser-tools-preferences summary:focus-visible { border-radius: var(--radius-sm); box-shadow: var(--focus-ring); }
+.browser-tools-preferences summary > svg:first-child { color: var(--green-2); }
+.browser-tools-preferences summary strong { flex: 1; font-size: var(--fs-meta); }
+.browser-tools-preferences summary small { color: var(--text-3); font-size: var(--fs-micro); }
+.browser-tools-preferences details[open] summary > svg:last-child { transform: rotate(90deg); }
+.browser-tools-preferences__body { display: grid; gap:var(--sp-3); padding-top:var(--sp-2); }
+.browser-tools-preferences__body > p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.browser-tools-preferences__items { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap:1px; }
 .browser-tools-preferences label { min-height: 28px; display: flex; align-items: center; gap:var(--sp-4); padding:0 var(--sp-2); border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--fs-micro); }
 .browser-tools-preferences label:hover { background: var(--surface-3); }
 .browser-tools-preferences input { accent-color: var(--green-2); }
-.browser-tools-preferences > .small-button { justify-self: stretch; justify-content: center; }
-.browser-profiles { width: 100%; display: grid; gap:var(--sp-4); margin-top:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
+.browser-tools-preferences__body > .small-button { justify-self: end; }
+.browser-profiles { width: 100%; display: grid; gap:var(--sp-3); }
 .browser-profiles > header { display: flex; align-items: center; gap:var(--sp-3); color: var(--text-2); }
 .browser-profiles > header > svg { color: var(--green-2); }
 .browser-profiles > header > span { min-width: 0; display: grid; gap:var(--sp-1); }
@@ -26,7 +33,7 @@
 .browser-profiles__import > p { margin:0; color: var(--text-3); font-size: var(--fs-micro); }
 .browser-profiles__loading { display: flex; align-items: center; gap:var(--sp-3); }
 .browser-profiles__catalog { display: grid; gap:var(--sp-2); }
-.browser-profiles__catalog article { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); }
+.browser-profiles__catalog article { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:var(--sp-3) 0; }
 .browser-profiles__catalog article > svg { color: var(--text-3); }
 .browser-profiles__catalog article > span:not(.browser-profiles__delete-confirm) { min-width: 0; display: grid; gap:var(--sp-1); }
 .browser-profiles__catalog article strong { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); overflow: hidden; color: var(--text-2); font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; }
@@ -46,8 +53,8 @@
 .browser-profiles__browsers select { min-width: 0; height: 28px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--bg); font-size: var(--fs-micro); }
 .browser-profiles__create button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); cursor: pointer; }
 .browser-profiles__create button:disabled { opacity: .4; cursor: not-allowed; }
-.browser-profiles__import-open { justify-content: center; }
-.browser-profiles__import { display: grid; gap:var(--sp-3); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); }
+.browser-profiles__import-open { justify-self: start; }
+.browser-profiles__import { display: grid; gap:var(--sp-3); padding:var(--sp-2) 0; }
 .browser-profiles__import label { display: grid; gap:var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
 .browser-profiles__import > div { display: flex; justify-content: flex-end; gap:var(--sp-2); }
 .browser-profiles__browsers { display: grid; gap:var(--sp-2); padding-top:var(--sp-4); border-top: 1px solid var(--line-soft); }
@@ -58,7 +65,7 @@
 .browser-profiles__browsers label small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .browser-profiles__browsers label strong { color: var(--text-2); font-size: var(--fs-micro); }
 .browser-profiles__browsers label small { color: var(--text-3); font-size: var(--fs-micro); }
-.browser-annotations { width: 100%; display: grid; gap:var(--sp-4); margin-top:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
+.browser-annotations { width: 100%; display: grid; gap:var(--sp-3); }
 .browser-annotations > header { display: flex; align-items: center; gap:var(--sp-3); color: var(--text-2); }
 .browser-annotations > header > svg { flex: none; color: var(--green-2); }
 .browser-annotations > header > span { min-width: 0; display: grid; gap:var(--sp-1); }
@@ -66,7 +73,7 @@
 .browser-annotations > header small,
 .browser-annotations > p { margin:0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
 .browser-annotations__list { display: grid; gap:var(--sp-2); }
-.browser-annotations__list article { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px; align-items: center; gap:var(--sp-3); padding:var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); }
+.browser-annotations__list article { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px; align-items: center; gap:var(--sp-3); padding:var(--sp-3) 0; }
 .browser-annotations__list article.stale { opacity: .58; }
 .browser-annotations__list article > b { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--bg); background: var(--green); font-size: var(--fs-micro); }
 .browser-annotations__list article > span { min-width: 0; display: grid; gap:var(--sp-1); }
@@ -81,15 +88,25 @@
 .browser-annotations__handoff select { min-width: 0; height: 28px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--bg); font-size: var(--fs-micro); }
 .browser-annotations__handoff > div { display: flex; justify-content: flex-end; gap:var(--sp-2); }
 
-.browser-surface { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
+.browser-surface { height: 100%; min-height: 0; display: flex; flex-direction: column; container: browser-pane / inline-size; background: var(--surface-0); }
 .browser-toolbar { min-width: 0; display: flex; align-items: center; gap:var(--sp-1); padding:var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); }
+.workbench-region:has(> .workbench-region__close) > .workbench-session-region-host > .browser-surface > .browser-toolbar { padding-right: var(--region-close-clearance); }
 .browser-toolbar > button { width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .browser-toolbar > button:disabled { opacity: .3; cursor: default; }
-.browser-toolbar label { min-width: 0; height: 28px; flex: 1; display: flex; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
+.browser-toolbar label { min-width: 96px; height: 28px; flex: 1; display: flex; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: 11px "SFMono-Regular", monospace; }
-.browser-menu { min-width: 210px; z-index: var(--layer-popover); pointer-events: auto; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2, 0 10px 24px var(--scrim-2)), 0 14px 36px rgba(0, 0, 0, 0.45); }
+.browser-toolbar > .browser-toolbar__more--optional { display: none; }
+@container browser-pane (max-width: 620px) {
+  .browser-toolbar > .browser-toolbar__secondary { display: none; }
+  .browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }
+}
+@container browser-pane (max-width: 380px) {
+  .browser-toolbar > .browser-toolbar__navigation { display: none; }
+  .browser-toolbar > .browser-toolbar__reload { display: none; }
+}
+.browser-menu { min-width: 210px; max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; z-index: var(--layer-popover); pointer-events: auto; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2, 0 10px 24px var(--scrim-2)), 0 14px 36px rgba(0, 0, 0, 0.45); }
 .browser-menu [role="group"] { display: grid; gap:1px; }
 .browser-menu [role="menuitemradio"], .browser-menu [role="menuitemcheckbox"] { position: relative; }
 .browser-menu > [role="menuitemradio"] + [role="menuitemradio"] { margin-top:1px; }
@@ -99,6 +116,7 @@
 .browser-menu > [data-radix-menu-label], .browser-menu [role="group"] > [data-radix-menu-label] { padding:var(--sp-2) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .browser-menu__item { min-height: 28px; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-2) var(--sp-4); border-radius: var(--radius-sm); outline: none; font-size: var(--fs-body); user-select: none; cursor: pointer; }
 .browser-menu__item[data-highlighted], .browser-menu__item:hover:where(:not([data-disabled])) { color: var(--text); background: var(--surface-2); }
+.browser-menu__item[data-disabled] { opacity: .3; cursor: default; }
 .browser-menu__indicator { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--green); }
 .browser-menu__item small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .browser-body { flex: 1; min-width: 0; min-height: 0; display: flex; }
@@ -159,12 +177,15 @@
    页面抢同一条纵轴：页面被往上挤，轨迹自己只剩一条窄缝，读不成一条轨迹。这里让出的是横向
    空间，而 `.browser-stage` 的矩形就是原生 WebContentsView 的矩形——rail 挤窄 stage，原生
    视图跟着收，页面不是被盖住，是真的让出了这条带。 */
-.browser-trace-rail { flex: 0 0 clamp(248px, 26%, 340px); min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; border-left: 1px solid var(--line); background: var(--surface-0); }
+.browser-trace-rail { flex: 0 0 min(clamp(248px, 26%, 340px), 50%); min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; border-left: 1px solid var(--line); background: var(--surface-0); }
 /* rail 里这三块是同一条轨迹的三段，不是三张卡片：去掉各自的外框与圆角，只留一条分界发丝线，
    竖读下来是一条连续的脊，而不是三个盒子摞在一起。 */
 .browser-trace-rail > * { flex: none; border: 0; border-radius: 0; background: transparent; }
 .browser-trace-rail > * + * { border-top: 1px solid var(--line-soft); }
 .browser-trace-rail .browser-rsi-timeline { flex: 1 1 auto; min-height: 0; }
+.browser-trace-rail .browser-rsi-history__actions { flex: none; }
+/* Keep edge actions clear of the overlay scrollbar at their full hit size. */
+.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }
 
 
 .browser-surface > .browser-toolbar { flex: 0 0 38px; }
