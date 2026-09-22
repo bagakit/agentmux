@@ -23,7 +23,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
-import { snapshotApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
+import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
 import {
   assertPackageIdentity,
@@ -497,25 +497,22 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
   assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
 }
 
-async function scopedProcesses(appPath) {
+async function scopedProcesses(appPath, previousOwners = []) {
   const canonicalAppPath = await realpath(appPath).catch(error => {
     if (error.code === 'ENOENT') return resolve(appPath)
     throw error
   })
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const helperRoot = join(canonicalAppPath, 'Contents', 'Frameworks') + sep
-  const result = await run('ps', ['-axo', 'pid=,ppid=,lstart=,command='], {
-    capture: true, timeoutMs: 5_000, env: { ...process.env, LC_ALL: 'C' }
-  })
-  return snapshotApplicationProcesses(result.stdout, { executable, helperRoot })
+  return observeApplicationProcesses({ executable, helperRoot }, previousOwners)
 }
 
 // The bundle's *serving* processes: main + renderer/GPU/utility helpers. A
-// detached crash-reporter helper is excluded — it serves no UI and keeps no
-// old code alive — so a stale one no longer blocks quit/relaunch/survivor. See
-// package-process-scope.mjs for why only the crash reporter is carved out.
-async function processIdsForApplication(appPath) {
-  return (await scopedProcesses(appPath)).serving
+// detached crash reporter and confirmed external Node clients are excluded.
+// Main's own Node workers, unknown modes, and original owner births stay in
+// scope; see package-process-scope.mjs for the bound OS facts.
+async function processIdsForApplication(appPath, previousOwners = []) {
+  return (await scopedProcesses(appPath, previousOwners)).serving
 }
 
 async function waitForProcessExit(findProcessIds, timeoutMs) {
@@ -897,8 +894,9 @@ async function verifyDmg(dmgPath, temporaryRoot, source) {
  * 出来，因为一个残留的它曾经让每一次后续安装都卡住（2026-09-13 实测 pid 1033）。跳过而不是杀掉：安装
  * 路径不发信号是这里的既定承诺（见 package-install-restart.test.ts），交给 OS 回收更安全。
  */
-async function quitInstalledApplication(appPath) {
-  const { serving: running, crashReporter } = await scopedProcesses(appPath)
+async function quitInstalledApplication(appPath, originalOwners = []) {
+  const { serving: running, crashReporter, processes } = await scopedProcesses(appPath, originalOwners)
+  const previousOwners = processes.filter(row => running.includes(row.pid))
   if (crashReporter.length > 0) {
     process.stdout.write(`ignored_detached_crash_reporter=${crashReporter.join(',')} (orphaned Electron crash handler; serves no bundle, left for the OS to reap)\n`)
   }
@@ -907,7 +905,7 @@ async function quitInstalledApplication(appPath) {
   assert(/^[a-zA-Z0-9.-]+$/.test(bundleId), 'Application bundle identity is invalid; no quit was requested.')
   await run('osascript', ['-e', `quit app id "${bundleId}"`], { capture: true, timeoutMs: 15_000 })
     .catch(() => undefined)
-  let remaining = await waitForProcessExit(() => processIdsForApplication(appPath), 20_000)
+  let remaining = await waitForProcessExit(() => processIdsForApplication(appPath, previousOwners), 20_000)
   assert(remaining.length === 0,
     `Application has not exited gracefully (pids ${remaining.join(', ')}). Installation stopped; no processes were force-killed. Finish or save current work before retrying.`)
   return { wasRunning: true, pids: running }
@@ -1053,7 +1051,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
     // 不该白关掉用户正在用的窗口。
     const quitOutcome = previouslyInstalled && running.length > 0
-      ? await quit(destination)
+      ? await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)))
       : { wasRunning: false, pids: [] }
     // A pending action in the old GUI could have started a Runtime after the
     // first absent-listener observation. Recheck that same owner after GUI exit.

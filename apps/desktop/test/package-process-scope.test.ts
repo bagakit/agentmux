@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { classifyApplicationProcesses, snapshotApplicationProcesses, assertApplicationActivationOwnership } from '../scripts/package-process-scope.mjs'
+import { classifyApplicationProcesses, snapshotApplicationProcesses, observeApplicationProcesses, assertApplicationActivationOwnership } from '../scripts/package-process-scope.mjs'
+import { readFileSync } from 'node:fs'
 
 /**
  * 打包安装脚本用 `processIdsForApplication` 回答三个问题：退出旧实例前「还有没有在服务这份包的进程」、
@@ -100,11 +101,11 @@ describe('candidate activation uses OS ownership rather than the first launch PI
 
   it('keeps exact nonempty process metadata while preserving the crash-reporter classification', () => {
     const ps = [
-      ` 700 1 Fri Oct  2 12:00:01 2026 ${EXECUTABLE}`,
-      ` 701 700 Fri Oct  2 12:00:01 2026 ${FRAMEWORK}/AgentMux Helper (Renderer).app/Contents/MacOS/AgentMux Helper (Renderer) --type=renderer`,
-      ` 710 1 Fri Oct  2 12:00:01 2026 ${FRAMEWORK}/chrome_crashpad_handler --database=/x`
+      ` ${process.getuid!()} 700 1 Fri Oct  2 12:00:01 2026 ${EXECUTABLE}`,
+      ` ${process.getuid!()} 701 700 Fri Oct  2 12:00:01 2026 ${FRAMEWORK}/AgentMux Helper (Renderer).app/Contents/MacOS/AgentMux Helper (Renderer) --type=renderer`,
+      ` ${process.getuid!()} 710 1 Fri Oct  2 12:00:01 2026 ${FRAMEWORK}/chrome_crashpad_handler --database=/x`
     ].join('\n')
-    expect(snapshotApplicationProcesses(ps, bundle)).toEqual({ serving: [700, 701], crashReporter: [710],
+    expect(snapshotApplicationProcesses(ps, bundle)).toEqual({ serving: [700, 701], crashReporter: [710], externalNode: [],
       processes: [main, renderer, { pid: 710, ppid: 1, birth: newBirth }] })
     expect(() => snapshotApplicationProcesses('', bundle)).toThrow('empty')
     expect(() => snapshotApplicationProcesses(`700 1 unavailable ${EXECUTABLE}`, bundle)).toThrow('birth observation')
@@ -147,5 +148,92 @@ describe('candidate activation uses OS ownership rather than the first launch PI
     const a = { pid: 701, ppid: 702, birth: newBirth }, b = { pid: 702, ppid: 701, birth: newBirth }
     expect(() => assertApplicationActivationOwnership(ownership([system, main, a, b], [700, 701, 702])))
       .toThrow('ancestry is cyclic')
+  })
+})
+
+describe('external Node clients and Main-owned Node workers have different authority', () => {
+  const birth = 'Fri Oct 2 12:00:01 2026'
+  const row = (pid: number, ppid: number, command = EXECUTABLE) => `${process.getuid!()} ${pid} ${ppid} ${birth} ${command}`
+  const system = row(1, 0, '/sbin/launchd'), externalParent = row(90, 1, '/usr/bin/private-client')
+  const main = row(700, 1), node = (pid: number, ppid: number) => ({ pid, ppid, birth, uid: process.getuid!(), mode: 'node', executable: EXECUTABLE })
+  const ps = (...rows: string[]) => [system, externalParent, ...rows].join('\n')
+  const prior = [{ pid: 701, ppid: 700, birth }]
+
+  it('excludes only a bound external client, preserving Main child and indirect file workers', () => {
+    const scope = snapshotApplicationProcesses(ps(main, row(701, 700), row(702, 701), row(800, 90)), bundle,
+      { nodeModes: [node(701, 700), node(702, 701), node(800, 90)] })
+    expect(scope.serving).toEqual([700, 701, 702])
+    expect(scope.externalNode).toEqual([800])
+    expect(assertApplicationActivationOwnership({ previous: [], beforeLaunch: [], current: scope.processes,
+      serving: scope.serving, mainPid: 700 })).toEqual(scope.processes.filter(row => [700, 701, 702].includes(row.pid)))
+  })
+
+  it('protects an original worker after Main quits and the OS reparents it, until that birth really exits', () => {
+    const alive = snapshotApplicationProcesses(ps(row(701, 1), row(800, 90)), bundle,
+      { nodeModes: [node(701, 1), node(800, 90)], previousOwners: prior })
+    expect(alive.serving).toEqual([701]); expect(alive.externalNode).toEqual([800])
+    const gone = snapshotApplicationProcesses(ps(row(800, 90)), bundle,
+      { nodeModes: [node(800, 90)], previousOwners: prior })
+    expect(gone.serving).toEqual([]); expect(gone.externalNode).toEqual([800])
+    const fresh = snapshotApplicationProcesses(ps(row(701, 90)), bundle,
+      { nodeModes: [{ ...node(701, 90) }], previousOwners: [{ ...prior[0], birth: 'Fri Oct 2 12:00:00 2026' }] })
+    expect(fresh.serving).toEqual([]); expect(fresh.externalNode).toEqual([701])
+  })
+
+  it('never treats an unknown mode, argv environment word, foreign GUI or identity drift as external Node', () => {
+    for (const mode of [undefined, { ...node(800, 90), mode: 'unknown' }, { ...node(800, 90), mode: 'gui' },
+      { ...node(800, 90), birth: 'Fri Oct 2 12:00:00 2026' }, { ...node(800, 90), uid: process.getuid!() + 1 },
+      { ...node(800, 90), executable: '/usr/bin/argv0-lookalike' },
+      { ...node(800, 90), ppid: 91 }]) {
+      const scope = snapshotApplicationProcesses(ps(main, row(800, 90, `${EXECUTABLE} --fake=ELECTRON_RUN_AS_NODE=1`)), bundle,
+        { nodeModes: mode ? [mode] : [] })
+      expect(scope.serving).toEqual([700, 800]); expect(scope.externalNode).toEqual([])
+      expect(() => assertApplicationActivationOwnership({ previous: [], beforeLaunch: [], current: scope.processes,
+        serving: scope.serving, mainPid: 700 })).toThrow('not a confirmed descendant')
+    }
+    const changedUid = snapshotApplicationProcesses(ps(main,
+      row(800, 90).replace(`${process.getuid!()} 800`, `${process.getuid!() + 1} 800`)), bundle, { nodeModes: [node(800, 90)] })
+    expect(changedUid.serving).toEqual([700, 800]); expect(changedUid.externalNode).toEqual([])
+  })
+
+  it('keeps mode-confirmed Node protected when ancestry is missing or cyclic', () => {
+    for (const graph of [ps(main, row(800, 91)), ps(main, row(800, 801), row(801, 800, '/private/foreign'))]) {
+      const scope = snapshotApplicationProcesses(graph, bundle,
+        { nodeModes: [node(800, graph.includes('800 91 ') ? 91 : 801)] })
+      expect(scope.serving).toEqual([700, 800]); expect(scope.externalNode).toEqual([])
+    }
+  })
+
+  it('a bound Node mode never exempts a previous same-birth owner from activation', () => {
+    const scope = snapshotApplicationProcesses(ps(main, row(701, 1)), bundle,
+      { nodeModes: [node(701, 1)], previousOwners: prior })
+    expect(scope.serving).toEqual([700, 701])
+    expect(() => assertApplicationActivationOwnership({ previous: prior, beforeLaunch: [], current: scope.processes,
+      serving: scope.serving, mainPid: 700 })).toThrow('previous application owner')
+  })
+
+  it('rechecks authoritative OS existence: gone is removed, a still-existing unreadable mode remains protected', async () => {
+    const initial = ps(main, row(800, 90)), final = ps(main)
+    const snapshots = [initial, final], requested: number[][] = []
+    const gone = await observeApplicationProcesses(bundle, [], { processSnapshot: async () => snapshots.shift()!,
+      modes: async pids => { requested.push(pids); return [] } })
+    expect(requested).toEqual([[700, 800]])
+    expect(gone.serving).toEqual([700]); expect(gone.externalNode).toEqual([])
+    expect(gone.processes.map(row => row.pid)).toEqual([1, 90, 700])
+    const present = await observeApplicationProcesses(bundle, [], { processSnapshot: async () => initial, modes: async () => [] })
+    expect(present.serving).toEqual([700, 800]); expect(present.externalNode).toEqual([])
+  })
+
+  it('the real installer consumes mode facts and carries original birth pins through ordinary quit wait', () => {
+    const source = readFileSync(new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
+    const start = source.indexOf('async function scopedProcesses('), end = source.indexOf('// The bundle', start)
+    expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start)
+    expect(source.slice(start, end)).toContain('observeApplicationProcesses({ executable, helperRoot }, previousOwners)')
+    const quit = source.indexOf('async function quitInstalledApplication('), quitEnd = source.indexOf('/**', quit + 1)
+    expect(quit).toBeGreaterThan(-1); expect(quitEnd).toBeGreaterThan(quit)
+    expect(source.slice(quit, quitEnd)).toContain('const previousOwners = processes.filter(row => running.includes(row.pid))')
+    expect(source.slice(quit, quitEnd)).toContain('scopedProcesses(appPath, originalOwners)')
+    expect(source.slice(quit, quitEnd)).toContain('processIdsForApplication(appPath, previousOwners)')
+    expect(source).toContain('await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)))')
   })
 })
