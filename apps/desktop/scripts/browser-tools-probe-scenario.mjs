@@ -16,9 +16,9 @@ async function rows(ctx) {
 }
 async function addAnnotation(ctx, note) {
   await ctx.click(ctx.probe.cdp,ctx.selectors('[aria-label="Select element"]'))
-  await ctx.waitFor('actual element selection active',()=>ctx.probe.cdp.evaluate('Boolean(document.querySelector("[aria-label=\"Cancel element selection\"]"))'))
+  await ctx.waitFor('actual element selection active',()=>ctx.probe.cdp.evaluate(`Boolean(document.querySelector(${JSON.stringify('[aria-label="Cancel element selection"]')}))`))
   const input = await native(ctx,'#tools-target')
-  await ctx.waitFor('real selected element context',()=>ctx.probe.cdp.evaluate('Boolean(document.querySelector("[aria-label=\"Selected element context\"]"))'))
+  await ctx.waitFor('real selected element context',()=>ctx.probe.cdp.evaluate(`Boolean(document.querySelector(${JSON.stringify('[aria-label="Selected element context"]')}))`))
   await type(ctx,'[aria-label="Annotation note"]',note)
   await ctx.click(ctx.probe.cdp,`${ctx.selectors('button')}.filter(element=>element.textContent.trim()==='Add annotation')`)
   await ctx.waitFor('actual annotation projection after native selection',async()=>{const current=await rows(ctx);return current.some(row=>row.text.includes(note))?current:null})
@@ -85,6 +85,6 @@ export async function recoverBrowserTools(ctx) {
   assert.deepEqual((await config(ctx)).browser.toolbar,expected.preference.after)
   assert.ok((await profiles(ctx)).some(profile=>profile.id===expected.profile.id&&profile.label===expected.profile.label))
   await ctx.click(ctx.probe.cdp,ctx.selectors('button[aria-label="Browser Tools"]'))
-  assert.equal(await ctx.probe.cdp.evaluate('Array.from(document.querySelectorAll("[aria-label=\"New Browser\"]")).filter(element=>element.getClientRects().length).length'),1)
+  assert.equal(await ctx.probe.cdp.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify('[aria-label="New Browser"]')})).filter(element=>element.getClientRects().length).length`),1)
   expected.preferenceRestored=true;expected.profileRestored=true;expected.complete=true
 }
