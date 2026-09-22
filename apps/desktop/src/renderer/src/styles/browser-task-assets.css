@@ -9,5 +9,7 @@
 .browser-task-asset summary { color: var(--text-3); cursor: pointer; }
 .browser-task-asset__parameter { padding-block: var(--sp-1); }
 .browser-task-asset__parameter .browser-task-asset__field { padding-inline: 0; }
-.browser-task-asset__progress { margin: var(--sp-2) 0; color: var(--amber-text); line-height: 1.45; overflow-wrap: anywhere; }
+.browser-task-asset__progress { display: grid; gap: var(--sp-1); margin: 0; padding: var(--sp-2) var(--sp-3); color: var(--amber-text); line-height: 1.45; overflow-wrap: anywhere; }
+.browser-task-asset__progress p { margin: 0; }
+.browser-task-asset__run-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .browser-task-asset__version > .browser-task-asset__field { padding-inline: 0; }

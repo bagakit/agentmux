@@ -102,7 +102,8 @@ describe('versioned tasks in the actual BrowserPane', () => {
       expect(editor.getAttribute('data-task-asset-id')).toBe('asset-1')
       expect(editor.querySelector<HTMLInputElement>('[aria-label="Task asset name"]')?.value).toBe(content.name)
       expect(editor.querySelectorAll('[data-task-step-id]')).toHaveLength(1)
-      expect(editor.textContent).toContain('v1 · waiting-human · next step 1')
+      expect(editor.querySelector('.browser-task-asset__progress')?.getAttribute('data-run-status')).toBe('waiting-human')
+      expect(editor.textContent).toContain('Waiting for human checkpoint · next step 1')
       const buttons = [...editor.querySelectorAll<HTMLButtonElement>('button')].filter(button =>
         ['Save draft', 'Save version', 'Run next step', 'Return control and continue', 'Stop task'].includes(button.textContent?.trim() ?? '') || button.getAttribute('aria-label') === 'Locate task step 1')
       expect(buttons).toHaveLength(6)
