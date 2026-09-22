@@ -68,6 +68,7 @@ export function SessionPane({
   visible,
   parked = false,
   readOnly = false,
+  headerPortalTargetId = null,
   linkOrigin
 }: {
   sessionId: string
@@ -79,6 +80,7 @@ export function SessionPane({
   parked?: boolean
   /** Observation projection: no PTY input, Agent composer, interaction response or recovery. */
   readOnly?: boolean
+  headerPortalTargetId?: string | null
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
@@ -376,6 +378,7 @@ export function SessionPane({
       {session.kind === 'agent' ? <AgentRegionHeader
         name={agentInputIdentity!} executorLabel={agentInputExecutor!} sessionId={session.id}
         regionId={linkOrigin.regionId} readOnly={readOnly}
+        portalTargetId={headerPortalTargetId}
         onHistory={!historyOpen && !inlineHistory ? () => setHistoryOpen(true) : undefined}
         onRefreshObservation={observationMounted ? () => void refresh(true) : undefined}
         refreshing={refreshing}
