@@ -71,6 +71,7 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 - History 只保留一个应用入口，使用现有记录阅读与返回 owner，不争用关闭位置。中间的 `Full-screen history` 是 TerminalView 的阅读边界状态告示，不是第二个手动入口，须保留其诚实边界。CLI 原生画面不冒充另一应用按钮，也不能靠遮盖正文掩饰重复内容 owner。
 - Region 身份与动作沿同一个入口，消费现有 Agent 语义显示名与 Session 事实；用户名称、first prompt、Session label、Provider label 沿既有名字 owner 派生，完整名字与 Executor/Provider、Session 身份沿现 tooltip/可访问名称按需可读。Terminal、Activity、显式 History、冷态内联记录与只读观察共用这一位置；无 Agent 的 Terminal/File/Browser 不制造 Agent 身份。输入区不复制第二名称或身份条。固定 X 与显式 More 保留原完整命中区，长名字先收窄；只读状态仍可辨认。右上自适应角标与正文、命中区的呈现边界只见密度合同《Agent Region 的关闭与动作密度》，原精确 Region 菜单、关闭与 Focus 合并入口仍消费同一 owner，不能以隐藏未知或流程服务窗的三事实换取紧凑。
 - History 进入 More 单一应用入口，继续由原读取与返回 owner 控制；复制地址、分割、交换、移至新 Tab 复用原精确 Region 回调，菜单不从当前焦点猜目标、不另建动作注册表、地址格式、配置或后台查询。打开、悬停或关闭菜单/tooltip 不改变终端容器尺寸、权威 PTY 尺寸或 xterm 实例；工作量随本格相关事实增长。
+- 从 Terminal 或 Activity 的同一 History 入口进入，原 Session 的记录都必须实际可读，并有明确返回进入前视图的动作；查看和返回不强切 Terminal，不重建原 Activity 或终端，不丢原内容、阅读位置、选区与草稿。返回后键盘能继续操作原视图，较晚主动焦点优先。隐藏后的读取和迟到结果沿现持久会话阅读合同处理，不能为入口另建 reader、缓存或消息账本。
 - 交换目标中的 Agent 名称与该格当前的语义显示名一致，用户改名与首条 prompt 变化沿《显示名与身份》的同一优先级链反映。重名按同一 Tab 的视觉顺序区分，唯一名不无谓编号；名称、截断与编号只用于辨认，动作仍绑定原精确 Region 身份。
 - 关闭继续走现有精确 Tab/Region、未保存确认与资源处理 owner；同一 Session 的视图切换、History、冷态内联记录及服务窗不另建 Terminal、Session 或 Run。正常与恢复状态、窄分屏、记录面和进程重启后都保持这一合同；无关 Session 不产生额外处理。
 
