@@ -278,8 +278,9 @@ export async function recoverOverlay(ctx) {
   try {
     ctx.receipt.overlay.unforcedRestoredFrame=await ctx.nativeFrameReady(ctx.pageUrl)
   } catch (error) {
-    if (process.env.AGENTMUX_NATIVE_PAGE_PAINT_DIAGNOSTIC === '1') {
-      try { await diagnoseNativePagePaint(ctx, error) }
+    const mode = process.env.AGENTMUX_NATIVE_PAGE_THROTTLING_DIAGNOSTIC
+    if (mode === 'true' || mode === 'false') {
+      try { await diagnoseNativePagePaint(ctx, error, mode === 'true') }
       catch (diagnosticError) { ctx.receipt.nativePagePaintDiagnostic = { diagnosticOnly: true, originalError: String(error), diagnosticError: String(diagnosticError) } }
     }
     throw error
