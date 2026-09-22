@@ -102,9 +102,11 @@ export class NativeOverlaySurfaces {
       }
       projection.region = region
       projection.interactive = false
-      projection.view.setBorderRadius(region.radius)
-      this.window.contentView.addChildView(projection.view)
       try {
+        projection.paintStage = 'Chrome geometry'
+        // CSS pixels scaled by UI zoom can be fractional; the native View takes integer pixels.
+        projection.view.setBorderRadius(Math.round(region.radius))
+        this.window.contentView.addChildView(projection.view)
         await projection.ready
         await boundedChromePaint(this.paint(projection))
         if (this.current(projection) && generation === this.generation) projection.interactive = true
@@ -208,6 +210,9 @@ export class NativeOverlaySurfaces {
   private remove(id: string, projection: Projection): void {
     ++projection.revision
     if (this.projections.get(id) === projection) this.projections.delete(id)
+    // Closing this revoked owner can reject a document that geometry failure never awaited.
+    // Consume its terminal result without delaying cleanup or changing the original warning.
+    void projection.ready.catch(() => {})
     if (!this.window.isDestroyed()) this.window.contentView.removeChildView(projection.view)
     if (!projection.view.webContents.isDestroyed()) projection.view.webContents.close()
   }
