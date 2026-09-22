@@ -132,6 +132,7 @@ function agentSession(
     label: id,
     createdAt: 1,
     updatedAt: 1,
+    agentSessionUpdatedAt: 1,
     processState: 'running',
     status,
     latestOutputBytes: 0,
@@ -204,7 +205,8 @@ describe('Browser bar contract', () => {
     expect(markup).not.toContain('aria-label="Open DevTools"')
     expect(markup).not.toContain('aria-label="Viewport"')
     expect(markup).not.toContain('aria-label="Save this page as a bookmark"')
-    expect(markup).not.toContain('aria-label="More browser tools"')
+    // More remains optional in a wide pane; the CSS projection must retain necessary overflow in a narrow one.
+    expect(markup).toContain('class="browser-toolbar__more--optional" aria-label="More browser tools"')
     expect('openExternal' in fixture.state.config.browser.toolbar).toBe(false)
   })
 
