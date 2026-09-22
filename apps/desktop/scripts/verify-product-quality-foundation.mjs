@@ -25,10 +25,10 @@ const own = (headerOnly ? [
   'components/SessionMailbox.tsx', 'components/AgentSessionComposer.tsx', 'styles/composer.css'
 ]).map(name => 'apps/desktop/src/renderer/src/' + name)
 const focused = headerOnly ? ['agent-region-identity-menu.test.tsx', 'region-context-menu.test.tsx', 'hover-dropdown-menu.test.tsx',
-  'session-pane-composer.test.tsx', 'product-quality-foundation.test.tsx', 'sliced-scan-surface-not-empty.test.ts', 'vacuous-on-empty-predicate.test.ts'] : ['product-quality-foundation.test.tsx', 'service-window-notice-component.test.tsx', 'agent-region-identity-menu.test.tsx',
+  'session-pane-composer.test.tsx', 'product-quality-foundation.test.tsx', 'focus-preview-header.test.tsx', 'sliced-scan-surface-not-empty.test.ts', 'vacuous-on-empty-predicate.test.ts'] : ['product-quality-foundation.test.tsx', 'service-window-notice-component.test.tsx', 'agent-region-identity-menu.test.tsx',
   'session-pane-composer.test.tsx', 'continuous-progress-product.test.tsx', 'composer-local-feedback.test.tsx', 'composer-paste-selection.test.tsx']
 const inputs = [...own, ...focused.map(name => 'apps/desktop/test/' + name), relative(repo, import.meta.filename),
-  ...['entry.tsx', 'index.html', 'main.cjs'].map(name => 'apps/desktop/scripts/fixtures/product-quality-foundation/' + name)]
+  ...['entry.tsx', 'index.html', 'main.cjs', ...(headerOnly ? ['header-visual.md'] : [])].map(name => 'apps/desktop/scripts/fixtures/product-quality-foundation/' + name)]
 async function hashes(files, base = repo) { return Object.fromEntries(await Promise.all(files.map(async file => [file, sha(await readFile(join(base, file)))]))) }
 const result = { schema: 'agentmux.product-quality-foundation-ui-proof.v1', mode, scope: headerOnly ? 'header-only' : 'notice-progress', passed: false,
   qualification: mode === 'source' ? 'Actual mounted React consumers; controlled API boundary; not installed App acceptance'
@@ -139,11 +139,11 @@ try {
   if (mode === 'source') {
     privateRoot = await mkdtemp('/tmp/amx-product-quality-source-')
     const copy = await fixedSourceCopy(privateRoot)
-    const green = runTests(headerOnly ? focused.filter(name => ['agent-region-identity-menu.test.tsx', 'session-pane-composer.test.tsx', 'product-quality-foundation.test.tsx'].includes(name)) : focused, copy)
+    const green = runTests(headerOnly ? focused.filter(name => ['agent-region-identity-menu.test.tsx', 'session-pane-composer.test.tsx', 'product-quality-foundation.test.tsx', 'focus-preview-header.test.tsx'].includes(name)) : focused, copy)
     result.green = { ...green, log: await artifact('current-focused-green.log', green.log) }
     positive(green.log); assert.equal(green.exit, 0, green.error ?? green.log)
     const mutations = headerOnly ? [
-      { name: 'header-single-right-row', file: own[1], before: 'justify-content: flex-end;', after: 'justify-content: flex-start;', geometry: true },
+      { name: 'corner-local-flow-and-hit', file: own[1], before: '.agent-region-header-home { position: absolute;', after: '.agent-region-header-home { position: static;', geometry: true },
       { name: 'header-full-name-accessible', file: own[0], before: 'title={name}', after: 'title={name.slice(0, 8)}' },
       { name: 'header-precise-menu-consumer', file: own[0], before: 'entry={entry}', after: "entry={{ kind: 'separator' }}" }
     ] : [
@@ -177,7 +177,7 @@ try {
           record.geometryRed = await narrowGeometry(mutation.name + '-red', '--header-layout-only')
           record.redExit = record.geometryRed.exit; record.command = record.geometryRed.command; record.log = record.geometryRed.log
           assert.equal(record.redExit, 1); assert.equal(record.geometryRed.native.failure?.name, 'AssertionError')
-          assert.match(record.geometryRed.native.failure.message, /Header action row must align to its right inset/)
+          assert.match(record.geometryRed.native.failure.message, /Adaptive corner identity must not reserve a full Header row/)
         } else {
           const red = runTests([focused[0]], copy)
           record.command = red.command; record.redExit = red.exit; record.log = await artifact(`${mutation.name}-red.log`, red.log)
@@ -193,6 +193,18 @@ try {
       } finally { await writeFile(file, original) }
       assert.equal(sha(await readFile(file)), result.inputs[mutation.file], 'Exact production source must be restored before GREEN')
       if (mutation.geometry) {
+        const hitBefore = original, hitAfter = original
+          .replace('.agent-region-header-home > .agent-region-header-host { pointer-events: none; }', '.agent-region-header-home > .agent-region-header-host { pointer-events: auto; }')
+          .replace('max-width: 40ch;', 'max-width: min(40ch, 100%);')
+        assert.notEqual(hitAfter, hitBefore)
+        record.hitMutation = { before: hitBefore, after: hitAfter, mutatedSha256: sha(hitAfter) }
+        try {
+          await writeFile(file, hitAfter)
+          record.hitRed = await narrowGeometry(mutation.name + '-transparent-host-red', '--header-layout-only')
+          assert.equal(record.hitRed.exit, 1); assert.equal(record.hitRed.native.failure?.name, 'AssertionError')
+          assert.match(record.hitRed.native.failure.message, /Quiet corner host must not intercept the original left reading area/)
+        } finally { await writeFile(file, original) }
+        assert.equal(sha(await readFile(file)), result.inputs[mutation.file])
         record.geometryGreen = await narrowGeometry(mutation.name + '-restore-green', '--header-layout-only')
         assert.equal(record.geometryGreen.exit, 0); assert.equal(record.geometryGreen.native.passed, true)
         record.green = { exit: 0, command: record.geometryGreen.command, log: record.geometryGreen.log }
