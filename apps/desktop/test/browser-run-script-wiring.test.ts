@@ -99,6 +99,8 @@ const fakeElectron = vi.hoisted(() => {
       for (const listener of [...(this.listeners.get(event) ?? [])]) listener({}, ...args)
     }
     setWindowOpenHandler(): void {}
+    disableDeviceEmulation(): void {}
+    enableDeviceEmulation(): void {}
     setZoomFactor(): void {}
     getZoomFactor(): number { return 1 }
     getURL(): string { return this.url }
@@ -2188,7 +2190,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
     const dispatchModule = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
     const payload = Buffer.from([0, 255, 128, 13, 10, 2])
     let clicks = 0
-    const install = (mode: 'complete' | 'cancel' | 'none' = 'complete') => {
+    const install = (mode: 'complete' | 'cancel' | 'none' = 'complete', afterSnapshot?: () => Promise<unknown>) => {
       f.contents.debugger.sendCommandImpl = async (method: string) => {
         if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11,
           role: { value: 'link' }, name: { value: 'Export file' }, childIds: [] }] }
@@ -2208,7 +2210,14 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
         }
         return {}
       }
-      createDispatch.mockImplementationOnce(context => dispatchModule.createBrowserPageDispatch(context))
+      createDispatch.mockImplementationOnce(context => {
+        const dispatch = dispatchModule.createBrowserPageDispatch(context)
+        return afterSnapshot ? async (name, args) => {
+          const value = await dispatch(name, args)
+          if (name === 'snapshot') await afterSnapshot()
+          return value
+        } : dispatch
+      })
     }
     return { ...f, root, workspace, files, downloads, resolve, journal, payload, install, actualDispatch: dispatchModule.createBrowserPageDispatch, clicks: () => clicks,
       close: async () => { f.manager.dispose(); await rm(root, { recursive: true, force: true }) } }
@@ -2252,6 +2261,25 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
         expect(Buffer.from((resumed.result as BrowserDownloadChunk).data, 'base64')).toEqual(f.payload.subarray(4))
         expect(f.clicks()).toBe(1)
       } finally { restored.manager.dispose() }
+    } finally { await f.close() }
+  }, 30_000)
+
+  it('refuses relabelling an old operation as the replacement native view and preserves the new healthy Browser', async () => {
+    const f = await fixture()
+    try {
+      const waits = vi.spyOn(f.downloads, 'wait')
+      f.install('none', async () => await f.manager.switchProfile('b1', 'another-profile'))
+      const report = await f.manager.runScript('b1', 'const page=await snapshot(); return await download(page.nodes[0].ref,{path:"wrong-owner.bin",timeoutMs:100})')
+      const replacement = fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents
+      expect(replacement.id).not.toBe(f.contents.id)
+      expect(f.contents.isDestroyed()).toBe(true)
+      expect(waits).toHaveBeenCalledTimes(0)
+      expect(f.clicks()).toBe(0)
+      expect(replacement.session.listenerCount('will-download')).toBe(0)
+      expect(report.outcome.kind).not.toBe('completed')
+      await expect(readFile(join(f.root, 'wrong-owner.bin'))).rejects.toMatchObject({code:'ENOENT'})
+      expect(await f.manager.runScript('b1','return 58')).toMatchObject({result:58,outcome:{kind:'completed'}})
+      expect(replacement.isDestroyed()).toBe(false)
     } finally { await f.close() }
   }, 30_000)
 
