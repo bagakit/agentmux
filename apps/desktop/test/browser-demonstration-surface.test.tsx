@@ -1,6 +1,8 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BrowserDemonstrationSurface } from '../src/renderer/src/components/BrowserDemonstrationSurface'
 import type { BrowserDemonstrationDraft } from '../src/shared/browser-demonstration'
 
@@ -9,7 +11,29 @@ const draft: BrowserDemonstrationDraft = { id: 'draft-1', browserId: 'browser-1'
   { id: 'step-2', sequence: 2, recordedAt: 3, navigationId: 'nav-1', source: 'native-human', method: 'click', url: 'https://example.test', args: [], blockedReason: 'The demonstrated target could not be verified; locate it before replay.' }
 ] }
 const render = (input: BrowserDemonstrationDraft | null, warning?: string) => renderToStaticMarkup(createElement(BrowserDemonstrationSurface, { draft: input, onStart() {}, onStop() {}, ...(warning ? { warning } : {}) }))
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 describe('BrowserDemonstrationSurface', () => {
+  it('leaves one real recording entry when unused, with visible warnings and the original busy boundary', async () => {
+    const host = document.createElement('div'), root = createRoot(host), onStart = vi.fn(), onStop = vi.fn()
+    const props = { draft: null, onStart, onStop }
+    try {
+      await act(async () => root.render(createElement(BrowserDemonstrationSurface, props)))
+      expect(host.querySelector('header')).toBeNull()
+      expect(host.querySelector('ol')).toBeNull()
+      expect(host.textContent).toBe('Record demonstration')
+      const button = host.querySelector<HTMLButtonElement>('[aria-label="Start recording demonstration"]')!
+      expect(button.disabled).toBe(false)
+      await act(async () => button.click())
+      expect(onStart).toHaveBeenCalledTimes(1)
+      expect(onStart.mock.calls[0]?.[0].nativeEvent.type).toBe('click')
+      expect(onStop).not.toHaveBeenCalled()
+      await act(async () => root.render(createElement(BrowserDemonstrationSurface, {
+        ...props, busy: true, warning: 'Draft storage is unavailable; inspect before retrying.'
+      })))
+      expect(host.querySelector('[role="status"]')?.textContent).toContain('Draft storage is unavailable')
+      expect(host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
+    } finally { await act(async () => root.unmount()) }
+  })
   it('shows nonempty recorded semantic steps, fresh parameter and unknown target reasons with no execute affordance', () => {
     const html = render(draft)
     expect(html).toContain('data-demonstration-id="draft-1"')
