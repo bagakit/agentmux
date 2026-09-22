@@ -288,6 +288,93 @@ it('reviews and continues only the actual v1 cursor with fresh parameters while 
   } finally { await view.close() }
 })
 
+it.each(['completed', 'rejected'] as const)('clears an invocation secret after %s, including when the same Editor reveals the key through a saved draft revision', async outcome => {
+  const fixture = await ownerFixture()
+  let asset = await fixture.owner.edit(fixture.state.assets[0]!.id, fixture.state.assets[0]!.revision, {
+    ...fixture.state.assets[0]!.draft,
+    steps: fixture.state.assets[0]!.draft.steps.slice(1),
+    parameters: [{ key: 'name', label: 'Name', secret: false }]
+  })
+  let currentRun = fixture.run
+  const immutableVersions = structuredClone(asset.versions)
+  const secret = 'fresh-invocation-finally-only'
+  const scriptCalls: string[] = []
+  let view: Awaited<ReturnType<typeof mount>>
+  const onRun = vi.fn<React.ComponentProps<typeof BrowserTaskAssetEditor>['onRun']>(async input => {
+    if (outcome === 'rejected') throw new Error('Continuation failed; inspect the retained page')
+    currentRun = await fixture.owner.run({ ...input, assetId: asset.id, browserId: recording.browserId }, {
+      onRunPrepared: runId => expect(runId).toBe(fixture.run.id), control: () => 'agent',
+      yieldControl: () => { throw new Error('The already reviewed checkpoint must not repeat') },
+      runScript: async (browserId, script) => {
+        scriptCalls.push(script)
+        expect(script).toContain(secret)
+        const operation = await fixture.journal.start({ browserId, operator: { id: 'person', name: 'Person' }, summary: 'Fill reviewed input', url: recording.url })
+        const step = await fixture.journal.startStep(operation.id, { method: 'fillInput', label: 'Fill reviewed input', target: asset.versions[0]!.steps[2]!.target! })
+        await fixture.journal.finishStep(operation.id, step!.sequence, { status: 'completed' })
+        const completed = await fixture.journal.finish(operation.id, 'completed')
+        return { result: undefined, logs: [], outcome: { kind: 'completed' }, runOperation: completed! }
+      }
+    })
+    view.root.render(render())
+  })
+  const saveVersion = vi.fn<React.ComponentProps<typeof BrowserTaskAssetEditor>['onSaveVersion']>(async content => {
+    const edited = await fixture.owner.edit(asset.id, asset.revision, content)
+    asset = await fixture.owner.saveVersion(edited.id, edited.revision)
+    view.root.render(render())
+  })
+  const render = () => <BrowserTaskAssetEditor asset={asset} recording={recording} run={currentRun}
+    onImport={vi.fn()} onSaveDraft={vi.fn()} onSaveVersion={saveVersion} onLocateStep={vi.fn()} onRun={onRun} onStop={vi.fn()} />
+  view = await mount(render())
+  try {
+    const surface = view.host.querySelector('[aria-label="Editable Browser task asset"]')!
+    expect(surface).not.toBeNull()
+    const buttons = () => [...view.host.querySelectorAll<HTMLButtonElement>('button')]
+    await act(async () => buttons().find(button => button.textContent === 'Review and continue v1')!.click())
+    const parameter = view.host.querySelector<HTMLInputElement>('[aria-label="Task parameter Name"]')!
+    expect(parameter).not.toBeNull()
+    expect(parameter.type).toBe('password')
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(parameter, secret)
+      parameter.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => buttons().find(button => button.textContent === 'Return control and continue')!.click())
+    expect(onRun.mock.calls.map(([input]) => input)).toEqual([{ version: 1, mode: 'run', runId: fixture.run.id, parameters: { name: secret } }])
+    if (outcome === 'completed') {
+      expect(currentRun.status).toBe('completed')
+      expect(currentRun.nextStep).toBe(3)
+      expect(currentRun.operationIds).toHaveLength(2)
+      expect(currentRun.operationIds[0]).toBe(fixture.run.operationIds[0])
+      expect(view.host.querySelector('[aria-label="Task parameter Name"]')).toBeNull()
+    } else {
+      expect(currentRun).toEqual(fixture.run)
+      expect(parameter.value).toBe('')
+      expect(surface.textContent).toContain('Continuation failed; inspect the retained page')
+    }
+    const retainedRun = structuredClone(currentRun)
+    // Saving a local draft revision keeps this mounted Editor and does not invoke
+    // the version-selector/review handlers that would independently reset values.
+    await act(async () => view.host.querySelector<HTMLButtonElement>('[aria-label="Delete task step 1"]')!.click())
+    await act(async () => buttons().find(button => button.textContent === 'Save version')!.click())
+    expect(saveVersion).toHaveBeenCalledTimes(1)
+    expect(asset.versions).toHaveLength(3)
+    expect(asset.versions.slice(0, 2)).toEqual(immutableVersions)
+    expect(asset.versions[2]!.steps.map(step => step.kind)).toEqual(['fill'])
+    expect(view.host.querySelector('[aria-label="Editable Browser task asset"]')).toBe(surface)
+    expect(view.host.querySelector<HTMLSelectElement>('[aria-label="Task asset version"]')?.value).toBe('3')
+    const revealed = view.host.querySelector<HTMLInputElement>('[aria-label="Task parameter Name"]')!
+    expect(revealed).not.toBeNull()
+    expect(revealed.type).toBe('text')
+    expect(revealed.value).toBe('')
+    expect(buttons().find(button => button.textContent === 'Run version')?.disabled).toBe(true)
+    expect(buttons().find(button => button.textContent === 'Run next step')?.disabled).toBe(true)
+    expect((await fixture.owner.state(recording.browserId)).runs).toEqual([retainedRun])
+    expect(onRun).toHaveBeenCalledTimes(1)
+    expect(scriptCalls).toHaveLength(outcome === 'completed' ? 1 : 0)
+    expect(JSON.stringify(await fixture.restore())).not.toContain(secret)
+    expect(JSON.stringify(await fixture.journal.list())).not.toContain(secret)
+  } finally { await view.close() }
+})
+
 it('retains unknown-version, storage and save failures outside folded source details, with Stop available while busy', async () => {
   const fixture = await ownerFixture(), asset = fixture.state.assets[0]!
   const missing: BrowserTaskAssetRun = { ...fixture.run, version: 99, warning: 'Unknown execution result; inspect the page' }
