@@ -28,12 +28,35 @@ export type ConversationMessageProps = {
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   onContinue?: () => void
   onAnnotate?: (annotation: ConversationAnnotation) => void
+  expandedTraces?: ReadonlySet<string>
+  onToggleTrace?: (traceId: string, open: boolean) => void
 }
 
 export type ConversationAnnotation = {
   messageId: string
   quote: string
   note: string
+}
+
+export function traceDisclosureKey(messageId: string, partKey: string): string {
+  return JSON.stringify([messageId, partKey])
+}
+
+export function parseTraceDisclosureKey(key: string): [messageId: string, partKey: string] | null {
+  try {
+    const parsed = JSON.parse(key)
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      typeof parsed[0] === 'string' &&
+      typeof parsed[1] === 'string'
+    ) {
+      return [parsed[0], parsed[1]]
+    }
+  } catch {
+    // Unknown disclosure keys do not identify a record.
+  }
+  return null
 }
 
 function partText(part: AgentSessionHistoryContentPart): string {
@@ -47,7 +70,7 @@ function partText(part: AgentSessionHistoryContentPart): string {
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   speaker, name, providerId, content, status, createdAt, origin, workspaceRoot = '', messageId = '',
-  openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onAnnotate
+  openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onAnnotate, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -62,8 +85,6 @@ export function ConversationMessage({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const activeCopyActionRef = useRef(0)
   const copyTimerRef = useRef<number | null>(null)
-  const localPartKeysRef = useRef<WeakMap<object, string>>(new WeakMap())
-  const nextLocalKeyRef = useRef(1)
   const [selection, setSelection] = useState<{ quote: string } | null>(null)
   const [note, setNote] = useState('')
 
@@ -122,30 +143,14 @@ export function ConversationMessage({
     window.getSelection()?.removeAllRanges()
   }
 
-  const callCounts = new Map<string, number>()
-  for (const part of parts) {
-    if ((part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId) {
-      const k = `${part.kind}:${part.callId}`
-      callCounts.set(k, (callCounts.get(k) ?? 0) + 1)
-    }
-  }
-
-  const renderOccurrences = new Map<object, number>()
-
+  const occurrenceCounts = new Map<string, number>()
   function partKey(part: AgentSessionHistoryContentPart): string {
     if (isStringContent) return 'text'
-    if ((part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId) {
-      const k = `${part.kind}:${part.callId}`
-      if (callCounts.get(k) === 1) return k
-    }
-    let baseKey = localPartKeysRef.current.get(part)
-    if (!baseKey) {
-      baseKey = `part-${nextLocalKeyRef.current++}`
-      localPartKeysRef.current.set(part, baseKey)
-    }
-    const occurrence = (renderOccurrences.get(part) ?? 0) + 1
-    renderOccurrences.set(part, occurrence)
-    return occurrence === 1 ? baseKey : `${baseKey}:${occurrence}`
+    const callId = (part.kind === 'tool-call' || part.kind === 'tool-result') ? (part.callId ?? null) : null
+    const occKey = JSON.stringify([part.kind, callId])
+    const occ = occurrenceCounts.get(occKey) ?? 0
+    occurrenceCounts.set(occKey, occ + 1)
+    return JSON.stringify([part.kind, callId, occ])
   }
 
   return (
@@ -192,9 +197,15 @@ export function ConversationMessage({
               {...(readPastedImage ? { readPastedImage } : {})}
               {...(openHttpLink ? { openHttpLink } : {})}
             /> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
-              <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot} />
+              <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot}
+                traceId={traceDisclosureKey(messageId, key)}
+                {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
+                {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})} />
             ) : part.kind === 'reasoning' ? (
-              <details key={key} className="log-turn__trace" data-trace-kind={part.kind}>
+              <details key={key} className="log-turn__trace" data-trace-kind={part.kind}
+                data-trace-id={traceDisclosureKey(messageId, key)}
+                open={expandedTraces ? expandedTraces.has(traceDisclosureKey(messageId, key)) : undefined}
+                onToggle={onToggleTrace ? (event) => onToggleTrace(traceDisclosureKey(messageId, key), event.currentTarget.open) : undefined}>
                 <summary>Reasoning</summary>
                 <pre>{part.text}</pre>
               </details>

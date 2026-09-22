@@ -583,6 +583,7 @@ function WorkingIndicator(): JSX.Element {
 }
 
 export function ActivityView({
+  sessionId,
   items,
   capability,
   displayState,
@@ -594,6 +595,7 @@ export function ActivityView({
   onAnnotate,
   describeSpeaker
 }: {
+  sessionId: string
   items: AgentTimelineItem[]
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
@@ -627,19 +629,31 @@ export function ActivityView({
   const band = useMemo(() => rulerBand(scale, visible), [scale, visible])
 
   const logRef = useRef<HTMLDivElement>(null)
+  const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
   // 跟随状态是一个**值**，判定全在 lib 里；组件只负责把几何量喂进去、把决定执行掉。
   // 这样"什么时候该贴底"能被断言，而不是埋在一个 effect 里——本仓库测试不跑 effect。
   const followRef = useRef(initFollowState())
   const [showJump, setShowJump] = useState(false)
+  const lastSessionIdRef = useRef<string | null>(null)
+  const currentSessionId = sessionId
+
+  useEffect(() => {
+    if (currentSessionId && lastSessionIdRef.current !== currentSessionId) {
+      lastSessionIdRef.current = currentSessionId
+      followRef.current = initFollowState()
+      setShowJump(false)
+      pinToBottom()
+    }
+  }, [currentSessionId])
 
   const feedGeometry = (): ScrollGeometry | null => {
-    const el = logRef.current?.closest('.activity-feed')
+    const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (!(el instanceof HTMLElement)) return null
     return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }
   }
 
   const pinToBottom = (): void => {
-    const el = logRef.current?.closest('.activity-feed')
+    const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (el instanceof HTMLElement) el.scrollTop = el.scrollHeight
   }
 
@@ -654,7 +668,7 @@ export function ActivityView({
   // 用户主动往上滚才脱离；内容变长不算——两者都会让"离底部的距离"变大，能区分它们的证据是
   // scrollTop 本身有没有减少。判定在 lib 里，这里只把事件折进去。
   useEffect(() => {
-    const el = logRef.current?.closest('.activity-feed')
+    const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (!(el instanceof HTMLElement)) return
     const handle = (): void => {
       const geometry = feedGeometry()
@@ -664,7 +678,7 @@ export function ActivityView({
     }
     el.addEventListener('scroll', handle, { passive: true })
     return () => el.removeEventListener('scroll', handle)
-  }, [])
+  }, [feedEl])
 
   // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
   // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
@@ -680,7 +694,7 @@ export function ActivityView({
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
-  }, [items])
+  }, [items, feedEl])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
@@ -737,7 +751,7 @@ export function ActivityView({
 
   if (capability === 'unavailable') {
     return (
-      <div className="activity-feed">
+      <div className="activity-feed" ref={setFeedEl}>
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
         </div>
@@ -746,7 +760,7 @@ export function ActivityView({
   }
   if (showEmptyState(displayState, items)) {
     return (
-      <div className="activity-feed">
+      <div className="activity-feed" ref={setFeedEl}>
         <div className="activity-feed__empty">
           No structured activity yet. Terminal remains available.
         </div>
@@ -757,7 +771,7 @@ export function ActivityView({
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
   if (items.length === 0) {
     return (
-      <div className="activity-feed">
+      <div className="activity-feed" ref={setFeedEl}>
         <WorkingIndicator />
       </div>
     )
@@ -773,7 +787,7 @@ export function ActivityView({
   }
 
   return (
-    <div className="activity-feed">
+    <div className="activity-feed" ref={setFeedEl}>
       <Ruler
         items={items}
         scale={scale}
