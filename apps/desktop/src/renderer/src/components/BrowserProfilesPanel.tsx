@@ -235,7 +235,7 @@ export function BrowserProfilesPanel({
     <section className="browser-profiles" aria-label="Browser Profiles">
       <header>
         <UserRound size={14} />
-        <span><strong>Profiles</strong><small>Isolated sessions owned by AgentMux.</small></span>
+        <span><strong>Profiles</strong><small>Separate sign-ins</small></span>
       </header>
       {profiles === null ? (
         <div className="browser-profiles__loading"><LoaderCircle className="spin" size={13} /> Loading Profiles…</div>
