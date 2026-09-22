@@ -206,16 +206,54 @@ export async function recoverTaskAssets(ctx) {
   await probe.cdp.evaluate(`Array.from(document.querySelectorAll(${quoted(taskSurface + ' button')})).find(e=>e.textContent.trim()==='Return control and continue').click()`)
   assert.deepEqual(await run(ctx), receipt.taskAssets.waiting, 'Synthetic continuation cannot confirm the checkpoint')
   await type(ctx, 'Task parameter Fresh name', secret)
+  await probe.cdp.evaluate(`globalThis.__privateTaskCleanupSurface=document.querySelector(${quoted(taskSurface)});true`)
   await ctx.click(probe.cdp, button(ctx, 'Return control and continue'))
   const completed = await waitFor('same version continues only after the real human action', async () => { const item = await run(ctx); return item?.status === 'completed' ? item : null })
   assert.equal(completed.version, 1); assert.equal(completed.nextStep, 3); assert.equal(completed.operationIds.length, 2)
   assert.equal(completed.operationIds[0], receipt.taskAssets.waiting.operationIds[0])
   assert.equal(await pageCount(ctx), 0, 'Completed steps must not be replayed after restart')
   assert.equal(await ctx.nativePageScript(probe, 'document.querySelector("#demo-input").value'), secret)
-  await waitFor('temporary secret cleared from the real Editor', () => probe.cdp.evaluate(`document.querySelector(${quoted(taskSurface + ' [aria-label="Task parameter Fresh name"]')}).value===''`))
-  receipt.taskAssets.secretAbsentFrom = await persistent(ctx, secret)
   receipt.taskAssets.syntheticContinueRejected = true
   receipt.taskAssets.completed = completed
+  ctx.setPhase('task-assets-temporary-secret-disposal')
+  try {
+    const hidden = await waitFor('completed version projects its first segment without the later parameter', () => probe.cdp.evaluate(`(()=>{const surface=document.querySelector(${quoted(taskSurface)}),progress=surface?.querySelector('.browser-task-asset__progress');if(progress?.dataset.runStatus!=='completed')return null;return{sameEditorSurface:surface===globalThis.__privateTaskCleanupSurface,assetId:surface.dataset.taskAssetId,selectedVersion:surface.querySelector('[aria-label="Task asset version"]')?.value,inputPresent:!!surface.querySelector('[aria-label="Task parameter Fresh name"]')}})()`))
+    receipt.taskAssets.completedParameterVisibility = hidden
+    assert.equal(hidden.sameEditorSurface, true)
+    assert.equal(hidden.assetId, receipt.taskAssets.assetId)
+    assert.equal(hidden.selectedVersion, '1')
+    assert.equal(hidden.inputPresent, false, 'Completed v1 does not ask for a parameter beyond its first checkpoint; absence alone does not prove clearing')
+    const before = await asset(ctx)
+    assert.deepEqual(before, receipt.taskAssets.savedBeforeRestart)
+    assert.deepEqual(before.draft.steps.map(step => step.kind), ['checkpoint', 'fill'])
+    assert.equal(before.draft.parameters[0].secret, false)
+    // This real draft edit reveals the same key without executing anything or
+    // using selectVersion/onReview, whose handlers would independently reset values.
+    await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label="Delete task step 1"]`))
+    await ctx.click(probe.cdp, button(ctx, 'Save version'))
+    const revised = await waitFor('same asset saves a third version with only its reviewed fill', async () => {
+      const item = await asset(ctx)
+      return item?.versions.length === 3 ? item : null
+    })
+    assert.equal(revised.id, before.id)
+    assert.ok(revised.revision > before.revision)
+    assert.deepEqual(revised.versions.slice(0, 2), before.versions)
+    assert.deepEqual(revised.versions[2].steps.map(step => step.kind), ['fill'])
+    assert.equal(revised.versions[2].parameters[0].key, 'freshName')
+    const revealed = await waitFor('same mounted Editor reveals the fresh parameter for the saved draft version', () => probe.cdp.evaluate(`(()=>{const surface=document.querySelector(${quoted(taskSurface)}),input=surface?.querySelector('[aria-label="Task parameter Fresh name"]');const save=Array.from(surface?.querySelectorAll('button')??[]).find(button=>button.textContent.trim()==='Save version');if(!input||!save||save.disabled||surface.querySelector('[aria-label="Task asset version"]')?.value!=='3')return null;return{sameEditorSurface:surface===globalThis.__privateTaskCleanupSurface,assetId:surface.dataset.taskAssetId,selectedVersion:'3',saveDisabled:save.disabled,input:{present:true,visible:input.checkVisibility(),empty:input.value==='',type:input.type},runButtons:Array.from(surface.querySelectorAll('button')).filter(button=>['Run version','Run next step'].includes(button.textContent.trim())).map(button=>({label:button.textContent.trim(),disabled:button.disabled}))}})()`))
+    receipt.taskAssets.secretDisposal = { revealed, savedVersion: revised.versions[2] }
+    assert.equal(revealed.sameEditorSurface, true)
+    assert.equal(revealed.assetId, before.id)
+    assert.equal(revealed.saveDisabled, false, 'Busy state cannot substitute for the missing-parameter action guard')
+    assert.deepEqual(revealed.input, { present: true, visible: true, empty: true, type: 'text' }, 'The actual same-key field must be visible and empty, not absent or reset by a version-selection handler')
+    assert.deepEqual(revealed.runButtons, [{ label: 'Run next step', disabled: true }, { label: 'Run version', disabled: true }], 'Both real actions require fresh input; v3 is never executed')
+    assert.deepEqual(await run(ctx), completed, 'Saving the inspection draft cannot change the completed v1 cursor or its operation ids')
+    assert.equal(await pageCount(ctx), 0)
+    assert.equal(await ctx.nativePageScript(probe, 'document.querySelector("#demo-input").value'), secret)
+    receipt.taskAssets.secretAbsentFrom = await persistent(ctx, secret)
+  } finally {
+    await probe.cdp.evaluate('delete globalThis.__privateTaskCleanupSurface;true')
+  }
   receipt.taskAssets.complete = true
   await ctx.capture(probe, 'normal-task-asset-completed-after-restart', 'task-assets')
 }
