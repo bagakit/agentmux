@@ -504,6 +504,7 @@ function SurfaceContent({
   surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
+  headerPortalTargetId,
   focus
 }: {
   surface: WorkbenchSurface
@@ -512,6 +513,7 @@ function SurfaceContent({
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  headerPortalTargetId: string | null
   /** 这一格的焦点表达。只有 browser 那格真用得到（原生视图要让位），但由上游一次算好传下来。 */
   focus: RegionFocusExpression
 }) {
@@ -526,6 +528,7 @@ function SurfaceContent({
         interactiveResize={interactiveResize}
         visible={surfaceVisible}
         parked={parked}
+        headerPortalTargetId={headerPortalTargetId}
         linkOrigin={{
           workspaceId: surface.workspaceId,
           tabGroupId: groupId,
@@ -585,6 +588,7 @@ function WorkbenchRegionTree(props: {
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  headerPortalTargetId: string | null
 }) {
   const { tab } = props
   const sessions = useWorkbenchTabSessions(tab)
@@ -610,7 +614,8 @@ function WorkbenchRegionNode({
   groupId,
   surfaceVisible,
   nativeSurfacesVisible,
-  interactiveResize
+  interactiveResize,
+  headerPortalTargetId = null
 }: {
   node: WorkbenchRegionLayoutNode
   nodePath: string
@@ -620,6 +625,7 @@ function WorkbenchRegionNode({
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  headerPortalTargetId?: string | null
 }) {
   if (node.type === 'leaf') {
     return (
@@ -631,6 +637,7 @@ function WorkbenchRegionNode({
         surfaceVisible={surfaceVisible}
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
+        headerPortalTargetId={headerPortalTargetId}
       />
     )
   }
@@ -657,7 +664,8 @@ function WorkbenchRegionLeaf({
   groupId,
   surfaceVisible,
   nativeSurfacesVisible,
-  interactiveResize
+  interactiveResize,
+  headerPortalTargetId
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
   tab: WorkbenchTab
@@ -666,6 +674,7 @@ function WorkbenchRegionLeaf({
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  headerPortalTargetId: string | null
 }) {
   const focusRegion = useAppStore((state) => state.focusRegion)
   const closeRegion = useAppStore((state) => state.closeRegion)
@@ -791,6 +800,7 @@ function WorkbenchRegionLeaf({
           surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={interactiveResize}
+          headerPortalTargetId={headerPortalTargetId}
           focus={focus}
         />
       </SessionRegionHost>
@@ -1427,6 +1437,9 @@ export function WorkspaceWorkbench({
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
+            headerPortalTargetId={focusTab?.id === tab.id && targetId && storedLayout && ownerByTab.has(tab.id) &&
+              tab.layout.root.type === 'leaf' && tab.regions[tab.layout.root.regionId]?.kind === 'agent'
+              ? `${targetId}-header` : null}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}

@@ -1,8 +1,9 @@
 /* One Session identity above its native/recorded content; the original Workbench X retains its slot. */
-.agent-surface:has(> .agent-region-header) { display: flex; flex-direction: column; }
-.agent-surface:has(> .agent-region-header) > .agent-body { flex: 1 1 0; }
-.agent-surface:has(> .agent-region-header) > :not(.agent-body) { flex-shrink: 0; }
-.agent-surface:has(> .agent-region-header) > .agent-launch-notice { flex: 0 1 auto; max-height: 35%; overflow-y: auto; }
+.agent-surface:has(> .agent-region-header-home) { display: flex; flex-direction: column; }
+.agent-surface:has(> .agent-region-header-home) > .agent-body { flex: 1 1 0; }
+.agent-surface:has(> .agent-region-header-home) > :not(.agent-body) { flex-shrink: 0; }
+.agent-surface:has(> .agent-region-header-home) > .agent-launch-notice { flex: 0 1 auto; max-height: 35%; overflow-y: auto; }
+.agent-region-header-home { min-height: 0; }
 .agent-region-header { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: 0 var(--region-close-clearance, var(--sp-3)) 0 var(--sp-3); background: transparent; }
 .agent-region-header__name { flex: 0 1 auto; min-width: 0; max-width: min(40ch, 100%); overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 400; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .agent-region-header__mode { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
