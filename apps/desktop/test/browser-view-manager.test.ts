@@ -25,6 +25,9 @@ const fakeElectron = vi.hoisted(() => {
     destroyed = false
     mainFrame = { framesInSubtree: [{ osProcessId: 10, detached: false }] }
     zoomFactor = 1
+    backgroundThrottling = true
+    readonly getBackgroundThrottling = vi.fn(() => this.backgroundThrottling)
+    readonly setBackgroundThrottling = vi.fn((value: boolean) => { this.backgroundThrottling = value })
     deviceEmulation: Record<string, unknown> | null = null
     readonly disableDeviceEmulation = vi.fn(() => { this.deviceEmulation = null })
     readonly enableDeviceEmulation = vi.fn((parameters: Record<string, unknown>) => {
@@ -103,8 +106,8 @@ const fakeElectron = vi.hoisted(() => {
       this.url = url
       this.title = url === 'about:blank' ? '' : new URL(url).hostname
       this.emit('did-navigate', url)
-      this.loading = false
       this.emit('did-finish-load')
+      this.loading = false
       this.emit('did-stop-loading')
     }
 
@@ -115,10 +118,12 @@ const fakeElectron = vi.hoisted(() => {
     isLoading() { return this.loading }
     isDestroyed() { return this.destroyed }
     reload() {
+      this.loading = true
       this.emitDetails('did-start-navigation', { url: this.url, isSameDocument: false, isMainFrame: true })
       this.emit('did-start-loading')
       this.zoomFactor = 1
       this.emit('did-finish-load')
+      this.loading = false
       this.emit('did-stop-loading')
     }
     close() { this.destroyed = true; this.emit('destroyed') }
@@ -136,8 +141,7 @@ const fakeElectron = vi.hoisted(() => {
     readonly webPreferences: Record<string, unknown> | undefined
     visible = true
     bounds = { x: 0, y: 0, width: 0, height: 0 }
-    // 重绘那次抖动会用**同一个值**再 setBounds 一遍（首帧后强制合成器重绘）——只记最后的值看不出它发生过，
-    // 所以把每次 setBounds 的值都追加进来，让"首帧后又设了一次 bounds"这件事可被断言。
+    // Keep every native geometry write so lifecycle synchronization cannot hide extra layout work.
     boundsHistory: Array<{ x: number; y: number; width: number; height: number }> = []
 
     constructor(options?: { webPreferences?: Record<string, unknown> }) {
@@ -490,53 +494,141 @@ describe('BrowserViewManager', () => {
       .not.toThrow()
   })
 
-  it('re-applies bounds after the first frame so a loaded page is not left blank until resize', async () => {
-    // Electron 43 在 macOS 上：视图在挂载时就 setVisible(true)+setBounds（页面还没画），首帧要等到
-    // `did-finish-load`，而合成器一直显示那层空白，直到一次几何变化把它作废——"加载了却空白，resize
-    // 才出现"。修法是在首帧信号处把当前 bounds 原样再设一遍，用同一个几何事件强制重绘。
+  it.each([true, false])('synchronizes a loaded visible page at load and show edges, preserving policy %s', async policy => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
     await manager.create('browser-paint', 'https://example.com/')
     const view = fixture.children[0]!
+    view.webContents.backgroundThrottling = policy
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([])
 
-    // 视图可见并拿到真实矩形。setBounds 本身算一次。
-    manager.setBounds('browser-paint', { x: 5, y: 6, width: 640, height: 480 })
-    const boundsCallsBeforeLoad = view.boundsHistory.length
-
-    // 一次真实的重新加载走完首帧信号（did-finish-load）。此时视图已可见，必须再设一次 bounds——
-    // 值不变，但那次调用就是让合成器丢掉空白层、画出新内容的几何事件。
+    const bounds = { x: 5, y: 6, width: 640, height: 480 }
+    manager.setBounds('browser-paint', bounds)
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[policy]])
+    expect(view.boundsHistory).toEqual([bounds])
+    // Position and size updates are layout work, not another visibility edge.
+    manager.setBounds('browser-paint', { ...bounds, x: 9 })
+    manager.setBounds('browser-paint', { ...bounds, x: 9 })
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[policy]])
+    const layoutBeforeLoad = [...view.boundsHistory]
     await manager.reload('browser-paint')
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[policy], [policy]])
+    expect(view.boundsHistory).toEqual(layoutBeforeLoad)
+    expect(view.webContents.backgroundThrottling).toBe(policy)
 
-    expect(
-      view.boundsHistory.length,
-      'did-finish-load 之后没有对已可见的视图重设 bounds：加载完的页面会停在空白直到用户 resize'
-    ).toBe(boundsCallsBeforeLoad + 1)
-    // 重绘用的就是当前那份矩形，不是别的值。
-    expect(view.boundsHistory.at(-1)).toEqual({ x: 5, y: 6, width: 640, height: 480 })
+    manager.setBounds('browser-paint', null)
+    await manager.reload('browser-paint')
+    expect(view.visible).toBe(false)
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[policy], [policy]])
+    manager.setBounds('browser-paint', bounds)
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[policy], [policy], [policy]])
+    expect(view.visible).toBe(true)
     manager.close('browser-paint')
   })
 
-  it('does not force-show a hidden view on first frame — a parked/overlaid surface stays hidden', async () => {
-    // 反向控制：首帧重绘只对**已可见**的视图做。若视图正被 setBounds(null) 正当地藏着（parked、overlay、
-    // 焦点让位等），首帧信号绝不能替那些分支把它显示出来——否则原则 11/12 的隐藏语义被这次重绘旁路掉。
+  it('waits for loading to finish when the original page becomes visible first', async () => {
+    const fixture = fakeWindow()
+    let finish!: () => void
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => {
+      contents.loading = true
+      await new Promise<void>(resolve => { finish = () => { contents.finishLoad(url); resolve() } })
+    }
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-loading', 'https://example.com/')
+    const view = fixture.children[0]!
+    manager.setBounds('browser-loading', { x: 1, y: 2, width: 300, height: 200 })
+    expect(view.visible).toBe(true)
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([])
+    finish()
+    await Promise.resolve()
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
+    expect(view.boundsHistory).toEqual([{ x: 1, y: 2, width: 300, height: 200 }])
+    manager.close('browser-loading')
+  })
+
+  it('waits for did-stop-loading when did-finish-load still reports an in-flight page', async () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
-    await manager.create('browser-hidden', 'https://example.com/')
+    await manager.create('browser-load-stop', 'https://example.com/')
     const view = fixture.children[0]!
+    const bounds = { x: 5, y: 6, width: 300, height: 200 }
+    manager.setBounds('browser-load-stop', bounds)
+    view.webContents.setBackgroundThrottling.mockClear()
 
-    manager.setBounds('browser-hidden', { x: 1, y: 2, width: 300, height: 200 })
-    manager.setBounds('browser-hidden', null) // 现在隐藏
-    expect(view.visible).toBe(false)
-    const boundsCallsWhileHidden = view.boundsHistory.length
+    const loadingAtEvents: boolean[] = []
+    view.webContents.on('did-finish-load', () => loadingAtEvents.push(view.webContents.isLoading()))
+    view.webContents.on('did-stop-loading', () => loadingAtEvents.push(view.webContents.isLoading()))
+    await manager.reload('browser-load-stop')
+    expect(loadingAtEvents).toEqual([true, false])
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
+    expect(view.boundsHistory).toEqual([bounds])
+    manager.close('browser-load-stop')
+  })
 
-    await manager.reload('browser-hidden')
+  it('synchronizes a loaded profile candidate only after it is the visible authoritative owner', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-profile-paint', 'https://example.com/')
+    const original = fixture.children[0]!
+    manager.setBounds('browser-profile-paint', { x: 1, y: 2, width: 300, height: 200 })
+    let finish!: () => void
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => {
+      await new Promise<void>(resolve => { finish = () => { contents.finishLoad(url); resolve() } })
+    }
+    const pending = manager.switchProfile('browser-profile-paint', 'work')
+    const candidate = fixture.children[1]!
+    expect(candidate.visible).toBe(false)
+    expect(candidate.webContents.setBackgroundThrottling.mock.calls).toEqual([])
+    finish()
+    expect(candidate.webContents.setBackgroundThrottling.mock.calls).toEqual([])
+    await pending
+    expect(fixture.children).toEqual([candidate])
+    expect(candidate.visible).toBe(true)
+    expect(candidate.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
+    expect(original.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
+    expect(original.webContents.isDestroyed()).toBe(true)
+    manager.close('browser-profile-paint')
+  })
 
-    expect(
-      view.boundsHistory.length,
-      '首帧重绘把一个正被隐藏的视图重新设了 bounds——隐藏语义被旁路'
-    ).toBe(boundsCallsWhileHidden)
-    expect(view.visible).toBe(false)
-    manager.close('browser-hidden')
+
+  it('waits for an in-flight document with a nonempty previous URL before synchronizing its first show', async () => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-known-url-loading', 'https://example.com/old')
+    const view = fixture.children[0]!
+    expect(view.webContents.getURL()).toBe('https://example.com/old')
+    view.webContents.loading = true
+    view.webContents.emitDetails('did-start-navigation', {
+      url: 'https://example.com/new', isSameDocument: false, isMainFrame: true
+    })
+    view.webContents.emit('did-start-loading')
+    manager.setBounds('browser-known-url-loading', { x: 5, y: 6, width: 300, height: 200 })
+    expect(view.visible).toBe(true)
+    expect(view.webContents.getURL()).toBe('https://example.com/old')
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([])
+    view.webContents.finishLoad('https://example.com/new')
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
+    expect(view.boundsHistory).toEqual([{ x: 5, y: 6, width: 300, height: 200 }])
+    manager.close('browser-known-url-loading')
+  })
+
+  it('waits for a nonempty document URL before synchronizing its first show', async () => {
+    const fixture = fakeWindow()
+    let finish!: () => void
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => {
+      await new Promise<void>(resolve => { finish = () => { contents.finishLoad(url); resolve() } })
+    }
+    const manager = browserManager(fixture.window)
+    await manager.create('browser-empty-url', 'https://example.com/new')
+    const view = fixture.children[0]!
+    expect(view.webContents.getURL()).toBe('')
+    expect(view.webContents.isLoading()).toBe(false)
+    manager.setBounds('browser-empty-url', { x: 1, y: 2, width: 300, height: 200 })
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([])
+    finish()
+    await Promise.resolve()
+    expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
+    manager.close('browser-empty-url')
   })
 
   it('releases a hidden native owner without deleting the Browser Region and restores its projection', async () => {
