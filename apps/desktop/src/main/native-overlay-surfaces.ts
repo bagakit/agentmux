@@ -14,6 +14,7 @@ interface Projection {
   paintStage: string
   interactive: boolean
   throttlingSynchronized: boolean
+  pressedButtons: Set<'leftbuttondown' | 'middlebuttondown' | 'rightbuttondown'>
 }
 
 async function boundedChromePaint(work: Promise<void>, budget = 1500): Promise<void> {
@@ -95,7 +96,7 @@ export class NativeOverlaySurfaces {
         view.setVisible(true)
         // A first native Renderer startup is a different boundary from an already loaded frame.
         // Keep both bounded, without treating cold process startup as a failed compositor frame.
-        projection = { view, region, ready: boundedChromePaint(view.webContents.loadURL(CHROME_DOCUMENT), 5000), revision: 0, framePending: false, paintStage: 'Chrome document', interactive: false, throttlingSynchronized: false }
+        projection = { view, region, ready: boundedChromePaint(view.webContents.loadURL(CHROME_DOCUMENT), 5000), revision: 0, framePending: false, paintStage: 'Chrome document', interactive: false, throttlingSynchronized: false, pressedButtons: new Set() }
         this.projections.set(region.id, projection)
         const owner = projection
         view.webContents.on('input-event', (_event, input) => this.forward(owner, input))
@@ -176,10 +177,24 @@ export class NativeOverlaySurfaces {
 
   private forward(projection: Projection, input: Electron.InputEvent): void {
     if (!this.current(projection) || this.window.webContents.isDestroyed()) return
-    if (!projection.interactive) return
-    const event = input as Electron.MouseInputEvent | Electron.MouseWheelInputEvent | Electron.KeyboardInputEvent
+    let event = input as Electron.MouseInputEvent | Electron.MouseWheelInputEvent | Electron.KeyboardInputEvent
+    const button = 'button' in event && event.button === 'left' ? 'leftbuttondown'
+      : 'button' in event && event.button === 'middle' ? 'middlebuttondown'
+      : 'button' in event && event.button === 'right' ? 'rightbuttondown' : undefined
+    const continuingGesture = event.type === 'mouseMove' && projection.pressedButtons.size > 0
+      || event.type === 'mouseUp' && button !== undefined && projection.pressedButtons.has(button)
+    // A repaint cannot drop the release of a gesture already accepted by this owner.
+    if (!projection.interactive && !continuingGesture) return
     if ('x' in event && 'y' in event && Number.isFinite(event.x) && Number.isFinite(event.y)) {
-      this.window.webContents.sendInputEvent({ ...event, x: event.x + projection.region.bounds.x, y: event.y + projection.region.bounds.y })
+      // Native input-event omits mouse modifiers. Retain this owner's actual
+      // button transitions so the next move does not end the original pointer capture.
+      if (button && event.type === 'mouseDown') projection.pressedButtons.add(button)
+      if (button && event.type === 'mouseUp') projection.pressedButtons.delete(button)
+      if (event.type === 'mouseMove' && projection.pressedButtons.size) {
+        event = { ...event, modifiers: [...new Set([...(event.modifiers ?? []), ...projection.pressedButtons])] }
+      }
+      const bounds = projection.view.getBounds()
+      this.window.webContents.sendInputEvent({ ...event, x: event.x + bounds.x, y: event.y + bounds.y })
       if (event.type === 'mouseDown') this.window.webContents.focus()
     } else if (event.type === 'keyDown' || event.type === 'rawKeyDown' || event.type === 'keyUp' || event.type === 'char') {
       this.window.webContents.sendInputEvent(event)
