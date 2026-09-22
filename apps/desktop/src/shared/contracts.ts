@@ -1291,6 +1291,8 @@ export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
+export const NATIVE_BROWSER_POINTER_CHANNEL = 'ui:nativeBrowserPointer'
+export const NATIVE_OVERLAY_WARNING_CHANNEL = 'ui:nativeOverlayWarning'
 export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
 /** Main -> renderer: a periodic CPU/RSS sample for the resource panel. */
 export const RESOURCE_USAGE_CHANNEL = 'agentmux:resource-usage'
@@ -1374,6 +1376,9 @@ export type AgentMuxDesktopApi = {
     decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
   }
   ui: {
+    publishNativeOverlays(regions: import('./native-overlay').NativeOverlayRegion[]): Promise<import('./native-overlay').NativeOverlayReceipt>
+    onNativeOverlayWarning(listener: (warning: string) => void): () => void
+    onNativeBrowserPointer(listener: (point: import('./native-overlay').NativeBrowserPointer) => void): () => void
     /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
