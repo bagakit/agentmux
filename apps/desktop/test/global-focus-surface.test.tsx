@@ -27,7 +27,6 @@ function agent(id: string, state: 'waiting' | 'working' | 'done', observedAt: nu
     latestOutputBytes: 0,
     status: { state, source: 'run-process', observedAt },
     capabilities: {} as never,
-    ...(state === 'waiting' ? { pendingInteraction: {} as never } : {}),
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}`, generation: 1 } }
   } as SessionSnapshot
 }
@@ -73,7 +72,8 @@ describe('Global Agents card board', () => {
     useAppStore.setState({ sessions: [agent('done', 'done', 3), agent('needs-you', 'waiting', 1), agent('working', 'working', 2)], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     const groups = [...container.querySelectorAll<HTMLElement>('.global-agents-group')]
-    expect(groups.map((group) => group.dataset.bucket)).toEqual(['attention', 'working', 'idle'])
+    expect(groups.map((group) => group.dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle'])
+    expect(container.querySelector('[data-bucket="results"][data-empty="true"]')).not.toBeNull()
     expect(container.querySelector('[data-session-id="needs-you"]')).toBeTruthy()
   })
 
