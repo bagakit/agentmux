@@ -24,9 +24,9 @@ class MemoryStore implements BrowserTaskAssetStore {
 }
 const tuple = (run: BrowserTaskAssetRun): BrowserTaskRunIdentity => ({ runId: run.id, browserId: run.browserId, assetId: run.assetId, version: run.version })
 const pending = (run: BrowserTaskAssetRun) => ({ pendingCheckpointId: run.pendingCheckpointId!, nextStep: run.nextStep, controlBefore: 'human' as const })
-function clocked(store: BrowserTaskAssetStore) {
+function clocked(store: BrowserTaskAssetStore, idPrefix = 'asset-or-run') {
   let n = 0, time = 10
-  return new BrowserTaskAssets(store, { id: () => `asset-or-run-${++n}`, now: () => time++ })
+  return new BrowserTaskAssets(store, { id: () => `${idPrefix}-${++n}`, now: () => time++ })
 }
 async function asset(assets: BrowserTaskAssets, browserId: string, checkpoint = true) {
   const recording: BrowserDemonstrationDraft = { id: `recording-${browserId}`, browserId, navigationId: 'nav-a', url: 'https://generic.invalid/form',
@@ -128,6 +128,8 @@ describe('trusted Continue event facts in the existing asset run', () => {
     const continued = await f.assets.run({ ...tuple(f.run), assetId: f.saved.id, runId: f.run.id, parameters: {} }, f.host.value)
     expect(continued.status).toBe('completed')
     expect(continued.operationIds).toEqual(['operation-1'])
+    expect(continued.warning).toContain('Trusted checkpoint confirmation is unavailable')
+    expect((await f.assets.state('browser-a')).runs).toEqual([continued])
     expect(f.host.runScript).toHaveBeenCalledTimes(1)
     expect(await f.assets.readExactFact(tuple(f.run), 'checkpoint-a')).toMatchObject({ status: 'unavailable' })
   })
@@ -202,10 +204,66 @@ describe('trusted Continue event facts in the existing asset run', () => {
     const completed = await f.assets.run({ browserId: f.run.browserId, assetId: f.run.assetId, version: f.run.version, runId: f.run.id, parameters: {} }, f.host.value)
     expect(completed.status).toBe('completed')
     expect(completed.humanCheckpoints).toEqual([])
+    expect(completed.warning).toContain('Trusted checkpoint confirmation is unavailable')
     expect(await f.assets.readExactFact(tuple(f.run), 'checkpoint-a')).toMatchObject({ status: 'unavailable' })
     const restored = clocked(new BrowserTaskAssetFileStore(path))
     expect(await restored.readExactFact(tuple(f.run), 'checkpoint-a')).toMatchObject({ status: 'unavailable' })
     expect(await restored.recordHumanCheckpoint(tuple(f.run), 'checkpoint-a', pending(f.run))).toMatchObject({ saved: false, fact: null })
     expect(JSON.parse(await readFile(path, 'utf8')).runs[0].humanCheckpoints).toEqual([])
+  })
+
+  it('keeps the local unavailable notice in run return, state and ordinary file restart after failed optional save', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'amux-human-notice-')); roots.push(directory)
+    const path = join(directory, 'assets.json'), file = new BrowserTaskAssetFileStore(path)
+    let failFact = false
+    const store: BrowserTaskAssetStore = { load: () => file.load(), save: async document => {
+      if (failFact) throw new Error('Private failure text is not a service notice')
+      await file.save(document)
+    } }
+    const f = await waiting(store)
+    failFact = true
+    expect(await f.assets.recordHumanCheckpoint(tuple(f.run), 'checkpoint-a', pending(f.run))).toMatchObject({ saved: false, fact: null })
+    failFact = false; f.host.returnControl('browser-a')
+    const completed = await f.assets.run({ browserId: f.run.browserId, assetId: f.run.assetId, version: f.run.version,
+      runId: f.run.id, parameters: {} }, f.host.value)
+    expect(completed).toMatchObject({ status: 'completed', nextStep: 2, operationIds: ['operation-1'], humanCheckpoints: [] })
+    expect(completed.warning).toContain('Trusted checkpoint confirmation is unavailable')
+    expect(completed.warning).not.toContain('Private failure')
+    expect((await f.assets.state('browser-a')).runs).toEqual([completed])
+    const restored = clocked(new BrowserTaskAssetFileStore(path), 'restored-owner')
+    expect((await restored.state('browser-a')).runs).toEqual([completed])
+    expect(await restored.readExactFact(tuple(f.run), 'checkpoint-a')).toMatchObject({ status: 'unavailable' })
+    expect(f.host.runScript).toHaveBeenCalledTimes(1)
+    const other = await asset(restored, 'browser-b', false), h = host()
+    const healthy = await restored.run({ assetId: other.id, browserId: 'browser-b', version: 1, parameters: {} }, h.value)
+    expect((await restored.state('browser-b')).runs).toEqual([healthy])
+    expect(healthy.warning).toBeUndefined()
+    expect(healthy.operationIds).toEqual(['operation-1'])
+    expect(JSON.parse(await readFile(path, 'utf8')).runs[0].warning).toBeUndefined()
+  })
+
+  it('retains earlier missing facts beside a later human checkpoint, preserving its control notice', async () => {
+    const store = new MemoryStore(), f = await waiting(store)
+    // A new immutable version has two separate checkpoints; its actual run never borrows the older cursor.
+    const edited = await f.assets.edit(f.saved.id, f.saved.revision, { ...f.saved.draft,
+      steps: [f.saved.draft.steps[0]!, { ...f.saved.draft.steps[0]!, id: 'checkpoint-b' }, f.saved.draft.steps[1]!] })
+    const saved = await f.assets.saveVersion(edited.id, edited.revision), h = host()
+    const first = await f.assets.run({ assetId: saved.id, browserId: 'browser-a', version: 2, parameters: {} }, h.value)
+    h.returnControl('browser-a')
+    const second = await f.assets.run({ assetId: saved.id, browserId: 'browser-a', version: 2, runId: first.id, parameters: {} }, h.value)
+    expect(second).toMatchObject({ status: 'waiting-human', nextStep: 2, pendingCheckpointId: 'checkpoint-b', humanCheckpoints: [] })
+    expect(second.warning).toContain('Human checkpoint reached')
+    expect(second.warning).toContain('Trusted checkpoint confirmation is unavailable')
+    expect((await f.assets.state('browser-a')).runs.find(run => run.id === second.id)).toEqual(second)
+    expect(await f.assets.readExactFact(tuple(second), 'checkpoint-a')).toMatchObject({ status: 'unavailable' })
+    expect(await f.assets.readExactFact(tuple(second), 'checkpoint-b')).toEqual({ status: 'not-recorded' })
+    const recorded = await f.assets.recordHumanCheckpoint(tuple(second), 'checkpoint-b', pending(second))
+    expect(recorded.saved).toBe(true)
+    expect((await f.assets.state('browser-a')).runs.find(run => run.id === second.id)!.warning).toContain('Trusted checkpoint confirmation is unavailable')
+    h.returnControl('browser-a')
+    const finished = await f.assets.run({ assetId: saved.id, browserId: 'browser-a', version: 2, runId: first.id, parameters: {} }, h.value)
+    expect(finished.humanCheckpoints).toEqual([recorded.fact])
+    expect(finished.warning).toContain('Trusted checkpoint confirmation is unavailable')
+    expect(await clocked(store).readExactFact(tuple(finished), 'checkpoint-b')).toEqual({ status: 'available', fact: recorded.fact })
   })
 })
