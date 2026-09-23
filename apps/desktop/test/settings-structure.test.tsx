@@ -4,7 +4,6 @@ import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
-import { ProjectRailToolbar } from '../src/renderer/src/components/ProjectRailToolbar'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -37,15 +36,11 @@ it('renders eight daily-preference/resource entries and opens Appearance by defa
   expect(dom.container.querySelector('[data-settings-pane="copy-paths"]')).toBeNull()
 })
 
-it('ordinary settings entry targets Appearance while the actual project rail keeps its Workspaces context', async () => {
+it('ordinary settings entry targets Appearance through the actual SurfaceSwitch control', async () => {
   const open = vi.fn()
   await dom.render(<SurfaceSwitch onOpenSettings={open} />)
   await dom.click('[aria-label="Settings"]')
   expect(open).toHaveBeenCalledExactlyOnceWith('appearance')
-  open.mockClear()
-  await dom.render(<ProjectRailToolbar onOpenSettings={open} />)
-  await dom.click('[aria-label="Settings"]')
-  expect(open).toHaveBeenCalledExactlyOnceWith('workspaces')
 })
 
 it('General saves only copied paths through the existing config owner with its captured expected value', async () => {

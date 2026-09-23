@@ -152,11 +152,13 @@
 }
 @media (max-width: 560px) {
   .window-status-bar { padding: 0 var(--sp-2); gap: var(--sp-1); }
-  .window-status-bar__right { gap: var(--sp-1); }
-  .window-status-bar__utilities { padding-left: var(--sp-1); }
-  .window-status-bar__surface-switch { padding-left: 40px; }
-  .surface-navigation__surfaces { gap: 1px; }
-  .surface-navigation__slot { width: 26px; height: 24px; flex-basis: 26px; }
+  .window-status-bar__right { gap: 0; }
+  .window-status-bar__utilities { padding-left: 0; gap: 0; }
+  .window-status-bar__surface-switch { padding-left: 38px; }
+  .surface-navigation__surfaces { gap: 0; }
+  .surface-navigation__settings { margin-left: 0; }
+  .surface-navigation__slot { width: 24px; height: 24px; flex-basis: 24px; }
+  .window-status-bar .surface-navigation__focus { gap: 3px; padding: 0 var(--sp-2); }
   .surface-navigation__slot--launcher { width: 34px; height: 34px; flex-basis: 34px; }
   .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher,
   .surface-navigation__slot--launcher .pmo-teams-topic-compact-launcher__button { width: 34px; height: 34px; }

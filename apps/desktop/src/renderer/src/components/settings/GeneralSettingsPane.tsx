@@ -51,7 +51,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
         <dl className="settings-footnote">
           <div>
             <dt>Local data</dt>
-            <dd>Bring your projects and agent tools together in one place. AgentMux keeps your workspace configuration on this machine.</dd>
+            <dd>AgentMux keeps your workspace configuration on this machine.</dd>
           </div>
           <div>
             <dt>Session recovery</dt>

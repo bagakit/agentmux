@@ -162,6 +162,8 @@ it('keeps the real App footer interactive, returns through its surface controls 
   const footer = dom.container.querySelector<HTMLElement>('.window-status-bar')!
   expect(settings).not.toBeNull()
   expect(settings.querySelector('.settings-content__header h2')!.textContent).toBe('Appearance')
+  await section('Workspaces')
+  expect(settings.querySelector('.settings-content__header h2')!.textContent).toBe('Workspaces')
   expect(footer.closest('[inert]')).toBeNull()
   expect(footer.closest('[aria-hidden="true"]')).toBeNull()
   expect(dom.container.querySelector<HTMLElement>('.app-shell__workspace')!.inert).toBe(true)
