@@ -65,9 +65,11 @@ export function GlobalFocusSurface() {
   }, [])
   const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs), [laneContexts, config, facts, tabs])
-  const search = query.trim().toLocaleLowerCase()
+  const trimmedQuery = query.trim()
+  const search = trimmedQuery.toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
-  const matching = executionRows.filter(row => (project === 'all' || laneByContext.get(row.id)?.projectId === project) && `${row.name} ${row.detail} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search))
+  const matching = executionRows.filter(row => (project === 'all' || laneByContext.get(row.id)?.projectId === project) &&
+    ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
   const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
   const selected = executionRows.find(row => row.id === selectedId)
   const filteredIds = new Set(filtered.map(row => row.id))
@@ -99,7 +101,7 @@ export function GlobalFocusSurface() {
     <FocusToolbar selectedId={selectedId} selected={selected} tab={selectedTab} onReview={() => setRequestId(selectedId)} onCloseWorkspace={closeWorkspace}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label className="global-board-select"><select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All projects</option>{[...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()].map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
           <label className="global-board-select"><select aria-label="Focus state filter" value={bucketFilter} onChange={event => setBucketFilter(event.target.value as FocusBucket | 'all')}><option value="all">All states</option>{(Object.keys(bucketMeta) as FocusBucket[]).map(bucket => <option key={bucket} value={bucket}>{bucketMeta[bucket].label} · {matching.filter(row => row.bucket === bucket).length}</option>)}</select></label>
         </div>
