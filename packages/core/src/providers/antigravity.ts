@@ -18,7 +18,9 @@ export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
   eventNameSource: { kind: 'flag' },
   rules: [
     { events: ['PreToolUse'], toolNames: ['ask_question', 'ask_permission', 'request_user_input', 'askuserquestion'], state: 'waiting' },
-    { events: ['Stop'], state: 'done' },
+    // Stop runs before Hook decisions: decision=continue can re-enter the execution loop.
+    // Neither terminationReason nor fullyIdle proves a final successful main turn.
+    { events: ['Stop'], state: 'unknown', lifecycleEvent: null },
     // `UserPromptSubmit` 必须在这条 working 规则里，而它此前**漏了**——上面的安装清单
     // （ANTIGRAVITY_HOOK_EVENTS）装了它，rules 却没有任何一条提到它，于是它到达时 eventState 判
     // `unknown`。同族的 claude/codex/grok/gemini/cursor/copilot/kimi/droid 全都把它归 working，
@@ -58,7 +60,7 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
 }
 
 export function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
+  const provider = defineAgentProvider({
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
     planManagedHooks: () => createAntigravityManagedHookPlan(),
     catalog: catalog({
@@ -79,4 +81,22 @@ export function createAntigravityProvider(defineAgentProvider: ProviderFactory):
       '--conversation', sessionId, ...args, ...(prompt ? ['--prompt-interactive', prompt] : [])
     ]
   })
+
+  return {
+    ...provider,
+    normalizeHook(envelope, context) {
+      // First-party Pre/PostToolUse carries toolCall.name/args, not flat tool fields.
+      // Adapt only those protocol events; the original nested payload remains available.
+      const call = envelope.payload?.toolCall
+      if ((envelope.eventName !== 'PreToolUse' && envelope.eventName !== 'PostToolUse') ||
+          !call || typeof call !== 'object' || Array.isArray(call)) {
+        return provider.normalizeHook(envelope, context)
+      }
+      const toolCall = call as Record<string, unknown>
+      return provider.normalizeHook({
+        ...envelope,
+        payload: { ...envelope.payload, tool_name: toolCall.name, tool_input: toolCall.args }
+      }, context)
+    }
+  }
 }
