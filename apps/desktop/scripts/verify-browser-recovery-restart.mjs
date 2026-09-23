@@ -37,6 +37,10 @@ const overlayCase = process.argv.includes('--case-overlay')
 const taskAssetsCase = process.argv.includes('--case-task-assets')
 const browserToolsCase = process.argv.includes('--case-browser-tools')
 const structuredCase = process.argv.includes('--case-structured-output')
+const outcomeCase = process.argv.includes('--case-outcome')
+const observeOverlayMenuReadiness = process.env.AGENTMUX_OBSERVE_OVERLAY_MENU_READINESS === '1'
+assert.ok(!observeOverlayMenuReadiness || overlayCase, 'Menu readiness observation belongs to the private overlay recovery case')
+if(observeOverlayMenuReadiness)receipt.diagnosticMode='explicit-overlay-menu-readiness-observation'
 const observeRestartLifecycle = process.env.AGENTMUX_OBSERVE_RESTART_LIFECYCLE === '1'
 assert.ok(!observeRestartLifecycle || overlayCase, 'Restart lifecycle observation belongs to the private overlay recovery case')
 const observeStageDelivery = process.argv.includes('--observe-stage-delivery')
@@ -46,7 +50,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase,outcomeCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -56,6 +60,7 @@ if(overlayCase)receipt.case='overlay'
 if(taskAssetsCase)receipt.case='task-assets'
 if(browserToolsCase)receipt.case='browser-tools'
 if(structuredCase)receipt.case='structured-output'
+if(outcomeCase)receipt.case='outcome'
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
 const captureDirectory = await mkdtemp(join(repositoryRoot,'.tmp/browser-operation-visual-'))
 receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-performed', frames: [],
@@ -157,7 +162,7 @@ async function identity() {
       'apps/desktop/src/main/config-owner.ts','apps/desktop/src/main/config-store.ts',
       'apps/desktop/scripts/browser-tools-probe-scenario.mjs','apps/desktop/scripts/verify-browser-tools.mjs',
       'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : []),
-    ...(structuredCase ? ['apps/desktop/src/main/browser-structured-output.ts','apps/desktop/src/main/browser-structured-target.ts',
+    ...(structuredCase || outcomeCase ? ['apps/desktop/src/main/browser-structured-output.ts','apps/desktop/src/main/browser-structured-target.ts',
       'apps/desktop/src/main/browser-page-dispatch.ts','apps/desktop/src/main/browser-page-snapshot.ts',
       'apps/desktop/src/main/browser-snapshot-query.ts','apps/desktop/src/main/browser-frame-documents.ts',
       'apps/desktop/src/main/browser-cdp-session.ts','apps/desktop/src/main/browser-result-artifact.ts',
@@ -165,7 +170,12 @@ async function identity() {
       'apps/desktop/src/shared/browser-step-evidence.ts','apps/desktop/src/renderer/src/components/BrowserStructuredFields.tsx',
       'apps/desktop/src/renderer/src/styles/browser-structured-fields.css','packages/core/src/browser-page-capability.ts',
       'packages/core/src/control.ts','packages/core/src/control-host.ts','packages/core/dist/browser-page-capability.js',
-      'apps/desktop/scripts/browser-structured-probe-scenario.mjs','apps/desktop/scripts/verify-browser-structured-output.mjs'] : [])]
+      'apps/desktop/scripts/browser-structured-probe-scenario.mjs','apps/desktop/scripts/verify-browser-structured-output.mjs'] : []),
+    ...(outcomeCase ? ['packages/core/src/browser-completion-facts.ts','packages/core/dist/browser-completion-facts.js',
+      'apps/desktop/src/main/browser-completion-control.ts','apps/desktop/src/main/browser-outcome-criteria.ts',
+      'apps/desktop/src/main/browser-outcome-journal.ts','apps/desktop/src/shared/browser-outcome-criteria.ts',
+      'apps/desktop/src/renderer/src/components/BrowserOutcomeCriteria.tsx','apps/desktop/scripts/browser-outcome-probe-scenario.mjs',
+      'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : [])]
   const values = await Promise.all(files.map(async name => { const bytes = await readFile(join(repositoryRoot, name)); assert.ok(bytes.length > 0, name); return [name, digest(bytes)] }))
   const electron = require('electron'); values.push([electron, digest(await readFile(electron))])
   return Object.fromEntries(values)
@@ -705,7 +715,9 @@ try {
   const taskAssets = taskAssetsCase ? await import('./browser-task-assets-probe-scenario.mjs') : null
   const browserTools = browserToolsCase ? await import('./browser-tools-probe-scenario.mjs') : null
   const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
+  const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
   const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
+    requestControl:fields=>requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),...fields},join(runtimeDirectory,'control.sock')),
     diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
     capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,repositoryRoot})
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
@@ -723,7 +735,7 @@ try {
       response.end(downloadPayload);return
     }
     response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1>'+
-      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':uploadCase?'<input type="file" aria-label="Single file"><input type="file" multiple aria-label="Multiple files"><iframe title="Upload frame" src="/upload-frame"></iframe>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
+      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':uploadCase?'<input type="file" aria-label="Single file"><input type="file" multiple aria-label="Multiple files"><iframe title="Upload frame" src="/upload-frame"></iframe>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):outcome?outcome.outcomeFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
   })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
@@ -743,6 +755,7 @@ try {
   else if(uploadCase)await reviewUploads(first,initial.surface.browserId,urls[0])
   else if(browserTools)await browserTools.reviewBrowserTools(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(structured)await structured.reviewStructuredOutput(scenarioContext(first,initial.surface.browserId,urls[0]))
+  else if(outcome)await outcome.reviewBrowserOutcome(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(taskAssets)await taskAssets.reviewTaskAssets(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(demonstration)await demonstration.reviewDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(overlay)await overlay.reviewOverlay(scenarioContext(first,initial.surface.browserId,urls[0]))
@@ -772,6 +785,7 @@ try {
   if(taskAssets)await taskAssets.recoverTaskAssets(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(browserTools)await browserTools.recoverBrowserTools(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(structured)await structured.recoverStructuredOutput(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(outcome)await outcome.recoverBrowserOutcome(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(overlay)await overlay.recoverOverlay(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   receipt.secondUi={...after,pages:restoredPages,ensure};receipt.secondExit=await normalQuit(second)
   receipt.identityAfter=await identity();assert.deepEqual(receipt.identityAfter,receipt.identityBefore)
@@ -794,6 +808,6 @@ try {
 }
 receipt.passed=!failure&&receipt.completeGate;receipt.failure=failure??null
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
-await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
+await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
 process.stdout.write(JSON.stringify({passed:receipt.passed,completeGate:receipt.completeGate,failure:receipt.failure,cleanup:receipt.cleanup})+'\n')
 process.exitCode=receipt.passed?0:1
