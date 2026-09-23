@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { CSSProperties } from 'react'
 import { Folder, GitBranch } from 'lucide-react'
 import { api } from '../lib/api'
-import { projectIconHue, projectMonogram } from '../lib/project-monogram'
+import { projectMonogram } from '../lib/project-monogram'
 
 type Appearance = { kind: 'repository' | 'directory'; icon: string | null }
 
@@ -27,8 +26,9 @@ export function ProjectIcon({ workspaceId, name }: { workspaceId: string; name: 
   const monogram = appearance && !appearance.icon ? projectMonogram(name) : ''
   return <span
     className="project-rail-row__icon"
+    data-space-icon-source="automatic"
     title={appearance ? (appearance.kind === 'repository' ? 'Git project' : 'Project folder') : undefined}
-    {...(monogram ? { 'data-monogram': '', style: { '--project-hue': projectIconHue(workspaceId) } as CSSProperties } : {})}
+    {...(monogram ? { 'data-monogram': '' } : {})}
   >
     {appearance === null ? null
       : appearance.icon ? <img src={appearance.icon} alt="Project icon" onError={() => setAppearance({ ...appearance, icon: null })} />

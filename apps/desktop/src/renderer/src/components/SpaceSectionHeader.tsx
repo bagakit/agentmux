@@ -13,7 +13,7 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
   </button>
 }
 
-/** Categories share controls; they do not add a directory level to their members. */
+/** Categories share controls; member indentation expresses category ownership, not a directory. */
 export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen,
   createLabel, onCreate, activity, selected = false }: {
   label: string; count: number; icon: ReactNode; expanded: boolean; filtering: boolean;

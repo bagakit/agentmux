@@ -32,6 +32,7 @@ const fixture = vi.hoisted(() => ({
     projectRailOpen: true,
     collapsedProjectGroups: {} as Record<string, true>,
     pinnedItems: {} as Record<string, string[]>,
+    spaceObjectIcons: {},
     toolsOpen: false,
     selectWorkspace: vi.fn(async () => {}),
     openScratchTopic: vi.fn(),

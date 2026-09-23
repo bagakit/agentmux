@@ -1,11 +1,14 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { createHash } = require('node:crypto')
 const { app, BrowserWindow } = require('electron')
-const [html, privateRoot, mode] = process.argv.slice(2)
+const [html, privateRoot, mode, generationJson] = process.argv.slice(2)
+const generation = JSON.parse(generationJson)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { passed: false, pid: process.pid, boundary: 'Actual WorkspaceSidebar, SpaceTopicsTree, store disclosure/density and CSS; preview API/navigation data; private Electron profile. No user App, Run or keyboard operations.' }
+const result = { passed: false, pid: process.pid, generation, operations: [], images: [], matrix: [], boundary: 'Actual WorkspaceSidebar, SpaceTopicsTree, store disclosure/density and CSS; controlled preview API resource facts; native mouse and keyboard; private Electron profile. No user App or real Run. Legacy restore uses fixture state injection.' }
+result.processGeneration=`${generation.id}:${mode ?? 'seed'}:${process.pid}`
 let win
 let original
 app.whenReady().then(async () => {
@@ -18,10 +21,15 @@ app.whenReady().then(async () => {
     } while (Date.now() < deadline)
     throw new Error(`Space tree did not settle: ${expression}`)
   }
-  const capture = async name => {
+  const settle = async () => {
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     await read('Promise.allSettled(document.getAnimations().filter(animation => Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation => animation.finished))')
-    fs.writeFileSync(path.join(privateRoot, name), (await win.webContents.capturePage()).toPNG())
+  }
+  const capture = async name => {
+    await settle()
+    const bytes = (await win.webContents.capturePage()).toPNG()
+    fs.writeFileSync(path.join(privateRoot, name), bytes)
+    result.images.push({file:name,sha256:createHash('sha256').update(bytes).digest('hex'),scene:name.slice(0,-4),phase:mode ?? 'seed',pid:process.pid,generation:generation.id})
   }
   const aligned = (a, b, message) => assert.ok(Math.abs(a - b) < .5, `${message}: ${a} vs ${b}`)
   const checkRestraint = async expectedGap => {
@@ -58,8 +66,12 @@ app.whenReady().then(async () => {
     }
     aligned(g.standalone.icon.x, g.mote.icon.x, 'root Folder and Mote icons share the natural edge')
     aligned(g.group.icon.x, g.mote.icon.x, 'path group occupies the existing type slot')
-    assert.ok(g.topic.title.x <= 8, 'Topic leaves do not reserve any empty type/disclosure slot')
-    assert.equal(g.topic.icon, null)
+    for (const [member, category] of [[g.mote,g.sections.motes],[g.topic,g.sections.topics],[g.standalone,g.sections.folders]]) {
+      assert.ok(category.icon?.width > 0 && category.title?.width > 0 && member.icon?.width > 0 && member.title?.width > 0,
+        'Actual category and member identities are nonempty')
+      aligned(member.icon.x-category.icon.x,12,'category member identity adds exactly one level')
+      assert.ok(member.title.x-category.title.x >= 11.5,'category member title has a meaningful level')
+    }
     assert.ok(g.indent >= 12, 'every density retains meaningful nesting')
     aligned(g.alpha.icon.x - g.group.icon.x, g.indent, 'group adds exactly one level')
     aligned(g.core.icon.x - g.alpha.icon.x, g.indent, 'nested Folder adds exactly one level')
@@ -75,9 +87,45 @@ app.whenReady().then(async () => {
     assert.ok(g.standalone.title.right <= g.standalone.activity.x, 'status cluster does not overlap the Folder title')
     assert.deepEqual(g.original, original)
   }
+  const checkIdentities = async () => {
+    const facts = await read('window.spaceTreeIdentityFacts()')
+    assert.ok(facts.icons.length > 0 && facts.pins.length >= 4 && facts.folders.length >= 4)
+    const category = facts.sections.find(section=>section.label==='Folders')
+    assert.ok(category?.glyph && facts.groupGlyphs.length > 0)
+    for(const glyph of facts.groupGlyphs) assert.ok(glyph && glyph!==category.glyph,'automatic path group is distinct from Folders category')
+    const monograms=facts.icons.filter(icon=>icon.monogram)
+    assert.ok(monograms.length > 0,'real automatic monograms are mounted')
+    for(const icon of monograms) {
+      assert.equal(icon.color,facts.theme.text3,'Space automatic monograms are neutral')
+      assert.equal(icon.background,facts.theme.surface2,'automatic monograms use the neutral theme surface')
+    }
+    assert.ok(facts.icons.some(icon=>icon.image),'detected automatic asset has a real consumer')
+    for(const pin of facts.pins) {
+      assert.ok(pin.box.width>=10&&pin.box.width<=11.1&&pin.box.height>=10&&pin.box.height<=11.1,'actual pin SVG stays small')
+      assert.ok(pin.target.width>pin.box.width&&pin.target.height>pin.box.height,'pin retains a larger target')
+    }
+    const pinned=facts.folders.filter(folder=>folder.ownPins.length>0)
+    assert.ok(pinned.length>=2,'parent Folder and nested Folder each have self-owned pins')
+    for(const folder of facts.folders) {
+      assert.deepEqual(folder.nestedFolders,[],'Folder background excludes real nested Folder descendants')
+      assert.equal(folder.pinned,folder.ownPins.length>0)
+      if(!folder.pinned) { assert.equal(folder.fill,'rgba(0, 0, 0, 0)'); continue }
+      assert.notEqual(folder.fill,'rgba(0, 0, 0, 0)','continuous pinned owner has a real background')
+      assert.ok(folder.row.width>0&&folder.box.width>0)
+      for(const pin of folder.ownPins) {
+        assert.equal(pin.owner,folder.id)
+        assert.ok(pin.box.y>=folder.box.y&&pin.box.bottom<=folder.box.bottom+.5,'self pin is inside Folder background')
+        assert.ok(pin.box.x>=folder.box.x&&pin.box.right<=folder.box.right+.5)
+        aligned(pin.icon.x-folder.icon.x,12,'branch pin identity adds one real child level')
+      }
+      for(const other of facts.folders.filter(other=>other.id!==folder.id))
+        assert.ok(other.box.y>=folder.box.bottom-.5||other.box.bottom<=folder.box.y+.5,'background does not swallow sibling or nested Folder')
+    }
+    return facts
+  }
   try {
     win = new BrowserWindow({ width: 260, height: 760, useContentSize: true, show: false,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } })
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling:false } })
     await win.loadFile(html)
     await until(mode === 'restore' ? 'window.spaceTreeRetained && window.spaceTreeGeometry?.().topicCount === 0' : 'window.spaceTreeGeometry?.().topicCount === 13')
     original = await read('window.spaceTreeBaseline')
@@ -92,6 +140,8 @@ app.whenReady().then(async () => {
       assert.deepEqual((await read('window.spaceTreeGeometry()')).original, original)
       await capture('restart.png')
       result.restart = { retained, distinctProcess: true }
+      result.workface={before:original,after:(await read('window.spaceTreeGeometry()')).original,preserved:true}
+      result.operations.push({input:'legacy-fixture-state-readback',productionInitialize:false})
       result.passed = true
       return
     }
@@ -99,6 +149,35 @@ app.whenReady().then(async () => {
     assert.equal(original.sessions.length, 30)
     assert.equal(Object.keys(original.tabs).length, 1)
     assert.ok(original.layouts.standalone)
+    if(mode==='baseline') {
+      result.baseline={captureOnly:true,newContracts:'not-asserted'}
+      win.webContents.debugger.attach('1.3')
+      const input=(method,params)=>win.webContents.debugger.sendCommand(method,params)
+      for(const tier of ['default','compact','dense']) {
+        while((await read('document.querySelector(".project-rail").dataset.railDensity ?? "default"'))!==tier) {
+          const point=await read('(() => {const node=document.querySelector(".space-tree-search > button:last-child");const r=node.getBoundingClientRect();if(!r.width||!r.height)throw new Error("Missing density control");return {x:r.x+r.width/2,y:r.y+r.height/2}})()')
+          for(const type of ['mousePressed','mouseReleased']) await input('Input.dispatchMouseEvent',{type,button:'left',clickCount:1,...point})
+          result.operations.push({input:'native-pointer',selector:'.space-tree-search > button:last-child'})
+        }
+        for(const width of [180,240]) for(const appearance of ['dark','light']) {
+          win.setContentSize(width,1040)
+          await until(`innerWidth===${width}&&innerHeight===1040`)
+          await read(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)}`)
+          await input('Input.dispatchMouseEvent',{type:'mouseMoved',x:1,y:1})
+          const geometry=await read('window.spaceTreeGeometry()')
+          assert.ok(geometry.mote?.box.width>0&&geometry.topic?.title.width>0&&geometry.alpha?.title.width>0,'Historical scene is mounted and nonempty')
+          assert.equal(geometry.topicCount,13)
+          assert.deepEqual(geometry.original,original)
+          const file=`matrix-${tier}-${width}-${appearance}.png`
+          await capture(file)
+          result.matrix.push({density:tier,width,appearance,geometry,file,pid:process.pid,generation:generation.id})
+          result.operations.push({input:'native-density-and-viewport',density:tier,width,appearance})
+        }
+      }
+      result.workface={before:original,after:(await read('window.spaceTreeGeometry()')).original,preserved:true}
+      result.passed=true
+      return
+    }
     await capture('default.png')
     const g = await read('window.spaceTreeGeometry()')
     result.default = g
@@ -126,8 +205,13 @@ app.whenReady().then(async () => {
     const click = async selector => {
       const r = await read(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({block:'nearest'}); const r = node.getBoundingClientRect(); return {x:r.x + r.width/2, y:r.y + r.height/2} })()`)
       for (const type of ['mousePressed', 'mouseReleased']) await input('Input.dispatchMouseEvent', { type, button: 'left', clickCount: 1, ...r })
+      result.operations.push({input:'native-pointer',selector})
     }
     const originalDisclosure = await read('window.spaceTreeDisclosure()')
+    await click('[data-space-pin-owner][aria-label="review/long-branch-name"]')
+    result.pinNavigation=await read('window.spaceTreeOpenCalls')
+    assert.deepEqual(result.pinNavigation,[{kind:'folder',id:'alpha-review'}],'actual branch pin reaches its registered worktree')
+    await read('window.spaceTreeOpenCalls.length=0')
     for (const label of ['Create Mote', 'Create Topic', 'Open Folder']) await click(`[aria-label="${label}"]`)
     result.creationCalls = await read('window.spaceTreeOpenCalls')
     assert.deepEqual(result.creationCalls, [{kind:'mote'}, {kind:'topic'}, {kind:'open-folder'}])
@@ -143,6 +227,31 @@ app.whenReady().then(async () => {
       assert.ok(result[tier].mote.box.height < (tier === 'compact' ? result.default.mote.box.height : result.compact.mote.box.height))
       await capture(`${tier}.png`)
     }
+    for(const tier of ['default','compact','dense']) {
+      while((await read('document.querySelector(".project-rail").dataset.railDensity ?? "default"'))!==tier)
+        await click('.space-tree-search > button:last-child')
+      for(const width of [180,240]) for(const appearance of ['dark','light']) {
+        win.setContentSize(width,1040)
+        await until(`innerWidth===${width} && innerHeight===1040`)
+        await read(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)}`)
+        await input('Input.dispatchMouseEvent',{type:'mouseMoved',x:1,y:1})
+        await read('window.spaceTreeIdentityFacts()')
+        await settle()
+        await new Promise(resolve=>setTimeout(resolve,160))
+        const geometry=await read('window.spaceTreeGeometry()')
+        check(geometry)
+        const facts=await checkIdentities()
+        const restraint=await checkRestraint(tier==='default'?12:tier==='compact'?8:6)
+        const file=`matrix-${tier}-${width}-${appearance}.png`
+        await capture(file)
+        result.matrix.push({density:tier,width,appearance,geometry,facts,restraint,file,pid:process.pid,generation:generation.id})
+        result.operations.push({input:'native-density-and-viewport',density:tier,width,appearance})
+      }
+    }
+    assert.equal(result.matrix.length,12)
+    await read('document.documentElement.dataset.appearance="dark"')
+    win.setContentSize(260,760)
+    await until('innerWidth===260&&innerHeight===760')
     await click('[aria-label="Collapse Topics"]')
     await until('window.spaceTreeGeometry().topicCount === 0')
     assert.equal((await read('window.spaceTreeGeometry()')).topicExpanded, 'false')
@@ -186,6 +295,7 @@ app.whenReady().then(async () => {
     const press = async key => {
       const codes = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, Escape: 27, Enter: 13, Tab: 9 }
       for (const type of ['keyDown', 'keyUp']) await input('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: codes[key], ...(key === 'Enter' && type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
+      result.operations.push({input:'native-keyboard',key})
     }
     const disclosureHover = await read('(() => { const node = document.querySelector(".space-topics-heading [data-space-disclosure]"); node.scrollIntoView({block:"nearest"}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
     await input('Input.dispatchMouseEvent', { type:'mouseMoved', ...disclosureHover })
@@ -213,6 +323,12 @@ app.whenReady().then(async () => {
     await input('Input.insertText', { text: 'core' })
     await until('!!document.querySelector(\'[data-workspace-id="core"]\') && !document.querySelector(\'[data-workspace-id="beta"]\')')
     result.found = await read('window.spaceTreeGeometry()')
+    result.foundIdentityFacts=await read('window.spaceTreeIdentityFacts()')
+    assert.ok(result.foundIdentityFacts.folders.length>0)
+    for(const folder of result.foundIdentityFacts.folders) {
+      assert.equal(folder.pinned,false,'search reveals Folder ancestors without unrelated pin-background')
+      assert.deepEqual(folder.ownPins,[])
+    }
     assert.equal(result.found.topicCount, 0)
     assert.ok(result.found.alpha && result.found.core, 'search reveals the original collapsed ancestor and its matching child')
     assert.deepEqual(await read('window.spaceTreeDisclosure()'), savedDisclosure)
@@ -261,7 +377,7 @@ app.whenReady().then(async () => {
         selectedWeight: getComputedStyle(active.querySelector('strong')).fontWeight,
         topicGlyphs: document.querySelectorAll('.space-topic-row .project-rail-row__icon svg').length }
     })()`)
-    assert.equal(result.visual.topicGlyphs, 0, 'identical Topic glyphs do not consume attention')
+    assert.ok(await read('document.querySelectorAll(".space-topic-row [data-space-icon-source=automatic]").length > 0'),'Topic identity has a nonempty actual consumer')
     assert.equal(result.visual.hovered, true, 'the pointer actually hovers a visible Topic row')
     assert.ok(Number(result.visual.selectedWeight) > Number(result.visual.ordinaryWeight))
     assert.notEqual(result.visual.selectedFill, result.visual.hoverFill, 'selected and hover surfaces remain distinguishable')
@@ -297,6 +413,7 @@ app.whenReady().then(async () => {
     assert.equal(result.lightStable.moteColor, 'rgb(70, 85, 75)')
     assert.equal(result.lightStable.selectedColor, 'rgb(23, 32, 26)')
     assert.equal(result.lightStable.selectedFill, 'rgb(215, 223, 218)')
+    result.workface={before:original,after:(await read('window.spaceTreeGeometry()')).original,preserved:true}
     result.passed = true
   } catch (error) { result.failure = { message: error.message, stack: error.stack } }
   finally {

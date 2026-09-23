@@ -1,7 +1,8 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, NotebookText, Pencil, Pin, PinOff, RotateCcw, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Copy, Crosshair, NotebookText, Pencil, Pin, PinOff, RotateCcw, Shapes, ToggleLeft, ToggleRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
 
 /**
  * Topic 行的右键菜单。
@@ -12,7 +13,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
  * pin/unpin 走同一条理由收进这里：行上再多一个常驻图标按钮会跟标题抢宽度，也会撞
  * surface-tool-dock 那条「行上只留一个常驻动作」的断言。已 pin 的**状态**在行内以一枚静息态
  * 小 Pin 标记表达（见 WorkspaceTopicsPanel 的 workspace-topic-entry__pin），这里提供切换它的**动作**。
- * 键盘可达：Radix ContextMenu 的 Trigger 挂在可聚焦的行上，Shift+F10 / 菜单键即唤出。
+ * 键盘可达：共用对象菜单的 Trigger 支持 Shift+F10 / 菜单键。
  *
  * 复用 `tab-context-menu` 那套基座——密度合同要求全部 Context Menu 共用一套，新开一套只会让
  * 两处的行高与内缩慢慢走偏。
@@ -27,6 +28,7 @@ export function TopicContextMenu({
   onEditWiki,
   onToggleWiki,
   onResetWiki,
+  onChangeIcon,
   wikiEnabled
 }: {
   children: ReactNode
@@ -38,17 +40,22 @@ export function TopicContextMenu({
   onEditWiki(): void
   onToggleWiki?: (() => void) | undefined
   onResetWiki?: (() => void) | undefined
+  onChangeIcon?: (() => void) | undefined
   wikiEnabled?: boolean | undefined
 }) {
+  const menu = useSpaceObjectMenu()
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+    <ContextMenu.Root onOpenChange={menu.onOpenChange}>
+      <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu topic-context-menu"
           collisionPadding={8}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={menu.onCloseAutoFocus}
         >
+          {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(onChangeIcon)}>
+            <Shapes size={14} /><span>Change icon…</span>
+          </ContextMenu.Item> : null}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onTogglePin}>
             {pinned ? <PinOff size={14} /> : <Pin size={14} />}
             <span>{pinned ? 'Unpin Topic' : 'Pin Topic'}</span>

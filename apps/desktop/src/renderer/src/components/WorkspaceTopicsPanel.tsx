@@ -5,7 +5,7 @@ import {
   Pin,
   Plus
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
@@ -47,6 +47,9 @@ import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { TopicPresence } from './TopicPresence'
 import type { TopicTabDetail } from './TopicPresence'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
+import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
+import { SpaceIconPicker } from './SpaceIconPicker'
 
 /**
  * 一个 selector 的返回值就是 `useSyncExternalStore` 的快照，React 用 `Object.is` 比较它。所以缺省值必须是
@@ -89,6 +92,10 @@ export function WorkspaceTopicsPanel({
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
+  const manualIcons = useAppStore(state => state.spaceObjectIcons)
+  const panel = useRef<HTMLElement>(null)
+  const iconReturnKey = useRef<string | null>(null)
   // The Topic list is authoritative and comes from the filesystem snapshot. Live Sessions are
   // matched onto it here for display; they never add or remove a Topic.
   // 拖拽要有一小段距离才启动，否则点一下打开 Topic 会被误判成拖动。键盘 sensor 提供等价路径。
@@ -321,7 +328,7 @@ export function WorkspaceTopicsPanel({
   }
 
   return (
-    <section className="surface-tool-summary workspace-topics-panel workspace-topics-panel--index">
+    <section ref={panel} className="surface-tool-summary workspace-topics-panel workspace-topics-panel--index">
       <SelectorListHeader
         className="workspace-topic-index-header"
         title="Topics"
@@ -375,6 +382,7 @@ export function WorkspaceTopicsPanel({
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
             const pinned = pinnedTopics.includes(topic.id)
+            const target = topicSpaceIconTarget(workspace, topic)
             return (
               <SortableTopicItem
                 topicId={topic.id}
@@ -388,6 +396,7 @@ export function WorkspaceTopicsPanel({
                 onEditWiki={() => void openFile(`${topic.directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)}
                 onToggleWiki={topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined}
                 onResetWiki={topic.wiki ? () => void resetTopicWiki(topic) : undefined}
+                onChangeIcon={() => { iconReturnKey.current = target.key; setIconTarget(target) }}
                 wikiEnabled={topic.wiki?.enabled}
               >
                 {editing ? (
@@ -415,6 +424,7 @@ export function WorkspaceTopicsPanel({
                   <div
                     className="workspace-topic-entry"
                     data-topic-id={topic.id}
+                    data-space-icon-target={target.key}
                     {...(isCurrent ? { 'data-current': 'true' } : {})}
                     role="button"
                     tabIndex={pending !== null ? -1 : 0}
@@ -427,10 +437,9 @@ export function WorkspaceTopicsPanel({
                         「行上只留一个常驻动作」的断言）——pin/unpin 这个**动作**收在右键菜单里，与改名
                         同一处。这里只画一个 aria-hidden 的状态记号，且只在 pinned 时占位，同 leading
                         spinner「只在有话说时才占用」的规矩。 */}
-                    {/* 行首不放 Topic 图标：一列全同的图标不携带信息，只在挤压标题宽度。
-                        这个位置只在真的有话说时才占用——正在打开时的那枚 spinner。 */}
                     <SelectorRow
-                      leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span> : undefined}
+                      leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
+                        : <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcons[target.key] ?? null} />}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
@@ -495,6 +504,9 @@ export function WorkspaceTopicsPanel({
       ) : null}
       {readError ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
+      <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() =>
+        [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
+          .find(node => node.dataset.spaceIconTarget === iconReturnKey.current) ?? null} />
     </section>
   )
 }
@@ -517,6 +529,7 @@ function SortableTopicItem({
   onEditWiki,
   onToggleWiki,
   onResetWiki,
+  onChangeIcon,
   wikiEnabled
 }: {
   topicId: string
@@ -530,6 +543,7 @@ function SortableTopicItem({
   onEditWiki(): void
   onToggleWiki?: (() => void) | undefined
   onResetWiki?: (() => void) | undefined
+  onChangeIcon(): void
   wikiEnabled?: boolean | undefined
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -545,6 +559,7 @@ function SortableTopicItem({
       onEditWiki={onEditWiki}
       onToggleWiki={onToggleWiki}
       onResetWiki={onResetWiki}
+      onChangeIcon={onChangeIcon}
       {...(wikiEnabled === undefined ? {} : { wikiEnabled })}
     >
       <div

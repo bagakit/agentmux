@@ -1,0 +1,15 @@
+.space-object-icon { flex-shrink: 0; }
+.space-icon-picker__overlay { position: fixed; inset: 0; z-index: var(--layer-dialog); background: var(--scrim-3); }
+.space-icon-picker { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 24px)); box-sizing: border-box; padding: var(--sp-5); display: grid; gap: var(--sp-4); background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: 0 30px 90px var(--scrim-3); }
+.space-icon-picker__title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 620; overflow-wrap: anywhere; }
+.space-icon-picker__description { margin: 0; font-size: var(--fs-meta); line-height: 1.5; }
+.space-icon-picker__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(32px, 1fr)); gap: var(--sp-2); }
+.space-icon-picker__choice { width: 100%; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: var(--sp-3); background: transparent; color: var(--text-2); border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
+.space-icon-picker__choice:hover { background: var(--surface-3); color: var(--text); }
+.space-icon-picker__choice[aria-pressed="true"], .space-icon-picker__automatic[aria-pressed="true"] { background: var(--surface-3); color: var(--text); border-color: var(--line); }
+.space-icon-picker__choice:focus-visible { outline: 2px solid color-mix(in srgb, var(--green) 55%, transparent); outline-offset: 2px; }
+.space-icon-picker__choice:disabled { cursor: default; opacity: .6; }
+.space-icon-picker__automatic { justify-self: start; }
+.space-icon-picker__error { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.space-icon-picker footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-3); }
+.space-icon-picker__save { color: var(--text); background: var(--surface-3); }

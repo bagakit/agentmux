@@ -6,14 +6,13 @@
  * 不占位，因为「每行都写 `This Mac` 的一列区分不了任何东西」（见 WorkspaceSidebar 那条注释）。
  * 同一条规矩用在图标上，结论就是这个文件。
  *
- * 两件事都必须**确定性**：同一个项目每次渲染、每次重启、每个窗口都得是同一个字母同一个颜色。
- * 颜色若随渲染顺序变，这枚牌子就不是身份而是噪声——那正是设计明令禁止的「按渲染顺序取色」。
+ * 两件事都必须**确定性**：同一个名称每次渲染、每次重启、每个窗口都得是同一个字素。
+ * 导航字母牌的中性外观由 Space 样式决定，不再派生对象颜色。
  *
  * 纯函数、不读时钟、不读 DOM：本仓测试用 `renderToStaticMarkup`，effect 不跑，写在组件里的分支
  * 没有断言够得着。
  */
 
-import { speakerColorHue } from './conversation-avatar-color'
 
 /**
  * 取首个**字素簇**，不是首个 UTF-16 码元。
@@ -76,19 +75,4 @@ function firstGrapheme(value: string): string {
  */
 export function projectMonogram(name: string): string {
   return firstGrapheme(firstGrapheme(name).toLocaleUpperCase('en-US'))
-}
-
-/**
- * 牌面的色相。直接复用说话人头像那套派生，**不新造一份调色板**。
- *
- * 复用是对的，因为两处要解的是同一道题：开放集身份要稳定上色，且**不能撞上语义色**——
- * amber 专表「需要你」、red 表失败、green 表成功、blue 表人类说话人。一枚落在 40° 的项目图标
- * 会被读成「这个项目在等你」，而它其实只是名字散列到了那里。身份色误报状态，比撞色难查得多。
- * 那套推理与实现（FNV-1a + avalanche + 保留弧补集）在 conversation-avatar-color.ts 里已经完整
- * 论证并被测试钉住，原样拿来用即可。
- *
- * 键取 `workspaceId` 而不是项目名：改个名字不该换一枚颜色——身份没变。
- */
-export function projectIconHue(workspaceId: string): number {
-  return speakerColorHue(workspaceId)
 }
