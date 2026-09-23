@@ -1,12 +1,9 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CtxmuxClient, RunSpec } from '@ctxmux/sdk'
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxClient } from '../src/client.js'
 
-const exec = promisify(execFile)
 afterEach(() => vi.unstubAllEnvs())
 
 describe('local Run environment', () => {
@@ -30,16 +27,17 @@ describe('local Run environment', () => {
     Object.assign(client, { kernel: adapter, connected: true })
     try {
       vi.stubEnv('AGENTMUX_TEST_ENV', 'after-daemon')
-      await expect(client.createTerminal({ workspacePath: upstreamFixturePath("tmp"), command: '/bin/sh', env: {
+      await expect(client.createTerminal({ workspacePath: fixturePath('temporary'), command: '/bin/sh', env: {
         NO_COLOR: '1', FORCE_COLOR: '0', CLICOLOR: '0'
       } }))
         .rejects.toThrow('captured at SDK boundary')
       vi.stubEnv('AGENTMUX_TEST_ENV', 'changed-again')
-      await expect(client.createTerminal({ workspacePath: upstreamFixturePath("tmp"), command: '/bin/sh', env: { AGENTMUX_TEST_OVERRIDE: 'run', EMPTY: '' } }))
+      await expect(client.createTerminal({ workspacePath: fixturePath('temporary'), command: '/bin/sh', env: { AGENTMUX_TEST_OVERRIDE: 'run', EMPTY: '' } }))
         .rejects.toThrow('captured at SDK boundary')
       vi.stubEnv('AGENTMUX_TEST_OVERRIDE', 'inherited')
-      await expect(client.createTerminal({ workspacePath: upstreamFixturePath("tmp"), command: '/bin/sh', env: { AGENTMUX_TEST_OVERRIDE: 'explicit' } }))
+      await expect(client.createTerminal({ workspacePath: fixturePath('temporary'), command: '/bin/sh', env: { AGENTMUX_TEST_OVERRIDE: 'explicit' } }))
         .rejects.toThrow('captured at SDK boundary')
+      expect(captured).toHaveLength(3)
       expect(captured[0]!.env.AGENTMUX_TEST_ENV).toBe('after-daemon')
       expect(captured[1]!.env.AGENTMUX_TEST_ENV).toBe('changed-again')
       expect(captured[2]!.env.AGENTMUX_TEST_OVERRIDE).toBe('explicit')
@@ -51,8 +49,12 @@ describe('local Run environment', () => {
       expect(captured[0]!.env.CLAUDECODE).toBeUndefined()
       expect(captured[0]!.env.CLAUDE_CODE_CHILD_SESSION).toBeUndefined()
       expect(captured[0]!.env.TERM_PROGRAM).toBe('AgentMux')
-      const child = await exec(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.AGENTMUX_TEST_ENV, process.env.AGENTMUX_TEST_OVERRIDE, process.env.EMPTY]))'], { env: captured[1]!.env })
-      expect(JSON.parse(child.stdout)).toEqual(['changed-again', 'run', ''])
+      expect(captured[1]!.env.AGENTMUX_TEST_OVERRIDE).toBe('run')
+      expect(captured[1]!.env.EMPTY).toBe('')
+      expect(captured[0]!.program).toBe('/usr/bin/env')
+      expect(captured[0]!.args.slice(-2)).toEqual(['--', '/bin/sh'])
+      // Actual daemon inheritance is verified in long-lived-runtime-environment.integration.test.ts;
+      // execFile({ env: captured.env }) replaces the whole environment and cannot prove that contract.
     } finally {
       Object.assign(adapter, { client: null })
       await client.dispose()
