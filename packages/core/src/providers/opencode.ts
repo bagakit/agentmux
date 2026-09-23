@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -5,6 +6,8 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
 import { catalog } from './shared.js'
+
+export { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -24,66 +27,53 @@ export const OPENCODE_HOOK_EVENTS = [
   'permission.updated', 'permission.replied', 'session.compacted', 'session.error'
 ] as const
 
-/**
- * 为什么 done 同时挂在 `session.status` 与 `session.idle` 两个名字上。
- *
- * 上游把一次「转为空闲」发成**两条**事件，且顺序固定（`packages/opencode/src/session/status.ts:41-45`）：
- *
- * ```ts
- * yield* events.publish(Event.Status, { sessionID, status })   // 先 session.status
- * if (status.type === "idle") {
- *   yield* events.publish(Event.Idle, { sessionID })           // 再 session.idle
- * }
- * ```
- *
- * 而 `session.idle` 在 schema 里**已标注废弃**（`packages/schema/src/session-status-event.ts:43` 那行
- * 逐字 `// deprecated`），`session.status` 是继任者。
- *
- * 于是只押一个都会坏：只押 `session.idle`，上游哪天真删掉它，done 就静默消失——不报错、不告警，只是
- * 会话永远停在 working；只押 `session.status`，它在**每次状态变化**时都发（含 `busy`），判 done 会让
- * 一轮刚开始就被判成结束。
- *
- * 本可以读负载里的 `status.type === 'idle'` 来精确区分，但 `eventState` 的规则匹配只看事件名
- * （`hook-normalizer.ts:187-198`，除 `toolNames` 外不读负载）。在不改归一化层的前提下，正确做法是
- * 认「两条成对到达」这个上游事实：两个名字都判 done，让 `session.status` 承担 `session.idle` 消失后
- * 的续命，同时接受一个已知代价——`session.status(busy)` 也会被判成 done。
- *
- * 这个代价由 `message.part.updated` 抵消：它在模型流式输出期间持续到达（`types.gen.ts:406-412`），
- * 每一条都判 working。真实时序是 status(busy) → 一串 part.updated → status(idle) + idle，所以一轮
- * 开头那次误判会被紧随其后的 part.updated 覆盖回 working，收尾那次才是最终态。
- *
- * 这不是最优解，是**在现有归一化层能力内最诚实的解**：它没有假装能读负载，也没有把一个已废弃的事件
- * 当作唯一依靠。若日后规则支持按负载字段匹配，这里应收敛成单条 `session.status` + `status.type` 判据。
- */
+function isChildPayload(payload: Readonly<Record<string, unknown>>): boolean {
+  if (typeof payload.parentID === 'string' && payload.parentID.trim().length > 0) return true
+  const info = typeof payload.info === 'object' && payload.info ? (payload.info as Record<string, unknown>) : undefined
+  if (typeof info?.parentID === 'string' && info.parentID.trim().length > 0) return true
+  return false
+}
+
 export const OPENCODE_HOOKS: AgentNativeHookSpecification = {
   rules: [
-    // 授权门：Agent 正卡在一个授权决定上等人回答。`permission.updated` 的负载是一个完整的
-    // `Permission`（`types.gen.ts:423-442`），带 `id`/`sessionID`/`callID`/`title`。
-    // 判 waiting 而非 working——与 Copilot 的 `permissionRequest`、Cursor 的两个授权门同一判断。
-    { events: ['permission.updated'], state: 'waiting' },
-    // 收尾：两个名字都判，理由见上面那段。
-    { events: ['session.status', 'session.idle'], state: 'done' },
-    // 干活中。`permission.replied`（`types.gen.ts:444-451`）表示决定已经给出、执行随即继续，
-    // 所以它是 working 而不是另一种收尾。
-    { events: ['message.part.updated', 'permission.replied', 'session.compacted', 'session.error'], state: 'working' }
+    // 授权门：Agent 正卡在一个授权决定上等人回答。
+    { events: ['permission.updated'], state: 'waiting', lifecycleEvent: 'permission-request' },
+    // session.status 细化谓词：busy -> working (turn-start), retry -> working, idle -> neutral unknown (null)
+    {
+      events: ['session.status'],
+      matches: (payload) => {
+        const status = typeof payload.status === 'object' && payload.status ? (payload.status as Record<string, unknown>).type : undefined
+        return status === 'busy'
+      },
+      state: 'working',
+      lifecycleEvent: 'turn-start'
+    },
+    {
+      events: ['session.status'],
+      matches: (payload) => {
+        const status = typeof payload.status === 'object' && payload.status ? (payload.status as Record<string, unknown>).type : undefined
+        return status === 'retry'
+      },
+      state: 'working'
+    },
+    {
+      events: ['session.status'],
+      matches: (payload) => {
+        const status = typeof payload.status === 'object' && payload.status ? (payload.status as Record<string, unknown>).type : undefined
+        return status === 'idle'
+      },
+      state: 'unknown',
+      lifecycleEvent: null
+    },
+    { events: ['session.idle'], state: 'unknown', lifecycleEvent: null },
+    // 干活中。permission.replied 表示决定已经给出、执行随即继续。
+    { events: ['message.part.updated', 'permission.replied', 'session.compacted'], state: 'working' },
+    { events: ['session.error'], state: 'unknown' }
   ],
-  // 子代理不记账：上游 28 个事件里没有任何一对子代理起止事件（`types.gen.ts:704-736` 逐个读过）。
-  // 声明一个不存在的记账会让 `applySubagentTracking` 永远等一个不会到来的 stop，把 done 一直压住。
-  //
-  // native handle 的键是 **`sessionID`（大写 ID）**，不是 `sessionId`。这不是风格问题：
-  // `stringField` 按声明的键逐字取值，拼错了取不到，于是每个事件都给不出 handle、resume 整条失效。
-  // 上游全库统一大写（`session.idle` 在 `types.gen.ts:479`、`session.status` 在 `:470`）。
-  //
-  // **不声明 `transcriptPathKeys`**：上游没有单文件 transcript。会话被拆成三组存储键
-  // （`storage.ts:150-196`：session/message/part 各一棵），没有任何一个事件负载带得出一条可读路径。
-  // 声明一个取不到的键等于让 handle 永远缺一半。
+  subagentSubject: isChildPayload,
   nativeHandle: {
     sessionIdKeys: ['sessionID']
   },
-  // OpenCode 的 hook 面是一份 AgentMux 生成的插件文件，跑在 OpenCode 进程里**自己直接 POST**
-  // （见下面 `openCodePluginSource`：body 里 `eventName: event.type` 由生成代码直接给出）。
-  // `agent-hook-command` 那个子进程整个不在这条链路上，所以既谈不上 `--event` 旗标，也谈不上
-  // 「从负载里解析出事件名」——事件名是结构性在场的，不是解析出来的。
   eventNameSource: { kind: 'generated-code' }
 }
 
@@ -106,6 +96,33 @@ function openCodeConfigDir(env?: Readonly<Record<string, string>>): string {
   if (override) return resolve(override)
   const xdg = env?.XDG_CONFIG_HOME?.trim()
   return xdg ? join(resolve(xdg), 'opencode') : join(homedir(), '.config', 'opencode')
+}
+
+function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...payload }
+  const part = typeof payload.part === 'object' && payload.part ? (payload.part as Record<string, unknown>) : undefined
+  if (part) {
+    if (part.type === 'tool') {
+      if (typeof part.tool === 'string') result.tool_name = part.tool
+      if (typeof part.callID === 'string') result.call_id = part.callID
+      const state = typeof part.state === 'object' && part.state ? (part.state as Record<string, unknown>) : undefined
+      if (state) {
+        if (state.input !== undefined) result.tool_input = state.input
+        if (state.status === 'completed') {
+          result.tool_output = state.output ?? ''
+        } else if (state.status === 'error') {
+          result.error = state.error ?? 'Tool failed'
+          result.is_error = true
+        }
+      }
+    } else if (part.type === 'text' && typeof part.text === 'string') {
+      const time = typeof part.time === 'object' && part.time ? (part.time as Record<string, unknown>) : undefined
+      if (time?.end !== undefined && part.synthetic !== true && part.ignored !== true) {
+        result.last_assistant_message = part.text
+      }
+    }
+  }
+  return result
 }
 
 /**
@@ -180,7 +197,7 @@ export async function server() {
  * 上游按 glob 收整个目录下的每个文件（`config/plugin.ts:21`），用户自己的插件是同目录下的别的文件，
  * 我们整文件拥有自己这一个，两边互不相干。这与 Copilot 装到独占 `hooks/agentmux.json` 是同一模式。
  *
- * 扩展名用 `.js` 而非 `.ts`：glob 两者都收，但 `.ts` 会让这份内容看起来可以用 TS 语法，而它实际上是
+ * 扩展名用 `.js` 而非 `.ts`：glob 两者都收，但 `.ts` 会让这份内容看起来可以用 TS语法，而它实际上是
  * 直接被 `import()` 的源码，写错了是永久缓存的加载失败（`loader.ts:206-207`）。`.js` 如实表达了
  * 「这就是要被原样执行的 JS」。
  */
@@ -200,35 +217,85 @@ export function createOpenCodeManagedHookPlan(
 }
 
 export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
+  const provider = defineAgentProvider({
     planManagedHooks: ({ env, endpoint }) => endpoint ? createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, env) : null,
     catalog: catalog({
       id: 'opencode', label: 'OpenCode', executable: 'opencode', expectedProcess: 'opencode',
       promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
-      // 恢复走 `--session <id>`（`cli/cmd/run.ts:152-156`，别名 `-s`，描述逐字 "session id to
-      // continue"）。**没有 `--resume`**——照别家拼法猜一个会直接报未知参数。
-      // `--continue`（`-c`，`:147-151`）是「继续上一个会话」，不接受 id，不是这里要的。
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true, timeline: 'complete-events',
-        // observe 而非 respond：`permission.updated` 能看见 Agent 在等一个授权决定，但回决定要走
-        // SDK 的 permission 接口，是另一条通路。今天靠 PTY 注入按键回答，与其余各家一致。
         permission: 'observe',
         providerResume: true,
-        // 没有工具关联 id：工具调用不是独立事件，而是流式 `message.part.updated` 里的 part
-        // （`types.gen.ts:406-412`），一次调用的两端拿不到同一个 id。如实声明 none。
         replyCorrelation: 'none'
-        // usage 不声明：没有单文件 transcript（`storage.ts:150-196` 把会话拆成三组存储键），
-        // 既有两个 reader（claude-jsonl / codex-rollout）都不适用。按「未核实就不声明」留空。
       }
     }),
     readSessionHistoryPage: readOpenCodeSessionHistoryPage,
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: OPENCODE_HOOKS,
+    inspectHookActivation: async (context) => {
+      const target = context.plan.mutations[0]
+      if (!target) return { active: false, code: 'HOOK_PLAN_EMPTY', action: 'The managed Hook plan is empty.' }
+      if (!existsSync(target.path)) {
+        return {
+          active: false,
+          code: 'HOOK_CONFIGURATION_CHANGED',
+          action: 'The managed Hook configuration changed during inspection. Inspect this scope again.'
+        }
+      }
+      return {
+        active: false,
+        code: 'HOOK_ACTIVATION_NEEDS_EVIDENCE',
+        action: 'OpenCode managed Hook plugin is present on disk, but live runtime activation in the current environment has not been established. Terminal interactions and prompt submissions remain available.'
+      }
+    },
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--session', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
   })
+
+  return {
+    ...provider,
+    normalizeHook(envelope, context) {
+      const payload = envelope.payload ?? {}
+      const nativeHandle = context.nativeHandle
+      const trustedRootSessionId = nativeHandle?.sessionId
+      const sid = typeof payload.sessionID === 'string' && payload.sessionID.trim().length > 0
+        ? payload.sessionID.trim()
+        : undefined
+      const isChild = isChildPayload(payload)
+      const isRoot = sid !== undefined && trustedRootSessionId !== undefined && sid === trustedRootSessionId && !isChild
+
+      const adapted = adaptOpenCodePayload(payload)
+      const normalized = provider.normalizeHook({ ...envelope, payload: adapted }, context)
+
+      if (isRoot && nativeHandle) {
+        return {
+          ...normalized,
+          nativeHandle
+        }
+      }
+
+      const {
+        nativeHandle: _nh,
+        turnUsage: _tu,
+        interaction: _ix,
+        interactionCompletion: _ic,
+        lifecycleEvent: _le,
+        ...fenced
+      } = normalized
+
+      return {
+        ...fenced,
+        lifecycleEvent: null,
+        semanticState: 'unknown',
+        status: {
+          ...normalized.status,
+          state: 'running'
+        }
+      }
+    }
+  }
 }

@@ -558,7 +558,7 @@ describe('built-in agent providers', () => {
       receiptId: 'rcpt-1',
       eventName: 'PreInvocation',
       payload: { conversationId: 'native-agy-1', transcript_path: upstreamFixturePath("tmp/agy.jsonl") }
-    })
+    }, {})
     expect(preInvocation.status.state).toBe('working')
     expect(preInvocation.nativeHandle).toEqual({
       kind: 'provider',
@@ -574,7 +574,7 @@ describe('built-in agent providers', () => {
       receiptId: 'rcpt-2',
       eventName: 'PreToolUse',
       payload: { tool_name: 'ask_question', tool_input: { prompt: 'Allow write?' } }
-    })
+    }, {})
     expect(toolUse.status.state).toBe('waiting')
     expect(toolUse.timeline).toHaveLength(1)
     const toolMutation = toolUse.timeline[0]
@@ -590,7 +590,7 @@ describe('built-in agent providers', () => {
       receiptId: 'rcpt-3',
       eventName: 'Stop',
       payload: { last_assistant_message: 'Done all work.' }
-    })
+    }, {})
     expect(stop.status.state).toBe('done')
     expect(stop.timeline).toHaveLength(1)
     const stopMutation = stop.timeline[0]

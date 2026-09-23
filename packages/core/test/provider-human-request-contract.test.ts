@@ -37,7 +37,7 @@ function permissionRequest(providerId: 'claude' | 'codex', receiptId: string): A
     providerId,
     eventName: 'PermissionRequest',
     payload: { tool_name: 'Edit', tool_input: { path: 'src/index.ts' } }
-  })
+  }, {})
   const request = norm.interaction
   if (!request || request.kind !== 'permission') {
     throw new Error('expected a native-hook permission interaction request')

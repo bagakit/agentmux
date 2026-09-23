@@ -26,6 +26,7 @@ import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
+  AgentNativeSessionHandle,
   AgentPostureInputPlan,
   AgentPromptInputPlan,
   AgentProviderLaunchContext,
@@ -59,6 +60,10 @@ export type AgentProviderHookActivationContext = {
 
 export type AgentProviderHookActivation = { active: boolean; code: string; action: string | null }
 
+export type AgentProviderHookNormalizationContext = Readonly<{
+  nativeHandle?: Readonly<AgentNativeSessionHandle>
+}>
+
 export type AgentProvider = {
   readonly id: AgentProviderId
   readonly label: string
@@ -88,7 +93,10 @@ export type AgentProvider = {
     response: AgentMuxInteractionResponse
   ): AgentMuxInteractionInputPlan
   planPostureSet(modeId: string): AgentPostureInputPlan
-  normalizeHook(envelope: NativeHookEnvelope): NormalizedHookEvent
+  normalizeHook(
+    envelope: NativeHookEnvelope,
+    context: AgentProviderHookNormalizationContext
+  ): NormalizedHookEvent
 }
 
 export type AgentCatalogSeed = Omit<AgentCatalogEntry, 'readySignal' | 'launchOptions'>
@@ -341,7 +349,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       }
       return posture.planSet(modeId)
     },
-    normalizeHook(envelope) {
+    normalizeHook(envelope, _context) {
       if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }

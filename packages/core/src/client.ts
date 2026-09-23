@@ -18,7 +18,8 @@ import {
   resolveAgentExecutable,
   splitLaunchPromptByDelivery,
   type AgentProvider,
-  type AgentManagedHookPlanContext
+  type AgentManagedHookPlanContext,
+  type AgentProviderHookNormalizationContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
 import { nativeHookHasSubagentSubject, releaseSubagentRoster } from './hook-normalizer.js'
@@ -4266,7 +4267,10 @@ export class AgentMuxClient {
       session.providerId !== envelope.providerId
     ) return
     const provider = this.providers.get(envelope.providerId)
-    const normalized = provider.normalizeHook(envelope)
+    const context: AgentProviderHookNormalizationContext = Object.freeze({
+      ...(session.nativeHandle ? { nativeHandle: Object.freeze({ ...session.nativeHandle }) } : {})
+    })
+    const normalized = provider.normalizeHook(envelope, context)
     // 读与推进的先后**在今天不承重**，别照着「先读后推」写注释骗下一个人：实测调换这两句，7 条断言全绿。
     // 原因是结构性的——会推进阶段的事件（turn-end / 重开事件）与会被闸门拦的事件
     // （tool-use-start / tool-use-end）是两个不相交的集合，所以「拿推进前的值还是推进后的值」对任何一条

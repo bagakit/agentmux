@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { GEMINI_HOOK_EVENTS, createGeminiManagedHookPlan } from '../../src/providers/gemini.js'
@@ -34,10 +34,10 @@ describe('Gemini provider', () => {
       payload: {
         hook_event_name: eventName,
         session_id: 'gem-session-1',
-        transcript_path: upstreamFixturePath("tmp/chats/session.json"),
+        transcript_path: fixturePath("tmp/chats/session.json"),
         ...payload
       }
-    })
+    }, {})
   }
 
   describe('能力声明与实现读出的合同相符', () => {
@@ -78,7 +78,7 @@ describe('Gemini provider', () => {
         kind: 'provider',
         providerId: 'gemini',
         sessionId: 'gem-session-1',
-        transcriptPath: upstreamFixturePath("tmp/chats/session.json")
+        transcriptPath: fixturePath("tmp/chats/session.json")
       })
     })
 
@@ -87,14 +87,14 @@ describe('Gemini provider', () => {
       const failed = gemini.normalizeHook({
         receiptId: 'r-fail', agentSessionId: 's-gemini', runId: 'run-gemini', providerId: 'gemini',
         payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { output: 'boom', is_error: true } }
-      })
+      }, {})
       const failedItem = failed.timeline.find((m) => m.type !== 'update' && m.item.kind === 'tool_call')
       expect(failedItem && failedItem.type !== 'update' && failedItem.item.status).toBe('failed')
 
       const ok = gemini.normalizeHook({
         receiptId: 'r-ok', agentSessionId: 's-gemini', runId: 'run-gemini', providerId: 'gemini',
         payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { output: 'fine' } }
-      })
+      }, {})
       const okItem = ok.timeline.find((m) => m.type !== 'update' && m.item.kind === 'tool_call')
       expect(okItem && okItem.type !== 'update' && okItem.item.status).toBe('complete')
     })
@@ -126,17 +126,17 @@ describe('Gemini provider', () => {
   })
 
   describe('装到 settings.json，且不碰 Antigravity 在同一目录下的配置', () => {
-    const plan = (new AgentProviderRegistry().get('gemini').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo") }) ?? null)
+    const plan = (new AgentProviderRegistry().get('gemini').planManagedHooks?.({ workspacePath: fixturePath("repo") }) ?? null)
 
-    it('写的是 ~/.gemini/settings.json，与 Antigravity 的 config/hooks.json 是不同文件', () => {
+    it(("写的是 ~" + ("/.gemini/settings.json") + "，与 Antigravity 的 config/hooks.json 是不同文件"), () => {
       expect(plan?.mutations).toHaveLength(1)
       const target = plan!.mutations[0]!.path
-      expect(target.endsWith('/.gemini/settings.json')).toBe(true)
+      expect(target.endsWith("/.gemini/settings.json")).toBe(true)
       // 关键的邻接风险：两个 Provider 同住 ~/.gemini。路径必须真的不同，否则装 Gemini 会改掉
       // 用户 Antigravity 的行为。这里直接拿两个 plan 对比，而不是只断言字符串长相。
       const antigravity = createAntigravityManagedHookPlan()
       expect(antigravity.mutations[0]!.path).not.toBe(target)
-      expect(antigravity.mutations[0]!.path).toContain('/.gemini/config/hooks.json')
+      expect(antigravity.mutations[0]!.path).toContain("/.gemini/config/hooks.json")
     })
 
     it('装的事件恰好是声明的那些，matcher 只出现在工具类事件上', () => {
@@ -156,8 +156,8 @@ describe('Gemini provider', () => {
         security: { folderTrust: { enabled: true } },
         mcpServers: { linear: { command: 'linear-mcp' } },
         hooks: {
-          AfterAgent: [{ hooks: [{ type: 'command', command: upstreamFixturePath("usr/local/bin/my-own-notify.sh") }] }],
-          PreCompress: [{ hooks: [{ type: 'command', command: upstreamFixturePath("usr/local/bin/archive.sh") }] }]
+          AfterAgent: [{ hooks: [{ type: 'command', command: fixturePath("usr/local/bin/my-own-notify.sh") }] }],
+          PreCompress: [{ hooks: [{ type: 'command', command: fixturePath("usr/local/bin/archive.sh") }] }]
         }
       })
       const merged = JSON.parse(renderMergedHookContent(
@@ -170,10 +170,10 @@ describe('Gemini provider', () => {
       expect(merged.mcpServers).toEqual({ linear: { command: 'linear-mcp' } })
       // 用户自己在同一事件上的 hook 必须留着，且排在我们前面。
       const afterAgent = merged.hooks.AfterAgent as Array<{ hooks: Array<{ command: string }> }>
-      expect(afterAgent[0]!.hooks[0]!.command).toBe(upstreamFixturePath("usr/local/bin/my-own-notify.sh"))
+      expect(afterAgent[0]!.hooks[0]!.command).toBe(fixturePath("usr/local/bin/my-own-notify.sh"))
       expect(afterAgent.some((d) => d.hooks.some((h) => h.command.includes('agentmux-hook.js')))).toBe(true)
       // 我们没接的事件桶原样保留。
-      expect(merged.hooks.PreCompress[0].hooks[0].command).toBe(upstreamFixturePath("usr/local/bin/archive.sh"))
+      expect(merged.hooks.PreCompress[0].hooks[0].command).toBe(fixturePath("usr/local/bin/archive.sh"))
     })
 
     it('重装不累积：自有条目按 marker 清扫后只剩一份', () => {
@@ -186,7 +186,7 @@ describe('Gemini provider', () => {
   describe('resume argv 精确，缺 handle 时 fail closed', () => {
     it('argv 恰为 gemini --resume <session-id>，prompt 走 --prompt-interactive', () => {
       expect(gemini.buildResumeLaunch({
-        workspacePath: upstreamFixturePath("repo"),
+        workspacePath: fixturePath("repo"),
         nativeHandle: { kind: 'provider', providerId: 'gemini', sessionId: 'uuid-abc' },
         prompt: 'continue now',
         args: ['--approval-mode', 'plan'],
@@ -202,7 +202,7 @@ describe('Gemini provider', () => {
       let error: AgentMuxError | undefined
       try {
         gemini.buildResumeLaunch({
-          workspacePath: upstreamFixturePath("repo"),
+          workspacePath: fixturePath("repo"),
           nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'not-gemini' },
           args: [], env: {}
         })
@@ -213,8 +213,8 @@ describe('Gemini provider', () => {
     })
 
     it('home 可注入，便于在测试里不碰真实 home', () => {
-      expect(createGeminiManagedHookPlan(upstreamFixturePath("tmp/fake-home")).mutations[0]!.path)
-        .toBe(upstreamFixturePath("tmp/fake-home/.gemini/settings.json"))
+      expect(createGeminiManagedHookPlan(fixturePath("tmp/fake-home")).mutations[0]!.path)
+        .toBe(fixturePath("tmp/fake-home/.gemini/settings.json"))
     })
   })
 })

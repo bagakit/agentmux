@@ -1,4 +1,4 @@
-import { fixtureEpoch as upstreamFixtureEpoch, fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixtureEpoch, fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
@@ -41,11 +41,11 @@ describe('Copilot provider', () => {
         eventName,
         payload: {
           sessionId: 'copilot-session-1',
-          timestamp: upstreamFixtureEpoch(1, 79826, 179),
-          cwd: upstreamFixturePath("repo"),
+          timestamp: fixtureEpoch(1, 79826, 179),
+          cwd: fixturePath("repo"),
           ...payload
         }
-      })
+      }, {})
   }
 
   function toolMutation(event: ReturnType<ReturnType<typeof hookIn>>) {
@@ -75,7 +75,7 @@ describe('Copilot provider', () => {
     it('配置形状：version 是字面量 1、条目在 hooks 下、每条带 timeoutSec', () => {
       // 实测 schema：`version: Invalid literal value, expected 1`；字段名是 `timeoutSec` 而不是
       // `timeout`——写 `timeout` 会被剥掉然后静默用它自己的默认超时（不是报错，是换了行为）。
-      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as {
         version: number
         hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string; timeoutSec: number }> }>>
@@ -97,7 +97,7 @@ describe('Copilot provider', () => {
     it('matcher 是正则不是 glob——写 * 会让整个桶失效', () => {
       // 实测：`matcher: '*'` 被当作**无效正则**拒掉（那个桶一个事件都不响），`'.*'` 正常。这与 droid
       // 恰好相反（droid 的 `'*'` 是合法 glob），所以两家不能互抄这个字面量。
-      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as {
         hooks: Record<string, Array<{ matcher?: string }>>
       }
@@ -115,10 +115,10 @@ describe('Copilot provider', () => {
       // 那个目录下**任意文件名**都会被加载（实测），所以 AgentMux 可以整文件拥有——于是不需要合并
       // 策略。这条同时守住两个绝不能碰的位置：用户级 `config.json`（装着模型/授权规则等全部设置）
       // 与仓库级 `.github/hooks/`（会被提交进用户仓库）。
-      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       expect(plan!.mutations).toHaveLength(1)
       const [mutation] = plan!.mutations
-      expect(mutation!.path).toContain('/.copilot/hooks/agentmux.json')
+      expect(mutation!.path).toContain("/.copilot/hooks/agentmux.json")
       expect(mutation!.path).not.toContain('config.json')
       expect(mutation!.path).not.toContain('.github')
       // 独占文件 => 无合并策略。有了它反而说明有人以为这份文件是共享的。
@@ -128,15 +128,15 @@ describe('Copilot provider', () => {
     it('COPILOT_HOME 被尊重，空串等于没设', () => {
       // 逐字实现它自己的解析：`configDir ?? COPILOT_HOME ?? join(homedir(), '.copilot')`，
       // 且它自己的判断是 `if (t === undefined || t === "")`——空串必须回落，否则会写到根目录下的 hooks。
-      expect(createCopilotManagedHookPlan({ COPILOT_HOME: upstreamFixturePath("tmp/ch") }).mutations[0]!.path)
-        .toBe(upstreamFixturePath("tmp/ch/hooks/agentmux.json"))
+      expect(createCopilotManagedHookPlan({ COPILOT_HOME: fixturePath("tmp/ch") }).mutations[0]!.path)
+        .toBe(fixturePath("tmp/ch/hooks/agentmux.json"))
       expect(createCopilotManagedHookPlan({ COPILOT_HOME: '   ' }).mutations[0]!.path)
-        .toContain('/.copilot/hooks/agentmux.json')
+        .toContain("/.copilot/hooks/agentmux.json")
     })
 
     it('装的位置与 workspace 无关——resolver 不该拿 workspacePath 派生路径', () => {
-      const a = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/one") }) ?? null)
-      const b = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/two") }) ?? null)
+      const a = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: fixturePath("repo/one") }) ?? null)
+      const b = (new AgentProviderRegistry().get('copilot').planManagedHooks?.({ workspacePath: fixturePath("repo/two") }) ?? null)
       expect(a!.mutations[0]!.path).toBe(b!.mutations[0]!.path)
     })
   })
@@ -211,7 +211,7 @@ describe('Copilot provider', () => {
   describe('收尾只有 agentStop 一种，且不是 sessionEnd', () => {
     it('agentStop 判 done、是 turn-end、也是用量落定点', () => {
       const event = hookIn('run-stop')('agentStop', {
-        stopReason: 'end_turn', transcriptPath: upstreamFixturePath("tmp/copilot/t.jsonl")
+        stopReason: 'end_turn', transcriptPath: fixturePath("tmp/copilot/t.jsonl")
       })
       expect<AgentSemanticState>(event.semanticState).toBe('done')
       expect(canonicalHookLifecycleEvent('agentStop')).toBe('turn-end')
@@ -316,13 +316,13 @@ describe('Copilot provider', () => {
   describe('catalog 如实声明它有的和没有的', () => {
     it('native handle 读 camelCase 的 sessionId 与 transcriptPath', () => {
       const event = hookIn('run-handle')('agentStop', {
-        stopReason: 'end_turn', transcriptPath: upstreamFixturePath("tmp/copilot/t.jsonl")
+        stopReason: 'end_turn', transcriptPath: fixturePath("tmp/copilot/t.jsonl")
       })
       expect(event.nativeHandle).toEqual({
         kind: 'provider',
         providerId: 'copilot',
         sessionId: 'copilot-session-1',
-        transcriptPath: upstreamFixturePath("tmp/copilot/t.jsonl")
+        transcriptPath: fixturePath("tmp/copilot/t.jsonl")
       })
     })
 
@@ -343,10 +343,10 @@ describe('Copilot provider', () => {
       const launch = copilot.buildResumeLaunch({
         nativeHandle: {
           kind: 'provider', providerId: 'copilot',
-          sessionId: 'sess-9', transcriptPath: upstreamFixturePath("tmp/t.jsonl")
+          sessionId: 'sess-9', transcriptPath: fixturePath("tmp/t.jsonl")
         },
         args: ['--banner'],
-        workspacePath: upstreamFixturePath("repo/app"),
+        workspacePath: fixturePath("repo/app"),
         env: {}
       })
       expect(launch.command).toBe('copilot')
@@ -358,7 +358,7 @@ describe('Copilot provider', () => {
       // 验收要求「Provider unavailable 与 native handle missing 两类恢复失败可区分」。这里守后者。
       expect(() => copilot.buildResumeLaunch({
         nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 's-1' },
-        args: [], workspacePath: upstreamFixturePath("repo/app"), env: {}
+        args: [], workspacePath: fixturePath("repo/app"), env: {}
       })).toThrowError(/does not belong to this provider/)
     })
 
@@ -373,7 +373,7 @@ describe('Copilot provider', () => {
     })
 
     it('prompt 走位置参数，且 resume 时也带得上', () => {
-      const ws = { workspacePath: upstreamFixturePath("repo/app"), env: {} }
+      const ws = { workspacePath: fixturePath("repo/app"), env: {} }
       expect(copilot.buildLaunch({ prompt: 'do it', args: ['--banner'], ...ws }).args)
         .toEqual(['--banner', 'do it'])
       expect(copilot.buildLaunch({ prompt: '', args: ['--banner'], ...ws }).args)
