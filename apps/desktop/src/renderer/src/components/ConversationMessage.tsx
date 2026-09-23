@@ -19,7 +19,7 @@ export type ConversationMessageProps = {
   name?: string
   providerId?: AgentProviderId
   content: string | readonly AgentSessionHistoryContentPart[]
-  status?: AgentTimelineItemStatus
+  status?: AgentTimelineItemStatus | 'unverified'
   createdAt?: number
   origin?: number
   workspaceRoot?: string
@@ -77,7 +77,7 @@ export function ConversationMessage({
     ? [{ kind: 'text', text: content }]
     : content
   const hasContent = parts.some((part) => partText(part).length > 0)
-  const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker ? 'Assistant' : 'Activity')
+  const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker?.role === 'unknown' ? 'Input' : speaker ? 'Assistant' : 'Activity')
   // Native parts have no annotation offset contract. Live string annotations retain their original
   // quote and note; read-only callers do not collect selection state.
   const canAnnotate = onAnnotate !== undefined && typeof content === 'string'
@@ -170,6 +170,9 @@ export function ConversationMessage({
         ) : null}
         {status === 'failed' ? (
           <span className="log-row__chip log-row__chip--failed" role="status"><SemanticIcon name="failed" size={12} />Failed</span>
+        ) : null}
+        {status === 'unverified' ? (
+          <span className="log-row__chip log-row__chip--unverified" role="status"><SemanticIcon name="neutral" size={12} />Unverified</span>
         ) : null}
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
           ? formatClock(createdAt) : `${formatClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>

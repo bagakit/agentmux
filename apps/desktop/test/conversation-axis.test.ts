@@ -6,7 +6,7 @@ import {
   speaksAsAgent,
   speaksAsHuman
 } from '../src/renderer/src/lib/conversation-axis.js'
-import { HUMAN_SPEAKER_ID, speakerOf } from '../src/renderer/src/lib/conversation-speaker.js'
+import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, speakerOf } from '../src/renderer/src/lib/conversation-speaker.js'
 
 /**
  * 两条轴（说话人轴、自我 Agent 轴）收敛成一个纯函数之后，这里钉的是那个函数的四条验收：
@@ -54,7 +54,7 @@ describe('对话体两条轴的定位与筛选', () => {
     const marks = conversationAxis(items, speaksAsHuman)
     expect(marks.map((m) => m.item.id)).toEqual(['u1', 'u2'])
     expect(marks.map((m) => m.index)).toEqual([0, 4])
-    for (const mark of marks) expect(mark.speaker.role).toBe('human')
+    for (const mark of marks) expect(mark.speaker.role).toBe('unknown')
   })
 
   it('标记带的身份就是 speakerOf 判出的那个，本函数不在它之后改造 id', () => {
@@ -68,7 +68,7 @@ describe('对话体两条轴的定位与筛选', () => {
     // 重新组装身份。身份判定只有一个出处，这条就是那句话的可执行形式。
     const items = conversationFixture()
     for (const mark of conversationAxis(items, speaksAsHuman)) {
-      expect(mark.speaker).toEqual({ role: 'human', id: HUMAN_SPEAKER_ID })
+      expect(mark.speaker).toEqual({ role: 'unknown', id: UNKNOWN_SPEAKER_ID })
       expect(mark.speaker).toEqual(speakerOf(mark.item))
     }
     for (const mark of conversationAxis(items, speaksAsAgent)) {

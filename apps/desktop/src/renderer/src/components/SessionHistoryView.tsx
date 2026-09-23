@@ -1,13 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, History, LoaderCircle, RefreshCw } from 'lucide-react'
-import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage } from '@agentmux/core'
+import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionControl, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import { ConversationMessage, parseTraceDisclosureKey } from './ConversationMessage'
-import { HUMAN_SPEAKER_ID } from '../lib/conversation-speaker'
+import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
 
 type ReadingAnchor = { id: string; offset: number }
 type ReadingState = {
@@ -69,7 +70,7 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
-  control, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice,
+  control, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, describeSpeaker,
   expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp
 }: {
   control: AgentSessionControl
@@ -85,6 +86,7 @@ export function SessionHistoryView({
   openHttpLink(url: string, event: LinkClickModifiers): void
   expandedTraces?: ReadonlySet<string>
   onToggleTrace?: (traceId: string, open: boolean) => void
+  describeSpeaker?: DescribeSpeaker
 }) {
   const visibleRef = useRef(visible)
   visibleRef.current = visible
@@ -246,6 +248,32 @@ export function SessionHistoryView({
   }, [])
 
   const items = reading.pages.flatMap((page) => page.items)
+  const userMessagesByRawId = useMemo(() => {
+    const map = new Map<string, AgentSessionUserMessage>()
+    for (const page of reading.pages) {
+      const messages = projectSessionUserMessages({
+        agentSessionId: control.agentSessionId,
+        historyPage: page
+      })
+      for (const msg of messages) {
+        map.set(msg.rawId, msg)
+      }
+    }
+    return map
+  }, [reading.pages, control.agentSessionId])
+
+  const fallbackResolver = useMemo(
+    () =>
+      createSpeakerResolver({
+        currentSession: {
+          id: control.agentSessionId,
+          label,
+          ...(reading.source ? { providerId: reading.source.providerId } : {})
+        }
+      }),
+    [control.agentSessionId, label, reading.source?.providerId]
+  )
+  const resolveSpeaker = describeSpeaker ?? fallbackResolver
   const appearance = terminalOptions(themeId, fontSize)
   const theme = terminalTheme(themeId)
   const openedTraces = expandedTracesProp ?? localDisclosures
@@ -333,23 +361,35 @@ export function SessionHistoryView({
           {reading.loading ? <><LoaderCircle size={12} className="spin" /> Reading history…</> : reading.source && reading.nextCursor === null ? 'Beginning of the available native history' : null}
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
-        {items.map((item) => <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
-          <ConversationMessage
-            messageId={item.id}
-            {...(item.kind === 'activity' ? {} : { speaker: item.kind === 'user-message'
-              ? { role: 'human' as const, id: HUMAN_SPEAKER_ID }
-              : { role: 'agent' as const, id: control.agentSessionId } })}
-            name={item.kind === 'user-message' ? 'You' : item.kind === 'assistant-message' ? label : item.title ?? 'Activity'}
-            {...(reading.source ? { providerId: reading.source.providerId } : {})}
-            content={item.contentParts}
-            {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
-            workspaceRoot={workspaceRoot}
-            openWorkspaceFile={openWorkspaceFile}
-            openHttpLink={openHttpLink}
-            expandedTraces={openedTraces}
-            onToggleTrace={handleToggleTrace}
-          />
-        </article>)}
+        {items.map((item) => {
+          const userMsg = item.kind === 'user-message' ? userMessagesByRawId.get(item.id) : undefined
+          const speaker: ConversationSpeaker | undefined = item.kind === 'activity'
+            ? undefined
+            : item.kind === 'user-message'
+              ? (userMsg ? speakerOfUserMessage(userMsg) : { role: 'unknown', id: UNKNOWN_SPEAKER_ID })
+              : { role: 'agent', id: control.agentSessionId }
+
+          const described = speaker ? resolveSpeaker(speaker) : undefined
+          const displayName = described?.name ?? (item.kind === 'activity' ? item.title ?? 'Activity' : 'Input')
+
+          return (
+            <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
+              <ConversationMessage
+                messageId={item.id}
+                {...(speaker ? { speaker } : {})}
+                name={displayName}
+                {...(described?.providerId ? { providerId: described.providerId } : reading.source ? { providerId: reading.source.providerId } : {})}
+                content={item.contentParts}
+                {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
+                workspaceRoot={workspaceRoot}
+                openWorkspaceFile={openWorkspaceFile}
+                openHttpLink={openHttpLink}
+                expandedTraces={openedTraces}
+                onToggleTrace={handleToggleTrace}
+              />
+            </article>
+          )
+        })}
         {!reading.loading && reading.source && items.length === 0 ? <p className="session-history__empty">No records in this page.{reading.nextCursor !== null ? ' Earlier records can still be read.' : ''}</p> : null}
         {reading.newerOutsideWindow ? <div className="session-history__boundary" role="status">Newer records are outside this three-page reading window. <button type="button" className="small-button" disabled={reading.loading && retryDirectionRef.current === 'latest'} onClick={() => void readPage('latest')}>Return to latest</button></div> : null}
       </div>
