@@ -1,4 +1,6 @@
 import { AgentMuxError } from './errors.js'
+import { stripVTControlCharacters } from 'node:util'
+import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
 
 /**
  * 握手探测失败之后怎么办——判定层（AGENTS.md 原则 11 在 Core 侧的落点）。
@@ -29,6 +31,25 @@ export const AGENT_TERMINAL_HANDSHAKE_TIMEOUT = 'AGENT_TERMINAL_HANDSHAKE_TIMEOU
  * 还有一个能干活的 Agent。
  */
 export const AGENT_TERMINAL_HANDSHAKE_FAILED = 'AGENT_TERMINAL_HANDSHAKE_FAILED'
+
+/** An exited Run's bounded startup output, carried in message because IPC drops custom fields. */
+export function terminalHandshakeExitError(run: CtxmuxAdapterRun, output: string): AgentMuxError {
+  // Node's stripper leaves OSC payloads containing spaces; remove those complete non-text
+  // control strings before using the standard stripper for the remaining VT sequences.
+  const text = stripVTControlCharacters(output.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/gu, ''))
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/gu, '')
+    .trim().slice(-4096)
+  const state = run.state
+  const reason = state.type === 'exited'
+    ? `exit code ${state.code ?? 'unknown'}${state.signal ? `, signal ${state.signal}` : ''}`
+    : state.type
+  return new AgentMuxError(
+    `Agent Run exited before its terminal capability query was observed (${reason}). ${
+      text ? `Startup output:\n${text}` : 'No startup output was observed.'
+    }`,
+    AGENT_TERMINAL_HANDSHAKE_FAILED
+  )
+}
 
 /**
  * The capability probe was degradable, but recording that fact in the Session Store failed.  This
