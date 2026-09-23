@@ -79,6 +79,7 @@ import {
   type CtxmuxAdapterStopOperation
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
+import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { mintAgentSessionId } from './agent-session-id.js'
 import {
   AgentMuxFileAgentSessionStore,
@@ -410,9 +411,7 @@ export function terminalEnvironment(
   // emitting ANSI. The Runtime baseline removes the same signals for daemon startup; repeat that
   // invariant at the final Agent/Terminal launch boundary so a stale daemon or executor snapshot cannot
   // reintroduce them.
-  delete resolved.NO_COLOR
-  if (resolved.FORCE_COLOR === '0') delete resolved.FORCE_COLOR
-  if (resolved.CLICOLOR === '0') delete resolved.CLICOLOR
+  removeHostColorSignals(resolved)
   return resolved
 }
 

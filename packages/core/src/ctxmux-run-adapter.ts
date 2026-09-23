@@ -30,6 +30,7 @@ import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
+import { missingHostEnvironmentKeys, removeInheritedHostSignals } from './terminal-environment-policy.js'
 import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
@@ -238,17 +239,11 @@ function localProcessEnvironment(): Record<string, string> {
     TERM_PROGRAM_VERSION: CTXMUX_VERSION,
     FORCE_HYPERLINK: '1'
   }
-  delete environment.NO_COLOR
-  if (environment.FORCE_COLOR === '0') delete environment.FORCE_COLOR
-  if (environment.CLICOLOR === '0') delete environment.CLICOLOR
   // AgentMux can itself be started from an Agent/CI shell. Those markers describe the
   // desktop host, not a newly launched Agent, and Claude treats them as a child/CI session
   // (which disables transcript/UI behavior). Explicit Run env overrides are merged after this
   // baseline, so a caller can still opt into one deliberately.
-  delete environment.CI
-  delete environment.CODEX_CI
-  delete environment.CLAUDECODE
-  delete environment.CLAUDE_CODE_CHILD_SESSION
+  removeInheritedHostSignals(environment)
   return Object.fromEntries(Object.entries(environment).filter((entry): entry is [string, string] => entry[1] !== undefined))
 }
 
@@ -992,12 +987,17 @@ export class CtxmuxRunAdapter {
     rows?: number
   }): Promise<CtxmuxAdapterRun> {
     try {
-      const run = await this.requireClient().start(defineRun(input.program, {
-        args: input.args,
+      const environment = { ...localProcessEnvironment(), ...input.env }
+      // RunSpec.env adds entries to the daemon's environment; omitting a key does not unset it.
+      // The system env utility execs the original program in the same PID/PTY, removing only
+      // policy keys absent from the final environment. Values remain in env, never in argv.
+      const unsetArgs = missingHostEnvironmentKeys(environment).flatMap(key => ['-u', key])
+      const run = await this.requireClient().start(defineRun('/usr/bin/env', {
+        args: [...unsetArgs, '--', input.program, ...input.args],
         cwd: input.cwd,
         // The daemon can outlive this application. Every new local Run receives the current
         // client environment; explicit Run overrides remain authoritative.
-        env: { ...localProcessEnvironment(), ...input.env },
+        env: environment,
         initialSize: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
       }), createOperationKey(input.operationKey))
       return this.projectRun(run)
