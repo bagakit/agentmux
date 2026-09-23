@@ -263,8 +263,9 @@ export function ScreenshotEditor({
   if (!bounds) return null
   return (
     <WindowOverlayPortal layer="dialog">
-    <div ref={containerRef} className="browser-screenshot-editor" role="dialog" data-state="open" aria-label="Screenshot editor"
+    <div className="browser-screenshot-editor" role="dialog" data-state="open" aria-label="Screenshot editor"
       style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height }}>
+      <div ref={containerRef} className="browser-screenshot-editor__canvas-area">
       <div
         ref={viewportRef}
         className="browser-screenshot-editor__viewport"
@@ -316,6 +317,7 @@ export function ScreenshotEditor({
             }}
           />
         ) : null}
+      </div>
       </div>
       <div className="browser-screenshot-toolbar" role="toolbar" aria-label="Screenshot markup tools">
         <div className="browser-screenshot-toolbar__tools">
@@ -376,7 +378,6 @@ export function ScreenshotEditor({
           </button>
         </div>
         <div className="browser-screenshot-toolbar__actions">
-          <span>Mark the frozen page, then copy a PNG.</span>
           <button type="button" disabled={busy} onClick={onCancel}><X size={13} /> Cancel</button>
           <button className="primary-button" type="button" disabled={busy || !loaded} onClick={complete}>
             <Clipboard size={13} /> {busy ? 'Copying…' : 'Copy PNG'}
