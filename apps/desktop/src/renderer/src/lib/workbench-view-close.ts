@@ -118,7 +118,7 @@ export function planWorkbenchViewClose(input: {
       return { owner: surfaceOwner(surface, sessions), resourceKey: null }
     }
     if (surface.phase !== 'attached' || attachedOutsideView.has(surface.sessionId)) {
-      return { owner: surfaceOwner(surface, sessions, true), resourceKey: null }
+      return { owner: surfaceOwner(surface, sessions), resourceKey: null }
     }
     const session = sessions.get(surface.sessionId)
     const shouldStop = session !== undefined && session.processState !== 'exited' &&
