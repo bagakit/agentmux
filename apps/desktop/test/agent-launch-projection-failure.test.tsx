@@ -15,14 +15,17 @@ import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { AgentHookServer } from '../../../packages/core/src/hook-server'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
-  invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
+  invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  listeners: new Map<string, Set<(...args: any[]) => void>>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
 // preload, registered IPC, RuntimeController and public Core submission all execute below.
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
-  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() },
+  ipcRenderer: { invoke: bridge.invoke, on: (channel: string, listener: (...args: any[]) => void) => {
+    const callbacks = bridge.listeners.get(channel) ?? new Set(); callbacks.add(listener); bridge.listeners.set(channel, callbacks)
+  }, off: (channel: string, listener: (...args: any[]) => void) => bridge.listeners.get(channel)?.delete(listener), send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => '/private-explicit-steer' },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -119,7 +122,8 @@ beforeEach(async () => {
   runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-  const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed, send: vi.fn(),
+  const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed,
+    send: vi.fn((channel: string, ...args: any[]) => { for (const listener of bridge.listeners.get(channel) ?? []) listener({}, ...args) }),
     session: { flushStorageData: vi.fn() } })
   disposeIpc = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as unknown as ConfigStore,
@@ -314,6 +318,50 @@ it('Native persistence refusal during original Session recovery retains the same
     nativeHandle: { kind: 'provider', providerId: 'projection-fixture', sessionId: 'verified-private-handle' } })
   expect([...runs.keys()]).toEqual([session.control.run.runId])
   expect(stop).not.toHaveBeenCalled()
+})
+it('consumes a successful Core resume rollback after the failed Run and rejects its late projection without losing the original workbench', async () => {
+  const id = await launch(), original = useAppStore.getState().sessions[0]!
+  const inner = core as any, clock = Date.now()
+  await inner.registry.put({ ...inner.registry.get(id), updatedAt: clock - 1,
+    nativeHandle: { kind: 'provider', providerId: 'projection-fixture', sessionId: 'original-native' } })
+  const oldRun = runs.get(original.control.run.runId)
+  oldRun.state = { type: 'exited', code: 0, signal: null }
+  await useAppStore.getState().refreshSession(id)
+  await pane(id)
+  useAppStore.getState().setAgentComposerDraft(id, 'original unsent draft')
+  const before = useAppStore.getState(), observed: string[] = []
+  const unsubscribe = core.onEvent(event => {
+    if (event.type === 'agent-session') observed.push(useAppStore.getState().sessions.find(item => item.id === id)!.control.run.runId)
+  })
+  inner.providers.get('projection-fixture').terminalHandshake = { query: '\x1b[?u', response: '\x1b[?0u' }
+  vi.spyOn(Date, 'now').mockReturnValue(clock)
+  let failed: any
+  kernel.attach = async (runId: string) => {
+    const run = runs.get(runId); run.state = { type: 'exited', code: 1, signal: null }
+    failed = structuredClone(inner.registry.get(id))
+    inner.publisher.publish({ type: 'agent-session', session: failed })
+    inner.publisher.publishRunState(inner.projectRun(run, failed), id)
+    return { run, replay: [{ data: '\x1b[31mError: missing fixture runtime\x1b[0m\n' }] }
+  }
+  kernel.detach = vi.fn(async () => {}); kernel.hasAttachment = () => false
+  await act(async () => useAppStore.getState().recoverSession(id))
+  const state = useAppStore.getState()
+  expect(observed).toEqual(['projection-run-2', original.control.run.runId])
+  expect(state.sessions.find(item => item.id === id)).toMatchObject({ processState: 'exited',
+    control: original.control })
+  expect(state.error).toContain('Error: missing fixture runtime')
+  expect(state.error).toContain('exit code 1'); expect(state.error).not.toContain('\x1b')
+  expect(state.tabs).toBe(before.tabs); expect(state.layouts).toBe(before.layouts)
+  expect(state.agentComposerDrafts[id]).toBe('original unsent draft')
+  expect(state.documents).toBe(before.documents); expect(state.dirtyDocuments).toBe(before.dirtyDocuments)
+  expect(core.agentSession(id)).toMatchObject({ nativeHandle: { kind: 'provider', providerId: 'projection-fixture', sessionId: 'original-native' }, run: original.control.run, retiredRuns: [{ runId: 'projection-run-2' }], updatedAt: clock + 1 })
+  await act(async () => inner.publisher.publish({ type: 'agent-session', session: failed }))
+  expect(useAppStore.getState().sessions.find(item => item.id === id)!.control).toEqual(original.control)
+  expect(writes).toEqual([]); expect(starts).toHaveLength(2)
+  expect(container.querySelector('[role="status"]')).not.toBeNull()
+  expect(container.textContent).toContain('Resume')
+  expect(container.textContent).toContain('Error: missing fixture runtime')
+  unsubscribe()
 })
 it('sender disappearance keeps the existing explicit cancellation boundary using the accepted Run', async () => {
   destroyed = true
