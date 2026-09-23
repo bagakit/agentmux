@@ -16,14 +16,14 @@ export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
 }
 
-function GoalRow({ demand, selected, sessionContext, onSelect }: { demand: DemandProjection; selected: boolean; sessionContext: boolean; onSelect: () => void }) {
+function GoalRow({ demand, selected, sessionContext, acknowledgementFailed, onSelect }: { demand: DemandProjection; selected: boolean; sessionContext: boolean; acknowledgementFailed: boolean; onSelect: () => void }) {
   const execution = useAppStore(useShallow((state) => {
     const byId = sessionPresentationById(state.sessions)
     let count = 0; const statuses = new Set<string>()
     for (const id of demand.sessionIds) { const session = byId.get(id); if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } }
     return { count, status: [...statuses].join(' / ') }
   }))
-  const nextStep = goalNextStep(demand)
+  const nextStep = acknowledgementFailed ? 'Reload current proposal' : goalNextStep(demand)
   return <div role="button" tabIndex={0} className={`goals-row${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(sessionContext ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
@@ -109,7 +109,7 @@ export function GlobalBoardSurface() {
     } catch (error) { setCreationError(error instanceof Error ? error.message : String(error)) }
     finally { setSaving(false) }
   }
-  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} sessionContext={Boolean(selectedSessionId && demand.sessionIds.includes(selectedSessionId))} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
+  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={Boolean(acknowledgementFeedback[demand.id]?.failure)} sessionContext={Boolean(selectedSessionId && demand.sessionIds.includes(selectedSessionId))} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
   return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
     if (event.key !== 'Escape' || event.nativeEvent.isComposing) return

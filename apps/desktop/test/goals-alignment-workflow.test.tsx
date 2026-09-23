@@ -56,6 +56,16 @@ function button(label: string) { const node = [...container.querySelectorAll<HTM
 async function click(label: string, waitForTransport = true) { await act(async () => { button(label).click(); for (let i = 0; waitForTransport && i < 4; i++) { await Promise.resolve(); await Promise.allSettled([...activeTransport]) } }) }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
 function next() { return container.querySelector('.goals-row__next')?.textContent }
+function expectReloadOnly() {
+  const recovery = container.querySelector('[data-goal-acknowledgement-failure]')
+  expect(recovery).toBeTruthy()
+  expect([...recovery!.querySelectorAll('button')].map(node => node.textContent?.trim())).toEqual(['Reload current proposal'])
+  expect([...container.querySelectorAll('.goals-detail .goals-button--primary')].map(node => node.textContent?.trim())).toEqual(['Reload current proposal'])
+  expect(container.querySelector('[data-goal-confirm], [data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
+  expect(container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent).toBe('Reload current proposal')
+  expect(container.querySelector('[data-demand-id="goal"]')?.getAttribute('aria-label')).toBe('Open goal Restore my work. Reload current proposal')
+}
+
 
 describe('mounted Goals → actual Renderer store → durable Demand owner', () => {
   it('prioritizes the proposal, waits for human confirmation and accepts the exact current report without forging business status', async () => {
@@ -219,10 +229,10 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const unchanged = useAppStore.getState().demands.goal
     await openDemandStore({ root: temporaryRoot }).proposeAlignment('goal', { ...proposal, summary: 'A different target from another caller.' })
     await click('Confirm goal'); await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('changed'))
-    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1); expect(useAppStore.getState().demands.goal).toEqual(unchanged)
+    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1); expect(useAppStore.getState().demands.goal).toEqual(unchanged); expectReloadOnly()
     vi.mocked(api.demands.list).mockRejectedValueOnce(new Error('Owner unavailable'))
     await click('Reload current proposal'); await eventually(() => expect(container.textContent).toContain('Reload failed: Owner unavailable'))
-    expect(useAppStore.getState().demands.goal).toEqual(unchanged)
+    expect(useAppStore.getState().demands.goal).toEqual(unchanged); expectReloadOnly()
     await click('Reload current proposal'); await eventually(() => expect(container.querySelector('[data-goal-summary]')?.textContent).toBe('A different target from another caller.'))
     expect(api.demands.confirmAlignment).toHaveBeenCalledTimes(1); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
     expect(useAppStore.getState().demands.goal).toMatchObject({ description: intent, source: 'session', sessionIds: ['healthy-run'], alignment: { revision: 2, confirmedAt: null } })
@@ -234,7 +244,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     await save(proposal, true, report()); await mount(); const oldSubmission = (await owner.get('goal'))!.grounding!.submissionId
     await openDemandStore({ root: temporaryRoot }).proposeGrounding('goal', { ...report('gap'), summary: 'A newly reported gap.' })
     await click('Accept results'); await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('changed'))
-    expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, oldSubmission, false)
+    expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, oldSubmission, false); expectReloadOnly()
     expect(useAppStore.getState().demands.goal!.grounding!.acceptedAt).toBeNull()
     await click('Reload current proposal'); await eventually(() => expect(container.querySelector('[data-goal-result-summary]')?.textContent).toBe('A newly reported gap.'))
     expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
@@ -243,13 +253,60 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(api.demands.acceptGrounding.mock.calls.at(-1)).toEqual(['goal', 1, (await owner.get('goal'))!.grounding!.submissionId, true])
   })
 
-  it('retains a failed acknowledgement and retries the exact reviewed tokens after transport recovery', async () => {
+  it('retains an unconfirmed receipt, reloads and requires a new explicit acceptance of the same reviewed report', async () => {
     await save(proposal, true, report()); await mount(); const submission = (await owner.get('goal'))!.grounding!.submissionId
     vi.mocked(api.demands.acceptGrounding).mockRejectedValueOnce(new Error('Receipt unavailable'))
     await click('Accept results'); await eventually(() => expect(container.textContent).toContain('Result acceptance is unconfirmed'))
     expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull(); expect(useAppStore.getState().demands.goal!.grounding!.acceptedAt).toBeNull()
-    await click('Retry acceptance'); await eventually(() => expect(next()).toBe('Accepted'))
+    expectReloadOnly(); await click('Reload current proposal')
+    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1); expect(button('Accept results')).toBeTruthy()
+    await click('Accept results'); await eventually(() => expect(next()).toBe('Accepted'))
     expect(api.demands.acceptGrounding.mock.calls).toEqual([['goal', 1, submission, false], ['goal', 1, submission, false]])
+  })
+
+  it('keeps recovery primary when changed owner facts arrive while its receipt failure is retained', async () => {
+    await save(proposal); await mount()
+    vi.mocked(api.demands.confirmAlignment).mockRejectedValueOnce(new Error('Receipt unavailable'))
+    await click('Confirm goal'); expectReloadOnly()
+    await act(async () => useAppStore.getState().updateDemand('goal', { alignment: { ...proposal, openQuestions: ['Should the original Agent resume automatically?'] } }))
+    expectReloadOnly(); expect(button('Discuss changes').classList.contains('goals-button--primary')).toBe(false)
+    expect(button('Discuss changes').disabled).toBe(false)
+    await owner.proposeAlignment('goal', proposal); await owner.confirmAlignment('goal', 3)
+    await act(async () => useAppStore.getState().updateDemand('goal', { description: intent }))
+    expectReloadOnly(); expect(button('Open discussion for Restore my work').classList.contains('goals-button--primary')).toBe(false)
+    expect(button('Open discussion for Restore my work').disabled).toBe(false)
+    await click('Reload current proposal')
+    expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull()
+    expect(next()).toBe('Goal agreed'); expect(button('Open discussion for Restore my work').classList.contains('goals-button--primary')).toBe(true)
+    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1)
+    expect((await owner.get('goal'))!).toMatchObject({ description: intent, sessionIds: ['healthy-run'], alignment: { revision: 3, confirmedAt: expect.any(Number) } })
+  })
+
+  it.each(['confirm', 'accept'] as const)('reads a durable successful %s after a lost receipt without sending a second acknowledgement', async (kind) => {
+    await save(proposal, kind === 'accept', kind === 'accept' ? report() : undefined)
+    const healthyRun = { id: 'healthy-run', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: 1 } } as SessionSnapshot
+    useAppStore.setState({ sessions: [healthyRun] }); await mount()
+    const reviewed = useAppStore.getState().demands.goal!
+    if (kind === 'confirm') vi.mocked(api.demands.confirmAlignment).mockImplementationOnce((id, revision) => transport((async () => { await owner.confirmAlignment(id, revision); throw new Error('Receipt lost after the owner committed') })()))
+    else vi.mocked(api.demands.acceptGrounding).mockImplementationOnce((id, revision, submission, gaps) => transport((async () => { await owner.acceptGrounding(id, revision, submission, gaps); throw new Error('Receipt lost after the owner committed') })()))
+    await click(kind === 'confirm' ? 'Confirm goal' : 'Accept results')
+    await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('is unconfirmed'))
+    expectReloadOnly(); expect(useAppStore.getState().demands.goal).toEqual(reviewed)
+    const committed = (await openDemandStore({ root: temporaryRoot }).get('goal'))!
+    const savedAt = kind === 'confirm' ? committed.alignment!.confirmedAt : committed.grounding!.acceptedAt
+    expect(savedAt).toBeGreaterThan(0)
+    expect(kind === 'confirm' ? reviewed.alignment!.confirmedAt : reviewed.grounding!.acceptedAt).toBeNull()
+    await click('Reload current proposal')
+    expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull()
+    expect(kind === 'confirm' ? useAppStore.getState().demands.goal!.alignment!.confirmedAt : useAppStore.getState().demands.goal!.grounding!.acceptedAt).toBe(savedAt)
+    expect(next()).toBe(kind === 'confirm' ? 'Goal agreed' : 'Accepted')
+    expect(container.textContent).toContain(kind === 'confirm' ? 'Confirmed by you' : 'Accepted by you')
+    expect(container.querySelector('[data-goal-confirm], [data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
+    expect(api.demands.confirmAlignment).toHaveBeenCalledTimes(kind === 'confirm' ? 1 : 0)
+    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(kind === 'accept' ? 1 : 0)
+    expect(useAppStore.getState().sessions).toEqual([healthyRun])
+    expect((await owner.get('goal'))!).toMatchObject({ description: intent, status: 'in_progress', sessionIds: ['healthy-run'] })
+    if (kind === 'accept') expect((await owner.get('goal'))!.grounding!.submissionId).toBe(reviewed.grounding!.submissionId)
   })
 
   it('uses the mapped healthy Mote Run for both stages and keeps real deferred input when readiness is unavailable', async () => {
@@ -291,16 +348,24 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(useAppStore.getState().selectedDemandId).toBe('goal'); expect((await owner.get('goal'))!.sessionIds).toEqual(['healthy-run'])
   })
 
-  it('keeps a failed acknowledgement attached to its Goal across navigation and retries only its reviewed report', async () => {
+  it('keeps a failed acknowledgement attached across navigation, then reloads before a new explicit acceptance', async () => {
     await save(proposal, true, report()); await owner.create({ id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
     const submission = (await owner.get('goal'))!.grounding!.submissionId
     vi.mocked(api.demands.acceptGrounding).mockRejectedValueOnce(new Error('Receipt unavailable'))
     await click('Accept results'); await eventually(() => expect(container.textContent).toContain('Result acceptance is unconfirmed'))
+    expectReloadOnly(); await click('Back to goals')
+    expect(container.querySelector('.goals-detail')).toBeNull()
+    expect(container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent).toBe('Reload current proposal')
+    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1)
+    await act(async () => (container.querySelector('[data-demand-id="goal"]') as HTMLElement).click())
+    expectReloadOnly(); expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1)
     await act(async () => (container.querySelector('[data-demand-id="other"]') as HTMLElement).click())
     expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull()
     await act(async () => (container.querySelector('[data-demand-id="goal"]') as HTMLElement).click())
     expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('Receipt unavailable')
-    await click('Retry acceptance'); await eventually(() => expect(next()).toBe('Accepted'))
+    expectReloadOnly(); await click('Reload current proposal')
+    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1); expect(button('Accept results')).toBeTruthy()
+    await click('Accept results'); await eventually(() => expect(next()).toBe('Accepted'))
     expect(api.demands.acceptGrounding.mock.calls).toEqual([['goal', 1, submission, false], ['goal', 1, submission, false]])
   })
 
