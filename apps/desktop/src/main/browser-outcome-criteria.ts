@@ -131,6 +131,8 @@ async function downloadCondition(registration: BrowserOutcomeRegistration,
     receipt.workspaceId === registration.context.workspaceId && receipt.path === condition.path)
   if (receipts.length !== 1) throw new Error('No unique registered download')
   const receipt = receipts[0]!
+  if (receipt.status === 'failed') return result(condition, 'unavailable',
+    'The registered transfer has no confirmed readable file. Inspect its recorded download and restore access, then verify again. Existing work remains; no trigger was repeated.')
   if (receipt.status !== 'completed') return result(condition, 'not-met', 'The registered download has not completed. No trigger was repeated.')
   const reference = receipt.reference
   if (!reference || reference.kind !== 'browser-download-file' || reference.id !== receipt.id ||
