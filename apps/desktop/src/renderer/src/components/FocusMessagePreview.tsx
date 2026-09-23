@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef } from 'react'
+import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { ArrowUpRight, Bot, MessageSquare, X } from 'lucide-react'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
-import { useAppStore } from '../store'
 import { ConversationMessage } from './ConversationMessage'
+import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 
 export type FocusMessageReader = {
@@ -16,15 +17,14 @@ export type FocusMessageReader = {
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected Core input. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ message, sender, recipient, lane, hierarchy, interactive, left, reader, onSelect, onClose }: {
+export function FocusMessagePreview({ message, sender, recipient, lane, hierarchy, interactive, anchor, reader, onSelect, onClose }: {
   message: AgentSessionUserMessage | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
-  interactive: boolean; left: number; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
+  interactive: boolean; anchor: HTMLElement; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
 }) {
   const element = useRef<HTMLDivElement>(null)
   const returnFocus = useRef(true)
-  const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
-  const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
+  const insidePointer = useRef<PointerEvent | null>(null)
   const agent = message?.author.kind === 'agent'
   const authorId = message?.author.kind === 'agent' ? message.author.agentSessionId : undefined
   const topic = sender?.topicId && lane ? hierarchy?.topics[lane.workspaceId]?.find(item => item.id === sender.topicId) : undefined
@@ -33,28 +33,52 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
   useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null
     const surface = element.current
+    if (!surface) return
     returnFocus.current = true
-    acquireOverlay()
-    if (interactive) element.current?.focus()
-    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() } }
-    const outside = (event: PointerEvent) => { if (interactive && event.target instanceof Node && !element.current?.contains(event.target) && !(event.target instanceof Element && event.target.closest('.recent-focus__message'))) onClose() }
+    let disposed = false
+    let positioned = false
+    const update = async () => {
+      const { x, y } = await computePosition(anchor, surface, {
+        strategy: 'fixed', placement: 'top', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
+          apply({ availableWidth, availableHeight }) {
+            if (disposed) return
+            surface.style.width = `${Math.max(0, Math.min(332, availableWidth))}px`
+            surface.style.maxHeight = `${Math.max(0, Math.min(440, window.innerHeight * .6, availableHeight))}px`
+          }
+        })]
+      })
+      if (disposed) return
+      Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+      if (!positioned) {
+        positioned = true
+        if (interactive && (document.activeElement === previous || document.activeElement === document.body)) surface.focus()
+      }
+    }
+    const stopPosition = autoUpdate(anchor, surface, () => { void update() })
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); onClose() } }
+    const outside = (event: PointerEvent) => {
+      // A nested image Portal remains inside this React subtree, though DOM.contains is false.
+      if (insidePointer.current === event) { insidePointer.current = null; return }
+      if (interactive && event.target instanceof Node && !surface.contains(event.target) && !(event.target instanceof Element && event.target.closest('.recent-focus__message'))) onClose()
+    }
     document.addEventListener('keydown', dismiss)
     document.addEventListener('pointerdown', outside)
     return () => {
-      releaseOverlay()
+      disposed = true
+      stopPosition()
       document.removeEventListener('keydown', dismiss)
       document.removeEventListener('pointerdown', outside)
       if (interactive && returnFocus.current && previous?.isConnected && surface?.contains(document.activeElement)) previous.focus()
     }
-  }, [interactive, acquireOverlay, releaseOverlay, onClose])
+  }, [anchor, interactive, onClose])
   const navigate = (context: FocusContext | undefined) => {
     if (!context) return
     returnFocus.current = false
     onSelect(context.id)
     onClose()
   }
-  return <div ref={element} tabIndex={interactive ? -1 : undefined} className="recent-focus__message-preview" data-interactive={interactive}
-    style={{ left: `clamp(8px, ${left}px, calc(100% - 340px))` }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
+  return <WindowOverlayPortal layer={interactive ? 'popover' : 'tooltip'}><div ref={element} tabIndex={interactive ? -1 : undefined} className="recent-focus__message-preview" data-interactive={interactive} data-state="open"
+    onPointerDownCapture={event => { insidePointer.current = event.nativeEvent }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
     <header>{agent ? <Bot size={14} aria-hidden="true" /> : <MessageSquare size={14} aria-hidden="true" />}<strong>{reader ? 'Input records' : agent ? sender?.name ?? 'Agent' : 'Prompt'}</strong>
       {message ? <time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Record time unknown'}</time> : null}
       {interactive ? <button type="button" className="icon-button" aria-label="Close message" onClick={onClose}><X size={12} /></button> : null}</header>
@@ -83,5 +107,5 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
       workspaceRoot={recipient?.workspacePath ?? ''} readPastedImage={readPastedImage} /></div>
     {interactive && agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ArrowUpRight size={12} aria-hidden="true" /></button> : null}
     {interactive ? <button type="button" disabled={!recipient} onClick={() => navigate(recipient)}>Return to Context</button> : <span className="recent-focus__message-hint">Click or press Enter to view actions</span>}</> : null}
-  </div>
+  </div></WindowOverlayPortal>
 }
