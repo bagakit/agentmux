@@ -69,7 +69,7 @@ app.whenReady().then(async () => {
       await until(`document.querySelector('.settings-content__header h2').textContent===${JSON.stringify(title)}`)
       await until('document.querySelectorAll(".settings-content__scroll:not([hidden])").length === 1')
     }
-    await until('window.__settingsSearchRefinement.ready && !!document.querySelector("[data-settings-pane=copy-paths]")')
+    await until('window.__settingsSearchRefinement.ready && !!document.querySelector("[data-settings-pane=general]")')
     for (const width of [320, 420, 1480]) {
       win.setContentSize(width, 900)
       win.webContents.focus()
@@ -107,13 +107,13 @@ app.whenReady().then(async () => {
       await section('Appearance')
       const font = node('[aria-label="Terminal font size in pixels"]')
       await fill(font, '18'); await fill(font, '')
-      await section('Copy Paths')
-      const toggle = 'document.querySelector("[data-settings-pane=copy-paths] input[type=checkbox]")'
+      await section('General')
+      const toggle = 'document.querySelector("[data-settings-pane=general] input[type=checkbox]")'
       if (!(await read(`(${toggle}).checked`))) await click(toggle)
       await until(`(${toggle}).checked`)
-      frame.copyIntro = await read(`(() => {const p=document.querySelector('[data-settings-pane=copy-paths]');return {connected:p.isConnected,visible:!p.hidden,title:document.querySelector('.settings-content__header h2').textContent,description:document.querySelector('.settings-content__header p').textContent,leadCount:p.querySelectorAll('.settings-lead').length,text:p.textContent,dirty:!p.querySelector('.settings-pane-actions button').disabled}})()`)
+      frame.copyIntro = await read(`(() => {const p=document.querySelector('[data-settings-pane=general]'),group=p.querySelector('.settings-group');return {connected:p.isConnected,visible:!p.hidden,title:document.querySelector('.settings-content__header h2').textContent,description:document.querySelector('.settings-content__header p').textContent,groupConnected:group.isConnected,groupTitle:group.querySelector('header span').textContent,leadCount:group.querySelectorAll('.settings-lead').length,text:group.textContent,dirty:!p.querySelector('[data-settings-save-bar] button').disabled}})()`)
       assert.equal(frame.copyIntro.connected, true); assert.equal(frame.copyIntro.visible, true)
-      assert.equal(frame.copyIntro.title, 'Copy Paths'); assert.equal(frame.copyIntro.description, 'Choose how paths look when you share them.')
+      assert.equal(frame.copyIntro.title, 'General'); assert.equal(frame.copyIntro.description, 'Copied paths, local data, and diagnostics.'); assert.equal(frame.copyIntro.groupConnected, true); assert.equal(frame.copyIntro.groupTitle, 'Home directory in copied paths')
       if (testCase === 'copy-intro') assert.equal(frame.copyIntro.leadCount, 0, 'Copy Paths has one introduction')
       for (const text of ['~', 'proj/app', 'your own home directory', 'Remote paths and paths belonging to another user always stay complete', 'Applies to every Copy Path action']) assert.ok(frame.copyIntro.text.includes(text))
       assert.equal(frame.copyIntro.dirty, true)
@@ -137,12 +137,12 @@ app.whenReady().then(async () => {
         await click(clear); await until(`(${search}).value===''`)
       }
       await section('Appearance'); assert.equal(await read(`(${font}).value`), '', 'Incomplete numeric draft survives searching and clearing')
-      await section('Copy Paths'); assert.equal(await read(`(${toggle}).checked`), true, 'Dirty Copy Paths draft survives searching and clearing')
+      await section('General'); assert.equal(await read(`(${toggle}).checked`), true, 'Dirty Copy Paths draft survives searching and clearing')
       await settle(); const image = `${width}-${testCase}.png`; fs.writeFileSync(path.join(evidence, image), (await win.webContents.capturePage()).toPNG()); frame.image = image
       await click(node('[aria-label="Close settings"]')); await until('!document.querySelector(".settings-page")')
-      await click('document.querySelector(".window-status-bar [aria-label=Settings]")'); await until('!!document.querySelector("[data-settings-pane=copy-paths]")')
+      await click('document.querySelector(".window-status-bar [aria-label=Settings]")'); await until('!!document.querySelector("[data-settings-pane=general]")')
       await click(node('.window-status-bar [aria-label="Space: show terminal and file workbench"]')); await until('!document.querySelector(".settings-page")')
-      await click('document.querySelector(".window-status-bar [aria-label=Settings]")'); await until('!!document.querySelector("[data-settings-pane=copy-paths]")')
+      await click('document.querySelector(".window-status-bar [aria-label=Settings]")'); await until('!!document.querySelector("[data-settings-pane=general]")')
       result.frames.push(frame)
     }
     result.events = await read('window.__settingsSearchRefinement.events')

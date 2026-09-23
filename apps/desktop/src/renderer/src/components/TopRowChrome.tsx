@@ -221,8 +221,8 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
             aria-label="Settings"
             title="Settings"
             aria-expanded={settingsOpen}
-            data-settings-section="workspaces"
-            onClick={() => settingsOpen ? onCloseSettings?.() : onOpenSettings('workspaces')}
+            data-settings-section="appearance"
+            onClick={() => settingsOpen ? onCloseSettings?.() : onOpenSettings('appearance')}
           >
             <Settings2 size={14} aria-hidden="true" />
           </button>

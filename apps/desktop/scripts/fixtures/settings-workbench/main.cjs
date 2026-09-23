@@ -36,7 +36,7 @@ app.whenReady().then(async () => {
       await click('document.querySelector(".settings-section-picker")')
       await until('!!document.querySelector(".settings-section-menu[role=menu]")')
       const titles = await read(`Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio]')).map(n=>n.textContent.trim())`)
-      assert.deepEqual(titles,['Workspaces','Hosts','Agents','Appearance','Notifications','Browser','Prompts','Copy Paths','General'])
+      assert.deepEqual(titles,['Appearance','Notifications','Browser','General','Agents','Prompts','Workspaces','Hosts'])
       if (win.getContentSize()[0] === 420 && !result.menuFrame) {
         await until(`(() => { const menu=document.querySelector('.settings-section-menu[role=menu]'); const r=menu.getBoundingClientRect(); return r.width > 100 && r.height > 200 && getComputedStyle(menu).opacity === '1'; })()`)
         await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -59,12 +59,13 @@ app.whenReady().then(async () => {
     const before = await read('window.settingsProbe.facts()')
     await click('document.querySelector(".window-status-bar [aria-label=Settings]")')
     await until('!!document.querySelector(".settings-page")')
+    assert.equal(await read('document.querySelector(".settings-content__header h2").textContent'), 'Appearance', 'Actual ordinary Settings entry opens Appearance')
     for (const width of [1480, 760, 560, 420]) {
       win.setContentSize(width, width <= 560 ? 820 : 960)
       for (const theme of ['dark', 'light']) {
         await read(`window.settingsProbe.theme(${JSON.stringify(theme)})`)
         await until(`document.documentElement.dataset.appearance === ${JSON.stringify(theme)}`)
-        for (const pane of ['Workspaces', 'Hosts', 'Agents', 'Appearance', 'Notifications', 'Browser', 'Prompts', 'Copy Paths', 'General']) {
+        for (const pane of ['Appearance', 'Notifications', 'Browser', 'General', 'Agents', 'Prompts', 'Workspaces', 'Hosts']) {
           if (width <= 560) {
             await category(pane)
           } else {
@@ -77,7 +78,7 @@ app.whenReady().then(async () => {
           const geometry = await read(`(() => {
             const rect = selector => { const n = document.querySelector(selector); const r = n.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,right:r.right}; };
             const settings = rect('.settings-page'), footer = rect('.window-status-bar'), scroll = document.querySelector('[data-settings-pane]:not([hidden])');
-            const controls = [...document.querySelectorAll('.window-status-bar button')].filter(n => n.getBoundingClientRect().width > 0).map(n => { const r=n.getBoundingClientRect(); return {label:n.getAttribute('aria-label') || n.textContent, hit: Boolean(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button') === n)} });
+            const controls = [...document.querySelectorAll('.window-status-bar button')].filter(n => n.getBoundingClientRect().width > 0).map(n => { const r=n.getBoundingClientRect(); const hits=[[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]].map(([x,y])=>document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)?.closest('button')===n); return {label:n.getAttribute('aria-label') || n.textContent, hit:hits.every(Boolean),hits}; });
             const bar = scroll.querySelector('.settings-pane-actions'); const action = bar?.getBoundingClientRect();
             return {settings,footer,controls,overflow:scroll.scrollWidth-scroll.clientWidth,workspaceInert:document.querySelector('.app-shell__workspace').inert,footerInert:Boolean(document.querySelector('.window-status-bar').closest('[inert]')),saveVisible: !bar || (action.top >= scroll.getBoundingClientRect().top && action.bottom <= footer.y + 1)};
           })()`)
@@ -92,6 +93,17 @@ app.whenReady().then(async () => {
           const file = `${width}-${theme}-${pane.toLowerCase()}.png`
           await capture(file)
           result.frames.push({width,theme,pane,file,geometry,navigation:width <= 560 ? 'radix-radio-menu-trusted-keyboard' : 'native-button'})
+          if (pane === 'General') {
+            const diagnostics = 'document.querySelector("[data-settings-pane=general] .settings-diagnostics button")'
+            await read(`(${diagnostics}).scrollIntoView({block:'nearest'})`)
+            await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+            const diagnostic = await read(`(() => { const n=${diagnostics},r=n.getBoundingClientRect(),scope=n.closest('.settings-diagnostics'); return { label:n.textContent,privacy:scope.querySelector('span').textContent.trim(),width:r.width,height:r.height,hits:[[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]].map(([x,y])=>n.contains(document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)))}; })()`)
+            assert.equal(diagnostic.label,'Show crash log')
+            assert.equal(diagnostic.privacy,'Crashes are recorded to a local file and never uploaded.')
+            assert.ok(diagnostic.width > 0 && diagnostic.height > 0)
+            assert.deepEqual(diagnostic.hits,[true,true,true,true,true],'The separate diagnostic action remains reachable')
+            result.frames.at(-1).diagnostic = diagnostic
+          }
           if (pane === 'Agents' && theme === 'dark') {
             await click('document.querySelector("[data-settings-pane=agents] .agent-settings-card > summary")')
             await until('document.querySelector("[data-settings-pane=agents] .agent-settings-card[open] .agent-settings-fields")?.getBoundingClientRect().height > 100')
@@ -128,6 +140,8 @@ app.whenReady().then(async () => {
     assert.ok(result.scale.providers >= 13)
     assert.equal(result.scale.executors, result.scale.providers + 1)
     await click('document.querySelector(".window-status-bar [aria-label=Settings]")')
+    await until('document.querySelector(".settings-content__header h2")?.textContent === "Appearance"')
+    await category('Workspaces')
     await until('document.querySelectorAll(".workspace-settings-list > div").length === 51')
     const fill = async (selector, value) => {
       await read(`(() => { const input=document.querySelector(${JSON.stringify(selector)}); input.focus(); input.select(); })()`)

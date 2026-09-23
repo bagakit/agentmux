@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { BrowserSettingsPane } from '../src/renderer/src/components/settings/BrowserSettingsPane'
-import { CopyPathsSettingsPane } from '../src/renderer/src/components/settings/CopyPathsSettingsPane'
+import { GeneralSettingsPane } from '../src/renderer/src/components/settings/GeneralSettingsPane'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -11,7 +11,7 @@ type Kind = typeof kinds[number]
 
 function pane(kind: Kind, saved: boolean, onSave: (value: boolean, expected: boolean) => Promise<void>) {
   return kind === 'copy'
-    ? <CopyPathsSettingsPane copyPathsAsAbsolute={saved} onSave={onSave} />
+    ? <GeneralSettingsPane copyPathsAsAbsolute={saved} onSave={onSave} />
     : <BrowserSettingsPane browser={{ ...composerConfig.browser, agentAutomation: saved }} onSave={onSave} onForget={async () => {}} />
 }
 
@@ -43,7 +43,7 @@ it.each(kinds.flatMap(kind => [false, true].map(saved => ({ kind, saved }))))(
     expect(controls(kind).input).toBe(original.input)
     expect(original.input.checked).toBe(!saved)
     expect(original.summary.textContent).toBe(savedText(kind, saved))
-    expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Unsaved changes')
+    expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toBe('Unsaved changes')
     expect(save).not.toHaveBeenCalled()
   }
 )
@@ -53,13 +53,13 @@ it.each(kinds)('%s retains the saved fact and expected value through pending and
   const save = vi.fn(() => new Promise<void>((_, fail) => { reject = fail }))
   await dom.render(pane(kind, false, save))
   await dom.click('input[type="checkbox"]')
-  await dom.click('.settings-pane-actions button')
+  await dom.click('[data-settings-save-bar] button')
   expect(save).toHaveBeenCalledExactlyOnceWith(true, false)
   expect(controls(kind).summary.textContent).toBe(savedText(kind, false))
   expect(controls(kind).input.checked).toBe(true)
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Saving changes')
+  expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toContain('Saving changes')
   await act(async () => reject(new Error('Original save failed')))
-  expect(dom.container.querySelector('[role="alert"]')!.textContent).toBe('Original save failed')
+  expect(dom.container.querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toBe('Original save failed')
   expect(controls(kind).summary.textContent).toBe(savedText(kind, false))
   expect(controls(kind).input.checked).toBe(true)
 })
@@ -69,7 +69,7 @@ it.each(kinds)('%s advances its saved summary only on publication and retains a 
   const save = vi.fn(() => new Promise<void>(done => { resolve = done }))
   await dom.render(pane(kind, false, save))
   await dom.click('input[type="checkbox"]')
-  await dom.click('.settings-pane-actions button')
+  await dom.click('[data-settings-save-bar] button')
   const original = controls(kind)
   await dom.click('input[type="checkbox"]')
   expect(original.input.checked).toBe(false)
@@ -80,5 +80,5 @@ it.each(kinds)('%s advances its saved summary only on publication and retains a 
   expect(controls(kind).input).toBe(original.input)
   expect(original.input.checked).toBe(false)
   expect(original.summary.textContent).toBe(savedText(kind, true))
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Unsaved changes')
+  expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toBe('Unsaved changes')
 })

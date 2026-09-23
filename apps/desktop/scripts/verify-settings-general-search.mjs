@@ -19,9 +19,26 @@ await fs.mkdir(evidence, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceFile = path.join(desktop, 'src/renderer/src/components/SettingsPanel.tsx')
 const original = await fs.readFile(sourceFile, 'utf8')
-const keywords = "keywords: 'core runtime terminal tmux ssh show crash log session recovery'"
+const ts = require('typescript'), callers = [], entries = []
+const panel = ts.createSourceFile(sourceFile, original, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+let sections, generalKeywords
+const find = node => { if (ts.isVariableDeclaration(node) && node.name.getText(panel) === 'SECTIONS') sections = node.initializer; ts.forEachChild(node, find) }; find(panel)
+assert.ok(sections && ts.isArrayLiteralExpression(sections))
+for (const entry of sections.elements) {
+  assert.ok(ts.isObjectLiteralExpression(entry))
+  const fields = new Map(entry.properties.filter(ts.isPropertyAssignment).map(property => [property.name.getText(panel), property]))
+  const string = node => { assert.ok(node); while (ts.isAsExpression(node)) node = node.expression; assert.ok(ts.isStringLiteral(node)); return node.text }
+  const id = string(fields.get('id')?.initializer), keyword = fields.get('keywords'); assert.ok(keyword)
+  entries.push({ id, keywords: ts.isStringLiteral(keyword.initializer) ? keyword.initializer.text : keyword.initializer.getText(panel) })
+  if (id === 'general') { assert.equal(generalKeywords, undefined); generalKeywords = keyword }
+}
+assert.deepEqual(entries.map(entry => entry.id), ['appearance', 'notifications', 'browser', 'general', 'agents', 'prompts', 'workspaces', 'hosts'])
+assert.ok(generalKeywords && ts.isStringLiteral(generalKeywords.initializer))
+const diagnosticKeywords = 'show crash log session recovery'
+const keywords = generalKeywords.getText(panel), keywordValue = generalKeywords.initializer.text
+assert.equal(keywordValue.split(diagnosticKeywords).length, 2, 'The actual General registration contains the diagnostic keywords once')
 assert.equal(original.split(keywords).length, 2, 'One actual owning General keyword block')
-const mutated = original.replace(keywords, "keywords: 'core runtime terminal tmux ssh'")
+const mutated = original.replace(keywords, `keywords: ${JSON.stringify(keywordValue.replace(diagnosticKeywords, '').trim())}`)
 const inputs = new Map(), runs = []
 async function bind(file) {
   const bytes = await fs.readFile(file), digest = hash(bytes)
@@ -78,19 +95,6 @@ try {
     runs.push({ mode, execution, assertion: render.failure?.message, frames: render.frames.length, compiled,
       owningSourceSha256: hash(mode === 'mutant' ? mutated : original) })
   }
-  const ts = require('typescript'), callers = [], entries = []
-  const panel = ts.createSourceFile(sourceFile, original, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  let sections
-  const find = node => { if (ts.isVariableDeclaration(node) && node.name.getText(panel) === 'SECTIONS') sections = node.initializer; ts.forEachChild(node, find) }; find(panel)
-  assert.ok(sections && ts.isArrayLiteralExpression(sections)); assert.equal(sections.elements.length, 9)
-  for (const entry of sections.elements) {
-    assert.ok(ts.isObjectLiteralExpression(entry))
-    const fields = new Map(entry.properties.filter(ts.isPropertyAssignment).map(property => [property.name.getText(panel), property.initializer]))
-    const string = node => { while (ts.isAsExpression(node)) node = node.expression; assert.ok(ts.isStringLiteral(node)); return node.text }
-    const keyword = fields.get('keywords'); assert.ok(keyword)
-    entries.push({ id: string(fields.get('id')), keywords: ts.isStringLiteral(keyword) ? keyword.text : keyword.getText(panel) })
-  }
-  assert.deepEqual(entries.filter(entry => entry.id === 'general'), [{ id: 'general', keywords: 'core runtime terminal tmux ssh show crash log session recovery' }])
   for (const [symbol, file] of [['SettingsPanel', path.join(desktop, 'src/renderer/src/App.tsx')], ['GeneralSettingsPane', sourceFile]]) {
     const source = await fs.readFile(file, 'utf8'), tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX), uses = []
     const visit = node => {

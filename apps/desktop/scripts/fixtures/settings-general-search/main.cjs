@@ -59,7 +59,7 @@ app.whenReady().then(async () => {
             shownPanes:Array.from(document.querySelectorAll('[data-settings-pane]')).filter(n=>n.checkVisibility()&&!n.hidden&&!n.inert).map(n=>n.dataset.settingsPane),
             pane:rect(pane),header:rect(header),title:text(header.querySelector('h2')),description:text(header.querySelector('p')),
             facts:Array.from(pane.querySelectorAll('dl > div')).map(n=>({term:text(n.querySelector('dt')),body:text(n.querySelector('dd'))})),
-            privacy:text(pane.querySelector('.settings-pane-actions > span')),buttons:Array.from(pane.querySelectorAll('button')).map(n=>({text:n.textContent,disabled:n.disabled,connected:n.isConnected,visible:n.checkVisibility(),rect:rect(n)})),
+            privacy:text(pane.querySelector('.settings-diagnostics > span')),buttons:Array.from(pane.querySelectorAll('.settings-diagnostics button')).map(n=>({text:n.textContent,disabled:n.disabled,connected:n.isConnected,visible:n.checkVisibility(),rect:rect(n)})),
             status:rect(document.querySelector('.window-status-bar')),page:rect(document.querySelector('.settings-page'))};})()`)
         const image = `${width}-${query}.png`
         // Geometry reads can start the newly mounted Pane's entrance animation. Wait after them.
@@ -68,14 +68,14 @@ app.whenReady().then(async () => {
         result.frames.push({ width, query, actual, searchHit, clearHit, image })
         assert.deepEqual(actual.nav, ['General'], 'General search reaches the original controls')
         assert.deepEqual(actual.shownPanes, ['general'])
-        assert.equal(actual.title.text, 'General'); assert.equal(actual.description.text, 'Local storage, session continuity, and diagnostics.')
+        assert.equal(actual.title.text, 'General'); assert.equal(actual.description.text, 'Copied paths, local data, and diagnostics.')
         assert.deepEqual(actual.facts.map(fact => fact.term.text), ['Local data', 'Session recovery', 'System SSH'])
         assert.equal(actual.facts[1].body.text, 'Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.')
         assert.equal(actual.facts[2].body.text, 'Remote AgentMux Runs are not supported yet. Connection metadata and key file paths stay on this machine; private key contents are never stored.')
         assert.equal(actual.privacy.text, 'Crashes are recorded to a local file and never uploaded.')
         assert.deepEqual(actual.buttons.map(button => button.text), ['Show crash log'])
         assert.equal(actual.buttons[0].disabled, false); assert.equal(actual.buttons[0].connected, true); assert.equal(actual.buttons[0].visible, true)
-        assertHit(await hit(node('[data-settings-pane="general"] button')))
+        assertHit(await hit(node('[data-settings-pane="general"] .settings-diagnostics button')))
         const texts = [actual.title, actual.description, actual.privacy, ...actual.facts.flatMap(fact => [fact.term, fact.body])]
         assert.equal(texts.length, 9)
         for (const text of texts) {
