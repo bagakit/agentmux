@@ -8,8 +8,7 @@ palette 与 TUI 自身表现层的边界。
 
 # Terminal 运行时：CtxMux 内核与外观所有权
 
-本文只描述当前源码能证明的事实。术语沿用 `packages/core` 与 Desktop 的既有命名
-（Run、Attachment、Agent Session、Provider、OSC 等）。
+本文只描述当前源码能证明的事实。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/agentmux-desktop-interaction.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。本文旧 Control 命令描述当前来源，新命令按[空间 CLI 实施合同](../plans/pmo-cross-workspace-worktree-cli-design.md)闭合后更新，不提前宣称可用。
 
 CtxMux 作为唯一 Run Kernel 的取舍见 `docs/plans/mux-runtime-decision.md`。本文只做
 端到端链路与所有权的技术还原。
@@ -66,10 +65,7 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
 Core 的 Control 合同只表达类型化的
 `inspect.tab/inspect.region/list.agents/open.agent/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
 请求和 receipt；它不保存
-布局。Desktop Main 持有跨进程事务和长期 Agent lifecycle，Renderer 的 Workspace split tree
-是 Tab/Region 的唯一 SSOT。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经
-Main Browser owner；布局或 owner 丢失时只回滚本次事务。完整命令与 selector 语义只由
-`docs/plans/agentmux-ai-native-desktop-composition-cli.md` 定义。布局变化最终只通过既有 viewport
+布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。新合同要求 Space/Zone 绑定、失败保留健康 Agent，并将空间归属与执行 cwd 分开；当前 cleanup 与按 cwd 过滤恢复的真实来源尚待本轮修正，不能把这些要求写成已经实现的事实。当前命令来源见 `docs/plans/agentmux-ai-native-desktop-composition-cli.md`；本轮 Agent 空间扩展合同与 source 差异见上述空间 CLI 设计及 [概念审阅](../reviews/space-zone-concept-unification-review.md)。布局变化最终只通过既有 viewport
 synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
 
 ## 2. 所有权矩阵
