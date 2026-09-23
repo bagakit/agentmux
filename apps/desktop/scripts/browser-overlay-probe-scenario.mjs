@@ -144,12 +144,47 @@ async function captureChrome(ctx,label) {
     throw error
   }
 }
+async function menuGeometry(ctx) {
+  return ctx.probe.cdp.evaluate(`(()=>{
+    const rect=element=>{if(!element)return null;const r=element.getBoundingClientRect(),style=getComputedStyle(element);return{x:r.x,y:r.y,width:r.width,height:r.height,visible:!!element.getClientRects().length&&style.visibility!=='hidden',opacity:style.opacity}};
+    const item=document.querySelector(${JSON.stringify(activitySelector)}),menu=item?.closest('[role="menu"]');
+    const surface=item&&document.querySelector('.browser-surface');
+    return{menu:rect(menu),item:rect(item),stage:rect(surface?.querySelector('[data-native-browser-stage]')),zoom:window.agentmux.ui.getZoomFactor()};
+  })()`)
+}
 async function menu(ctx,label) {
   await hover(ctx,'[aria-label="Browser address"]')
   await ctx.probe.cdp.evaluate('document.querySelector(".browser-operation-status__trigger").focus()')
   for(const type of ['keyDown','keyUp'])await ctx.probe.cdp.call('Input.dispatchKeyEvent',{type,key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40})
   await ctx.waitFor('actual Browser operation popover',()=>ctx.probe.cdp.evaluate(`document.querySelector(${JSON.stringify(activitySelector)})?.getClientRects().length`))
-  const projected = await ctx.waitFor('native Chrome covers only the actual intersecting menu',async()=>{const entries=await owners(ctx);return chromeOwners(entries).length?entries:null})
+  const observe = process.env.AGENTMUX_OBSERVE_OVERLAY_MENU_READINESS === '1'
+  const readiness = observe ? { label, attempts: [], diagnosticOnly: true, mode: 'explicit-success-path-observation' } : null
+  if(readiness)(ctx.receipt.overlayMenuReadiness ??= []).push(readiness)
+  let projected
+  try {
+    projected = await ctx.waitFor('native Chrome covers only the actual intersecting menu',async()=>{
+      const entries = await owners(ctx)
+      if(readiness){
+        const observation = { entries, renderer: await menuGeometry(ctx) }
+        if(readiness.attempts.length<32)readiness.attempts.push(observation)
+        else readiness.lastAttempt=observation
+      }
+      return chromeOwners(entries).length?entries:null
+    })
+  } catch(error) {
+    // Observe once after the unchanged gate has failed. A layout read cannot
+    // retroactively turn that original failure into a passing projection.
+    const failure = { label, diagnosticOnly: true, originalError: String(error), mode: 'failure-only-observation' }
+    ;(ctx.receipt.overlayMenuProjectionFailures ??= []).push(failure)
+    try {
+      const [renderer,native] = await Promise.all([
+        menuGeometry(ctx),
+        ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=${electron(ctx)},window=BrowserWindow.getAllWindows()[0];return {window:{id:window.id,visible:window.isVisible(),focused:window.isFocused(),bounds:window.getBounds()},entries:window.contentView.children.filter(view=>view.webContents&&!view.webContents.isDestroyed()).map(view=>({id:view.webContents.id,url:view.webContents.getURL(),visible:view.getVisible(),bounds:view.getBounds(),loading:view.webContents.isLoading(),backgroundThrottling:view.webContents.getBackgroundThrottling(),ownerWindowId:view.webContents.getOwnerBrowserWindow()?.id}))}})()`)
+      ])
+      failure.observation={renderer,native}
+    } catch(diagnosticError) { failure.diagnosticError=String(diagnosticError) }
+    throw error
+  }
   const pages = pageOwner(ctx,projected)
   assert.equal(pages.length,1);assert.equal(pages[0].visible,true)
   const whileOpen = await pageInput(ctx)
