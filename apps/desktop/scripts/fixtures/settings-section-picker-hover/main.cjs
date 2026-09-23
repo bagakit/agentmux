@@ -135,9 +135,9 @@ app.whenReady().then(async () => {
           await key(openKey); await until(`!!${menu}`); await key('Escape'); await until(`!${menu}`); await exactTrigger(picker)
         }
         await key('ArrowDown'); await until(`!!${menu}`); await key('End'); await key('ArrowUp')
-        assert.equal(await read('document.activeElement?.textContent.trim()'), 'Copy Paths')
+        assert.equal(await read('document.activeElement?.textContent.trim()'), 'Workspaces')
         await key('Enter'); await until(`!${menu}`); await exactTrigger(picker)
-        assert.equal(await read(`document.querySelector('.settings-content__header h2').textContent`), 'Copy Paths')
+        assert.equal(await read(`document.querySelector('.settings-content__header h2').textContent`), 'Workspaces')
         await replaceText(search, 'copy')
         await move(picker); await until(`!!${menu}`)
         const filtered = await read('window.__sectionHover.categories("copy")'); assert(filtered.length > 0)
@@ -241,7 +241,7 @@ app.whenReady().then(async () => {
     const native = result.events.filter(event => event.type !== 'click'); assert(native.length > 0)
     assert(native.every(event => event.trusted), 'actual input, key and pointer events are trusted')
     const generatedClicks = result.events.filter(event => event.type === 'click' && !event.trusted)
-    assert.deepEqual(generatedClicks.map(event => event.label), scenario === 'settings' && width < 700 ? ['Copy Paths'] : [])
+    assert.deepEqual(generatedClicks.map(event => event.label), scenario === 'settings' && width < 700 ? ['Workspaces'] : [])
     result.eventBoundary = 'Real mouse/key/input events are trusted. Only Radix keyboard selection synthesizes its final click from trusted Enter.'
     result.passed = true
   } catch (error) {

@@ -71,6 +71,33 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
         </div>
       </section>
       <section className="settings-group">
+        <header><span>Terminal font size</span><small>{fontSize}px</small></header>
+        <div className="terminal-font-size-control">
+          {/* Incomplete numeric text stays editable. The range shows the original expectation until
+              the draft is a legal size; Save validates before beginning any field's transaction. */}
+          <input
+            type="range"
+            aria-label="Terminal font size"
+            min={TERMINAL_FONT_SIZE_MIN}
+            max={TERMINAL_FONT_SIZE_MAX}
+            step={1}
+            value={fontSize}
+            onChange={(event) => setFontSize(event.target.value)}
+          />
+          <input
+            type="number"
+            aria-label="Terminal font size in pixels"
+            min={TERMINAL_FONT_SIZE_MIN}
+            max={TERMINAL_FONT_SIZE_MAX}
+            step={1}
+            value={font.value}
+            onChange={(event) => setFontSize(event.target.value)}
+          />
+          <span className="terminal-font-size-control__unit">px</span>
+        </div>
+        <p className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
+      </section>
+      <section className="settings-group">
         <header><span>Terminal palette</span><small>{TERMINAL_THEME_CATALOG.length}</small></header>
         <div className="terminal-theme-grid" role="radiogroup" aria-label="Terminal palette">
           {TERMINAL_THEME_CATALOG.map((definition) => {
@@ -102,33 +129,6 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
             )
           })}
         </div>
-      </section>
-      <section className="settings-group">
-        <header><span>Terminal font size</span><small>{fontSize}px</small></header>
-        <div className="terminal-font-size-control">
-          {/* Incomplete numeric text stays editable. The range shows the original expectation until
-              the draft is a legal size; Save validates before beginning any field's transaction. */}
-          <input
-            type="range"
-            aria-label="Terminal font size"
-            min={TERMINAL_FONT_SIZE_MIN}
-            max={TERMINAL_FONT_SIZE_MAX}
-            step={1}
-            value={fontSize}
-            onChange={(event) => setFontSize(event.target.value)}
-          />
-          <input
-            type="number"
-            aria-label="Terminal font size in pixels"
-            min={TERMINAL_FONT_SIZE_MIN}
-            max={TERMINAL_FONT_SIZE_MAX}
-            step={1}
-            value={font.value}
-            onChange={(event) => setFontSize(event.target.value)}
-          />
-          <span className="terminal-font-size-control__unit">px</span>
-        </div>
-        <p className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
       </section>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save appearance" onSave={() => void save()} />
     </div>

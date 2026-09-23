@@ -19,7 +19,7 @@ const evidence = path.join(root, '.tmp/settings-saved-summary', `run-${Date.now(
 await fs.mkdir(evidence, { recursive: true })
 const hash = content => createHash('sha256').update(content).digest('hex')
 const sources = new Map(await Promise.all(['copy', 'browser'].map(async kind => {
-  const file = path.join(desktop, 'src/renderer/src/components/settings', kind === 'copy' ? 'CopyPathsSettingsPane.tsx' : 'BrowserSettingsPane.tsx')
+  const file = path.join(desktop, 'src/renderer/src/components/settings', kind === 'copy' ? 'GeneralSettingsPane.tsx' : 'BrowserSettingsPane.tsx')
   const original = await fs.readFile(file, 'utf8')
   assert.equal(original.split('Saved: ').length, 2, 'Mutation binds exactly one owning summary')
   return [kind, { file, original, mutated: original.replace('Saved: ', '') }]
@@ -62,7 +62,7 @@ try {
   const text = await fs.readFile(path.join(root, callerFile), 'utf8')
   const tree = ts.createSourceFile(callerFile, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const callers = []
-  for (const symbol of ['CopyPathsSettingsPane', 'BrowserSettingsPane']) {
+  for (const symbol of ['GeneralSettingsPane', 'BrowserSettingsPane']) {
     const uses = []
     const visit = node => {
       if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(tree) === symbol)

@@ -25,7 +25,7 @@ function Fixture() {
   return <>
     <div className="app-shell app-shell--project-rail-collapsed">
       <main className="main-shell main-shell--merged" aria-label="Controlled empty workbench" />
-      {open && <SettingsPanel initialSection="copy-paths" onClose={() => setOpen(false)} />}
+      {open && <SettingsPanel initialSection="general" onClose={() => setOpen(false)} />}
       <footer className="window-status-bar">
         <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={open} onOpenSettings={() => setOpen(true)} onCloseSettings={() => setOpen(false)} /></div>
         <div className="window-status-bar__right"><span>Controlled status facts</span></div>

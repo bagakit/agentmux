@@ -275,7 +275,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     assert.deepEqual(await permissions(), originalPermissions)
     facts.permissions = originalPermissions
     facts.restartValues = await allValues()
-    await showSettings(true); await section(probe, 'Copy Paths', 'copy-paths')
+    await showSettings(true); await section(probe, 'General', 'general')
     return facts
   }
 
@@ -296,7 +296,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     assert.equal(await railUI(), facts.restartValues.projectRailDensity)
     assert.deepEqual(await permissions(), expectedPermissions)
     facts.restored = { values: await allValues(), notification, toolbar: actualToolbar, rail: await railUI() }
-    await showSettings(true); await section(probe, 'Copy Paths', 'copy-paths')
+    await showSettings(true); await section(probe, 'General', 'general')
   }
 
   async function capture(target = probe) {

@@ -37,7 +37,7 @@ async function section(title: string) {
 
 it('keeps drafts and each visited scroll container while leaving unvisited panes unmounted', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  expect([...dom.container.querySelectorAll<HTMLElement>('[data-settings-pane]')].map(el => el.dataset.settingsPane)).toEqual(['workspaces'])
+  expect([...dom.container.querySelectorAll<HTMLElement>('[data-settings-pane]')].map(el => el.dataset.settingsPane)).toEqual(['appearance'])
   await section('Appearance')
   await input('[aria-label="Terminal font size in pixels"]', '17')
   const appearance = dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!
@@ -104,14 +104,17 @@ it('returns Clear focus to the original search input so the next query can be ty
 })
 
 it('keeps one Copy Paths introduction and the actual path examples and scope', async () => {
-  await dom.render(<SettingsPanel onClose={() => {}} initialSection="copy-paths" />)
-  const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="copy-paths"]')!
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="general" />)
+  const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="general"]')!
   expect(pane.isConnected).toBe(true)
   expect(pane.hidden).toBe(false)
-  expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Copy Paths')
-  expect(dom.container.querySelector('.settings-content__header p')!.textContent).toBe('Choose how paths look when you share them.')
-  expect(pane.querySelector('.settings-lead')).toBeNull()
-  const toggle = pane.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('General')
+  expect(dom.container.querySelector('.settings-content__header p')!.textContent).toBe('Copied paths, local data, and diagnostics.')
+  const copiedPaths = pane.querySelector<HTMLElement>('.settings-group')!
+  expect(copiedPaths.isConnected).toBe(true)
+  expect(copiedPaths.querySelector('header > span')!.textContent).toBe('Home directory in copied paths')
+  expect(copiedPaths.querySelector('.settings-lead')).toBeNull()
+  const toggle = copiedPaths.querySelector<HTMLInputElement>('input[type="checkbox"]')!
   expect(toggle.isConnected).toBe(true)
   expect(pane.textContent).toContain('proj/app')
   expect(pane.textContent).toContain('your own home directory')
@@ -120,7 +123,7 @@ it('keeps one Copy Paths introduction and the actual path examples and scope', a
 })
 
 it('prioritizes existing workspaces and retains the creation draft across disclosure and section switches', async () => {
-  await dom.render(<SettingsPanel onClose={() => {}} />)
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="workspaces" />)
   expect(dom.container.querySelector('.workspace-settings-list')!.textContent).toContain('Project')
   expect(dom.container.querySelector<HTMLElement>('.settings-workspace-create')!.hidden).toBe(true)
   await dom.click('.settings-pane-toolbar button')
@@ -158,6 +161,7 @@ it('keeps the real App footer interactive, returns through its surface controls 
   const settings = dom.container.querySelector('.settings-page')!
   const footer = dom.container.querySelector<HTMLElement>('.window-status-bar')!
   expect(settings).not.toBeNull()
+  expect(settings.querySelector('.settings-content__header h2')!.textContent).toBe('Appearance')
   expect(footer.closest('[inert]')).toBeNull()
   expect(footer.closest('[aria-hidden="true"]')).toBeNull()
   expect(dom.container.querySelector<HTMLElement>('.app-shell__workspace')!.inert).toBe(true)

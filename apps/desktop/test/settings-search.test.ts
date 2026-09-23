@@ -37,6 +37,10 @@ describe('设置搜索', () => {
     expect(all.length, '空查询应返回全部 section').toBeGreaterThan(1)
     expect(visibleSettingsSections('tmux').map((section) => section.id)).toEqual(['general'])
     expect(visibleSettingsSections('worktree').map((section) => section.id)).toEqual(['workspaces'])
+    for (const keyword of ['copy', 'clipboard', 'tilde', '~', 'absolute']) {
+      expect(visibleSettingsSections(keyword).map((section) => section.id)).toEqual(['general'])
+    }
+    expect(all.map(section => section.id)).toEqual(['appearance', 'notifications', 'browser', 'general', 'agents', 'prompts', 'workspaces', 'hosts'])
     // 而一个谁都不含的词必须什么都不返回——否则「过滤」只是名义上的。
     expect(visibleSettingsSections('zzzznotakeyword')).toEqual([])
   })

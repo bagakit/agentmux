@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AppearanceSettingsPane } from '../src/renderer/src/components/settings/AppearanceSettingsPane'
-import { CopyPathsSettingsPane } from '../src/renderer/src/components/settings/CopyPathsSettingsPane'
+import { GeneralSettingsPane } from '../src/renderer/src/components/settings/GeneralSettingsPane'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -20,7 +20,7 @@ function mode(name: string) {
 }
 async function choose(name: string) { await act(async () => mode(name).click()) }
 const selected = (name: string) => String(mode(name).checked)
-const saveButton = () => dom.container.querySelector<HTMLButtonElement>('.settings-pane-actions button')!
+const saveButton = () => dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!
 
 describe('Settings drafts across external commits', () => {
   it('refreshes clean fields, keeps dirty fields and saves only authored intent against the original baseline', async () => {
@@ -32,7 +32,7 @@ describe('Settings drafts across external commits', () => {
     expect(selected('Light')).toBe('true')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Terminal font size in pixels"]')?.value).toBe('21')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledWith(
       { ...external, appAppearance: 'light' },
       { ...external, appAppearance: 'dark' }
@@ -48,12 +48,12 @@ describe('Settings drafts across external commits', () => {
     await choose('Light')
     current = { ...current, appearance: { ...initial, appAppearance: 'system' } }
     await dom.render(<AppearanceSettingsPane appearance={current.appearance} onSave={onSave} />)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('appearance.appAppearance')
     expect(selected('Light')).toBe('true')
     expect(saveButton().disabled).toBe(false)
     expect(current.appearance.appAppearance).toBe('system')
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledTimes(2)
     expect(onSave.mock.calls.map(([, expected]) => expected.appAppearance)).toEqual(['dark', 'dark'])
   })
@@ -62,11 +62,11 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(async () => {}).mockRejectedValueOnce(new Error('disk full'))
     await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
     await choose('Light')
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('disk full')
     expect(selected('Light')).toBe('true')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenLastCalledWith(
       { ...initial, appAppearance: 'light', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT },
       { ...initial, terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT }
@@ -79,13 +79,13 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
     await choose('Light')
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(saveButton().disabled).toBe(true)
     await choose('System')
     await act(async () => finish())
     expect(selected('System')).toBe('true')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls[1]).toEqual([
       { ...initial, appAppearance: 'system', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT },
       { ...initial, appAppearance: 'light', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT }
@@ -109,14 +109,14 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
     await choose('Light')
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledOnce()
     await choose('Dark')
     await dom.render(<AppearanceSettingsPane appearance={{ ...initial, appAppearance: 'light' }} onSave={onSave} />)
     await act(async () => finish())
     expect(selected('Dark')).toBe('true')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls[1]).toEqual([
       { ...initial, terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT },
       { ...initial, appAppearance: 'light', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT }
@@ -126,8 +126,8 @@ describe('Settings drafts across external commits', () => {
 
   it('updates a clean Copy Paths field from a CLI commit', async () => {
     const onSave = vi.fn(async () => {})
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(true)
     expect(saveButton().disabled).toBe(true)
     expect(onSave).not.toHaveBeenCalled()
@@ -135,9 +135,9 @@ describe('Settings drafts across external commits', () => {
 
   it('refreshes a now-clean Copy Paths draft after local undo reaches its old baseline', async () => {
     const onSave = vi.fn(async () => {})
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(true)
     expect(saveButton().disabled).toBe(true)
@@ -147,40 +147,40 @@ describe('Settings drafts across external commits', () => {
   it('preserves an edit back to the old Copy Paths baseline while a save is pending', async () => {
     let finish!: () => void
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledOnce()
     await dom.click('[type="checkbox"]')
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     await act(async () => finish())
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(false)
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls[1]).toEqual([false, true])
     await act(async () => finish())
   })
 
   it('does not silently accept a matching external boolean commit as the user’s successful save', async () => {
     const onSave = vi.fn(async () => {})
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={undefined} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={undefined} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledWith(true, false)
     expect(saveButton().disabled).toBe(true)
   })
 
   it('keeps Copy Paths checked after a failed save and retries with the same baseline', async () => {
     const onSave = vi.fn(async () => {}).mockRejectedValueOnce(new Error('disk full'))
-    await dom.render(<CopyPathsSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
+    await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('disk full')
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(true)
     expect(saveButton().disabled).toBe(false)
-    await dom.click('.settings-pane-actions button')
+    await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls).toEqual([[true, false], [true, false]])
     expect(saveButton().disabled).toBe(true)
   })
@@ -192,7 +192,7 @@ describe('Settings drafts across external commits', () => {
     const save = vi.spyOn(api.config, 'save').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
     await dom.render(<SettingsPanel initialSection="appearance" onClose={() => {}} />)
     await choose('Light')
-    const appearanceSave = dom.container.querySelector<HTMLButtonElement>('[data-settings-pane="appearance"] .settings-pane-actions button')!
+    const appearanceSave = dom.container.querySelector<HTMLButtonElement>('[data-settings-pane="appearance"] [data-settings-save-bar] button')!
     await act(async () => appearanceSave.click())
     expect(save).toHaveBeenCalledTimes(1)
     const later = { ...baseline, appearance: { ...initial, appAppearance: 'system' as const }, copyPathsAsAbsolute: true }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -10,7 +10,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/settings-workbench')
-const evidence = path.join(root, '.tmp/settings-workbench')
+const evidence = path.join(root, '.tmp/settings-workbench', `run-${Date.now()}-${randomUUID()}`)
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-settings-proof-'))
@@ -30,7 +30,7 @@ try {
   assert.equal(render.exitCode, 0)
   const receipt = JSON.parse(await fs.readFile(path.join(evidence, 'render.json'), 'utf8'))
   assert.equal(receipt.passed, true, receipt.failure?.message)
-  assert.equal(receipt.frames.length, 72)
+  assert.equal(receipt.frames.length, 64)
   // The renderer fixture does not claim Runtime facts. This separate private desktop proof uses
   // actual Core and a healthy cat Run, kills the process and verifies durable split/focus restoration.
   if (!process.argv.includes('--render-only')) {

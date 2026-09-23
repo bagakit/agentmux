@@ -17,7 +17,7 @@ export function crashLogDiagnosticsProof({ probe, desktopRoot, userData, command
   const get = () => command(['diagnostics', 'crash-log'])
   const reveal = code => command(['diagnostics', 'crash-log', 'reveal'], code)
   const shellCalls = target => target.main.evaluate(`${port}.requests`)
-  const status = target => target.cdp.evaluate(`document.querySelector(${JSON.stringify(`${pane} [role="status"]`)})?.textContent ?? null`)
+  const status = target => target.cdp.evaluate(`document.querySelector(${JSON.stringify(`${pane} .settings-crash-log-status`)})?.textContent ?? null`)
   async function install(target) {
     await target.main.evaluate(`(() => {
       const shell=${electron}.shell, fs=process.getBuiltinModule('fs/promises'), module=process.getBuiltinModule('module');
@@ -34,7 +34,7 @@ export function crashLogDiagnosticsProof({ probe, desktopRoot, userData, command
   }
   async function ui(target, expected, text) {
     const before = (await shellCalls(target)).length
-    await activate(target.cdp, `Array.from(document.querySelectorAll(${JSON.stringify(`${pane} button`)})).filter(node=>node.textContent.trim()==='Show crash log')`)
+    await activate(target.cdp, `Array.from(document.querySelectorAll(${JSON.stringify(`${pane} .settings-diagnostics button`)})).filter(node=>node.textContent.trim()==='Show crash log')`)
     await waitFor('General current typed receipt', async () => (await status(target))?.includes(text))
     const actual = await status(target)
     assert.ok(actual.includes(path)); assert.ok(!actual.includes(body.trim()))

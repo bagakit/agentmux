@@ -32,7 +32,7 @@ async function category(title: string) {
   expect(trigger).not.toBeNull()
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
   const choices = [...document.querySelectorAll<HTMLElement>('.settings-section-menu [role="menuitemradio"]')]
-  expect(choices.map(node => node.textContent)).toEqual(['Workspaces', 'Hosts', 'Agents', 'Appearance', 'Notifications', 'Browser', 'Prompts', 'Copy Paths', 'General'])
+  expect(choices.map(node => node.textContent)).toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Agents', 'Prompts', 'Workspaces', 'Hosts'])
   const item = choices.find(node => node.textContent === title)!
   expect(item).not.toBeUndefined()
   await act(async () => item.click())

@@ -133,13 +133,13 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
   async function ui(probe) {
     return probe.cdp.evaluate(`(() => {
       const appearance=document.querySelector('[data-settings-pane="appearance"] [aria-label="Application appearance"] input[type="radio"]:checked')
-      const copy=document.querySelector('[data-settings-pane="copy-paths"] input[type="checkbox"]')
+      const copy=document.querySelector('[data-settings-pane="general"] input[type="checkbox"]')
       const browser=document.querySelector('[data-settings-pane="browser"] input[type="checkbox"]')
       const active=document.querySelector('.settings-content__scroll:not([hidden])')
       return { appearance:appearance?.getAttribute('aria-label'), copy:copy?.checked, browser:browser?.checked,
         font:Number(document.querySelector('[data-settings-pane="appearance"] input[aria-label="Terminal font size in pixels"]')?.value),
         alert:active?.querySelector('[role="alert"]')?.textContent ?? '',
-        saveDisabled:active?.querySelector('.settings-pane-actions button')?.disabled,
+        saveDisabled:active?.querySelector('[data-settings-save-bar] button')?.disabled,
         status:active?.querySelector('.settings-save-feedback')?.textContent,
         theme:document.documentElement.dataset.appearance,
         events:window.__settingsCliProof?.configEvents ?? [], controlRequests:window.__settingsCliProof?.controlRequests ?? [] }
@@ -304,7 +304,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     await chooseAppearance(first,'Light'); await set(copyKey,'true')
     await waitFor('disjoint commit reaches current UI',async()=> (await ui(first)).events.at(-1)?.copy===true)
     assert.equal((await ui(first)).appearance,'Light'); assert.equal((await ui(first)).saveDisabled,false)
-    await section(first,'Copy Paths','copy-paths')
+    await section(first,'General','general')
     assert.equal((await ui(first)).copy,true); assert.equal((await ui(first)).saveDisabled,true)
     await section(first,'Appearance','appearance')
     const fontBefore=(await ui(first)).font; assert.ok(Number.isFinite(fontBefore) && fontBefore>0)
@@ -328,17 +328,17 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     await section(first,'Appearance','appearance')
     assert.equal((await ui(first)).appearance,'System')
     await chooseAppearance(first,'Light'); await activate(first.cdp,paneButtons('appearance','Save appearance')); await saved(first)
-    await section(first,'Copy Paths','copy-paths'); await set(copyKey,'false')
+    await section(first,'General','general'); await set(copyKey,'false')
     await waitFor('clean copy projection updated',async()=> (await ui(first)).copy===false)
     phase='durable-write-failure'
-    await click(first.cdp,`${pane('copy-paths')} input[type="checkbox"]`)
+    await click(first.cdp,`${pane('general')} input[type="checkbox"]`)
     assert.equal((await ui(first)).copy,true); assert.equal((await ui(first)).saveDisabled,false)
     const bytesBeforeFailure=await readFile(configPath), publicationsBeforeFailure=(await ui(first)).events.length
     const previousPath=`${configPath}.prev`, backup=join(root,'saved-private-previous-config')
     assert.equal((await stat(previousPath)).isFile(),true)
     await rename(previousPath,backup); await mkdir(previousPath); obstruction={path:previousPath,backup}
     try {
-      await activate(first.cdp,paneButtons('copy-paths','Save'))
+      await activate(first.cdp,paneButtons('general','Save'))
       await waitFor('real persistence failure reaches UI',async()=> (await ui(first)).alert.length>0)
       assert.deepEqual(await readFile(configPath),bytesBeforeFailure,'Failed durable write leaves actual committed bytes unchanged')
       const failed=await ui(first)
@@ -346,7 +346,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       assert.deepEqual(await settings(),{[appearanceKey]:'light',[copyKey]:false})
       receipt.facts.failedSave={ui:failed,configDigest:digest(bytesBeforeFailure)}
     } finally { await restoreObstruction() }
-    await activate(first.cdp,paneButtons('copy-paths','Save')); await saved(first)
+    await activate(first.cdp,paneButtons('general','Save')); await saved(first)
     assert.deepEqual(await settings(),{[appearanceKey]:'light',[copyKey]:true})
     phase='invalid-and-nochange'
     const invalidBaseline=await readFile(configPath), eventsBeforeInvalid=(await ui(first)).events.length
@@ -409,7 +409,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     assert.deepEqual(await settings(),{[appearanceKey]:'light',[copyKey]:true})
     await activate(second.cdp,nodes('.window-status-bar button[aria-label="Settings"]'))
     await section(second,'Appearance','appearance'); assert.equal((await ui(second)).appearance,'Light')
-    await section(second,'Copy Paths','copy-paths'); assert.equal((await ui(second)).copy,true)
+    await section(second,'General','general'); assert.equal((await ui(second)).copy,true)
     await preferences.verifyRestart(second,browserProof ? {
       automation:browserProof.facts.final.agentAutomation,schemes:browserProof.facts.final.appLinkSchemes
     } : undefined)

@@ -19,9 +19,9 @@ const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-settings-s
 const evidence = path.join(root, '.tmp/settings-search-craft', `${testCase}-${Date.now()}`)
 await fs.mkdir(evidence, { recursive: true })
 const hash = content => createHash('sha256').update(content).digest('hex')
-const source = path.join(desktop, 'src/renderer/src/components', testCase === 'clear-focus' ? 'SettingsPanel.tsx' : 'settings/CopyPathsSettingsPane.tsx')
+const source = path.join(desktop, 'src/renderer/src/components', testCase === 'clear-focus' ? 'SettingsPanel.tsx' : 'settings/GeneralSettingsPane.tsx')
 const original = await fs.readFile(source, 'utf8')
-const anchor = testCase === 'clear-focus' ? '    searchInput.current?.focus()' : '<div className="settings-pane-stack">'
+const anchor = testCase === 'clear-focus' ? '    searchInput.current?.focus()' : '<section className="settings-group">'
 assert.equal(original.split(anchor).length, 2, 'Mutation must bind exactly one actual owning source block')
 const mutated = testCase === 'clear-focus' ? original.replace(anchor, '') : original.replace(anchor, `${anchor}\n      <p className="settings-lead">Choose how paths look when you share them.</p>`)
 const inputs = new Map(await Promise.all([
@@ -55,7 +55,7 @@ try {
   // Product callers are actual JSX uses, separate from definitions, imports and this fixture.
   const ts = require('typescript')
   const callers = []
-  for (const [relative, symbol] of [['apps/desktop/src/renderer/src/App.tsx', 'SettingsPanel'], ['apps/desktop/src/renderer/src/components/SettingsPanel.tsx', 'CopyPathsSettingsPane']]) {
+  for (const [relative, symbol] of [['apps/desktop/src/renderer/src/App.tsx', 'SettingsPanel'], ['apps/desktop/src/renderer/src/components/SettingsPanel.tsx', 'GeneralSettingsPane']]) {
     const text = await fs.readFile(path.join(root, relative), 'utf8')
     const tree = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const uses = []
