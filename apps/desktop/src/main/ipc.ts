@@ -2,6 +2,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_POINTER_CHANNEL, NATIVE_OVE
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
+import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
 import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
@@ -320,7 +321,7 @@ export async function registerIpc(args: {
         recipientRunId: request.message.recipientRunId
       })
     }
-    return await controlBridge.execute(request)
+    return projectBrowserControlResult(await controlBridge.execute(request))
   }
   ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
   const handle = <TArgs extends unknown[], TResult>(
@@ -1015,19 +1016,16 @@ export async function registerIpc(args: {
       const subscription = await browserOperationJournal.subscribe(
         request.operationId,
         request.afterSequence,
-        (sequenced) => onEvent({ sequence: sequenced.sequence, event: sequenced.event })
+        (sequenced) => onEvent({ sequence: sequenced.sequence, event: projectBrowserControlEvent(sequenced.event) })
       )
       // backlog 在开场帧之后立刻投递，不混进开场帧本身：开场帧说的是"这条操作现在什么样、有没有
       // 缺口"，backlog 是事件。合进去会让客户端要写两套解析（第一帧带一批、后续一条一条）。
       // `queueMicrotask` 而不是同步 for：同步发的话，这些事件会在 `subscribeBrowserOperation`
       // 返回之前就流出去——也就是在开场帧之前，而缺口必须先到。
-      queueMicrotask(() => { for (const event of subscription.backlog) onEvent({ sequence: event.sequence, event: event.event }) })
+      queueMicrotask(() => { for (const event of subscription.backlog) onEvent({ sequence: event.sequence, event: projectBrowserControlEvent(event.event) }) })
       return {
-        // 原样交出，**不做映射**：`BrowserOperation` 与 core 的 `AgentMuxControlBrowserOperation`
-        // 形状刻意一致（contracts.ts 的 BrowserScriptRunReport 那段写了理由），browser.run 那条路
-        // 也是原样交。中间加一层映射，漏一个字段是静默的——而这里漏掉 `warning` 就等于把
-        // "这条记录不完整"这件事吞掉。
-        runOperation: subscription.operation,
+        // Main 的 producer 登记留在本地；公开 completion 只来自已验收的事实，既有 warning 保留。
+        runOperation: projectBrowserControlOperation(subscription.operation),
         gap: subscription.gap,
         dispose: () => subscription.dispose()
       }

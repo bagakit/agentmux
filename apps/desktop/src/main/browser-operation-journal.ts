@@ -52,7 +52,7 @@ export type BrowserOperationEvent =
       step: BrowserOperationStep
     }
   | {
-      type: 'operation-finished'
+      type: 'operation-finished' | 'operation-checked'
       operationId: string
       at: number
       operation: BrowserOperation
@@ -339,10 +339,13 @@ export class BrowserOperationJournal {
       operation.id, operation.browserId)
     if (!outcome) return null
     operation.outcome = outcome
+    const event = this.record({ type: 'operation-checked', operationId, at: this.now(), operation })
     const saved = await this.persist()
     if (!saved && outcome.evaluation) {
       outcome.evaluation.warning = 'The result was checked but could not be saved. Existing Browser work remains; restore local storage before relying on recovery.'
+      if ('operation' in event.event) event.event.operation = cloneOperation(operation)
     }
+    this.deliver(event)
     return { operation: cloneOperation(operation), saved }
   }
 
@@ -485,13 +488,22 @@ export class BrowserOperationJournal {
   }
 
   private publish(event: BrowserOperationEvent): void {
-    this.document.events.push(cloneEvent(event))
+    this.deliver(this.record(event))
+  }
+
+  private record(event: BrowserOperationEvent): BrowserOperationSequencedEvent {
+    const fact = cloneEvent(event)
+    this.document.events.push(fact)
     // 号从**单调计数器**取，不从 `document.events` 的长度取：号是"这条事件发生了"的标记，不是
     // "它还留着"的标记。按存活数组算的话，一条刚发出就被 trim 砍掉的事件不占号，于是客户端按号
     // 算出的缺口会少一条——而它正好是缺了的那条。（这两句与 `++` 和 `trim()` 的先后无关：计数器
     // 不看数组，两种顺序行为相同。承重的是取号的来源。）
     const sequence = ++this.sequenced
     this.trim()
+    return { sequence, event: fact }
+  }
+
+  private deliver({ sequence, event }: BrowserOperationSequencedEvent): void {
     for (const subscriber of [...this.subscribers.values()]) {
       if (subscriber.operationId !== event.operationId) continue
       // 每个订阅一份自己的拷贝，且各自 try：一个订阅者抛出来不许挡住别的订阅者，也不许挡住控制
@@ -692,6 +704,7 @@ function sanitizeEvent(event: BrowserOperationEvent): BrowserOperationEvent {
   switch (event.type) {
     case 'operation-started':
     case 'operation-finished':
+    case 'operation-checked':
       return { ...event, operationId: clamp(event.operationId), operation: sanitizeOperation(event.operation) }
     case 'step-started':
     case 'step-finished':

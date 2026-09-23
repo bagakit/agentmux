@@ -4,6 +4,7 @@ import type { AgentExecutorId, AgentProviderId } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
+import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -622,6 +623,8 @@ export type AgentMuxControlBrowserOperation = {
   steps: unknown[]
   replayOf?: string
   warning?: string
+  /** Main-owned goal evidence, separate from the script termination outcome. */
+  completion?: AgentMuxBrowserCompletion
 }
 
 /** Core keeps replay assets opaque beyond their version and join identity. Desktop owns step semantics. */
