@@ -1402,6 +1402,6 @@ Region 持续故障告示与手动观察刷新只引用交互合同《Terminal �
 
 用户反馈：「Space 每个 folder 右侧 Agent 状态图标 + 数字占宽太多，数字改图标角标并缩间距」。Folder 行的状态簇采用图标与其邻接角标，把数量紧贴所属状态；不再把每个数量作为额外宽文本列。沿用现有状态来源、计数与优先级，数字可辨认，tooltip 与无障碍描述保留状态名称和完整数量；零数量不增加装饰。窄行继续优先保留可读名称，状态簇不挤出行的操作与焦点。与折叠汇总共享既有真相，不新增轮询或计数注册表。终端关闭的行为只定义在 interaction《Topic 默认终端与可发现关闭》。
 
-### PMO 跨 Workspace 的 worktree 工作入口
+### Agent-first 的 Space 工作入口
 
-该流程的行为与待用户确认的设计边界只定义在交互 SSOT《PMO 跨 Workspace 的 worktree 工作入口》。工作面与失败说明沿用现有 Tab/Region、服务窗和身份展示语言；本轮仅交付 CLI 设计，不新增界面控件或视觉层。
+Space / Zone / Tab / Region、Project 与 Workspace 的统一含义只定义在交互 SSOT《统一概念与空间寻址》；`agent open` 与 `space mv` 的行为只定义在《Agent-first 的 Space 工作入口》。工作面、原执行目录与失败说明沿用现有 Tab/Region、服务窗和身份展示语言；本轮统一合同并闭合 CLI，不新增 Renderer 控件或视觉层，不把全仓改名当成概念统一。
