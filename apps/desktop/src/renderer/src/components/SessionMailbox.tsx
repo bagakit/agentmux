@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react'
 import type { AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { CircleHelp, Mail, Pause, Repeat2, X } from 'lucide-react'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -7,6 +7,7 @@ import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
 import { useAppStore } from '../store'
 import { useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
 import { useSessionUserMessages } from '../lib/session-user-messages'
+import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import type { AgentSessionControl } from '../../../shared/contracts'
 
 type Folder = 'inbox' | 'outbox' | 'system' | 'progress'
@@ -16,6 +17,12 @@ type MailboxDisplayItem = AgentTimelineItem | AgentSessionUserMessage
 
 function isUserMessage(item: MailboxDisplayItem): item is AgentSessionUserMessage {
   return 'source' in item && typeof item.source === 'object' && item.source !== null
+}
+
+function latestFirst(a: number | undefined, b: number | undefined) {
+  if (a === undefined) return b === undefined ? 0 : 1
+  if (b === undefined) return -1
+  return b - a
 }
 
 function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
@@ -45,9 +52,11 @@ function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
 function MessageHistory({ items, incoming, onCopy }: { items: readonly MailboxDisplayItem[]; incoming: boolean; onCopy?: ((text: string) => void) | undefined }) {
   const sessions = useAppStore((state) => state.sessions)
   const names = useAppStore((state) => state.agentNames)
+  const recent = useMemo(() => [...items].sort((a, b) => latestFirst(
+    isUserMessage(a) ? a.recordedAt : a.createdAt, isUserMessage(b) ? b.recordedAt : b.createdAt)), [items])
   const authorLabel = (id: string) => names?.[id] || sessions.find((session) => session.id === id)?.label || `Agent ${id.slice(0, 8)}`
   return items.length ? <ol className="composer-mailbox__messages" aria-label={incoming ? 'Recent Agent messages' : 'Recent outgoing messages'}>
-    {items.map((item) => {
+    {recent.map((item) => {
       const isUnified = isUserMessage(item)
       let headerText = ''
       let timestamp: number | undefined
@@ -110,6 +119,41 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
 }) {
   const id = useId()
   const [open, setOpen] = useState(false)
+  const [viewed, setViewed] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const popover = useRef<HTMLDivElement>(null)
+  const preview = useRef(false)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  function cancelClose() { clearTimeout(closeTimer.current) }
+  useEffect(() => () => cancelClose(), [])
+  function pin() { cancelClose(); preview.current = false; setViewed(true) }
+  function enter(event: PointerEvent) {
+    if (event.pointerType !== 'mouse' || event.buttons !== 0) return
+    cancelClose()
+    if (open) return
+    preview.current = true
+    setViewed(false)
+    // Native source retains the trigger relationship and implicit anchor. TS's DOM declaration
+    // has not yet included this platform option; there is no alternate popover implementation.
+    ;(popover.current!.showPopover as (options: { source: HTMLButtonElement }) => void)
+      .call(popover.current, { source: trigger.current! })
+  }
+  function leave(event: PointerEvent) {
+    if (event.pointerType !== 'mouse' || !preview.current) return
+    cancelClose()
+    closeTimer.current = setTimeout(() => popover.current?.hidePopover(), 180)
+  }
+  useEffect(() => {
+    if (!open) return
+    // The current editor may consume Escape before native light-dismiss. Only a hover preview
+    // handles it here; no focus moves and composing Escape remains owned by the editor/IME.
+    const dismissPreview = (event: KeyboardEvent) => {
+      if (!preview.current || event.key !== 'Escape' || isImeOwnedKeyboardEvent(event)) return
+      event.preventDefault(); event.stopPropagation(); popover.current!.hidePopover()
+    }
+    document.addEventListener('keydown', dismissPreview, true)
+    return () => document.removeEventListener('keydown', dismissPreview, true)
+  }, [open])
   const [folder, setFolder] = useState<Folder>('inbox')
   const folders: readonly Folder[] = progressSession ? [...FOLDERS, 'progress'] : FOLDERS
   const progressTarget = progressSession ? JSON.stringify([progressSession.hostId, progressSession.id, progressSession.providerId, progressSession.workspacePath]) : ''
@@ -168,6 +212,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
   const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`, fingerprints ?? {},
     timeline !== undefined && fingerprints !== undefined)
   const unread = receipts.unread.length + system.unread.length
+  const notices = useMemo(() => [...system.notices].sort((a, b) => latestFirst(a.observedAt, b.observedAt)), [system.notices])
 
   const deliveredIds = useMemo(() => {
     return new Set(messages.filter((item) => item.status === 'complete').map((item) => item.id))
@@ -189,24 +234,39 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
     }
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
-    if (!open) return
+    if (!open || !viewed) return
     if (folder === 'inbox' && receipts.unread.length) receipts.acknowledge(receipts.unread)
     if (folder === 'system' && system.unread.length) system.acknowledge(system.unread)
-  }, [open, folder, receipts, system])
+  }, [open, viewed, folder, receipts, system])
   return <>
-    <button type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
+    <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
       aria-label={`Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending${progressSession ? `. ${progressLabel}` : ''}`}
-      title={progressSession ? `Mailbox · ${progressLabel}` : 'Mailbox'} popoverTarget={id} popoverTargetAction="toggle">
+      title={progressSession ? `Mailbox · ${progressLabel}` : 'Mailbox'} popoverTarget={id} popoverTargetAction="toggle"
+      onPointerEnter={enter} onPointerLeave={leave}
+      onClick={(event) => { if (preview.current && open) { event.preventDefault(); pin() } }}>
       <Mail size={14} aria-hidden="true" />
       {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={9} className="composer-mailbox__progress" aria-hidden="true" /> : null}
       {pending.length ? <span aria-hidden="true">{pending.length}</span> : null}
       {unread ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
     </button>
-    <div id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
+    <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
       data-state={open ? 'open' : 'closed'}
-      onToggle={(event) => { const opening = event.newState === 'open'; if (opening) setFolder(openFolder()); setOpen(opening) }}>
+      onPointerEnter={(event) => { if (event.pointerType === 'mouse') { cancelClose(); setViewed(true) } }}
+      onPointerLeave={leave} onPointerDownCapture={pin} onFocusCapture={pin}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || isImeOwnedKeyboardEvent(event)) return
+        event.preventDefault(); event.stopPropagation()
+        popover.current!.hidePopover(); trigger.current!.focus({ preventScroll: true })
+      }}
+      onToggle={(event) => {
+        const opening = event.newState === 'open'
+        if (opening) { setFolder(openFolder()); if (!preview.current) setViewed(true) }
+        else { cancelClose(); preview.current = false; setViewed(false) }
+        setOpen(opening)
+      }}>
       <div className="composer-mailbox__heading"><strong>Mailbox</strong>
-        <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"><X size={14} /></button></div>
+        <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
+          onClick={() => trigger.current!.focus({ preventScroll: true })}><X size={14} /></button></div>
       <div className="composer-mailbox__folders" role="tablist" aria-label="Mailbox folders">
         {folders.map((name, index) => <button key={name} type="button"
           id={`${id}-${name}-tab`} role="tab" aria-controls={`${id}-${name}`} aria-selected={folder === name}
@@ -253,9 +313,11 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
         <MessageHistory items={sent} incoming={false} onCopy={onCopyQueued} />
       </div>
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
-        {system.notices.length ? system.notices.map((item) => <div key={item.id} className="composer-notice" data-kind={item.notice.kind}>
+        {notices.length ? notices.map((item) => <div key={item.id} className="composer-notice" data-kind={item.notice.kind}>
           <div className="composer-notice__body">
             <strong>{item.notice.notice.step}</strong><span>{item.notice.notice.mode}</span><span>{item.notice.notice.restore}</span>
+            {item.observedAt === undefined ? <small>Time not recorded.</small>
+              : <time dateTime={new Date(item.observedAt).toISOString()}>{new Date(item.observedAt).toLocaleString()}</time>}
             {item.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => setFolder('outbox')}>View outbox</button> : null}
             {item.action ? <button type="button" className="composer-tool" onClick={item.action.run}>{item.action.label}</button> : null}
           </div>

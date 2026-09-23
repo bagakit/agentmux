@@ -5,6 +5,8 @@ import type { RenderableServiceNotice } from './service-window-notice'
 export type ServiceNoticeItem = {
   id: string
   occurrence?: string
+  /** Display metadata from this notice's owner; never part of its read identity. */
+  observedAt?: number
   notice: RenderableServiceNotice
   action?: { label: string; run(): void }
 }

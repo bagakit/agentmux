@@ -1,17 +1,20 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import type { ContinuousProgressLoop } from '@agentmux/core'
+import type { AgentSessionUserMessage, ContinuousProgressLoop } from '@agentmux/core'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
+import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
 
 const dom = composerDOM()
 let disposeBootstrap: (() => void) | undefined
 beforeAll(async () => { disposeBootstrap = await useAppStore.getState().initialize() })
 afterAll(() => disposeBootstrap?.())
+afterEach(() => vi.useRealTimers())
 const session = () => ({ ...composerSession(), terminalPromptDelivery: {
   state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
   submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: 1
@@ -56,6 +59,162 @@ async function toggle(state: 'open' | 'closed') {
 async function folder(name: 'inbox' | 'outbox' | 'system' | 'progress') {
   await dom.click(`[role="tab"][id$="-${name}-tab"]`)
 }
+
+// Only the absent browser methods are supplied here. Native source/focus/light-dismiss are
+// verified separately by trusted Electron input; these tests own the React disclosure/read paths.
+function popoverMethods() {
+  const content = mailbox()
+  function state(newState: 'open' | 'closed') {
+    const event = new Event('toggle')
+    Object.defineProperty(event, 'newState', { value: newState })
+    content.dispatchEvent(event)
+  }
+  const show = vi.fn((_options: { source: HTMLButtonElement }) => state('open'))
+  const hide = vi.fn(() => state('closed'))
+  Object.defineProperties(content, { showPopover: { configurable: true, value: show }, hidePopover: { configurable: true, value: hide } })
+  return { show, hide }
+}
+async function pointer(target: Element, type: string, pointerType = 'mouse', buttons = 0) {
+  await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType, buttons })))
+}
+
+it('hover previews without reading or moving the current editor, allows crossing the gap, and reads only after entering content', async () => {
+  const create = vi.spyOn(api.continuousProgress, 'create')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const editor = dom.container.querySelector<HTMLElement>('.ProseMirror')!
+  const text = editor.querySelector('p')!.firstChild!
+  editor.focus()
+  const range = document.createRange(); range.setStart(text, 5); range.collapse(true)
+  document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
+  await act(async () => editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '中文' })))
+  const methods = popoverMethods()
+  vi.useFakeTimers()
+  await pointer(trigger(), 'pointerover', 'touch')
+  await pointer(trigger(), 'pointerover', 'mouse', 1)
+  expect(methods.show).not.toHaveBeenCalled()
+  await pointer(trigger(), 'pointerover')
+  expect(methods.show).toHaveBeenCalledExactlyOnceWith({ source: trigger() })
+  expect(mailbox().dataset.state).toBe('open')
+  expect(unread()).toBe('true')
+  expect(document.activeElement).toBe(editor)
+  expect(document.getSelection()!.anchorNode).toBe(text)
+  expect(document.getSelection()!.anchorOffset).toBe(5)
+  expect(dom.draft()).toBe('Keep my draft')
+  await pointer(trigger(), 'pointerout')
+  await act(async () => vi.advanceTimersByTime(100))
+  expect(methods.hide).not.toHaveBeenCalled()
+  await pointer(mailbox(), 'pointerover')
+  await act(async () => vi.advanceTimersByTime(300))
+  expect(methods.hide).not.toHaveBeenCalled()
+  expect(unread()).toBe('false')
+  expect(document.activeElement).toBe(editor)
+  await pointer(mailbox(), 'pointerout')
+  await act(async () => vi.advanceTimersByTime(200))
+  expect(methods.hide).toHaveBeenCalledTimes(1)
+  expect(mailbox().dataset.state).toBe('closed')
+  expect(dom.draft()).toBe('Keep my draft')
+  expect(create).not.toHaveBeenCalled()
+  await pointer(trigger(), 'pointerover')
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape', isComposing: true })))
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape', keyCode: 229 })))
+  expect(methods.hide).toHaveBeenCalledTimes(1)
+  await act(async () => editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中文' })))
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
+  expect(methods.hide).toHaveBeenCalledTimes(2)
+  expect(document.activeElement).toBe(editor)
+  expect(document.getSelection()!.anchorNode).toBe(text)
+  expect(document.getSelection()!.anchorOffset).toBe(5)
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
+  expect(methods.hide).toHaveBeenCalledTimes(2) // Closed Mailbox has no keyboard owner.
+})
+
+it.each(['entry', 'content'] as const)('pins the hover preview through %s interaction and keeps the Progress form and observer', async (surface) => {
+  const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
+  const observe = vi.spyOn(api.continuousProgress, 'onChanged')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const form = mailbox().querySelector('.continuous-progress-control form')!
+  const methods = popoverMethods()
+  vi.useFakeTimers()
+  await pointer(trigger(), 'pointerover')
+  if (surface === 'entry') {
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    await act(async () => trigger().dispatchEvent(click))
+    expect(click.defaultPrevented).toBe(true)
+  } else {
+    await pointer(mailbox().querySelector('[id$="-progress-tab"]')!, 'pointerdown')
+    await folder('progress')
+    const input = form.querySelector<HTMLInputElement>('input[type="number"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '17')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(input.value).toBe('17')
+  }
+  await pointer(trigger(), 'pointerout'); await pointer(mailbox(), 'pointerout')
+  await act(async () => vi.advanceTimersByTime(400))
+  expect(methods.hide).not.toHaveBeenCalled()
+  expect(mailbox().dataset.state).toBe('open')
+  await act(async () => mailbox().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
+  expect(mailbox().dataset.state).toBe('closed')
+  expect(document.activeElement).toBe(trigger())
+  await pointer(trigger(), 'pointerover'); await folder('progress')
+  expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
+  if (surface === 'content') expect(form.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('17')
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(observe).toHaveBeenCalledTimes(1)
+})
+
+it('orders mixed recorded and captured history by original time, keeping equal/missing times stable and queue order untouched', async () => {
+  const native = (id: string, recordedAt?: number): AgentSessionUserMessage => ({ id, rawId: id, agentSessionId: 'agent-1',
+    source: { kind: 'native', providerId: 'codex', nativeSessionId: 'native-session', recordId: id },
+    author: { kind: 'unknown' }, content: id, contentParts: [{ kind: 'text', text: id }],
+    ...(recordedAt === undefined ? {} : { recordedAt }) })
+  const items = [{ ...delivered('old'), createdAt: 10 }, { ...delivered('tie-a'), createdAt: 30 },
+    { ...delivered('tie-b'), createdAt: 30 }, { ...delivered('in-old', 'peer'), createdAt: 10 },
+    { ...delivered('in-new', 'peer'), createdAt: 50 }]
+  let userMessages = [native('missing-a'), native('native-new', 40), native('native-tie', 30), native('missing-b')]
+  const queued = [{ id: 'q-a', text: 'First intention', status: 'queued' as const, enqueuedAt: 999 },
+    { id: 'q-b', text: 'Second intention', status: 'queued' as const, enqueuedAt: 1 }]
+  const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
+  const render = () => dom.render(<SessionMailbox system={system} queued={queued}
+    timeline={{ agentSessionId: 'agent-1', revision: 1, items }} userMessages={userMessages} />)
+  await render()
+  const contents = (name: string) => [...mailbox().querySelectorAll(`[id$="-${name}"] .composer-mailbox__messages li > p`)].map(el => el.textContent)
+  expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'missing-a', 'missing-b'])
+  expect(contents('inbox')).toEqual(['Body in-new', 'Body in-old'])
+  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map(el => el.textContent)).toEqual(['First intention', 'Second intention'])
+  expect(items.map(item => item.content)).toEqual(['Body old', 'Body tie-a', 'Body tie-b', 'Body in-old', 'Body in-new'])
+  userMessages = [...userMessages, native('loaded-earlier', 5)]
+  await render()
+  expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'loaded-earlier', 'missing-a', 'missing-b'])
+})
+
+it('uses the selected System owner time, keeps unknown times last, and never makes a time-only update unread', async () => {
+  const current = session()
+  current.terminalPromptDelivery.observedAt = 30
+  current.terminalCapability = { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout', run: current.control.run, observedAt: 20 }
+  current.terminalOutputChannel = { state: 'severed', mode: 'degraded', reason: 'reattach-failed', run: current.control.run, observedAt: 1000 }
+  current.status = { ...current.status, state: 'disconnected', observedAt: 2000 }
+  const queue: AgentSteerQueueEntry[] = [{ operationId: 'unknown-time', text: 'Kept', runId: 'run-agent-1', status: 'failed', enqueuedAt: 9000 }]
+  expect(sessionServiceNotices(current, queue).map(item => [item.id, item.observedAt])).toEqual([
+    ['connection', 20], ['delivery', 30], ['queue', undefined]])
+  await act(async () => useAppStore.setState({ sessions: [current], agentSteerQueues: { 'agent-1': queue } }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const steps = () => [...mailbox().querySelectorAll('.composer-notice__body > strong')].map(el => el.textContent)
+  expect(steps()).toEqual(['Screen confirmation from retained terminal output didn’t complete', 'Checking terminal capabilities didn’t complete', 'A queued message has not been sent'])
+  expect([...mailbox().querySelectorAll('.composer-notice__body time')].map(el => el.getAttribute('datetime'))).toEqual([
+    new Date(30).toISOString(), new Date(20).toISOString()])
+  expect(mailbox().querySelectorAll('.composer-notice__body small')).toHaveLength(1)
+  expect(mailbox().querySelector('.composer-notice__body small')!.textContent).toBe('Time not recorded.')
+  await toggle('open'); await toggle('closed')
+  await act(async () => useAppStore.setState({ sessions: [{ ...current,
+    terminalCapability: { ...current.terminalCapability!, observedAt: 40 } }] }))
+  expect(unread()).toBe('false')
+  expect(steps()).toEqual(['Checking terminal capabilities didn’t complete', 'Screen confirmation from retained terminal output didn’t complete', 'A queued message has not been sent'])
+  const output = { ...current, terminalCapability: undefined }
+  expect(sessionServiceNotices(output).map(item => [item.id, item.observedAt])).toEqual([['connection', 1000], ['delivery', 30]])
+  expect(sessionServiceNotices({ ...output, terminalOutputChannel: undefined }).map(item => [item.id, item.observedAt])).toEqual([['connection', 2000], ['delivery', 30]])
+})
 
 it('uses one right Session mailbox, opens incoming notices to clear the red dot, and keeps the Core fact', async () => {
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)

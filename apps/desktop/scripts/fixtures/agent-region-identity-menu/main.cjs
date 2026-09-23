@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const fs = require('node:fs/promises'), path = require('node:path')
 const swapProof = require('./swap.cjs')
+const mailboxProof = require('./mailbox.cjs')
 const [html, privateRoot, evidence, probe = 'complete'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -277,7 +278,10 @@ app.whenReady().then(async()=>{
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.identityMenu)')
     if(probe==='terminal-loading-owning')await terminalLoadingVisual()
-    else if(probe==='composer-visual'||probe==='composer-layout-owning')await composerVisual(probe==='composer-layout-owning')
+    else if(probe==='composer-visual'||probe==='composer-layout-owning'){
+      await composerVisual(probe==='composer-layout-owning')
+      await mailboxProof({win,evaluate,waitFor,visible,painted,click,key,point,seed,capture,result,surface})
+    }
     else if(probe==='name'){await seed(640);result.names=await identity()}
     else if(probe==='target')await selection('Split',320)
     else if(probe.startsWith('swap-'))result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
@@ -305,5 +309,8 @@ app.whenReady().then(async()=>{
     }
     result.passed=true
   }catch(error){result.failure={name:error.name,message:error.message,stack:error.stack,stage:result.stage}}
-  finally{await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2));win?.destroy();app.exit(result.passed?0:1)}
+  finally{
+    if(win&&!win.isDestroyed())result.mailboxInputs??=await evaluate('window.identityMenu?.mailboxInputs?.()??[]')
+    await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2));win?.destroy();app.exit(result.passed?0:1)
+  }
 })

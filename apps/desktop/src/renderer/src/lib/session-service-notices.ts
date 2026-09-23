@@ -16,12 +16,16 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     notices.push({ id: 'recovery', occurrence: JSON.stringify(identity),
       notice: agentLifecycleFailureNotice(lifecycleError.failure, lifecycleError.message) })
   }
-  for (const [id, outcome] of [
-    ['connection', agentSessionServiceOutcome(session)],
-    ['delivery', agentPromptDeliveryServiceOutcome(session)]
+  const connectionTime = session.terminalCapability?.reason === 'handshake-timeout' ? session.terminalCapability.observedAt
+    : session.terminalOutputChannel?.reason === 'reattach-failed' ? session.terminalOutputChannel.observedAt
+    : session.status.state === 'disconnected' ? session.status.observedAt : undefined
+  for (const [id, outcome, observedAt] of [
+    ['connection', agentSessionServiceOutcome(session), connectionTime],
+    ['delivery', agentPromptDeliveryServiceOutcome(session), session.terminalPromptDelivery?.observedAt]
   ] as const) {
     const notice = serviceNoticeToRender(classifyServiceNotice(outcome))
-    if (notice) notices.push({ id, occurrence: JSON.stringify(identity), notice })
+    if (notice) notices.push({ id, occurrence: JSON.stringify(identity), notice,
+      ...(observedAt === undefined ? {} : { observedAt }) })
   }
   const problem = queue.find(entry => entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
     !steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState))

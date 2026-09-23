@@ -16,6 +16,8 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const visualOnly=process.argv.includes('--visual-only')
 const progressLayoutOwning=process.argv.includes('--progress-layout-owning')
 const terminalLoadingOwning=process.argv.includes('--terminal-loading-owning')
+const mailboxHoverMutation=process.argv.includes('--mailbox-hover-mutation')
+assert.ok(!mailboxHoverMutation||visualOnly,'Mailbox hover mutation stays in the private visual compilation')
 assert.ok(!progressLayoutOwning||visualOnly,'Progress layout owning uses only the private visual fixture')
 assert.ok(!terminalLoadingOwning||visualOnly,'Terminal loading owning uses only the private visual fixture')
 assert.ok(!terminalLoadingOwning||!progressLayoutOwning,'The private owning modes have distinct scenes')
@@ -39,8 +41,16 @@ async function renderer(label,probe='complete'){
   const cssPath=join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
   const loadedSourceInputs={},importedStyleInputs={}
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
-    plugins:[{name:'record-private-renderer-inputs',enforce:'pre',transform(source,id){
-      if(id.startsWith(join(desktop,'src')+'/')&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
+    plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
+      if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
+      if(mailboxHoverMutation&&id===join(desktop,'src/renderer/src/components/SessionMailbox.tsx')){
+        const anchor=';(popover.current!.showPopover as (options: { source: HTMLButtonElement }) => void)\n      .call(popover.current, { source: trigger.current! })'
+        assert.equal(source.split(anchor).length,2,'The private mutation cuts exactly the actual hover-open call')
+        const altered=source.replace(anchor,'void 0 // private mutation: cut actual hover open')
+        await writeFile(join(directory,'mailbox-original.tsx'),source);await writeFile(join(directory,'mailbox-mutated.tsx'),altered)
+        result.mutations.push({kind:'private-renderer-transform',file:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
+        return altered
+      }
     },async generateBundle(){
       for(const file of this.getWatchFiles())if(file.startsWith(join(desktop,'src')+'/')&&file.endsWith('.css'))importedStyleInputs[file.slice(repository.length+1)]=hash(await readFile(file))
     }}],

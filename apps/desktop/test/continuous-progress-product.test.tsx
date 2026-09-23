@@ -158,15 +158,30 @@ async function click(label: string) {
   await act(async () => button!.click())
 }
 it('mounts the existing Composer leaf and real create/pause/resume/check/stop routes, with no second target work', async () => {
-  const form = container.querySelector('form'); expect(form).not.toBeNull()
+  const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!; expect(mailbox).not.toBeNull()
+  // Happy DOM lacks native popover toggling; only its browser state event is supplied here.
+  const opened = new Event('toggle'); Object.defineProperty(opened, 'newState', { value: 'open' })
+  await act(async () => mailbox.dispatchEvent(opened))
+  const progress = mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-progress-tab"]')!; expect(progress).not.toBeNull()
+  await act(async () => progress.click())
+  const page = mailbox.querySelector<HTMLElement>('[role="tabpanel"][id$="-progress"]')!; expect(page.hidden).toBe(false)
+  const form = page.querySelector('form'); expect(form).not.toBeNull()
   const textarea = form!.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
+    textarea.focus()
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'continue the assigned work')
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  await act(async () => form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-  await vi.waitFor(() => expect(manager.list()).toHaveLength(1))
-  await vi.waitFor(() => expect(container.textContent).toContain('active'))
+  expect(document.activeElement).toBe(textarea)
+  const enable = form!.querySelector<HTMLButtonElement>('button[type="submit"]')!; expect(enable.disabled).toBe(false)
+  const created = vi.spyOn(api.continuousProgress, 'create')
+  await act(async () => {
+    enable.click()
+    expect(created).toHaveBeenCalledExactlyOnceWith(target(), 1_800_000, 'continue the assigned work', undefined)
+    await created.mock.results[0]!.value
+  })
+  expect(manager.list()).toHaveLength(1)
+  expect(page.textContent).toContain('active')
   expect(manager.list()[0]).toMatchObject(target())
   await click('Pause continuous progress'); expect(manager.list()[0]!.status).toBe('paused')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Resume continuous progress"]')).not.toBeNull())
