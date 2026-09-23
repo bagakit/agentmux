@@ -43,10 +43,17 @@ app.whenReady().then(async () => {
     const key = (keyCode, modifiers) => { win.webContents.sendInputEvent({ type:'keyDown', keyCode, modifiers }); win.webContents.sendInputEvent({ type:'keyUp', keyCode, modifiers }) }
     const capture = async file => { await settle(); fs.writeFileSync(path.join(evidence,file), (await win.webContents.capturePage()).toPNG()) }
     const footerHits = async () => {
-      const controls = `Array.from(document.querySelectorAll('.window-status-bar button')).filter(n=>n.checkVisibility()&&n.getBoundingClientRect().width>0)`
-      const count = await read(`${controls}.length`); assert.ok(count>=5)
+      const controls = `Array.from(document.querySelectorAll('.window-status-bar button'))`
+      const inventory = await read(`${controls}.map((n,index)=>{const p=n.closest('[popover]'),r=n.getBoundingClientRect();return{index,label:n.getAttribute('aria-label')||n.textContent.trim(),visible:n.checkVisibility(),rect:r.toJSON(),closedPopover:p&&!p.matches(':popover-open')?{id:p.id,type:p.getAttribute('popover')}:null}})`)
+      assert.ok(inventory.length>0,'Actual footer button source is nonempty')
+      const required = inventory.filter(n=>!n.closedPopover); assert.ok(required.length>0)
+      result.footerInventories ??= []; result.footerInventories.push({width:await read('innerWidth'),allButtons:inventory,requiredCount:required.length})
       const found = []
-      for(let i=0;i<count;i++) {const geometry=await hit(`${controls}[${i}]`);assertHit(geometry);found.push(geometry)}
+      for(const control of required) {
+        assert.equal(control.visible,true,`Actual footer control remains visible: ${control.label}`)
+        assert.ok(control.rect.width>0&&control.rect.height>0,`Actual footer control has positive area: ${control.label}`)
+        const geometry=await hit(`${controls}[${control.index}]`);assertHit(geometry);found.push(geometry)
+      }
       return found
     }
     const sampleCounts = async () => {
@@ -63,6 +70,14 @@ app.whenReady().then(async () => {
         await until('!!document.querySelector(".settings-section-menu[role=menu]")'); await settle()
         const actual = await read(`Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio]')).map(n=>n.textContent.trim())`)
         assert.deepEqual(actual, titles, 'Eight actual compact navigation entries are nonempty and complete')
+        if(!result.menuFrame&&await read('innerWidth===320')) {
+          const menu = await read(`(() => {const n=document.querySelector('.settings-section-menu'),range=document.createRange();return{rect:n.getBoundingClientRect().toJSON(),status:document.querySelector('.window-status-bar').getBoundingClientRect().toJSON(),labels:Array.from(n.querySelectorAll('.settings-section-menu__label,[role=menuitemradio]')).map(label=>{range.selectNodeContents(label);return{text:label.textContent.trim(),lines:Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0).map(r=>r.toJSON())}})}})()`)
+          assert.deepEqual(menu.labels.map(n=>n.text),['Preferences',...titles.slice(0,4),'Resources',...titles.slice(4)])
+          assert.ok(menu.rect.x>=0&&menu.rect.right<=320&&menu.rect.y>=0&&menu.rect.bottom<=menu.status.y,'Complete compact menu stays above the status bar and within the viewport')
+          for(const label of menu.labels) {assert.ok(label.lines.length>0);for(const line of label.lines)assert.ok(line.x>=menu.rect.x&&line.right<=menu.rect.right&&line.y>=menu.rect.y&&line.bottom<=menu.rect.bottom,'Complete nonempty menu text stays in its actual menu')}
+          menu.entries=[];for(let i=0;i<actual.length;i++){const geometry=await hit(`document.querySelectorAll('.settings-section-menu [role=menuitemradio]')[${i}]`);assertHit(geometry);menu.entries.push(geometry)}
+          menu.footerHits=await footerHits();menu.file='320-sections-menu.png';await capture(menu.file);result.menuFrame=menu
+        }
         const index = actual.indexOf(title); assert.ok(index >= 0)
         key('Home'); await until(`document.activeElement===document.querySelectorAll('.settings-section-menu [role=menuitemradio]')[0]`)
         for (let i=1;i<=index;i++) { key('Down'); await until(`document.activeElement===document.querySelectorAll('.settings-section-menu [role=menuitemradio]')[${i}]`) }
@@ -102,6 +117,7 @@ app.whenReady().then(async () => {
       await read('window.structureProbe.theme("dark")');await until('document.documentElement.dataset.appearance==="dark"');await settle()
       result.footer = await footerHits()
       result.countSample = await sampleCounts()
+      await nav('Appearance')
       await click(node('[aria-label="Close settings"]'),'Close footer sample');await until('!document.querySelector(".settings-page")')
       result.closedSurface = await surface();result.passed=true;return
     }
