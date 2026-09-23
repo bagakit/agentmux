@@ -218,6 +218,24 @@ describe('Hermes provider', () => {
       expect(hook('on_session_end', { completed: true }).semanticState).toBe('done')
     })
 
+    for (const shape of ['extra', 'flat'] as const) {
+      it(`明确子 Agent 的 ${shape} 负载不贡献主会话状态或生命周期`, () => {
+        const events = ['on_session_start', 'on_session_end', 'pre_approval_request', 'pre_tool_call']
+        expect(events).toHaveLength(4)
+        for (const eventName of events) {
+          const fields = { platform: 'subagent', completed: true, interrupted: false, failed: false }
+          const observed = shape === 'extra'
+            ? hook(eventName, fields, { session_id: 'native-delegate' })
+            : hook(eventName, {}, { session_id: 'native-delegate', ...fields })
+          expect(observed.semanticState).toBe('unknown')
+          expect(observed.lifecycleEvent).toBeNull()
+          expect(observed.nativeHandle).toBeUndefined()
+          expect(observed.interaction).toBeUndefined()
+          expect(observed.timeline.length).toBeGreaterThan(0)
+        }
+      })
+    }
+
     it('未装的事件到达时保持可诊断，绝不伪造状态', () => {
       for (const eventName of ['transform_llm_output', 'pre_verify', 'kanban_task_claimed', 'subagent_start']) {
         const event = hook(eventName)
