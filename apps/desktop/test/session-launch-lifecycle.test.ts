@@ -1759,7 +1759,7 @@ describe('Warm terminal pool', () => {
     expect(useAppStore.getState().layouts.workspace!.groups.flatMap(group => group.tabOrder)).not.toContain(tab.id)
   })
 
-  it('cleans only known unclaimed terminals without expanding Runtime Sessions into Views', async () => {
+  it('keeps known unclaimed terminals discoverable without expanding Runtime Sessions into Views', async () => {
     const warm = terminalSession('warm-run')
     const visible = agentSession('visible-run')
     useAppStore.setState({
@@ -1778,16 +1778,15 @@ describe('Warm terminal pool', () => {
     const dispose = await useAppStore.getState().initialize()
 
     const state = useAppStore.getState()
-    expect(stop).toHaveBeenCalledTimes(1)
-    expect(stop).toHaveBeenCalledWith(warm.control)
-    expect(state.sessions).toEqual([visible])
-    expect(state.unclaimedTerminalSessionIds).toEqual([])
+    expect(stop).not.toHaveBeenCalled()
+    expect(state.sessions).toEqual([warm, visible])
+    expect(state.unclaimedTerminalSessionIds).toEqual([warm.id])
     expect(state.tabs['session:warm-run']).toBeUndefined()
     expect(state.tabs['session:visible-run']).toBeUndefined()
     dispose()
   })
 
-  it('keeps a failed warm-terminal cleanup hidden and recorded for the next startup', async () => {
+  it('does not retry a previous warm-terminal cleanup during startup', async () => {
     const warm = terminalSession('warm-run')
     const visible = agentSession('visible-run')
     useAppStore.setState({
@@ -1801,12 +1800,13 @@ describe('Warm terminal pool', () => {
       timelines: {},
       recoveryCandidates: []
     })
-    vi.spyOn(api.sessions, 'stop').mockRejectedValue(new Error('owner unavailable'))
+    const stop = vi.spyOn(api.sessions, 'stop').mockRejectedValue(new Error('owner unavailable'))
 
     const dispose = await useAppStore.getState().initialize()
 
     const state = useAppStore.getState()
-    expect(state.sessions).toEqual([visible])
+    expect(stop).not.toHaveBeenCalled()
+    expect(state.sessions).toEqual([warm, visible])
     expect(state.unclaimedTerminalSessionIds).toEqual([warm.id])
     expect(state.tabs['session:warm-run']).toBeUndefined()
     expect(state.tabs['session:visible-run']).toBeUndefined()
