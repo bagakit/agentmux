@@ -2110,6 +2110,13 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 - Demand 的关联 Session 和 PMO 的混合 Session 筛选可以包含普通 Terminal，归现有通用 Session 入口所有；不得拿 Core 的 Agent 集合拒绝这些完整引用。只有领域明确要求 Agent 的入口才做 Agent 前缀解析。
 - 一条消息在收件 Agent 和人类阅读面上只有一份简洁的表达；机器回执留在命令结果/审计入口，不作为消息正文再转发。可读信封只是展示，不是认证；发送授权仍按上节的 capability 与 Session/Run 事实核验。
 
+### 按 amux id 搜索 Agent
+
+- 用户原话：「加个功能快速合入 main: 支持按 amux id 搜索 agent」。Focus 的既有上下文搜索与快速切换的既有搜索都应能找到当前入口已提供的 Agent，按 Core 权威 Agent Session ID 检索；Run ID、Provider 原生会话 ID 和普通 Terminal 的身份不是这里的 amux Agent ID。
+- ID 输入去除首尾空白后按原大小写连续匹配，支持完整 ID、前缀和中间连续片段；不把散落字符的模糊匹配用于 ID。前缀或片段命中多个 Agent 时展示全部匹配，由用户明确选择，不静默猜一个；这是一组现有行的搜索结果，不改变 CLI 唯一前缀寻址的合同。
+- 原名称、上下文、Provider 等已有文本搜索规则与排序保持；快速切换的 ID-only 命中使用中性匹配权重，原注意力、文本质量与观察时间排序不另设 ID 优先级。Focus 原项目、状态与 PMO 可见性边界保持；只添加已有可见 Agent 行的 ID 匹配，不扩展候选集合。
+- 选中结果沿原 Focus 或快速切换动作进入同一 Agent 工作面；搜索本身不创建或恢复 Session，不改变原焦点、布局或健康 Run。匹配依现有已加载事实完成，不另建 Core 索引、轮询或第二份身份。
+
 ### Terminal 连续向上阅读历史
 
 - **底层卡住时，Region 必须持续指出问题并支持手动刷新**。attachment、resume 或底层服务失败时，对应 Region 持续呈现实际失败步骤、可读原因、最后确认的运行事实和当前未知的输入送达，并提供手动观察刷新；不能靠瞬时 toast、收件箱已读或一次 metadata 成功消除仍存在的问题。刷新只重新取得原 Session／Run 的事实与输出观察连接，保留同 Run 的共享连接、原终端历史／视口／选择、Tab／Group／Region／焦点／布局、草稿和 queued／sending／unconfirmed 消息的原身份、字节与状态；刷新及其事件回流不能顺带投递、重放未知输入、停止或重启健康 Run，独立显式输入仍沿原入口。失败或超时保留原投影与真实告示；running、Hook 或快照读取成功不能冒充实况恢复，只有同一 subject 的实际观察结果能解除对应观察失败，缺少 owner 活性或输入回执时继续如实未知。重复点击复用已有在途操作与连接，晚回包或 subject 变化不能污染另一 Region；进程重启后先恢复原工作面并自动尝试原身份续接，不能从 failed resume 删除原 Session。
