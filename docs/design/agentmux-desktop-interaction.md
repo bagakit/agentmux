@@ -1867,6 +1867,8 @@ Claude 的终端输出会使用 ANSI 256 色（包含橙色等索引色），这
 
 **Resume 后颜色保持**。用户反馈「现在可以 resume，但 resume 后颜色都丢了」。颜色能力必须在实际子进程环境成立，不能以 RunSpec 中没有禁色变量替代它：当前 client 已清除的宿主信号不得通过长寿命 Runtime 的父环境重新进入新 Run。已有 PTY 的 ANSI 16 色、256 色和 truecolor 在恢复 seed、原始 tail 与终端渲染中保持同一语义；Provider semantic resume 创建的新 Run 与旧 Run 的回放须明确区分。发现无色时区分原始输出无色、恢复丢色与渲染丢色，证据不足明确 unknown，不虚构颜色、猜厂商行为或重启健康 Run。原 Session、Provider nativeHandle、布局与草稿保持，未知输入不自动重发。
 
+用户在  反馈「现在看终端仍然没有颜色」，要求沿用这项验收完成修复并合入 main。调查文档、安装成功、私有对照通过或另一块有颜色的 Region，均不能替代原 Session 的实际颜色恢复；已启动 CLI 的环境不能在线改写，恢复窗口尚不安全或现场证据缺失时保留原工作面和健康 Run，明确说明颜色恢复仍未确认。
+
 ### Result ready 在小 Region 中的可用性
 
 Agent 完成后的 Result ready 只占一行紧凑摘要，默认不展开文件和链接。用户可以明确展开、收起或关闭它；关闭后终端、Message Tool 和 Region 的主要操作必须立即恢复可用。展开的结果按文件和预览目标分组为可扫描列表，内容有独立滚动上限，不能靠把每个目标平铺成按钮而把小 Region 撑成十行左右。窄 Region 里所有可见控件必须可点、可键盘到达；面板不能盖住或挤走输入区。
@@ -2249,3 +2251,11 @@ Core 的语义文本供 Provider/readiness 等文本观察使用，与 ordered b
 ### Topic 默认终端与可发现关闭
 
 用户反馈：「Topic 里 Terminal 默认渲染两个且找不到关闭入口」。普通 Topic 的首次打开应形成一个可用 Terminal；重复点击、创建完成后的打开、恢复或不同投影的挂载不能凭流程增加第二个 Terminal Session 或 Region。用户主动分割、打开的多个终端仍按真实布局呈现，不能靠隐藏第二个终端、清空持久布局或删除健康 Run 解决默认重复。终端的关闭动作在当前 Tab/Region 附近可发现，并复用已有关闭/停止合同；取消或关闭其他 Region 不影响未选中的健康工作。重启先恢复既有分割与引用，不重新运行首次创建路径。
+
+### PMO 跨 Workspace 的 worktree 工作入口
+
+用户要的流程是：「人在别的 Workspace，指定一个项目，给它创建 worktree，在这个 worktree 上开出第一张 tab，拉起指定 Agent，并把第一句任务交给它执行。」目标项目、Host 和工作目录必须来自显式身份；不能由调用者当前 Workspace、焦点、标题或最近 Session 推断。新 worktree 没有任何 Tab 时，也必须能表达它的首张 Tab 落点。PMO 无需切换当前工作面就能发现其他 Workspace 已打开的 Tab，并取得新 Session 的精确 ID。
+
+设计必须分别说明 Git checkout、Workspace 登记、Tab/Region 放置、Core Session 创建和首句投递的事实；启动成功、PTY 接收字节、首句投递确认和任务完成不能相互代签。部分失败或回执丢失时说明已发生、未发生和未知的结果，以及 worktree 与 Session 分别保留在哪里、怎样精确查询；未知结果不能触发重复创建或重投。健康 Session 和原工作面的保护、重启先恢复持久布局的边界沿用既有合同，布局或观察流程失败不得停止健康 Run。
+
+本项先交设计给用户看，得到同意再实现。命令面、后台创建与聚焦的默认选择、新建资源的失败保留方式及请求关联方案见 [待确认 CLI 设计](../plans/pmo-cross-workspace-worktree-cli-design.md)；proposal 登记不表示用户已经批准这些设计选择。
