@@ -15,4 +15,6 @@ Native 在固定私有源码副本编译实际 WorkspaceWorkbench、SessionPane�
 
 独立评审逐张打开同轮完整 PNG，判断自适应右上组是否轻、名字是否清楚、空容器是否拦截正文、独立 Terminal 主题下字形是否可读、菜单与 X 焦点是否清楚、原首行与输入是否可用。局部 backing 只覆盖 quiet glyph band，不能以 opaque 22px 面盖首行；hover/open 临时表面沿原菜单语义。几何和采集通过不能代签观感。数据和 API 在既有 preview 边界受控；这里不操作用户 App/Run、剪贴板、权限或系统截图选择器，不证明真实 Core、厂商 CLI 或用户安装。普通 private Core 重启另核同来源编译产物，本轮没有打包安装任务。
 
+昂贵 Gate 前的一次非 gating 反例预检可用 `--native --header-only --header-font-preflight`，由原 SessionPane 配置消费产品支持的 8px 字号，只实绘同一 full-dark 场景，不增加默认矩阵。首行文字在 buffer 中成立不等于实际笔画完整；同轮元数据分别记录 0 flow row、实际 Terminal 阅读内距、22px 命中区与局部 backing，任何一次裁顶原图保留，不能把这些数值合写成固定顶栏高度。
+
 原 T005 的 24px 源码与截图只保历史时点，原件不重写；当前规格只以两份 SSOT 和本次角标 receipt 为准。
