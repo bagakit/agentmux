@@ -102,22 +102,44 @@ export function SessionPane({
   )
   const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const surfaceRef = useRef<HTMLElement>(null)
+  const historyReturnFocusRef = useRef<HTMLButtonElement | null>(null)
+  const historyOpenRef = useRef(historyOpen)
+  historyOpenRef.current = historyOpen
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
   const historyEverOpenedRef = useRef(false)
   if (historyOpen) historyEverOpenedRef.current = true
   const [historyDisclosures, setHistoryDisclosures] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     setHistoryOpen(false)
+    historyReturnFocusRef.current = null
     historyEverOpenedRef.current = false
     setHistoryDisclosures(new Set())
   }, [sessionId])
   useEffect(() => {
     setHistoryOpen(false)
   }, [viewMode])
+  const openHistory = (): void => {
+    const header = !readOnly && headerPortalTargetId
+      ? document.getElementById(headerPortalTargetId)
+      : surfaceRef.current
+    historyReturnFocusRef.current = header?.querySelector<HTMLButtonElement>('.agent-region-header__more') ?? null
+    setHistoryOpen(true)
+  }
   const closeHistory = (): void => {
+    const reader = surfaceRef.current?.querySelector('.session-history')
+    const target = historyReturnFocusRef.current
     setHistoryOpen(false)
     if (linkOrigin.tabId && linkOrigin.regionId) {
-      useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId, 'keyboard')
+      useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId, 'pointer')
     }
+    requestAnimationFrame(() => {
+      if (!visibleRef.current || historyOpenRef.current || !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
+      const active = document.activeElement
+      if (active && active !== document.body && !reader?.contains(active)) return
+      target.focus()
+    })
   }
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   const startupDecision = session?.kind === 'agent' ? agentStartupRecoveryDecision({
@@ -382,6 +404,7 @@ export function SessionPane({
 
   return (
     <section
+      ref={surfaceRef}
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
@@ -389,7 +412,7 @@ export function SessionPane({
         name={agentInputIdentity!} executorLabel={agentInputExecutor!} sessionId={session.id}
         regionId={linkOrigin.regionId} readOnly={readOnly}
         portalTargetId={headerPortalTargetId}
-        onHistory={!historyOpen && !inlineHistory ? () => setHistoryOpen(true) : undefined}
+        onHistory={!historyOpen && !inlineHistory ? openHistory : undefined}
         onRefreshObservation={observationMounted ? () => void refresh(true) : undefined}
         refreshing={refreshing}
       /> : null}
@@ -398,10 +421,7 @@ export function SessionPane({
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
-        <div
-          className="agent-terminal-stage"
-          style={session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore ? { display: 'none' } : undefined}
-        >
+        <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
             pendingAgentRestore ? (inlineHistory ? null :
               <div className="terminal-cold-parked" role="status">
@@ -431,7 +451,8 @@ export function SessionPane({
             control={session.control}
             label={agentInputIdentity ?? session.label}
             {...(!inlineHistory ? { onClose: closeHistory } : {})}
-            visible={visible && (historyOpen || inlineHistory) && (viewMode === 'terminal' || inlineHistory)}
+            visible={visible && (historyOpen || inlineHistory)}
+            returnLabel={pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity'}
             themeId={terminalThemeId}
             fontSize={terminalFontSize}
             workspaceRoot={activeWorkspaceRoot}
@@ -447,7 +468,6 @@ export function SessionPane({
               })
             }}
             {...(pendingAgentRestore ? {
-              returnLabel: 'Session',
               serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
             } : {})}
           /> : null}
@@ -482,21 +502,23 @@ export function SessionPane({
               </div>
             </div>
           ) : null}
+          {session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore ? (
+            <div inert={historyOpen} style={{ height: '100%' }}>
+              <ActivityView
+                sessionId={session.id}
+                items={timeline}
+                capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
+                displayState={session.status.state}
+                workspaceRoot={activeWorkspaceRoot}
+                openWorkspaceFile={openWorkspaceFile}
+                readPastedImage={readPastedImage}
+                openHttpLink={onProseLinkClick}
+                onAnnotate={annotateMessage}
+                describeSpeaker={describeSpeaker}
+              />
+            </div>
+          ) : null}
         </div>
-        {session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore ? (
-          <ActivityView
-            sessionId={session.id}
-            items={timeline}
-            capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
-            displayState={session.status.state}
-            workspaceRoot={activeWorkspaceRoot}
-            openWorkspaceFile={openWorkspaceFile}
-            readPastedImage={readPastedImage}
-            openHttpLink={onProseLinkClick}
-            onAnnotate={annotateMessage}
-            describeSpeaker={describeSpeaker}
-          />
-        ) : null}
       </div>
       {session.kind === 'agent' ? (
         <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} />
