@@ -152,7 +152,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const [readingContextId, setReadingContextId] = useState<string | null>(null)
   const [readerOpen, setReaderOpen] = useState(false)
   const [earlier, setEarlier] = useState(false)
-  const [preview, setPreview] = useState<{ message: AgentSessionUserMessage | undefined; interactive: boolean; left: number } | null>(null)
+  const [preview, setPreview] = useState<{ message: AgentSessionUserMessage | undefined; interactive: boolean; anchor: HTMLElement } | null>(null)
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined
     const observe = () => {
@@ -169,9 +169,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const headerRef = useRef<HTMLElement>(null)
   const closePreview = useCallback(() => { setPreview(null); setReaderOpen(false); setReadingContextId(null); setEarlier(false) }, [])
   const inspectMessage = useCallback((message: AgentSessionUserMessage, target: HTMLElement, interactive: boolean) => {
-    const bounds = timelineRef.current?.getBoundingClientRect()
-    const left = bounds ? Math.max(8, Math.min(target.getBoundingClientRect().left - bounds.left - 160, bounds.width - 340)) : 8
-    setPreview(current => !interactive && current?.interactive ? current : { message, interactive, left })
+    setPreview(current => !interactive && current?.interactive ? current : { message, interactive, anchor: target })
   }, [])
   const dismissMessage = useCallback((messageId: string) => setPreview(current => current?.message?.id === messageId && !current.interactive ? null : current), [])
   const inputContextId = readingContextId ?? currentSessionId
@@ -247,9 +245,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
   const inspectWindow = (next: number | null) => { setAnchor(next); closePreview() }
   const openInputRecords = (target: HTMLElement) => {
-    const bounds = timelineRef.current?.getBoundingClientRect()
-    const left = bounds ? Math.max(8, Math.min(target.getBoundingClientRect().left - bounds.left - 160, bounds.width - 340)) : 8
-    setReaderOpen(true); setPreview({ message: undefined, interactive: true, left })
+    setReaderOpen(true); setPreview({ message: undefined, interactive: true, anchor: target })
   }
   const inputCoverage = historical ? nativeWindow.page
     ? `${nativeWindow.page.items.length} native records retained${nativeWindow.rotated ? ' · Newer records are outside this reading window' : ''}. ${nativeWindow.page.nextCursor === null ? 'Beginning of this available snapshot reached.' : 'Coverage incomplete. Earlier records can still be read.'}`
@@ -281,7 +277,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         <p className="recent-focus__empty">No read records in this window. Native coverage may be incomplete; use Input records.</p>
       </div>
     </div> : null}
-    {preview ? <FocusMessagePreview message={preview.message} recipient={previewContext} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} left={preview.left} onSelect={onSelect} onClose={closePreview}
+    {preview ? <FocusMessagePreview message={preview.message} recipient={previewContext} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview}
       {...(readerOpen ? { reader: {
         contexts: contexts.filter(context => context.kind === 'agent'), contextId: inputContext?.id ?? null, messages: inputMessages,
         loading: historical ? nativeWindow.loading : latest.loading, coverage: inputCoverage,

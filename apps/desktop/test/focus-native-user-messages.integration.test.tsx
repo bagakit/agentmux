@@ -37,6 +37,11 @@ afterEach(async () => {
   document.getElementById('agentmux-window-overlay-host')?.remove()
 })
 
+function floating() {
+  const node = document.getElementById('agentmux-window-overlay-host')
+  expect(node, 'Actual shared overlay host').not.toBeNull(); return node!
+}
+
 async function fixture(records: NativeRecord[], captured = false) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW)
@@ -87,9 +92,9 @@ async function fixture(records: NativeRecord[], captured = false) {
   const element = document.createElement('div'); document.body.append(element); nodes.push(element)
   const root = createRoot(element); roots.push(root)
   const render = () => act(async () => root.render(createElement(GlobalFocusSurface)))
-  const click = async (selector: string) => { const target = element.querySelector<HTMLButtonElement>(selector); expect(target, selector).not.toBeNull(); await act(async () => target!.click()) }
+  const click = async (selector: string) => { const target = element.querySelector<HTMLButtonElement>(selector) ?? floating().querySelector<HTMLButtonElement>(selector); expect(target, selector).not.toBeNull(); await act(async () => target!.click()) }
   const wait = async (check: () => void) => act(async () => { await vi.waitFor(check, { timeout: 3000, interval: 10 }) })
-  const readInputs = async () => { await click('[aria-label="View input records"]'); await wait(() => expect(element.querySelector('[aria-label="Available input records"]')).not.toBeNull()) }
+  const readInputs = async () => { await click('[aria-label="View input records"]'); await wait(() => expect(floating().querySelector('[aria-label="Available input records"]')).not.toBeNull()) }
   const verifyNoRuntime = () => expect(forbidden.map(spy => spy.mock.calls.length)).toEqual(forbidden.map(() => 0))
   return { directory, store, client, sessions, stored, root, element, history, reads, writes, render, click, wait, readInputs, writeRecords, verifyNoRuntime }
 }
@@ -111,8 +116,8 @@ it('built-in Provider → public Core → Store → mounted Focus keeps exact na
   expect(h.reads.map(read => read.id)).toEqual([A]); h.verifyNoRuntime()
   const before = useAppStore.getState().agentFocus
   await h.click(`[data-message-id="${nativeId('one')}"]`)
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Sender not recorded')
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).not.toContain('Human')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Sender not recorded')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain('Human')
   expect(useAppStore.getState().agentFocus).toBe(before)
 })
 
@@ -123,8 +128,8 @@ it('unknown-time native inputs stay accessible in Focus and ordered parts use th
   expect([...h.element.querySelectorAll<HTMLElement>('.recent-focus__message')].map(item => item.dataset.messageId)).toEqual([nativeId('timed')])
   const focus = useAppStore.getState().agentFocus
   await h.readInputs(); await h.click(`[data-input-message-id="${nativeId('untimed')}"]`)
-  const preview = h.element.querySelector<HTMLElement>(`[data-input-preview-id="${nativeId('untimed')}"]`)!
-  expect(preview).not.toBeNull(); expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Record time unknown')
+  const preview = floating().querySelector<HTMLElement>(`[data-input-preview-id="${nativeId('untimed')}"]`)!
+  expect(preview).not.toBeNull(); expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Record time unknown')
   const parts = [...preview.querySelector('.log-turn__body')!.children]
   expect(parts).toHaveLength(3); expect(parts[0]!.textContent).toBe('Before resource'); expect(parts[2]!.textContent).toBe('After resource')
   expect(parts[1]!.querySelector('code')!.textContent).toBe('data:image/png;base64,aW1hZ2U=')
@@ -139,9 +144,9 @@ it('out-of-window, future and missing-time records never get guessed time positi
   expect(h.reads.map(read => read.id)).toEqual([A])
   const focus = useAppStore.getState().agentFocus
   await h.readInputs()
-  await act(async () => { const select = h.element.querySelector<HTMLSelectElement>('[aria-label="Input records Context"]')!; select.value = B; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  await act(async () => { const select = floating().querySelector<HTMLSelectElement>('[aria-label="Input records Context"]')!; select.value = B; select.dispatchEvent(new Event('change', { bubbles: true })) })
   await h.wait(() => expect(h.reads.map(read => read.id)).toEqual([A, B]))
-  expect(useAppStore.getState().agentFocus).toBe(focus); expect(h.element.querySelector(`[data-input-message-id="native:claude:native-${B}:other"]`)).not.toBeNull(); h.verifyNoRuntime()
+  expect(useAppStore.getState().agentFocus).toBe(focus); expect(floating().querySelector(`[data-input-message-id="native:claude:native-${B}:other"]`)).not.toBeNull(); h.verifyNoRuntime()
 })
 
 it('an old window beyond the first page uses opaque cursors and three raw pages even when most records are assistant/tool', async () => {
@@ -152,14 +157,14 @@ it('an old window beyond the first page uses opaque cursors and three raw pages 
   expect(h.reads.slice(1).map(read => read.page.items.length)).toEqual([30, 30, 30])
   expect(h.reads.slice(2).map(read => read.cursor)).toEqual(h.reads.slice(1, 3).map(read => read.page.nextCursor))
   expect(h.element.querySelector('.recent-focus__message')).toBeNull()
-  await h.readInputs(); expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('90 native records retained')
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Coverage incomplete')
+  await h.readInputs(); expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('90 native records retained')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Coverage incomplete')
   await h.click('.recent-focus__input-actions button')
   await h.wait(() => expect(h.reads).toHaveLength(5))
   expect(h.reads.at(-1)!.cursor).toBe(h.reads[3]!.page.nextCursor)
   expect(h.element.querySelector(`[data-message-id="${nativeId('raw-5')}"]`)).not.toBeNull()
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Beginning of this available snapshot reached')
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('90 native records retained'); h.verifyNoRuntime()
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Beginning of this available snapshot reached')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('90 native records retained'); h.verifyNoRuntime()
 })
 
 it('unrelated Session output causes zero new native reads or marker DOM replacement', async () => {
@@ -183,18 +188,18 @@ it('explicit continuation rotates at ninety raw records while retaining the exac
   const h = await fixture(Array.from({ length: 160 }, (_, index) => record(`row-${index}`, `Input body ${index}`)))
   await h.render(); await h.wait(() => expect(h.reads).toHaveLength(1))
   await h.readInputs(); await h.click(`[data-input-message-id="${nativeId('row-159')}"]`)
-  const body = h.element.querySelector<HTMLElement>(`[data-input-preview-id="${nativeId('row-159')}"]`)!
+  const body = floating().querySelector<HTMLElement>(`[data-input-preview-id="${nativeId('row-159')}"]`)!
   const text = body.querySelector('.log-turn__body p')!.firstChild!
   const selected = document.createRange(); selected.setStart(text, 0); selected.setEnd(text, 5)
   document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(selected)
   await h.click('.recent-focus__input-actions button'); await h.wait(() => expect(h.reads).toHaveLength(4))
-  expect(h.element.querySelector(`[data-input-preview-id="${nativeId('row-159')}"]`)).toBe(body)
+  expect(floating().querySelector(`[data-input-preview-id="${nativeId('row-159')}"]`)).toBe(body)
   await h.click('.recent-focus__input-actions button'); await h.wait(() => expect(h.reads).toHaveLength(7))
-  expect(h.element.querySelector(`[data-input-preview-id="${nativeId('row-159')}"]`)).toBe(body)
+  expect(floating().querySelector(`[data-input-preview-id="${nativeId('row-159')}"]`)).toBe(body)
   expect(document.getSelection()!.toString()).toBe('Input')
-  expect([...h.element.querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)).toHaveLength(90)
-  expect(h.element.querySelector(`[data-input-message-id="${nativeId('row-159')}"]`)).not.toBeNull()
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Newer records are outside this reading window')
+  expect([...floating().querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)).toHaveLength(90)
+  expect(floating().querySelector(`[data-input-message-id="${nativeId('row-159')}"]`)).not.toBeNull()
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Newer records are outside this reading window')
   expect(h.reads.slice(1).map(read => read.page.items.length)).toEqual([30, 30, 30, 30, 30, 10]); h.verifyNoRuntime()
 })
 
@@ -210,18 +215,18 @@ it('Focus bounds its own native bodies even when another real shared consumer ha
   expect(h.reads).toHaveLength(5)
   await h.render(); await h.readInputs()
   expect(shared!.messages).toHaveLength(130)
-  const listed = [...h.element.querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)
+  const listed = [...floating().querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)
   expect(listed).toEqual(Array.from({ length: 90 }, (_, index) => nativeId(`shared-${index + 40}`)))
   expect(h.reads).toHaveLength(5)
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Earlier coverage is unknown')
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).not.toContain('Beginning of this available snapshot reached'); h.verifyNoRuntime()
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Earlier coverage is unknown')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain('Beginning of this available snapshot reached'); h.verifyNoRuntime()
 })
 
 it('a real Source replacement keeps the old pinned input and only explicit Refresh reads a new Source', async () => {
   const h = await fixture(Array.from({ length: 110 }, (_, index) => record(`source-${index}`, `Old Source ${index}`)))
   await h.render(); await h.wait(() => expect(h.reads).toHaveLength(1)); await h.readInputs(); await h.click('.recent-focus__input-actions button'); await h.wait(() => expect(h.reads).toHaveLength(4))
   await h.click(`[data-input-message-id="${nativeId('source-109')}"]`)
-  const body = h.element.querySelector(`[data-input-preview-id="${nativeId('source-109')}"]`)
+  const body = floating().querySelector(`[data-input-preview-id="${nativeId('source-109')}"]`)
   const replacement = join(h.directory, 'replacement.jsonl')
   await writeFile(replacement, JSON.stringify({ sessionId: 'native-replacement', ...record('new-source', 'New Source body') }) + '\n')
   const original = (await loadAgentSessions(h.store)).find(session => session.agentSessionId === A)!
@@ -232,15 +237,15 @@ it('a real Source replacement keeps the old pinned input and only explicit Refre
   let sourceError: (Error & { code?: string }) | undefined
   await act(async () => { try { await h.history.mock.results[4]!.value } catch (error) { sourceError = error as Error & { code?: string } } })
   expect(sourceError?.code).toBe('AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-  await h.wait(() => expect(h.element.querySelector('.recent-focus__input-error')!.textContent).toContain('Native history cursor belongs to another source.'))
-  expect(h.element.querySelector(`[data-input-preview-id="${nativeId('source-109')}"]`)).toBe(body)
-  expect(h.element.querySelector('[data-input-message-id="native:claude:native-replacement:new-source"]')).toBeNull()
+  await h.wait(() => expect(floating().querySelector('.recent-focus__input-error')!.textContent).toContain('Native history cursor belongs to another source.'))
+  expect(floating().querySelector(`[data-input-preview-id="${nativeId('source-109')}"]`)).toBe(body)
+  expect(floating().querySelector('[data-input-message-id="native:claude:native-replacement:new-source"]')).toBeNull()
   await h.click('.recent-focus__input-actions button:last-child')
   await h.wait(() => expect(h.history).toHaveBeenCalledTimes(6))
   await h.wait(() => expect(h.reads.at(-1)!.page.source).toEqual({ providerId: 'claude', nativeSessionId: 'native-replacement' }))
   expect(h.reads.at(-1)!.page.items.map(item => [item.id, item.kind])).toEqual([['new-source', 'user-message']])
-  await h.wait(() => expect(h.element.querySelector('[data-input-message-id="native:claude:native-replacement:new-source"]')).not.toBeNull())
-  expect(h.element.querySelector(`[data-input-message-id="${nativeId('source-109')}"]`)).toBeNull()
+  await h.wait(() => expect(floating().querySelector('[data-input-message-id="native:claude:native-replacement:new-source"]')).not.toBeNull())
+  expect(floating().querySelector(`[data-input-message-id="${nativeId('source-109')}"]`)).toBeNull()
   h.verifyNoRuntime()
 })
 
@@ -267,11 +272,11 @@ it('empty native pages and latest loading facts never claim a complete old windo
   const h = await fixture([])
   await h.render(); await h.wait(() => expect(h.reads).toHaveLength(1)); await h.readInputs()
   expect(h.reads[0]!.page.source).toEqual({ providerId: 'claude', nativeSessionId: `native-${A}` })
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Earlier coverage is unknown')
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).not.toContain('Beginning of this available snapshot reached')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Earlier coverage is unknown')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain('Beginning of this available snapshot reached')
   await h.click('.recent-focus__input-actions button'); await h.wait(() => expect(h.reads).toHaveLength(2))
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Beginning of this available snapshot reached')
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('0 native records retained'); h.verifyNoRuntime()
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Beginning of this available snapshot reached')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('0 native records retained'); h.verifyNoRuntime()
 })
 
 it('known captured Agent inspection stays read-only and navigation resolves the exact sender ID before the same-name decoy', async () => {
@@ -282,21 +287,21 @@ it('known captured Agent inspection stays read-only and navigation resolves the 
   const origin = useAppStore.getState().agentFocus
   const marker = h.element.querySelector<HTMLButtonElement>('[data-message-id="captured:prompt:sender-core"]')!
   await act(async () => marker.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: null })))
-  expect(h.element.querySelector('[role="tooltip"]')!.textContent).toContain('Sender Run not recorded')
-  expect(h.element.querySelector('[role="tooltip"]')!.textContent).toContain(B)
+  expect(floating().querySelector('[role="tooltip"]')!.textContent).toContain('Sender Run not recorded')
+  expect(floating().querySelector('[role="tooltip"]')!.textContent).toContain(B)
   expect(useAppStore.getState().agentFocus).toBe(origin)
   await act(async () => { marker.focus(); marker.click() })
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).not.toContain(`${B}-original-run`)
-  const knownBody = h.element.querySelector<HTMLElement>('[data-input-preview-id="captured:prompt:sender-core"] .log-turn')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain(`${B}-original-run`)
+  const knownBody = floating().querySelector<HTMLElement>('[data-input-preview-id="captured:prompt:sender-core"] .log-turn')
   expect(knownBody).not.toBeNull(); expect(knownBody!.dataset.speakerRole).toBe('agent')
   expect(knownBody!.querySelector('.conversation-avatar--human')).toBeNull()
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-  expect(h.element.querySelector('[role="dialog"]')).toBeNull(); expect(h.element.querySelector('[role="tooltip"]')).toBeNull(); expect(document.activeElement).toBe(marker)
+  expect(floating().querySelector('[role="dialog"]')).toBeNull(); expect(floating().querySelector('[role="tooltip"]')).toBeNull(); expect(document.activeElement).toBe(marker)
   await act(async () => marker.click())
   await h.click('.recent-focus__sender-link')
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(B)
   expect(useAppStore.getState().agentFocus.execution.sessionId).not.toBe(C)
-  expect(h.element.querySelector('[role="dialog"]')).toBeNull(); h.verifyNoRuntime()
+  expect(floating().querySelector('[role="dialog"]')).toBeNull(); h.verifyNoRuntime()
 })
 
 it('same Source repeated records across accepted pages are deduplicated without deduplicating equal bodies', async () => {
@@ -308,9 +313,9 @@ it('same Source repeated records across accepted pages are deduplicated without 
   // Core normalization forbids duplicate IDs inside a single native page.
   h.history.mockImplementation(async (control, options) => { const page = await read(control, options); return options?.cursor ? { ...page, items: [...page.items, repeated] } : page })
   await h.readInputs(); await h.click('.recent-focus__input-actions button'); await h.wait(() => expect(h.reads).toHaveLength(4))
-  const ids = [...h.element.querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)
+  const ids = [...floating().querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)
   expect(ids).toEqual(Array.from({ length: 90 }, (_, index) => nativeId(`duplicate-${index + 10}`)))
-  expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('90 native records retained'); h.verifyNoRuntime()
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('90 native records retained'); h.verifyNoRuntime()
 })
 
 it('document hiding and a late old-Context result never read subsequent pages or contaminate the newly selected Context', async () => {
@@ -324,13 +329,13 @@ it('document hiding and a late old-Context result never read subsequent pages or
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 20)) })
-  expect(h.reads).toHaveLength(2); expect(h.element.querySelector('[role="dialog"]')).toBeNull()
+  expect(h.reads).toHaveLength(2); expect(floating().querySelector('[role="dialog"]')).toBeNull()
   expect([...h.element.querySelectorAll<HTMLElement>('.recent-focus__message[data-message-source="native"]')].map(item => item.dataset.messageId)).toEqual([])
   await act(async () => useAppStore.getState().focusExecutionSession(B))
   visibility.mockReturnValue('visible'); await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   await h.wait(() => expect(h.reads).toHaveLength(3))
   expect(h.reads.map(read => read.id)).toEqual([A, A, B]); await h.readInputs()
-  expect([...h.element.querySelectorAll<HTMLElement>('[data-input-message-id]')].map(item => item.dataset.inputMessageId)).toEqual([`native:claude:native-${B}:other`])
+  expect([...floating().querySelectorAll<HTMLElement>('[data-input-message-id]')].map(item => item.dataset.inputMessageId)).toEqual([`native:claude:native-${B}:other`])
   h.verifyNoRuntime()
 })
 
@@ -342,11 +347,11 @@ it('record time zero remains real, while a public page from another Context is r
   expect(marker).not.toBeNull(); expect(marker.dataset.messageAt).toBe('0'); expect(marker.style.left).toBe('75%')
   const focus = useAppStore.getState().agentFocus
   h.history.mockImplementation(async () => h.client.sessionHistoryPage(B))
-  await h.readInputs(); await h.wait(() => expect(h.element.querySelector<HTMLButtonElement>('.recent-focus__input-actions button:last-child')!.disabled).toBe(false)); await h.click('.recent-focus__input-actions button:last-child')
+  await h.readInputs(); await h.wait(() => expect(floating().querySelector<HTMLButtonElement>('.recent-focus__input-actions button:last-child')!.disabled).toBe(false)); await h.click('.recent-focus__input-actions button:last-child')
   await h.wait(() => expect(h.history).toHaveBeenCalledTimes(3))
   await act(async () => { await h.history.mock.results[2]!.value })
-  await h.wait(() => { const notice = h.element.querySelector('.recent-focus__input-error'); expect(notice).not.toBeNull(); expect(notice!.textContent).toContain('Input records belong to another Context.') })
+  await h.wait(() => { const notice = floating().querySelector('.recent-focus__input-error'); expect(notice).not.toBeNull(); expect(notice!.textContent).toContain('Input records belong to another Context.') })
   expect(h.element.querySelector(`[data-message-id="${nativeId('epoch')}"]`)).toBe(marker)
-  expect(h.element.querySelector(`[data-input-message-id="native:claude:native-${B}:other"]`)).toBeNull()
+  expect(floating().querySelector(`[data-input-message-id="native:claude:native-${B}:other"]`)).toBeNull()
   expect(useAppStore.getState().agentFocus).toBe(focus); h.verifyNoRuntime()
 })
