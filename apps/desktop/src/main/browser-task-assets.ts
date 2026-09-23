@@ -78,7 +78,7 @@ export class BrowserTaskAssets {
     await this.ready()
     return copy({
       assets: this.document.assets.filter(asset => !browserId || asset.browserId === browserId),
-      runs: this.document.runs.filter(run => !browserId || run.browserId === browserId),
+      runs: this.document.runs.filter(run => !browserId || run.browserId === browserId).map(run => this.projectRun(run)),
       ...(this.warning ? { warning: this.warning } : {})
     })
   }
@@ -194,7 +194,7 @@ export class BrowserTaskAssets {
         run.status = 'stopped'; run.warning = 'Task stopped. Completed steps remain; inspect the page before another run.'
         await this.updateRun(run)
       }
-      return copy(run)
+      return copy(this.projectRun(run))
     })
   }
 
@@ -250,7 +250,7 @@ export class BrowserTaskAssets {
             run!.warning = 'Human checkpoint reached. Review the page, then explicitly return control to continue the remaining steps.'
             await this.updateRun(run!)
           })
-          return copy(run)
+          return copy(this.projectRun(run))
         }
         const script = compileAssetStep(step, parameters)
         // Write-ahead cursor: restart during a call is uncertain, so no automatic replay is offered.
@@ -270,7 +270,7 @@ export class BrowserTaskAssets {
             }
             await this.updateRun(run!)
           })
-          return copy(run)
+          return copy(this.projectRun(run))
         }
         await this.change(async () => {
           const stopped = run!.status === 'stopped'
@@ -288,18 +288,18 @@ export class BrowserTaskAssets {
           if (stopped) run!.status = 'stopped'
           await this.updateRun(run!)
         })
-        if (run.status !== 'running') return copy(run)
+        if (run.status !== 'running') return copy(this.projectRun(run))
         actions += 1
         if (input.mode === 'step' && actions === 1 && run.nextStep < version.steps.length) {
           await this.change(async () => { run!.status = 'ready'; await this.updateRun(run!) })
-          return copy(run)
+          return copy(this.projectRun(run))
         }
       }
       await this.change(async () => {
         run!.status = run!.status === 'stopped' ? 'stopped' : 'completed'
         await this.updateRun(run!)
       })
-      return copy(run)
+      return copy(this.projectRun(run))
     } finally {
       this.activeBrowsers.delete(browserId)
     }
@@ -317,6 +317,15 @@ export class BrowserTaskAssets {
     if (!run || !asset || !version || run.browserId !== tuple.browserId || asset.browserId !== tuple.browserId ||
         run.assetId !== tuple.assetId || run.version !== tuple.version) return null
     return { run, version }
+  }
+  /** The durable cursor and exact facts keep an optional recording failure visible after later saves. */
+  private projectRun(run: BrowserTaskAssetRun): BrowserTaskAssetRun {
+    const version = this.document.assets.find(asset => asset.id === run.assetId)?.versions.find(item => item.version === run.version)
+    const confirmed = new Set(run.humanCheckpoints?.map(fact => fact.checkpointId))
+    const unavailable = version?.steps.some((step, index) => step.kind === 'checkpoint' && index < run.nextStep &&
+      step.id !== run.pendingCheckpointId && !confirmed.has(step.id))
+    if (!unavailable) return run
+    return { ...run, warning: run.warning ? `${run.warning} ${HUMAN_FACT_UNAVAILABLE}` : HUMAN_FACT_UNAVAILABLE }
   }
   private async change<T>(action: () => Promise<T>): Promise<T> {
     await this.ready()

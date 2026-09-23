@@ -2,7 +2,7 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 
 const file = 'apps/desktop/src/main/browser-task-assets.ts'
 await verifyRendererSourceMutations({
-  name: 'browser-task-human-checkpoints-mutations',
+  name: 'browser-task-human-checkpoints-notice-mutations',
   tests: ['apps/desktop/test/browser-task-human-checkpoints.test.ts'],
   sources: [file, 'apps/desktop/src/shared/browser-task-assets.ts', 'apps/desktop/src/shared/browser-outcome-criteria.ts',
     'apps/desktop/src/main/browser-replay-compiler.ts'],
@@ -36,6 +36,18 @@ await verifyRendererSourceMutations({
       after: "if (cursor <= bound.run.nextStep && bound.run.pendingCheckpointId !== checkpointId) return { status: 'not-recorded' }" },
     { label: 'store-load-failure-treated-as-no-event-yet', file,
       before: "if (!bound || this.loadUnavailable || this.warning === HUMAN_FACT_SAVE_FAILED) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }",
-      after: "if (!bound || this.loadUnavailable || this.warning === HUMAN_FACT_SAVE_FAILED) return { status: 'not-recorded' }" }
+      after: "if (!bound || this.loadUnavailable || this.warning === HUMAN_FACT_SAVE_FAILED) return { status: 'not-recorded' }" },
+    { label: 'notice-disappears-after-successful-progress-save', file, before: 'if (!unavailable) return run', after: 'if (true) return run' },
+    { label: 'state-omits-persistent-local-notice', file,
+      before: 'runs: this.document.runs.filter(run => !browserId || run.browserId === browserId).map(run => this.projectRun(run)),',
+      after: 'runs: this.document.runs.filter(run => !browserId || run.browserId === browserId),' },
+    { label: 'completed-return-omits-persistent-local-notice', file,
+      before: "run!.status = run!.status === 'stopped' ? 'stopped' : 'completed'\n        await this.updateRun(run!)\n      })\n      return copy(this.projectRun(run))",
+      after: "run!.status = run!.status === 'stopped' ? 'stopped' : 'completed'\n        await this.updateRun(run!)\n      })\n      return copy(run)" },
+    { label: 'notice-replaces-existing-human-control-warning', file,
+      before: 'run.warning ? `${run.warning} ${HUMAN_FACT_UNAVAILABLE}` : HUMAN_FACT_UNAVAILABLE', after: 'HUMAN_FACT_UNAVAILABLE' },
+    { label: 'another-browser-checkpoints-drive-local-notice', file,
+      before: 'const version = this.document.assets.find(asset => asset.id === run.assetId)?.versions.find(item => item.version === run.version)',
+      after: 'const version = this.document.assets[0]?.versions.find(item => item.version === run.version)' }
   ]
 })
