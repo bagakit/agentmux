@@ -181,8 +181,8 @@ it('uses the shared message owner for ordered native parts, exact copy and host 
     workspaceRoot="/synthetic" openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink} />))
   const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'))
   expect(rows.map(row => row.dataset.historyItemId)).toEqual(['native-user', 'native-assistant', 'native-activity'])
-  expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['human', 'agent', null])
-  expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['You', 'Reader', 'Tool observation'])
+  expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['unknown', 'agent', null])
+  expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['Input', 'Reader', 'Tool observation'])
   expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-status'))).toEqual([null, null, null])
   expect(rows.map(row => row.querySelector('.log-turn__time')?.textContent ?? null)).toEqual([null, new Date(0).toTimeString().slice(0, 8), null])
   const body = rows[0]!.querySelector('.log-turn__body')!
