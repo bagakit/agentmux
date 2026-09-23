@@ -1,3 +1,4 @@
+import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from './browser-outcome-criteria'
 import type { BrowserStepEvidenceReference } from './browser-step-evidence'
 
 /** Browser activity belongs to Desktop Main, independently of Agent/PTY timelines. */
@@ -41,6 +42,7 @@ export type BrowserOperation = {
   steps: BrowserOperationStep[]
   replayOf?: string
   warning?: string
+  outcome?: { registration: BrowserOutcomeRegistration; evaluation?: BrowserOutcomeEvaluation }
 }
 export type BrowserReplayPlan = {
   schema: 'agentmux.browser-replay.v1'

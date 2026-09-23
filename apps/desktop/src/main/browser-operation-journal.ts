@@ -1,3 +1,5 @@
+import { normalizeBrowserOutcomeJournal } from './browser-outcome-journal.js'
+import type { BrowserOutcomeRegistration, BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -317,6 +319,33 @@ export class BrowserOperationJournal {
     return cloneOperation(operation)
   }
 
+  /** Register before any producer step; verification cannot select an old successful artifact. */
+  async registerOutcome(operationId: string, registration: BrowserOutcomeRegistration): Promise<{ operation: BrowserOperation; saved: boolean } | null> {
+    await this.ready()
+    const operation = this.find(operationId)
+    if (!operation || operation.steps.length > 0 || operation.outcome) return null
+    const outcome = normalizeBrowserOutcomeJournal({ registration }, operation.id, operation.browserId)
+    if (!outcome) return null
+    operation.outcome = outcome
+    const saved = await this.persist()
+    return { operation: cloneOperation(operation), saved }
+  }
+
+  async recordOutcome(operationId: string, evaluation: BrowserOutcomeEvaluation): Promise<{ operation: BrowserOperation; saved: boolean } | null> {
+    await this.ready()
+    const operation = this.find(operationId)
+    if (!operation?.outcome) return null
+    const outcome = normalizeBrowserOutcomeJournal({ registration: operation.outcome.registration, evaluation },
+      operation.id, operation.browserId)
+    if (!outcome) return null
+    operation.outcome = outcome
+    const saved = await this.persist()
+    if (!saved && outcome.evaluation) {
+      outcome.evaluation.warning = 'The result was checked but could not be saved. Existing Browser work remains; restore local storage before relying on recovery.'
+    }
+    return { operation: cloneOperation(operation), saved }
+  }
+
   async get(operationId: string): Promise<BrowserOperation | null> {
     await this.ready()
     const operation = this.find(operationId)
@@ -478,11 +507,13 @@ export class BrowserOperationJournal {
     }
   }
 
-  private async persist(): Promise<void> {
+  private async persist(): Promise<boolean> {
     try {
       await this.saveStore.save(normalizeDocument(this.document))
+      return true
     } catch (error) {
       this.warning = `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}`
+      return false
     }
   }
 }
@@ -549,8 +580,11 @@ function stripUrl(value: string): string {
 }
 
 function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
+  const { outcome: rawOutcome, ...facts } = operation
+  const outcome = normalizeBrowserOutcomeJournal(rawOutcome, operation.id, operation.browserId)
   return {
-    ...operation,
+    ...facts,
+    ...(outcome ? { outcome } : {}),
     id: clamp(operation.id),
     browserId: clamp(operation.browserId),
     operator: {
@@ -561,7 +595,8 @@ function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
     summary: clampProse(operation.summary),
     url: stripUrl(operation.url),
     steps: operation.steps.slice(-MAX_BROWSER_OPERATION_STEPS).map(sanitizeStep),
-    ...(operation.warning ? { warning: clampProse(operation.warning) } : {})
+    ...(rawOutcome !== undefined && !outcome ? { warning: clampProse(`${operation.warning ?? ''} Stored completion conditions are unreadable; verification is unavailable. Existing Browser work remains.`) }
+      : operation.warning ? { warning: clampProse(operation.warning) } : {})
   }
 }
 

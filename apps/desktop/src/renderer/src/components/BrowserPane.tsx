@@ -1,3 +1,4 @@
+import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import * as DropdownMenu from './HoverDropdownMenu'
 import {
   AlertTriangle,
@@ -945,10 +946,27 @@ export function BrowserPane({
             onLocateStep={(stepId, event) => { if (event.nativeEvent.isTrusted !== true || !taskAsset) return; void taskAction(event, () => api.browser.locateTaskAssetStep(tab.browserId, taskAsset.id, taskAsset.revision, stepId)).catch(reportError) }}
             onRun={(input, event) => taskAction(event, async () => {
               if (!taskAsset) return
-              applyBrowserEvent({ type: 'updated', browser: await api.browser.returnControl(tab.browserId) })
               await api.browser.runTaskAsset({ ...input, assetId: taskAsset.id, browserId: tab.browserId })
             })}
             onStop={(runId, event) => { if (event.nativeEvent.isTrusted !== true) return; void api.browser.stopTaskAsset(tab.browserId, runId).catch(reportError) }}
+          />
+          <BrowserOutcomeCriteria
+            evaluation={timelineOperation?.outcome?.evaluation ?? null}
+            historical={Boolean(timelineOperation?.outcome && (timelineOperation.id !== tab.activity?.operation?.id ||
+              timelineOperation.outcome.registration.context.navigationId !== tab.navigationId))}
+            onVerify={event => taskAction(event, async () => {
+              if (!timelineOperation?.outcome) return
+              await api.browser.verifyOutcome(tab.browserId, timelineOperation.id)
+              await loadOperationHistory()
+            })}
+            busy={taskBusy || tab.driving || demonstrationBusy}
+            onRun={(input, event) => taskAction(event, async () => {
+              applyBrowserEvent({ type: 'updated', browser: await api.browser.returnControl(tab.browserId) })
+              setSelectedOperationId(null)
+              setSelectedStep(null)
+              await api.browser.checkOutcomeFields(tab.browserId, input)
+              await loadOperationHistory()
+            })}
           />
           <BrowserOperationHistory
             operations={[
