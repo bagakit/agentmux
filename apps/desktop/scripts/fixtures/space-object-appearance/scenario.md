@@ -1,0 +1,11 @@
+# Space object identity, actual private process restart
+
+This scene implements the Space object manual identity contract in `docs/design/agentmux-desktop-interaction.md` and the identity/hierarchy contract in `docs/design/agentmux-surface-density.md`.
+
+The production sidebar, Topics overview, Workbench, Store initialize and sole Workbench presentation writer are mounted. Only initial workface topology is seeded. Mote, Topic and Folder menus are opened with native pointer or keyboard input; the shared picker saves through the actual product handler. A pending automatic Folder probe returns after manual selection. Local storage and platform flush failures retain the picker draft and expose Retry. Cancellation performs no save. The process exits, a distinct private Electron process restores all three manual identities and the original workface, then actual menus restore automatic identity. A third process reads back the removal of overrides.
+
+ScratchTopics and automatic Folder detection use private filesystem directories and production owners. Session snapshot/attachment and providers are controlled public API facts. This scene does not claim real Core or ctxmux Run survival and never reads the user's profile or application. Platform flush completion is a request result; cross-process readback supplies the persistence evidence.
+
+Every PNG is a full native window. The receipt binds generation, actual loaded sources, private compiled bytes, process IDs, input operations, state and image hashes. Collection is `captureOnly`; an independent Agent must actually open all images and assess the result. CSS geometry confirms behavior and bounds; it does not establish visual quality.
+
+The isolated `--persistence-only` mode is for the `omitted-persist-field` causal mutation. It runs the same real three-kind picker saves, overview cancellation/save and process readback without failure injection. Removing the persisted input field prevents an icon edit from reaching `localStorage.setItem`, so a write-failure scenario would stop before the intended restart assertion. The mode is recorded as `persistence-mutation`; it does not replace the complete behavior run. A missing field must fail in the second process with an empty restored icon map, while the exact-byte restoration must pass all three processes.

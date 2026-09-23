@@ -40,7 +40,7 @@ afterEach(async () => {
 })
 function workspace() { return { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', kind: 'folder' as const, path: directory } }
 async function mount() {
-  await act(async () => root.render(createElement(SpaceTopicsTree, { workspace: workspace() })))
+  await act(async () => root.render(createElement(SpaceTopicsTree, { workspace: workspace(), icons: {}, onChangeIcon: () => {} })))
 }
 function button(label: string): HTMLButtonElement {
   const result = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)

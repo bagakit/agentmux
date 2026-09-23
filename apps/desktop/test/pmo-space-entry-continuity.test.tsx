@@ -59,7 +59,7 @@ async function settle() {
 async function render() {
   await act(async () => root.render(createElement(Fragment, null,
     createElement('button', { id: 'execution-focus' }, 'Execution input'), createElement(NavigationTarget),
-    createElement(PmoTeamsTopicEntry), createElement(ControlledFloatingPanel), createElement(SpaceTopicsTree, { workspace })
+    createElement(PmoTeamsTopicEntry), createElement(ControlledFloatingPanel), createElement(SpaceTopicsTree, { workspace, icons: {}, onChangeIcon: () => {} })
   )))
   await settle()
 }
