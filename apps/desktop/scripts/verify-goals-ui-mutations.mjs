@@ -13,6 +13,6 @@ await verifyRendererSourceMutations({
     { label: 'reload-auto-confirms-unread-content', file: alignment, before: 'await refreshDemand(demand.id); onFeedbackChange({ failure: null })', after: 'await refreshDemand(demand.id); await confirmDemandGoal(demand.id, useAppStore.getState().demands[demand.id]!.alignment!.revision); onFeedbackChange({ failure: null })' },
     { label: 'acknowledgement-feedback-detached-on-navigation', file: board, before: 'acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT}', after: 'acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT}' },
     { label: 'evidence-location-dropped', file: alignment, before: 'openFile(path, undefined, location, workspace.id)', after: 'openFile(path, undefined, undefined, workspace.id)' },
-    { label: 'list-stage-detached-from-owner-facts', file: board, before: 'const nextStep = goalNextStep(demand)', after: "const nextStep = 'Align goal'" }
+    { label: 'list-stage-detached-from-owner-facts', file: board, before: "const nextStep = acknowledgementFailed ? 'Reload current proposal' : goalNextStep(demand)", after: "const nextStep = 'Align goal'" }
   ]
 })
