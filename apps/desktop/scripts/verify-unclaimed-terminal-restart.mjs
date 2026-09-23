@@ -23,6 +23,7 @@ const env = { ...process.env, HOME: join(root, 'home'), CODEX_HOME: join(root, '
 for (const name of ['AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_HOOK_TOKEN', 'AGENTMUX_HOOK_URL']) delete env[name]
 const critical = [fileURLToPath(import.meta.url), join(base, 'apps/desktop/scripts/probe-process.mjs'),
   ...['main/runtime-controller.ts', 'shared/contracts.ts', 'renderer/src/store.ts', 'renderer/src/lib/session-state.ts',
+    'renderer/src/lib/workbench-view-close.ts',
     'renderer/src/lib/api.ts'].map(p => join(base, 'apps/desktop/src', p)),
   join(base, 'packages/core/dist/client.js'), join(base, 'packages/core/dist/ctxmux-run-adapter.js'),
   join(base, 'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),
@@ -112,10 +113,14 @@ try {
  assert.deepEqual(stops, []); assert.equal(current.state, 'running')
  const parentPid = Number(execFileSync('/bin/ps', ['-p', String(current.pid), '-o', 'ppid='], { encoding: 'utf8' }).trim())
  assert.ok(Number.isSafeInteger(parentPid) && parentPid > 1)
+ const runtimeState = (await core.runtimeDiagnostics()).ctxmux.state
+ assert.equal(runtimeState.servingDirectory, runtimeState.configuredDirectory)
+ assert.ok(runtimeState.servingDirectory.startsWith(join(root, 'state') + '/'))
  const result = { mode, clientPid: process.pid, id, childPid: current.pid,
   childBirth: execFileSync('/bin/ps', ['-p', String(current.pid), '-o', 'uid=,pid=,ppid=,lstart='], { encoding: 'utf8' }).trim(),
   nativePid: parentPid,
   nativeBirth: execFileSync('/bin/ps', ['-p', String(parentPid), '-o', 'uid=,pid=,lstart='], { encoding: 'utf8' }).trim(),
+  runtimeState,
   daemon: core.runtimeIdentity().instanceId, accepted: current.acceptedInputBytes, output: current.latestOutputBytes,
   tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts, unclaimed: state.unclaimedTerminalSessionIds, stops }
  if (mode === 'first') writeFileSync(join(root, 'first.json'), JSON.stringify(result))
@@ -161,6 +166,7 @@ try {
     assert.equal(first.id, next.id); assert.equal(first.childPid, next.childPid); assert.equal(first.daemon, next.daemon)
     assert.equal(first.childBirth, next.childBirth)
     assert.equal(first.nativePid, next.nativePid); assert.equal(first.nativeBirth, next.nativeBirth)
+    assert.deepEqual(first.runtimeState, next.runtimeState)
     assert.deepEqual(first.tabs, next.tabs); assert.deepEqual(first.layouts, next.layouts); assert.deepEqual(first.drafts, next.drafts)
     assert.deepEqual(next.unclaimed, [first.id]); assert.deepEqual(next.stops, [])
   }
@@ -185,7 +191,8 @@ finally {
   if (JSON.stringify(compiledBefore) !== JSON.stringify(compiledAfter)) failure ??= 'Compiled worker changed during proof'
   const after = await capture(); if (JSON.stringify(before) !== JSON.stringify(after)) failure ??= 'Selected inputs changed during proof'
   if (!remaining.length && !cleanupErrors.length) await rm(root, { recursive: true, force: true })
-  const receipt = { passed: !failure && !remaining.length && !cleanupErrors.length, records,
+  const receipt = { passed: !failure && !remaining.length && !cleanupErrors.length, privateRoot: root,
+    directories: { runtime: env.AGENTMUX_RUNTIME_DIRECTORY, state: env.AGENTMUX_STATE_DIRECTORY }, records,
     inputsBefore: before, inputsAfter: after, compiledBefore, compiledAfter, failure: failure ?? null,
     cleanup: { remaining, errors: cleanupErrors, rootRemoved: !remaining.length && !cleanupErrors.length },
     scope: 'Actual public Core/FileStore/native PTY, RuntimeController, Store filesystem-host storage; first and two ordinary Node restarts, not Electron/OS input/user Run.' }
