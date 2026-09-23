@@ -1,3 +1,4 @@
+import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
 import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousProgressInputResult } from './continuous-progress'
 import type {
   AgentCatalogEntry,
@@ -1534,6 +1535,8 @@ export type AgentMuxDesktopApi = {
      * 不在这个契约上，所以改它们不动这里。
      */
     runScript(id: string, code: string, operator?: BrowserOperator, operationId?: string): Promise<BrowserScriptRunReport>
+    checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation>
+    verifyOutcome(id: string, operationId: string): Promise<BrowserOutcomeEvaluation>
     listOperationHistory(): Promise<BrowserOperation[]>
     /**
      * 读一条操作的当下事实，凭 operationId。

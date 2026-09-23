@@ -375,6 +375,8 @@ describe('BrowserOperationJournal', () => {
         if (code.startsWith('*') || code.startsWith('//')) continue
         if (!code.includes('randomUUID')) continue
         if (code.includes('navigationId')) continue
+        // T014 的 inspectionToken 属于元素选取 owner，精确放行这一声明；不放行 UUID 值或整行含该名字。
+        if (code === 'const inspectionToken = randomUUID()') continue
         if (code.startsWith('import ')) continue
         mintSites.push(`${name}: ${code}`)
       }

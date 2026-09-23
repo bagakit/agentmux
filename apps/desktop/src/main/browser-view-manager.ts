@@ -1,3 +1,7 @@
+import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
+import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
+import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
+import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -681,7 +685,7 @@ export class BrowserViewManager {
    *   这里绝不再补一个 `randomUUID()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
-  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void, privateTaskParameters = false): Promise<BrowserScriptRunReport> {
+  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
     // Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.
     void this.releaseDemonstrationCapture(entry)
@@ -784,16 +788,16 @@ export class BrowserViewManager {
         this.emit(entry)
       }
     }
-    onOperationStarted?.(operation)
-    if (!stopRequested) {
-      operation.phase = 'running'
-      operation.summary = 'Agent is operating the Browser'
-      void this.operationJournal?.setPhase(operation.id, 'running', { summary: operation.summary })
-      // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
-      // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
-      this.emit(entry)
-    }
     try {
+      await onOperationStarted?.(operation)
+      if (!stopRequested) {
+        operation.phase = 'running'
+        operation.summary = 'Agent is operating the Browser'
+        void this.operationJournal?.setPhase(operation.id, 'running', { summary: operation.summary })
+        // 翻转必须各带一次 emit，否则这一位只有主进程自己知道，标签上的标记永远不动。开始与结束
+        // 两处都要——只推开始的话，标记会一直停在"正在驱动"上，那比不画更糟。
+        this.emit(entry)
+      }
       if (stopRequested) return {
         result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning! }, runOperation: operation
       }
@@ -1163,6 +1167,77 @@ export class BrowserViewManager {
     return await this.resultArtifacts.read(artifact, { workspaceId: entry.workspaceId, browserId: entry.id }, options)
   }
 
+  /** Main registers a finite condition before its sole, read-only extraction producer. */
+  async checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation> {
+    const entry = this.require(id)
+    const view = entry.view
+    const navigationId = entry.navigationId
+    const request = parseBrowserStructuredOutputRequest(input.request)
+    const criteria = parseBrowserOutcomeCriteriaRequest({ criteria: input.criteria }).criteria
+    if (criteria.some(c => c.kind !== 'field-equals' || !request.fields.some(f => f.key === c.key && f.type === typeof c.expected))) {
+      throw new Error('Declare field conditions with the exact requested type.')
+    }
+    let registration: BrowserOutcomeRegistration | undefined
+    let registrationSaved = false
+    const report = await this.runScript(id, `return await extractStructured(${JSON.stringify(request)})`,
+      { id: 'user:outcome-check', name: 'Field verification' }, undefined, undefined, async operation => {
+        registration = { context: { workspaceId: entry.workspaceId, browserId: id, operationId: operation.id, navigationId },
+          criteria: criteria.map(c => ({ ...c as Extract<typeof c, { kind: 'field-equals' }>,
+            producer: { operationId: operation.id, navigationId, sequence: 1, request } })) }
+        const registered = await this.operationJournal?.registerOutcome(operation.id, registration)
+        if (!registered) throw new Error('The completion declaration was not accepted within the registration budget. No observation was performed; the Browser remains usable.')
+        if (registered?.operation.outcome) { operation.outcome = registered.operation.outcome; registrationSaved = registered.saved }
+      })
+    if (!registration) throw new Error('The verification producer was not registered. The Browser remains usable.')
+    return await this.evaluateOutcome(entry, view, registration, report.runOperation.id, registrationSaved)
+  }
+
+  /** Reads retained facts; verification never reruns extraction, clicks or file triggers. */
+  async verifyOutcome(id: string, operationId: string): Promise<BrowserOutcomeEvaluation> {
+    const entry = this.require(id)
+    const operation = await this.getOperation(operationId)
+    if (operation?.browserId !== id || !operation.outcome) throw new Error('This Browser operation has no registered completion conditions.')
+    return await this.evaluateOutcome(entry, entry.view, operation.outcome.registration, operationId, true)
+  }
+
+  private async evaluateOutcome(entry: BrowserEntry, view: WebContentsView,
+    registration: BrowserOutcomeRegistration, operationId: string, registrationSaved: boolean): Promise<BrowserOutcomeEvaluation> {
+    const current = () => {
+      if (!this.owns(entry, view) || view.webContents.isDestroyed() || entry.activity.operation?.id !== operationId) {
+        throw new Error('The registered execution no longer owns this Browser.')
+      }
+      return { workspaceId: entry.workspaceId, browserId: entry.id, navigationId: entry.navigationId, assetRun: null }
+    }
+    const unavailable = (): BrowserOutcomeEvaluation => ({ context: registration.context, status: 'unavailable',
+      conditions: registration.criteria.map(c => ({ criterion: c.kind === 'field-equals'
+        ? { kind: c.kind, key: c.key, expected: c.expected } : c.kind === 'download-readable'
+          ? { kind: c.kind, path: c.path } : { kind: c.kind, checkpointId: c.checkpointId },
+        status: 'unavailable', reason: 'The original registration could not be saved. Existing work remains; restore local storage before verifying again.' })) })
+    const evaluation = !this.operationJournal || !registrationSaved ? unavailable()
+      : await evaluateBrowserOutcomeCriteria(registration, {
+        current, getOperation: id => this.getOperation(id),
+        getStepEvidence: (id, sequence) => this.getStepEvidence(id, sequence),
+        readStepResult: (id, sequence, options) => this.readStepResult(id, sequence, options),
+        isStructuredSourceCurrent: async source => {
+          current()
+          if (source.navigationId !== entry.navigationId || source.scope.withinRef) return false
+          const session = BrowserCdpSession.attach(view.webContents)
+          try {
+            const target = await resolveBrowserStructuredTarget(session.sendCommand, source.scope.within ? { within: source.scope.within } : {})
+            try { const valid = target.document === source.document && await target.isCurrent(); current(); return valid }
+            finally { await target.release() }
+          } finally { session.detach() }
+        }
+      })
+    const recorded = await this.operationJournal?.recordOutcome(operationId, evaluation)
+    const projected = recorded?.operation.outcome?.evaluation ?? evaluation
+    if (recorded?.operation.outcome && this.owns(entry, view) && entry.activity.operation?.id === operationId) {
+      entry.activity.operation.outcome = recorded.operation.outcome
+      this.emit(entry)
+    }
+    return projected
+  }
+
   async getTaskAssets(id: string): Promise<BrowserTaskAssetState> {
     const entry = this.require(id)
     const view = entry.view
@@ -1266,12 +1341,36 @@ export class BrowserViewManager {
   /** Trusted Client action. Existing Browser control is the only checkpoint authority. */
   async runTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun> {
     const entry = this.require(input.browserId)
+    const view = entry.view
     const asset = await this.requireTaskAsset(input.browserId, input.assetId)
     const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)
     if (this.taskExecutions.has(entry.id) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
     const execution = { entry, runId: input.runId, operationId: undefined as string | undefined, stopRequested: false }
     this.taskExecutions.set(entry.id, execution)
     try {
+      // This existing trusted Client action is the checkpoint authority. Capture the actual
+      // pending cursor and control before returning control or the asset owner advances it.
+      if (input.runId) {
+        const state = await this.taskAssets!.state(entry.id)
+        const previous = state.runs.find(run => run.id === input.runId)
+        if (!previous || previous.assetId !== asset.id || previous.version !== input.version || previous.browserId !== entry.id) {
+          throw new Error('The original task continuation identity is unavailable; it was not restarted.')
+        }
+        if (previous.status !== 'ready' && previous.status !== 'waiting-human') {
+          throw new Error('This task cannot continue from its current cursor. Inspect the retained progress.')
+        }
+        if (previous.status === 'waiting-human' && previous.pendingCheckpointId) {
+          await this.taskAssets!.recordHumanCheckpoint({ runId: previous.id, browserId: previous.browserId,
+            assetId: previous.assetId, version: previous.version }, previous.pendingCheckpointId,
+          { pendingCheckpointId: previous.pendingCheckpointId, nextStep: previous.nextStep,
+            controlBefore: entry.humanControl ? 'human' : entry.activity.control })
+        }
+      }
+      if (!this.owns(entry, view) || view.webContents.isDestroyed()) {
+        throw new Error('The original Browser owner is unavailable; the task was not replayed.')
+      }
+      if (execution.stopRequested) throw new Error('This task was stopped before control returned. Its progress remains.')
+      this.returnControl(entry.id)
       return await runBrowserTaskAsset(this.taskAssets!, input, {
         onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
