@@ -101,7 +101,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
         >
           <Dialog.Title className="quick-switch__title">Jump to a session or tab</Dialog.Title>
           <Dialog.Description className="quick-switch__description">
-            Type to filter open agent sessions and tabs. Agents that need you rank first.
+            Search by name or amux Agent ID. Agents that need you rank first.
           </Dialog.Description>
           <div className="quick-switch__input">
             <Search size={15} />
@@ -109,7 +109,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
             <input
               autoFocus
               value={query}
-              placeholder="Search sessions and tabs…"
+              placeholder="Search sessions, tabs or amux ID…"
               aria-label="Search sessions and tabs"
               aria-controls="quick-switch-list"
               onChange={(event) => setQuery(event.target.value)}

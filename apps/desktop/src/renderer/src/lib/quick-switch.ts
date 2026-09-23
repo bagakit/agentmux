@@ -98,7 +98,10 @@ export function rankQuickSwitchItems(
     // Match against the visible title AND subtitle so "main" finds a workspace-qualified tab.
     const titleScore = fuzzyScore(trimmed, item.title)
     const subtitleScore = trimmed === '' ? null : fuzzyScore(trimmed, item.subtitle)
-    if (trimmed !== '' && titleScore === null && subtitleScore === null) continue
+    // AgentMux IDs are opaque, case-sensitive identities; Terminal IDs can be Run IDs.
+    const idMatches = item.providerId !== null && item.target.kind === 'session'
+      && item.target.sessionId.includes(trimmed)
+    if (trimmed !== '' && titleScore === null && subtitleScore === null && !idMatches) continue
     const best = Math.max(titleScore ?? -Infinity, (subtitleScore ?? -Infinity) - 3)
     ranked.push({ ...item, matchScore: Number.isFinite(best) ? best : 0 })
   }
