@@ -24,7 +24,7 @@ afterAll(async () => {
   }
 })
 
-async function fixture() {
+async function fixture(options: { maxEvents?: number; maxOperations?: number } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-checked-stream-ack-'))
   const fileStore = new BrowserOperationFileStore(join(directory, 'journal.json'))
   const saves: BrowserOperationJournalDocument[] = []
@@ -36,7 +36,7 @@ async function fixture() {
     const hold = nextHold; nextHold = undefined
     if (hold) { hold.entered = true; await hold.ack; if (hold.fail) throw new Error('Private optional store failure') }
     await fileStore.save(document)
-  } })
+  } }, options)
   cleanups.push(async () => {
     for (const hold of holds) hold.release()
     await Promise.allSettled(pending)
@@ -53,7 +53,7 @@ async function fixture() {
   await journal.finish(context.operationId, 'completed')
   expect((await journal.events(context.operationId)).map(event => event.type)).toEqual([
     'operation-started', 'step-started', 'step-finished', 'operation-finished'
-  ])
+  ].slice(-(options.maxEvents ?? 4)))
   return { journal, saves, pending, disposers, arm(fail = false) {
     let release!: () => void
     const ack = new Promise<void>(resolve => { release = resolve })
@@ -115,9 +115,9 @@ it('keeps each overlapping check snapshot and failed-save notice with its own or
   await vi.waitFor(() => expect(holdA.entered).toBe(true), { timeout: 1000 })
   const holdB = f.arm(), checkB = f.journal.recordOutcome(context.operationId, second); f.pending.push(checkB)
   await vi.waitFor(() => expect(holdB.entered).toBe(true), { timeout: 1000 })
-  holdB.release(); await checkB
+  holdB.release(); const replyB = await checkB
   const beforeA = structuredClone(live)
-  holdA.release(); await checkA
+  holdA.release(); const replyA = await checkA
   const values = live.map(item => {
     if (item.event.type !== 'operation-checked') throw new Error('Expected checked event')
     const evaluation = item.event.operation.outcome?.evaluation
@@ -130,5 +130,111 @@ it('keeps each overlapping check snapshot and failed-save notice with its own or
     { sequence: 6, status: 'not-met', reason: second.conditions[0]!.reason, hasNotice: false }
   ])
   expect(beforeA, 'Second result overtook the first acknowledgement').toEqual([])
+  expect(replyA?.operation.outcome?.evaluation).toEqual({ ...first, warning: expect.stringContaining('could not be saved') })
+  expect(replyB?.operation.outcome?.evaluation).toEqual(second)
   expect((await f.journal.get(context.operationId))?.outcome?.evaluation).toEqual(second)
+})
+
+
+it('excludes every pending same-operation entry from both history and backlog and honors a future live cursor', async () => {
+  const f = await fixture(), hold = f.arm(), checking = f.journal.recordOutcome(context.operationId, first); f.pending.push(checking)
+  await vi.waitFor(() => expect(hold.entered).toBe(true))
+  await f.journal.setPhase(context.operationId, 'human')
+  const late: BrowserOperationSequencedEvent[] = [], future: BrowserOperationSequencedEvent[] = []
+  const opened = await f.journal.subscribe(context.operationId, 4, item => late.push(item)); f.disposers.push(opened.dispose)
+  const advanced = await f.journal.subscribe(context.operationId, 5, item => future.push(item)); f.disposers.push(advanced.dispose)
+  expect(opened.backlog).toEqual([])
+  expect(advanced.backlog).toEqual([])
+  expect((await f.journal.events(context.operationId)).map(item => item.type)).toEqual([
+    'operation-started', 'step-started', 'step-finished', 'operation-finished'
+  ])
+  hold.release(); await checking
+  expect(late.map(item => [item.sequence, item.event.type])).toEqual([[5, 'operation-checked'], [6, 'phase-changed']])
+  expect(future.map(item => [item.sequence, item.event.type])).toEqual([[6, 'phase-changed']])
+  const after = await f.journal.subscribe(context.operationId, 4, () => {}); f.disposers.push(after.dispose)
+  expect(after.backlog.map(item => [item.sequence, item.event.type])).toEqual([[5, 'operation-checked'], [6, 'phase-changed']])
+})
+
+it('retains pending delivery identity through event trimming without announcing that live fact as lost', async () => {
+  const f = await fixture({ maxEvents: 2 }), hold = f.arm(), checking = f.journal.recordOutcome(context.operationId, first); f.pending.push(checking)
+  await vi.waitFor(() => expect(hold.entered).toBe(true))
+  await f.journal.setPhase(context.operationId, 'human') // sequence 6
+  await f.journal.start({ id: 'operation-b', browserId: 'browser-b', operator: { id: 'person', name: 'Person' },
+    summary: 'Other operation', url: 'https://generic.invalid/other' }) // sequence 7 trims pending sequence 5
+  const live: BrowserOperationSequencedEvent[] = []
+  const opened = await f.journal.subscribe(context.operationId, 4, item => live.push(item)); f.disposers.push(opened.dispose)
+  expect(opened.gap).toBeNull()
+  expect(opened.backlog).toEqual([])
+  hold.release(); await checking
+  expect(live.map(item => [item.sequence, item.event.type])).toEqual([[5, 'operation-checked'], [6, 'phase-changed']])
+  const after = await f.journal.subscribe(context.operationId, 4, () => {}); f.disposers.push(after.dispose)
+  expect(after.gap).toEqual({ droppedThrough: 5 })
+  expect(after.backlog.map(item => [item.sequence, item.event.type])).toEqual([[6, 'phase-changed']])
+})
+
+it('keeps retained sequence numbers when operation trimming removes an event from the middle', async () => {
+  const f = await fixture({ maxOperations: 2 })
+  await f.journal.setPhase(context.operationId, 'human') // active A stays, sequences 1..5
+  await f.journal.start({ id: 'operation-b', browserId: 'browser-b', operator: { id: 'person', name: 'Person' },
+    summary: 'Finished B', url: 'https://generic.invalid/other' }) // sequence 6
+  await f.journal.finish('operation-b', 'completed') // sequence 7
+  await f.journal.setPhase(context.operationId, 'running') // sequence 8
+  await f.journal.start({ id: 'operation-c', browserId: 'browser-c', operator: { id: 'person', name: 'Person' },
+    summary: 'Active C', url: 'https://generic.invalid/third' }) // sequence 9 removes B, not A
+  const a = await f.journal.subscribe(context.operationId, 0, () => {}), c = await f.journal.subscribe('operation-c', 0, () => {})
+  f.disposers.push(a.dispose, c.dispose)
+  expect(a.backlog.map(item => item.sequence)).toEqual([1, 2, 3, 4, 5, 8])
+  expect(c.backlog.map(item => item.sequence)).toEqual([9])
+  expect((await f.journal.list()).map(item => item.id)).toEqual([context.operationId, 'operation-c'])
+})
+
+it('allows disposal and a new subscription from checked delivery without duplication or shared mutation', async () => {
+  const f = await fixture(), seen: BrowserOperationSequencedEvent[] = [], reopenedLive: BrowserOperationSequencedEvent[] = []
+  let reopen: ReturnType<BrowserOperationJournal['subscribe']> | undefined
+  const firstSubscriber = await f.journal.subscribe(context.operationId, 4, item => {
+    firstSubscriber.dispose()
+    reopen = f.journal.subscribe(context.operationId, 4, next => reopenedLive.push(next))
+    if (item.event.type === 'operation-checked') item.event.operation.outcome!.evaluation!.warning = 'Caller mutation'
+  }); f.disposers.push(firstSubscriber.dispose)
+  f.disposers.push((await f.journal.subscribe(context.operationId, 4, item => seen.push(item))).dispose)
+  const hold = f.arm(true), checking = f.journal.recordOutcome(context.operationId, first); f.pending.push(checking)
+  await vi.waitFor(() => expect(hold.entered).toBe(true))
+  await f.journal.setPhase(context.operationId, 'human')
+  hold.release(); await checking
+  expect(seen.map(item => [item.sequence, item.event.type])).toEqual([[5, 'operation-checked'], [6, 'phase-changed']])
+  expect(reopen).toBeDefined()
+  const reopened = await reopen!; f.disposers.push(reopened.dispose)
+  expect([...reopened.backlog, ...reopenedLive].map(item => [item.sequence, item.event.type])).toEqual([[5, 'operation-checked'], [6, 'phase-changed']])
+  const checked = seen[0]!.event
+  if (checked.type !== 'operation-checked') throw new Error('Expected checked event')
+  expect(checked.operation.outcome?.evaluation?.warning).toContain('could not be saved')
+  expect((await f.journal.get(context.operationId))?.outcome?.evaluation?.warning).toContain('could not be saved')
+})
+
+it('dispatches only to related consumers as unrelated subscriptions grow', async () => {
+  const f = await fixture(), live: number[] = [], unrelated: number[] = []
+  f.disposers.push((await f.journal.subscribe(context.operationId, 4, item => live.push(item.sequence))).dispose)
+  for (let n = 0; n < 128; n++) f.disposers.push((await f.journal.subscribe(`unrelated-${n}`, 0, item => unrelated.push(item.sequence))).dispose)
+  // Read counting is observational only; production identity and callback dispatch remain real.
+  const relatedLookup: string[] = []
+  const groups = (f.journal as unknown as { subscribers: Map<string, unknown> }).subscribers
+  const get = groups.get.bind(groups)
+  const spy = vi.spyOn(groups, 'get').mockImplementation(key => { relatedLookup.push(key); return get(key) })
+  try {
+    await f.journal.recordOutcome(context.operationId, first)
+    expect(live).toEqual([5])
+    expect(unrelated).toEqual([])
+    expect(relatedLookup).toEqual([context.operationId])
+  } finally { spy.mockRestore() }
+})
+
+
+it('does not let a disposed old group remove a later subscription for the same operation', async () => {
+  const f = await fixture(), old = await f.journal.subscribe(context.operationId, 4, () => {}), live: number[] = []
+  f.disposers.push(old.dispose)
+  old.dispose()
+  const current = await f.journal.subscribe(context.operationId, 4, item => live.push(item.sequence)); f.disposers.push(current.dispose)
+  old.dispose()
+  await f.journal.recordOutcome(context.operationId, first)
+  expect(live).toEqual([5])
 })

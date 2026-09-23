@@ -10,7 +10,7 @@ Run only this leaf:
 pnpm exec vitest run --config apps/desktop/scripts/fixtures/browser-checked-stream-ack/vitest.owning.config.mts
 ```
 
-Current `ec971cdf` Main candidate is **RED in all four behavior assertions**:
+Original `ec971cdf` Main source is **RED in all four behavior assertions** (reproduced from immutable original Journal bytes during T009 closeout):
 
 - A subscriber opened during the acknowledgement wait sees `operation-checked` in backlog early.
 - That subscriber receives sequence 5 again in live delivery after the failed save.
@@ -23,7 +23,10 @@ The leaf is deliberately named `source-proof.ts` and uses an exact owning config
 discovery does not silently collect a private copied tree. `AGENTMUX_CHECKED_STREAM_FACTS` is an
 optional owned JSON output path for recorded observations, not a product setting.
 
-The follow-up implementation still requires restored GREEN, actual-source mutants, existing
-subscription/trim regressions, public socket coverage and related-consumer cost checks. The prior
-17 source mutants and observed e946 Native gate do not cover this acknowledgement race. No GUI,
-Native or Task completion is claimed here.
+The repaired Journal owning suite now includes the original four assertions plus full pending
+history/backlog exclusion, future live cursor, event/operation trimming, callback disposal and
+resubscription, original reply snapshots, clone isolation, and related-consumer cost checks.
+The unchanged prior 17 source mutants and observed e946 Native gate do not cover this ACK race.
+Run the task-specific `verify-browser-checked-stream-ack-mutations.mjs` for private actual Journal
+and public/Core source mutations with restored GREEN and pinned source identities. Public socket
+and FileStore reconstruction remain separate gates. No GUI, Native or Task completion is claimed here.

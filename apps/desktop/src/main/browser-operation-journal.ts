@@ -153,6 +153,10 @@ export type BrowserOperationSubscription = {
   dispose(): void
 }
 
+type PendingDelivery = BrowserOperationSequencedEvent & { ready: boolean }
+type DeliveryQueue = { entries: PendingDelivery[]; flushing: boolean }
+type JournalSubscriber = { afterSequence: number; deliver: (event: BrowserOperationSequencedEvent) => void }
+
 type JournalOptions = {
   now?: () => number
   id?: () => string
@@ -180,17 +184,13 @@ export class BrowserOperationJournal {
   private readonly maxEvents: number
   private readonly maxSteps: number
   private warning: string | undefined
-  /**
-   * 事件发号器。每 publish 一条 +1，**本进程生命周期内**单调。
-   *
-   * 不把号写进事件对象：那是落盘格式（版本号钉住的），而号是进程内的概念——重启后事件从盘上读回来，
-   * 谈"接着上次的游标"没有意义（旧号属于上一个进程）。也不另存一份「号 → 事件」的边表：
-   * `trimOperations` 会按 operationId **从中间**滤掉事件（不只从头砍），边表与事件数组会当场错位，
-   * 而错位之后两边各自看起来都正常（本仓的「两个数据源一条生命周期＝鬼影」）。
-   */
+  /** 序号属于实际事件引用；裁剪可从中间移除事件，不能从数组下标反推。重启后重新发号。 */
   private sequenced = 0
-  /** 活着的订阅。事件流不许成为控制路径上的闸，所以往它们投递时抛出的异常一律吞掉。 */
-  private readonly subscribers = new Map<number, { operationId: string; deliver: (event: BrowserOperationSequencedEvent) => void }>()
+  private readonly eventFacts = new WeakMap<BrowserOperationEvent, { sequence: number; published: boolean }>()
+  /** 只在 ACK 未到或同 operation 前序未交付时暂存；Journal 仍是唯一持久事实。 */
+  private readonly deliveryQueues = new Map<string, DeliveryQueue>()
+  /** 投递只访问相关 operation 的消费者；坏订阅不能成为控制路径上的闸。 */
+  private readonly subscribers = new Map<string, Map<number, JournalSubscriber>>()
   private nextSubscriberId = 1
 
   constructor(store: BrowserOperationJournalStore, options: JournalOptions = {}) {
@@ -340,13 +340,18 @@ export class BrowserOperationJournal {
     if (!outcome) return null
     operation.outcome = outcome
     const event = this.record({ type: 'operation-checked', operationId, at: this.now(), operation })
+    const pending = this.enqueue(event, false)
     const saved = await this.persist()
-    if (!saved && outcome.evaluation) {
-      outcome.evaluation.warning = 'The result was checked but could not be saved. Existing Browser work remains; restore local storage before relying on recovery.'
-      if ('operation' in event.event) event.event.operation = cloneOperation(operation)
+    // ACK 对应原检查，不读取可能已经被下一次检查/phase 更新的 operation。
+    const checked = (event.event as Extract<BrowserOperationEvent, { type: 'operation-finished' | 'operation-checked' }>).operation
+    if (!saved && checked.outcome?.evaluation) {
+      const notice = 'The result was checked but could not be saved. Existing Browser work remains; restore local storage before relying on recovery.'
+      checked.outcome.evaluation.warning = notice
+      if (operation.outcome === outcome && outcome.evaluation) outcome.evaluation.warning = notice
     }
-    this.deliver(event)
-    return { operation: cloneOperation(operation), saved }
+    pending.ready = true
+    this.flush(operationId)
+    return { operation: cloneOperation(checked), saved }
   }
 
   async get(operationId: string): Promise<BrowserOperation | null> {
@@ -365,7 +370,7 @@ export class BrowserOperationJournal {
     const events = operationId
       ? this.document.events.filter((event) => event.operationId === operationId)
       : this.document.events
-    return events.map(cloneEvent)
+    return events.filter(event => this.eventFacts.get(event)?.published).map(cloneEvent)
   }
 
   async replayPlan(operationId: string): Promise<BrowserReplayPlan | null> {
@@ -394,9 +399,8 @@ export class BrowserOperationJournal {
    * 回调。这与本仓 attach 的 replay/live 取舍是同一条——重叠会让客户端收到重复，而中间留缝会让它
    * 静默丢事件，两者都无从察觉。
    *
-   * 缺口的判法是**数出来的，不是猜的**：`sequenced` 记着一共发过多少号，当下还留着多少条事件是
-   * 数组长度。一条在跑的操作若它最早那条事件已经被砍掉，那么"还留着的最早那条的号"必然大于
-   * `afterSequence + 1`，差额就是缺口。
+   * 尚未 ACK 或等待前序的事件只走未来 live，不进入 backlog；每个 subscriber 的游标同时约束两条路。
+   * 缺口依据实际保留引用的序号，等待交付的引用即使被历史裁剪也继续 live，不冒称已丢失。
    *
    * 查不到那条操作不是错误：答 `operation: null`、空 backlog，并且**仍然建立订阅**——那条 id 可能
    * 属于一个马上就要开始的操作（调用方先给 id 再发起，正是本 Feature 的设计）。在这里拒绝等于让
@@ -409,26 +413,28 @@ export class BrowserOperationJournal {
   ): Promise<BrowserOperationSubscription> {
     await this.ready()
     const id = this.nextSubscriberId++
-    this.subscribers.set(id, { operationId, deliver })
-    // 这条操作已经有过的事件，按它们当时拿到的号算：`document.events` 里属于它的那些，是本进程内
-    // 最后 N 条里的一部分。号从「总共发过 sequenced 个，现存 events.length 条」反推——现存的第 i 条
-    // （从 0 数）拿到的号是 `sequenced - events.length + i + 1`。
-    const total = this.document.events.length
-    const base = this.sequenced - total
-    const mine = this.document.events
-      .map((event, index) => ({ sequence: base + index + 1, event }))
-      .filter(({ event }) => event.operationId === operationId)
     const cursor = afterSequence ?? 0
-    const backlog = mine.filter(({ sequence }) => sequence > cursor).map(({ sequence, event }) => ({ sequence, event: cloneEvent(event) }))
-    // 缺口：客户端要 cursor 之后的每一条，而我们手上最早的号是 base+1。base 比 cursor 还大，说明
-    // 中间那段（cursor+1 .. base）已经被砍掉了。cursor 为 0（"从头要"）时同样成立——那正是砍过之后
-    // 一个新客户端会遇到的情形。
-    const gap = base > cursor ? { droppedThrough: base } : null
+    const backlog = this.document.events
+      .filter(event => event.operationId === operationId && this.eventFacts.get(event)?.published)
+      .map(event => ({ sequence: this.eventFacts.get(event)!.sequence, event }))
+      .filter(({ sequence }) => sequence > cursor)
+      .map(({ sequence, event }) => ({ sequence, event: cloneEvent(event) }))
+    const related = this.subscribers.get(operationId) ?? new Map<number, JournalSubscriber>()
+    related.set(id, { afterSequence: backlog.at(-1)?.sequence ?? cursor, deliver })
+    this.subscribers.set(operationId, related)
+    // 尚未交付的引用可能已被历史上限裁掉，但仍会 live 到达；不能把它报作已丢失。
+    const retained = this.document.events[0]
+    const oldest = Math.min(retained ? this.eventFacts.get(retained)!.sequence : this.sequenced + 1,
+      this.deliveryQueues.get(operationId)?.entries[0]?.sequence ?? this.sequenced + 1)
+    const droppedThrough = oldest - 1
     return {
       operation: this.find(operationId) ? cloneOperation(this.find(operationId) as BrowserOperation) : null,
-      gap,
+      gap: droppedThrough > cursor ? { droppedThrough } : null,
       backlog,
-      dispose: () => { this.subscribers.delete(id) }
+      dispose: () => {
+        related.delete(id)
+        if (related.size === 0 && this.subscribers.get(operationId) === related) this.subscribers.delete(operationId)
+      }
     }
   }
 
@@ -473,14 +479,9 @@ export class BrowserOperationJournal {
       this.trim()
       await this.persist()
     }
-    // 给从盘上读回来的那些事件补号。**这一步不能漏**：它们没走 `publish()`，所以一个号都没发过，
-    // 而 `subscribe()` 是按「总共发过 sequenced 个、现存 length 条」反推每条的号的——不补的话
-    // `sequenced` 是 0 而 length 是 N，反推出来的起始号是 -N+1，客户端收到一串负号，
-    // 而缺口判据（`base > cursor`）在负数上恒不成立，于是"缺了一段"这件事永远不会被说出来。
-    //
-    // 从 length 起算而不是试图续上上一个进程的号：号是进程内的概念。上一个进程砍掉过多少条，
-    // 这一个进程没有依据知道，所以不假装知道——它只说"我手上这 N 条是 1..N"。
-    this.sequenced = this.document.events.length
+    for (const event of this.document.events) {
+      this.eventFacts.set(event, { sequence: ++this.sequenced, published: true })
+    }
   }
 
   private find(operationId: string): BrowserOperation | undefined {
@@ -488,27 +489,51 @@ export class BrowserOperationJournal {
   }
 
   private publish(event: BrowserOperationEvent): void {
-    this.deliver(this.record(event))
+    this.enqueue(this.record(event), true)
+    this.flush(event.operationId)
   }
 
   private record(event: BrowserOperationEvent): BrowserOperationSequencedEvent {
     const fact = cloneEvent(event)
-    this.document.events.push(fact)
-    // 号从**单调计数器**取，不从 `document.events` 的长度取：号是"这条事件发生了"的标记，不是
-    // "它还留着"的标记。按存活数组算的话，一条刚发出就被 trim 砍掉的事件不占号，于是客户端按号
-    // 算出的缺口会少一条——而它正好是缺了的那条。（这两句与 `++` 和 `trim()` 的先后无关：计数器
-    // 不看数组，两种顺序行为相同。承重的是取号的来源。）
     const sequence = ++this.sequenced
+    this.eventFacts.set(fact, { sequence, published: false })
+    this.document.events.push(fact)
     this.trim()
     return { sequence, event: fact }
   }
 
+  private enqueue(event: BrowserOperationSequencedEvent, ready: boolean): PendingDelivery {
+    const pending = { ...event, ready }
+    const queue = this.deliveryQueues.get(event.event.operationId) ?? { entries: [], flushing: false }
+    queue.entries.push(pending)
+    this.deliveryQueues.set(event.event.operationId, queue)
+    return pending
+  }
+
+  private flush(operationId: string): void {
+    const queue = this.deliveryQueues.get(operationId)
+    if (!queue || queue.flushing) return
+    queue.flushing = true
+    try {
+      while (queue.entries[0]?.ready) {
+        // 先移出队头并标记公开，callback 重入/新订阅不能再次消费这条事实。
+        const entry = queue.entries.shift()!
+        this.eventFacts.get(entry.event)!.published = true
+        this.deliver(entry)
+      }
+    } finally {
+      queue.flushing = false
+      if (queue.entries.length === 0) this.deliveryQueues.delete(operationId)
+    }
+  }
+
   private deliver({ sequence, event }: BrowserOperationSequencedEvent): void {
-    for (const subscriber of [...this.subscribers.values()]) {
-      if (subscriber.operationId !== event.operationId) continue
-      // 每个订阅一份自己的拷贝，且各自 try：一个订阅者抛出来不许挡住别的订阅者，也不许挡住控制
-      // 路径——进度是 Browser 的一个视图，不是它的闸。
-      try { subscriber.deliver({ sequence, event: cloneEvent(event) }) } catch { /* 同上 */ }
+    const related = this.subscribers.get(event.operationId)
+    if (!related) return
+    for (const [id, subscriber] of [...related]) {
+      if (related.get(id) !== subscriber || sequence <= subscriber.afterSequence) continue
+      subscriber.afterSequence = sequence
+      try { subscriber.deliver({ sequence, event: cloneEvent(event) }) } catch { /* 订阅是视图，不是控制闸。 */ }
     }
   }
 
@@ -677,7 +702,7 @@ function trimOperations(document: BrowserOperationJournalDocument, maxOperations
   const keepInactive = Math.max(0, maxOperations - Math.min(active.length, maxOperations))
   const keepIds = new Set([
     ...active.slice(-maxOperations).map((operation) => operation.id),
-    ...inactive.slice(-keepInactive).map((operation) => operation.id)
+    ...inactive.slice(inactive.length - keepInactive).map((operation) => operation.id)
   ])
   // Filter the original sequence so the resulting history remains chronological. Concatenating
   // active and inactive partitions would make a still-running old operation appear after newer
