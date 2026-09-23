@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ActivityView } from '../src/renderer/src/components/ActivityView.js'
+import { createSpeakerResolver } from '../src/renderer/src/lib/conversation-speaker.js'
 import { allStyles } from './helpers/styles.js'
 
 function activity(
@@ -26,7 +27,7 @@ function render(
   capability: 'unavailable' | 'complete-events' | 'streaming',
   items: AgentTimelineItem[] = []
 ): string {
-  return renderToStaticMarkup(createElement(ActivityView, { sessionId: 'test-session', capability, items }))
+  return renderToStaticMarkup(createElement(ActivityView, { sessionId: 'agent-1', capability, items }))
 }
 
 /**
@@ -64,10 +65,10 @@ function logRowMarkup(markup: string): string {
 function renderWithSpeakers(items: AgentTimelineItem[]): string {
   return renderToStaticMarkup(
     createElement(ActivityView, {
+      sessionId: 'agent-1',
       capability: 'complete-events',
       items,
-      describeSpeaker: (speaker: { role: 'human' | 'agent'; id: string }) =>
-        speaker.role === 'human' ? { name: 'You' } : { name: 'Claude', providerId: 'claude' as const }
+      describeSpeaker: createSpeakerResolver({ currentSession: { id: 'agent-1', label: 'Claude', providerId: 'claude' } })
     })
   )
 }
@@ -78,7 +79,7 @@ describe('ActivityView 与两条对话轴的接线', () => {
       activity('u1', { kind: 'user_message', source: 'user', title: 'Prompt', content: '第一句', createdAt: 1 }),
       activity('u2', { kind: 'user_message', source: 'user', title: 'Prompt', content: '第二句', createdAt: 2 })
     ])
-    expect(markup.match(/class="log-turn" data-speaker-role="human"/g)).toHaveLength(2)
+    expect(markup.match(/class="log-turn" data-speaker-role="unknown"/g)).toHaveLength(2)
     expect(markup).toContain('第一句')
     expect(markup).toContain('第二句')
   })
@@ -94,7 +95,7 @@ describe('ActivityView 与两条对话轴的接线', () => {
     // 两条轴各有自己的可访问名，两枚头像各是自己那一路的画法。
     expect(markup).toContain('aria-label="Speakers"')
     expect(markup).toContain('aria-label="This agent"')
-    expect(markup).toContain('conversation-avatar--human')
+    expect(markup).toContain('conversation-avatar--unknown')
     expect(markup).toContain('conversation-avatar--agent')
     // 机器上报不在任何一条轴上：两条轴合起来恰好两枚标记（u1 与 a1），tool_call 不占位。
     expect(markup.match(/conversation-axis__mark/g)).toHaveLength(2)
@@ -164,18 +165,18 @@ describe('对话正文的说话人形状', () => {
   }
 
   const conversation = [
-    activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '人说的话' }),
+    activity('u1', { kind: 'user_message', source: 'user', createdAt: 0, content: '未记录作者的输入' }),
     activity('a1', { kind: 'assistant_message', source: 'native-hook', createdAt: 100, content: 'Agent 说的话' })
   ]
 
-  it('user 与 Agent 的话在正文里形状不同——两个身份各自一枚头像，不再共用一种形状', () => {
+  it('未记录作者的输入与 Agent 的话在正文里形状不同——两个身份各自一枚头像，不再共用一种形状', () => {
     // 这条是 T-006 的实质，也是用户报的那句「user 消息也会被收进 Agent 的历史, 感觉不够优雅」的
     // 直接验收：两条发言过去共用一枚按 kind 选的图标，现在各带自己身份的头像。
     const log = logOf(renderWithSpeakers(conversation))
-    expect(log).toContain('data-speaker-role="human"')
+    expect(log).toContain('data-speaker-role="unknown"')
     expect(log).toContain('data-speaker-role="agent"')
     // 头像真的在正文里，不只在轴上——组件写好却没在这一路被调用，其他断言都会绿。
-    expect(log).toContain('conversation-avatar--human')
+    expect(log).toContain('conversation-avatar--unknown')
     expect(log).toContain('conversation-avatar--agent')
     // 正文两枚头像各一枚，且都坐在 spine 的节点槽里。
     expect(log.match(/log-turn__node/g)).toHaveLength(2)
@@ -190,12 +191,12 @@ describe('对话正文的说话人形状', () => {
   })
 
   it('没有 describeSpeaker 时仍按身份分形状，只是退回 role 的名字', () => {
-    // 退化路径要仍然分得开：`describeSpeaker` 缺席时头像认不出「具体是谁」，但「人 还是 Agent」这
+    // 退化路径要仍然分得开：`describeSpeaker` 缺席时头像认不出「具体是谁」，但「未知输入还是 Agent」这
     // 一层由 role 决定，与 store 无关，所以形状不许一起塌掉。
     const log = logOf(render('complete-events', conversation))
-    expect(log).toContain('data-speaker-role="human"')
+    expect(log).toContain('data-speaker-role="unknown"')
     expect(log).toContain('data-speaker-role="agent"')
-    expect(log).toContain('conversation-avatar--human')
+    expect(log).toContain('conversation-avatar--unknown')
     expect(log).toContain('conversation-avatar--agent')
     // 轴没画（那条已单独实测），所以这些头像只可能来自正文。
     expect(log).not.toContain('conversation-axis')
@@ -204,7 +205,7 @@ describe('对话正文的说话人形状', () => {
   it('形状属性、头像、caption 三者同源——不许有一个脱离身份单独漂移', () => {
     // 实测出来的洞：把 `data-speaker-role` 单独改成按 kind 反推（头像与 caption 仍走 speaker.role），
     // 上面每一条断言都绿——因为它们各自只看三者之一，没有人看见「同一个元素上两个矛盾的答案」。
-    // 那种状态下 CSS 按属性选到的是 agent 的排版，而里面画的是人的头像。
+    // 那种状态下 CSS 按属性选到的是 agent 的排版，而里面画的是未知输入的头像。
     //
     // 判据用 `source:'user'` 但 `kind:'lifecycle'` 这条：两个字段在这里故意不一致，于是「按 source
     // 认」与「按 kind 反推」给出相反的结论，三者必须一致地站在 source 那一边。
@@ -213,10 +214,10 @@ describe('对话正文的说话人形状', () => {
         activity('steer-only-source', { source: 'user', kind: 'lifecycle', title: 'Prompt', content: '换个方向' })
       ])
     )
-    expect(log).toContain('data-speaker-role="human"')
-    expect(log).toContain('conversation-avatar--human')
-    expect(log).toContain('log-turn__who">You')
-    // 反向：agent 的三件套一个都不许出现在这条人说的话上。
+    expect(log).toContain('data-speaker-role="unknown"')
+    expect(log).toContain('conversation-avatar--unknown')
+    expect(log).toContain('log-turn__who">Input')
+    // 反向：agent 的三件套一个都不许出现在这条未知作者的输入上。
     expect(log).not.toContain('data-speaker-role="agent"')
     expect(log).not.toContain('conversation-avatar--agent')
   })
@@ -348,15 +349,15 @@ describe('ActivityView', () => {
 
     // The turn lands in the conversation register, not the machine Row. The register is selected by
     // SPEAKER, not by kind — `data-speaker-role` is what the identity verdict puts on the element.
-    expect(markup).toContain('class="log-turn" data-speaker-role="human"')
+    expect(markup).toContain('class="log-turn" data-speaker-role="unknown"')
     expect(markup).not.toContain('log-row log-row--user_message')
     // kind 不再驱动对话体的形状：留下这条，是因为回到 `log-turn--user_message` 就等于把「谁说的」
     // 重新压回二值，而 A2A 落地后第三个身份无处可去。
     expect(markup).not.toContain('log-turn--user_message')
-    // The words are the substance; the caption is the human speaker, not the generic machine title.
+    // The words are the substance; absent author facts use Input rather than a claimed human identity.
     expect(markup).toContain('log-turn__body')
     expect(markup).toContain('Make the adapter observable.')
-    expect(markup).toContain('You')
+    expect(markup).toContain('Input')
   })
 
   it('never folds the assistant reply into a machine run, even when it is native-hook next to a tool call', () => {
@@ -421,16 +422,16 @@ describe('ActivityView', () => {
     ])
 
     // The steer renders as a turn with its words on screen — not a machine row, never behind a fold.
-    expect(markup).toContain('class="log-turn" data-speaker-role="human"')
+    expect(markup).toContain('class="log-turn" data-speaker-role="unknown"')
     expect(markup).toContain('Actually, focus on the parser instead.')
-    expect(markup).toContain('You')
+    expect(markup).toContain('Input')
     expect(markup).not.toContain('log-row log-row--user_message')
 
     // It is bracketed by machine steps, proving it landed mid-turn: the two runs on either side each fold
     // to "2 steps", and the steer sits between them rather than being swept into either.
     const log = markup.slice(markup.indexOf('activity-log'))
     expect(log).toContain('2 steps')
-    const turnAt = log.indexOf('data-speaker-role="human"')
+    const turnAt = log.indexOf('data-speaker-role="unknown"')
     const firstFold = log.indexOf('2 steps')
     const lastFold = log.lastIndexOf('2 steps')
     expect(firstFold).toBeGreaterThanOrEqual(0)
@@ -695,15 +696,8 @@ describe('ActivityView', () => {
     expect(markup).toContain('接回了上次的会话')
   })
 
-  it('说话人由 source 认定，渲染层不按 kind 反推身份', () => {
-    // 这条守的是判据来源，不是显示结果。`kind:'user_message'` 与 `source:'user'` 在今天恒等价
-    // （Core 里只有 launch/send 一处产生用户消息，同时写死两个字段），所以上面每一条既有断言在
-    // 「按 source 认」和「按 kind 认」两种实现下都会绿——把身份判定收敛进 conversation-speaker
-    // 这件事本身没有任何渲染断言守着。
-    //
-    // 所以这里构造一条只有 source 说话的条目：source 是 'user'，kind 不是 user_message。按 kind
-    // 反推的实现会把人说的话画成 Assistant 的话（设计 SSOT 明令禁止渲染层按 kind 反推身份），
-    // 这条会红；按 source 认的实现给出 'You'。
+  it('source 标为输入却缺作者时仍用未知身份，不把生命周期 kind 当 Agent 发言', () => {
+    // 输入来源说明这是一轮话；没有可信作者时不能叫 You，也不能因为 kind 是 lifecycle 改成 Agent。
     const markup = render('complete-events', [
       activity('steer-only-source', {
         source: 'user',
@@ -713,7 +707,7 @@ describe('ActivityView', () => {
       })
     ])
 
-    expect(markup).toContain('You')
+    expect(markup).toContain('Input')
     expect(markup).not.toContain('>Assistant<')
     // 而且它必须走 turn register，不能被当成机器行——「是一轮对话」与「谁说的」是同一个判据。
     expect(markup).toContain('log-turn')

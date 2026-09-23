@@ -23,6 +23,16 @@ describe('activity ruler mapping', () => {
     expect(scale.positionOf(1)).toBeCloseTo(100, 10)
   })
 
+  it('clamps temporal event fractions to the 0..1 bounding interval even if timestamps are out of order', () => {
+    // Durable append order [1000, 3000, 2000]: middle event timestamp exceeds last event.
+    const scale = createRulerScale([1_000, 3_000, 2_000], 100)
+    expect(scale.axis).toBe('temporal')
+    expect(scale.fractionOf(0)).toBe(0)
+    expect(scale.fractionOf(1)).toBe(1)
+    expect(scale.fractionOf(2)).toBe(1)
+    expect(scale.positionOf(1)).toBe(100)
+  })
+
   it('round-trips position → data → position onto the same pixel', () => {
     // Uneven gaps so a bug that mixed ordinal and temporal math would land on a different pixel.
     const scale = createRulerScale([0, 250, 1_000, 4_000], 400)
@@ -62,6 +72,20 @@ describe('activity ruler mapping', () => {
     // The honesty contract, enforced by the type: an ordinal readout has no `at` to render a time
     // from. Reading it off the object proves no moment leaked in under a zero-span axis.
     expect((readout as { at?: number }).at).toBeUndefined()
+  })
+
+  it('collapses to an ordinal axis when any event in the list has an undefined timestamp', () => {
+    const scale = createRulerScale([undefined, undefined, 1_000, 2_000], 300)
+    expect(scale.axis).toBe('ordinal')
+    expect(scale.fractionOf(0)).toBe(0)
+    expect(scale.fractionOf(1)).toBeCloseTo(1 / 3, 10)
+    expect(scale.fractionOf(2)).toBeCloseTo(2 / 3, 10)
+    expect(scale.fractionOf(3)).toBe(1)
+    expect(describeSpan(scale)).toBeNull()
+    expect(describeRulerAxis(scale)).toBe('Activity timeline, 4 events in order')
+    expect(scale.readoutOf(0).axis).toBe('ordinal')
+    expect(scale.readoutOf(2).axis).toBe('ordinal')
+    expect(scale.readoutAtFraction(0.66)!.index).toBe(2)
   })
 
   it('describes a zero-span readout as an ordinal only — no clock time, no offset', () => {

@@ -156,18 +156,19 @@ export function describeSpan(scale: RulerScale): { from: string; to: string; ela
  * event, or none — collapses the axis to `ordinal`: positions are spaced by order, and readouts drop
  * the moment. A width of 0 (unmeasured track) is tolerated everywhere; nothing divides by it.
  */
-export function createRulerScale(timestamps: readonly number[], width: number): RulerScale {
+export function createRulerScale(timestamps: readonly (number | undefined)[], width: number): RulerScale {
   const count = timestamps.length
-  const origin = count > 0 ? timestamps[0]! : 0
-  const last = count > 0 ? timestamps[count - 1]! : 0
+  const allKnown = count > 0 && timestamps.every((t) => typeof t === 'number' && Number.isFinite(t))
+  const origin = allKnown ? (timestamps[0] as number) : 0
+  const last = allKnown ? (timestamps[count - 1] as number) : 0
   const span = Math.max(0, last - origin)
-  const axis: RulerAxis = span > 0 ? 'temporal' : 'ordinal'
+  const axis: RulerAxis = allKnown && span > 0 ? 'temporal' : 'ordinal'
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 0
 
   const fractionOf = (index: number): number => {
     if (count <= 1) return 0
     const i = clampIndex(index, count)
-    if (axis === 'temporal') return (timestamps[i]! - origin) / span
+    if (axis === 'temporal') return clamp((timestamps[i]! - origin) / span, 0, 1)
     return i / (count - 1)
   }
 

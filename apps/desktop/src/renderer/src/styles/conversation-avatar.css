@@ -33,6 +33,12 @@
   background: color-mix(in srgb, var(--blue) 16%, var(--surface-0));
 }
 
+/* Unknown native user / unrecorded author. Neutral text tone, never guessing human blue. */
+.conversation-avatar--unknown {
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--text-2) 16%, var(--surface-0));
+}
+
 /* Agent. Hue is driven by the id: the component sets `--speaker-hue` inline, and inline wins over this class
    selector, so two agents on the same provider share one brand glyph but get different chip colours — that is
    how the open set of A2A identities stays distinguishable.

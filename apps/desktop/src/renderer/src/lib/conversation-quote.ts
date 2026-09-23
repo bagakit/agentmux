@@ -1,4 +1,3 @@
-import type { AgentTimelineItem } from '../../../shared/contracts'
 
 /**
  * 「这枚标记要展示的原话是什么」——把一条 timeline item 收敛成面板要显示的那段引文。
@@ -25,7 +24,7 @@ import type { AgentTimelineItem } from '../../../shared/contracts'
  */
 export const QUOTE_MAX_CHARS = 280
 
-export function conversationQuote(item: AgentTimelineItem): string | null {
+export function conversationQuote(item: { content?: string }): string | null {
   const content = item.content?.trim()
   if (!content) return null
   if (content.length <= QUOTE_MAX_CHARS) return content
