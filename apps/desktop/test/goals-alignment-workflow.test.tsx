@@ -72,11 +72,11 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(useAppStore.getState().demands.goal!.alignment!.confirmedAt).toBeNull()
     await act(async () => { finish(); await Promise.allSettled([...activeTransport]) }); await eventually(() => expect(container.querySelector('[data-goal-confirmation-state]')?.getAttribute('data-goal-confirmation-state')).toBe('confirmed'))
     expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1)
-    expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0); expect(next()).toContain('Ground results')
+    expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0); expect(next()).toContain('Goal agreed')
     await act(async () => useAppStore.getState().updateDemand('goal', { grounding: report() }))
     const submission = (await owner.get('goal'))!.grounding!.submissionId
     expect([...container.querySelectorAll('[data-goal-outcome]')].map(node => node.getAttribute('data-goal-outcome'))).toEqual(['met', 'met'])
-    expect(container.textContent).toContain('Agent report · not accepted'); expect(next()).toContain('Review results')
+    expect(container.textContent).toContain('Agent report · Not accepted yet'); expect(next()).toContain('Review results')
     expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
     await click('Accept results'); await eventually(async () => expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeGreaterThan(0))
     expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, submission, false)
@@ -85,12 +85,88 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.querySelector('[data-goal-result-state]')?.getAttribute('data-goal-result-state')).toBe('accepted'); expect(next()).toBe('Accepted')
   })
 
+  it('shows the original intent and one clarification block without empty proposal or result sections', async () => {
+    await save(); await mount()
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
+    expect(container.querySelectorAll('.goals-clarification')).toHaveLength(1)
+    expect(container.querySelector('.goals-alignment')).toBeNull(); expect(container.querySelector('.goals-grounding')).toBeNull()
+    expect(container.querySelector('[data-goal-result-state]')).toBeNull(); expect(next()).toBe('Clarify goal')
+    expect(button('Clarify goal').parentElement?.textContent).toContain('Sends a goal request to the agent')
+    expect(container.querySelector('[data-demand-id]')?.getAttribute('aria-label')).toBe('Open goal Restore my work. Clarify goal')
+    expect(container.querySelector('.goals-row__facts')?.textContent).toBe('Repo')
+    expect(container.querySelector('.goals-row__next svg')).toBeNull()
+    expect((await owner.get('goal'))!).toMatchObject({ description: intent, status: 'in_progress', sessionIds: ['healthy-run'] })
+  })
+
+  it('states that an agreed goal has no report yet and keeps checking secondary to the current work', async () => {
+    await save(proposal, true); await mount()
+    expect(next()).toBe('Goal agreed')
+    expect(container.querySelector('.goals-no-results')?.textContent).toContain('No result report yet. Continue in your discussion or workspace.')
+    expect(container.querySelector('.goals-grounding')).toBeNull()
+    expect(button('Ask agent to check work').classList.contains('goals-button--primary')).toBe(false)
+    expect(button('Open discussion for Restore my work').classList.contains('goals-button--primary')).toBe(true)
+    expect([...container.querySelectorAll('.goals-detail .goals-button--primary')].map(node => node.textContent?.trim())).toEqual(['Open discussion'])
+    expect(container.querySelector('[data-goal-accept]')).toBeNull()
+    expect(container.textContent).not.toContain('Start work')
+    expect((await owner.get('goal'))!).toMatchObject({ status: 'in_progress', alignment: { confirmedAt: expect.any(Number) } })
+    expect((await owner.get('goal'))!.grounding).toBeUndefined()
+  })
+
+  it.each([
+    ['absent proposal', undefined, false], ['unconfirmed proposal', proposal, false], ['confirmed proposal', proposal, true],
+  ] as const)('calls a done goal with %s unverified when no report exists', async (_label, alignment, confirmed) => {
+    await save(alignment, confirmed); await useAppStore.getState().updateDemand('goal', { status: 'done' }); await mount(); await click('Show finished')
+    expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual(['goal'])
+    expect(next()).toBe('Results not verified')
+    expect(container.querySelector('.goals-no-results')?.textContent).toContain('Marked done, but no report has checked the work against success criteria.')
+    expect(container.querySelector('[data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
+    const restored = (await openDemandStore({ root: temporaryRoot }).get('goal'))!
+    expect(restored.status).toBe('done'); expect(restored.grounding).toBeUndefined()
+    if (alignment) expect(restored.alignment!.confirmedAt).toEqual(confirmed ? expect.any(Number) : null)
+  })
+
+  it('keeps a report without a proposal directly readable while explaining why it cannot be accepted', async () => {
+    await save(proposal, true, report())
+    // Existing incomplete durable record: normal submission requires a goal; reading must still preserve its report.
+    const snapshot = await owner.snapshot(); delete snapshot.demands[0]!.alignment
+    await writeFile(owner.storePath, JSON.stringify(snapshot)); await useAppStore.getState().refreshDemand('goal'); await mount()
+    expect(container.querySelector('[data-goal-result-summary]')?.textContent).toBe(report().summary)
+    expect([...container.querySelectorAll('[data-goal-outcome]')].map(node => node.getAttribute('data-goal-outcome'))).toEqual(['met', 'met'])
+    expect([...container.querySelectorAll('.goals-evidence__open')].map(node => node.getAttribute('title'))).toEqual(report().checks.flatMap(check => check.evidence))
+    expect(container.querySelector('.goals-grounding')?.textContent).toContain('Define the goal and success criteria before accepting this report.')
+    expect(container.querySelector('[data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
+    expect(container.querySelector('[data-goal-grill]')?.textContent).toContain('Clarify goal'); expect(container.textContent).not.toContain('vundefined')
+    expect(api.demands.acceptGrounding).not.toHaveBeenCalled()
+    expect((await owner.get('goal'))!).toMatchObject({ description: intent, grounding: { checks: report().checks, acceptedAt: null } })
+  })
+
+  it('distinguishes sending from opening and retains delivery uncertainty after a real transport failure', async () => {
+    await save(); let reject!: (error: Error) => void
+    const ensure = vi.spyOn(api.scratch, 'ensureTopic').mockImplementationOnce(() => new Promise((_resolve, no) => { reject = no }))
+    await mount(); await click('Clarify goal', false)
+    expect(button('Sending request…').disabled).toBe(true)
+    expect(button('Open discussion for Restore my work').textContent).toContain('Open discussion')
+    await act(async () => { reject(new Error('Discussion transport unavailable')); await Promise.resolve() })
+    await eventually(() => expect(container.querySelector('.goals-service')?.textContent).toContain('Goal request delivery is unconfirmed. Your goal and current work are kept.'))
+    expect((await owner.get('goal'))!).toMatchObject({ description: intent, sessionIds: ['healthy-run'] })
+    expect(useAppStore.getState().selectedDemandId).toBe('goal')
+    ensure.mockRejectedValueOnce(new Error('Discussion transport unavailable'))
+    await click('Retry goal request'); expect(ensure).toHaveBeenCalledTimes(2)
+    let finish!: () => void
+    ensure.mockImplementationOnce(() => new Promise((_yes, no) => { finish = () => no(new Error('Open transport unavailable')) }))
+    await click('Open discussion for Restore my work', false)
+    expect(button('Open discussion for Restore my work').textContent).toContain('Opening discussion…')
+    expect(container.querySelector('[data-goal-grill]')?.textContent).toContain('Clarify goal')
+    await act(async () => { finish(); await Promise.resolve() }); await eventually(() => expect(container.querySelector('.goals-service')?.textContent).toContain('The discussion could not be opened.'))
+    expect(button('Retry opening discussion')).toBeTruthy(); expect(ensure).toHaveBeenCalledTimes(3)
+  })
+
   it('accepts a real reported gap only through the explicit action and keeps the gap and its evidence', async () => {
     await save(proposal, true, report('gap')); await mount()
     expect(container.querySelector('[data-goal-accept]')).toBeNull(); expect(next()).toContain('Review gaps')
     expect(container.textContent).toContain('Reported gap'); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
     const submission = (await owner.get('goal'))!.grounding!.submissionId
-    await click('Accept results, keep gaps'); await eventually(() => expect(next()).toBe('Accepted · gaps kept'))
+    await click('Accept results, keep gaps'); await eventually(() => expect(next()).toBe('Accepted with gaps'))
     expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, submission, true)
     expect((await owner.get('goal'))!.grounding!.checks).toEqual(report('gap').checks)
     expect(container.querySelector('[data-goal-result-state]')?.getAttribute('data-goal-result-state')).toBe('accepted-with-gaps')
@@ -98,12 +174,12 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   })
 
   it.each([
-    ['unknown', report('unknown'), 'Resolve unknowns'],
-    ['missing check', { ...report(), checks: [report().checks[0]!] }, 'Complete checks'],
-    ['missing evidence', { ...report(), checks: report().checks.map(check => ({ ...check, evidence: [] })) }, 'Complete checks'],
-    ['unlocatable evidence', { ...report(), checks: report().checks.map(check => ({ ...check, evidence: ['trust me'] })) }, 'Complete checks'],
-    ['unexplained gap', { ...report('gap'), checks: report('gap').checks.map(check => ({ ...check, note: '' })) }, 'Complete checks'],
-    ['empty checks', { ...report(), checks: [] }, 'Complete checks'],
+    ['unknown', report('unknown'), 'Results need checking'],
+    ['missing check', { ...report(), checks: [report().checks[0]!] }, 'Results need checking'],
+    ['missing evidence', { ...report(), checks: report().checks.map(check => ({ ...check, evidence: [] })) }, 'Results need checking'],
+    ['unlocatable evidence', { ...report(), checks: report().checks.map(check => ({ ...check, evidence: ['trust me'] })) }, 'Results need checking'],
+    ['unexplained gap', { ...report('gap'), checks: report('gap').checks.map(check => ({ ...check, note: '' })) }, 'Results need checking'],
+    ['empty checks', { ...report(), checks: [] }, 'Results need checking'],
   ] as const)('keeps %s reported and cannot accept it as a normal result or a gap', async (_label, grounding, expected) => {
     await save(proposal, true, grounding); await mount()
     expect(container.querySelectorAll('[data-goal-criterion-id]')).toHaveLength(2)
@@ -112,14 +188,15 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   })
 
   it.each([
-    ['open questions', { ...proposal, openQuestions: ['Should resume happen automatically or after a click?'] }, 'Resolve choices'],
-    ['empty criteria', { ...proposal, criteria: [] }, 'Define success'],
+    ['open questions', { ...proposal, openQuestions: ['Should resume happen automatically or after a click?'] }, 'Decision needed'],
+    ['empty criteria', { ...proposal, criteria: [] }, 'Define success criteria'],
   ] as const)('shows %s before confirmation without letting status manufacture acknowledgement', async (_label, alignment, expected) => {
-    await save(alignment); await useAppStore.getState().updateDemand('goal', { status: 'done' }); await mount()
+    await save(alignment); await mount()
     expect(container.querySelector('[data-goal-confirm]')).toBeNull(); expect(container.querySelector('[data-goal-accept]')).toBeNull()
     expect(container.querySelector('[data-goal-alignment-revision]')?.getAttribute('data-goal-alignment-revision')).toBe('1')
     expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull(); expect(api.demands.confirmAlignment).not.toHaveBeenCalled()
-    await click('Show finished'); expect(next()).toBe(expected)
+    expect(next()).toBe(expected); expect(container.querySelector('.goals-section-heading .goals-caption')?.textContent).toBe(_label === 'open questions' ? 'Decisions needed' : 'Define success criteria')
+    expect([...container.querySelectorAll('.goals-detail .goals-button--primary')].map(node => node.textContent?.trim())).toEqual(['Discuss changes'])
   })
 
   it('keeps an earlier accepted report visible but stale when the target changes, and preserves same-content acknowledgements', async () => {
@@ -133,7 +210,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.querySelector('[data-goal-result-state]')?.getAttribute('data-goal-result-state')).toBe('stale')
     expect(container.querySelector('[data-goal-accept]')).toBeNull(); expect(container.querySelector('[data-goal-accept-gaps]')).toBeNull()
     expect(container.textContent).toContain('previous acceptance does not apply'); expect(next()).toContain('Confirm goal')
-    await click('Confirm goal'); await eventually(() => expect(next()).toBe('Update results'))
+    await click('Confirm goal'); await eventually(() => expect(next()).toBe('Results need updating'))
     expect((await owner.get('goal'))!.grounding!.acceptedAt).toBe(before.grounding!.acceptedAt)
   })
 
@@ -176,18 +253,18 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   })
 
   it('uses the mapped healthy Mote Run for both stages and keeps real deferred input when readiness is unavailable', async () => {
-    await save(proposal, true)
+    await save()
     const session = { id: 'mote-session', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'mote-session', run: { runId: 'original-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null } as SessionSnapshot
     const tab = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }, 'Mote'), topicId: PMO_TEAMS_TOPIC_ID }
     vi.spyOn(api.scratch, 'readTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session); vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Prompt readiness not observed'))
     useAppStore.setState({ sessions: [session], demandPmoTabIds: { goal: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [tab.id]) } })
-    await mount(); await click('Discuss the goal')
+    await mount(); await click('Open discussion for Restore my work'); expect(submit).not.toHaveBeenCalled(); await click('Clarify goal')
     await eventually(() => expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.status).toBe('deferred'))
     const first = useAppStore.getState().agentSteerQueues[session.id]![0]!
     expect(first.text).toContain('Grill:'); expect(first.text).toContain(JSON.stringify(intent)); expect(first.runId).toBe('original-run')
-    submit.mockResolvedValue(undefined); await act(async () => useAppStore.getState().flushAgentSteerQueue(session.id)); await click('Check results')
+    submit.mockResolvedValue(undefined); await act(async () => { await useAppStore.getState().flushAgentSteerQueue(session.id); await useAppStore.getState().updateDemand('goal', { alignment: proposal }); await useAppStore.getState().confirmDemandGoal('goal', 1) }); await click('Ask agent to check work')
     await eventually(() => expect(submit.mock.calls.at(-1)?.[1]).toContain('Grounding:'))
     expect(submit.mock.calls.at(-1)?.[1]).toContain(proposal.criteria[0]!.text)
     expect(submit.mock.calls.at(-1)?.[1]).toContain('\"revision\": 1')
@@ -237,7 +314,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(button('Saving…').disabled).toBe(true); await click('Saving…', false)
     expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1)
     await act(async () => { finish(); await Promise.allSettled([...activeTransport]) })
-    expect(next()).toBe('Ground results'); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
+    expect(next()).toBe('Goal agreed'); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
   })
 
   it('does no default render work for unrelated Session output while a current report is visible', async () => {

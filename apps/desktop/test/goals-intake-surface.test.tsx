@@ -70,18 +70,18 @@ describe('Goals real-intent intake and reading surface', () => {
     useAppStore.setState({ createDemand: create, requestDemandPmoTask: request })
     await mount(); await click('New Goal'); await edit('Goal intent', saved.description); await click('Save & discuss')
     expect(Object.keys(useAppStore.getState().demands)).toEqual([saved.id]); expect(useAppStore.getState().selectedDemandId).toBe(saved.id)
-    expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('Goal saved')
+    expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('Your goal and current work are kept')
     expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('delivery is unconfirmed')
-    await click('Retry discussion'); expect(request).toHaveBeenCalledTimes(2); expect(create).toHaveBeenCalledTimes(1)
+    await click('Retry goal request'); expect(request).toHaveBeenCalledTimes(2); expect(create).toHaveBeenCalledTimes(1)
     expect(container.querySelector('.goals-detail [role="status"]')).toBeNull()
   })
 
   it('retries a failed Mote open as an open action without silently starting Grill', async () => {
     const original = goal(); const open = vi.fn().mockRejectedValueOnce(new Error('Mote view unavailable')).mockResolvedValueOnce('mote-tab'); const request = vi.fn()
     useAppStore.setState({ demands: { [original.id]: original }, selectedDemandId: original.id, openDemandPmo: open, requestDemandPmoTask: request })
-    await mount(); await click(`Open Mote for ${original.title}`)
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('workspace could not be opened')
-    expect(request).not.toHaveBeenCalled(); await click('Retry opening Mote')
+    await mount(); await click(`Open discussion for ${original.title}`)
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('discussion could not be opened')
+    expect(request).not.toHaveBeenCalled(); await click('Retry opening discussion')
     expect(open.mock.calls).toEqual([[original.id], [original.id]]); expect(request).not.toHaveBeenCalled()
   })
 

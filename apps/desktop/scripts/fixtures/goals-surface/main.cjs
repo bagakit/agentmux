@@ -12,7 +12,7 @@ async function paint() { await evaluate('new Promise(resolve => requestAnimation
 const button = (label) => `([...document.querySelectorAll('button')].find(node => node.textContent.trim()===${JSON.stringify(label)} || node.getAttribute('aria-label')===${JSON.stringify(label)}))`
 async function click(expression) { const p = await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`); for (const type of ['mousePressed','mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount:1}); await paint() }
 async function size(width) { await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:780,deviceScaleFactor:1,mobile:false}); await paint() }
-async function capture(name, width) { await paint(); const bytes=(await win.webContents.capturePage()).toPNG(); const file=name+'.png'; await fs.writeFile(path.join(evidence,file),bytes); result.frames.push({name,width,file,sha256:crypto.createHash('sha256').update(bytes).digest('hex')}) }
+async function capture(name, width) { await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:1,y:1}); await paint(); const bytes=(await win.webContents.capturePage()).toPNG(); const file=name+'.png'; await fs.writeFile(path.join(evidence,file),bytes); result.frames.push({name,width,file,sha256:crypto.createHash('sha256').update(bytes).digest('hex')}) }
 app.whenReady().then(async()=>{
   try {
     await fs.mkdir(evidence,{recursive:true}); win=new BrowserWindow({show:false,width:1280,height:780,webPreferences:{sandbox:false,backgroundThrottling:false}})
@@ -34,14 +34,16 @@ app.whenReady().then(async()=>{
     await size(1280); await evaluate('goalsVisual.seed("empty")'); await capture('1280-empty',1280)
     assert.deepEqual(await evaluate('goalsVisual.facts().runs'),original,'Original preview Run identities remain intact')
     assert.equal(result.frames.length,9);
-    for (const mode of ['proposal','questions','confirmed','results','gap','unknown','stale','accepted','accepted-gaps','receipt-failure']) {
-      await evaluate(`goalsVisual.seed(${JSON.stringify(mode)})`); await waitFor('Boolean(document.querySelector("[data-goal-summary]"))'); await evaluate('document.querySelector(".goals-detail").scrollTop=0')
+    for (const mode of ['proposal','questions','confirmed','results','gap','unknown','stale','accepted','accepted-gaps','receipt-failure','done-no-alignment','done-unconfirmed','done-confirmed','no-alignment-report','delivery-failure']) {
+      await evaluate(`goalsVisual.seed(${JSON.stringify(mode)})`); await waitFor('Boolean(document.querySelector("[data-goal-id]"))'); await evaluate('document.querySelector(".goals-detail").scrollTop=0')
+      if(mode.startsWith('done-') && await evaluate(`${button('Show finished')} !== undefined`)) await click(button('Show finished'))
+      if(mode==='delivery-failure') { await click('document.querySelector("[data-goal-grill]")'); await waitFor('Boolean([...document.querySelectorAll(".goals-service")].find(node=>node.textContent.includes("The discussion service is unavailable")))') }
       if(mode==='receipt-failure') { await click('document.querySelector("[data-goal-confirm]")'); await waitFor('Boolean(document.querySelector("[data-goal-acknowledgement-failure]"))') }
       await capture('1280-'+mode,1280)
       if(mode==='unknown'||mode==='stale'){ assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-accept], [data-goal-accept-gaps]"))'),false,'Ineligible results have no acceptance shortcut') }
-      if(['proposal','results','gap','unknown','stale','accepted-gaps'].includes(mode)) { await size(620); await capture('620-'+mode,620); await size(1280) }
+      if(['proposal','confirmed','results','gap','unknown','stale','accepted-gaps','done-confirmed','no-alignment-report','delivery-failure'].includes(mode)) { await size(620); await capture('620-'+mode,620); await size(1280) }
     }
-    assert.equal(result.frames.length,25); assert.deepEqual(result.consoleErrors,[]); result.passed=true
+    assert.equal(result.frames.length,34); assert.deepEqual(result.consoleErrors,[]); result.passed=true
   } catch(error) { result.failure={name:error.name,message:error.message,stack:error.stack} }
   finally { await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2)); win?.destroy(); app.exit(result.passed?0:1) }
 })

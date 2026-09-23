@@ -48,7 +48,7 @@ describe('Goal reading workspace', () => {
     useAppStore.setState({ selectedDemandId: 'demand:one', sessions: [], demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: [], tags: ['design'], phaseIndex: 1 } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     const properties = container.querySelector<HTMLDetailsElement>('.goals-properties')!; expect(properties.open).toBe(false); expect(properties.querySelector('summary')?.textContent).toBe('More properties')
     expect(properties.querySelectorAll('select')).toHaveLength(5)
-    for (const label of ['Goal status', 'Goal priority', 'Goal project', 'Goal assignee', 'Parent goal']) expect(properties.querySelector(`[aria-label="${label}"]`)).toBeTruthy()
+    for (const label of ['Goal work status', 'Goal priority', 'Goal project', 'Goal assignee', 'Parent goal']) expect(properties.querySelector(`[aria-label="${label}"]`)).toBeTruthy()
     expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal tags"]')?.value).toBe('design'); expect(properties.querySelectorAll('input[type="date"]')).toHaveLength(2); expect(properties.querySelector('input[type="number"]')).toBeTruthy()
     expect(container.querySelector('.agent-topology-summary')).toBeNull(); expect(container.querySelector('.goals-execution__link')).toBeNull(); expect(container.textContent).not.toContain('0 Sessions')
   })
