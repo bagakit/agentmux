@@ -50,18 +50,25 @@ async function type(ctx, label, value) {
   assert.equal(await ctx.probe.cdp.evaluate(`(${expression})[0].value`), value)
 }
 
-async function numberCondition(ctx) {
+export async function numberCondition(ctx) {
   await type(ctx, 'CSS selector', '#verified-number')
-  // From the preceding real input, Tab reaches the closed native select. Avoid
-  // opening an OS popup or assigning the select's value/focus from page script.
+  // Native menus may keep the highlighted choice pending until Enter. Use one
+  // arrow and one explicit commit; never assign its value/focus or retry senders.
   await key(ctx, 'Tab', 'Tab', 9)
   const expression = labelControl(ctx, 'Value type')
-  assert.equal(await ctx.probe.cdp.evaluate(`document.activeElement===(${expression})[0]`), true)
-  const before = await ctx.probe.cdp.evaluate(`(${expression})[0].value`)
+  const read = () => ctx.probe.cdp.evaluate(`(()=>{const controls=${expression};if(controls.length!==1)throw new Error('The actual type selector is missing');const target=controls[0];return {value:target.value,focused:document.activeElement===target,optionCount:target.options.length,selected:Array.from(target.selectedOptions).map(option=>option.value)}})()`)
+  const observed = { before: await read() }
+  ;(ctx.receipt.browserOutcome.numberSelections ??= []).push(observed)
+  assert.equal(observed.before.focused, true)
+  assert.equal(observed.before.optionCount, 3)
+  const before = observed.before.value
   if (before === 'boolean') await key(ctx, 'ArrowUp', 'ArrowUp', 38)
   else if (before === 'string') await key(ctx, 'ArrowDown', 'ArrowDown', 40)
   else assert.equal(before, 'number')
-  assert.equal(await ctx.probe.cdp.evaluate(`(${expression})[0].value`), 'number', 'Actual keyboard input selects the numeric type')
+  observed.afterArrow = await read()
+  if (before !== 'number') await key(ctx, 'Enter', 'Enter', 13)
+  observed.afterCommit = await read()
+  assert.equal(observed.afterCommit.value, 'number', 'Actual keyboard input commits the numeric type')
   await type(ctx, 'Equals', '0')
 }
 

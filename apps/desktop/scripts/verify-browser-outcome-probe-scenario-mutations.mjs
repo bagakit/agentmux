@@ -9,6 +9,8 @@ await verifyRendererSourceMutations({
     'apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs',
     'apps/desktop/scripts/lib/verify-renderer-source-mutations.mjs'],
   mutations: [
+    { label: 'pending-native-select-never-committed', file,
+      before: "  if (before !== 'number') await key(ctx, 'Enter', 'Enter', 13)\n", after: '' },
     { label: 'empty-producer-steps-accepted', file,
       before: "  assert.deepEqual(value.steps.map(step => [step.sequence, step.method, step.status]), [[1, 'extractStructured', 'completed']])\n", after: '' },
     { label: 'foreign-registered-producer-accepted', file,
