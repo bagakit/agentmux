@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, rm } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS,
@@ -1176,9 +1177,18 @@ function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
   if (!Array.isArray(source.steps) || source.steps.length > 10_000) {
     throw new AgentMuxError('Control browser operation steps are invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
+  const operationId = identity(source.id, 'Control browser operation id is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const browserId = identity(source.browserId, 'Control browser operation browser id is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  let completion: AgentMuxControlBrowserOperation['completion'], completionWarning: string | undefined
+  if (source.completion !== undefined) {
+    try { completion = parseBrowserCompletionFacts(source.completion, { operationId, browserId }) }
+    catch { completionWarning = BROWSER_COMPLETION_UNAVAILABLE_WARNING }
+  }
+  const warning = [source.warning === undefined ? undefined : text(source.warning, 'Control browser operation warning is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    completionWarning].filter(Boolean).join(' ')
   return {
-    id: identity(source.id, 'Control browser operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
-    browserId: identity(source.browserId, 'Control browser operation browser id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    id: operationId,
+    browserId,
     operator: {
       id: identity(operator.id, 'Control browser operation operator id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
       name: text(operator.name, 'Control browser operation operator name is invalid.', 'CONTROL_PROTOCOL_ERROR'),
@@ -1191,7 +1201,8 @@ function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
     url: text(source.url, 'Control browser operation url is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     steps: source.steps,
     ...(source.replayOf === undefined ? {} : { replayOf: identity(source.replayOf, 'Control browser operation replay id is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
-    ...(source.warning === undefined ? {} : { warning: text(source.warning, 'Control browser operation warning is invalid.', 'CONTROL_PROTOCOL_ERROR') })
+    ...(completion ? { completion } : {}),
+    ...(warning ? { warning } : {})
   }
 }
 
