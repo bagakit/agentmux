@@ -769,7 +769,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **行的身份取决于 Workspace 是什么，不是另一种 Board**。Git 项目的行是 Branch/Worktree；Scratch 的行是 Topic。两者共用同一套列、同一套状态归类、同一个 Inbox 语义——**一个 Board 组件按行来源参数化，不是两个 Board**。理由与 `Files + Branches` / `Files + Topics` 同源：Topic 与 Branch 都是"一条并行的工作线"，只是承载物一个是 worktree、一个是 topic 目录。为 Topic 复制一份 Board 会让状态归类、列定义、Inbox 入口各出现第二份，日后必然漂移。
 - **Topic 与 Branch 一样有 Inbox**。Inbox 是矩阵第一列和带上下文的创建入口，不是 Tools 中的重复页面——Branch Inbox 带 Branch 上下文，Topic Inbox 带 Topic 上下文，走同一个创建路径。
 - **Board 工具的次级面板是工作清单，不是说明页**。它列出当前 Board 的行与行内 Agent，可展开、可点击定位——用户来这里是找一条具体的工作线，不是读一段介绍 Board 是什么的文案。图例式的静态说明只在没有任何行时作为空态出现。清单的行与 Agent 状态点复用共享状态语汇，不发明第二套。**行必须与 Board 主视图同源**：一份行来源分叉（Scratch 出 Topic 行、Git 项目出 Branch 行）、一份排序，由 `useBoardRows` 持有，两处都调它。让面板自己再查一遍 topics/branches，就等于给"这个 Board 有哪些行"开第二份答案——两处会在筛选、排序、加载时序上各自漂移，而漂移时谁都不会响。行数超出时其余折叠为可展开的一条，不无限撑长也不截断丢弃。守护：`surface-tool-dock.test.tsx`。
-- Settings 按可操作资源优先组织为 Workspaces、Hosts、Agents、Appearance、General；默认打开第一个可操作分区。
+- Settings 的分区、主次与默认入口统一归《设置页的信息架构》，不在此另设资源优先顺序。
 - **Settings 是一个控制工作面，不是卡片墙。** 左侧只承担搜索和分区导航，条目保持单行、标题优先；当前分区的说明只在主区头部出现一次。主区先给出当前上下文和可用动作，再进入设置内容，避免同一标题/描述在侧栏和正文重复。
 - **可操作内容与只读说明分层。** 能修改配置的区块使用抬起的 Surface；运行时说明、来源和隐私提示落在页面底色上，用留白和发丝线分隔，不使用装饰性品牌图标格伪装成主操作。
 - Settings 的关闭动作始终可见；Escape 先清搜索，再关闭。窄窗口必须完整发现全部分区并用键盘选择，不能依赖用户发现屏外的横向条目，也不能牺牲正文与保存区。
@@ -1732,6 +1732,8 @@ PMO Teams 不再提供独立的浮动头像形态；产品入口的位置见《�
 用户新增要求：「对照下 `~/proj/github/orca`、`~/proj/github/paseo`、`~/proj/github/deepseek-harness` 的设置界面研究下，整个设置页面结构可以更加优化」。设置的层级按用户任务、对象和真实作用范围组织；单个轻量偏好与复杂资源编辑要有合适的轻重，不能按组件或配置键逐个增加一级页面。重组须保留全部既有入口、未保存草稿、原保存范围、对象直达与搜索；GUI 的导航结构不改变 CLI 的对象、配置键或唯一 owner。对照结论和尚未实施的候选结构见 [三项目设置结构研究](../reviews/settings-structure-references.md)，不把参考产品的作用域或插件平台自动变成 AgentMux 的运行时要求。
 
 设置页要像一个现代工作台：侧栏只负责快速定位，主区首屏明确当前设置对象、当前状态和唯一主操作；可编辑内容与只读说明分层，重复说明收起到次级层。搜索、键盘导航、窄窗口和保存反馈必须保持可见且可恢复，切换分区不能丢弃未保存草稿。
+
+- 用户随后明确追问「只是研究了吗？实现了不？」，结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），资源配置在后（Agents、Prompts、Workspaces、Hosts）；原九类能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。普通设置入口进入 Appearance，项目入口仍直达 Workspaces，Executor 入口仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复与 Provider。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
