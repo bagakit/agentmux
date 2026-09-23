@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -557,7 +557,7 @@ describe('Core Provider protocol', () => {
         runId: 'run-unknown',
         providerId: 'traex',
         eventName: 'quantum_flux_observed'
-      })
+      }, {})
       // 缺席，而不是被塞一个「差不多」的 canonical 值。
       expect(event.lifecycleEvent).toBeUndefined()
       // 绝不伪造 working/done。
@@ -575,7 +575,7 @@ describe('Core Provider protocol', () => {
         runId: 'run-nameless',
         providerId: 'traex',
         payload: { some_unrelated_field: 'x' }
-      })
+      }, {})
       expect(event.eventName).toBe('unknown')
       expect(event.lifecycleEvent).toBeUndefined()
       expect(event.semanticState).toBe('unknown')
@@ -589,7 +589,7 @@ describe('Core Provider protocol', () => {
         providerId: 'hermes',
         eventName: 'post_tool_call',
         payload: { tool_name: 'shell' }
-      })
+      }, {})
       expect(event.lifecycleEvent).toBe('tool-use-end')
       // 原始名没有被 canonical 值顶掉。
       expect(event.eventName).toBe('post_tool_call')
@@ -604,7 +604,7 @@ describe('Core Provider protocol', () => {
         providerId: 'claude',
         eventName: 'TotallyMadeUpEvent',
         payload: {}
-      })
+      }, {})
       expect(event.lifecycleEvent).toBeUndefined()
       expect(event.nativeHandle).toBeUndefined()
       expect(event.turnUsage).toBeUndefined()
@@ -622,7 +622,7 @@ describe('Core Provider protocol', () => {
         providerId: 'antigravity',
         eventName: 'SessionStart',
         payload: { conversationId: 'agy-conversation-1' }
-      })
+      }, {})
       expect(antigravity.nativeHandle).toEqual({
         kind: 'provider',
         providerId: 'antigravity',
@@ -636,9 +636,9 @@ describe('Core Provider protocol', () => {
         runId: 'run-pi',
         providerId: 'pi',
         eventName: 'agent_start',
-        payload: { session_id: 'pi-1', session_file: upstreamFixturePath("tmp/pi-protocol.jsonl") }
-      })
-      expect(pi.nativeHandle).toMatchObject({ sessionId: 'pi-1', transcriptPath: upstreamFixturePath("tmp/pi-protocol.jsonl") })
+        payload: { session_id: 'pi-1', session_file: fixturePath("tmp/pi-protocol.jsonl") }
+      }, {})
+      expect(pi.nativeHandle).toMatchObject({ sessionId: 'pi-1', transcriptPath: fixturePath("tmp/pi-protocol.jsonl") })
     })
 
     it('camelCase 与 snake_case 的 handle 键在同一个 Provider 上都读得出', () => {
@@ -650,7 +650,7 @@ describe('Core Provider protocol', () => {
           providerId: 'antigravity',
           eventName: 'SessionStart',
           payload: { [key]: `agy-${key}` }
-        })
+        }, {})
         expect(event.nativeHandle).toMatchObject({ sessionId: `agy-${key}` })
       }
       for (const key of ['transcript_path', 'transcriptPath'] as const) {
@@ -660,9 +660,9 @@ describe('Core Provider protocol', () => {
           runId: `run-${key}`,
           providerId: 'claude',
           eventName: 'SessionStart',
-          payload: { session_id: 'claude-1', [key]: upstreamFixturePath("tmp/claude-protocol.jsonl") }
-        })
-        expect(event.nativeHandle).toMatchObject({ transcriptPath: upstreamFixturePath("tmp/claude-protocol.jsonl") })
+          payload: { session_id: 'claude-1', [key]: fixturePath("tmp/claude-protocol.jsonl") }
+        }, {})
+        expect(event.nativeHandle).toMatchObject({ transcriptPath: fixturePath("tmp/claude-protocol.jsonl") })
       }
     })
 
@@ -675,8 +675,8 @@ describe('Core Provider protocol', () => {
         runId: 'run-hermes-handle',
         providerId: 'hermes',
         eventName: 'on_session_start',
-        payload: { session_id: 'hermes-looks-resumable', transcript_path: upstreamFixturePath("tmp/hermes.jsonl") }
-      })
+        payload: { session_id: 'hermes-looks-resumable', transcript_path: fixturePath("tmp/hermes.jsonl") }
+      }, {})
       expect(event.nativeHandle).toBeUndefined()
       expect(registry.get('hermes').catalog.resumeStrategy.kind).toBe('none')
     })
@@ -696,7 +696,7 @@ describe('Core Provider protocol', () => {
     it('「这个 Provider 不支持 resume」与「handle 属于别的 Provider」是可分辨的两种失败', () => {
       // 同一个错误码此前承载多种原因，界面只能笼统说一句恢复不了。detail 必须分开说清。
       const unsupported = refusal(() => registry.get('hermes').buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/work"),
+        workspacePath: fixturePath("tmp/work"),
         nativeHandle: { kind: 'provider', providerId: 'hermes', sessionId: 'h-1' },
         args: [], env: {}
       }))
@@ -708,7 +708,7 @@ describe('Core Provider protocol', () => {
 
       // 支持 resume，但 handle 是别人的：该刷新会话，不是换 Provider。
       const mismatch = refusal(() => registry.get('claude').buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/work"),
+        workspacePath: fixturePath("tmp/work"),
         nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'c-1' },
         args: [], env: {}
       }))
@@ -722,7 +722,7 @@ describe('Core Provider protocol', () => {
       // Pi 的 resume locator 是 hook 报出的 session_file。Provider 对得上、只是那个字段还没到——
       // 与上一条的 handle-provider-mismatch 共用错误码，靠 detail 区分该等待还是该刷新。
       const missing = refusal(() => registry.get('pi').buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/work"),
+        workspacePath: fixturePath("tmp/work"),
         nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: 'pi-1' },
         args: [], env: {}
       }))
@@ -735,11 +735,11 @@ describe('Core Provider protocol', () => {
 
     it('细节里绝不出现 sessionId、transcript 路径或 prompt 正文——它会跨客户端边界', () => {
       const secretId = 'SECRET-SESSION-ID-42'
-      const secretPath = upstreamFixturePath("private/SECRET-TRANSCRIPT.jsonl")
+      const secretPath = fixturePath("private/SECRET-TRANSCRIPT.jsonl")
       const secretPrompt = 'SECRET-PROMPT-do-not-leak'
 
       const mismatch = refusal(() => registry.get('claude').buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/work"),
+        workspacePath: fixturePath("tmp/work"),
         nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: secretId, transcriptPath: secretPath },
         prompt: secretPrompt,
         args: [], env: {}
@@ -752,7 +752,7 @@ describe('Core Provider protocol', () => {
       }
 
       const missing = refusal(() => registry.get('pi').buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/work"),
+        workspacePath: fixturePath("tmp/work"),
         nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: secretId },
         prompt: secretPrompt,
         args: [], env: {}

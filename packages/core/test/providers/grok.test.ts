@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import {  } from '../../src/agent-provider.js'
@@ -28,7 +28,7 @@ describe('Grok provider', () => {
       runId: 'run-grok',
       providerId: 'grok',
       payload: { hookEventName: eventName, sessionId: 'grok-session-1', ...payload }
-    })
+    }, {})
   }
 
   /**
@@ -102,7 +102,7 @@ describe('Grok provider', () => {
       const snake = grok.normalizeHook({
         receiptId: 'r-snake', agentSessionId: 's-grok', runId: 'run-grok', providerId: 'grok',
         payload: { hookEventName: 'session_start', session_id: 'not-groks-spelling' }
-      })
+      }, {})
       expect(snake.nativeHandle).toBeUndefined()
     })
   })
@@ -177,7 +177,7 @@ describe('Grok provider', () => {
   })
 
   describe('managed install 只落在受信目录，且不污染别家配置', () => {
-    const plan = (new AgentProviderRegistry().get('grok').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo") }) ?? null)
+    const plan = (new AgentProviderRegistry().get('grok').planManagedHooks?.({ workspacePath: fixturePath("repo") }) ?? null)
 
     it('装到 ~/.grok/hooks/ 下自有文件，绝不写 Claude 或 Cursor 的配置', () => {
       expect(plan).not.toBeNull()
@@ -210,7 +210,7 @@ describe('Grok provider', () => {
   describe('resume argv 精确，缺 handle 时 fail closed', () => {
     it('argv 恰为 grok --resume <session-id>，prompt 走 `--` 分隔', () => {
       expect(grok.buildResumeLaunch({
-        workspacePath: upstreamFixturePath("repo"),
+        workspacePath: fixturePath("repo"),
         nativeHandle: { kind: 'provider', providerId: 'grok', sessionId: 'abc-123' },
         prompt: 'continue now',
         args: ['--model', 'grok-4'],
@@ -226,7 +226,7 @@ describe('Grok provider', () => {
       let error: AgentMuxError | undefined
       try {
         grok.buildResumeLaunch({
-          workspacePath: upstreamFixturePath("repo"),
+          workspacePath: fixturePath("repo"),
           nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'not-grok' },
           args: [], env: {}
         })

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { DROID_HOOK_EVENTS, DROID_HOOKS, createDroidManagedHookPlan } from '../../src/providers/droid.js'
@@ -40,12 +40,12 @@ describe('Droid provider', () => {
         payload: {
           hook_event_name: eventName,
           session_id: 'droid-session-1',
-          transcript_path: upstreamFixturePath("tmp/droid/transcript.jsonl"),
-          cwd: upstreamFixturePath("repo"),
+          transcript_path: fixturePath("tmp/droid/transcript.jsonl"),
+          cwd: fixturePath("repo"),
           permission_mode: 'off',
           ...payload
         }
-      })
+      }, {})
   }
 
   function toolMutation(event: ReturnType<ReturnType<typeof hookIn>>) {
@@ -62,14 +62,14 @@ describe('Droid provider', () => {
     it('顶层键就是事件名，不套 hooks:——套了整份配置会被判无效', () => {
       // zod：`object({ PreToolUse: array(...).optional(), …, hooksDisabled: boolean().optional() })`。
       // 照 Claude 的形状多包一层 `hooks` 不是"少响几个事件"，是一个都不响（整份配置被 schema 拒掉）。
-      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as Record<string, unknown>
       expect(Object.keys(config).sort()).toEqual([...DROID_HOOK_EVENTS].sort())
       expect(config).not.toHaveProperty('hooks')
     })
 
     it('每条 hook 条目是 {type:command, command, timeout}，包在事件的数组里', () => {
-      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as Record<
         string,
         Array<{ matcher?: string; hooks: Array<{ type: string; command: string; timeout: number }> }>
@@ -85,7 +85,7 @@ describe('Droid provider', () => {
     })
 
     it('只有两个工具事件带 matcher——别处写 matcher 是噪音', () => {
-      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as Record<
         string, Array<{ matcher?: string }>
       >
@@ -103,14 +103,14 @@ describe('Droid provider', () => {
       //
       // **先验行为、再验策略名**：反过来写的话，策略名那条会先抛，后面几条行为断言就成了死代码——
       // 换错策略时它们一条都跑不到，于是"这份配置具体怎么坏"根本没人守。
-      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const mutation = plan!.mutations[0]!
       const existing = JSON.stringify({
-        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: upstreamFixturePath("home/me/audit.sh") }] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: fixturePath("home/me/audit.sh") }] }],
         hooksDisabled: false
       })
       const merged = JSON.parse(renderMergedHookContent(existing, mutation.content, mutation.merge!))
-      expect(merged.PreToolUse[0].hooks[0].command).toBe(upstreamFixturePath("home/me/audit.sh"))
+      expect(merged.PreToolUse[0].hooks[0].command).toBe(fixturePath("home/me/audit.sh"))
       expect(merged.hooksDisabled).toBe(false)
       expect(merged).not.toHaveProperty('hooks')
       expect(merged.Stop[0].hooks[0].command).toContain('agentmux-hook.js')
@@ -119,16 +119,16 @@ describe('Droid provider', () => {
 
     it('FACTORY_HOME_OVERRIDE 被尊重——忽略它会写出一份该 CLI 永远不读的配置', () => {
       // 本机发行物逐字：`process.env.FACTORY_HOME_OVERRIDE ?? HOME ?? USERPROFILE`，目录名 `.factory`。
-      const overridden = createDroidManagedHookPlan({ FACTORY_HOME_OVERRIDE: upstreamFixturePath("tmp/fh") })
-      expect(overridden.mutations.map((mutation) => mutation.path)).toEqual([upstreamFixturePath("tmp/fh/.factory/hooks.json")])
+      const overridden = createDroidManagedHookPlan({ FACTORY_HOME_OVERRIDE: fixturePath("tmp/fh") })
+      expect(overridden.mutations.map((mutation) => mutation.path)).toEqual([fixturePath("tmp/fh/.factory/hooks.json")])
     })
 
     it('装的位置与 workspace 无关——resolver 不该拿 workspacePath 派生路径', () => {
       // 这条守 index.ts 的接线：droid 是 user 层安装，两个不同 workspace 必须解析到同一份文件。
-      const a = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/one") }) ?? null)
-      const b = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/two") }) ?? null)
+      const a = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: fixturePath("repo/one") }) ?? null)
+      const b = (new AgentProviderRegistry().get('droid').planManagedHooks?.({ workspacePath: fixturePath("repo/two") }) ?? null)
       expect(a!.mutations[0]!.path).toBe(b!.mutations[0]!.path)
-      expect(a!.mutations[0]!.path).toContain('/.factory/hooks.json')
+      expect(a!.mutations[0]!.path).toContain("/.factory/hooks.json")
     })
   })
 
@@ -275,7 +275,7 @@ describe('Droid provider', () => {
         kind: 'provider',
         providerId: 'droid',
         sessionId: 'droid-session-1',
-        transcriptPath: upstreamFixturePath("tmp/droid/transcript.jsonl")
+        transcriptPath: fixturePath("tmp/droid/transcript.jsonl")
       })
     })
 
@@ -284,7 +284,7 @@ describe('Droid provider', () => {
         source: 'subagent',
         calling_session_id: 'parent-session-123',
         session_id: 'child-session-456',
-        transcript_path: upstreamFixturePath("tmp/droid/child.jsonl")
+        transcript_path: fixturePath("tmp/droid/child.jsonl")
       })
       expect(childEvent.nativeHandle).toBeUndefined()
     })
@@ -297,10 +297,10 @@ describe('Droid provider', () => {
       const launch = droid.buildResumeLaunch({
         nativeHandle: {
           kind: 'provider', providerId: 'droid',
-          sessionId: 'sess-9', transcriptPath: upstreamFixturePath("tmp/t.jsonl")
+          sessionId: 'sess-9', transcriptPath: fixturePath("tmp/t.jsonl")
         },
         args: ['--auto', 'low'],
-        workspacePath: upstreamFixturePath("repo/app"),
+        workspacePath: fixturePath("repo/app"),
         env: {}
       })
       expect(launch.command).toBe('droid')
@@ -313,7 +313,7 @@ describe('Droid provider', () => {
       // 拿着别家的 handle 来恢复，错误码必须是 handle 不属于本 Provider，而不是"不支持恢复"。
       expect(() => droid.buildResumeLaunch({
         nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 's-1' },
-        args: [], workspacePath: upstreamFixturePath("repo/app"), env: {}
+        args: [], workspacePath: fixturePath("repo/app"), env: {}
       })).toThrowError(/does not belong to this provider/)
     })
 
@@ -327,7 +327,7 @@ describe('Droid provider', () => {
     })
 
     it('prompt 走位置参数，且 resume 时也带得上', () => {
-      const ws = { workspacePath: upstreamFixturePath("repo/app"), env: {} }
+      const ws = { workspacePath: fixturePath("repo/app"), env: {} }
       expect(droid.buildLaunch({ prompt: 'do it', args: ['--auto', 'low'], ...ws }).args)
         .toEqual(['--auto', 'low', 'do it'])
       expect(droid.buildLaunch({ prompt: '', args: ['--auto', 'low'], ...ws }).args)

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxClient } from '../src/client.js'
@@ -61,7 +61,7 @@ describe('normalizeHook usage projection', () => {
           observedAt: 1234
         }
       }
-    })
+    }, {})
     expect(event.turnUsage).toEqual({ inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: 1234 })
   })
 
@@ -74,7 +74,7 @@ describe('normalizeHook usage projection', () => {
       providerId: 'claude',
       eventName: 'Stop',
       payload: { last_assistant_message: 'DONE', session_id: 'claude-native' }
-    })
+    }, {})
     expect(event.turnUsage).toBeUndefined()
   })
 
@@ -90,7 +90,7 @@ describe('normalizeHook usage projection', () => {
         session_id: 'codex-native',
         [HOOK_PAYLOAD_USAGE_KEY]: { inputTokens: 10, outputTokens: 5 }
       }
-    })
+    }, {})
     expect(event.turnUsage).toBeUndefined()
   })
 })
@@ -115,7 +115,7 @@ function storedClaudeSession(): AgentMuxStoredAgentSession {
     providerId: 'claude',
     executorId: 'claude',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'usage-run' },
     retiredRuns: [],
     hookBindingId: 'binding-usage',

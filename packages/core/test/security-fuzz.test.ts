@@ -57,7 +57,7 @@ describe('deterministic AgentMux boundary fuzz', () => {
         providerId,
         eventName: randomString(next),
         payload: payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : { value: payload }
-      })
+      }, {})
 
       expect(normalized.agentSessionId).toBe(`semantic-${index}`)
       expect(normalized.run).toEqual({ runId: `run-${index}` })

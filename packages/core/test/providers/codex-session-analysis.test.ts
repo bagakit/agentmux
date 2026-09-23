@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureFileUrl as upstreamFixtureFileUrl, fixtureDisplayPath as upstreamFixtureDisplayPath } from '../helpers/fixture-values.js'
+import { fixtureFileUrl, fixturePath } from '../helpers/fixture-values.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import os from 'node:os'
@@ -62,7 +62,7 @@ const turnEntries = [
       type: 'commandExecution',
       id: 'cmd-running',
       command: 'sleep 30',
-      cwd: upstreamFixturePath("workspace"),
+      cwd: fixturePath("workspace"),
       aggregatedOutput: null,
       exitCode: null,
       status: 'inProgress'
@@ -76,7 +76,7 @@ const turnEntries = [
       type: 'commandExecution',
       id: 'cmd-failed',
       command: 'cat nonexistent.txt',
-      cwd: upstreamFixturePath("workspace"),
+      cwd: fixturePath("workspace"),
       aggregatedOutput: 'cat: nonexistent.txt: No such file or directory',
       exitCode: 1,
       status: 'failed'
@@ -90,7 +90,7 @@ const turnEntries = [
       type: 'commandExecution',
       id: 'cmd-ok',
       command: 'git status',
-      cwd: upstreamFixturePath("workspace"),
+      cwd: fixturePath("workspace"),
       aggregatedOutput: 'On branch main\nnothing to commit',
       exitCode: 0,
       status: 'completed'
@@ -116,7 +116,7 @@ const turnEntries = [
       id: 'usr-1',
       content: [
         { type: 'text', text: 'Please check git status and update README' },
-        { type: 'mention', name: 'README.md', path: upstreamFixturePath("workspace/README.md") }
+        { type: 'mention', name: 'README.md', path: fixturePath("workspace/README.md") }
       ]
     }
   }
@@ -223,9 +223,9 @@ const repairEntries = [
           { type: 'text', text: 'Bundle preview retrieved with warnings', _meta: { block: 'text-meta-marker' } },
           { type: 'image', data: 'aW1hZ2VkYXRh', mimeType: 'image/png', _meta: { block: 'image-meta-marker' } },
           { type: 'audio', data: 'YXVkaW9kYXRh', mimeType: 'audio/wav', _meta: { block: 'audio-meta-marker' } },
-          { type: 'resource', _meta: { block: 'outer-meta-marker' }, resource: { uri: upstreamFixtureFileUrl("workspace/embedded.ts"), name: 'embedded.ts', text: 'export const embedded = 1;', _meta: { block: 'inner-meta-marker' } } },
-          { type: 'resource', resource: { uri: upstreamFixtureFileUrl("workspace/blob.png"), mimeType: 'image/png', blob: 'YmxvYmRhdGE=' } },
-          { type: 'resource_link', uri: upstreamFixtureFileUrl("workspace/link.ts"), name: 'link.ts', description: 'Linked doc', _meta: { block: 'link-meta-marker' } },
+          { type: 'resource', _meta: { block: 'outer-meta-marker' }, resource: { uri: fixtureFileUrl("workspace/embedded.ts"), name: 'embedded.ts', text: 'export const embedded = 1;', _meta: { block: 'inner-meta-marker' } } },
+          { type: 'resource', resource: { uri: fixtureFileUrl("workspace/blob.png"), mimeType: 'image/png', blob: 'YmxvYmRhdGE=' } },
+          { type: 'resource_link', uri: fixtureFileUrl("workspace/link.ts"), name: 'link.ts', description: 'Linked doc', _meta: { block: 'link-meta-marker' } },
           { type: 'image', data: '', mimeType: '' }
         ],
         structuredContent: { bundleId: 'b-99', warnings: ['deprecated codec'] },
@@ -330,7 +330,7 @@ async function fixture(
   }) => Promise<void>,
   mode = 'normal'
 ): Promise<void> {
-  const home = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-codex-analysis-test-"))
+  const home = await mkdtemp(fixturePath("tmp/amx-codex-analysis-test-"))
   const workspace = join(home, 'workspace')
   await mkdir(workspace)
   const script = join(home, 'codex-protocol-mock.mjs')
@@ -439,7 +439,7 @@ input.on('line', (line) => {
       kind: 'provider',
       providerId: 'codex',
       sessionId: nativeId,
-      transcriptPath: upstreamFixturePath("synthetic/codex-transcript.jsonl")
+      transcriptPath: fixturePath("synthetic/codex-transcript.jsonl")
     }
   })
   const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(storePath) })
@@ -512,14 +512,14 @@ describe('Codex provider completeness & session analysis', () => {
       payload: {
         hook_event_name: 'SessionStart',
         session_id: 'test-session-uuid-42',
-        transcript_path: upstreamFixturePath("tmp/codex-session.jsonl")
+        transcript_path: fixturePath("tmp/codex-session.jsonl")
       }
-    })
+    }, {})
     expect(normalizedStart.nativeHandle).toEqual({
       kind: 'provider',
       providerId: 'codex',
       sessionId: 'test-session-uuid-42',
-      transcriptPath: upstreamFixturePath("tmp/codex-session.jsonl")
+      transcriptPath: fixturePath("tmp/codex-session.jsonl")
     })
     expect(normalizedStart.semanticState).toBe('working')
 
@@ -530,7 +530,7 @@ describe('Codex provider completeness & session analysis', () => {
       providerId: 'codex',
       eventName: 'PermissionRequest',
       payload: { hook_event_name: 'PermissionRequest', session_id: 'test-session-uuid-42' }
-    })
+    }, {})
     expect(normalizedPerm.semanticState).toBe('waiting')
 
     const normalizedStop = codex.normalizeHook({
@@ -540,13 +540,13 @@ describe('Codex provider completeness & session analysis', () => {
       providerId: 'codex',
       eventName: 'Stop',
       payload: { hook_event_name: 'Stop', session_id: 'test-session-uuid-42' }
-    })
+    }, {})
     expect(normalizedStop.semanticState).toBe('done')
 
     // Managed hook plan verification
-    const plan = createCodexManagedHookPlan(upstreamFixturePath("mock/workspace"))
+    const plan = createCodexManagedHookPlan(fixturePath("mock/workspace"))
     expect(plan.providerId).toBe('codex')
-    expect(plan.mutations[0]!.path).toBe(upstreamFixturePath("mock/workspace/.codex/hooks.json"))
+    expect(plan.mutations[0]!.path).toBe(fixturePath("mock/workspace/.codex/hooks.json"))
   })
 
   it('reads chronological native items with structured trace blocks for reasoning, commands, patches, and tools', async () => {
@@ -575,7 +575,7 @@ describe('Codex provider completeness & session analysis', () => {
         turnId: 'turn-1',
         contentParts: [
           { kind: 'text', text: 'Please check git status and update README' },
-          { kind: 'resource', resourceType: 'file', reference: upstreamFixturePath("workspace/README.md"), label: 'README.md' }
+          { kind: 'resource', resourceType: 'file', reference: fixturePath("workspace/README.md"), label: 'README.md' }
         ]
       })
 
@@ -842,13 +842,13 @@ describe('Codex provider completeness & session analysis', () => {
         { kind: 'tool-result', output: JSON.stringify({ block: 'image-meta-marker' }, null, 2), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
         { kind: 'resource', resourceType: 'audio', reference: 'data:audio/wav;base64,YXVkaW9kYXRh' },
         { kind: 'tool-result', output: JSON.stringify({ block: 'audio-meta-marker' }, null, 2), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
-        { kind: 'resource', resourceType: 'file', reference: upstreamFixtureFileUrl("workspace/embedded.ts"), label: 'embedded.ts' },
+        { kind: 'resource', resourceType: 'file', reference: fixtureFileUrl("workspace/embedded.ts"), label: 'embedded.ts' },
         { kind: 'tool-result', output: 'export const embedded = 1;', name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
         { kind: 'tool-result', output: JSON.stringify({ block: 'outer-meta-marker' }, null, 2), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
         { kind: 'tool-result', output: JSON.stringify({ block: 'inner-meta-marker' }, null, 2), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
-        { kind: 'resource', resourceType: 'file', reference: upstreamFixtureFileUrl("workspace/blob.png") },
-        { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,YmxvYmRhdGE=', label: upstreamFixtureFileUrl("workspace/blob.png") + ' (blob)' },
-        { kind: 'resource', resourceType: 'file', reference: upstreamFixtureFileUrl("workspace/link.ts"), label: 'link.ts' },
+        { kind: 'resource', resourceType: 'file', reference: fixtureFileUrl("workspace/blob.png") },
+        { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,YmxvYmRhdGE=', label: fixtureFileUrl("workspace/blob.png") + ' (blob)' },
+        { kind: 'resource', resourceType: 'file', reference: fixtureFileUrl("workspace/link.ts"), label: 'link.ts' },
         { kind: 'tool-result', output: JSON.stringify({ block: 'link-meta-marker' }, null, 2), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
         { kind: 'tool-result', output: expect.not.stringContaining('data:;base64,'), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
         { kind: 'tool-result', output: JSON.stringify({ bundleId: 'b-99', warnings: ['deprecated codec'] }, null, 2), name: 'media_server/fetch_bundle', callId: 'mcp-mixed', failed: true },
