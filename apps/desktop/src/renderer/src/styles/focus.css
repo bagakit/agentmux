@@ -113,7 +113,7 @@
 .recent-focus__message[data-message-author='agent'] { border-radius: 4px; color: var(--green); border-color: color-mix(in srgb, var(--green) 65%, var(--line)); }
 .recent-focus__tracks:has(.recent-focus__track) + .recent-focus__empty { display: none; }
 .recent-focus__empty { margin: 2px var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.recent-focus__message-preview { position: absolute; bottom: calc(100% + 6px); z-index: 6; box-sizing: border-box; width: min(332px, calc(100% - 16px)); max-height: min(440px, 60vh); overflow: auto; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: 0 4px 16px #0004; font-size: var(--fs-micro); }
+.recent-focus__message-preview { position: fixed; visibility: hidden; box-sizing: border-box; width: min(332px, calc(100vw - 16px)); max-height: min(440px, 60vh); overflow: auto; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: 0 4px 16px #0004; font-size: var(--fs-micro); }
 .recent-focus__message-preview[data-interactive='false'] { pointer-events: none; }
 .recent-focus__message-preview header { display: flex; align-items: center; gap: var(--sp-2); }
 .recent-focus__message-preview header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -30,7 +30,8 @@ const DECOY = 'association-decoy'
 const SENDER_NAME = 'Same worker name'
 const TOPIC = 'launcher:association'
 const BODY = 'Do the same work. workspaceId=decoy-project [Project: Other project]'
-const EXPECTED_IDS = ['prompt:association-one', 'prompt:association-two', 'prompt:association-unknown']
+const RAW_IDS = ['prompt:association-one', 'prompt:association-two', 'prompt:association-unknown']
+const EXPECTED_IDS = RAW_IDS.map(id => `captured:${id}`)
 const baseline = useAppStore.getState()
 const roots: Root[] = [], elements: HTMLElement[] = [], clients: AgentMuxClient[] = []
 
@@ -43,6 +44,11 @@ afterEach(async () => {
   document.getElementById('agentmux-window-overlay-host')?.remove()
 })
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+
+function floating() {
+  const node = document.getElementById('agentmux-window-overlay-host')
+  expect(node, 'Actual shared overlay host').not.toBeNull(); return node!
+}
 
 async function fixture(options: { branch?: boolean; missingTopic?: boolean; missingProject?: boolean } = {}) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -149,9 +155,9 @@ async function fixture(options: { branch?: boolean; missingTopic?: boolean; miss
   }
   const captured = await client.sessionTimeline(RECIPIENT)
   expect(captured.items.map(item => [item.id, item.agentSessionId, item.kind, item.source, item.content, item.authorAgentSessionId])).toEqual([
-    [EXPECTED_IDS[0], RECIPIENT, 'user_message', 'user', BODY, SENDER],
-    [EXPECTED_IDS[1], RECIPIENT, 'user_message', 'user', BODY, SENDER],
-    [EXPECTED_IDS[2], RECIPIENT, 'user_message', 'user', 'Public Core input without a recorded author', undefined]
+    [RAW_IDS[0], RECIPIENT, 'user_message', 'user', BODY, SENDER],
+    [RAW_IDS[1], RECIPIENT, 'user_message', 'user', BODY, SENDER],
+    [RAW_IDS[2], RECIPIENT, 'user_message', 'user', 'Public Core input without a recorded author', undefined]
   ])
   expect(writes).toEqual([{ runId: `${RECIPIENT}-original-run`, data: BODY + '\r' }, { runId: `${RECIPIENT}-original-run`, data: BODY + '\r' },
     { runId: `${RECIPIENT}-original-run`, data: 'Public Core input without a recorded author\r' }])
@@ -169,7 +175,7 @@ function marker(h: Harness, id = EXPECTED_IDS[0]!) {
   expect(node, `Actual marker ${id}`).toBeTruthy(); return node!
 }
 function preview(h: Harness, role: 'dialog' | 'tooltip' = 'dialog') {
-  const node = h.element.querySelector<HTMLElement>(`.recent-focus__message-preview[role="${role}"][aria-label="Message"]`)
+  const node = floating().querySelector<HTMLElement>(`.recent-focus__message-preview[role="${role}"][aria-label="Message"]`)
   expect(node, `Actual ${role} preview`).toBeTruthy(); return node!
 }
 async function inspect(h: Harness, id = EXPECTED_IDS[0]!) { await act(async () => marker(h, id).click()); return preview(h) }
@@ -221,7 +227,7 @@ it('uses the exact author ID and current Topic/project, not the earlier same-nam
   expect(field(node, 'Current project')).toBe('Sender topics')
   expect(field(node, 'Current topic')).toBe('Current sender topic')
   expect(field(node, 'Current branch')).toBe('Not recorded')
-  expect(node.querySelector('.recent-focus__message-body')!.textContent).toBe(BODY)
+  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
   senderRunUnknown(node)
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(RECIPIENT)
 })
@@ -269,15 +275,15 @@ it('mouse hover, keyboard focus and preview open/close observe without changing 
   expect(field(preview(h, 'tooltip'), 'Current topic')).toBe('Current sender topic')
   expect(document.activeElement).toBe(search); expect(useAppStore.getState().agentFocus).toBe(origin)
   await act(async () => marker(h).dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: search })))
-  expect(h.element.querySelector('[role="tooltip"]')).toBeNull()
+  expect(floating().querySelector('[role="tooltip"]')).toBeNull()
   await act(async () => marker(h).focus())
   expect(field(preview(h, 'tooltip'), 'Sender')).toContain(SENDER)
   expect(useAppStore.getState().agentFocus).toBe(origin)
   await act(async () => marker(h).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
-  expect(h.element.querySelector('[role="tooltip"]')).toBeNull()
+  expect(floating().querySelector('[role="tooltip"]')).toBeNull()
   const node = await inspect(h)
   await act(async () => button(node, 'Close message').click())
-  expect(h.element.querySelector('[role="dialog"]')).toBeNull(); expect(useAppStore.getState().agentFocus).toBe(origin)
+  expect(floating().querySelector('[role="dialog"]')).toBeNull(); expect(useAppStore.getState().agentFocus).toBe(origin)
   expect(h.writes).toHaveLength(3); expect(h.lifecycle.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
 
@@ -289,7 +295,7 @@ it('pinned Escape restores its real marker without reopening a tooltip, and an e
   expect(document.activeElement).toBe(node)
   await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
   expect(document.activeElement).toBe(target)
-  expect(h.element.querySelectorAll('.recent-focus__message-preview')).toHaveLength(0)
+  expect(floating().querySelectorAll('.recent-focus__message-preview')).toHaveLength(0)
   expect(useAppStore.getState().agentFocus).toBe(origin)
   await act(async () => target.click())
   expect(preview(h)).toBeTruthy(); expect(useAppStore.getState().agentFocus).toBe(origin)
@@ -300,7 +306,7 @@ it.each(['removed', 'pmo'] as const)('a %s sender Context retains original autho
   await act(async () => useAppStore.setState(state => ({ sessions: kind === 'removed' ? state.sessions.filter(session => session.id !== SENDER)
     : state.sessions.map(session => session.id === SENDER ? { ...session, workspacePath: _hygiene_fixturePath("sender-topics/topic--launcher--leader") } : session) })))
   const node = preview(h)
-  expect(node.textContent).toContain(SENDER); expect(node.querySelector('.recent-focus__message-body')!.textContent).toBe(BODY)
+  expect(node.textContent).toContain(SENDER); expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
   expect(button(node, 'View sender').disabled).toBe(true)
   const origin = useAppStore.getState().agentFocus
   await act(async () => button(node, 'View sender').click())
@@ -314,7 +320,7 @@ it('a missing recipient retains the pinned original record and disables Return i
   const h = await fixture(); await inspect(h)
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== RECIPIENT) })))
   const node = preview(h), origin = useAppStore.getState().agentFocus
-  expect(node.querySelector('.recent-focus__message-body')!.textContent).toBe(BODY)
+  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
   expect(button(node, 'Return to Context').disabled).toBe(true)
   await act(async () => button(node, 'Return to Context').click())
   expect(useAppStore.getState().agentFocus).toBe(origin)
@@ -327,7 +333,7 @@ it.each(['project', 'topic'] as const)('a missing sender %s remains explicitly u
   expect(field(node, 'Sender')).toContain(SENDER)
   expect(field(node, 'Current project')).toBe(missing === 'project' ? 'Not recorded' : 'Sender topics')
   expect(field(node, 'Current topic')).toBe('Not recorded')
-  expect(node.querySelector('.recent-focus__message-body')!.textContent).toBe(BODY); senderRunUnknown(node)
+  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY); senderRunUnknown(node)
 })
 
 it('sender old-to-current Run replacement and unknown working start never become this message execution', async () => {
@@ -385,6 +391,6 @@ it('late current Topic facts and source changes cannot rewrite a pinned original
   const node = preview(h)
   expect(field(node, 'Sender')).toContain(SENDER)
   expect(field(node, 'Current project')).toBe('Sender topics')
-  expect(node.querySelector('.recent-focus__message-body')!.textContent).toBe(BODY)
+  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
   expect((await h.client.sessionTimeline(RECIPIENT)).items).toEqual(h.captured.items)
 })
