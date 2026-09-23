@@ -1,9 +1,10 @@
-import { fixtureTime as _hygiene_fixtureTime } from "../../lib/fixture-values.mjs"
+import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../../lib/fixture-values.mjs"
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
+import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
 import '../../../src/renderer/src/styles/index.css'
 await useAppStore.getState().initialize()
@@ -18,7 +19,11 @@ const initialize = async () => () => {}
 const alignment = { summary: 'Return to the same work after restart, with the original Agents and layout intact.', criteria: [{ id: 'layout', text: 'The same tabs, groups and splits return without reconstruction.' }, { id: 'session', text: 'The original healthy Agent can resume with the unsent draft intact.' }], openQuestions: [], revision: 1, confirmedAt: null }
 const grounding = { alignmentRevision: 1, summary: 'The original layout and Agent identity returned. Both success criteria were checked against the recovery log.', checks: [{ criterionId: 'layout', outcome: 'met' as const, evidence: ['artifacts/recovery/layout-check.log:18'], note: 'Tab and split identities match the saved work surface.' }, { criterionId: 'session', outcome: 'met' as 'met' | 'gap' | 'unknown', evidence: ['artifacts/recovery/session-check.log:42'], note: 'The same Session resumed and the draft text is unchanged.' }], submissionId: 'report:visual-1', acceptedAt: null }
 function phase(mode: string): DemandRecord {
-  const base = { ...goals[0]!, alignment: { ...alignment, confirmedAt: ['proposal', 'questions', 'receipt-failure'].includes(mode) ? null : _hygiene_fixtureTime(23734400000) } }
+  if (mode === 'done-no-alignment') return { ...goals[0]!, status: 'done' }
+  if (mode === 'no-alignment-report') return { ...goals[0]!, grounding }
+  if (mode === 'delivery-failure') return goals[0]!
+  const base = { ...goals[0]!, alignment: { ...alignment, confirmedAt: ['proposal', 'questions', 'receipt-failure', 'done-unconfirmed'].includes(mode) ? null : _hygiene_fixtureTime(23734400000) } }
+  if (['done-unconfirmed', 'done-confirmed'].includes(mode)) return { ...base, status: 'done' }
   if (mode === 'questions') return { ...base, alignment: { ...base.alignment, openQuestions: ['Should the Agent resume automatically, or wait for a click?'] } }
   if (['proposal', 'confirmed', 'receipt-failure'].includes(mode)) return base
   if (mode === 'stale') return { ...base, alignment: { ...base.alignment, revision: 2, criteria: [...alignment.criteria, { id: 'outage', text: 'A temporary Runtime outage preserves the current work surface.' }] }, grounding: { ...grounding, acceptedAt: _hygiene_fixtureTime(23734400000) } }
@@ -27,13 +32,16 @@ function phase(mode: string): DemandRecord {
   return { ...base, grounding: { ...grounding, acceptedAt: mode === 'accepted' ? _hygiene_fixtureTime(23734400000) : null } }
 }
 const confirm = api.demands.confirmAlignment
+const ensureTopic = api.scratch.ensureTopic
+let root: ReturnType<typeof createRoot> | undefined
 
 function seed(mode = 'many') {
   const scenario = !['many', 'empty', 'one'].includes(mode)
   const entries = mode === 'empty' ? [] : mode === 'one' ? [goals[0]!] : scenario ? [phase(mode), ...goals.slice(1), finished] : [...goals, finished]
+  api.scratch.ensureTopic = mode === 'delivery-failure' ? async () => { throw new Error('The discussion service is unavailable. Your goal and current work are preserved.') } : ensureTopic
   api.demands.confirmAlignment = mode === 'receipt-failure' ? async () => { throw new Error('The current proposal changed in another window. Reload it before confirming.') } : confirm
-  flushSync(() => useAppStore.setState({ initialize, config: initial.config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: null, layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true, leaderTopicVisible: false }))
+  flushSync(() => { useAppStore.setState({ initialize, config: mode === 'delivery-failure' ? { ...initial.config!, workspaces: [...initial.config!.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID), { ...project, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: _hygiene_fixturePath("preview/scratch"), kind: 'scratch' }] } : initial.config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: null, layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true, leaderTopicVisible: false }); root?.render(<App key={mode} />) })
 }
 seed()
-createRoot(document.getElementById('root')!).render(<App />)
+root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed, facts: () => ({ selected: useAppStore.getState().selectedDemandId, ids: Object.keys(useAppStore.getState().demands), runs: sessions.map((session) => session.control) }) } })
