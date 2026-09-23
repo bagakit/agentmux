@@ -7,6 +7,8 @@
 @import './tokens.css';
 @import './base.css';
 @import './chrome.css';
+@import './space-tree.css';
+@import './space-object-appearance.css';
 @import './selector.css';
 @import './dock.css';
 @import './topic-topology.css';

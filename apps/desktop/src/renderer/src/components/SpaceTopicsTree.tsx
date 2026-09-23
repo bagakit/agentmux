@@ -1,5 +1,5 @@
 import { NotebookText, Pin, NotebookPen } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
@@ -13,9 +13,14 @@ import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import type { ActivityContextInput } from '../lib/activity-groups'
 import { useAppStore } from '../store'
 import { matchesSpaceQuery } from '../lib/space-tree-navigation'
+import { topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
+import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 
 /** Filesystem objects and existing Session facts; no separate Space or heat registry. */
-export function SpaceTopicsTree({ workspace, query = '' }: { workspace: WorkspaceRecord; query?: string }) {
+export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: {
+  workspace: WorkspaceRecord; query?: string; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
+}) {
   const { topics, error } = useScratchTopics(workspace.id)
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
@@ -89,19 +94,22 @@ export function SpaceTopicsTree({ workspace, query = '' }: { workspace: Workspac
         const topic = byId.get(id)!
         const isMote = label === 'Motes'
         const name = id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title
+        const target = topicSpaceIconTarget(workspace, { ...topic, title: name })
         const selected = activeWorkspaceId === workspace.id && current === id
         const bucket = byTopic.get(id) ?? []
         const attentionLabel = rowAttentionLabel(rowAttention(bucket))
         const isPinned = pinned?.includes(id) === true
-        return <div key={id} className="space-tree-entry" data-space-entry>
+        return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon}>
+        <div className="space-tree-entry" data-space-entry>
           <div className="project-rail-entry">
             <button type="button" data-space-nav={`topic:${id}`} data-space-parent={key}
+              data-space-icon-target={target.key} style={{ '--rail-depth': 1 } as CSSProperties}
               className={`project-rail-row ${isMote ? 'space-mote-row' : 'space-topic-row'}${selected ? ' project-rail-row--active' : ''}`}
               aria-label={[`Open ${isMote && id !== PMO_TEAMS_TOPIC_ID ? `Mote · ${name}` : name}`, attentionLabel].filter(Boolean).join(' · ')}
               aria-current={selected ? 'page' : undefined}
               title={[name, topic.readError ?? topic.summary, topic.directoryPath].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
-              {isMote ? <span className="project-rail-row__icon"><MoteIcon size={14} /></span> : null}
+              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} />
               <span className="project-rail-row__identity"><strong>{name}</strong></span>
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
@@ -112,7 +120,7 @@ export function SpaceTopicsTree({ workspace, query = '' }: { workspace: Workspac
             {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
           </div>
           {topic.readError ? <div className="new-tab-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
-        </div>
+        </div></SpaceObjectContextMenu>
       }) : null}
     </nav>
   }

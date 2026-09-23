@@ -75,7 +75,7 @@ describe('Mote vector identity', () => {
   it('mounts that mark in the real Mote tree row and the open creation menu', async () => {
     vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
     useAppStore.setState({ layouts: {}, tabs: {}, collapsedProjectGroups: {}, pinnedItems: {} })
-    await act(async () => root.render(<><SpaceTopicsTree workspace={workspace} /><SpaceCreateMenu onOpenFolder={async () => {}} /></>))
+    await act(async () => root.render(<><SpaceTopicsTree workspace={workspace} icons={{}} onChangeIcon={() => {}} /><SpaceCreateMenu onOpenFolder={async () => {}} /></>))
     const tree = container.querySelector('[aria-label="Open Mote"] svg')
     expect(tree).not.toBeNull()
     const contour = renderedMote(14).querySelector('path')!.getAttribute('d')

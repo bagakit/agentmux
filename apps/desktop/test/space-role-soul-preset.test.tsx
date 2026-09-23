@@ -47,7 +47,7 @@ it('creates Mote through the actual menu, preserves its editable SOUL and opens 
   vi.mocked(api.scratch.listTopics).mockResolvedValue(await service.list(workspace))
   const openTopic = vi.fn(async () => {}); const openFile = vi.fn(async () => {})
   useAppStore.setState({ openScratchTopic: openTopic, openFile })
-  await act(async () => { root.render(createElement(SpaceTopicsTree, { workspace })); })
+  await act(async () => { root.render(createElement(SpaceTopicsTree, { workspace, icons: {}, onChangeIcon: () => {} })); })
   const edit = container.querySelector<HTMLButtonElement>('button[aria-label="Edit Untitled Mote SOUL.md"]')
   expect(edit).not.toBeNull()
   await act(async () => { edit!.click(); await vi.waitFor(() => expect(openFile).toHaveBeenCalledWith(`${mote.directoryPath}/SOUL.md`, undefined, undefined, SCRATCH_WORKSPACE_ID)) })

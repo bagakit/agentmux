@@ -1,7 +1,9 @@
-import { ProjectIcon } from './ProjectIcon'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
+import { SpaceIconPicker } from './SpaceIconPicker'
+import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { ProjectActivity } from './ProjectActivity'
-import { Folders, Pin, Plus, RadioTower, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
-import { useLayoutEffect, useMemo, useRef, useState, Fragment, type CSSProperties, type ReactNode } from 'react'
+import { Folders, Layers, Pin, Plus, RadioTower, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import {
@@ -43,10 +45,12 @@ export function WorkspaceSidebar() {
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
   const toggleProjectGroup = useAppStore((state) => state.toggleProjectGroup)
   const pinnedItems = useAppStore((state) => state.pinnedItems)
+  const icons = useAppStore((state) => state.spaceObjectIcons)
   const reportError = useAppStore((state) => state.reportError)
   const [removeRequest, setRemoveRequest] = useState<ReturnType<typeof projectRailNavigation>['projects'][number] | null>(null)
   const [removing, setRemoving] = useState(false)
   const [query, setQuery] = useState('')
+  const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
   const filtering = Boolean(query.trim())
   const treeRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -175,6 +179,7 @@ export function WorkspaceSidebar() {
           className="project-rail-row project-rail-row--pinned-child"
           data-space-nav={`pin:${scope}:${id}`}
           data-space-parent={scope}
+          data-space-pin-owner={scope}
           aria-label={label}
           title={label}
           style={{ '--rail-depth': depth } as CSSProperties}
@@ -195,6 +200,9 @@ export function WorkspaceSidebar() {
   }
 
   function projectRow({ project, depth }: ProjectRailNode) {
+    const target = folderSpaceIconTarget(project)
+    const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId}
+      manualIcon={icons[target.key] ?? null} />
     const ancestors = projectRelations.ancestors.get(project.id) ?? []
     if (!filtering && ancestors.some((id) => collapsedProjectGroups[projectCollapseKey(id)] === true)) return null
     const parentKey = ancestors.at(-1) ?? projectRelations.groupKeys.get(project.id) ?? 'space:folders'
@@ -230,7 +238,7 @@ export function WorkspaceSidebar() {
     const branch = preferredWorkspace?.branch ?? null
     const row = (
       <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
-      {hasChildren ? <SpaceDisclosure icon={<ProjectIcon workspaceId={project.preferredWorkspaceId} name={project.name} />}
+      {hasChildren ? <SpaceDisclosure icon={identity}
         expanded={!collapsed} label={`${collapsed ? 'Expand' : 'Collapse'} ${project.name}`} disabled={filtering}
         onToggle={() => toggleProjectGroup(projectCollapseKey(project.id))} /> : null}
       <button
@@ -242,9 +250,9 @@ export function WorkspaceSidebar() {
         data-space-parent={parentKey}
         data-space-expanded={hasChildren && !filtering ? !collapsed : undefined}
         data-workspace-id={preferred ?? undefined}
+        data-space-icon-target={target.key}
         {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
-        // 缩进只表达"这个 Project 在上一个 Project 的目录里"。深度走自定义属性而不是内联
-        // padding：具体几像素归样式表（密度合同《Project Rail Nesting Indent》），这里只报层数。
+        // 分类成员、路径聚合与真实目录层级相加；这里只报层数，像素归密度合同和样式表。
         {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
         {...(workingAgentCount(projectSessions) > 0 ? { 'data-running': 'true' } : {})}
         onClick={() => {
@@ -255,7 +263,7 @@ export function WorkspaceSidebar() {
           })
         }}
       >
-        {hasChildren ? null : <ProjectIcon workspaceId={project.preferredWorkspaceId} name={project.name} />}
+        {hasChildren ? null : identity}
         <span className="project-rail-row__identity">
           <strong>{project.name}</strong>
           {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
@@ -269,13 +277,15 @@ export function WorkspaceSidebar() {
       </div>
     )
     return (
-      <Fragment key={project.id}>
+      <div key={project.id} data-space-folder={project.id}
+        className={`project-rail-folder-block${!filtering && pinnedItems[project.id]?.length ? ' project-rail-folder-block--pinned' : ''}`}>
         <WorkspaceRowContextMenu
           path={project.repoPath}
           branch={branch}
           isLocal={project.hostId === 'local'}
           workspaceId={preferred ?? project.preferredWorkspaceId}
           onRemove={() => setRemoveRequest(project)}
+          onChangeIcon={() => setIconTarget(target)}
         >
           <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={projectSessions} contexts={activityContextsForWorkspaces(visibleProjectIds.flatMap((id) => projectRelations.nodes.get(id)!.workspaces))} /> : null}</div>
         </WorkspaceRowContextMenu>
@@ -285,7 +295,7 @@ export function WorkspaceSidebar() {
             workspace — the same selectWorkspace path the parent row uses. */}
         {!filtering && pinnedChildRows(
           project.id,
-          Math.min(depth + 1, PROJECT_RAIL_MAX_DEPTH),
+          depth + 1,
           (branchName) => ({
             label: branchName,
             targetId:
@@ -293,7 +303,7 @@ export function WorkspaceSidebar() {
               preferred ?? project.preferredWorkspaceId
           })
         )}
-      </Fragment>
+      </div>
     )
   }
 
@@ -331,7 +341,7 @@ export function WorkspaceSidebar() {
         >{railDensity === 'default' ? <Rows2 size={15} /> : railDensity === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}</button>
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
-        {scratch ? <SpaceTopicsTree workspace={scratch} query={query} /> : null}
+        {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={setIconTarget} /> : null}
         <nav className="project-list" aria-label="Folders">
           <SpaceSectionHeader label="Folders" count={projects.length} icon={<Folders size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup('space:folders')}
@@ -355,12 +365,8 @@ export function WorkspaceSidebar() {
                 ) : null}
                 {collapsed ? null : group.nodes.map((node) => projectRow({
                   ...node,
-                  // A grouped Project gets one visual level for the group itself;
-                  // path-derived nesting remains additive below that level.
-                  depth: Math.min(
-                    node.depth + (group.groupPath ? 1 : 0),
-                    PROJECT_RAIL_MAX_DEPTH
-                  )
+                  // One category step; a path group and real directory nesting add their own steps.
+                  depth: 1 + (group.groupPath ? 1 : 0) + Math.min(node.depth, PROJECT_RAIL_MAX_DEPTH)
                 }))}
               </div>
             )
@@ -370,6 +376,7 @@ export function WorkspaceSidebar() {
           ) : null}
         </nav>
       </div>
+      <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} />
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove project view?"
@@ -432,7 +439,7 @@ function GroupHeader({
         onClick={onToggle}
       >
         <span className="project-rail-group__identity">
-          <span className="space-disclosure__type project-rail-row__icon"><Folders size={13} aria-label="Automatic path group" /></span>
+          <span className="space-disclosure__type project-rail-row__icon"><Layers size={13} aria-label="Automatic path group" /></span>
           <span className="project-rail-group__label">{group.label}</span>
           {collapsed && group.groupPath ? (
             <span className="project-rail-group__address">{railGroupAddress(group.groupPath)}</span>

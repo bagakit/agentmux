@@ -41,7 +41,7 @@ it('shows Mote consistently in the real Space tree, creation menu and fixed navi
   const focus = useAppStore.getState().agentFocus
   await act(async () => root.render(createElement('div', {},
     createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }),
-    createElement(SpaceTopicsTree, { workspace }),
+    createElement(SpaceTopicsTree, { workspace, icons: {}, onChangeIcon: () => {} }),
     createElement(SpaceCreateMenu, { onOpenFolder: async () => {} })
   )))
   const launcher = container.querySelector<HTMLButtonElement>('.pmo-teams-topic-compact-launcher button')!

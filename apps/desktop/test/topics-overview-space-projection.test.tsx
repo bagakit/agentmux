@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({
     layouts: {} as Record<string, unknown>, tabs: {} as Record<string, unknown>,
     workspaceFileRevisions: {} as Record<string, number>, sessions: [] as SessionSnapshot[],
     agentNames: {} as Record<string, string>, timelines: {}, config: null,
-    scratchTopicOrder: [] as string[], pinnedItems: {} as Record<string, string[]>,
+    scratchTopicOrder: [] as string[], pinnedItems: {} as Record<string, string[]>, spaceObjectIcons: {},
     collapsedProjectGroups: {}, activeWorkspaceId: '__scratch__',
     toolsOpen: false, workspaceTool: 'agents',
     selectWorkspace: vi.fn(async () => {}), setWorkspaceTool: vi.fn(), toggleTools: vi.fn(),
@@ -63,7 +63,7 @@ let root: Root
 const reveal = vi.fn()
 async function render(): Promise<void> {
   await act(async () => root.render(createElement(Fragment, null,
-    createElement(SpaceTopicsTree, { workspace }),
+    createElement(SpaceTopicsTree, { workspace, icons: {}, onChangeIcon: () => {} }),
     createElement(WorkspaceTopicsPanel, { workspace, onRevealDirectory: reveal })
   )))
 }
@@ -123,7 +123,8 @@ describe('Topics tree and polished overview share filesystem and workface facts'
     expect(element('.workspace-topic-index-header').textContent).toBe('Topics2')
     expect(element('[data-topic-id="view:first"] .selector-row__identity').textContent).toContain('A durable goal')
     expect(element('[data-topic-id="view:second"] .workspace-topic-entry__pin')).toBeDefined()
-    expect(element('[aria-label="Open Second Topic"] [aria-label="Pinned"]')).toBeDefined()
+    expect(element('[aria-label="Open Second Topic"]').closest('.project-rail-entry')!
+      .querySelector('[aria-label="Unpin Second Topic"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(element('[aria-label="Open First Topic"]').getAttribute('aria-current')).toBe('page')
     expect(element('[aria-label="Topics overview"]').classList.contains('project-rail-row--active')).toBe(false)
     expect(element('[data-topic-id="view:first"]').dataset.current).toBe('true')
@@ -185,7 +186,7 @@ describe('Topics tree and polished overview share filesystem and workface facts'
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
     const menu = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
     expect(menu.map((item) => item.textContent)).toEqual([
-      'Pin Topic', 'Rename Topic', 'Reveal in Files', 'Copy Topic Path', 'Edit Topic Wiki',
+      'Change icon…', 'Pin Topic', 'Rename Topic', 'Reveal in Files', 'Copy Topic Path', 'Edit Topic Wiki',
       'Disable Topic Wiki', 'Restore default Topic Wiki'
     ])
     fixture.snapshots = [{ ...shared, title: 'Refreshed Wiki Topic', wiki: { ...shared.wiki, enabled: false } }]

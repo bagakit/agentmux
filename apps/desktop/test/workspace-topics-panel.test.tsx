@@ -29,6 +29,7 @@ const fixture = vi.hoisted(() => ({
     timelines: {} as Record<string, unknown>,
     scratchTopicOrder: [] as string[],
     pinnedItems: {} as Record<string, string[]>,
+    spaceObjectIcons: {},
     createScratchTopic: vi.fn(),
     openScratchTopic: vi.fn(),
     renameScratchTopic: vi.fn(),

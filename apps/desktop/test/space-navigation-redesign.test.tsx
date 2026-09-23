@@ -71,7 +71,7 @@ it('projects relative Topic directories onto exact same-host absolute Session pa
     agent('different-host', path, 'waiting', 'studio'), agent('nearby', `${path}-neighbor`, 'waiting'),
     agent('mote', `${scratch.path}/${scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)}`, 'working')]
   await mount([b, a], sessions)
-  const labels = () => [...container.querySelectorAll('.space-topic-row')].map((node) => node.textContent)
+  const labels = () => [...container.querySelectorAll('.space-topic-row .project-rail-row__identity strong')].map((node) => node.textContent)
   expect(labels()).toEqual(['Beta notes', 'Alpha notes'])
   expect(heat('[data-space-nav="topic:view:b"]')).toBeNull()
   const activity = heat('[data-space-nav="topic:view:a"]')!

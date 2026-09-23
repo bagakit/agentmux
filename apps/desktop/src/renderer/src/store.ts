@@ -8,6 +8,7 @@ import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
+import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconId, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
@@ -498,6 +499,9 @@ type AppState = {
    * scope 不做解释，只按给来的 key 分桶。
    */
   pinnedItems: Record<string, string[]>
+  /** User-authored Space identity, alongside pin/layout presentation; never Runtime configuration. */
+  spaceObjectIcons: SpaceIconOverrides
+  setSpaceObjectIcon(key: string, icon: SpaceIconId | null): Promise<void>
   /** 在一个 scope 内 pin/unpin 一个 id。保序；unpin 恰好移除一条；移空则删掉该 scope 键（同 toggleProjectGroup 删键，不留空数组）。 */
   togglePinnedItem(scope: string, id: string): void
   toolsOpen: boolean
@@ -1689,6 +1693,7 @@ type PersistedAppState = {
   collapsedProjectGroups?: Record<string, true>
   explorerCollapsed?: Record<string, boolean>
   pinnedItems?: Record<string, string[]>
+  spaceObjectIcons?: SpaceIconOverrides
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
   projectRailWidth?: number
@@ -1704,6 +1709,7 @@ export type RestoredUiState = Pick<
   | 'collapsedProjectGroups'
   | 'explorerCollapsed'
   | 'pinnedItems'
+  | 'spaceObjectIcons'
   | 'toolsOpen'
   | 'workspaceTool'
   | 'projectRailWidth'
@@ -1776,6 +1782,7 @@ export function restorePersistedUiState(
     | 'collapsedProjectGroups'
     | 'explorerCollapsed'
     | 'pinnedItems'
+    | 'spaceObjectIcons'
     | 'toolsOpen'
     | 'workspaceTool'
     | 'projectRailWidth'
@@ -1792,6 +1799,7 @@ export function restorePersistedUiState(
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
     pinnedItems: restoredPinnedItems(persisted.pinnedItems),
+    spaceObjectIcons: restoreSpaceIconOverrides(persisted.spaceObjectIcons),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
     projectRailWidth: clampProjectRailWidth(persisted.projectRailWidth ?? PROJECT_RAIL_DEFAULT_WIDTH),
@@ -1844,6 +1852,7 @@ function selectPersistedInputs(state: AppState) {
     // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
     // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
     pinnedItems: state.pinnedItems,
+    spaceObjectIcons: state.spaceObjectIcons,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
     projectRailWidth: state.projectRailWidth,
@@ -2180,6 +2189,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   collapsedProjectGroups: {},
   explorerCollapsed: {},
   pinnedItems: {},
+  spaceObjectIcons: {},
   toolsOpen: true,
   nativeSurfaceOverlayCount: 0,
   portalOverlayCount: 0,
@@ -4385,6 +4395,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       return { pinnedItems: { ...state.pinnedItems, [scope]: next } }
     })
+  },
+  async setSpaceObjectIcon(key, icon) {
+    requireSpaceIconSelection(key, icon)
+    if (!workbenchWriteFence.isOpen()) throw new Error('The saved workbench is still loading. Your icon choice is kept; retry when it is ready.')
+    set((state) => {
+      if ((state.spaceObjectIcons[key] ?? null) === icon) return state
+      const { [key]: _previous, ...others } = state.spaceObjectIcons
+      return { spaceObjectIcons: icon === null ? others : { ...others, [key]: icon } }
+    })
+    try {
+      persistentWorkbenchStorage.flush()
+      // The existing platform owner accepts a flush request; its void return is not a disk ACK.
+      await requestWorkbenchStorageFlush()
+    } catch (error) {
+      get().reportWorkbenchSaveFailure(error)
+      throw error
+    }
   },
   setPortalOverlayCount(portalOverlayCount) {
     set({ portalOverlayCount })

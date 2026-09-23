@@ -1,11 +1,12 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, ExternalLink, GitBranch, PanelLeftClose, SquareTerminal } from 'lucide-react'
+import { Copy, ExternalLink, GitBranch, PanelLeftClose, Shapes, SquareTerminal } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
 import { useAppStore } from '../store'
 
 /**
@@ -114,7 +115,8 @@ export function WorkspaceRowContextMenu({
   branch,
   isLocal,
   workspaceId,
-  onRemove
+  onRemove,
+  onChangeIcon
 }: {
   children: ReactNode
   path: string
@@ -123,7 +125,9 @@ export function WorkspaceRowContextMenu({
   workspaceId: string
   /** 缺省表示这一行不可移除（Scratch）。 */
   onRemove?: () => void
+  onChangeIcon?: () => void
 }) {
+  const menu = useSpaceObjectMenu()
   const reportError = useAppStore((state) => state.reportError)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const launchTerminal = useAppStore((state) => state.launchTerminal)
@@ -157,14 +161,17 @@ export function WorkspaceRowContextMenu({
   })
 
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+    <ContextMenu.Root onOpenChange={menu.onOpenChange}>
+      <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
           className="tab-context-menu project-rail-context-menu"
           collisionPadding={8}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={menu.onCloseAutoFocus}
         >
+          {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(onChangeIcon)}>
+            <Shapes size={14} /><span>Change icon…</span>
+          </ContextMenu.Item> : null}
           {model.entries.map((entry, index) => {
             if (entry.kind === 'separator') {
               return (

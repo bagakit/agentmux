@@ -141,18 +141,12 @@ describe('样式表的组织', () => {
     // 判据用模块自己导出的谓词，而不是在这里手抄一份保留色表：手抄就是把同一份数据放到第三个地方，
     // 而两个该联动的常量分居两文件必然漂移——这条断言存在的全部理由就是上一次的漂移。
     //
-    // 逐条遍历「组件注入的身份色属性」而不是只查 --speaker-hue：同一套派生已经有第二个消费方
-    // （项目图标的 --project-hue），而按单个属性名写死的判据对第三个、第四个消费方是**静默失明**的
-    // ——那正是这条断言自己在讲的那种失明，只是换了一层。新增身份色属性时把它加进这张表即可。
-    const files = new Map(styleFiles().map((file) => [file.name, file.text]))
-    const identityHues = [
-      { property: '--speaker-hue', file: 'conversation-avatar.css' },
-      { property: '--project-hue', file: 'conversation-avatar.css' }
-    ]
-    for (const { property, file } of identityHues) {
-      const css = files.get(file)
-      expect(css, `${file} 不在 @import 列表里了`).toBeDefined()
-      const declared = new RegExp(`${property}:\\s*([0-9.]+)\\s*;`).exec(css!)
+    // 从实际身份色的 hsl(var(--…hue)) 消费来源反推，避免手写清单与已退休的对象色一起漂移。
+    const identityHues = styleFiles().flatMap(({ name, text }) => [...text.matchAll(/hsl\(var\((--[\w-]+hue)\)/g)]
+      .map((match) => ({ property: match[1]!, file: name, css: text })))
+    expect(identityHues.length).toBeGreaterThan(0)
+    for (const { property, file, css } of identityHues) {
+      const declared = new RegExp(`${property}:\\s*([0-9.]+)\\s*;`).exec(css)
       expect(declared, `${property} 的兜底声明不见了——组件注入的自定义属性必须有声明的默认值`).not.toBeNull()
       const hue = Number(declared![1])
       expect(clearsSemanticHues(hue), `${property} 的兜底色相 ${hue}° 落在语义色的禁区里`).toBe(true)
