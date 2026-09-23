@@ -121,7 +121,7 @@ async function createHarness(
       conversationId: NATIVE_CONVERSATION_ID,
       transcriptPath
     }
-  })
+  }, {})
 
   // Genuinely narrow normalizedHook.nativeHandle before storing (no ! casts or silent omissions)
   if (!normalizedHook.nativeHandle || normalizedHook.nativeHandle.kind !== 'provider') {

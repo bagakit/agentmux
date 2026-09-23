@@ -35,7 +35,7 @@ describe('Pi provider', () => {
         providerId: 'pi',
         eventName,
         payload: { session_id: 'pi-session-1', session_file: '/tmp/pi/2026.jsonl', ...payload }
-      })
+      }, {})
   }
 
   describe('事件名逐字来自上游的 on() 重载', () => {
@@ -148,7 +148,7 @@ describe('Pi provider', () => {
         providerId: 'pi',
         eventName: 'agent_start',
         payload: { session_id: 'pi-session-1' }
-      })
+      }, {})
       expect(event.nativeHandle).toBeUndefined()
     })
   })

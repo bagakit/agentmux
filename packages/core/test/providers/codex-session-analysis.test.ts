@@ -513,7 +513,7 @@ describe('Codex provider completeness & session analysis', () => {
         session_id: 'test-session-uuid-42',
         transcript_path: '/tmp/codex-session.jsonl'
       }
-    })
+    }, {})
     expect(normalizedStart.nativeHandle).toEqual({
       kind: 'provider',
       providerId: 'codex',
@@ -529,7 +529,7 @@ describe('Codex provider completeness & session analysis', () => {
       providerId: 'codex',
       eventName: 'PermissionRequest',
       payload: { hook_event_name: 'PermissionRequest', session_id: 'test-session-uuid-42' }
-    })
+    }, {})
     expect(normalizedPerm.semanticState).toBe('waiting')
 
     const normalizedStop = codex.normalizeHook({
@@ -539,7 +539,7 @@ describe('Codex provider completeness & session analysis', () => {
       providerId: 'codex',
       eventName: 'Stop',
       payload: { hook_event_name: 'Stop', session_id: 'test-session-uuid-42' }
-    })
+    }, {})
     expect(normalizedStop.semanticState).toBe('done')
 
     // Managed hook plan verification

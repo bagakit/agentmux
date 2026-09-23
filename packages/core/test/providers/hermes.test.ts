@@ -42,7 +42,7 @@ describe('Hermes provider', () => {
         ...top,
         extra
       }
-    })
+    }, {})
   }
 
   function toolMutation(event: ReturnType<typeof hook>) {
@@ -122,7 +122,7 @@ describe('Hermes provider', () => {
         receiptId: 'r-flat', agentSessionId: 's-hermes', runId: 'run-hermes', providerId: 'hermes',
         eventName: 'post_tool_call',
         payload: { hook_event_name: 'post_tool_call', tool_name: 'terminal', tool_input: {}, status: 'ok' }
-      })
+      }, {})
       expect(event.semanticState).toBe('working')
     })
   })

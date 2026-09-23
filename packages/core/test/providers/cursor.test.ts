@@ -40,7 +40,7 @@ describe('Cursor provider', () => {
         model: 'gpt-5',
         ...payload
       }
-    })
+    }, {})
   }
 
   /** 取出那条携带完整 item 的工具轨迹，narrow 掉 `update` 变体（否则 `.item` 在类型上不存在）。 */

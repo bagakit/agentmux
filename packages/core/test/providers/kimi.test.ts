@@ -36,7 +36,7 @@ describe('Kimi provider', () => {
         providerId: 'kimi',
         eventName,
         payload: { hook_event_name: eventName, session_id: 'kimi-session-1', cwd: '/tmp/w', ...payload }
-      })
+      }, {})
   }
 
   describe('进程名不是可执行文件名——这条错了会让「就绪」永远等不到', () => {

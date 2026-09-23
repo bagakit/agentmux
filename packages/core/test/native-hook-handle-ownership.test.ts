@@ -186,7 +186,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
       receiptId: 'pi-main', agentSessionId: 'pi-session', runId: randomUUID(), providerId: 'pi',
       eventName: 'agent_start', payload: { session_id: 'pi-native-id', session_file: mainPath,
         agent_id: 'ordinary-unowned-field' }
-    })
+    }, {})
     expect(event.nativeHandle).toEqual({ kind: 'provider', providerId: 'pi',
       sessionId: 'pi-native-id', transcriptPath: mainPath })
   })

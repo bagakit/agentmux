@@ -60,7 +60,7 @@ describe('normalizeHook usage projection', () => {
           observedAt: 1234
         }
       }
-    })
+    }, {})
     expect(event.turnUsage).toEqual({ inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: 1234 })
   })
 
@@ -73,7 +73,7 @@ describe('normalizeHook usage projection', () => {
       providerId: 'claude',
       eventName: 'Stop',
       payload: { last_assistant_message: 'DONE', session_id: 'claude-native' }
-    })
+    }, {})
     expect(event.turnUsage).toBeUndefined()
   })
 
@@ -89,7 +89,7 @@ describe('normalizeHook usage projection', () => {
         session_id: 'codex-native',
         [HOOK_PAYLOAD_USAGE_KEY]: { inputTokens: 10, outputTokens: 5 }
       }
-    })
+    }, {})
     expect(event.turnUsage).toBeUndefined()
   })
 })

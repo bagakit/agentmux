@@ -23,7 +23,7 @@ describe('native hook normalization', () => {
         tool_input: { question: 'Ship it?' },
         session_id: 'codex-native-1'
       }
-    })
+    }, {})
     expect(event.status).toMatchObject({ state: 'waiting', source: 'native-hook' })
     expect(event.timeline[0]).toMatchObject({
       type: 'append',
@@ -55,7 +55,7 @@ describe('native hook normalization', () => {
         session_id: 'pi-native-1',
         session_file: '/tmp/pi-session.jsonl'
       }
-    })
+    }, {})
     expect(event.semanticState).toBe('working')
     // handle 的两个字段仍照常抽出来——删规则不该影响 native handle 这条正交的路。
     expect(event.nativeHandle).toMatchObject({ transcriptPath: '/tmp/pi-session.jsonl' })
@@ -69,7 +69,7 @@ describe('native hook normalization', () => {
       providerId: 'codex',
       eventName: 'SessionStart',
       payload: { session_id: '-resume-me' }
-    })
+    }, {})
     expect(codex.nativeHandle).toBeUndefined()
 
     const pi = providers.get('pi').normalizeHook({
@@ -82,7 +82,7 @@ describe('native hook normalization', () => {
         session_id: 'pi-native-relative',
         session_file: 'sessions/current.jsonl'
       }
-    })
+    }, {})
     expect(pi.nativeHandle).toBeUndefined()
   })
 
@@ -97,10 +97,10 @@ describe('native hook normalization', () => {
       payload: { last_assistant_message: 'Finished the task.' }
     }
     vi.setSystemTime(10)
-    const first = providers.get('codex').normalizeHook(envelope)
+    const first = providers.get('codex').normalizeHook(envelope, {})
     vi.setSystemTime(20)
-    const retry = providers.get('codex').normalizeHook(envelope)
-    const resumed = providers.get('codex').normalizeHook({ ...envelope, runId: 'run-2' })
+    const retry = providers.get('codex').normalizeHook(envelope, {})
+    const resumed = providers.get('codex').normalizeHook({ ...envelope, runId: 'run-2' }, {})
 
     expect(first.timeline[0]).toMatchObject({ type: 'append', item: { id: 'run-1:reused-receipt:0' } })
     expect(retry.timeline[0]).toMatchObject({ type: 'append', item: { id: 'run-1:reused-receipt:0' } })
@@ -121,11 +121,11 @@ describe('native hook normalization', () => {
       eventName: 'Stop',
       payload: { last_assistant_message: 'First result' }
     }
-    const first = providers.get('codex').normalizeHook(envelope)
+    const first = providers.get('codex').normalizeHook(envelope, {})
     const conflicting = providers.get('codex').normalizeHook({
       ...envelope,
       payload: { last_assistant_message: 'Different result' }
-    })
+    }, {})
 
     const once = applyAgentTimelineMutation([], first.timeline[0]!)
     expect(() => applyAgentTimelineMutation(once, conflicting.timeline[0]!))
@@ -140,7 +140,7 @@ describe('native hook normalization', () => {
       providerId: 'codex',
       eventName: 'UserPromptSubmit',
       payload: { prompt: 'Do not duplicate this Prompt.' }
-    })
+    }, {})
 
     // `event.timeline` 空了的话，下面那条 `some(...)===false` 照样绿——而 normalizeHook
     // 对 UserPromptSubmit 什么都不产出，比「多产出了一条 user_message」更值得红：这条测试名说的是
@@ -159,7 +159,7 @@ describe('native hook normalization', () => {
       runId: 'daemon-3',
       providerId: 'traex',
       eventName: 'tick'
-    })
+    }, {})
     expect(event.semanticState).toBe('unknown')
     expect(event.status).toMatchObject({ state: 'running', source: 'native-hook' })
   })
@@ -177,7 +177,7 @@ describe('native hook normalization', () => {
         providerId: 'claude',
         eventName,
         payload
-      })
+      }, {})
 
     const item = (event: ReturnType<typeof post>) => {
       const mutation = event.timeline[0]
@@ -257,7 +257,7 @@ describe('native hook normalization', () => {
           providerId: 'hermes',
           eventName,
           payload
-        })
+        }, {})
 
       const failed = hermes({
         tool_name: 'shell',
@@ -325,7 +325,7 @@ describe('native hook normalization', () => {
             tool_input: { command: 'exit 1' },
             extra
           }
-        })
+        }, {})
 
       const failed = hermesNested('post_tool_call', {
         tool_response: { is_error: true, stdout: 'boom' },
@@ -363,7 +363,7 @@ describe('native hook normalization', () => {
           tool_input: { command: 'ls' },
           extra: { tool_name: 'from-extra', tool_response: 'ok' }
         }
-      })
+      }, {})
       expect(landed(topLevelWins).toolName).toBe('shell')
     })
 
@@ -376,7 +376,7 @@ describe('native hook normalization', () => {
           providerId: 'pi',
           eventName,
           payload
-        })
+        }, {})
 
       const failed = pi({
         tool_name: 'bash',
@@ -399,7 +399,7 @@ describe('native hook normalization', () => {
         providerId: 'antigravity',
         eventName: 'PostInvocation',
         payload: { tool_name: 'browser', tool_input: { url: 'x' }, tool_response: { is_error: true } }
-      })
+      }, {})
       expect(event.lifecycleEvent).toBeUndefined()
       // 没有 canonical 依据就不宣称「已经有结果了」——结果字段不被采信。
       expect(item(event as ReturnType<typeof post>).toolOutput).toBeUndefined()
@@ -422,7 +422,7 @@ describe('native hook normalization', () => {
         providerId: 'claude',
         eventName,
         payload
-      })
+      }, {})
 
     it('PreToolUse 带 tool_use_id 时落在途态，item id 绑调用 id 而不是 receiptId', () => {
       const event = claude(
@@ -644,7 +644,7 @@ describe('native hook normalization', () => {
           providerId: 'codex',
           eventName,
           payload
-        })
+        }, {})
 
     const claudeRun = (runId: string) =>
       (eventName: string, payload: Record<string, unknown>, receiptId = `r-${eventName}-${Math.random()}`) =>
@@ -655,7 +655,7 @@ describe('native hook normalization', () => {
           providerId: 'claude',
           eventName,
           payload
-        })
+        }, {})
 
     it('Claude provisional 单列：Stop 与 SubagentStop 保持 unknown 且 lifecycleEvent 为 null，绝不伪造 done', () => {
       const hook = claudeRun('run-claude-provisional')
@@ -730,7 +730,7 @@ describe('native hook normalization', () => {
           providerId: 'codex',
           eventName,
           payload
-        })
+        }, {})
       codex('SubagentStart', { agent_id: 'cx-1', agent_type: 'reviewer' })
       const stop = codex('Stop', { last_assistant_message: 'done' })
       expect(stop.semanticState).toBe('working')

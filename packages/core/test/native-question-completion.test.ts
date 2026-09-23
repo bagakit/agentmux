@@ -198,8 +198,8 @@ describe('native successful question completion owns only an exact unclaimed que
 
   it.each(['run', 'receipt', 'session', 'source', 'kind', 'id-missing', 'id-empty', 'id-whitespace'] as const)('malformed Provider completion %s is refused before settlement', async field => {
     const base = new AgentProviderRegistry().get('codex')
-    const provider: AgentProvider = { ...base, normalizeHook: envelope => {
-      const event = base.normalizeHook(envelope)
+    const provider: AgentProvider = { ...base, normalizeHook: (envelope, context) => {
+      const event = base.normalizeHook(envelope, context)
       const completion = event.interactionCompletion
       if (!completion) return event
       return { ...event, interactionCompletion: { ...completion,

@@ -44,7 +44,7 @@ describe('Droid provider', () => {
           permission_mode: 'off',
           ...payload
         }
-      })
+      }, {})
   }
 
   function toolMutation(event: ReturnType<ReturnType<typeof hookIn>>) {

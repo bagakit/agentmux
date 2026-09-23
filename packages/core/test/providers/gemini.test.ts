@@ -36,7 +36,7 @@ describe('Gemini provider', () => {
         transcript_path: '/tmp/chats/session.json',
         ...payload
       }
-    })
+    }, {})
   }
 
   describe('能力声明与实现读出的合同相符', () => {
@@ -86,14 +86,14 @@ describe('Gemini provider', () => {
       const failed = gemini.normalizeHook({
         receiptId: 'r-fail', agentSessionId: 's-gemini', runId: 'run-gemini', providerId: 'gemini',
         payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { output: 'boom', is_error: true } }
-      })
+      }, {})
       const failedItem = failed.timeline.find((m) => m.type !== 'update' && m.item.kind === 'tool_call')
       expect(failedItem && failedItem.type !== 'update' && failedItem.item.status).toBe('failed')
 
       const ok = gemini.normalizeHook({
         receiptId: 'r-ok', agentSessionId: 's-gemini', runId: 'run-gemini', providerId: 'gemini',
         payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { output: 'fine' } }
-      })
+      }, {})
       const okItem = ok.timeline.find((m) => m.type !== 'update' && m.item.kind === 'tool_call')
       expect(okItem && okItem.type !== 'update' && okItem.item.status).toBe('complete')
     })

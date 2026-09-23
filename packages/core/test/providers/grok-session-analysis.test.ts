@@ -958,7 +958,7 @@ describe('Grok session history analysis and reader', () => {
           transcriptPath: updatesPath,
           cwd: workspacePath
         }
-      })
+      }, {})
 
       expect(normalized.nativeHandle).toBeDefined()
       if (!normalized.nativeHandle) {

@@ -27,7 +27,7 @@ describe('Grok provider', () => {
       runId: 'run-grok',
       providerId: 'grok',
       payload: { hookEventName: eventName, sessionId: 'grok-session-1', ...payload }
-    })
+    }, {})
   }
 
   /**
@@ -101,7 +101,7 @@ describe('Grok provider', () => {
       const snake = grok.normalizeHook({
         receiptId: 'r-snake', agentSessionId: 's-grok', runId: 'run-grok', providerId: 'grok',
         payload: { hookEventName: 'session_start', session_id: 'not-groks-spelling' }
-      })
+      }, {})
       expect(snake.nativeHandle).toBeUndefined()
     })
   })

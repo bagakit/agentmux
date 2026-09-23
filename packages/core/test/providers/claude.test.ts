@@ -36,7 +36,7 @@ describe('Claude provider', () => {
       providerId: 'claude',
       eventName,
       payload: { hook_event_name: eventName, session_id: 'sess-1', ...payload }
-    })
+    }, {})
   }
 
   function toolMutation(event: ReturnType<typeof hook>) {

@@ -452,7 +452,7 @@ describe('Droid session analysis and native history', () => {
           transcript_path: transcriptPath,
           cwd: '/fixture/workspace'
         }
-      })
+      }, {})
 
       expect(normalized.nativeHandle).toEqual({
         kind: 'provider',

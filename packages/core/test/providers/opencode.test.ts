@@ -1,17 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { AgentProviderRegistry } from '../../src/agent-provider.js'
+import { AgentProviderRegistry, type AgentProviderHookNormalizationContext } from '../../src/agent-provider.js'
 import { OPENCODE_HOOK_EVENTS, OPENCODE_HOOKS, createOpenCodeManagedHookPlan } from '../../src/providers/opencode.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**
- * T-009 的 Provider 测试。
+ * T-009 / T-039 的 Provider 测试。
  *
- * 证据来自**上游自己的源码**：`home//proj/github/opencode`（本机可读的第一方仓库）。
+ * 证据来自上游自己的源码：home//proj/github/opencode（df35e842f59bc115bb7c0479a8e11f017d443f2c）。
  * 每条断言的期望值都逐字取自那里的生成类型与加载器实现，不是从任何第三方项目的实现反推。
- *
- * 这些断言证明「声明与上游合同相符」。它**不**证明跑过一次真实 OpenCode 会话——本机没有装 opencode，
- * 事件是构造的信封，不是一个真在干活的 Agent 发出来的。不冒充。
  */
 describe('OpenCode provider', () => {
   const providers = new AgentProviderRegistry()
@@ -22,9 +19,14 @@ describe('OpenCode provider', () => {
    * 造一条 OpenCode 形状的信封。
    *
    * 负载键是 **`sessionID`（大写 ID）**——上游全库统一如此（`types.gen.ts:470,479`）。
-   * `runId` 逐用例区分：normalizer 的子代理花名册是按 runId 索引的模块级可变状态。
+   * `runId` 逐用例区分：每条信封沿自己的 Run 身份参与归一化，不共享可变花名册。
    */
-  function hookIn(runId: string) {
+  function hookIn(
+    runId: string,
+    context: AgentProviderHookNormalizationContext = {
+      nativeHandle: { kind: 'provider', providerId: 'opencode', sessionId: 'opencode-session-1' }
+    }
+  ) {
     return (eventName: string, payload: Record<string, unknown> = {}) =>
       opencode.normalizeHook({
         receiptId: `r-${runId}-${eventName}`,
@@ -33,14 +35,11 @@ describe('OpenCode provider', () => {
         providerId: 'opencode',
         eventName,
         payload: { sessionID: 'opencode-session-1', ...payload }
-      })
+      }, context)
   }
 
   describe('事件名逐字来自上游生成类型，不做翻译', () => {
-    it('装的七个全部是上游的真名——带点号的小写，没有一个合成的 PascalCase', () => {
-      // 上游的事件名形如 `session.idle`（`types.gen.ts:704-736` 的联合体）。参考实现会把它们改写成
-      // `SessionIdle` 这类合成名再投递；本仓透传真名，SSOT 因此直接落在上游类型上。
-      // 若哪天有人"顺手"改成 PascalCase，这条会红。
+    it('装的全部是上游的真名——带点号的小写，没有一个合成的 PascalCase', () => {
       for (const name of OPENCODE_HOOK_EVENTS) {
         expect(name).toMatch(/^[a-z]+(\.[a-z.]+)+$/)
       }
@@ -51,8 +50,6 @@ describe('OpenCode provider', () => {
     })
 
     it('绝不含任何一个别家 Provider 的拼法', () => {
-      // 别家的收尾拼法：Claude 的 `Stop`、Copilot 的 `agentStop`、grok 的 `stop_cancelled`、
-      // Pi 的 `agent_end`。照抄任何一个都会静默失配——上游不认识的名字不会报错，只是永远不到。
       const foreign = ['Stop', 'agentStop', 'stop_cancelled', 'agent_end', 'SessionStart', 'SessionIdle']
       for (const name of foreign) {
         expect([...OPENCODE_HOOK_EVENTS]).not.toContain(name)
@@ -60,37 +57,36 @@ describe('OpenCode provider', () => {
     })
   })
 
-  describe('done 挂在两个名字上——因为上游把一次空闲发成两条，且其中一条已废弃', () => {
-    it('session.status 与 session.idle 都判 done', () => {
-      // 上游 `session/status.ts:41-45`：先发 `session.status`，若 `status.type==='idle'` 再发
-      // `session.idle`。两条**总是成对到达**。
+  describe('session.status 使用 payload status.type 匹配，不把 busy/retry/idle 误判为 done', () => {
+    it('session.status 带 idle 保持中性 unknown，不发出 turn-end (idle 无确定 outcome)', () => {
       const emit = hookIn('run-done')
-      expect(emit('session.status', { status: { type: 'idle' } }).semanticState).toBe<AgentSemanticState>('done')
-      expect(emit('session.idle').semanticState).toBe<AgentSemanticState>('done')
+      const result = emit('session.status', { status: { type: 'idle' } })
+      expect(result.semanticState).toBe<AgentSemanticState>('unknown')
+      expect(result.lifecycleEvent ?? null).toBeNull()
     })
 
-    it('只押已废弃的 session.idle 是不够的——它随时可能消失', () => {
-      // `packages/schema/src/session-status-event.ts:43` 那行逐字 `// deprecated` 标在 `Idle` 上。
-      // 这条断言的意义：如果有人把 rules 收敛成只认 `session.idle`，上游删掉它的那天 done 会静默
-      // 消失（会话永远停在 working）。所以 `session.status` 必须独立地也判 done。
-      const statusRule = OPENCODE_HOOKS.rules.find((rule) => rule.events.includes('session.status'))
-      expect(statusRule?.state).toBe<AgentSemanticState>('done')
-      const idleRule = OPENCODE_HOOKS.rules.find((rule) => rule.events.includes('session.idle'))
-      expect(idleRule?.state).toBe<AgentSemanticState>('done')
+    it('session.status 带 busy 判 working 并发出 turn-start (可重开 turn)', () => {
+      const emit = hookIn('run-busy')
+      const result = emit('session.status', { status: { type: 'busy' } })
+      expect(result.semanticState).toBe<AgentSemanticState>('working')
+      expect(result.lifecycleEvent).toBe('turn-start')
     })
 
-    it('流式输出判 working——它把一轮开头 session.status(busy) 的误判覆盖回去', () => {
-      // 已知代价：规则只按事件名匹配（`hook-normalizer.ts:187-198` 除 toolNames 外不读负载），
-      // 所以 `session.status` 带 `busy` 时也会被判 done。真实时序是
-      // status(busy) → 一串 part.updated → status(idle)+idle，中间的 part.updated 会把状态拉回
-      // working，收尾那次才是最终态。这条钉住那个"拉回来"的能力。
-      const emit = hookIn('run-stream')
-      expect(emit('session.status', { status: { type: 'busy' } }).semanticState).toBe<AgentSemanticState>('done')
-      expect(emit('message.part.updated', { part: { id: 'p1' } }).semanticState).toBe<AgentSemanticState>('working')
+    it('session.status 带 retry 判 working (进行中重试，不重开 turn)', () => {
+      const emit = hookIn('run-retry')
+      const result = emit('session.status', { status: { type: 'retry', attempt: 1 } })
+      expect(result.semanticState).toBe<AgentSemanticState>('working')
+      expect(result.lifecycleEvent).toBeUndefined()
+    })
+
+    it('session.status 缺失 status 或未知 type 保持 unknown', () => {
+      const emit = hookIn('run-missing')
+      expect(emit('session.status', {}).semanticState).toBe<AgentSemanticState>('unknown')
+      expect(emit('session.status', { status: { type: 'mysterious' } }).semanticState).toBe<AgentSemanticState>('unknown')
     })
   })
 
-  describe('授权门判 waiting，回复判 working', () => {
+  describe('授权门与人机问题判 waiting，回复判 working', () => {
     it('permission.updated 判 waiting——Agent 正卡在一个决定上', () => {
       const emit = hookIn('run-perm')
       expect(emit('permission.updated', { id: 'perm-1', title: 'Run command' }).semanticState)
@@ -102,6 +98,8 @@ describe('OpenCode provider', () => {
       expect(emit('permission.replied', { permissionID: 'perm-1', response: 'once' }).semanticState)
         .toBe<AgentSemanticState>('working')
     })
+
+
   })
 
   describe('声明与安装必须一致', () => {
@@ -127,9 +125,6 @@ describe('OpenCode provider', () => {
     const plan = createOpenCodeManagedHookPlan(endpoint.url, endpoint.token)
 
     it('内容是可被 import 的 ESM，且只导出一个函数', () => {
-      // 上游加载器对模块的**每个**导出取值判定，任何一个非函数导出都会让整个模块抛
-      // `"Plugin export is not a function"`（`plugin/index.ts:99-112`）。所以这份源码只能导出
-      // 一个具名函数 `server`，顺手导出一个常量就会让整个插件加载失败。
       const content = plan.mutations[0]?.content ?? ''
       expect(content).toContain('export async function server()')
       const exports = [...content.matchAll(/^export\s+(?:async\s+)?(\w+)/gm)].map((match) => match[1])
@@ -137,8 +132,6 @@ describe('OpenCode provider', () => {
     })
 
     it('这是本仓第一份非 shell 的 hook 内容——绝不含 shell 命令的痕迹', () => {
-      // 其余九家写的是 `ELECTRON_RUN_AS_NODE=1 ... agentmux-hook.js` 这样一条命令。这条钉住
-      // opencode 走的是另一条路：若有人"照着别家改"，把它换回 managedHookCommand()，这条会红。
       const content = plan.mutations[0]?.content ?? ''
       expect(content).not.toContain('ELECTRON_RUN_AS_NODE')
       expect(content).not.toContain('agentmux-hook.js')
@@ -148,14 +141,11 @@ describe('OpenCode provider', () => {
       const content = plan.mutations[0]?.content ?? ''
       expect(content).toContain(JSON.stringify(endpoint.url))
       expect(content).toContain(JSON.stringify(endpoint.token))
-      // 且不能退化成读环境变量：插件跑在 OpenCode 自己的进程里，那里没有这两个变量。
       expect(content).not.toContain('AGENTMUX_HOOK_URL')
       expect(content).not.toContain('AGENTMUX_HOOK_TOKEN')
     })
 
     it('投递的信封与那九家 shell hook 完全同形', () => {
-      // 服务端从 token 绑定反查 providerId/runId/agentSessionId（`hook-server.ts:302-304`），
-      // 不从正文取，所以插件必须发且只发这三个字段。
       const content = plan.mutations[0]?.content ?? ''
       expect(content).toContain('receiptId')
       expect(content).toContain('eventName')
@@ -163,9 +153,7 @@ describe('OpenCode provider', () => {
       expect(content).toContain("'Bearer '")
     })
 
-    it('只投递声明过的那七个事件', () => {
-      // 上游会把**所有**类型的事件推给插件（`plugin/index.ts:255-262` 只按目录过滤）。不筛的话
-      // 每次 keystroke 级的 part 更新之外还会灌进 lsp/file/pty 等一大批无关事件。
+    it('只投递声明过的事件', () => {
       const content = plan.mutations[0]?.content ?? ''
       for (const name of OPENCODE_HOOK_EVENTS) expect(content).toContain(JSON.stringify(name))
       expect(content).toContain('events.has(event.type)')
@@ -179,7 +167,6 @@ describe('OpenCode provider', () => {
 
   describe('装到上游真的会扫的位置', () => {
     it('装到 <config-dir>/plugin/agentmux.js', () => {
-      // 自动发现的 glob 是 `{plugin,plugins}/*.{ts,js}`（`config/plugin.ts:21`）。
       const plan = createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, {
         OPENCODE_CONFIG_DIR: '/tmp/oc-config'
       })
@@ -193,13 +180,11 @@ describe('OpenCode provider', () => {
     })
 
     it('XDG_CONFIG_HOME 决定默认目录', () => {
-      // 上游 `global.ts:13`：`Path.config = join(xdgConfig, 'opencode')`。
       const plan = createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, { XDG_CONFIG_HOME: '/tmp/xdg' })
       expect(plan.mutations[0]?.path).toBe('/tmp/xdg/opencode/plugin/agentmux.js')
     })
 
     it('绝不装到项目级 .opencode/——那会被提交进用户仓库', () => {
-      // 上游也扫项目级与 home 下的 `.opencode/`（`config/paths.ts:23-41`）。只装全局一处。
       const plan = createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, { OPENCODE_CONFIG_DIR: '/tmp/oc' })
       expect(plan.mutations[0]?.path).not.toContain('.opencode')
     })
@@ -212,7 +197,7 @@ describe('OpenCode provider', () => {
   })
 
   describe('catalog 如实声明它有的和没有的', () => {
-    it('native handle 读大写 sessionID——读 sessionId 会取不到', () => {
+    it('native handle 读大写 sessionID 并在可信 context 匹配时交付 handle', () => {
       const event = hookIn('run-handle')('session.idle')
       expect(event.nativeHandle?.sessionId).toBe('opencode-session-1')
       // 反证：小写拼法的负载给不出 handle。这条防的是"看起来对"的拼写漂移。
@@ -220,24 +205,19 @@ describe('OpenCode provider', () => {
         receiptId: 'r-wrong', agentSessionId: 's', runId: 'run-wrong',
         providerId: 'opencode', eventName: 'session.idle',
         payload: { sessionId: 'lowercase-id' }
-      })
+      }, { nativeHandle: { kind: 'provider', providerId: 'opencode', sessionId: 'opencode-session-1' } })
       expect(wrong.nativeHandle?.sessionId).toBeUndefined()
     })
 
     it('不声明 transcriptPath——上游没有单文件 transcript', () => {
-      // `storage.ts:150-196` 把会话拆成 session/message/part 三组存储键，没有任何事件负载带得出
-      // 一条可读路径。声明一个取不到的键等于让 handle 永远缺一半。
       expect(OPENCODE_HOOKS.nativeHandle?.transcriptPathKeys).toBeUndefined()
     })
 
     it('不声明子代理记账——上游 28 个事件里没有子代理起止', () => {
-      // 声明一个不存在的记账会让 applySubagentTracking 永远等一个不会到来的 stop，把 done 压死。
       expect(OPENCODE_HOOKS.subagentTracking).toBeUndefined()
     })
 
     it('resume 走 --session，不走 --resume 也不走 --continue', () => {
-      // `cli/cmd/run.ts:152-156`：`--session`（别名 `-s`）"session id to continue"。
-      // **没有 `--resume`**——照别家拼法猜一个会直接报未知参数。
       const launch = opencode.buildResumeLaunch({
         workspacePath: '/repo',
         nativeHandle: { kind: 'provider', providerId: 'opencode', sessionId: 'sess-9' },
@@ -262,6 +242,71 @@ describe('OpenCode provider', () => {
       expect(opencode.catalog.acpStrategy).toEqual({ kind: 'none' })
       expect(opencode.catalog.capabilities.usage).toBeUndefined()
       expect(opencode.catalog.capabilities.replyCorrelation).toBe('none')
+    })
+  })
+
+  describe('可信 Session 上下文与根/子隔离', () => {
+    it('明确子会话（parentID）被严格隔离：不晋升 handle、不推进 turn、中性 unknown', () => {
+      const emit = hookIn('run-child')
+      const child = emit('session.status', { parentID: 'root-sess-1', status: { type: 'busy' } })
+      expect(child.nativeHandle).toBeUndefined()
+      expect(child.lifecycleEvent).toBeNull()
+      expect(child.semanticState).toBe('unknown')
+      expect(child.status.state).toBe('running')
+    })
+
+    it('明确子会话（info.parentID）同样被严格隔离', () => {
+      const emit = hookIn('run-child-info')
+      const child = emit('session.status', { info: { parentID: 'root-sess-1' }, status: { type: 'busy' } })
+      expect(child.nativeHandle).toBeUndefined()
+      expect(child.lifecycleEvent).toBeNull()
+      expect(child.semanticState).toBe('unknown')
+      expect(child.status.state).toBe('running')
+    })
+
+    it('主 Agent 调用 task 工具保留主会话身份与原状态，不凭工具名推断子会话', () => {
+      const emit = hookIn('run-root-task')
+      const taskEvent = emit('message.part.updated', {
+        part: { type: 'tool', tool: 'task', callID: 'call-1', state: { status: 'running' } }
+      })
+      expect(taskEvent.nativeHandle?.sessionId).toBe('opencode-session-1')
+      expect(taskEvent.lifecycleEvent).toBeUndefined()
+      expect(taskEvent.timeline.length).toBeGreaterThan(0)
+      expect(taskEvent.semanticState).toBe('working')
+    })
+
+    it('外部会话（sessionID 与 context.nativeHandle 不匹配）被严格隔离', () => {
+      const emit = hookIn('run-foreign')
+      const foreign = emit('session.status', { sessionID: 'foreign-session-2', status: { type: 'busy' } })
+      expect(foreign.nativeHandle).toBeUndefined()
+      expect(foreign.lifecycleEvent).toBeNull()
+      expect(foreign.semanticState).toBe('unknown')
+      expect(foreign.status.state).toBe('running')
+    })
+
+    it('context.nativeHandle 缺失时（未知归属），保非空 trace 但不猜 root、不推进主生命周期', () => {
+      const emit = hookIn('run-fresh', {})
+      const fresh = emit('session.status', { status: { type: 'busy' } })
+      expect(fresh.nativeHandle).toBeUndefined()
+      expect(fresh.lifecycleEvent).toBeNull()
+      expect(fresh.semanticState).toBe('unknown')
+      expect(fresh.status.state).toBe('running')
+      expect(fresh.timeline.length).toBeGreaterThan(0)
+    })
+
+    it('子会话被严格隔离时，剥除 turnUsage 与 interaction，不影响主会话用量与交互', () => {
+      const emit = hookIn('run-child-clean')
+      const child = emit('permission.updated', {
+        sessionID: 'sub-1',
+        parentID: 'opencode-session-1',
+        id: 'per-child',
+        permission: 'bash'
+      })
+      expect(child.nativeHandle).toBeUndefined()
+      expect(child.lifecycleEvent).toBeNull()
+      expect(child.semanticState).toBe('unknown')
+      expect(child.interaction).toBeUndefined()
+      expect(child.turnUsage).toBeUndefined()
     })
   })
 })

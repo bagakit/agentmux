@@ -44,7 +44,7 @@ describe('Copilot provider', () => {
           cwd: '/repo',
           ...payload
         }
-      })
+      }, {})
   }
 
   function toolMutation(event: ReturnType<ReturnType<typeof hookIn>>) {

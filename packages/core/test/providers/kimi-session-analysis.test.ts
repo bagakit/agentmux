@@ -312,7 +312,7 @@ describe('Kimi session analysis, trace completeness and production path', () => 
         session_id: f.session.nativeHandle!.sessionId,
         cwd: f.session.workspacePath
       }
-    })
+    }, {})
 
     // Hook must extract session_id as native handle WITHOUT transcript_path
     expect(normalizedHook.nativeHandle).toEqual({

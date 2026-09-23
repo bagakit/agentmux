@@ -556,7 +556,7 @@ describe('Core Provider protocol', () => {
         runId: 'run-unknown',
         providerId: 'traex',
         eventName: 'quantum_flux_observed'
-      })
+      }, {})
       // 缺席，而不是被塞一个「差不多」的 canonical 值。
       expect(event.lifecycleEvent).toBeUndefined()
       // 绝不伪造 working/done。
@@ -574,7 +574,7 @@ describe('Core Provider protocol', () => {
         runId: 'run-nameless',
         providerId: 'traex',
         payload: { some_unrelated_field: 'x' }
-      })
+      }, {})
       expect(event.eventName).toBe('unknown')
       expect(event.lifecycleEvent).toBeUndefined()
       expect(event.semanticState).toBe('unknown')
@@ -588,7 +588,7 @@ describe('Core Provider protocol', () => {
         providerId: 'hermes',
         eventName: 'post_tool_call',
         payload: { tool_name: 'shell' }
-      })
+      }, {})
       expect(event.lifecycleEvent).toBe('tool-use-end')
       // 原始名没有被 canonical 值顶掉。
       expect(event.eventName).toBe('post_tool_call')
@@ -603,7 +603,7 @@ describe('Core Provider protocol', () => {
         providerId: 'claude',
         eventName: 'TotallyMadeUpEvent',
         payload: {}
-      })
+      }, {})
       expect(event.lifecycleEvent).toBeUndefined()
       expect(event.nativeHandle).toBeUndefined()
       expect(event.turnUsage).toBeUndefined()
@@ -621,7 +621,7 @@ describe('Core Provider protocol', () => {
         providerId: 'antigravity',
         eventName: 'SessionStart',
         payload: { conversationId: 'agy-conversation-1' }
-      })
+      }, {})
       expect(antigravity.nativeHandle).toEqual({
         kind: 'provider',
         providerId: 'antigravity',
@@ -636,7 +636,7 @@ describe('Core Provider protocol', () => {
         providerId: 'pi',
         eventName: 'agent_start',
         payload: { session_id: 'pi-1', session_file: '/tmp/pi-protocol.jsonl' }
-      })
+      }, {})
       expect(pi.nativeHandle).toMatchObject({ sessionId: 'pi-1', transcriptPath: '/tmp/pi-protocol.jsonl' })
     })
 
@@ -649,7 +649,7 @@ describe('Core Provider protocol', () => {
           providerId: 'antigravity',
           eventName: 'SessionStart',
           payload: { [key]: `agy-${key}` }
-        })
+        }, {})
         expect(event.nativeHandle).toMatchObject({ sessionId: `agy-${key}` })
       }
       for (const key of ['transcript_path', 'transcriptPath'] as const) {
@@ -660,7 +660,7 @@ describe('Core Provider protocol', () => {
           providerId: 'claude',
           eventName: 'SessionStart',
           payload: { session_id: 'claude-1', [key]: '/tmp/claude-protocol.jsonl' }
-        })
+        }, {})
         expect(event.nativeHandle).toMatchObject({ transcriptPath: '/tmp/claude-protocol.jsonl' })
       }
     })
@@ -675,7 +675,7 @@ describe('Core Provider protocol', () => {
         providerId: 'hermes',
         eventName: 'on_session_start',
         payload: { session_id: 'hermes-looks-resumable', transcript_path: '/tmp/hermes.jsonl' }
-      })
+      }, {})
       expect(event.nativeHandle).toBeUndefined()
       expect(registry.get('hermes').catalog.resumeStrategy.kind).toBe('none')
     })
