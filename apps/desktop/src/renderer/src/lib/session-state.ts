@@ -4,6 +4,7 @@ import type {
   AgentTimelineSnapshot,
   RuntimeEvent,
   RuntimeSnapshot,
+  SessionControl,
   SessionSnapshot
 } from '../../../shared/contracts'
 import { runInterruptionFact } from '../../../shared/contracts'
@@ -101,22 +102,40 @@ function acceptsAgentSessionTransition(
 export function runtimeDiagnosticNotice(
   state: Pick<SessionProjectionState, 'sessions'>,
   event: RuntimeEvent
-): { message: string; subject?: AgentSessionControl } | null {
+): { message: string; subject?: SessionControl } | null {
   const core = event.event
   if (core.type !== 'agent-error') return null
-  const session = core.agentSessionId ? state.sessions.find(item => item.id === core.agentSessionId) : undefined
-  if (session && session.hostId !== event.hostId) return null
-  if (session && core.evidence.run && !sameRun(session.control.run, core.evidence.run)) return null
-  const confirmed = session?.kind === 'agent' && core.evidence.run !== undefined
-  const scope = core.agentSessionId
-    ? `Agent "${session?.label ?? core.agentSessionId}" on host "${event.hostId}"`
-    : `Host "${event.hostId}"`
+  const run = core.evidence.run
+  let session: SessionSnapshot | undefined
+  if (core.agentSessionId) {
+    const named = state.sessions.filter(item => item.kind === 'agent' && item.id === core.agentSessionId)
+    if (named.length > 0) {
+      const current = named.filter(item => item.hostId === event.hostId && (!run || sameRun(item.control.run, run)))
+      // An explicit Agent identity cannot be reassigned to another Session by its Run.
+      if (current.length !== 1) return null
+      session = current[0]
+    }
+  } else if (run) {
+    const current = state.sessions.filter(item => item.hostId === event.hostId && sameRun(item.control.run, run))
+    if (current.length === 1) session = current[0]
+  }
+  const confirmed = run !== undefined ? session : undefined
+  const scope = session
+    ? `${session.kind === 'agent' ? 'Agent' : 'Terminal'} "${session.label}" on host "${event.hostId}"`
+    : core.agentSessionId
+      ? `Agent "${core.agentSessionId}" on host "${event.hostId}"`
+      : `Host "${event.hostId}"`
   const mode = confirmed
-    ? `Last confirmed Agent state: ${session.status.state}; Run state: ${session.processState}.`
-    : 'The affected Agent/Run scope could not be confirmed.'
+    ? confirmed.kind === 'agent'
+      ? `Last confirmed Agent state: ${confirmed.status.state}; Run state: ${confirmed.processState}.`
+      : `Last confirmed Run state: ${confirmed.processState}.`
+    : 'The affected current Session could not be confirmed.'
+  const recovery = core.code === 'OUTPUT_GAP'
+    ? 'Refresh the terminal observation to check available output. This does not establish complete history or confirm input delivery.'
+    : 'Check the terminal and error details before choosing a recovery action.'
   return {
-    message: `${scope}: ${core.code}: ${core.message}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}\nCheck the terminal and error details before choosing a recovery action.`,
-    ...(confirmed ? { subject: session.control } : {})
+    message: `${scope}${run ? `; Run "${run.runId}"` : ''}: ${core.code}: ${core.message}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}\n${recovery}`,
+    ...(confirmed ? { subject: confirmed.control } : {})
   }
 }
 

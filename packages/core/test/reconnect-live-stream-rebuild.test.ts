@@ -335,6 +335,11 @@ describe('T-001 重连后重建实时字节泵', () => {
       event.type === 'agent-error' && event.code === 'OUTPUT_GAP')
     expect(running, '截断时没有 republish 成 running——流是活的，不该跳过').toBeGreaterThanOrEqual(0)
     expect(gap, '截断没有被披露').toBeGreaterThanOrEqual(0)
+    expect(forAgent[gap]).toMatchObject({
+      type: 'agent-error', code: 'OUTPUT_GAP',
+      message: 'This Attachment could not replay all output from its requested cursor.',
+      evidence: { source: 'terminal-output', run: { runId: 'run-1' } }
+    })
 
     // 承重的那条：披露必须是**后**发的。把 client.ts 里两条 publish 调回「先 gap 后 running」，
     // 这条红；而上面两条「都在场」仍绿——所以红的确实是顺序，不是缺了谁。

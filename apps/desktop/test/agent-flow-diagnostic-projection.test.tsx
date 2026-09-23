@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act } from 'react'
@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider } from '@agentmux/core'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '@agentmux/core'
+import { agentPromptCondition } from '@agentmux/core/prompt-condition'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { ConfigStore } from '../src/main/config-store'
 import type { ScratchTopics } from '../src/main/scratch-topics'
@@ -16,13 +17,14 @@ import type { AppConfig, RuntimeEvent } from '../src/shared/contracts'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({
+  storageRoot: '',
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...values: unknown[]) => void>>()
 }))
 // Isolate native transport/painting and unrelated services, not Core producers, subscription,
 // RuntimeController, preload, initialized Store, mounted App or Focus.
 vi.mock('electron', () => ({
-  app: { getPath: () => '/isolated-flow-diagnostic', dock: { setBadge: vi.fn() } },
+  app: { getPath: () => bridge.storageRoot, dock: { setBadge: vi.fn() } },
   contextBridge: { exposeInMainWorld: (key: string, value: unknown) => Object.assign(window, { [key]: value }) },
   webFrame: { getZoomFactor: () => 1 },
   ipcMain: { handle: (key: string, handler: any) => bridge.handlers.set(key, handler),
@@ -109,7 +111,7 @@ async function produceDiagnostic(id = ids[0]!) {
   const session = core.agentSession(id)
   const fail = vi.spyOn(durable, 'applyTimelineMutation').mockRejectedValueOnce(new Error('Private history save failed'))
   const before = events.length
-  await act(async () => core.submitAgentPrompt({ agentSessionId: id, expectedRun: session.run,
+  await act(async () => core.submitAgentPrompt({ agentSessionId: id, ...agentPromptCondition(session),
     prompt: 'Explicit private request', allowUncertainTurn: true, operationId: `prompt-${events.length}` }))
   fail.mockRestore(); await settle()
   const emitted = events.slice(before).filter(event => event.type === 'agent-error')
@@ -133,6 +135,8 @@ function workface() {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   dir = await mkdtemp(join(tmpdir(), 'amx-flow-diagnostic-'))
+  bridge.storageRoot = dir
+  await mkdir(join(dir, 'Local Storage', 'leveldb'), { recursive: true })
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime'));
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(dir, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
   bridge.handlers.clear(); bridge.listeners.clear(); events = []; wire = []; writes = []
@@ -165,11 +169,13 @@ beforeEach(async () => {
     executors: { fixture: { label: 'Fixture', providerId: provider.id, command: provider.executable, args: [], env: {}, injectAgentMuxGuide: false } },
     workspaces: [{ id: 'private-workspace', name: 'Private workspace', hostId: 'local', path: dir, kind: 'folder' }] }
   sender = Object.assign(new EventEmitter(), { id: 718, isDestroyed: () => false,
-    session: { flushStorageData: vi.fn() }, send: (channel: string, value: RuntimeEvent) => {
+    session: { getStoragePath: () => dir, flushStorageData: vi.fn() }, send: (channel: string, value: RuntimeEvent) => {
       if (channel === SESSION_EVENT_CHANNEL) wire.push(value)
       for (const listener of bridge.listeners.get(channel) ?? []) listener({}, value)
     } })
   disposeIpc = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+    // Unrelated progress manager is an explicit empty API boundary; diagnostics still use real IPC.
+    progressLoops: { subscribe: () => () => {}, start: async () => {}, list: () => [], pauseTarget: async () => {} } as never,
     configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: { listTopics: async () => [] } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
@@ -228,7 +234,9 @@ it('rejects old Run and wrong Host diagnostics, and presents unconfirmed scope h
   expect(notice()?.textContent).toContain('could not be confirmed')
   expect(useAppStore.getState().sessions).toBe(before)
   await transport({ ...actual, event: { ...actual.event, agentSessionId: undefined } })
-  expect(notice()?.textContent).toContain('could not be confirmed')
+  expect(notice()?.textContent).toContain(`Agent "${before[0]!.label}"`)
+  expect(notice()?.textContent).toContain('Run \"run-flow-one\"')
+  expect(useAppStore.getState().errorNoticeContext?.subject).toBe(before[0]!.control)
   expect(notice()?.textContent).toContain('Private history save failed')
   expect(useAppStore.getState().sessions).toBe(before)
 })
@@ -266,7 +274,7 @@ it('rehydrates the durable workface and initializes again from the same Core fac
   const face = structuredClone(workface())
   const facts = useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control,
     status: session.status, processState: session.processState, updatedAt: session.kind === 'agent' && session.agentSessionUpdatedAt }))
-  prepareRendererUpdate()
+  await prepareRendererUpdate()
   const name = useAppStore.persist.getOptions().name!
   const saved = localStorage.getItem(name)
   expect(saved).not.toBeNull()
@@ -340,8 +348,61 @@ it.each(['before', 'after'])('shows a real output gap %s a Run observation witho
   await act(async () => { if (order === 'before') gap(); await observed(); if (order === 'after') gap() }); await settle()
   expect(events.filter(event => event.type === 'agent-error').map(event => event.code)).toEqual(['OUTPUT_GAP'])
   expect(notice()).not.toBeNull()
-  expect(notice()?.textContent).toContain('CtxMux evicted output')
+  expect(notice()?.textContent).toContain('This Attachment did not receive a continuous output stream')
+  expect(notice()?.textContent).not.toContain('evicted')
   expect(useAppStore.getState().sessions.map(session => session.status.state)).toEqual(['working', 'working', 'working'])
   expect(focus().textContent).not.toContain('Failed')
   expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it('locates a real Core Gap for an ordinary Terminal without changing the workface or input intent', async () => {
+  await mount()
+  const terminal = {
+    id: 'run-terminal', kind: 'terminal', hostId: 'local', providerId: null,
+    workspacePath: dir, label: 'Build terminal', createdAt: 1, updatedAt: 1,
+    processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+    control: { kind: 'terminal', hostId: 'local', runId: 'run-terminal', run: { runId: 'run-terminal' } }
+  } as const
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, terminal],
+    agentSteerQueues: { [ids[0]!]: [{ operationId: 'keep-unknown', runId: 'run-flow-one', text: 'Unconfirmed intent', status: 'deferred', error: 'Delivery unknown' }] },
+    tabs: { ...state.tabs, 'terminal-tab': createWorkbenchTab('terminal-tab', {
+      regionId: 'terminal-region', kind: 'terminal', phase: 'attached', sessionId: terminal.id, workspaceId: 'private-workspace'
+    }) } })))
+  const before = useAppStore.getState(), face = workface()
+  expect(Object.keys(before.tabs)).toHaveLength(4)
+  expect(before.agentSteerQueues[ids[0]!]).toHaveLength(1)
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: terminal.id, latestOutputBytes: 20 })); await settle()
+  const gap = events.filter(event => event.type === 'agent-error' && event.code === 'OUTPUT_GAP')
+  expect(gap).toHaveLength(1)
+  expect(gap[0]).toMatchObject({ evidence: { source: 'terminal-output', run: terminal.control.run } })
+  expect(gap[0]).not.toHaveProperty('agentSessionId')
+  expect(notice()?.textContent).toContain('Terminal \"Build terminal\" on host \"local\"; Run \"run-terminal\"')
+  expect(notice()?.textContent).toContain('Last confirmed Run state: running')
+  expect(notice()?.textContent).not.toContain('Last confirmed Agent state')
+  expect(useAppStore.getState().errorNoticeContext?.subject).toBe(terminal.control)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentSteerQueues).toBe(before.agentSteerQueues)
+  expect(workface()).toEqual(face)
+  expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+  await act(async () => useAppStore.getState().dismissError())
+  expect(useAppStore.getState().errorDismissed).toBe(true)
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: terminal.id, latestOutputBytes: 30 })); await settle()
+  expect(useAppStore.getState().errorDismissed).toBe(true)
+})
+
+it('locates a current Agent without the Core Agent mapping and keeps explicit input available', async () => {
+  await mount()
+  const before = useAppStore.getState(), face = workface()
+  expect(before.sessions).toHaveLength(3)
+  const lookup = vi.spyOn((core as any).registry, 'findByRun').mockReturnValue(undefined)
+  try {
+    await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 20 })); await settle()
+  } finally { lookup.mockRestore() }
+  expect(notice()?.textContent).toContain(`Agent "${before.sessions[0]!.label}" on host "local"; Run "run-flow-one"`)
+  expect(useAppStore.getState().errorNoticeContext?.subject).toBe(before.sessions[0]!.control)
+  expect(workface()).toEqual(face)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+  await input('Explicit input after Gap')
+  expect(writes).toEqual([{ runId: 'run-flow-one', data: 'Explicit input after Gap' }])
 })

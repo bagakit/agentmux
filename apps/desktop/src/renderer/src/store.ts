@@ -304,7 +304,7 @@ export type HostCheckState = {
 /** Attributes of the one current/last transient notice, never a second Agent status record. */
 export type ErrorNoticeContext = {
   kind: ServiceNoticeKind
-  subject?: AgentSessionControl
+  subject?: SessionControl
   lifecycle?: AgentLifecycleFailure
 }
 
@@ -6431,7 +6431,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (current.errorDismissed && current.lastError !== null
       && (current.errorNoticeContext?.kind ?? 'indeterminate') === (context?.kind ?? 'indeterminate')
       && previousSubject?.hostId === subject?.hostId
-      && previousSubject?.agentSessionId === subject?.agentSessionId
+      && previousSubject?.kind === subject?.kind
+      && (previousSubject?.kind === 'agent' ? previousSubject.agentSessionId : undefined)
+        === (subject?.kind === 'agent' ? subject.agentSessionId : undefined)
       && previousSubject?.run.runId === subject?.run.runId
       && current.errorNoticeContext?.lifecycle?.step === context?.lifecycle?.step
       && (current.errorNoticeContext?.lifecycle?.step !== 'launch' ||

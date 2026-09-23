@@ -973,7 +973,7 @@ export class AgentMuxClient {
             type: 'agent-error',
             agentSessionId: agentSession.agentSessionId,
             code: 'OUTPUT_GAP',
-            message: 'CtxMux evicted output before this Attachment could resume it.',
+            message: 'This Attachment could not replay all output from its requested cursor.',
             evidence: {
               source: 'terminal-output',
               observedAt: Date.now(),
@@ -4553,7 +4553,7 @@ export class AgentMuxClient {
         type: 'agent-error',
         ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
         code: 'OUTPUT_GAP',
-        message: 'CtxMux evicted output before this Attachment could consume it.',
+        message: 'This Attachment did not receive a continuous output stream.',
         evidence: {
           source: 'terminal-output',
           observedAt: Date.now(),
