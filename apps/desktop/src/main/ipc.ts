@@ -879,6 +879,15 @@ export async function registerIpc(args: {
     // 回放"，而调用方拿着的 id 谁也不认识——两边各自看起来都正常。
     return await browsers.runScript(id, code, operator, undefined, operationId)
   })
+  handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
+    requireTrustedSender('browser:checkOutcomeFields', event)
+    if (config.browser.agentAutomation !== true) throw new Error('Browser automation is off. Turn it on in Settings › Browser.')
+    return await browsers.checkOutcomeFields(id, input)
+  })
+  handleWithEvent('browser:verifyOutcome', async (event, id: string, operationId: string) => {
+    requireTrustedSender('browser:verifyOutcome', event)
+    return await browsers.verifyOutcome(id, operationId)
+  })
   handleWithEvent('browser:listOperationHistory', async (event) => {
     requireTrustedSender('browser:listOperationHistory', event)
     return await browsers.listOperationHistory()
