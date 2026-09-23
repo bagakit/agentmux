@@ -305,7 +305,7 @@ function SortableWorkbenchTab({
       tabsById,
       currentTabIds,
       'agent'
-    ).length
+    ).filter((id) => useAppStore.getState().sessions.find((item) => item.id === id)?.processState !== 'exited').length
     if (dirtyCount > 0 || agentSessionCount > 0) {
       setPendingClose({ tabIds: currentTabIds, dirtyCount, agentSessionCount })
       return

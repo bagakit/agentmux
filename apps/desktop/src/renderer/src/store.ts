@@ -916,7 +916,17 @@ async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewC
   resources: readonly Resource[],
   close: (resource: Resource) => Promise<void>
 ): Promise<WorkbenchViewCloseReceipt[]> {
-  const results = await Promise.allSettled(resources.map(close))
+  const results = await Promise.allSettled(resources.map((resource) => {
+    const pending = close(resource)
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(
+        `The ${resource.kind} close result is unknown after 5 seconds. Its View is retained; review it before retrying.${resource.kind === 'session' ? ' You can keep the Session and close only its display; the original Stop remains unconfirmed.' : ''}`
+      )), 5_000)
+      // Observe the original operation after our UI deadline; it has not been cancelled.
+      // A late settlement cannot apply this completed View plan again.
+      void pending.then(resolve, reject).finally(() => clearTimeout(timer))
+    })
+  }))
   return results.map((result, index) => result.status === 'fulfilled'
     ? { key: resources[index]!.key, status: 'fulfilled' }
     : { key: resources[index]!.key, status: 'rejected', reason: result.reason })
