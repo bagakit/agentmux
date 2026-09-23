@@ -68,13 +68,16 @@ async function waitFor(label, read, budget = 20_000) {
   while (Date.now() < end) { const result = await read(); if (result) return result; await delay(60) }
   throw new Error(`Browser recovery timed out: ${label}`)
 }
-async function connectCdp(url) {
+async function connectCdp(url, role) {
   const socket = new WebSocket(url), pending = new Map(), pauses = []
+  const error = (message, method, requestId) => Object.assign(new Error(message), {
+    privateCdp: { role, method, ...(requestId === undefined ? {} : { requestId }) }
+  })
   const cdp = { pauses, close: () => socket.close() }
   connections.add(cdp)
   let serial = 0
   await new Promise((done, fail) => {
-    const timer = setTimeout(() => fail(new Error('Private CDP handshake timed out')), 12_000)
+    const timer = setTimeout(() => fail(error('Private CDP handshake timed out', 'handshake')), 12_000)
     socket.addEventListener('open', () => { clearTimeout(timer); done() }, { once: true })
     socket.addEventListener('error', error => { clearTimeout(timer); fail(error) }, { once: true })
   })
@@ -84,12 +87,12 @@ async function connectCdp(url) {
     const request = pending.get(message.id)
     if (!request) return
     pending.delete(message.id); clearTimeout(request.timer)
-    message.error ? request.fail(new Error(message.error.message)) : request.done(message.result)
+    message.error ? request.fail(error(message.error.message, request.method, message.id)) : request.done(message.result)
   })
-  socket.addEventListener('close', () => { for (const request of pending.values()) { clearTimeout(request.timer); request.fail(new Error('Private CDP closed')) }; pending.clear() })
+  socket.addEventListener('close', () => { for (const [id, request] of pending) { clearTimeout(request.timer); request.fail(error('Private CDP closed', request.method, id)) }; pending.clear() })
   const call = (method, params = {}) => new Promise((done, fail) => {
-    const id = ++serial, timer = setTimeout(() => { pending.delete(id); fail(new Error(`CDP timed out: ${method}`)) }, 12_000)
-    pending.set(id, { done, fail, timer }); socket.send(JSON.stringify({ id, method, params }))
+    const id = ++serial, timer = setTimeout(() => { pending.delete(id); fail(error(`CDP timed out: ${method}`, method, id)) }, 12_000)
+    pending.set(id, { done, fail, timer, method }); socket.send(JSON.stringify({ id, method, params }))
   })
   Object.assign(cdp, { call, async evaluate(expression) {
     const result = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
@@ -185,7 +188,7 @@ async function launch(label) {
     rendererUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(diagnostics)?.[1]
   })
   const alive = () => { if (spawnError) throw spawnError; if (child.exitCode !== null || child.signalCode !== null) throw new Error(`${label} exited ${child.exitCode}/${child.signalCode}: ${diagnostics}`) }
-  const main = await connectCdp(await waitFor(`${label} Main inspector`, () => { alive(); return mainUrl }))
+  const main = await connectCdp(await waitFor(`${label} Main inspector`, () => { alive(); return mainUrl }), `${label}:main`)
   const probe = { child, main }
   launchedProbes.add(probe)
   await main.call('Runtime.enable')
@@ -254,7 +257,7 @@ async function launch(label) {
   }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
-  const cdp = await connectCdp(target.webSocketDebuggerUrl); await cdp.call('Runtime.enable')
+  const cdp = await connectCdp(target.webSocketDebuggerUrl, `${label}:renderer`); await cdp.call('Runtime.enable')
   probe.cdp = cdp
   receipt.launchUiObservations ??= {}
   receipt.launchUiObservations[label] = await cdp.evaluate('({bridgePresent:Boolean(window.agentmux),projectListPresent:Boolean(document.querySelector(".project-list")),navigationPresent:Boolean(document.querySelector(".surface-navigation")),regionCount:document.querySelectorAll("[data-workbench-region-id]").length,body:document.body.innerText.slice(0,1500)})')
@@ -735,6 +738,7 @@ try {
   // Observe genuine readiness; do not override the product's overlay/focus visibility decisions.
   await observeNativeFrameReady(first,urls[0])
   receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
+  phase = `first-process-${receipt.case ?? 'operation'}-scenario`
   if(downloadCase)await reviewDownloads(first,initial.surface.browserId)
   else if(uploadCase)await reviewUploads(first,initial.surface.browserId,urls[0])
   else if(browserTools)await browserTools.reviewBrowserTools(scenarioContext(first,initial.surface.browserId,urls[0]))
@@ -761,6 +765,7 @@ try {
   const ensure=await second.cdp.evaluate(`window.agentmux.browser.create(${JSON.stringify(expected.regions[0].browserId)},'http://127.0.0.1:1/stale')`)
   assert.equal(ensure.id,expected.regions[0].browserId);assert.equal(ensure.url,urls[0]);assert.equal(ensure.error,null)
   const pagesAfterEnsure=await nativePages(second,urls);assert.deepEqual(pagesAfterEnsure,restoredPages)
+  phase = `second-process-${receipt.case ?? 'operation'}-scenario`
   if(downloadCase)await recoverDownloads(second,expected.regions[0].browserId)
   if(uploadCase)await recoverUploads(second,expected.regions[0].browserId,urls[0])
   if(demonstrationCase)await demonstration.recoverDemonstration(scenarioContext(second,expected.regions[0].browserId,urls[0]))
@@ -772,7 +777,7 @@ try {
   receipt.identityAfter=await identity();assert.deepEqual(receipt.identityAfter,receipt.identityBefore)
   receipt.completeGate=true
 } catch(error) {
-  failure={phase,message:error.message,stack:error.stack};const active=second??first
+  failure={phase,message:error.message,stack:error.stack,...(error.privateCdp ? { privateCdp: error.privateCdp } : {})};const active=second??first
   if(active&&active.child.exitCode===null&&active.child.signalCode===null){try{receipt.failureWorkbench=await state(active.cdp);receipt.failureDom=await active.cdp.evaluate('document.body.innerText.slice(-5000)')}catch(error){receipt.diagnosticError=error.message}}
 } finally {
   const errors=[]
