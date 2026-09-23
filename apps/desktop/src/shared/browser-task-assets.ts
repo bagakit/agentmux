@@ -1,4 +1,13 @@
 import type { BrowserReplayTarget } from './browser-operation.js'
+import type { BrowserOutcomeHumanFact } from './browser-outcome-criteria.js'
+
+export type BrowserTaskHumanCheckpoint = BrowserOutcomeHumanFact & { pendingCursor: number }
+export type BrowserTaskRunIdentity = { runId: string; browserId: string; assetId: string; version: number }
+export type BrowserTaskHumanCheckpointSaved = { saved: boolean; fact: BrowserTaskHumanCheckpoint | null; warning?: string }
+export type BrowserTaskHumanCheckpointRead =
+  | { status: 'available'; fact: BrowserTaskHumanCheckpoint }
+  | { status: 'not-recorded' }
+  | { status: 'unavailable'; warning: string }
 
 export type BrowserTaskParameter = { key: string; label: string; secret: boolean }
 export type BrowserTaskStep = {
@@ -34,6 +43,8 @@ export type BrowserTaskAssetRun = {
   status: 'ready' | 'running' | 'waiting-human' | 'completed' | 'interrupted' | 'failed' | 'stopped'
   operationIds: string[]
   pendingCheckpointId?: string
+  /** Main-created trusted Continue events. Absence means their recording information is unavailable. */
+  humanCheckpoints?: BrowserTaskHumanCheckpoint[]
   warning?: string
   startedAt: number
   updatedAt: number

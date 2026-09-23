@@ -1,0 +1,41 @@
+import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
+
+const file = 'apps/desktop/src/main/browser-task-assets.ts'
+await verifyRendererSourceMutations({
+  name: 'browser-task-human-checkpoints-mutations',
+  tests: ['apps/desktop/test/browser-task-human-checkpoints.test.ts'],
+  sources: [file, 'apps/desktop/src/shared/browser-task-assets.ts', 'apps/desktop/src/shared/browser-outcome-criteria.ts',
+    'apps/desktop/src/main/browser-replay-compiler.ts'],
+  mutations: [
+    { label: 'agent-control-records-human-confirmation', file, before: "actual.controlBefore !== 'human'", after: 'false' },
+    { label: 'actual-pending-proof-ignored', file, before: 'actual.pendingCheckpointId !== checkpointId', after: 'false' },
+    { label: 'stored-run-identity-ignored', file,
+      before: 'const run = this.document.runs.find(item => item.id === tuple.runId)',
+      after: 'const run = this.document.runs[0]' },
+    { label: 'foreign-browser-reuses-fact', file,
+      before: 'run.browserId !== tuple.browserId || asset.browserId !== tuple.browserId ||', after: '' },
+    { label: 'another-saved-version-reuses-fact', file, before: 'run.version !== tuple.version', after: 'false' },
+    { label: 'caller-raw-fields-leak-to-receipt', file,
+      before: 'const fact: BrowserTaskHumanCheckpoint = { runId: tuple.runId, browserId: tuple.browserId, assetId: tuple.assetId, version: tuple.version,',
+      after: 'const fact: BrowserTaskHumanCheckpoint = { ...tuple,' },
+    { label: 'duplicate-event-is-replaced', file, before: 'if (existing) return { saved: true, fact: copy(existing) }',
+      after: 'if (false) return { saved: true, fact: copy(existing) }' },
+    { label: 'approval-published-before-save-ack', file, before: 'await this.store.save(candidate)',
+      after: 'run.humanCheckpoints = facts; await this.store.save(candidate)' },
+    { label: 'candidate-swaps-over-another-browser-live-progress', file,
+      before: 'run.humanCheckpoints = facts; run.updatedAt = at', after: 'this.document = candidate' },
+    { label: 'failed-save-claims-confirmation', file, before: 'return { saved: false, fact: null, warning: HUMAN_FACT_SAVE_FAILED }',
+      after: 'return { saved: true, fact: null, warning: HUMAN_FACT_SAVE_FAILED }' },
+    { label: 'missing-recording-information-reported-empty', file,
+      before: "if (!Array.isArray(run.humanCheckpoints) || run.humanCheckpoints.length > version.steps.filter(step => step.kind === 'checkpoint').length) return undefined",
+      after: "if (!Array.isArray(run.humanCheckpoints) || run.humanCheckpoints.length > version.steps.filter(step => step.kind === 'checkpoint').length) return []" },
+    { label: 'loaded-agent-origin-accepted', file, before: "fact.origin !== 'trusted-ui'", after: 'false' },
+    { label: 'fact-retention-producer-returns-empty-block', file, before: 'return facts\n}', after: 'return []\n}' },
+    { label: 'completed-cursor-treated-as-no-event-yet', file,
+      before: "if (cursor <= bound.run.nextStep && bound.run.pendingCheckpointId !== checkpointId) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }",
+      after: "if (cursor <= bound.run.nextStep && bound.run.pendingCheckpointId !== checkpointId) return { status: 'not-recorded' }" },
+    { label: 'store-load-failure-treated-as-no-event-yet', file,
+      before: "if (!bound || this.loadUnavailable || this.warning === HUMAN_FACT_SAVE_FAILED) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }",
+      after: "if (!bound || this.loadUnavailable || this.warning === HUMAN_FACT_SAVE_FAILED) return { status: 'not-recorded' }" }
+  ]
+})

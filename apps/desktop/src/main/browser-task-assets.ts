@@ -7,7 +7,8 @@ import type { BrowserReplayStep, BrowserReplayTarget } from '../shared/browser-o
 import type { BrowserScriptRunReport } from '../shared/contracts.js'
 import type {
   BrowserTaskAsset, BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskAssetRunInput,
-  BrowserTaskAssetState, BrowserTaskContent, BrowserTaskParameter, BrowserTaskStep, BrowserTaskVersion
+  BrowserTaskAssetState, BrowserTaskContent, BrowserTaskParameter, BrowserTaskStep, BrowserTaskVersion,
+  BrowserTaskHumanCheckpoint, BrowserTaskHumanCheckpointRead, BrowserTaskHumanCheckpointSaved, BrowserTaskRunIdentity
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
 
@@ -18,6 +19,8 @@ const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
 const MAX_RUNS = 64
 const MAX_FILE_BYTES = 1_048_576
+const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
+const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
 
 export interface BrowserTaskAssetStore {
@@ -81,6 +84,58 @@ export class BrowserTaskAssets {
   }
   async get(assetId: string): Promise<BrowserTaskAsset | null> {
     await this.ready(); return copy(this.document.assets.find(asset => asset.id === assetId) ?? null)
+  }
+
+  /** Main-only: the trusted Continue/control owner supplies these actual facts before returning control. */
+  async recordHumanCheckpoint(tuple: BrowserTaskRunIdentity, checkpointId: string,
+    actual: { pendingCheckpointId: string; nextStep: number; controlBefore: 'human' | 'agent' }): Promise<BrowserTaskHumanCheckpointSaved> {
+    return this.change(async () => {
+      const bound = this.exactRun(tuple)
+      if (!bound || this.loadUnavailable || actual.controlBefore !== 'human' || bound.run.status !== 'waiting-human' ||
+          actual.pendingCheckpointId !== checkpointId || bound.run.pendingCheckpointId !== checkpointId ||
+          bound.run.nextStep !== actual.nextStep || bound.version.steps[actual.nextStep - 1]?.kind !== 'checkpoint' ||
+          bound.version.steps[actual.nextStep - 1]?.id !== checkpointId) {
+        return { saved: false, fact: null, warning: HUMAN_FACT_UNAVAILABLE }
+      }
+      const { run, version } = bound
+      const existing = run.humanCheckpoints?.find(fact => fact.checkpointId === checkpointId)
+      if (existing) return { saved: true, fact: copy(existing) }
+      const at = this.now()
+      const fact: BrowserTaskHumanCheckpoint = { runId: tuple.runId, browserId: tuple.browserId, assetId: tuple.assetId, version: tuple.version,
+        checkpointId, pendingCursor: actual.nextStep,
+        origin: 'trusted-ui', controlBefore: 'human', confirmedAt: at }
+      // The existing queue serializes every asset/progress producer. Publish only this run's facts,
+      // after durable success; never swap a document over another Browser's in-memory progress.
+      const candidateRun = { ...run, humanCheckpoints: [...(run.humanCheckpoints ?? []), fact], updatedAt: at }
+      const facts = normalizeHumanCheckpoints(candidateRun, version)
+      if (!facts) return { saved: false, fact: null, warning: HUMAN_FACT_UNAVAILABLE }
+      const candidate = copy(this.document)
+      const target = candidate.runs.find(item => item.id === run.id)!
+      target.humanCheckpoints = facts; target.updatedAt = at
+      try {
+        await this.store.save(candidate)
+        run.humanCheckpoints = facts; run.updatedAt = at
+        this.warning = undefined
+        return { saved: true, fact: copy(fact) }
+      } catch {
+        this.warning = HUMAN_FACT_SAVE_FAILED
+        return { saved: false, fact: null, warning: HUMAN_FACT_SAVE_FAILED }
+      } finally { this.notify(run.browserId) }
+    })
+  }
+
+  /** No waiting/control/cursor inference creates approval. Only an exact stored event is returned. */
+  async readExactFact(tuple: BrowserTaskRunIdentity, checkpointId: string): Promise<BrowserTaskHumanCheckpointRead> {
+    await this.ready()
+    const bound = this.exactRun(tuple)
+    if (!bound || this.loadUnavailable || this.warning === HUMAN_FACT_SAVE_FAILED) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }
+    const cursor = bound.version.steps.findIndex(step => step.kind === 'checkpoint' && step.id === checkpointId) + 1
+    if (cursor === 0 || bound.run.humanCheckpoints === undefined) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }
+    const fact = bound.run.humanCheckpoints.find(item => item.checkpointId === checkpointId)
+    if (fact) return { status: 'available', fact: copy(fact) }
+    // A passed cursor without its event may be an old/unrecorded Continue or failed optional save.
+    if (cursor <= bound.run.nextStep && bound.run.pendingCheckpointId !== checkpointId) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }
+    return { status: 'not-recorded' }
   }
 
   /** Called with the actual Main-owned recording, never a Renderer-supplied replacement. */
@@ -169,7 +224,7 @@ export class BrowserTaskAssets {
         validateTaskSegment(version, parameters, existing?.nextStep ?? 0, input.mode)
         const next = existing ?? {
           id: identity(this.id()), assetId: asset.id, version: version.version, browserId,
-          nextStep: 0, status: 'ready' as const, operationIds: [], startedAt: this.now(), updatedAt: this.now()
+          nextStep: 0, status: 'ready' as const, operationIds: [], humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now()
         }
         if (!existing) {
           if (this.document.runs.length >= MAX_RUNS) throw new Error('Task run budget reached; previous run facts were retained.')
@@ -255,6 +310,14 @@ export class BrowserTaskAssets {
     if (!asset) throw new Error('Task asset is unavailable; existing Browser work was retained.')
     return asset
   }
+  private exactRun(tuple: BrowserTaskRunIdentity): { run: BrowserTaskAssetRun; version: BrowserTaskVersion } | null {
+    const run = this.document.runs.find(item => item.id === tuple.runId)
+    const asset = this.document.assets.find(item => item.id === tuple.assetId)
+    const version = asset?.versions.find(item => item.version === tuple.version)
+    if (!run || !asset || !version || run.browserId !== tuple.browserId || asset.browserId !== tuple.browserId ||
+        run.assetId !== tuple.assetId || run.version !== tuple.version) return null
+    return { run, version }
+  }
   private async change<T>(action: () => Promise<T>): Promise<T> {
     await this.ready()
     const next = this.tail.then(action)
@@ -268,11 +331,12 @@ export class BrowserTaskAssets {
     catch {
       this.warning = 'Task assets could not be saved. The live draft and previous Browser work remain; restore storage before executing another step.'
       throw new Error(this.warning)
-    } finally {
-      if (browserId) for (const listener of [...this.listeners]) {
-        try { void Promise.resolve(listener(browserId)).catch(() => {}) }
-        catch { /* A failed projection cannot change the durable action/cursor fact. */ }
-      }
+    } finally { if (browserId) this.notify(browserId) }
+  }
+  private notify(browserId: string): void {
+    for (const listener of [...this.listeners]) {
+      try { void Promise.resolve(listener(browserId)).catch(() => {}) }
+      catch { /* A failed projection cannot change the durable action/cursor fact. */ }
     }
   }
   private async load(): Promise<void> {
@@ -385,10 +449,28 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
     if (!run || !asset || !version || asset.browserId !== run.browserId || !Number.isSafeInteger(run.nextStep) || run.nextStep < 0 || run.nextStep > version.steps.length ||
         !['ready', 'running', 'waiting-human', 'completed', 'interrupted', 'failed', 'stopped'].includes(run.status) ||
         !Array.isArray(run.operationIds) || run.operationIds.length > MAX_STEPS || !Number.isFinite(run.startedAt) || !Number.isFinite(run.updatedAt)) throw new Error('Invalid task run')
+    const humanCheckpoints = normalizeHumanCheckpoints(run, version)
     return { id: identity(run.id), assetId: asset.id, version: version.version, browserId: asset.browserId, nextStep: run.nextStep, status: run.status,
       operationIds: run.operationIds.map(identity), ...(run.pendingCheckpointId ? { pendingCheckpointId: identity(run.pendingCheckpointId) } : {}),
+      ...(humanCheckpoints !== undefined ? { humanCheckpoints } : {}),
       ...(run.warning ? { warning: text(run.warning) } : {}), startedAt: run.startedAt, updatedAt: run.updatedAt }
   })
   if (new Set(runs.map(run => run.id)).size !== runs.length) throw new Error('Duplicate task run identity')
   return { version: 1, assets, runs }
+}
+
+/** Damaged/missing optional facts do not damage valid asset progress or manufacture an empty history. */
+function normalizeHumanCheckpoints(run: BrowserTaskAssetRun, version: BrowserTaskVersion): BrowserTaskHumanCheckpoint[] | undefined {
+  if (!Array.isArray(run.humanCheckpoints) || run.humanCheckpoints.length > version.steps.filter(step => step.kind === 'checkpoint').length) return undefined
+  const facts: BrowserTaskHumanCheckpoint[] = []
+  for (const fact of run.humanCheckpoints) {
+    if (!fact || fact.runId !== run.id || fact.browserId !== run.browserId || fact.assetId !== run.assetId || fact.version !== run.version ||
+        fact.origin !== 'trusted-ui' || fact.controlBefore !== 'human' || !Number.isSafeInteger(fact.pendingCursor) || fact.pendingCursor < 1 ||
+        fact.pendingCursor > run.nextStep || version.steps[fact.pendingCursor - 1]?.kind !== 'checkpoint' ||
+        version.steps[fact.pendingCursor - 1]?.id !== fact.checkpointId || !Number.isFinite(fact.confirmedAt) ||
+        fact.confirmedAt < run.startedAt || fact.confirmedAt > run.updatedAt || facts.some(item => item.checkpointId === fact.checkpointId)) return undefined
+    facts.push({ runId: run.id, browserId: run.browserId, assetId: run.assetId, version: run.version, checkpointId: fact.checkpointId,
+      pendingCursor: fact.pendingCursor, origin: 'trusted-ui', controlBefore: 'human', confirmedAt: fact.confirmedAt })
+  }
+  return facts
 }
