@@ -2479,27 +2479,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot after recovery')
         if (refreshedSnapshot) snapshot = refreshedSnapshot
       }
-      let failedCleanupIds = new Set<string>()
-      while (true) {
-        const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
-        failedCleanupIds = new Set<string>()
-        await Promise.all(snapshot.sessions.flatMap((session) => {
-          if (!unclaimedSessionIds.has(session.id)) return []
-          return [api.sessions.stop(session.control).catch(() => {
-            failedCleanupIds.add(session.id)
-          })]
-        }))
-        if (!sessionEventBufferOverflowed) break
+      // A previous process's unclaimed View marker is not a current Stop intent.
+      // Keep observed Runs discoverable; only an exact, current cancellation owns cleanup.
+      while (sessionEventBufferOverflowed) {
         pendingSessionEvents.length = 0
         sessionEventBufferOverflowed = false
         const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot during startup reconciliation')
         if (!refreshedSnapshot) break
         snapshot = refreshedSnapshot
       }
-      const unclaimedSessionIds = new Set(get().unclaimedTerminalSessionIds)
       set({ startupProgress: { step: 'layout' } })
       const visibleSessions = [...new Map([
-        ...snapshot.sessions.filter((session) => !unclaimedSessionIds.has(session.id)),
+        ...snapshot.sessions,
         ...recoveryFailures.filter((pending) => !snapshot.sessions.some((current) => (
           current.id === pending.id && (current.processState === 'running' || !sessionOwnsControl(current, pending.control))
         )))
@@ -2540,7 +2531,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         providerCatalog,
         sessions: visibleSessions,
         recoveryCandidates: snapshot.recoveryCandidates,
-        unclaimedTerminalSessionIds: [...failedCleanupIds],
         timelines: snapshot.timelines,
         runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,
         environmentWarning: snapshotVerified ? snapshot.environmentWarning ?? null : get().environmentWarning,
