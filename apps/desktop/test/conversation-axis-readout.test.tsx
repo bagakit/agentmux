@@ -45,7 +45,7 @@ function fixture(): AgentTimelineItem[] {
 }
 
 const describeSpeaker = (speaker: ConversationSpeaker): { name: string } =>
-  speaker.role === 'human' ? { name: 'You' } : { name: 'Claude' }
+  speaker.role === 'agent' ? { name: 'Claude' } : { name: 'You' }
 
 type Peek = { rect: DOMRect; mark: ConversationAxisMark; name: string }
 

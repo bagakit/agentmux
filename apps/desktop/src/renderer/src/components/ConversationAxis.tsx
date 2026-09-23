@@ -1,24 +1,8 @@
-import type { AgentProviderId } from '@agentmux/core'
-import type { AgentTimelineItem } from '../../../shared/contracts'
-import { conversationAxis, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
-import type { ConversationSpeaker } from '../lib/conversation-speaker'
+import type { ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker'
+import { conversationAxis, type ConversationAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 
-/**
- * 把一个身份解析成「叫什么、画哪个 provider」。
- *
- * 是一个具名类型而不是行内写四遍：轴、轴标记、Activity 的正文回合、以及接线层都要说这同一句话，
- * 而它们必须逐字一致——providerId 是 optional 且在 `exactOptionalPropertyTypes` 下「缺席」与
- * 「显式 undefined」不是一回事，抄第四遍就是给漂移开一个口子。
- *
- * 解析发生在**调用方**（唯一持有 session 的那一层），不在这些组件里：组件因此不读 store，可在无
- * DOM 的测试里直接求值。返回的 `name` 是身份的判别器——同 provider 的两个 Agent 共用一枚品牌图标、
- * 色相又有约 52% 概率撞在 20° 内（已实测，见设计 SSOT），所以接线方必须给出互相可分的名字。
- */
-export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
-  name: string
-  providerId?: AgentProviderId
-}
+export type { DescribeSpeaker }
 
 /**
  * 一条说话人轴：把某一类身份的发言画成时间轴上的若干枚头像。
@@ -61,8 +45,8 @@ export function ConversationAxis({
   onPeek,
   onPeekEnd
 }: {
-  /** 全量 timeline。scale 在全量上建，位置按原始下标取——两条轴因此与主刻度时间基准同源。 */
-  items: readonly AgentTimelineItem[]
+  /** 全量 items。scale 在全量上建，位置按原始下标取——两条轴因此与主刻度时间基准同源。 */
+  items: readonly ConversationAxisItem[]
   /** 轴语义：哪些身份在这条轴上留标记。两条轴只有这个参数不同。 */
   belongs: SpeakerPredicate
   /** 这条轴是什么的可读名，作为轨道的可访问名。 */

@@ -1,5 +1,5 @@
 import type { AgentProviderId } from '@agentmux/core'
-import { UserRound } from 'lucide-react'
+import { CircleDot, UserRound } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { ConversationSpeaker } from '../lib/conversation-speaker'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
@@ -92,8 +92,10 @@ export function ConversationSpeakerAvatar({
         // 兜底），所以这里不需要把「查不到」编码成一个假值。`exactOptionalPropertyTypes` 下显式
         // `undefined` 不能喂给 optional 属性，故按缺席传，而不是退回 `?? ''` 那种假值。
         <AgentProviderIcon {...(providerId === undefined ? {} : { providerId })} size={glyphSize} />
-      ) : (
+      ) : speaker.role === 'human' ? (
         <UserRound size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
+      ) : (
+        <CircleDot size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       )}
     </span>
   )

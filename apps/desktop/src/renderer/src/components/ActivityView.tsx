@@ -1,6 +1,6 @@
 import { ChevronRight, Info } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
-import type { AgentDisplayState } from '@agentmux/core'
+import type { AgentDisplayState, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
@@ -31,9 +31,9 @@ import {
 } from '../lib/activity-ruler'
 import { stepTitle } from '../lib/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
-import { speaksAsAgent, speaksAsHuman, type ConversationAxisMark } from '../lib/conversation-axis'
+import { speaksAsAgent, type ConversationAxisItem, type ConversationAxisMark } from '../lib/conversation-axis'
 import { buildContinuationPrompt } from '../lib/session-continuation'
-import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'
+import { isConversationTurn, speakerOf, speakerOfUserMessage } from '../lib/conversation-speaker'
 import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
@@ -63,8 +63,19 @@ function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: nu
 type Segment =
   | { kind: 'item'; item: AgentTimelineItem }
   | { kind: 'run'; id: string; items: AgentTimelineItem[] }
+  | { kind: 'user-message'; message: AgentSessionUserMessage }
 
-function segment(items: AgentTimelineItem[]): Segment[] {
+type RawEntry =
+  | { type: 'timeline'; item: AgentTimelineItem; time: number }
+  | { type: 'user-message'; message: AgentSessionUserMessage; time?: number }
+
+function buildActivityEntries(
+  items: AgentTimelineItem[],
+  userMessages?: readonly AgentSessionUserMessage[]
+): {
+  unifiedItems: ConversationAxisItem[]
+  segments: Segment[]
+} {
   const segments: Segment[] = []
   let run: AgentTimelineItem[] = []
   const flush = (): void => {
@@ -74,18 +85,68 @@ function segment(items: AgentTimelineItem[]): Segment[] {
     else segments.push({ kind: 'run', id: `run-${run[0]!.id}`, items: run })
     run = []
   }
-  for (const item of items) {
-    // A run holds machine reporting only. A human turn already breaks it (source 'user'); the assistant
-    // reply is native-hook too, so without the speaker guard segment() would sweep it into a collapsed
-    // "N steps" fold and hide the agent's half of the conversation.
-    if (item.source === 'native-hook' && !isConversationTurn(item)) run.push(item)
-    else {
+
+  if (!userMessages || userMessages.length === 0) {
+    for (const item of items) {
+      if (item.source === 'native-hook' && !isConversationTurn(item)) run.push(item)
+      else {
+        flush()
+        segments.push({ kind: 'item', item })
+      }
+    }
+    flush()
+    return { unifiedItems: items, segments }
+  }
+
+  // Only exclude captured user messages that are already represented in userMessages.
+  // Native rawId collision must NEVER erase an unrelated timeline receipt.
+  const capturedSubmissionIds = new Set(
+    userMessages
+      .filter((m) => m.source.kind === 'captured')
+      .map((m) => m.rawId)
+  )
+  const nonUserItems = items.filter((item) => {
+    if (item.kind === 'user_message' || item.source === 'user') {
+      return !capturedSubmissionIds.has(item.id)
+    }
+    return true
+  })
+
+  const stream: RawEntry[] = [
+    ...nonUserItems.map((item) => ({ type: 'timeline' as const, item, time: item.createdAt })),
+    ...userMessages.map((message) => ({
+      type: 'user-message' as const,
+      message,
+      ...(message.recordedAt !== undefined ? { time: message.recordedAt } : {})
+    }))
+  ]
+
+  stream.sort((a, b) => {
+    if (a.time !== undefined && b.time !== undefined) return a.time - b.time
+    if (a.time !== undefined) return 1
+    if (b.time !== undefined) return -1
+    return 0
+  })
+
+  const unifiedItems: ConversationAxisItem[] = []
+
+  for (const entry of stream) {
+    if (entry.type === 'user-message') {
       flush()
-      segments.push({ kind: 'item', item })
+      segments.push({ kind: 'user-message', message: entry.message })
+      unifiedItems.push(entry.message)
+    } else {
+      unifiedItems.push(entry.item)
+      if (entry.item.source === 'native-hook' && !isConversationTurn(entry.item)) {
+        run.push(entry.item)
+      } else {
+        flush()
+        segments.push({ kind: 'item', item: entry.item })
+      }
     }
   }
   flush()
-  return segments
+  return { unifiedItems, segments }
 }
 
 /** The client-space rectangle the readout must stay clear of and inside — the whole ruler track. */
@@ -151,7 +212,7 @@ export function Ruler({
   onSelect,
   axes
 }: {
-  items: AgentTimelineItem[]
+  items: readonly ConversationAxisItem[]
   scale: RulerScale
   selectedIndex: number | null
   band: ReturnType<typeof rulerBand>
@@ -318,15 +379,19 @@ export function Ruler({
             aria-hidden="true"
           />
         ) : null}
-        {items.map((item, index) => (
-          <span
-            key={item.id}
-            className={`activity-ruler__tick activity-ruler__tick--${item.kind}`}
-            data-status={item.status}
-            data-selected={index === selectedIndex ? '' : undefined}
-            style={{ left: `${scale.fractionOf(index) * 100}%` }}
-          />
-        ))}
+        {items.map((item, index) => {
+          const kind = 'kind' in item ? item.kind : 'user_message'
+          const status = 'status' in item ? item.status : ('deliveryStatus' in item ? item.deliveryStatus : undefined)
+          return (
+            <span
+              key={item.id}
+              className={`activity-ruler__tick activity-ruler__tick--${kind}`}
+              data-status={status}
+              data-selected={index === selectedIndex ? '' : undefined}
+              style={{ left: `${scale.fractionOf(index) * 100}%` }}
+            />
+          )
+        })}
         </div>
       </div>
       {/* 用户：「时间只显示分钟太不友好了, 应该显示从什么时间点到什么时间点, 消耗的时分秒」。
@@ -558,7 +623,7 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
   let index = 0
   for (const entry of segments) {
     const size = entry.kind === 'run' ? entry.items.length : 1
-    const key = entry.kind === 'run' ? entry.id : entry.item.id
+    const key = entry.kind === 'run' ? entry.id : entry.kind === 'user-message' ? entry.message.id : entry.item.id
     placed.push({ entry, key, from: index, to: index + size - 1 })
     index += size
   }
@@ -585,6 +650,7 @@ function WorkingIndicator(): JSX.Element {
 export function ActivityView({
   sessionId,
   items,
+  userMessages,
   capability,
   displayState,
   openWorkspaceFile,
@@ -597,6 +663,7 @@ export function ActivityView({
 }: {
   sessionId: string
   items: AgentTimelineItem[]
+  userMessages?: readonly AgentSessionUserMessage[]
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
   displayState?: AgentDisplayState
@@ -617,12 +684,28 @@ export function ActivityView({
    */
   describeSpeaker?: DescribeSpeaker
 }) {
-  const segments = useMemo(() => segment(items), [items])
+  const { unifiedItems, segments } = useMemo(
+    () => buildActivityEntries(items, userMessages),
+    [items, userMessages]
+  )
   const placed = useMemo(() => placeSegments(segments), [segments])
-  const origin = items[0]?.createdAt ?? 0
+  const origin = useMemo(() => {
+    for (const it of unifiedItems) {
+      const t = 'createdAt' in it ? it.createdAt : it.recordedAt
+      if (t !== undefined) return t
+    }
+    return 0
+  }, [unifiedItems])
   // The scale is the single source both the ruler and the log read from — width is irrelevant to it
   // because every position is expressed as a 0..1 fraction and rendered as a percentage.
-  const scale = useMemo(() => createRulerScale(items.map((item) => item.createdAt), 1), [items])
+  const scale = useMemo(
+    () =>
+      createRulerScale(
+        unifiedItems.map((item) => ('createdAt' in item ? item.createdAt : item.recordedAt)),
+        1
+      ),
+    [unifiedItems]
+  )
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [visible, setVisible] = useState<{ from: number; to: number } | null>(null)
@@ -685,16 +768,16 @@ export function ActivityView({
   useEffect(() => {
     const geometry = feedGeometry()
     if (!geometry) return
-    const last = items.at(-1)
+    const last = unifiedItems.at(-1)
     const decision = onContentChange(followRef.current, {
-      itemCount: items.length,
+      itemCount: unifiedItems.length,
       lastItemId: last?.id ?? null,
       lastItemLength: last?.content?.length ?? 0
     }, geometry)
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
-  }, [items, feedEl])
+  }, [unifiedItems, feedEl])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
@@ -749,7 +832,10 @@ export function ActivityView({
     return () => observer.disconnect()
   }, [placed])
 
-  if (capability === 'unavailable') {
+  const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
+  const hasItems = items.length > 0
+
+  if (capability === 'unavailable' && !hasUserMessages && !hasItems) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         <div className="activity-feed__empty">
@@ -758,7 +844,7 @@ export function ActivityView({
       </div>
     )
   }
-  if (showEmptyState(displayState, items)) {
+  if (!hasUserMessages && showEmptyState(displayState, items)) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         <div className="activity-feed__empty">
@@ -769,7 +855,7 @@ export function ActivityView({
   }
   // 正在想、但首行还没落地：显示"在进行"而不是空状态。一个正在工作的东西显示成空，
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
-  if (items.length === 0) {
+  if (!hasUserMessages && !hasItems) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         <WorkingIndicator />
@@ -788,28 +874,23 @@ export function ActivityView({
 
   return (
     <div className="activity-feed" ref={setFeedEl}>
+      {capability === 'unavailable' ? (
+        <div className="activity-feed__empty" role="status">
+          This executor does not provide structured activity. Terminal remains available.
+        </div>
+      ) : null}
       <Ruler
-        items={items}
+        items={unifiedItems}
         scale={scale}
         selectedIndex={selectedIndex}
         band={band}
         onSelect={selectEvent}
         axes={({ onPeek, onPeekEnd }) =>
           describeSpeaker ? (
-            // 两条轴在既有 ruler **之上**分轴，而不是替换它：ruler 那三条更强的性质（诚实时间轴、
-            // 每行偏移、无跨度时退化为序数）是既有资产。轴与 track 由 `Ruler` 摆进同一个坐标盒，
-            // 所以「同一个 fraction 落在同一个像素」这句话在布局上真的成立，而不只是两个都写着
-            // 同一个百分比——后者在两个不同宽度的盒里是两个位置。
-            //
-            // 顺序是「说话人在上、自我 Agent 在下、主刻度在最下」：自上而下正是从"谁在说话"到
-            // "这个 Agent 在干什么"到"整条时间轴"的收敛，越往下越细。
-            //
-            // 面板出口（onPeek/onPeekEnd）由 Ruler 递进来：面板与主刻度的 readout 是同一个浮层，
-            // 而它的锚定要用 Ruler 才有的那个共享坐标盒。这一层只补上身份解析。
             <Fragment>
               <ConversationAxis
-                items={items}
-                belongs={speaksAsHuman}
+                items={unifiedItems}
+                belongs={(speaker) => speaker.id !== sessionId || !speaksAsAgent(speaker)}
                 label="Speakers"
                 size={16}
                 describe={describeSpeaker}
@@ -819,8 +900,8 @@ export function ActivityView({
                 onPeekEnd={onPeekEnd}
               />
               <ConversationAxis
-                items={items}
-                belongs={speaksAsAgent}
+                items={unifiedItems}
+                belongs={(speaker) => speaksAsAgent(speaker) && speaker.id === sessionId}
                 label="This agent"
                 size={16}
                 describe={describeSpeaker}
@@ -836,7 +917,11 @@ export function ActivityView({
       <div className="activity-log" ref={logRef}>
         {placed.map(({ entry, key, from }) => {
           // Identity is resolved once here; the shared message only renders that verdict.
-          const speaker = entry.kind === 'run' ? null : speakerOf(entry.item)
+          const speaker = entry.kind === 'run'
+            ? null
+            : entry.kind === 'user-message'
+              ? speakerOfUserMessage(entry.message)
+              : speakerOf(entry.item)
           const described = speaker ? describeSpeaker?.(speaker) : undefined
           return (
             // One wrapper per segment carries the scroll target, the observer key, and the selection
@@ -848,6 +933,23 @@ export function ActivityView({
             >
               {entry.kind === 'run' ? (
                 <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
+              ) : entry.kind === 'user-message' ? (
+                <ConversationMessage
+                  messageId={entry.message.id}
+                  content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
+                  {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
+                  {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
+                  origin={origin}
+                  speaker={speaker!}
+                  name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
+                  workspaceRoot={workspaceRoot}
+                  {...(described?.providerId ? { providerId: described.providerId } : {})}
+                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+                  {...(readPastedImage ? { readPastedImage } : {})}
+                  {...(openHttpLink ? { openHttpLink } : {})}
+                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
+                  {...(onAnnotate ? { onAnnotate } : {})}
+                />
               ) : speaker ? (
                 <ConversationMessage
                   messageId={entry.item.id}
@@ -861,7 +963,7 @@ export function ActivityView({
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                   {...(readPastedImage ? { readPastedImage } : {})}
                   {...(openHttpLink ? { openHttpLink } : {})}
-                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(items, entry.item.id)) } : {})}
+                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
                   {...(onAnnotate ? { onAnnotate } : {})}
                 />
               ) : (

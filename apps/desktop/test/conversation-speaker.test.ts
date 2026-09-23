@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import {
   HUMAN_SPEAKER_ID,
+  UNKNOWN_SPEAKER_ID,
   isConversationTurn,
   speakerOf
 } from '../src/renderer/src/lib/conversation-speaker.js'
@@ -28,20 +29,21 @@ function item(overrides: Partial<AgentTimelineItem>): AgentTimelineItem {
 }
 
 describe('对话体的说话人判定', () => {
-  it('人类的话按 source 认，而不是按 kind 认', () => {
-    // 这是这个函数存在的理由。`kind:'user_message'` 与 `source:'user'` 在今天恒等价（Core 里只有
-    // launch/send 一处产生用户消息，同时写死两个字段），所以任何只看其中一个的实现都能让常规用例
-    // 全绿。要钉住「权威是 source」，必须构造一条**只有 source 说话**的条目：source 是 'user'，而
-    // kind 不是 user_message。按 kind 反推身份的实现在这里会把人的话判成机器上报（null），而设计
-    // SSOT 明确禁止按 kind 反推身份。
+  it('用户的话按 source 认，不再盲猜人类，而是 unknown 回合', () => {
+    // 守住「权威是 source」且不再将 source=user 臆断为人类。按 kind 反推身份在此会把用户
+    // 输入判成机器上报（null），而设计 SSOT 明确禁止按 kind 反推身份；盲猜人类也已被 T-036 废除。
     const speaker = speakerOf(item({ source: 'user', kind: 'lifecycle' }))
-    expect(speaker).toEqual({ role: 'human', id: HUMAN_SPEAKER_ID })
+    expect(speaker).toEqual({ role: 'unknown', id: UNKNOWN_SPEAKER_ID })
   })
 
-  it('常规的用户消息（两个字段同时成立）当然也是人', () => {
-    // 今天真实数据长这样：两个字段一致。上一条钉判据，这一条钉「判据没把常规情况判错」。
+  it('常规的用户消息返回 unknown 说话人，不冒充 Human', () => {
     expect(speakerOf(item({ source: 'user', kind: 'user_message' })))
-      .toEqual({ role: 'human', id: HUMAN_SPEAKER_ID })
+      .toEqual({ role: 'unknown', id: UNKNOWN_SPEAKER_ID })
+  })
+
+  it('带 authorAgentSessionId 的用户消息被识别为对应 Agent 身份', () => {
+    expect(speakerOf(item({ source: 'user', kind: 'user_message', authorAgentSessionId: 'peer-agent' })))
+      .toEqual({ role: 'agent', id: 'peer-agent' })
   })
 
   it('Agent 自己的话带上它自己的身份，而不是一个写死的字面量', () => {
@@ -81,30 +83,18 @@ describe('对话体的说话人判定', () => {
   })
 
   it('两个字段互相矛盾时，source 赢——两个方向都要钉，不只人这一侧', () => {
-    // 上面那条循环刻意跳过了 `source:'user'`，因为它会返回 human 而不是 agent。于是
-    // 「source 优先于 kind」在 assistant 方向上一直没有断言守着：一个先看 kind 的实现
-    // （`if (kind === 'assistant_message') return agent` 放在 source 判断之前）能让上面每一条
-    // 都绿，却在这里把人说的话画成 Agent 的话。
-    //
-    // 这个组合今天不可达（Core 里 assistant_message 永远不带 source:'user'），钉它是因为判据的
-    // **优先级**本身是这个函数的契约——两个字段哪个是权威，不能只在一半的取值上成立。
+    // 上面那条循环刻意跳过了 `source:'user'`，因为它会进入用户输入分支而不是 agent。
     expect(speakerOf(item({ kind: 'assistant_message', source: 'user' })))
-      .toEqual({ role: 'human', id: HUMAN_SPEAKER_ID })
+      .toEqual({ role: 'unknown', id: UNKNOWN_SPEAKER_ID })
   })
 
-  it('human 哨兵与 agentSessionId 共用 id 空间，所以只按 id 寻址会把两个身份并成一个', () => {
-    // Core 侧 agentSessionId 只过字符集校验（SAFE_ID），字面量 'human' 完全合法，而 createAgent
-    // 接受调用方传入的 agentSessionId。今天桌面端传 randomUUID() 所以碰不上，但类型没挡住。
-    //
-    // 这条不是要求实现去避免碰撞（那要动 Core 公共合同），而是把「碰撞真的会发生」这个事实钉成
-    // 可执行的：任何按 id 建映射的消费方（头像、配色、轴上的位置）都必须带上 role。若日后有人
-    // 写了 `avatars[speaker.id]`，这条断言就是它该被驳回的依据。
-    const human = speakerOf(item({ source: 'user', kind: 'user_message' }))
-    const collidingAgent = speakerOf(item({ kind: 'assistant_message', agentSessionId: HUMAN_SPEAKER_ID }))
+  it('unknown 哨兵与 agentSessionId 共用 id 空间，所以只按 id 寻址会把两个身份并成一个', () => {
+    const unknownSpeaker = speakerOf(item({ source: 'user', kind: 'user_message' }))
+    const collidingAgent = speakerOf(item({ kind: 'assistant_message', agentSessionId: UNKNOWN_SPEAKER_ID }))
     // id 相同——这是事实，不是缺陷。
-    expect(collidingAgent?.id).toBe(human?.id)
+    expect(collidingAgent?.id).toBe(unknownSpeaker?.id)
     // 而 role 不同，所以 (role, id) 仍然把两者分得开。寻址必须用这一对。
-    expect(collidingAgent?.role).not.toBe(human?.role)
+    expect(collidingAgent?.role).not.toBe(unknownSpeaker?.role)
   })
 
   it('「是一轮对话」与「有说话人」是同一个判据的两种问法，不是两份实现', () => {

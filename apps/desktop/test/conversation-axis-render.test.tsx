@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ConversationAxis } from '../src/renderer/src/components/ConversationAxis.js'
 import { conversationAxis, speaksAsAgent, speaksAsHuman } from '../src/renderer/src/lib/conversation-axis.js'
-import { HUMAN_SPEAKER_ID } from '../src/renderer/src/lib/conversation-speaker.js'
+import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID } from '../src/renderer/src/lib/conversation-speaker.js'
 import type { ConversationSpeaker } from '../src/renderer/src/lib/conversation-speaker.js'
 
 /**
@@ -38,7 +38,7 @@ function conversationFixture(): AgentTimelineItem[] {
 }
 
 const describeSpeaker = (speaker: ConversationSpeaker): { name: string; providerId?: 'claude' } =>
-  speaker.role === 'human' ? { name: 'You' } : { name: 'Claude', providerId: 'claude' }
+  speaker.role === 'agent' ? { name: 'Claude', providerId: 'claude' } : { name: 'You' }
 
 function render(node: Parameters<typeof renderToStaticMarkup>[0]): string {
   return renderToStaticMarkup(node)
@@ -75,10 +75,10 @@ describe('对话轴的渲染', () => {
     // 人类轴上两枚（u1、u2），Agent 轴上一枚（a1）——数量与身份都不同。
     expect(human.match(/conversation-axis__mark/g)).toHaveLength(2)
     expect(agent.match(/conversation-axis__mark/g)).toHaveLength(1)
-    expect(human).toContain('conversation-avatar--human')
+    expect(human).toContain('conversation-avatar--unknown')
     expect(human).not.toContain('conversation-avatar--agent')
     expect(agent).toContain('conversation-avatar--agent')
-    expect(agent).not.toContain('conversation-avatar--human')
+    expect(agent).not.toContain('conversation-avatar--unknown')
     // 两条轴各有自己的可访问名，读屏能分清在听哪条轴。
     expect(human).toContain('aria-label="Speakers"')
     expect(agent).toContain('aria-label="This agent"')
@@ -331,7 +331,7 @@ describe('对话轴的渲染', () => {
         onSelect={() => {}}
       />
     )
-    expect(markup).toContain('conversation-avatar--human')
+    expect(markup).toContain('conversation-avatar--unknown')
     expect(markup).not.toContain('data-agent-provider="claude"')
   })
 
@@ -342,7 +342,7 @@ describe('对话轴的渲染', () => {
     // 那种断言即便实现真的拿 speaker.id 当 key 也照样绿，是一条守不住它自己所命名的 bug 的断言。
     const marks = conversationAxis(conversationFixture(), speaksAsHuman)
     expect(marks.map((mark) => mark.index)).toEqual([0, 3])
-    expect(new Set(marks.map((mark) => mark.speaker.id))).toEqual(new Set([HUMAN_SPEAKER_ID]))
+    expect(new Set(marks.map((mark) => mark.speaker.id))).toEqual(new Set([UNKNOWN_SPEAKER_ID]))
   })
 
   it('可访问名由 button 给出、头像被标为装饰——名字有且只有一处', () => {

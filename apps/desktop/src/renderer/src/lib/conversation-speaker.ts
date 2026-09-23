@@ -1,41 +1,24 @@
 /**
- * 「这一条是谁说的」——对话体里唯一的说话人判定。
+ * 对话体里唯一的说话人判定与身份映射。
  *
- * 今天这件事散在渲染层三处，每处各自按 `kind` 二选一：图标在 `user_message`/`assistant_message`
- * 之间选形状，`isTurn` 判断这条算不算「人读的话」，`Turn` 的 caption 在 `'You'`/`'Assistant'`
- * 之间选字。三处的判据必须一致却没有共同出处——改一处漏两处，是这个形状本身的问题。
+ * 说话人身份由 `(role, id)` 共同表达：
+ * - `id` 是稳定身份标识，用于寻址、资料解析与头像色相派生。
+ * - `role` 决定类别与表示形状（'human'、'agent'、'unknown'）。
  *
- * ## 为什么权威是 `source` 而不是 `kind`
- *
- * `kind: 'user_message'` 与 `source: 'user'` 在今天恒等价，因为 Core 里只有一个地方产生用户
- * 消息（launch/send 路径），它同时写死这两个字段；`UserPromptSubmit` hook 刻意不重复收，已有
- * 测试守着这条。但这两个字段的**语义强度不同**：`source` 回答「这条事实是谁提供的」，`kind`
- * 回答「这是一条什么事件」。说话人是前者的问题。按 `kind` 反推身份正是当前二值 caption 的形态，
- * 也是设计 SSOT 明确禁止的（「渲染层不得按 kind 反推身份」）。所以这里先看 `source`。
- *
- * ## 为什么返回的不是一个布尔或两个字面量
- *
- * 说话人在设计上是**开放集**：A2A 落地后，同一条对话里会有多个 Agent 各自的身份。但今天 Core
- * 侧的 `AgentTimelineItem` 没有任何身份字段（`kind` 与 `source` 都是闭集，都不携带身份），所以
- * 真正的开放集是一次公共合同变更，不在本轮。本轮要做对的是**形状**：值域是今天真实存在的两个
- * 身份，而返回结构能容纳第三个身份而不必改调用方。
- *
- * 具体地：`SpeakerRole` 保持窄集合（今天只有 human/agent 两个真实取值），而识别一个**具体是谁**
- * 靠 `id`。今天 agent 的 id 就是它的 agentSessionId，human 只有一个所以是常量；A2A 落地后新增的
- * 参与者拿到自己的 id，`role` 仍然是 `'agent'`，调用方（选头像、选形状、排轴）不需要改。
- * 这不是预防性抽象——它没有多出任何配置层或分支，只是没把「只有两种」写进类型。
+ * 全来源原生用户输入与未记录作者如实表达为 `role: 'unknown'`，已知 Agent 作者使用其真实 agentSessionId，
+ * 绝不再从 `source=user` 或原生角色盲目猜测 Human。
  */
 
+import type { AgentProviderId, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 
 /**
  * 说话人的类别。**不是身份**——身份是 {@link ConversationSpeaker.id}。
  *
- * `'human'` 与 `'agent'` 之外没有第三个类别：`tool_call`/`permission`/`lifecycle` 这些机器上报
- * 不是「谁说了话」，它们根本不进对话体（见 {@link speakerOf} 返回 null）。A2A 带来的是更多
- * `'agent'` 身份，不是一个新类别。
+ * `'agent'` 为已知 Agent，`'unknown'` 为未记录或原生用户输入，`'human'` 仅在确知人类身份时保留。
+ * 绝不再从 `source=user` 或原生角色盲目猜测 Human。
  */
-export type SpeakerRole = 'human' | 'agent'
+export type SpeakerRole = 'human' | 'agent' | 'unknown'
 
 /**
  * 对话体里的一个说话人。
@@ -46,49 +29,95 @@ export type SpeakerRole = 'human' | 'agent'
  */
 export type ConversationSpeaker = {
   role: SpeakerRole
-  /** 这个说话人的稳定标识。今天：human 恒为 HUMAN_SPEAKER_ID，agent 为其 agentSessionId。 */
+  /** 这个说话人的稳定标识。agent 为其 agentSessionId，unknown 为 UNKNOWN_SPEAKER_ID。 */
   id: string
 }
 
 /**
  * 代表「这台机器前面的人」的身份。
- *
- * 是个常量而不是从 item 里读出来的，因为今天说话人轴上只会有人类用户的发言，Core 侧也没有区分
- * 多个人类用户的事实。A2A 预留的是 agent 侧的多身份，不是多个人类。
- *
- * **消费方必须按 `(role, id)` 寻址，不能只按 `id`。** 这个哨兵与 agentSessionId **共用一个 id
- * 空间**：Core 侧 `agentSessionId` 只过 `SAFE_ID` 字符集校验，字面量 `'human'` 是合法的，而
- * `createAgent` 接受调用方传入的 agentSessionId。今天桌面端传 `randomUUID()` 所以不会碰撞，但
- * 类型和这个常量都没有挡住它。于是一个 `agentSessionId === 'human'` 的 Agent 会得到
- * `{role:'agent', id:'human'}`，与人类的 `{role:'human', id:'human'}` 在**只看 id** 的映射里
- * collapse 成同一个身份——头像、颜色、轴上的位置会全部串。
- *
- * 修法不是在 Core 里加保留字校验（那要动公共合同，且 `role` 本来就在返回里，够用了），而是
- * **一切按 id 建的映射都要带上 role**。这条也顺着往长做：A2A 落地后 role 依然是正确的判别维度。
  */
 export const HUMAN_SPEAKER_ID = 'human'
 
 /**
- * 这一条时间轴条目的说话人；不是一句话（机器上报）时返回 null。
- *
- * null 是有意义的返回而不是兜底：`tool_call`/`permission`/`lifecycle` 是机器上报，它们在对话体
- * 里走 24px 紧凑行而不是 turn register。调用方据此二选一，而不必自己再判一次 kind。
+ * 未知输入作者的哨兵标识。
  */
-export function speakerOf(item: AgentTimelineItem): ConversationSpeaker | null {
-  // `source` 先行：它回答「这条事实谁提供的」，正是说话人的问题。人类的话只从 Core 的
-  // launch/send 路径来，那里是唯一写 `source: 'user'` 的地方。
-  if (item.source === 'user') return { role: 'human', id: HUMAN_SPEAKER_ID }
-  if (item.kind === 'assistant_message') return { role: 'agent', id: item.agentSessionId }
+export const UNKNOWN_SPEAKER_ID = 'unknown'
+
+/**
+ * 把一个身份解析成「叫什么、画哪个 provider」。
+ */
+export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
+  name: string
+  providerId?: AgentProviderId
+}
+
+/**
+ * 共同 speaker resolver：按真实 speaker.id 解析 Agent 资料，缺失时保留原 id 与未知说明，
+ * 不用收件人当前资料代填发件人。
+ */
+export function createSpeakerResolver(options?: {
+  lookupAgent?: (agentSessionId: string) => { label?: string; providerId?: AgentProviderId } | undefined
+  currentSession?: { id: string; label?: string; providerId?: AgentProviderId } | undefined
+}): DescribeSpeaker {
+  return (speaker: ConversationSpeaker) => {
+    if (speaker.role === 'human') return { name: 'You' }
+    if (speaker.role === 'unknown') return { name: 'Input' }
+    if (options?.lookupAgent) {
+      const found = options.lookupAgent(speaker.id)
+      if (found) {
+        return {
+          name: found.label ?? speaker.id,
+          ...(found.providerId ? { providerId: found.providerId } : {})
+        }
+      }
+    }
+    if (options?.currentSession && options.currentSession.id === speaker.id) {
+      return {
+        name: options.currentSession.label ?? speaker.id,
+        ...(options.currentSession.providerId ? { providerId: options.currentSession.providerId } : {})
+      }
+    }
+    return { name: speaker.id }
+  }
+}
+
+/**
+ * 从 AgentSessionUserMessage 得到规范说话人。
+ */
+export function speakerOfUserMessage(message: AgentSessionUserMessage): ConversationSpeaker {
+  if (message.author.kind === 'agent') {
+    return { role: 'agent', id: message.author.agentSessionId }
+  }
+  return { role: 'unknown', id: UNKNOWN_SPEAKER_ID }
+}
+
+/**
+ * 这一条条目或消息的说话人；不是一句话（机器上报）时返回 null。
+ */
+export function speakerOf(
+  itemOrMessage: AgentTimelineItem | AgentSessionUserMessage
+): ConversationSpeaker | null {
+  if ('author' in itemOrMessage && typeof itemOrMessage.author === 'object') {
+    return speakerOfUserMessage(itemOrMessage)
+  }
+  const item = itemOrMessage as AgentTimelineItem
+  if (item.authorAgentSessionId) {
+    return { role: 'agent', id: item.authorAgentSessionId }
+  }
+  if (item.source === 'user' || item.kind === 'user_message') {
+    return { role: 'unknown', id: UNKNOWN_SPEAKER_ID }
+  }
+  if (item.kind === 'assistant_message') {
+    return { role: 'agent', id: item.agentSessionId }
+  }
   return null
 }
 
 /**
  * 这一条是否属于对话体（turn register）而不是机器上报行。
- *
- * 与 {@link speakerOf} 同一个判据的两种问法——**不是**第二份实现。渲染层原先用一个只看 `kind`
- * 的 `isTurn`，与 caption 的判据各写一遍；这里让「有说话人」直接定义「是一轮对话」，两者不可能
- * 再漂移。
  */
-export function isConversationTurn(item: AgentTimelineItem): boolean {
-  return speakerOf(item) !== null
+export function isConversationTurn(
+  itemOrMessage: AgentTimelineItem | AgentSessionUserMessage
+): boolean {
+  return speakerOf(itemOrMessage) !== null
 }
