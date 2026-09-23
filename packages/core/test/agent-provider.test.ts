@@ -556,7 +556,7 @@ describe('built-in agent providers', () => {
       runId: 'agy-run-1',
       receiptId: 'rcpt-1',
       eventName: 'PreInvocation',
-      payload: { conversationId: 'native-agy-1', transcript_path: '/tmp/agy.jsonl' }
+      payload: { conversationId: 'native-agy-1', transcriptPath: '/tmp/agy.jsonl' }
     }, {})
     expect(preInvocation.status.state).toBe('working')
     expect(preInvocation.nativeHandle).toEqual({
@@ -572,7 +572,7 @@ describe('built-in agent providers', () => {
       runId: 'agy-run-1',
       receiptId: 'rcpt-2',
       eventName: 'PreToolUse',
-      payload: { tool_name: 'ask_question', tool_input: { prompt: 'Allow write?' } }
+      payload: { toolCall: { name: 'ask_question', args: { questions: [{ question: 'Allow write?', options: ['Yes', 'No'] }] } } }
     }, {})
     expect(toolUse.status.state).toBe('waiting')
     expect(toolUse.timeline).toHaveLength(1)
@@ -588,15 +588,17 @@ describe('built-in agent providers', () => {
       runId: 'agy-run-1',
       receiptId: 'rcpt-3',
       eventName: 'Stop',
-      payload: { last_assistant_message: 'Done all work.' }
+      payload: { terminationReason: 'model_stop', fullyIdle: true }
     }, {})
-    expect(stop.status.state).toBe('done')
+    expect(stop.status.state).toBe('running')
+    expect(stop.semanticState).toBe('unknown')
+    expect(stop.lifecycleEvent).toBeNull()
     expect(stop.timeline).toHaveLength(1)
     const stopMutation = stop.timeline[0]
     expect(stopMutation?.type).toBe('append')
     if (stopMutation?.type === 'append') {
-      expect(stopMutation.item.kind).toBe('assistant_message')
-      expect(stopMutation.item.content).toBe('Done all work.')
+      expect(stopMutation.item.kind).toBe('lifecycle')
+      expect(stopMutation.item.title).toBe('Stop')
     }
   })
 
