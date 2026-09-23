@@ -37,25 +37,32 @@ function signal(pid, name) {
 // becomes <defunct>, but it no longer needs a signal.
 export async function signalOwnedProbeProcess(pid, temporaryRoot, name) {
   let stdout
+  let observationError
   try {
     const observation = await execFileAsync('/bin/ps', ['-p', String(pid), '-o', 'stat=,command='], {
       timeout: 5_000, maxBuffer: 64 * 1024
     })
     stdout = observation.stdout
   } catch (error) {
-    // An empty ps exit is not itself enough to infer absence. Confirm it with
-    // the OS; permission errors or an existing PID remain unconfirmed.
     if (error.code === 1 && error.stdout?.trim() === '' && error.stderr?.trim() === '') {
-      try { process.kill(pid, 0) } catch (observed) {
-        if (observed.code === 'ESRCH') return false
-        throw observed
-      }
-    }
-    throw error
+      stdout = error.stdout
+      observationError = error
+    } else throw error
   }
+  // Both a successful empty ps observation and its empty nonzero result can
+  // race exit. Neither establishes absence without an OS confirmation.
+  if (!stdout.trim()) {
+    try { process.kill(pid, 0) } catch (observed) {
+      if (observed.code === 'ESRCH') return false
+      throw observed
+    }
+    if (observationError) throw observationError
+  }
+  const state = /^\s*(\S+)/.exec(stdout)?.[1]
+  if (state?.startsWith('Z')) return false
   const identity = /^\s*(\S+)\s+(.+)\s*$/.exec(stdout)
-  assert.ok(identity && /^[RSDTIUWZ]/.test(identity[1]), 'Private process state could not be observed')
-  if (identity[1].startsWith('Z')) return false
+  assert.ok(identity && /^[RSDTIUWZ]/.test(identity[1]),
+    `Private process state could not be observed (state=${JSON.stringify(state ?? null)}, chars=${stdout.length})`)
   assert.ok(ownsProbePath(identity[2], temporaryRoot), 'Private process identity changed')
   try { process.kill(pid, name) } catch (error) {
     if (error.code === 'ESRCH') return false
