@@ -1,13 +1,20 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { Window, type HTMLButtonElement, type HTMLInputElement, type HTMLSelectElement } from 'happy-dom'
 import { describe, expect, it } from 'vitest'
-import { auditFieldOperation, auditPublicCompletion, numberCondition, outcomeFixture, readRecordedOutcome } from '../scripts/browser-outcome-probe-scenario.mjs'
+import { AgentMuxControlServer, requestAgentMuxControl } from '../../../packages/core/src/control-host'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest, type AgentMuxControlSuccessReceipt } from '../../../packages/core/src/control'
+import { projectBrowserControlResult } from '../src/main/browser-completion-control'
+import { auditFieldOperation, auditPublicCompletion, numberCondition, outcomeFixture, publicFacts, readRecordedOutcome } from '../scripts/browser-outcome-probe-scenario.mjs'
 
-// Source-only tests of the scenario's actual emitted reads and rejection oracles.
-// This transport deliberately has no Desktop, Main manager or native input.
+// Source tests of the scenario's actual emitted reads and rejection oracles.
+// Only the public consumer case starts the real Core control socket; these tests
+// do not launch a Desktop or send macOS native input.
 const browserId = 'browser-one', operationId = 'operation-one', pageUrl = 'http://127.0.0.1:9876/a'
-const field = { key: 'result', type: 'number', source: { selector: '#verified-number', read: 'text' } }
+const field = { key: 'result', type: 'number' as const, source: { selector: '#verified-number', read: 'text' as const } }
 function sample() {
   const context = { workspaceId: 'workspace-one', browserId, operationId, navigationId: 'navigation-one' }
   const source = { ...context, url: pageUrl, documentUrl: pageUrl, document: 'document-one', scope: { kind: 'page' } }
@@ -17,11 +24,13 @@ function sample() {
   const artifact = { ...context, kind: 'browser-result-artifact', id: 'artifact-one', format: 'json',
     byteLength: bytes.length, capturedAt: 1, maxReadBytes: 65_536 }
   const reference = { id: 'evidence-one', operationId, browserId, navigationId: context.navigationId,
-    sequence: 1, kind: 'structured-output', capturedAt: 1, byteLength: 900 }
-  const criterion = { kind: 'field-equals', key: 'result', expected: 0 }
-  const evaluation = { context, status: 'passed', conditions: [{ criterion, status: 'passed', reason: 'The field equals the declared value.' }] }
-  const actual = { id: operationId, browserId, phase: 'completed', startedAt: 1,
-    steps: [{ sequence: 1, method: 'extractStructured', status: 'completed', evidence: [reference] }],
+    sequence: 1, kind: 'structured-output' as const, capturedAt: 1, byteLength: 900 }
+  const criterion = { kind: 'field-equals' as const, key: 'result', expected: 0 }
+  const evaluation = { context, status: 'passed' as const, conditions: [{ criterion, status: 'passed' as const, reason: 'The field equals the declared value.' }] }
+  const actual = { id: operationId, browserId, phase: 'completed' as const, startedAt: 1,
+    operator: { id: 'person', name: 'Person' }, summary: 'Check the declared field', url: pageUrl,
+    steps: [{ sequence: 1, method: 'extractStructured', label: 'Observe declared field', startedAt: 1,
+      status: 'completed' as const, evidence: [reference] }],
     outcome: { registration: { context, criteria: [{ ...criterion,
       producer: { operationId, navigationId: context.navigationId, sequence: 1, request: { fields: [field] } } }] }, evaluation } }
   const evidence = { operationId, sequence: 1, status: 'available', items: [{ reference,
@@ -50,6 +59,11 @@ function transport(data: ReturnType<typeof sample>, options: { extraHistoryAfter
     return await runInNewContext(expression, { window: { agentmux: { browser } } })
   } } } }
   return { ctx, calls }
+}
+function replaceCompleteDocument(data: ReturnType<typeof sample>, document: ReturnType<typeof sample>['document']) {
+  const bytes = Buffer.from(JSON.stringify(document))
+  data.chunk.data = bytes.toString('base64'); data.chunk.returnedBytes = bytes.length; data.chunk.totalBytes = bytes.length
+  data.chunk.reference.byteLength = bytes.length
 }
 
 // A Source-only keyboard model: arrows highlight a pending choice and Enter commits.
@@ -92,6 +106,34 @@ function keyboardTransport(initial: 'string' | 'number' | 'boolean', commit = tr
 }
 
 describe('completion scenario source oracles, without launching a Desktop', () => {
+  it('consumes result.operations and result.runOperation from the actual production socket SuccessReceipt', async () => {
+    const data = sample(), root = await mkdtemp(join(tmpdir(), 'amx-t020-'))
+    const socket = join(root, 'control.sock'), requests: AgentMuxControlRequest[] = [], receipts: AgentMuxControlSuccessReceipt[] = []
+    const server = new AgentMuxControlServer({ async execute(request) {
+      requests.push(request)
+      if (request.operation === 'browser.history') return projectBrowserControlResult({ operation: request.operation, operations: [data.actual] })
+      if (request.operation === 'browser.operation') return projectBrowserControlResult({ operation: request.operation, runOperation: data.actual })
+      throw new Error('Unexpected public consumer request')
+    } }, socket)
+    try {
+      await server.start()
+      const ctx = { browserId, requestControl: async (fields: Record<string, unknown>) => {
+        const receipt = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+          requestId: randomUUID(), ...fields } as AgentMuxControlRequest, socket)
+        receipts.push(receipt)
+        return receipt
+      } }
+      await expect(publicFacts(ctx, data.actual)).resolves.toEqual({ history: data.publicOperation, operation: data.publicOperation })
+      expect(requests.map(request => request.operation)).toEqual(['browser.history', 'browser.operation'])
+      expect(receipts.map(receipt => [receipt.ok, receipt.operation, Object.keys(receipt.result)])).toEqual([
+        [true, 'browser.history', ['operations']], [true, 'browser.operation', ['runOperation']]
+      ])
+      expect(Object.hasOwn(receipts[0]!, 'operations')).toBe(false)
+      expect(Object.hasOwn(receipts[1]!, 'runOperation')).toBe(false)
+      expect(JSON.stringify(receipts)).not.toContain('registration')
+    } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }
+  })
+
   it.each(['string', 'boolean', 'number'] as const)('commits the actual %s starting type with one bounded keyboard path', async initial => {
     const model = keyboardTransport(initial)
     try {
@@ -176,12 +218,31 @@ describe('completion scenario source oracles, without launching a Desktop', () =
     await expect(readRecordedOutcome(ctx, data.actual)).rejects.toThrow()
   })
 
+  it('requires the original evidence reference retained by the completed extraction step', async () => {
+    const data = sample()
+    data.evidence.items[0]!.reference = { ...data.evidence.items[0]!.reference, id: 'unlinked-evidence' }
+    const { ctx } = transport(data)
+    await expect(readRecordedOutcome(ctx, data.actual)).rejects.toThrow()
+  })
+
+  it('rejects complete bytes from another source document even when the request and numeric preview match', async () => {
+    const data = sample()
+    replaceCompleteDocument(data, { ...data.document, source: { ...data.document.source, document: 'another-document' } })
+    const { ctx } = transport(data)
+    await expect(readRecordedOutcome(ctx, data.actual)).rejects.toThrow()
+  })
+
+  it('rejects complete bytes with a different numeric value instead of trusting the zero preview', async () => {
+    const data = sample()
+    replaceCompleteDocument(data, { ...data.document, fields: [{ ...data.document.fields[0]!, value: 1 }] })
+    const { ctx } = transport(data)
+    await expect(readRecordedOutcome(ctx, data.actual)).rejects.toThrow()
+  })
+
   it('rejects complete bytes from another field request instead of trusting the zero preview', async () => {
     const data = sample()
-    const wrong = { ...data.document, request: { fields: [{ ...field, source: { selector: '#another-field', read: 'text' } }] } }
-    const bytes = Buffer.from(JSON.stringify(wrong))
-    data.chunk.data = bytes.toString('base64'); data.chunk.returnedBytes = bytes.length; data.chunk.totalBytes = bytes.length
-    data.chunk.reference.byteLength = bytes.length
+    const wrong = { ...data.document, request: { fields: [{ ...field, source: { selector: '#another-field', read: 'text' as const } }] } }
+    replaceCompleteDocument(data, wrong)
     const { ctx } = transport(data)
     await expect(readRecordedOutcome(ctx, data.actual)).rejects.toThrow()
   })
