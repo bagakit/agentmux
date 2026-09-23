@@ -140,19 +140,20 @@
 .browser-selection-result textarea { min-height: 76px; resize: vertical; padding:var(--sp-4) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font-family: inherit; font-size: var(--fs-meta); line-height: 1.5; }
 .browser-selection-result textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .browser-selection-result > footer { display: flex; justify-content: flex-end; gap:var(--sp-3); }
-.browser-screenshot-editor { position: fixed; z-index: var(--layer-dialog); overflow: hidden; pointer-events: auto; background: var(--bg); isolation: isolate; }
+.browser-screenshot-editor { position: fixed; z-index: var(--layer-dialog); display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--bg); isolation: isolate; }
+.browser-screenshot-editor__canvas-area { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
 .browser-screenshot-editor__viewport { position: absolute; z-index: 0; top: 50%; left: 50%; overflow: hidden; transform: translate(-50%, -50%); }
 .browser-screenshot-editor__viewport > img,
 .browser-screenshot-editor__viewport > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .browser-screenshot-editor__viewport > img { z-index: 0; user-select: none; -webkit-user-drag: none; }
 .browser-screenshot-editor__viewport > canvas { z-index: 1; cursor: crosshair; touch-action: none; }
 .browser-screenshot-editor__text { position: absolute; z-index: 3; min-width: 120px; max-width: min(360px, calc(100% - 16px)); padding:var(--sp-2) var(--sp-3); border: 1px solid var(--wash-3); border-radius: var(--radius-sm); outline: none; background: var(--scrim-3); box-shadow: 0 6px 20px var(--scrim-3); font-weight: 600; }
-.browser-screenshot-toolbar { position: absolute; z-index: 2; right: 10px; bottom: 10px; left: 10px; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); padding:var(--sp-3); border: 1px solid var(--wash-3); border-radius: var(--radius-lg); color: var(--text-2); background: var(--scrim-3); box-shadow: 0 18px 42px var(--scrim-3), inset 0 1px var(--wash-1); backdrop-filter: blur(14px); }
+.browser-screenshot-toolbar { position: relative; z-index: 2; flex: none; min-width: 0; max-height: 50%; margin:var(--sp-3); overflow: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap:var(--sp-4); padding:var(--sp-3); border: 1px solid var(--wash-3); border-radius: var(--radius-lg); color: var(--text-2); background: var(--scrim-3); box-shadow: 0 18px 42px var(--scrim-3), inset 0 1px var(--wash-1); backdrop-filter: blur(14px); }
 .browser-screenshot-toolbar__tools,
 .browser-screenshot-toolbar__actions,
 .browser-screenshot-toolbar__colors { min-width: 0; display: flex; align-items: center; gap:var(--sp-1); }
-.browser-screenshot-toolbar__tools { overflow-x: auto; scrollbar-width: none; }
-.browser-screenshot-toolbar__tools::-webkit-scrollbar { display: none; }
+.browser-screenshot-toolbar__tools { flex: 1 1 380px; flex-wrap: wrap; }
+.browser-screenshot-toolbar__colors { flex: none; max-width: 100%; flex-wrap: wrap; gap:var(--sp-2); padding:var(--sp-2); }
 .browser-screenshot-toolbar button { min-width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); padding:0 var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; cursor: pointer; }
 .browser-screenshot-toolbar button:hover:not(:disabled),
 .browser-screenshot-toolbar button.selected { color: var(--text); background: var(--surface-3); }
@@ -161,8 +162,7 @@
 .browser-screenshot-toolbar__colors button.selected { box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 3px var(--green); }
 .browser-screenshot-toolbar select { height: 25px; flex: none; padding:0 var(--sp-6) 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--bg); font: 10px "SFMono-Regular", monospace; }
 .browser-screenshot-toolbar__divider { width: 1px; height: 18px; flex: none; margin:0 var(--sp-1); background: var(--line); }
-.browser-screenshot-toolbar__actions { flex: none; }
-.browser-screenshot-toolbar__actions > span { max-width: 220px; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.browser-screenshot-toolbar__actions { flex: none; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 .browser-screenshot-toolbar__actions .primary-button { width: auto; color: var(--bg); background: var(--green); font-weight: 700; }
 .browser-screenshot-toolbar__actions .primary-button:hover:not(:disabled) { color: var(--bg); background: var(--green-text); }
 /* 应用链接的那一问。骨架用既有的 .pane-state（居中列 + gap），这里只补它没有的三样：
