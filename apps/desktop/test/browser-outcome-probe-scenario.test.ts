@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
-import { Window, type HTMLButtonElement, type HTMLInputElement } from 'happy-dom'
+import { Window, type HTMLButtonElement, type HTMLInputElement, type HTMLSelectElement } from 'happy-dom'
 import { describe, expect, it } from 'vitest'
-import { auditFieldOperation, auditPublicCompletion, outcomeFixture, readRecordedOutcome } from '../scripts/browser-outcome-probe-scenario.mjs'
+import { auditFieldOperation, auditPublicCompletion, numberCondition, outcomeFixture, readRecordedOutcome } from '../scripts/browser-outcome-probe-scenario.mjs'
 
 // Source-only tests of the scenario's actual emitted reads and rejection oracles.
 // This transport deliberately has no Desktop, Main manager or native input.
@@ -52,7 +52,78 @@ function transport(data: ReturnType<typeof sample>, options: { extraHistoryAfter
   return { ctx, calls }
 }
 
+// A Source-only keyboard model: arrows highlight a pending choice and Enter commits.
+// It runs the actual emitted readonly expressions; it cannot prove macOS native input.
+function keyboardTransport(initial: 'string' | 'number' | 'boolean', commit = true) {
+  const window = new Window({ url: pageUrl })
+  window.document.body.innerHTML = `<section class="browser-surface"><input aria-label="Browser address" value="${pageUrl}">
+    <details class="browser-outcome-criteria"><label>CSS selector<input></label>
+    <label>Value type<select><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option></select></label>
+    <label>Equals<input></label></details></section>`
+  const select = window.document.querySelector('select') as HTMLSelectElement
+  select.value = initial // Model setup only; the scenario never assigns the select.
+  const sends: Array<{ type: string; key: string | undefined }> = []
+  const reads: string[] = []
+  const selections: Array<{ before: { value: string }; afterArrow: { value: string }; afterCommit: { value: string } }> = []
+  let pending: string | undefined
+  const ctx = { pageUrl, receipt: { browserOutcome: { numberSelections: selections } },
+    selectors: (selector: string) => `Array.from(document.querySelectorAll(${JSON.stringify(selector)}))`,
+    click: async (_cdp: unknown, expression: string) => {
+      const targets = window.eval(expression) as HTMLInputElement[]
+      expect(targets).toHaveLength(1)
+      expect(targets[0]!.tagName).toBe('INPUT')
+      targets[0]!.focus() // Simulate the existing input sender, not a probe actuator.
+    },
+    probe: { cdp: {
+      evaluate: async (expression: string) => { reads.push(expression); return window.eval(expression) },
+      call: async (method: string, input: { type?: string; key?: string; text?: string }) => {
+        if (method === 'Input.insertText') (window.document.activeElement as HTMLInputElement).value = input.text!
+        else {
+          expect(method).toBe('Input.dispatchKeyEvent')
+          sends.push({ type: input.type!, key: input.key })
+          if (input.type === 'keyDown' && input.key === 'Tab') select.focus()
+          if (input.type === 'keyDown' && (input.key === 'ArrowDown' || input.key === 'ArrowUp')) pending = 'number'
+          if (input.type === 'keyDown' && input.key === 'Enter' && pending && commit) select.value = pending
+        }
+      }
+    } }
+  }
+  return { ctx, select, sends, reads, close: () => window.happyDOM.cancelAsync() }
+}
+
 describe('completion scenario source oracles, without launching a Desktop', () => {
+  it.each(['string', 'boolean', 'number'] as const)('commits the actual %s starting type with one bounded keyboard path', async initial => {
+    const model = keyboardTransport(initial)
+    try {
+      await numberCondition(model.ctx)
+      const arrow = initial === 'string' ? 'ArrowDown' : 'ArrowUp'
+      const choiceKeys = model.sends.filter(send => ['Tab', 'ArrowUp', 'ArrowDown', 'Enter'].includes(send.key!))
+      expect(choiceKeys).toEqual(initial === 'number'
+        ? [{ type: 'keyDown', key: 'Tab' }, { type: 'keyUp', key: 'Tab' }]
+        : ['Tab', arrow, 'Enter'].flatMap(key => [{ type: 'keyDown', key }, { type: 'keyUp', key }]))
+      expect(model.ctx.receipt.browserOutcome.numberSelections).toHaveLength(1)
+      expect(model.ctx.receipt.browserOutcome.numberSelections[0]).toMatchObject({
+        before: { value: initial }, afterArrow: { value: initial }, afterCommit: { value: 'number' }
+      })
+      expect(model.select.value).toBe('number')
+      expect(model.reads.length).toBeGreaterThan(0)
+      expect(model.reads.join('\n')).not.toMatch(/\.(?:value|selectedIndex)\s*=|\.focus\(/)
+    } finally { model.close() }
+  })
+
+  it('preserves the original numeric gate when the real commit has not changed its value', async () => {
+    const model = keyboardTransport('string', false)
+    try {
+      await expect(numberCondition(model.ctx)).rejects.toThrow('Actual keyboard input commits the numeric type')
+      expect(model.select.value).toBe('string')
+      expect(model.sends.filter(send => send.key === 'Enter')).toEqual([
+        { type: 'keyDown', key: 'Enter' }, { type: 'keyUp', key: 'Enter' }
+      ])
+      expect(model.ctx.receipt.browserOutcome.numberSelections).toHaveLength(1)
+      expect(model.ctx.receipt.browserOutcome.numberSelections[0]?.afterCommit.value).toBe('string')
+    } finally { model.close() }
+  })
+
   it('serves generic zero, false and empty fields; a DOM click stays untrusted', () => {
     const html = outcomeFixture('/a'), window = new Window({ url: pageUrl })
     const script = /<script>([\s\S]+)<\/script>/.exec(html)
