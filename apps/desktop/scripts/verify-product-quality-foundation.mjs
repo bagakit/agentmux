@@ -273,7 +273,8 @@ try {
     result.compiled = Object.fromEntries(await Promise.all(compiledFiles.map(async file => [relative(join(privateRoot, 'renderer'), file), sha(await readFile(file))])))
     result.electron = { version: require('electron/package.json').version, executableSha256: sha(await readFile(require('electron'))) }
     const execution = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(privateRoot, 'renderer/index.html'), privateRoot, evidence,
-      ...(headerOnly ? ['--header-only', ...(process.argv.includes('--header-layout-only') ? ['--header-layout-only'] : [])] : []),
+      ...(headerOnly ? ['--header-only', ...(process.argv.includes('--header-layout-only') ? ['--header-layout-only'] : []),
+        ...(process.argv.includes('--header-font-preflight') ? ['--header-font-preflight'] : [])] : []),
       ...(process.argv.includes('--narrow-only') ? ['--narrow-only'] : process.argv.includes('--aux-only') ? ['--aux-only'] : [])],
       { temporaryRoot: privateRoot, cwd: repo, env, timeoutMs: 120_000, onLine: line => { diagnostics += line + '\n' } })
     result.execution = execution; await artifact('electron.log', diagnostics)
