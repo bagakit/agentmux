@@ -2,6 +2,8 @@
 
 AgentMux 把本地 Coding Agent 的 Provider、Agent Session、Hook、Permission、ACP 与 Client 投影收口成一个可嵌入的 TypeScript Core；Desktop 是它的第一方 Client。
 
+产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址2026-10-03)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。下文 CLI 示例描述当前源码；新 `agentmux agent open` / `agentmux space mv` 合同正在[本轮实施](docs/plans/pmo-cross-workspace-worktree-cli-design-2026-10-03.md)，不能从合同推定命令已经可用。
+
 Run 层只有一个 Owner：`ctxmux`。AgentMux 不持有 PTY、子进程、Replay、Socket wire 或进程树，也没有 Backend Selector、兼容层和 fallback。
 
 ```text

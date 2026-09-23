@@ -181,9 +181,30 @@ fixture 只定义场景数据、操作、观察点与模拟边界，并引用当
 
 ## 产品对象
 
+### 统一概念与空间寻址
+
+用户要求「基于这套定义把项目里的概念定义统一」，随后「马上固化cli」。最新定义明确：「在cli上显示给出space概念，符合我们当前的设计，前面说的project/zone，其实也是space/zone更好。因为在我们的设定中，project不等同于space」。本节是产品文档、公开控制协议与 CLI 的唯一概念词典；源码旧字段的当前含义与需要修正的差异只作来源证据，不反过来改变产品定义。
+
+| 概念 | 必须成立的含义与身份 | 权威事实归属 |
+| --- | --- | --- |
+| **Space** | 用户选择的持久工作上下文，包含 Folder、Topic 与 Mote。身份是 Host 与对象的绝对持久目录；名称、分类、当前 Session、是否打开 Tab 均不构成身份。Space 不等同于 Project。 | Folder 来自已有目录/项目记录，Topic/Mote 来自真实持久目录；发现复用这些来源，不建第二份 Space 注册表。 |
+| **Zone** | Space 内的一条工作分区/上下文，承载 Tab。用户明确「cli用zone，这个语义更好，因为对项目是worktree，假设不用git，或者是对mote之类的，zone不一定是worktree」。worktree、普通目录和 Topic/Mote 的 home 上下文均可绑定 Zone，不能把 Zone 限定为 Git 或全量改名 Workspace。 | 已有 Folder 的分区从所属 Workspace 绑定派生；Topic/Mote 的 home 从真实 Topic 身份及其 Tab 绑定派生。确有新增分区关联时由既有 durable 工作面 owner 保存，不复制目录、Git 或 Session 真相。 |
+| **Project** | 围绕项目目录组织的来源项目事实，可关联多个实际 checkout/Workspace；Git 能力按真实仓库事实提供。它是 Space 的可选项目上下文，不能冒充所有 Space，也不能用单个 worktree Workspace ID 冒充项目 ID。 | 已有 Host、项目根目录和 Workspace 分组来源；不另建项目注册表。 |
+| **Workspace** | 宿主在特定 Host 上登记的实际工作目录记录。folder/worktree、路径、仓库根与分支是该记录的事实；Scratch Workspace 是既有 Topic 收纳和布局容器，不是每个 Topic 的身份。 | Main 配置/目录 owner；Git checkout 事实由现有 Git owner 提供。 |
+| **Tab** | Zone 中的一张完整工作面，拥有持久身份、分割布局与多个 Region。首张 Tab 不以另一张 Tab 为存在前提。 | 唯一 durable Workbench/layout owner；Topic 绑定沿原 Tab.topicId 来源。 |
+| **Region** | Tab 布局的一块精确 leaf 位置，承载 Agent/Terminal、文件、Browser 或启动面。它是空间位置，不是 Session 身份。 | 同一 durable layout owner；移动、分割和关闭绑定明确 Region。 |
+| **AgentSession** | Core 持有的 Agent 语义会话，包含 Provider/Executor、原生会话身份、执行目录与恢复事实。它可以在多个 Region 展示；空间归属不能改写其执行事实。 | AgentMux Core 的公开 API。 |
+| **Run** | ctxmux 持有的一次真实执行及其进程、PTY、ordered bytes、Replay 与 Attachment 事实。Session 与当前 Run 的绑定不把两个身份合并。 | ctxmux；client 只消费公开事实。 |
+
+对外空间层级统一为 **Space / Zone / Tab / Region**。公开 discovery、inspect 与动作回执分别给出空间位置、可选 Project/Workspace 绑定及 Session/Run 执行事实，所有可寻址 ID 均可原样用作下一次输入。精确 Region 或 Tab 可反推其上层；额外给出的父层必须一致。目标不依赖调用者工作目录、当前 Workspace、焦点、标题或最近 Session；存在多个候选时返回真实候选，不猜唯一目标。
+
+`space mv` 只改变 AgentMux 中的空间位置。用户明确「不改变执行目录，只改变在agentmux里的空间位置」；移动保留同一 AgentSession、Run、cwd 与原生句柄，不停止健康 Agent，也不复制所选投影。跨 Zone 时，目标空间归属与 Agent 原执行目录分别如实可读。Session 的额外展示与移动是两种明确动作，不能用创建副本或复用第一块同 Session Region 代替移动。
+
+本节统一合同不宣称当前源码已具有公开 Space/Zone 类型或 Topic 多 Zone；实际来源差异、命令语法与实施验收见 [来源核对与差异清单](../reviews/space-zone-concept-unification-review.md) 及 [CLI 合同](../plans/pmo-cross-workspace-worktree-cli-design.md)。本轮先统一定义，再闭合 CLI；既有 Renderer 文案与视觉不作全仓机械改名。
+
 ### Space、Folder 与 Topic
 
-用户提出：「沿用 Space 的定义的话，那么这里我们可以拓展为两类 Space 定义，一类就是 Project（或者就叫 Folder），另一类就是 Topic，他们的特点不一样」，并确认这里要表达「一个更外层的抽象概念：space」。Space 是 Folder/Project 与 Topic 共用的外层产品概念；两类 Space 的组织特点必须可辨认，不能因为共用入口而抹平差异。用户补充：「topic 和一般 folders 虽然底层行为一致，但视觉上还是区分开，目标是好懂好找」；共同工作能力不变，树中使用可读分组、类型图标和父子层级帮助定位。Folder/Project 的最终显示名称尚未确定。
+用户提出：「沿用 Space 的定义的话，那么这里我们可以拓展为两类 Space 定义，一类就是 Project（或者就叫 Folder），另一类就是 Topic，他们的特点不一样」，并确认这里要表达「一个更外层的抽象概念：space」。当前统一定义见《统一概念与空间寻址》：Space 是 Folder 与 Topic/Mote 共用的外层产品概念，Project 表达可选项目来源，不能与 Space 等同。两类 Space 的组织特点必须可辨认，不能因为共用入口而抹平差异。用户补充：「topic 和一般 folders 虽然底层行为一致，但视觉上还是区分开，目标是好懂好找」；共同工作能力不变，树中使用可读分组、类型图标和父子层级帮助定位。历史 Folder/Project 文案不能改变这两个对象的当前含义。
 
 - Folder/Project 类围绕已有目录组织工作。Project 可以由普通目录承载，Git 能力按真实仓库事实提供；不因采用 Space 概念就要求目录使用 Topic 的 Wiki 脚手架。
 - Topic 类围绕一件事情组织工作，保留独立 Wiki、资料、产出与 Agent 铭牌。Topic 的存在与耐久内容不依赖 Agent 或 Tab 是否仍打开。
@@ -2258,10 +2279,16 @@ Core 的语义文本供 Provider/readiness 等文本观察使用，与 ordered b
 
 用户反馈：「Topic 里 Terminal 默认渲染两个且找不到关闭入口」。普通 Topic 的首次打开应形成一个可用 Terminal；重复点击、创建完成后的打开、恢复或不同投影的挂载不能凭流程增加第二个 Terminal Session 或 Region。用户主动分割、打开的多个终端仍按真实布局呈现，不能靠隐藏第二个终端、清空持久布局或删除健康 Run 解决默认重复。终端的关闭动作在当前 Tab/Region 附近可发现，并复用已有关闭/停止合同；取消或关闭其他 Region 不影响未选中的健康工作。重启先恢复既有分割与引用，不重新运行首次创建路径。
 
-### PMO 跨 Workspace 的 worktree 工作入口
+### Agent-first 的 Space 工作入口
 
-用户要的流程是：「人在别的 Workspace，指定一个项目，给它创建 worktree，在这个 worktree 上开出第一张 tab，拉起指定 Agent，并把第一句任务交给它执行。」目标项目、Host 和工作目录必须来自显式身份；不能由调用者当前 Workspace、焦点、标题或最近 Session 推断。新 worktree 没有任何 Tab 时，也必须能表达它的首张 Tab 落点。PMO 无需切换当前工作面就能发现其他 Workspace 已打开的 Tab，并取得新 Session 的精确 ID。
+用户要的流程是：「人在别的 Workspace，指定一个项目，给它创建 worktree，在这个 worktree 上开出第一张 tab，拉起指定 Agent，并把第一句任务交给它执行。」随后明确「还是要 agent first，所以命令是同等重要，但是必须完全满足 pmo 视角」。人和 PMO 使用同一套控制命令，PMO 无需切换当前工作面即可发现别处的 Space、Zone、Tab 与 Region，创建目标的首张 Tab，取得新 AgentSession 的精确 ID 并发送后续任务；不能要求目标已经有锚点 Tab。
 
-设计必须分别说明 Git checkout、Workspace 登记、Tab/Region 放置、Core Session 创建和首句投递的事实；启动成功、PTY 接收字节、首句投递确认和任务完成不能相互代签。部分失败或回执丢失时说明已发生、未发生和未知的结果，以及 worktree 与 Session 分别保留在哪里、怎样精确查询；未知结果不能触发重复创建或重投。健康 Session 和原工作面的保护、重启先恢复持久布局的边界沿用既有合同，布局或观察流程失败不得停止健康 Run。
+最新主干是 `agentmux agent open ...` 与 `agentmux space mv ...`，空间目标使用《统一概念与空间寻址》的 **Space / Zone / Tab / Region**。`agent open` 能显式选择已有 Zone 或创建新 Zone，并在首张/新 Tab、已有空 Region 或明确分屏位置打开指定 Agent、交付首句。worktree 只是新 Zone 的一种资源来源，Topic/Mote 和非 Git 目录沿相同空间模型可用；Project 与 Workspace 作为真实绑定事实返回，不能冒充 Space/Zone 身份。精确子目标应能反推其上层，不强迫每次逐层填写四个 ID。新 Tab 的落点表达目标 Zone，`--new-tab-after` 不再承担落点语义；不引入旧命令兼容层或焦点 fallback。
 
-本项先交设计给用户看，得到同意再实现。命令面、后台创建与聚焦的默认选择、新建资源的失败保留方式及请求关联方案见 [待确认 CLI 设计](../plans/pmo-cross-workspace-worktree-cli-design.md)；proposal 登记不表示用户已经批准这些设计选择。
+用户要求把「在某处打开的 agent 移动到别处」，并确认「不改变执行目录，只改变在agentmux里的空间位置」。`space mv` 绑定源 Region 及其预期 Session，使用同一目标层级；多投影时不得凭 Session 猜来源，目标占用时不得静默替换健康 Agent。落地结果须明确源投影移除、目标位置保留，同一 Session/Run/cwd/原生句柄与其他投影保留；不能复制、合并到第一块同 Session 投影或把关闭源 Region 当成停止 Agent。跨 Zone 目标如实显示原执行目录。源与目标的持久化恢复一致，未知提交不能报告已移动或盲目重移。
+
+动作回执分别表达资源/Git checkout、Workspace 登记、工作面放置、Core Session 创建与首句投递的真实事实。启动成功、PTY 接收字节、Core 既有协议投递确认和 Agent 接受/开始/完成任务不能相互代签。后续流程失败保留已创建资源、持久工作面与健康 Session；回执丢失或进程重启后能按精确身份查询已发生、未发生与未知的事实，未知不得触发重复创建或重投。恢复先保留原 durable Tab/Group/Region/布局/焦点及空间绑定，再尝试同 Session reattach/resume；Session 执行目录与展示 Zone 不同不能成为删除投影的理由，移除仍须 Core 的真实终局事实。流程握手、观察或布局失败不能停止健康 Run。
+
+布局已应用、localStorage 写入、宿主 flush 已请求与磁盘耐久性未确认分别报告；当前 flush 请求没有磁盘 ACK，不能因为 await IPC 就声称已经落盘，也不能因没有 ACK 阻断健康 Agent。源移除与目标落点沿同一持久工作面快照保存；真实私有普通进程重启后读回同一空间绑定、布局与 Session 引用，才证明恢复验收。CLI 回执保持现有 JSON 输出，身份可原样用于后续命令。
+
+用户最新要求「基于这套定义把项目里的概念定义统一」，然后「马上固化cli」，本项进入统一合同与实施计划评审，不再等待已经明确的 Space、Zone、命令主干与移动语义。具体 grammar、缺省规则、失败保留、请求对账及真实私有重启验收见 [CLI 合同与推荐方案](../plans/pmo-cross-workspace-worktree-cli-design.md)。上一版 `worktree create/start` 主流程不再是当前方案；Tracker 安装经评审的实施计划后才开展对应代码任务，技术文档或 proposal 状态不能冒充功能交付。
