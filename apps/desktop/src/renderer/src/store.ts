@@ -1933,6 +1933,23 @@ async function requestWorkbenchStorageFlush(): Promise<void> {
 function requestWorkbenchStorageCommit(): void {
   void requestWorkbenchStorageFlush().catch(() => {})
 }
+// Only a captured, already-bound explicit message treats presentation saving as advisory.
+// Core admission remains the durable Input owner; automatic/recovery paths retain their fence.
+async function flushMessageWorkbench(explicitlyBound: boolean): Promise<void> {
+  if (explicitlyBound) {
+    try {
+      if (!workbenchWriteFence.isOpen()) throw new Error('Current workbench changes cannot be saved yet.')
+      persistentWorkbenchStorage.flush()
+      // Do not await a host save response before sending to a healthy Run.
+      requestWorkbenchStorageCommit()
+    } catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error) }
+    return
+  }
+  if (!workbenchWriteFence.isOpen()) throw new Error(
+    'Saved workbench storage is unavailable. Your execution intent is kept without dispatch.')
+  persistentWorkbenchStorage.flush()
+  await api.ui.requestStorageFlush()
+}
 const workbenchWriteFence = createWriteFencedStorage(persistentWorkbenchStorage.storage)
 
 /** 放行持久化写入。启动路径上的两个开启点都只走这一处。 */
@@ -5957,6 +5974,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Recovery and binding are part of this one attempt. Consume its grant before any
           // failure or await; a new grant arriving during the attempt remains in the set.
           const explicitAttempt = drain.explicitSteers.delete(entry.operationId)
+          // Capture before recovery: a newly restored binding grants no save bypass.
+          const explicitlyBound = explicitAttempt && entry.runId === currentRunId
           let preparedHere = false
           set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
           try {
@@ -5985,10 +6004,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             let pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             if (!pending) return
             if (pending.status === 'restoring') {
-              if (!workbenchWriteFence.isOpen()) throw new Error(
-                'Saved workbench storage is unavailable. Your execution intent is kept without dispatch.')
-              persistentWorkbenchStorage.flush()
-              await api.ui.requestStorageFlush()
+              await flushMessageWorkbench(explicitlyBound)
               // The exact binding precedes dispatch. Electron's void flush request is not fsync.
               set((current) => {
                 const entries = current.agentSteerQueues[sessionId]
@@ -6022,10 +6038,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   item.operationId === entry.operationId ? { ...item, promptCondition: condition } : item) } }))
               preparedHere = true
             }
-            if (!workbenchWriteFence.isOpen()) throw new Error(
-              'Saved workbench storage is unavailable. Your execution intent is kept without dispatch.')
-            persistentWorkbenchStorage.flush()
-            await api.ui.requestStorageFlush()
+            await flushMessageWorkbench(explicitlyBound)
             pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             session = get().sessions.find(item => item.id === sessionId)
             if (!pending || session?.kind !== 'agent') return

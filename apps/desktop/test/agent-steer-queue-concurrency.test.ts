@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
@@ -7,11 +7,23 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore, MAX_AGENT_STEER_QUEUE_ENTRIES } from '../src/renderer/src/store'
 
 const initial = useAppStore.getState()
+beforeEach(async () => {
+  // Open the real startup write fence; public admission preparation reads the exact Session.
+  const dispose = await useAppStore.getState().initialize()
+  dispose()
+  useAppStore.setState(initial, true)
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    const id = control.kind === 'agent' ? control.agentSessionId : control.runId
+    const current = useAppStore.getState().sessions.find(item => item.id === id)
+    if (!current) throw new Error('Missing private Session fixture')
+    return current
+  })
+})
 afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
 
 function agent(id = 's', runId = `${id}-run`): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
-    id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local',
+    id, promptSubmissionPredecessor: null, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local',
     workspacePath: '/repo', label: 'Agent', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1,
     processState: 'running', status: { state: 'working', source: 'native-hook', observedAt: 1 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
@@ -104,7 +116,7 @@ describe('one Session owns one live queue drain', () => {
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(() => gate.promise)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
-    await Promise.resolve() // The request has entered submitPrompt; changes below race its receipt.
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
     useAppStore.setState({ agentSteerQueues: { s: [{ ...entry! }] } })
     gate.resolve()
     await drain
@@ -117,8 +129,8 @@ describe('one Session owns one live queue drain', () => {
     const [head, tail] = enqueue('first', 'clicked second')
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     await useAppStore.getState().sendQueuedAgentSteer('s', tail!.operationId)
-    expect(submit.mock.calls.map((call) => [call[1], call[2], call[4]])).toEqual([
-      ['clicked second', tail!.operationId, { allowUncertainTurn: true }]
+    expect(submit.mock.calls.map((call) => [call[1], call[2], call[3], call[5]])).toEqual([
+      ['clicked second', tail!.operationId, { expectedRun: agent().control.run, afterSubmissionId: null }, { allowUncertainTurn: true }]
     ])
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([head])
   })
@@ -160,7 +172,7 @@ describe('one Session owns one live queue drain', () => {
     await useAppStore.getState().flushAgentSteerQueue('s')
     expect(submit).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { ...entry, status: 'deferred', error: 'submit phase unavailable' }
+      { ...entry, promptCondition: { expectedRun: agent().control.run, afterSubmissionId: null }, status: 'deferred', error: 'submit phase unavailable' }
     ])
   })
 
@@ -187,7 +199,7 @@ describe('one Session owns one live queue drain', () => {
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
-    await Promise.resolve() // The request has entered submitPrompt; changes below race its receipt.
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
     useAppStore.getState().removeAgentSteer('s', tail!.operationId)
     gate.resolve()
     await drain
@@ -199,9 +211,9 @@ describe('one Session owns one live queue drain', () => {
     useAppStore.setState({ sessions: [agent()] })
     const [head] = enqueue('in flight')
     const gate = deferred()
-    vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(() => gate.promise)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(() => gate.promise)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
-    await Promise.resolve() // The request has entered submitPrompt; changes below race its receipt.
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
     useAppStore.getState().removeAgentSteer('s', head!.operationId)
     const retained = useAppStore.getState().agentSteerQueues.s
     gate.resolve()
@@ -216,7 +228,7 @@ describe('one Session owns one live queue drain', () => {
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
-    await Promise.resolve() // The request has entered submitPrompt; changes below race its receipt.
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
     enqueue('added while sending')
     gate.resolve()
     await drain
@@ -230,7 +242,7 @@ describe('one Session owns one live queue drain', () => {
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
-    await Promise.resolve() // The request has entered submitPrompt; changes below race its receipt.
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
     useAppStore.setState({ sessions: [{ ...agent(), pendingInteraction: { request: { id: 'question' } } } as never] })
     gate.resolve()
     await drain
@@ -244,7 +256,7 @@ describe('one Session owns one live queue drain', () => {
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined)
     const drain = useAppStore.getState().flushAgentSteerQueue('s')
-    await Promise.resolve() // The request has entered submitPrompt; changes below race its receipt.
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
     useAppStore.setState({ sessions: [agent('s', 'replacement-run')] })
     gate.resolve()
     await drain
@@ -273,7 +285,7 @@ describe('one Session owns one live queue drain', () => {
     await useAppStore.getState().flushAgentSteerQueue('s')
     await useAppStore.getState().flushAgentSteerQueue('s')
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([
-      { ...entry, status: 'deferred', error: 'composer not ready' }
+      { ...entry, promptCondition: { expectedRun: agent().control.run, afterSubmissionId: null }, status: 'deferred', error: 'composer not ready' }
     ])
     expect(report).not.toHaveBeenCalled()
     expect(useAppStore.getState().error).toBeNull()
@@ -298,7 +310,7 @@ describe('one Session owns one live queue drain', () => {
     ])
   })
 
-  it('wakes retained intent when an explicit refresh clears an interaction without an event', async () => {
+  it('observation refresh clears an interaction without sending; explicit Send retains the original intent', async () => {
     const running = agent()
     const tab = createWorkbenchTab('tab', {
       regionId: 'region', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 's'
@@ -308,8 +320,11 @@ describe('one Session owns one live queue drain', () => {
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(running)
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     await useAppStore.getState().refreshSession('s')
-    await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined())
-    expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'after refresh', entry!.operationId, undefined, undefined)
+    expect(useAppStore.getState().agentSteerQueues.s).toEqual([entry])
+    expect(submit).not.toHaveBeenCalled()
+    await useAppStore.getState().sendQueuedAgentSteer('s', entry!.operationId)
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
+    expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'after refresh', entry!.operationId, { expectedRun: running.control.run, afterSubmissionId: null }, undefined, { allowUncertainTurn: true })
   })
 
   it('keeps a persisted queue paused until explicit Send even when startup restores a healthy snapshot', async () => {
@@ -328,7 +343,7 @@ describe('one Session owns one live queue drain', () => {
         tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) }
       },
       agentSteerQueues: JSON.parse(JSON.stringify({ s: [
-        { operationId: 'persisted-op', runId: 's-run', text: 'survived restart', status: 'queued' }
+        { operationId: 'persisted-op', runId: 's-run', text: 'survived restart', status: 'queued', promptCondition: { expectedRun: running.control.run, afterSubmissionId: null } }
       ] }))
     })
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
@@ -347,7 +362,7 @@ describe('one Session owns one live queue drain', () => {
       expect(submit).not.toHaveBeenCalled()
       await useAppStore.getState().sendQueuedAgentSteer('s', 'persisted-op')
       expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
-      expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'survived restart', 'persisted-op', undefined, { allowUncertainTurn: true })
+      expect(submit).toHaveBeenCalledExactlyOnceWith(running.control, 'survived restart', 'persisted-op', { expectedRun: running.control.run, afterSubmissionId: null }, undefined, { allowUncertainTurn: true })
       expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
     } finally { dispose() }
   })
