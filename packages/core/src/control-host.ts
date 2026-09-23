@@ -1461,9 +1461,17 @@ export class AgentMuxControlServer {
       return
     }
     let subscription: AgentMuxControlBrowserSubscription
+    let opened = false
+    const beforeOpening: AgentMuxControlBrowserEvent[] = []
+    const progress = (event: AgentMuxControlBrowserEvent): void => {
+      write({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: request.operation, event: 'progress', result: event })
+    }
     try {
       subscription = await this.control.subscribeBrowserOperation(request, (event) => {
-        write({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: request.operation, event: 'progress', result: event })
+        // Hosts may synchronously replay, or queue a microtask before this await resumes.
+        // The transport owns framing: opening must precede every actual progress fact.
+        if (!opened) beforeOpening.push(event)
+        else progress(event)
       })
     } catch (error) {
       // `MESSAGE_TARGET_NOT_UNIQUE` 要带 candidates 才是合法错误，而订阅路径上不可能产生它
@@ -1503,6 +1511,9 @@ export class AgentMuxControlServer {
       runOperation: subscription.runOperation,
       gap: subscription.gap
     }))
+    opened = true
+    for (const event of beforeOpening) progress(event)
+    beforeOpening.length = 0
   }
 }
 
