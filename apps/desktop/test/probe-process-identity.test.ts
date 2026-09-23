@@ -46,7 +46,7 @@ describe('private probe cleanup identity', () => {
   it.each(['', 'S', `? node ${root}/worker.mjs`])('rejects unknown successful ps observation %j', async (stdout) => {
     readPs.mockResolvedValue({ stdout })
     await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).rejects.toThrow('Private process state could not be observed')
-    expect(kill.mock.calls).toEqual([])
+    expect(kill.mock.calls).toEqual(stdout ? [] : [[41001, 0]])
   })
 
   it.each(['Z', 'Z+'])('accepts terminal zombie state %s without any signal', async (state) => {
@@ -55,8 +55,21 @@ describe('private probe cleanup identity', () => {
     expect(kill.mock.calls).toEqual([])
   })
 
+  it('does not require a command from an already confirmed zombie', async () => {
+    readPs.mockResolvedValue({ stdout: 'Z\n' })
+    await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(false)
+    expect(kill.mock.calls).toEqual([])
+  })
+
   it('accepts absence only after the exact empty ps result and OS ESRCH', async () => {
     readPs.mockRejectedValue(missingPs())
+    kill.mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }) })
+    await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(false)
+    expect(kill.mock.calls).toEqual([[41001, 0]])
+  })
+
+  it('also confirms OS absence when ps succeeds with an empty observation', async () => {
+    readPs.mockResolvedValue({ stdout: '' })
     kill.mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }) })
     await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(false)
     expect(kill.mock.calls).toEqual([[41001, 0]])
