@@ -108,7 +108,7 @@ const probe = {
     const record = records?.find(record => record.terminal.element === element && !record.disposed)
     if (!record) return null
     const buffer = record.terminal.buffer.active
-    return { id: record.id, cols: record.terminal.cols, rows: record.terminal.rows, viewportY: buffer.viewportY,
+    return { id: record.id, fontSize: record.terminal.options.fontSize, cols: record.terminal.cols, rows: record.terminal.rows, viewportY: buffer.viewportY,
       visibleLines: Array.from({ length: record.terminal.rows }, (_, i) => buffer.getLine(buffer.viewportY + i)?.translateToString(true) ?? ''),
       length: buffer.length, baseY: buffer.baseY }
   },
@@ -121,6 +121,9 @@ const probe = {
     const session = useAppStore.getState().sessions.find(session => session.id === originals[0]!.id)!
     flushSync(() => useAppStore.setState({ error: 'Original recovery observation cause. '.repeat(7) + 'FINAL LIFECYCLE CAUSE', errorDismissed: false,
       errorNoticeContext: { kind: 'indeterminate', lifecycle: { step: 'resume', subject: session.control, lastProcessState: 'interrupted' } } }))
+  },
+  font(size: number) {
+    flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, terminalFontSize: size } } })))
   },
   header(next: string) {
     probe.mode(next === 'readonly' ? 'readonly' : next === 'notice' ? 'unknown' : 'normal', next !== 'readonly')

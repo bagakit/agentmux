@@ -299,6 +299,11 @@ async function observationDetails() {
 }
 async function headerScenes(layoutOnly = false) {
   result.scope = 'header-only'
+  const fontPreflight = process.argv.includes('--header-font-preflight')
+  if (fontPreflight) {
+    result.observationOnly = 'Non-gating smallest supported Terminal font preflight; actual first-row glyph review, no new matrix'
+    await evaluate('qualityProbe.font(8)')
+  }
   const scaleFactor = screen.getDisplayMatching(win.getBounds()).scaleFactor
   result.displayScaleFactor = scaleFactor
   async function scene(mode, width, height, appearance = 'dark') {
@@ -363,6 +368,12 @@ async function headerScenes(layoutOnly = false) {
     }
     assert.equal(facts.draft, 'Preserved draft'); assert.equal(facts.screenshotCalls, 0)
     return facts
+  }
+  if (fontPreflight) {
+    const frame = await scene('full', 641, 600)
+    assert.equal(frame.xterm.fontSize, 8, 'The original SessionPane must consume the supported font setting')
+    assert.equal(result.frames.length, 1)
+    return
   }
   await scene(layoutOnly ? 'long' : 'normal', 1281, 600)
   if (layoutOnly) { assert.equal(result.frames.length, 1); return }
