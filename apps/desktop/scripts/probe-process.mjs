@@ -1,9 +1,14 @@
 import { execFile, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
+import assert from 'node:assert/strict'
 
 const execFileAsync = promisify(execFile)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const ownsProbePath = (command, temporaryRoot) => {
+  const root = temporaryRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return temporaryRoot.length > 0 && new RegExp(`(?:^|[=\\s])${root}(?:/|(?=\\s|$))`).test(command)
+}
 
 // A detached probe owns its process group. Detached Runtime/observer processes
 // are additionally identified by this invocation's unique temporary root.
@@ -12,13 +17,11 @@ export async function listProbeProcesses(groupId, temporaryRoot) {
     maxBuffer: 32 * 1024 * 1024,
     timeout: 5_000
   })
-  const root = temporaryRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const ownsPath = new RegExp(`(?:^|[=\\s])${root}(?:/|(?=\\s|$))`)
   return stdout.split('\n').flatMap((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line)
     if (!match || match[3].startsWith('Z')) return []
     const pid = Number(match[1])
-    return pid !== process.pid && (Number(match[2]) === groupId || ownsPath.test(match[4]))
+    return pid !== process.pid && (Number(match[2]) === groupId || ownsProbePath(match[4], temporaryRoot))
       ? [pid] : []
   })
 }
@@ -27,6 +30,38 @@ function signal(pid, name) {
   try { process.kill(pid, name) } catch (error) {
     if (error.code !== 'ESRCH') throw error
   }
+}
+
+// Recheck this invocation's root immediately before signalling a discovered
+// PID. A child can become a zombie after the discovery snapshot; its command
+// becomes <defunct>, but it no longer needs a signal.
+export async function signalOwnedProbeProcess(pid, temporaryRoot, name) {
+  let stdout
+  try {
+    const observation = await execFileAsync('/bin/ps', ['-p', String(pid), '-o', 'stat=,command='], {
+      timeout: 5_000, maxBuffer: 64 * 1024
+    })
+    stdout = observation.stdout
+  } catch (error) {
+    // An empty ps exit is not itself enough to infer absence. Confirm it with
+    // the OS; permission errors or an existing PID remain unconfirmed.
+    if (error.code === 1 && error.stdout?.trim() === '' && error.stderr?.trim() === '') {
+      try { process.kill(pid, 0) } catch (observed) {
+        if (observed.code === 'ESRCH') return false
+        throw observed
+      }
+    }
+    throw error
+  }
+  const identity = /^\s*(\S+)\s+(.+)\s*$/.exec(stdout)
+  assert.ok(identity && /^[RSDTIUWZ]/.test(identity[1]), 'Private process state could not be observed')
+  if (identity[1].startsWith('Z')) return false
+  assert.ok(ownsProbePath(identity[2], temporaryRoot), 'Private process identity changed')
+  try { process.kill(pid, name) } catch (error) {
+    if (error.code === 'ESRCH') return false
+    throw error
+  }
+  return true
 }
 
 export async function stopProbeProcesses(groupId, temporaryRoot, graceMs = 1_000) {

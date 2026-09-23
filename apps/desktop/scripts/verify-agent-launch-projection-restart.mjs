@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
-import { execFile, spawn } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { listProbeProcesses } from './probe-process.mjs'
+import { listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 
 // Two real Node processes, public Core/FileStore/native PTY and actual Store persistence.
 // A private filesystem localStorage adapter isolates the host transport; no Electron/paint claim.
@@ -169,18 +168,15 @@ try {
 finally {
   // Cleanup remains independent of assertion/process errors, restricted to the unique private root.
   for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
-  const exec = promisify(execFile)
   for (const pid of await listProbeProcesses(-1, root)) {
     try {
-      const identity = (await exec('/bin/ps', ['-p', String(pid), '-o', 'command='])).stdout
-      assert.ok(identity.includes(root), 'Private process identity changed')
-      process.kill(pid, 'SIGTERM')
-    } catch (error) { if (error.code !== 'ESRCH' && error.code !== 1) cleanupErrors.push(String(error)) }
+      await signalOwnedProbeProcess(pid, root, 'SIGTERM')
+    } catch (error) { cleanupErrors.push(String(error)) }
   }
   const deadline = Date.now() + 4000
   while (Date.now() < deadline && (await listProbeProcesses(-1, root)).length) await new Promise(done => setTimeout(done, 25))
   let remaining = await listProbeProcesses(-1, root)
-  for (const pid of remaining) { try { process.kill(pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') cleanupErrors.push(String(error)) } }
+  for (const pid of remaining) { try { await signalOwnedProbeProcess(pid, root, 'SIGKILL') } catch (error) { cleanupErrors.push(String(error)) } }
   await new Promise(done => setTimeout(done, 50)); remaining = await listProbeProcesses(-1, root)
   const after = await capture(); if (JSON.stringify(before) !== JSON.stringify(after)) failure ??= 'Selected inputs changed during proof'
   if (!remaining.length && !cleanupErrors.length) await rm(root, { recursive: true, force: true })
