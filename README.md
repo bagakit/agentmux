@@ -71,21 +71,32 @@ Provider/Agent Session 合同，当前真实端到端覆盖以 Codex 为代表�
 ## 使用 Codex 与统一 CLI
 
 ```ts
-import { connectLocalAgentMux } from '@agentmux/core'
+import { agentPromptCondition, connectLocalAgentMux } from '@agentmux/core'
 
 const client = await connectLocalAgentMux()
 const session = await client.createAgent({
-  agentId: 'codex',
+  providerId: 'codex',
+  executorId: 'codex-full-auto',
   workspacePath: process.cwd(),
   injectAgentMuxGuide: true,
   prompt: 'Inspect this repository'
 })
 
 await client.reattachAgent(session.agentSessionId, 0)
-await client.submitAgentPrompt(session.agentSessionId, 'Run the focused tests')
+// Agent 可接收后续 Prompt 时，先保存这条消息的精确投递条件。
+const followup = {
+  ...agentPromptCondition(await client.refreshAgentSession(session.agentSessionId, session.run)),
+  agentSessionId: session.agentSessionId,
+  operationId: crypto.randomUUID(),
+  prompt: 'Run the focused tests'
+}
+await client.submitAgentPrompt(followup)
 await client.signalAgent(session.agentSessionId, 'SIGINT')
 await client.dispose()
 ```
+
+丢回执或重试时保留同一个 `followup`，不按最新状态重建条件或 operationId。
+Provider 与 Executor 的职责、投递 admission 和 typed 交互见 [Core 接入说明](packages/core/README.md)。
 
 ```bash
 agentmux list agents
