@@ -57,7 +57,7 @@ describe('finite public Browser completion projection', () => {
     }
     invalid({ ...sample(), context: { ...sample().context, navigationId: undefined } })
     invalid({ ...sample(), context: { ...sample().context, workspaceId: undefined } })
-    invalid({ ...sample(), context: { ...sample().context, browserId: '界'.repeat(180) } })
+    invalid({ ...sample(), context: { ...sample().context, navigationId: '界'.repeat(180) } })
   })
 
   it('keeps unavailable and not-met distinct; aggregate must agree with nonempty condition facts', () => {
