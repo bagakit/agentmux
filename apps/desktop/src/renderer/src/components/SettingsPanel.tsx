@@ -1,6 +1,6 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { Check, ChevronDown, Bell, Bot, ClipboardCopy, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
+import { Check, ChevronDown, Bell, Bot, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -9,23 +9,20 @@ import { useAppStore } from '../store'
 import { AgentSettingsPane } from './settings/AgentSettingsPane'
 import { AppearanceSettingsPane } from './settings/AppearanceSettingsPane'
 import { BrowserSettingsPane } from './settings/BrowserSettingsPane'
-import { CopyPathsSettingsPane } from './settings/CopyPathsSettingsPane'
 import { ShortcutSettingsPane } from './settings/ShortcutSettingsPane'
 import { GeneralSettingsPane } from './settings/GeneralSettingsPane'
 import { HostSettingsPane } from './settings/HostSettingsPane'
 import { NotificationSettingsPane } from './settings/NotificationSettingsPane'
 import { WorkspaceSettingsPane } from './settings/WorkspaceSettingsPane'
 
-export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces' | 'browser' | 'prompts' | 'copy-paths'
-type SettingsGroupId = 'setup' | 'preferences'
+export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces' | 'browser' | 'prompts'
+type SettingsGroupId = 'preferences' | 'resources'
 
-// Grouped navigation, using `group`-tagged sections at this app's small scale
-// (two groups). "Setup" leads because those are the resources you actually
-// register and configure; app-level "Preferences" follow. Section order within SECTIONS is the
-// display order — keep the actionable panes ahead of read-only General.
+// Daily preferences lead; reusable resources remain separate. Both sidebar and
+// compact menu consume this same order, including when search filters it.
 const GROUPS: { id: SettingsGroupId; title: string }[] = [
-  { id: 'setup', title: 'Setup' },
-  { id: 'preferences', title: 'Preferences' }
+  { id: 'preferences', title: 'Preferences' },
+  { id: 'resources', title: 'Resources' }
 ]
 
 /**
@@ -41,15 +38,14 @@ const GROUPS: { id: SettingsGroupId; title: string }[] = [
 const AGENT_PROVIDER_KEYWORDS = BUILT_IN_AGENT_PROVIDER_IDS.map((id) => id.toLowerCase()).join(' ')
 
 const SECTIONS = [
-  { id: 'workspaces' as const, group: 'setup' as const, title: 'Workspaces', description: 'Project folders and their worktrees.', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
-  { id: 'hosts' as const, group: 'setup' as const, title: 'Hosts', description: 'Local and SSH connections for your workspace.', icon: Server, keywords: 'ssh remote hostname user port key test connection' },
-  { id: 'agents' as const, group: 'setup' as const, title: 'Agents', description: 'Reusable executors for your next agent session.', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
-  { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Theme, typography, and terminal colors.', icon: Palette, keywords: 'theme color palette terminal tui composer input background' },
+  { id: 'appearance' as const, group: 'preferences' as const, title: 'Appearance', description: 'Theme, typography, and terminal colors.', icon: Palette, keywords: 'theme color palette terminal tui composer input background font size typography' },
   { id: 'notifications' as const, group: 'preferences' as const, title: 'Notifications', description: 'Choose when and how agents get your attention.', icon: Bell, keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime' },
   { id: 'browser' as const, group: 'preferences' as const, title: 'Browser', description: 'Choose how agents interact with your pages.', icon: Globe, keywords: 'browser agent automation drive page script run snapshot click permission enable disable' },
-  { id: 'prompts' as const, group: 'preferences' as const, title: 'Prompts', description: 'Keep your everyday instructions close at hand.', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
-  { id: 'copy-paths' as const, group: 'preferences' as const, title: 'Copy Paths', description: 'Choose how paths look when you share them.', icon: ClipboardCopy, keywords: 'copy path clipboard home directory tilde abbreviate absolute full shorten' },
-  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Local storage, session continuity, and diagnostics.', icon: Settings2, keywords: 'core runtime terminal tmux ssh show crash log session recovery' }
+  { id: 'general' as const, group: 'preferences' as const, title: 'General', description: 'Copied paths, local data, and diagnostics.', icon: Settings2, keywords: 'copy path clipboard home directory ~ tilde abbreviate absolute full shorten core runtime terminal tmux ssh show crash log session recovery' },
+  { id: 'agents' as const, group: 'resources' as const, title: 'Agents', description: 'Reusable executors for your next agent session.', icon: Bot, keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider` },
+  { id: 'prompts' as const, group: 'resources' as const, title: 'Prompts', description: 'Keep your everyday instructions close at hand.', icon: MessageSquareText, keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom' },
+  { id: 'workspaces' as const, group: 'resources' as const, title: 'Workspaces', description: 'Project folders and their worktrees.', icon: FolderGit2, keywords: 'project folder repo branch worktree create run on agent' },
+  { id: 'hosts' as const, group: 'resources' as const, title: 'Hosts', description: 'Local and SSH connections for your workspace.', icon: Server, keywords: 'ssh remote hostname user port key test connection' }
 ]
 
 /**
@@ -90,7 +86,7 @@ export function settingsNavGroups(
   })
 }
 
-export function SettingsPanel({ onClose, initialSection = 'workspaces', executorId }: {
+export function SettingsPanel({ onClose, initialSection = 'appearance', executorId }: {
   onClose: () => void
   initialSection?: SettingsSectionId
   executorId?: string | undefined
@@ -248,11 +244,10 @@ export function SettingsPanel({ onClose, initialSection = 'workspaces', executor
         {visibleSections.length === 0 ? <div className="settings-nav-empty" role="status">No settings match “{query}”. Try a different word.</div> : null}
         {visited.map((pane) => (
         <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={active !== pane || visibleSections.length === 0} inert={active !== pane || visibleSections.length === 0}>
-          {pane === 'general' ? <GeneralSettingsPane /> : null}
+          {pane === 'general' ? <GeneralSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
           {pane === 'appearance' ? <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} /> : null}
           {pane === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
           {pane === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} onForget={api.browser.forgetAppLinkScheme} /> : null}
-          {pane === 'copy-paths' ? <CopyPathsSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
           {pane === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
           {pane === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={executorId} /> : null}
           {pane === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}

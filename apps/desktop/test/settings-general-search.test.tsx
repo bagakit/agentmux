@@ -23,7 +23,9 @@ function general() {
   expect([...pane.querySelectorAll('dt')].map(node => node.textContent)).toContain('Session recovery')
   expect(pane.textContent).toContain('Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.')
   expect(pane.textContent).toContain('Crashes are recorded to a local file and never uploaded.')
-  const buttons = [...pane.querySelectorAll<HTMLButtonElement>('button')]
+  const diagnostics = pane.querySelector<HTMLElement>('.settings-diagnostics')!
+  expect(diagnostics.isConnected).toBe(true)
+  const buttons = [...diagnostics.querySelectorAll<HTMLButtonElement>('button')]
   expect(buttons.map(node => node.textContent)).toEqual(['Show crash log'])
   expect(buttons[0]!.isConnected).toBe(true)
   expect(buttons[0]!.disabled).toBe(false)

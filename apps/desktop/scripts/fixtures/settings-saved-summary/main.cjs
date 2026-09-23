@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
       await until('document.querySelectorAll(".settings-content__scroll:not([hidden])").length===1')
       await settle()
     }
-    const pane = kind => `[data-settings-pane="${kind === 'copy' ? 'copy-paths' : 'browser'}"]:not([hidden])`
+    const pane = kind => `[data-settings-pane="${kind === 'copy' ? 'general' : 'browser'}"]:not([hidden])`
     const measure = kind => read(`(() => {
       const pane=document.querySelector(${JSON.stringify(pane(kind))}),group=pane?.querySelector('.settings-group'),header=group?.querySelector('header');
       const rect=n=>n.getBoundingClientRect().toJSON();
@@ -61,7 +61,7 @@ app.whenReady().then(async () => {
       const input=group?.querySelector('input[type=checkbox]');if(!input?.isConnected||!input.checkVisibility())throw Error('Missing actual checkbox');
       return {pane:rect(pane),header:rect(header),title:text(header.querySelector('span')),summary:text(header.querySelector('small')),
         controlTitle:text(input.closest('label').querySelector('strong')),scope:text(input.closest('label').querySelector('span > small')),
-        checked:input.checked,saved:window.__settingsSavedSummary.saved()[${JSON.stringify(kind)}],feedback:pane.querySelector('[role=status]')?.textContent.trim()};
+        checked:input.checked,saved:window.__settingsSavedSummary.saved()[${JSON.stringify(kind)}],feedback:pane.querySelector('[data-settings-save-bar] [role=status]')?.textContent.trim()};
     })()`)
     const assertText = (frame, kind, saved) => {
       assert.equal(frame.title.text, kind === 'copy' ? 'Home directory in copied paths' : 'Agent automation')
@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
         assert.ok(overlapX <= 0.5 || overlapY <= 0.5, 'Title and saved summary do not overlap')
       }
     }
-    await until('window.__settingsSearchRefinement?.ready&&window.__settingsSavedSummary&&document.querySelector("[data-settings-pane=copy-paths]")')
+    await until('window.__settingsSearchRefinement?.ready&&window.__settingsSavedSummary&&document.querySelector("[data-settings-pane=general]")')
     for (const width of [320, 420, 1480]) {
       win.setContentSize(width, 900)
       await until(`innerWidth===${width}`)
@@ -97,7 +97,7 @@ app.whenReady().then(async () => {
       }
       for (const kind of ['copy', 'browser']) {
         result.phase = `${width}-${kind}`
-        await section(kind === 'copy' ? 'Copy Paths' : 'Browser')
+        await section(kind === 'copy' ? 'General' : 'Browser')
         const before = await measure(kind)
         assertText(before, kind, before.saved)
         assert.equal(before.checked, before.saved)
@@ -111,14 +111,14 @@ app.whenReady().then(async () => {
         await settle()
         const image = `${width}-${kind}-dirty.png`
         fs.writeFileSync(path.join(evidence, image), (await win.webContents.capturePage()).toPNG())
-        const save = await click(node(`${pane(kind)} .settings-pane-actions button`))
+        const save = await click(node(`${pane(kind)} [data-settings-save-bar] button`))
         await until(`window.__settingsSavedSummary.saved()[${JSON.stringify(kind)}]===${!before.saved}`)
         await until(`${node(`${pane(kind)} .settings-group header small`)}.textContent===${JSON.stringify(`Saved: ${kind === 'copy' ? !before.saved ? 'Absolute' : 'Abbreviated' : !before.saved ? 'On' : 'Off'}`)}`)
         const published = await measure(kind)
         assertText(published, kind, !before.saved)
         assert.equal(published.checked, !before.saved)
         assert.equal(published.saved, !before.saved)
-        await until(`${node(`${pane(kind)} .settings-pane-actions button`)}.disabled`)
+        await until(`${node(`${pane(kind)} [data-settings-save-bar] button`)}.disabled`)
         await settle()
         const publishedImage = `${width}-${kind}-published.png`
         fs.writeFileSync(path.join(evidence, publishedImage), (await win.webContents.capturePage()).toPNG())
@@ -127,11 +127,11 @@ app.whenReady().then(async () => {
       const close = await click(node('[aria-label="Close settings"]'))
       await until('!document.querySelector(".settings-page")')
       const reopenAfterClose = await click(node('.window-status-bar [aria-label="Settings"]'))
-      await until('document.querySelector("[data-settings-pane=copy-paths]")')
+      await until('document.querySelector("[data-settings-pane=general]")')
       const space = await click(node('.window-status-bar [aria-label="Space: show terminal and file workbench"]'))
       await until('!document.querySelector(".settings-page")')
       const reopenAfterSpace = await click(node('.window-status-bar [aria-label="Settings"]'))
-      await until('document.querySelector("[data-settings-pane=copy-paths]")')
+      await until('document.querySelector("[data-settings-pane=general]")')
       result.navigation.push({ width, close, reopenAfterClose, space, reopenAfterSpace })
     }
     result.events = await read('window.__settingsSearchRefinement.events')
