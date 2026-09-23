@@ -46,7 +46,8 @@ import {
   AGENT_TERMINAL_HANDSHAKE_FAILED,
   AGENT_TERMINAL_HANDSHAKE_TIMEOUT,
   classifyTerminalHandshakeFailure,
-  degradedInputCursor
+  degradedInputCursor,
+  terminalHandshakeExitError
 } from './agent-terminal-handshake-outcome.js'
 import {
   handOff,
@@ -2446,11 +2447,15 @@ export class AgentMuxClient {
         catch (cleanupError) { rollbackErrors.push(cleanupError) }
         if (persisted) {
           try {
-            await this.registry.put({
+            const restored = await this.registry.update(current.agentSessionId, next.run, failed => ({
               ...current,
               retiredRuns: [...current.retiredRuns, next.run].slice(-16),
-              updatedAt: Date.now()
-            }, next.run)
+              // Renderer Run fences require a strictly newer canonical transition, even within
+              // one clock tick or after a concurrent update of the failed binding.
+              updatedAt: Math.max(Date.now(), failed.updatedAt + 1, next.updatedAt + 1)
+            }))
+            this.publisher.publish({ type: 'agent-session', session: cloneSession(restored) })
+            if (oldRun) this.publisher.publishRunState(this.projectRun(oldRun, restored), restored.agentSessionId)
             abandonedRun = null
           } catch (cleanupError) {
             rollbackErrors.push(cleanupError)
@@ -3500,6 +3505,7 @@ export class AgentMuxClient {
       }
     }
 
+    let startupOutput = ''
     let tail = ''
     let queryObserved = false
     let resolveQuery!: () => void
@@ -3509,6 +3515,7 @@ export class AgentMuxClient {
       rejectQuery = reject
     })
     const observe = (data: string): void => {
+      startupOutput = `${startupOutput}${data}`.slice(-8192)
       if (queryObserved) return
       const candidate = `${tail}${data}`
       if (candidate.includes(handshake.query)) {
@@ -3541,6 +3548,10 @@ export class AgentMuxClient {
       const attachment = await this.kernel.attach(session.run.runId, 0)
       attached = true
       for (const event of attachment.replay) observe(event.data)
+      this.assertAgentRun(session, attachment.run)
+      if (!queryObserved && attachment.run.state.type !== 'running') {
+        rejectQuery(terminalHandshakeExitError(attachment.run, startupOutput))
+      }
       if (!queryObserved) await query
 
       const boundaryRun = await this.kernel.status(session.run.runId)
@@ -3713,6 +3724,22 @@ export class AgentMuxClient {
       this.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
       observeReadiness(ready)
       return ready
+    } catch (error) {
+      if (error instanceof AgentMuxError && (
+        error.code === AGENT_TERMINAL_HANDSHAKE_FAILED ||
+        error.code === AGENT_TERMINAL_HANDSHAKE_TIMEOUT
+      )) {
+        // Reuse this handshake's Attachment; never attach another live consumer for diagnostics.
+        // A failed state read cannot replace the original failure with a guessed exit fact.
+        let exitedRun: CtxmuxAdapterRun | undefined
+        try {
+          const observed = await this.kernel.status(session.run.runId)
+          this.assertAgentRun(session, observed)
+          if (observed.state.type !== 'running') exitedRun = observed
+        } catch {}
+        if (exitedRun) throw terminalHandshakeExitError(exitedRun, startupOutput)
+      }
+      throw error
     } finally {
       clearTimeout(timer)
       unsubscribe()
