@@ -588,6 +588,7 @@ async function cleanupProcessScope(scope, findProcessIds) {
 }
 
 async function verifyLaunchServices(appPath, verificationRoot) {
+  const traceCancel = process.env.AGENTMUX_DESKTOP_FILE_EDITING_CANCEL_TRACE === '1'
   const canonicalAppPath = await realpath(appPath)
   const readyFile = join(verificationRoot, 'desktop-ready.json')
   const fileEditingReport = join(verificationRoot, 'workspace-file-editing.json')
@@ -642,6 +643,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       '--env', `AGENTMUX_STATE_DIRECTORY=${join(runtimeRoot, 'state')}`,
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
       '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
+      ...(traceCancel ? ['--env', 'AGENTMUX_DESKTOP_FILE_EDITING_CANCEL_TRACE=1'] : []),
       canonicalAppPath
     ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
     verificationStage = 'ready-receipt'
@@ -809,6 +811,17 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
   } catch (error) {
     cleanupErrors.push(error)
+  }
+
+  if (traceCancel) {
+    try {
+      const stderr = await readFile(stderrPath, 'utf8')
+      process.stderr.write('mounted_file_editing_diagnostic_stderr=' + JSON.stringify({ collected: true, stderr }) + '\n')
+    } catch (error) {
+      process.stderr.write('mounted_file_editing_diagnostic_stderr=' + JSON.stringify({
+        collected: false, error: error instanceof Error ? error.message : String(error)
+      }) + '\n')
+    }
   }
 
   const failures = [verificationError, ...cleanupErrors].filter(Boolean)

@@ -36,6 +36,7 @@ api.sessions.launchTerminal = async input => request('launch', input)
 api.sessions.launchAgent = async input => request('launch-agent', input)
 api.sessions.historyPage = async (control, options) => request('history', control, options)
 api.sessions.timeline = async control => request('timeline', control)
+api.sessions.historySources = async () => request('history-sources')
 api.sessions.onEvent = createRendererSessionEvents(listener => window.projectHistoryBoundary.onEvent(listener))
 api.ui.requestStorageFlush = async () => request('flush')
 let ids = setup.ids
@@ -78,6 +79,7 @@ window.projectHistoryUi = () => ({
 })
 window.projectHistoryPrepare = async () => {
   if (setup.phase === 'seed') {
+    for (const [id, name] of [[ids.keep, 'Context research'], [ids.archive, 'Closed review'], [ids.original, 'Focused work'], [ids.companion, 'Build checks']]) useAppStore.getState().renameAgent(id, name)
     // Controlled historical timestamps enter through the real Store writer. They describe
     // observed Focus visits, never a real elapsed Run duration or human send timestamp.
     const clock = Date.now, now = clock()
