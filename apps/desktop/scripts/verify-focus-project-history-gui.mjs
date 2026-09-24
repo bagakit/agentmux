@@ -51,7 +51,7 @@ try {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
     plugins: mutation ? [{ name: 'focus-history-loaded-readability-counterexample', enforce: 'pre', transform(source, id) {
       if (!id.split('?')[0].endsWith('/styles/focus.css')) return
-      const rule = source.match(/\.recent-focus__observation > p \{[^}]*\}/)?.[0]
+      const rule = source.match(/\.confirmation-dialog\.recent-focus__observation > p \{[^}]*\}/)?.[0]
       assert.ok(rule?.includes('white-space: normal;'), 'The actual production observation rule must be loaded')
       const changed = source.replace(rule, rule.replace('white-space: normal;', 'white-space: nowrap;'))
       receipt.loadedMutation = { variant: mutation, module: path.relative(root, id.split('?')[0]), originalSha256: hash(source), transformedSha256: hash(changed) }
