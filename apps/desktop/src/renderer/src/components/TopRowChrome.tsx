@@ -5,7 +5,7 @@ import { FocusNavigationButton } from './FocusNavigationButton'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
-import type { SettingsSectionId } from './SettingsPanel'
+import type { SettingsPageId } from './SettingsPanel'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
@@ -123,7 +123,7 @@ export function TopBreadcrumb() {
 }
 
 export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSettings }: {
-  onOpenSettings: (section: SettingsSectionId) => void
+  onOpenSettings: (section: SettingsPageId) => void
   settingsOpen?: boolean
   onCloseSettings?: () => void
 }) {
@@ -221,8 +221,8 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
             aria-label="Settings"
             title="Settings"
             aria-expanded={settingsOpen}
-            data-settings-section="appearance"
-            onClick={() => settingsOpen ? onCloseSettings?.() : onOpenSettings('appearance')}
+            data-settings-section="overview"
+            onClick={() => settingsOpen ? onCloseSettings?.() : onOpenSettings('overview')}
           >
             <Settings2 size={14} aria-hidden="true" />
           </button>
