@@ -1065,4 +1065,103 @@ describe('Kimi session analysis, trace completeness and production path', () => 
       }
     }).toThrow('MUTATION_FAILED')
   })
+
+  it('proves hook and client invariants: Stop does not complete accepted turn, Error/Interrupt do not guess success, control counts non-empty and zero, identity frozen', async () => {
+    const f = await createKimiFixture()
+    const provider = new AgentProviderRegistry().get('kimi')
+
+    // 1. Controls are non-empty and zero calls
+    expect(f.controls.length).toBeGreaterThan(0)
+    for (const ctrl of f.controls) {
+      expect(ctrl).not.toHaveBeenCalled()
+    }
+
+    // 2. Stop arriving does NOT complete the accepted turn (semanticState working, lifecycleEvent null)
+    const stopHook = provider.normalizeHook({
+      receiptId: 'rcpt-stop',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'Stop',
+      payload: {
+        hook_event_name: 'Stop',
+        session_id: f.session.nativeHandle!.sessionId,
+        stop_hook_active: false
+      }
+    }, {})
+    expect(stopHook.semanticState).toBe('working')
+    expect(stopHook.lifecycleEvent).toBeNull()
+
+    // 3. Error and Interrupt do NOT guess success (done)
+    const failHook = provider.normalizeHook({
+      receiptId: 'rcpt-fail',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'StopFailure',
+      payload: {
+        hook_event_name: 'StopFailure',
+        session_id: f.session.nativeHandle!.sessionId,
+        error_type: 'TimeoutError',
+        error_message: 'Step timed out'
+      }
+    }, {})
+    expect(failHook.semanticState).toBe('unknown')
+    expect(failHook.lifecycleEvent).toBeNull()
+    expect(failHook.semanticState).not.toBe('done')
+
+    const interruptHook = provider.normalizeHook({
+      receiptId: 'rcpt-int',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'Interrupt',
+      payload: {
+        hook_event_name: 'Interrupt',
+        session_id: f.session.nativeHandle!.sessionId,
+        turn_id: 1,
+        reason: 'cancelled'
+      }
+    }, {})
+    expect(interruptHook.semanticState).toBe('unknown')
+    expect(interruptHook.lifecycleEvent).toBeNull()
+    expect(interruptHook.semanticState).not.toBe('done')
+
+    // 4. Session identity strictly frozen with no transcriptPath
+    expect(stopHook.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'kimi',
+      sessionId: f.session.nativeHandle!.sessionId
+    })
+    expect(stopHook.nativeHandle).not.toHaveProperty('transcriptPath')
+    expect(failHook.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'kimi',
+      sessionId: f.session.nativeHandle!.sessionId
+    })
+    expect(failHook.nativeHandle).not.toHaveProperty('transcriptPath')
+
+    // 5. Unverified extra data (e.g. agent_name: 'unknown-display-name') does NOT wipe nativeHandle
+    const extraHook = provider.normalizeHook({
+      receiptId: 'rcpt-extra',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'StopFailure',
+      payload: {
+        hook_event_name: 'StopFailure',
+        session_id: f.session.nativeHandle!.sessionId,
+        agent_name: 'unknown-display-name',
+        error_type: 'TimeoutError',
+        error_message: 'Step timed out'
+      }
+    }, {})
+    expect(extraHook.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'kimi',
+      sessionId: f.session.nativeHandle!.sessionId
+    })
+    expect(extraHook.semanticState).toBe('unknown')
+    expect(extraHook.lifecycleEvent).toBeNull()
+  })
 })

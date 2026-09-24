@@ -6,64 +6,65 @@ import { readKimiSessionHistoryPage } from './kimi-native-history.js'
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
 /**
- * Kimi 写进 `~/.kimi/config.toml` 的事件名（`[[hooks]]` 数组，docs/en/customization/hooks.md:43）。
+ * Kimi (@moonshot-ai/kimi-code v2.1.1) Hook 协议映射。
  *
- * 拼法是 PascalCase，与 Claude 一族**逐字相同**（`PreToolUse`/`PostToolUse`/`Stop`/…），负载键则是
- * snake_case 的 `hook_event_name`——两者都已被既有的 `PASCAL_CASE_HOOK_DIALECT` 与
- * `HOOK_EVENT_NAME_PAYLOAD_KEYS` 覆盖，所以本 Provider **不必**往方言表加任何条目。这是"同名同结构"
- * 的合法复用（见 agent-hook-event.ts 里"键允许在 Provider 之间重复"那段），不是偷懒：Kimi 的
- * `PreToolUse` 在结构上确实就是一次工具调用的事前。
+ * 真实第一方依据：
+ * - packages/agent-core-v2/src/features/externalHooks/agent/agentExternalHooksService.ts
+ * - packages/agent-core-v2/src/features/externalHooks/internal/matchHooks.ts
+ * - packages/agent-core-v2/src/features/externalHooks/configSection.ts
+ * - apps/kimi-code/src/cli/commands.ts 与 package.json
  *
- * Kimi 另有 `SessionEnd`/`PreCompact`/`PostCompact`/`Notification` 四个（config.py:5-19 共 13 个），
- * Core 今天没有任何判断需要它们，故 `rules` 不列。
+ * 事件投递侧经 toHookInputData 将 camelCase 字段转为 snake_case，事件名在 hook_event_name 中传递。
+ *
+ * 关键协议事实：
+ * 1. Stop 是在 afterStep 上的可 veto 探测（loopService.ts onDidFinishStep -> runStop(ctx)），
+ *    若 hook 返回 block 判定（exit code 2 或 structured block），Kimi 会将原因作为 system_trigger (stop_hook)
+ *    写入 context 并调用 loop.notify() 继续运行；即使放行亦非 turn 结束。故 Stop 不当 main done 或 turn-end。
+ * 2. StopFailure 与 Interrupt 真实负载（notifyTurnEnded）仅带 errorType/errorMessage 或 turnId/reason，
+ *    不包含 agentId/agent_name 等主体作用域字段。未给 agent 作用域时诚实判定为 unknown/null，
+ *    绝不凭名字猜 main，绝不凭名字猜成功 (done)，未证 extra 数据亦不得影响真实 native identity。
+ * 3. 正常完成的 TurnEnded（reason === 'completed'）在第一方 AgentExternalHooksService 中不触发任何 hook；
+ *    按既有事实诚实声明，不虚造事件。
+ * 4. TS 2.1.1 中无 SubagentStart/SubagentStop hook，不声明 subagentTracking；亦不预设未证 agentName 别名猜测。
  */
 export const KIMI_HOOKS: AgentNativeHookSpecification = {
-  // 事件名随负载到达：Kimi 每条事件都写 `hook_event_name`（本机第一方源码实测：`hooks/events.py`）。
-  // 所以它虽不带 `--event`、也不注入 env，子进程仍解析得出事件名。
-  //
-  // 注意这条声明目前**无人守**：本文件的两面判据（声明↔安装计划、投递端到端）都只枚举
-  // explicit-managed，而 Kimi 是 unmanaged——AgentMux 不写它的配置，没有安装计划可比对。这个边界
-  // 在 test/provider-event-name-source.test.ts 里被显式钉住（清单里恰好只有 kimi），改了会红。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
-    // 两种收尾都算 done：正常完成与失败收尾。少任何一条都会卡在 working。Kimi 没有第三种
-    // （grok 的 `stop_cancelled` 在这里不存在，别照抄）。
-    //
-    // 但**这两条并没有覆盖全部收尾**——这是 Kimi 的固有限制，不是这里可以补的，也别试着发明一个
-    // 事件名去填：中断（Ctrl-C / Esc）与 `MaxStepsReached` 两条路**一个 hook 都不发**。
-    // `except asyncio.CancelledError`（soul/kimisoul.py:791）与 `except MaxStepsReached`（:788）
-    // 都在 `Stop` 的 trigger（:742）**之前**重新抛出；`StopFailure` 在 `_agent_loop` 的
-    // `except Exception` 里，而 `CancelledError` 自 py3.8 起是 `BaseException`、抓不到，
-    // `MaxStepsReached` 的 raise 点也在那个 try 之上。且中断后 Kimi 进程仍活在 composer 上
-    // （SIGINT 只取消当前 turn），于是连"进程退出"这个兜底事实都没有。
-    // 后果：用户中断或撞上步数上限后，这个 Agent 会继续显示运行中——但**不是永远**：
-    // 通用衰减（agent-status-freshness.ts）会在 15 分钟无新证据后把 working 落成 unknown，
-    // 那条衰减兜的正是"该发收尾却没发"这一类，所以这里不需要为 Kimi 单独加机制。
-    // 真实失效形态因此是"最多 15 分钟的错误运行中"，别把它写成永久卡死。
-    // 与 grok 的区别要认清——grok 是**发了**另一个事件（`StopCancelled`）而我们没接，
-    // Kimi 是真的什么都不发（config.py:5-19 的 13 个事件里没有任何 cancel 类），
-    // 所以这里正确的做法是如实记录这个限制，而不是编一个收尾事件出来。
-    { events: ['Stop', 'StopFailure'], state: 'done' },
+    // Stop 是 afterStep 上的可 veto 探测，可能继续执行，不当 main done 或 turn-end
+    {
+      events: ['Stop'],
+      state: 'working',
+      lifecycleEvent: null
+    },
+    // StopFailure / Interrupt 真实负载无 agent 作用域；诚实判定为 unknown/null，不猜 main 或成功
+    {
+      events: ['StopFailure', 'Interrupt'],
+      state: 'unknown',
+      lifecycleEvent: null
+    },
+    // 主轮开工与进行中事件
+    {
+      events: ['TurnStarted'],
+      state: 'working',
+      lifecycleEvent: 'turn-start'
+    },
+    {
+      events: ['PermissionRequest'],
+      state: 'waiting',
+      lifecycleEvent: 'permission-request'
+    },
     {
       events: [
-        'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-        'PostToolUseFailure', 'SubagentStart'
+        'UserPromptSubmit',
+        'UserPromptQueued',
+        'PreToolUse',
+        'PostToolUse',
+        'PostToolUseFailure',
+        'PermissionResult'
       ],
       state: 'working'
     }
   ],
-  // 子代理按**名字**记账，不是按 id：Kimi 的 SubagentStart/Stop 负载里只有 `agent_name`
-  // （hooks/events.py:117-142，两个事件都只带 agent_name + prompt/response），没有任何 id 键。
-  // 因此同名子代理并发时会记成一个——这是上游负载的事实，不是这里可以补的。
-  subagentTracking: {
-    startEvents: ['SubagentStart'],
-    stopEvents: ['SubagentStop'],
-    mainStopEvents: ['Stop', 'StopFailure'],
-    idKeys: ['agent_name']
-  },
-  // 负载键是 snake_case `session_id`（hooks/events.py:9 的 `_base`，每个事件都经它）。
-  // **不**声明 transcriptPathKeys：Kimi 的 hook 负载里没有任何 transcript/session 文件路径键，
-  // resume 靠 session id。
   nativeHandle: {
     sessionIdKeys: ['session_id']
   }
@@ -74,68 +75,24 @@ export function createKimiProvider(defineAgentProvider: ProviderFactory): AgentP
     readSessionHistoryPage: readKimiSessionHistoryPage,
     catalog: catalog({
       id: 'kimi', label: 'Kimi', executable: 'kimi',
-      // **不是** `kimi`。这个 CLI 启动时把自己的进程名改成 `Kimi Code`
-      // （cli/__init__.py:373 调 init_process_name("Kimi Code")，utils/proctitle.py:6-13 走
-      // setproctitle，且 setproctitle 是硬依赖 pyproject.toml:38）。readySignal 是
-      // foreground-process 按 expectedProcess 比对，写 `kimi` 会让"就绪"永远等不到——
-      // 这正是"从可执行文件名推进程名"这类形状推理的失效点。
-      expectedProcess: 'Kimi Code',
-      // 首个 prompt **送不到**，所以如实声明 post-launch-only 而不是 positional-argv。
-      //
-      // Kimi 的交互 UI 没有「带着一条 prompt 启动、并继续活着」的入口，这一点是两面夹死的：
-      //   1. `-p/--prompt`（与别名 `-c/--command`，cli/__init__.py:217-226）在 shell UI 里走的是
-      //      `Shell.run(command=...)`，而那条路 `# run single command and exit`
-      //      （ui/shell/__init__.py:382-399）跑完就 return——不是一个活着的 PTY。
-      //   2. 没有 Gemini `--prompt-interactive` 那样的旗标。把 cli/__init__.py 的整份选项清单读完，
-      //      prompt 只有上面那一个入口。
-      //   （`prefill_text` 不是第三条路：它只由 `Reload` 异常传入（cli/__init__.py:779），
-      //     并在交互循环内部才应用（ui/shell/__init__.py:497），任何命令行旗标都到不了它。）
-      //
-      // 于是首个 prompt 只能在进程起来之后当一条普通 turn 提交（`submitAgentPrompt`，那条路对本
-      // Provider 是通的：single-phase 不需要 composer readiness 纪元）。这不是"以后再接"——
-      // client 的两条生命周期路径都经 `splitLaunchPromptByDelivery` 把组装好的启动文本整份划给
-      // 补送，再由 `deliverPostLaunchPrompt` 在进程起来之后真的键入。
-      //
-      // **绝不能**声明 positional-argv 再在 buildArgs 里把 prompt 丢掉：那样用户的原话只会落进
-      // timeline、永不进入进程，而界面上一切正常——最难发现的一类丢失。声明成 post-launch-only 后，
-      // 带 prompt 启动会被 buildLaunch 当场拒绝（AGENT_LAUNCH_PROMPT_UNSUPPORTED）；正常路径够不到
-      // 那次拒绝（分流已经把启动侧清空），它守的是"谁哪天绕过分流直接塞 prompt"。
+      // 第一方 TS 2.1.1 (apps/kimi-code) 并无进程改名 (setproctitle) 证据；保持原成熟可执行名 kimi。
+      expectedProcess: 'kimi',
       promptDelivery: 'post-launch-only',
-      // `unmanaged` 而非 `explicit-managed`：hook 是真的、Core 也认得，但它的配置面是
-      // `~/.kimi/config.toml` 的 `[[hooks]]` 数组——**TOML**，而本仓四种 merge 策略
-      // （json-owned-key / json-managed-events / yaml-managed-events / json-managed-approvals）
-      // 没有一种能编辑 TOML，Core 也没有 TOML 解析器（依赖只有 @xterm/headless 与 yaml）。
-      //
-      // 而这个文件是用户自己的主配置：model、credentials、theme 都在里面
-      // （docs/en/configuration/config-files.md:7）。所以它和 grok 的 `~/.grok/hooks/*.json`
-      // 那种一文件一用途的 drop-in **不是**同一回事——整份覆盖会是一次数据损坏而不是一次安装，
-      // 而幂等的 TOML merge 要么加一个新依赖、要么手写一个保注释的 TOML 编辑器，两者都远超
-      // 本 Provider 的范围。按「能力未核实/未实现就不声明」如实记 unmanaged：hook 只在用户
-      // 自己接线后才响，Core 不假装安装过。
+      // TS 2.1.1 配置位于 KIMI_CODE_HOME（默认 ~/.kimi-code）下的 config.toml。
+      // configSection.ts 声明严格的 [[hooks]] 结构：{ event, matcher?, command, timeout? }。
+      // 完整 managed config loader/merge 语义未在当前 review slice 中全面核过，
+      // 诚实保留 unmanaged 范围与终局缺口，禁止猜测配置路径写入用户目录。
       hookStrategy: { kind: 'native', installation: 'unmanaged' },
-      // `--session/-S/--resume/-r <id>` 直传 session id，故 locator 是 session-id。
-      // 注意它是 **find-or-create**：id 不存在时会静默新建一个用该 id 的会话
-      // （cli/__init__.py:558-565，docs/en/guides/sessions.md:37）。对 AgentMux 无害——我们只用
-      // Core 记下来的、真的存在过的 id 去恢复；但**绝不能**把这个旗标当"给新会话指定 id"用。
+      // apps/kimi-code commands.ts 提供 -S, --session [id] 与隐藏的 -r, --resume [id]，
+      // locator 准确声明为 session-id
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
-      // ACP 真实存在（`kimi acp` 子命令 + agent-client-protocol 硬依赖），但 AgentMux 侧的 ACP
-      // 适配未接，故如实声明 none/false——与 Gemini 同一处理。
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true, timeline: 'complete-events',
-        // observe 而非 respond：Kimi 的 PreToolUse 确实能在 stdout 上回 permissionDecision:deny
-        // 来拦一次调用，但那要求这个 fire-and-forget 的 hook 变成一条阻塞 RPC。那条通路今天不存在。
-        // 且它的 hook 引擎是 **fail-open**（超时/崩溃/正则错一律 allow，hooks/runner.py:30,44-55），
-        // 本就不能当安全边界。AgentMux 靠 PTY 注入按键回答授权提示。
         permission: 'observe',
         providerResume: true, replyCorrelation: 'none'
-        // usage 刻意不声明：Kimi 的收尾负载（Stop / StopFailure，hooks/events.py:73-96）里
-        // **没有任何 token 字段**，它也不报 transcript 路径。今天两个 reader（claude-jsonl /
-        // codex-rollout）都无从下手。按「能力未核实就不声明」留空，UI 据此说"此 Provider 不报用量"。
       }
     }),
-    // prompt 一定是空的：非空的启动 prompt 已被 buildLaunch 依 post-launch-only 拒在门外
-    // （理由与出处见上面 promptDelivery 那段），所以这里只需把解析出的旗标原样传下去。
     buildArgs: (_prompt, args) => [...args],
     hook: KIMI_HOOKS,
     buildResumeArgs: (sessionId, _transcriptPath, _prompt, args) => ['--session', sessionId, ...args]

@@ -6,16 +6,9 @@ import { KIMI_HOOKS } from '../../src/providers/kimi.js'
 import { AgentMuxError } from '../../src/errors.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
-/**
- * T-016 的 Provider 测试。
- *
- * 证据来自**读第一方源码** `proj/github/kimi-cli`（`1.49.0`），主要是
- * `src/kimi_cli/hooks/{config,events}.py`、`src/kimi_cli/cli/__init__.py`、
- * `src/kimi_cli/ui/shell/__init__.py` 与它自带的 `docs/en/`。见
- * docs/reviews/agentmux-provider-cli-evidence.md 的《T-009…T-016 的证据面盘查》。
- *
- * 这些断言证明「声明与源码里读出的合同相符」，**不**证明「跑过一次真实的 Kimi 会话」——
- * 本机没装这个 CLI（`command -v kimi` 失败），不冒充。
+/** Contract fixtures follow the pinned MoonshotAI/kimi-code TypeScript 2.1.1 source.
+ * Hook payloads, veto semantics and CLI arguments are verified from that source;
+ * these tests do not certify a real CLI session or its foreground process name.
  */
 describe('Kimi provider', () => {
   const providers = new AgentProviderRegistry()
@@ -39,18 +32,15 @@ describe('Kimi provider', () => {
       }, {})
   }
 
-  describe('进程名不是可执行文件名——这条错了会让「就绪」永远等不到', () => {
-    it('expectedProcess 是 CLI 自己改成的进程名，不是 executable', () => {
-      // cli/__init__.py:373 调 init_process_name("Kimi Code")，proctitle.py 走 setproctitle，
-      // 且 setproctitle 是硬依赖（pyproject.toml:38）。readySignal 按 expectedProcess 比对，
-      // 写成 'kimi' 就永远匹配不上。这两个字段**必须不同**，相等即回归。
+  describe('可执行文件名与预期进程名一致——无改名证据时不按品牌名猜测', () => {
+    it('expectedProcess 保持成熟可执行名 kimi，不预设 Kimi Code 品牌改名', () => {
+      // 第一方 TS 2.1.1 (apps/kimi-code) 并无 setproctitle / proctitle 依据；
+      // bin 为 kimi (dist/main.mjs)，故 expectedProcess 保持原成熟可执行名 kimi。
       expect(kimi.catalog.executable).toBe('kimi')
-      expect(kimi.catalog.expectedProcess).toBe('Kimi Code')
-      expect(kimi.catalog.expectedProcess).not.toBe(kimi.catalog.executable)
-      // readySignal 由 catalog() 从 expectedProcess 派生，两者不许 drift。
+      expect(kimi.catalog.expectedProcess).toBe('kimi')
       expect(kimi.catalog.readySignal).toEqual({
         kind: 'foreground-process',
-        expectedProcess: 'Kimi Code'
+        expectedProcess: 'kimi'
       })
     })
   })
@@ -176,33 +166,133 @@ describe('Kimi provider', () => {
     })
   })
 
-  describe('两种收尾都算 done，缺一条就卡在 working', () => {
-    it.each(['Stop', 'StopFailure'])('%s 收尾', (eventName) => {
-      const event = hookIn(`run-stop-${eventName}`)(eventName)
-      expect<AgentSemanticState>(event.semanticState).toBe('done')
-      expect(event.lifecycleEvent).toBe('turn-end')
+  describe('Stop 是 afterStep 上的可 veto 探测，不当 main done 或 turn-end', () => {
+    it('Stop 是在步结束后的 vetoable 探测，返回 working 且无 turn-end 生命周期', () => {
+      // loopService.ts onDidFinishStep 调 runStop(ctx)；外部 hook block 会注入 system_trigger
+      // stop_hook 继续运行，即使放行也是步级探测而非 turn 结束；绝不能当作 main done 或 turn-end。
+      const event = hookIn('run-stop')('Stop')
+      expect<AgentSemanticState>(event.semanticState).toBe('working')
+      expect(event.lifecycleEvent).toBeNull()
     })
 
-    it('工作中的事件不误报 done', () => {
+    it('进行中的事件（TurnStarted, UserPromptSubmit, PreToolUse, PostToolUse）报告 working', () => {
       const hook = hookIn('run-working')
-      for (const eventName of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
-        expect(hook(eventName).semanticState).toBe('working')
+      expect(hook('TurnStarted').semanticState).toBe('working')
+      expect(hook('TurnStarted').lifecycleEvent).toBe('turn-start')
+      expect(hook('UserPromptSubmit').semanticState).toBe('working')
+      expect(hook('UserPromptSubmit').lifecycleEvent).toBe('user-prompt-submit')
+      expect(hook('PreToolUse').semanticState).toBe('working')
+      expect(hook('PreToolUse').lifecycleEvent).toBe('tool-use-start')
+      expect(hook('PostToolUse').semanticState).toBe('working')
+      expect(hook('PostToolUse').lifecycleEvent).toBe('tool-use-end')
+    })
+
+    it('PostToolUseFailure 只是工具失败，保持 working', () => {
+      const hook = hookIn('run-tool-failure')
+      const event = hook('PostToolUseFailure')
+      expect(event.semanticState).toBe('working')
+      expect(event.lifecycleEvent).toBe('tool-use-end')
+    })
+
+    it('PermissionRequest 处于 waiting 态', () => {
+      const event = hookIn('run-perm')('PermissionRequest', { tool_name: 'bash' })
+      expect(event.semanticState).toBe('waiting')
+      expect(event.lifecycleEvent).toBe('permission-request')
+    })
+
+    it('未映射生命周期的事件保持可诊断，不伪造状态', () => {
+      for (const eventName of ['PreCompact', 'PostCompact', 'TaskStarted', 'Notification']) {
+        const event = hookIn('run-diag')(eventName)
+        expect(event.semanticState).toBe('unknown')
+        expect(event.eventName).toBe(eventName)
       }
     })
+  })
 
-    it('失败收尾也是收尾：PostToolUseFailure 只是工具失败，不是这一轮结束', () => {
-      // 两个"Failure"分属不同层：工具那次失败了，回合还在继续。混为一谈会让 Agent 提前显示完成。
-      const hook = hookIn('run-tool-failure')
-      expect(hook('PostToolUseFailure').semanticState).toBe('working')
-      expect(hook('StopFailure').semanticState).toBe('done')
+  describe('StopFailure 与 Interrupt 的作用域真实性与错误判定', () => {
+    it('StopFailure 未给 agent 作用域时诚实 unknown/null，不猜 main，不填 transcriptPath', () => {
+      // TS 2.1.1 agentExternalHooksService.ts notifyStopFailure 仅带 errorType 与 errorMessage，
+      // 未带 agentId/agent_name。未给作用域时不能凭名字猜 main 或成功。
+      const event = hookIn('run-stop-failure')('StopFailure', {
+        error_type: 'RuntimeError',
+        error_message: 'Process crashed'
+      })
+      expect(event.semanticState).toBe('unknown')
+      expect(event.lifecycleEvent).toBeNull()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'kimi',
+        sessionId: 'kimi-session-1'
+      })
+      expect(event.nativeHandle).not.toHaveProperty('transcriptPath')
     })
 
-    it('未声明的事件保持可诊断，绝不伪造状态', () => {
-      // Kimi 另有 SessionEnd/PreCompact/PostCompact/Notification（config.py:5-19）本 Provider 不列。
-      // 它们必须落在 unknown 而不是被猜成 working/done。
-      const event = hookIn('run-unknown')('PreCompact')
+    it('Interrupt 未给 agent 作用域时诚实 unknown/null，不猜 main，不填 transcriptPath', () => {
+      // TS 2.1.1 notifyTurnEnded 中 cancelled 仅发 { turnId, reason: 'cancelled' }。
+      const event = hookIn('run-interrupt')('Interrupt', {
+        turn_id: 42,
+        reason: 'cancelled'
+      })
       expect(event.semanticState).toBe('unknown')
-      expect(event.eventName).toBe('PreCompact')
+      expect(event.lifecycleEvent).toBeNull()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'kimi',
+        sessionId: 'kimi-session-1'
+      })
+      expect(event.nativeHandle).not.toHaveProperty('transcriptPath')
+    })
+
+    it('未证 extra data (如 agent_name: main) 不得使 classifier 猜成 error/turn-end', () => {
+      // 第一方 TS 2.1.1 并不发 agent_name/agentName。若随意根据 extra 字段猜 main 作用域，
+      // 会导致 StopFailure 被误当成主轮终局 turn-end。
+      const event = hookIn('run-extra-main')('StopFailure', {
+        agent_name: 'main',
+        error_type: 'TimeoutError',
+        error_message: 'Step timed out'
+      })
+      expect(event.semanticState).toBe('unknown')
+      expect(event.lifecycleEvent).toBeNull()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'kimi',
+        sessionId: 'kimi-session-1'
+      })
+    })
+
+    it('未证 extra data (如 agent_name: unknown-display-name) 不得导致真实 nativeHandle 被抹除', () => {
+      // 反例：若将未证 extra 字段当作 child subject 判定，会抹除 nativeHandle 导致 public 页 IDENTITY_UNAVAILABLE。
+      // 必须保留真实 session_id。
+      const event = hookIn('run-extra-child')('StopFailure', {
+        agent_name: 'unknown-display-name',
+        error_type: 'SubagentError'
+      })
+      expect(event.semanticState).toBe('unknown')
+      expect(event.lifecycleEvent).toBeNull()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'kimi',
+        sessionId: 'kimi-session-1'
+      })
+    })
+
+    it('未证 extra 字段即使携带 agent_id 也不得将 Interrupt 猜成 turn-end', () => {
+      const event = hookIn('run-extra-int')('Interrupt', {
+        agent_id: 'main',
+        turn_id: 10,
+        reason: 'cancelled'
+      })
+      expect(event.semanticState).toBe('unknown')
+      expect(event.lifecycleEvent).toBeNull()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'kimi',
+        sessionId: 'kimi-session-1'
+      })
+    })
+
+    it('TS 2.1.1 第一方并无 SubagentStart/Stop hook，subagentTracking 保持未声明', () => {
+      expect(KIMI_HOOKS.subagentTracking).toBeUndefined()
     })
   })
 
@@ -249,40 +339,6 @@ describe('Kimi provider', () => {
       expect(error?.detail).toContain('expectedProviderId=kimi')
       // 会话 id 是用户内容，绝不进错误细节。
       expect(error?.detail).not.toContain('not-kimi')
-    })
-  })
-
-  describe('子代理按名字记账——因为负载里根本没有 id', () => {
-    it('idKeys 只有 agent_name', () => {
-      // events.py:117-142：SubagentStart/Stop 都只带 agent_name + prompt/response，无任何 id 键。
-      // 声明 subagentType/agentId 之类（照抄 grok）会让记账永远匹配不上。
-      expect(KIMI_HOOKS.subagentTracking).toEqual({
-        startEvents: ['SubagentStart'],
-        stopEvents: ['SubagentStop'],
-        mainStopEvents: ['Stop', 'StopFailure'],
-        idKeys: ['agent_name']
-      })
-    })
-
-    it.each(['Stop', 'StopFailure'])('子代理在途时压住主 %s，落地后才兑现 done', (mainStop) => {
-      // 这条才是 idKeys 的**行为**面：normalizer 只按 idKeys 取到的 id 记账
-      // （hook-normalizer.ts:117-126），键名写错就一个子代理都记不下，于是主 Stop 直接放行——
-      // 上面那条 toEqual 会红，但"到底压不压得住"要靠这里守。
-      //
-      // 两个收尾各跑一遍：mainStopEvents 是**两条**，只测 Stop 会让漏掉 StopFailure 的实现全绿，
-      // 而那个洞的后果最重——失败收尾时子代理还在跑，mainStopPending 没被置上，等最后一个
-      // SubagentStop 落地时它只会返回 working，这个 Agent 就永久停在运行中，再没有事件能救回来。
-      const hook = hookIn(`run-subagent-${mainStop}`)
-      // 子代理开始只记子事实；不能冒称主 Agent 正在工作。
-      expect(hook('SubagentStart', { agent_name: 'reviewer' }).semanticState).toBe('unknown')
-      // 主 Agent 说收尾了，但子代理还在跑——必须压住，否则界面提前翻完成、还会误发完成通知。
-      expect(hook(mainStop).semanticState).toBe('working')
-      expect(hook('SubagentStop', { agent_name: 'reviewer' }).semanticState).toBe('done')
-    })
-
-    it.each(['Stop', 'StopFailure'])('没有在途子代理时主 %s 不被压住', (mainStop) => {
-      // 反面，防止上一条被"永远返回 working"的实现骗过。
-      expect(hookIn(`run-no-subagent-${mainStop}`)(mainStop).semanticState).toBe('done')
     })
   })
 })
