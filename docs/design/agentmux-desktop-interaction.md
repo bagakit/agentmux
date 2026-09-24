@@ -899,6 +899,8 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - Hook 入口同时接受厂商的 camelCase 与 snake_case 字段，但在 Core 内收敛到同一 canonical event；`sessionId` 等 provider-native handle 只能由对应 Provider 解释，不能由 ctxmux 或 Desktop 猜测。流程探测或 Hook 安装失败属于非阻断降级，必须在服务窗说明当前状态与恢复动作。
 - 尚未纳入的 Agent 分成三类：具备完整 Hook/session/resume 证据的优先纳入；只有 status/Hook 的按实际需要纳入；只有 launch 配置或宿主专属 wrapper 的明确记录为暂不纳入。**同名不等于同身份**：TraeX (`traex`) 与 Trae CLI (`traecli`) 是两个不同 Provider，二进制与合同都不同，不得合并身份。
 - 所有 Provider、Agent Session、Hook 与 semantic resume 逻辑归 `packages/core`；ctxmux 只持有 Run、PTY、ordered bytes、Replay、Gap、Attachment 与进程事实。Provider parity 不得在 ctxmux 复制第二套实现。
+- 原生会话切换后，旧会话晚到的 Hook 只能保留为原始观察，不能覆盖当前会话身份、状态、用量、交互或工具记录。当前已知 native handle 与真实协议中的转换引用共同决定归属；缺少引用时不能按到达顺序、时间或正文猜。已核子任务对主轮的聚合结束语义保留；没有真实 turn 身份时，同会话旧轮与 ABA 仍明确未知，不伪造完成。
+- 原生 reasoning 的空文本、缺失文本与被遮蔽文本要分清：合法空记录仍可查看，未知结构原样保留，不能借别家字段补正文。协议确有的 opaque signature 与 redacted 事实沿公共内容记录保全，不当可读正文或混入普通消息复制；对话与历史仍复用原有 trace 折叠，工具结果只有图像时也保留真实调用关联与失败事实。
 
 ## 自举：在 AgentMux 里开一个 Agent 优化 AgentMux
 
