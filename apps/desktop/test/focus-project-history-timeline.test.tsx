@@ -19,7 +19,7 @@ import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSu
 const NOW = Date.parse('2026-10-03T12:00:00Z'), HOUR = 3_600_000
 const baseline = useAppStore.getState()
 let root: Root, element: HTMLDivElement
-function terminal(id: string, path: string): SessionSnapshot {
+function terminal(id: string, path: string): Extract<SessionSnapshot, { kind: 'terminal' }> {
   return { id, kind: 'terminal', providerId: null, hostId: 'local', workspacePath: path, label: `Terminal ${id}`, createdAt: 1, updatedAt: 1,
     processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: 1 },
     control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } } }
@@ -118,10 +118,11 @@ it('preserves immutable observations and the 2000-event limit through actual Sto
   expect(observation.identity?.name).toBe('Observed worker')
   useAppStore.getState().renameAgent('a', 'Later name')
   expect(useAppStore.getState().agentFocus.execution.history[0]).toBe(observation)
-  for (let i = 0; i < 2005; i++) record(`identity-not-recorded-${i % 2}`, NOW - 10_000 + i)
+  useAppStore.setState({ sessions: ['c', 'd'].map(id => ({ ...terminal(id, '/'), hostId: 'h', label: id, control: { kind: 'terminal' as const, hostId: 'h', runId: id, run: { runId: id } } })) })
+  for (let i = 0; i < 2005; i++) record(i % 2 ? 'c' : 'd', 5000 + i)
   const focus = useAppStore.getState().agentFocus
   expect(focus.execution.history).toHaveLength(2000)
-  expect(focus.execution.history.at(-1)!.focusedAt).toBe(NOW - 9995)
+  expect(focus.execution.history.at(-1)!.focusedAt).toBe(5005)
   expect(restoreAgentFocus(JSON.parse(JSON.stringify(focus)))).toEqual(focus)
 })
 
@@ -133,4 +134,34 @@ it('does not read native history for archive grouping and preserves tracks throu
   const tracks = [...element.querySelectorAll('[data-focus-timeline-id]')]; expect(tracks).toHaveLength(2)
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [{ id: 'out', agentSessionId: 'unrelated', kind: 'assistant_message', source: 'native-hook', status: 'complete', createdAt: NOW, updatedAt: NOW, title: 'Unrelated output', content: 'Nothing related' }] } } })))
   expect([...element.querySelectorAll('[data-focus-timeline-id]')]).toEqual(tracks); expect(history.mock.calls).toEqual([])
+})
+
+it('keeps project-presence work linear in actual retained tracks on initial mount', async () => {
+  const size = 200
+  useAppStore.setState({ sessions: Array.from({ length: size }, (_, index) => terminal(`presence-scale-${index}`, '/alpha')) })
+  for (let index = 0; index < size; index++) record(`presence-scale-${index}`, NOW - size + index)
+  const entries = useAppStore.getState().agentFocus.execution.history
+  expect(entries).toHaveLength(size)
+  vi.spyOn(Date, 'now').mockReturnValue(NOW)
+  let additions = 0, copied = 0
+  const NativeSet = globalThis.Set
+  class CountedSet<T> extends NativeSet<T> {
+    constructor(values?: Iterable<T> | null) {
+      const items = values ? Array.from(values) : undefined
+      super(items)
+      if (items?.length && typeof items[0] === 'string' && items[0].includes('presence-scale-')) copied += items.length
+    }
+    add(value: T): this {
+      if (typeof value === 'string' && value.includes('presence-scale-')) additions++
+      return super.add(value)
+    }
+  }
+  vi.stubGlobal('Set', CountedSet)
+  await render(entries, [])
+  expect(element.querySelectorAll('[data-focus-timeline-id]')).toHaveLength(size)
+  expect(visibleProjects()).toHaveLength(1)
+  expect(visibleProjects()[0]!.querySelector('.recent-focus__project-heading small')!.textContent).toBe(String(size))
+  expect(additions).toBeGreaterThanOrEqual(size)
+  expect(copied).toBeLessThanOrEqual(size * 2)
+  expect(additions).toBeLessThanOrEqual(size * 3)
 })

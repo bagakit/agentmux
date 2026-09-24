@@ -159,12 +159,14 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
   onDismiss(id: string): void; onInspect(segment: FocusTimeSegment, anchor: HTMLElement): void
 }) {
   const [collapsed, setCollapsed] = useState(false)
-  const [present, setPresent] = useState<ReadonlySet<string>>(() => new Set())
-  const observePresence = useCallback((key: string, visible: boolean) => setPresent(previous => {
-    if (previous.has(key) === visible) return previous
-    const next = new Set(previous); if (visible) next.add(key); else next.delete(key); return next
-  }), [])
-  const count = project.tracks.filter(track => present.has(track.key)).length
+  const present = useRef(new Set<string>())
+  const [, notifyPresence] = useState(0)
+  const observePresence = useCallback((key: string, visible: boolean) => {
+    if (present.current.has(key) === visible) return
+    if (visible) present.current.add(key); else present.current.delete(key)
+    notifyPresence(revision => revision + 1)
+  }, [])
+  const count = project.tracks.filter(track => present.current.has(track.key)).length
   return <section className="recent-focus__project" data-timeline-project={project.key} hidden={count === 0}>
     <button type="button" className="recent-focus__project-heading" aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${project.name}`} aria-expanded={!collapsed} title={`${project.name} · ${count} Contexts · Project summary, not Run duration`} onClick={() => setCollapsed(value => !value)}>
       <span className="recent-focus__gutter">{collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}{registered && project.workspaceId ? <ProjectIcon workspaceId={project.workspaceId} name={project.name} /> : <History size={12} />}<strong>{project.name}</strong><small>{count}</small></span>
