@@ -14,7 +14,7 @@ const evidence = path.resolve(process.argv[2] ?? path.join(root, `.tmp/focus-pro
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
-const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-project-history-'))
+const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amux-fhist-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputs = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'), ...await files(fixture),
@@ -23,7 +23,7 @@ const inputs = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/p
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
-const receipt = { schema: 'agentmux.focus-project-history-gui.v1', passed: false, candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], inputs: null, inputsAfter: null, cleanup: null,
+const receipt = { schema: 'agentmux.focus-project-history-gui.v1', passed: false, sourceRoot: root, candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], inputs: null, inputsAfter: null, cleanup: null,
   boundary: 'Complete Main source input with production App, Store, Focus, split Workbench and real xterm. Two ordinary private Electron processes share exact public Core Agent/Terminal Runs. The Agent CLI is a repository fixture. Controlled Focus visit timestamps are not real execution duration. Terminal archive does not qualify native Agent messages. No user App/Run, installation, physical input device or independent aesthetic pass is claimed.',
   independentVisualReview: 'pending', visualPaths: [] }
 let client, Core, guiStarted = false
@@ -51,7 +51,7 @@ try {
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
   await build({ configFile: false, root: fixture, logLevel: 'error', build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
     rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
-  receipt.compiled = { rendererIndex: hash(await fs.readFile(path.join(privateRoot, 'renderer/index.html'))), main: hash(await fs.readFile(path.join(privateRoot, 'main/main.mjs'))) }
+  receipt.compiled = Object.fromEntries(await Promise.all([...await files(path.join(privateRoot, 'renderer')), ...await files(path.join(privateRoot, 'main'))].map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['seed', 'restore']) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`); await fs.mkdir(phaseRoot)

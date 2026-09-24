@@ -95,6 +95,7 @@ const PERSISTED_PREFERENCES = {
   projectRailWidth: 317, // 非默认（默认 210）且落在 clamp 区间 [180,420] 内，见 store.ts:1516
   toolsOpen: true,
   agentNames: { 'sess-1': '我给它起的名字' },
+  viewModes: { 'sess-1': 'activity', 'terminal-reader': 'terminal' },
   noticeReadReceipts: { 'global:environment': { shell: 'read-warning-fingerprint' } },
   displacedAgentSessionIds: ['unplaced-agent-1'],
   scratchTopicOrder: ['topic-9', 'topic-3'],

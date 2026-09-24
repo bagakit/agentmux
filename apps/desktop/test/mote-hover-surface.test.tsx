@@ -15,6 +15,7 @@ import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopic
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
+import { WindowOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
 import { customAgent, customMoteId, customTab, defaultAgent, defaultTab, executionAgent, installNativePopover,
   moteTopics, neighborAgent, ordinaryTab, quietMoteId, quietTab, savedMoteKey, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 
@@ -357,9 +358,11 @@ describe('one operative Mote hover surface', () => {
     expect(panel().querySelector('[aria-label="Show Terminal"]')).not.toBeNull()
     await click(entry())
     expect(useAppStore.getState().viewModes).toBe(modes)
+    expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState()).viewModes).toEqual({})
     expect(effectiveSessionViewMode(useAppStore.getState(), defaultAgent.id)).toBe('activity')
     await click(panel().querySelector<HTMLButtonElement>('[aria-label="Show Terminal"]')!)
     expect(useAppStore.getState().viewModes[defaultAgent.id]).toBe('terminal')
+    expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState()).viewModes).toEqual({ [defaultAgent.id]: 'terminal' })
     expect(panel().querySelector('[data-agent-surface-mode="terminal"]')).not.toBeNull()
     expect(panel().querySelector('[aria-label="Show Activity"]')).not.toBeNull()
     await click(entry()); await hover()
@@ -438,6 +441,48 @@ describe('one operative Mote hover surface', () => {
     await mount()
     expect(panel().dataset.motePresentation).toBe('closed')
     expect(panel().dataset.moteTargetTab).toBe(customTab.id)
+  })
+
+  it.each(['portal', 'popover'] as const)('lets another mounted %s own Escape while the actual Mote remains a passive preview', async kind => {
+    const handled = vi.fn()
+    const foreign = createElement('div', { id: 'foreign-float', role: 'dialog', 'data-state': 'open',
+      ...(kind === 'popover' ? { popover: 'manual' as const } : {}),
+      onKeyDown(event: import('react').KeyboardEvent<HTMLDivElement>) {
+        if (event.key !== 'Escape' || event.nativeEvent.isComposing) return
+        event.preventDefault(); event.stopPropagation(); handled()
+        event.currentTarget.dataset.state = 'closed'
+        if (kind === 'popover') event.currentTarget.hidePopover()
+      }
+    }, createElement('input', { id: 'foreign-stage', 'data-native-browser-stage': 'foreign-browser', defaultValue: 'Other unsent text' }))
+    await act(async () => root.render(createElement(Fragment, null, createElement(Workface),
+      kind === 'portal' ? createElement(WindowOverlayPortal, { layer: 'dialog', children: foreign }) : foreign)))
+    await settle()
+    const owner = document.getElementById('foreign-float')!, stage = document.getElementById('foreign-stage') as HTMLInputElement
+    if (kind === 'popover') await act(async () => owner.showPopover())
+    stage.focus(); stage.setSelectionRange(5, 5)
+    await hover()
+    const original = useAppStore.getState()
+    await act(async () => stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true })))
+    expect(panel().dataset.motePresentation).toBe('preview')
+    expect(handled).not.toHaveBeenCalled()
+    await act(async () => stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(handled).toHaveBeenCalledOnce()
+    expect(owner.dataset.state).toBe('closed')
+    expect(panel().dataset.motePresentation).toBe('preview')
+    expect(document.activeElement).toBe(stage)
+    expect(stage.value).toBe('Other unsent text'); expect(stage.selectionStart).toBe(5)
+    expect(useAppStore.getState().tabs).toBe(original.tabs)
+    expect(useAppStore.getState().layouts).toBe(original.layouts)
+    expect(useAppStore.getState().viewModes).toBe(original.viewModes)
+    expect(useAppStore.getState().agentFocus.execution).toEqual(original.agentFocus.execution)
+    expect(saved()).toBeNull()
+    expect(api.scratch.ensureMote).not.toHaveBeenCalled()
+    expect(warm).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
+    const background = container.querySelector<HTMLInputElement>('#original-input')!
+    background.focus()
+    await act(async () => background.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(panel().dataset.motePresentation).toBe('closed')
+    expect(document.activeElement).toBe(background)
   })
 
   it('does not reread files or rescan all Tabs for 35 unrelated output events while all Motes are visible', async () => {

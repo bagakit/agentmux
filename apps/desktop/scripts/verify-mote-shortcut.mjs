@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { build } from 'vite'
@@ -13,42 +13,67 @@ const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-shortcut-'))
 const evidence = join(repository, '.tmp/mote-shortcut', `attempt-${Date.now()}`)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const inputs = new Map(), styles = new Set()
+let controlledApiTransforms = 0
+const binding = {
+  name: 'bind-mote-proof-source', enforce: 'pre', async load(id) {
+    const file = id.split('?')[0]
+    // Bind original bytes before asset loaders or the private API-boundary transform.
+    if (file.startsWith(repository + '/') && !file.includes('/node_modules/') && !inputs.has(file)) inputs.set(file, hash(await readFile(file)))
+    return null
+  }, buildEnd() {
+    for (const file of this.getModuleIds()) if (file.startsWith(repository + '/') && file.endsWith('.css')) styles.add(file)
+  }
+}
 const result = { schema: 'agentmux.mote-shortcut-proof.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false,
   phases: [], privateProfile: join(privateRoot, 'user-data'), limitations: ['Session snapshots, attachment and recovery use a controlled public API boundary. The second process receives a retained ended Session with fresh native idle-entry evidence, and ordinary initialization asks recovery for its exact original identity; the controlled API returns it as reattachable. These receipts do not claim actual Core/ctxmux Run survival or whole-product acceptance.'], cleanup: null }
 await mkdir(evidence, { recursive: true })
+result.limitations.push('The Renderer compiles the actual desktop Browser stage branch. Only the single api.ts export is privately transformed to choose its typed data mock; native Browser and overlay methods use a sandboxed preload and the original Main owners. Renderer capturePage excludes native WebContentsViews. Independent original native-page/Chrome images and actual topmost owner/trusted-input receipts verify their separate scopes; they are not an OS-composited window. Exact-PID OS capture is supplementary and retains provider failures. DevTools input is trusted native input, not physical hardware or OS IME.')
+result.limitations.push('Native Escape verifies the actual non-composing before-input-event. A separate diagnostic found that DevTools imeSetComposition starts trusted DOM composition, but CDP raw Escape still reports native isComposing=false; it cannot certify the composing key path. Source owning tests and effective mutation verify the isComposing guard; native OS IME remains unverified.')
 try {
-  for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), join(fixture, 'main.cjs'), join(fixture, 'index.html')]) inputs.set(file, hash(await readFile(file)))
+  for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), ...['main.cjs', 'preload.cjs', 'browser.html', 'index.html', 'scenario.md'].map(name => join(fixture, name))]) inputs.set(file, hash(await readFile(file)))
   const outDir = join(privateRoot, 'renderer')
+  const nativeDir = join(privateRoot, 'native')
+  await build({ configFile: false, root: desktop, logLevel: 'error', plugins: [binding], build: {
+    target: 'node22', outDir: nativeDir, emptyOutDir: true, ssr: join(fixture, 'native-browser.ts'),
+    rollupOptions: { external: ['electron', /^node:/, /^@agentmux\/core(?:\/|$)/], output: { format: 'es', entryFileNames: 'native.mjs', inlineDynamicImports: true } }
+  } })
+  // Resolve maintained dependencies without writing into the shared installation.
+  await symlink(join(desktop, 'node_modules'), join(nativeDir, 'node_modules'), 'dir')
+  const nativeBundle = join(nativeDir, 'native.mjs')
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
-    define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
-    plugins: [{ name: 'bind-mote-proof-source', enforce: 'pre', async load(id) {
-      const file = id.split('?')[0]
-      // Asset loaders return JavaScript URLs, so bind original file bytes before
-      // those loaders run rather than hashing their transformed module wrapper.
-      if (file.startsWith(repository + '/') && !file.includes('/node_modules/') && !inputs.has(file)) inputs.set(file, hash(await readFile(file)))
-      return null
-    }, buildEnd() {
-      for (const file of this.getModuleIds()) if (file.startsWith(repository + '/') && file.endsWith('.css')) styles.add(file)
+    define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
+    plugins: [binding, { name: 'private-mote-public-api-boundary', enforce: 'pre', transform(code, id) {
+      if (id.split('?')[0] !== join(desktop, 'src/renderer/src/lib/api.ts')) return null
+      const anchor = 'export const api = __AGENTMUX_WEB_PREVIEW__ ? mockApi : requireDesktopApi()'
+      assert.equal(code.split(anchor).length - 1, 1, 'The controlled public API export must have exactly one actual source anchor')
+      controlledApiTransforms += 1
+      return { code: code.replace(anchor, 'export const api = mockApi'), map: null }
     } }], build: { target: 'esnext', outDir, emptyOutDir: true } })
+  assert.equal(controlledApiTransforms, 1)
   for (const file of styles) if (!inputs.has(file)) inputs.set(file, hash(await readFile(file)))
   assert.ok([...inputs.keys()].some(file => file.endsWith('/PmoTeamsTopicEntry.tsx')), 'The actual production entry is compiled')
   assert.ok([...inputs.keys()].some(file => file.endsWith('/App.tsx')), 'The complete production App is compiled')
+  for (const owner of ['BrowserPane.tsx', 'browser-view-manager.ts', 'native-overlay-surfaces.ts', 'native-overlay-regions.ts']) assert.ok([...inputs.keys()].some(file => file.endsWith('/' + owner)), 'Actual native owner is compiled: ' + owner)
   const compiled = {}
   for (const entry of await readdir(outDir, { recursive: true, withFileTypes: true })) if (entry.isFile()) {
     const file = join(entry.parentPath, entry.name); compiled[relative(outDir, file)] = hash(await readFile(file))
   }
   assert.ok(Object.keys(compiled).length > 0)
+  compiled['native/native.mjs'] = hash(await readFile(nativeBundle))
+  result.controlledApiTransforms = controlledApiTransforms
   result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
   result.compiled = compiled
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['seed', 'restore']) {
     const logs = []
-    const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, phase, evidence], {
-      temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 45000, onLine: line => logs.push(line) })
+    const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, phase, evidence, nativeBundle], {
+      temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 180000, onLine: line => logs.push(line) })
     await writeFile(join(evidence, `${phase}.log`), logs.join('\n'))
+    const phaseResult = { phase, exit }
+    result.phases.push(phaseResult)
+    assert.equal(exit.timedOut, false, 'The private ' + phase + ' process must publish its bounded result')
     const native = JSON.parse(await readFile(join(evidence, `${phase}.json`), 'utf8'))
-    result.phases.push({ phase, exit, native })
-    assert.equal(exit.timedOut, false)
+    phaseResult.native = native
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
   }
@@ -56,8 +81,10 @@ try {
   for (const [file, digest] of inputs) assert.equal(hash(await readFile(file)), digest, `Compiled source changed during proof: ${relative(repository, file)}`)
   result.passed = true
   await writeFile(join(evidence, 'review.md'), ['# Mote shortcut screenshots — independent review pending', '',
-    'Complete production App, footer, floating workbench and CSS. Two ordinary Electron processes use one private profile. Controlled public Session facts do not prove Core/ctxmux Run survival; original user App and Runs are untouched.', '',
-    ...result.phases.flatMap(one => one.native.frames.map(frame => `- ${one.phase} / ${frame.name}: [complete screenshot](${frame.file})`)), '',
+    'Complete production App, desktop Browser stage, footer, floating workbench and CSS. Two ordinary Electron processes use one private profile. Native Main owners use private profiles/ledgers. Controlled public Session facts do not prove Core/ctxmux Run survival; original user App and Runs are untouched. Renderer screenshots exclude native WebContentsViews. Independent native-page/Chrome frames are separate images, not an OS-composited window. Actual topmost owners and trusted original input are recorded in receipt.json; OS captures remain supplementary.', '',
+    ...result.phases.flatMap(one => one.native.frames.map(frame => '- ' + one.phase + ' / ' + frame.name + ': [Renderer screenshot; excludes native views](' + frame.file + ')')),
+    ...result.phases.flatMap(one => (one.native.native?.nativeFrames ?? []).flatMap(attempt => attempt.frames.map(frame => '- ' + one.phase + ' / ' + attempt.label + ' / ' + frame.kind + ': [Independent original native frame; not OS composition](' + frame.file + ')'))),
+    ...result.phases.flatMap(one => (one.native.native?.osFrames ?? []).filter(frame => frame.captured).map(frame => '- ' + one.phase + ' / ' + frame.label + ': [OS window with native composition](' + frame.file + ')')), '',
     'Review the actual full images against the Mote shortcut SSOT. Capture success is not aesthetic approval. Exact imported source/style and compiled identities are in receipt.json.', ''].join('\n'))
 } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {

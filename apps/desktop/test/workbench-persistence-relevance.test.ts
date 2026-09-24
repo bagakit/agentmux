@@ -17,7 +17,7 @@ const config: AppConfig = {
 }
 const session: SessionSnapshot = {
   id: sessionId, kind: 'agent', providerId: 'codex', executorId: 'probe', hostId: 'local',
-  workspacePath: '/private/persistence', label: 'Private fixture', createdAt: 1, updatedAt: 1,
+  workspacePath: '/private/persistence', label: 'Private fixture', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1,
   processState: 'running', status: { state: 'working', source: 'native-hook', observedAt: 1 },
   latestOutputBytes: 0,
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
@@ -92,8 +92,10 @@ describe('actual Store persistence relevance', () => {
       return [tab.id, tab]
     }))
     store.setState({ tabs, layouts: { [workspaceId]: createWorkspaceLayout('fixture-group', Object.keys(tabs)) } })
+    store.getState().setViewMode(sessionId, 'activity')
     vi.advanceTimersByTime(400)
     expect(Object.keys(saved().state.restoredWorkbench.tabs)).toHaveLength(64)
+    expect(saved().state.viewModes).toEqual({ [sessionId]: 'activity' })
     const before = backing.get(storageName)
     projection.mockClear()
     const stringify = vi.spyOn(JSON, 'stringify')
@@ -106,6 +108,34 @@ describe('actual Store persistence relevance', () => {
     expect(stringify).not.toHaveBeenCalled()
     expect(read).not.toHaveBeenCalled()
     expect(backing.get(storageName)).toBe(before)
+  })
+
+  it('persists explicit Session modes through the existing writer and real rehydrate without changing Runtime or diff ownership', async () => {
+    await initialize()
+    const tab = agentTab(), readerId = 'persistence-reader'
+    store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('mode-group', [tab.id]) },
+      viewModes: {}, editorRegionModes: { 'file-region': 'diff' } })
+    vi.advanceTimersByTime(400)
+    expect(store.getState().viewModes).toEqual({})
+    store.getState().setViewMode(sessionId, 'activity')
+    store.getState().setViewMode(readerId, 'terminal')
+    const original = store.getState(), modes = { [sessionId]: 'activity', [readerId]: 'terminal' }
+    vi.advanceTimersByTime(400)
+    expect(saved().state.viewModes).toEqual(modes)
+    expect(saved().state).not.toHaveProperty('sessions')
+    expect(saved().state).not.toHaveProperty('editorRegionModes')
+    store.setState({ viewModes: {} })
+    await store.persist.rehydrate()
+    expect(store.getState().viewModes).toEqual(modes)
+    expect(store.getState().sessions).toBe(original.sessions)
+    expect(store.getState().sessions[0]?.control).toBe(original.sessions[0]?.control)
+    expect(store.getState().tabs).toBe(original.tabs)
+    expect(store.getState().layouts).toBe(original.layouts)
+    expect(store.getState().agentFocus).toEqual(original.agentFocus)
+    expect(store.getState().editorRegionModes).toBe(original.editorRegionModes)
+    store.setState({ startupProgress: { step: 'runtime' } })
+    vi.advanceTimersByTime(400)
+    expect(saved().state.viewModes).toEqual(modes)
   })
 
   it('saves a real composer draft by its deadline while accepted Agent events continue', async () => {

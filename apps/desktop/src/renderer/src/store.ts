@@ -549,7 +549,7 @@ type AppState = {
    * 关键决策：diff 不是新的 surface kind，而是既有 file Region 的一个**显示模式**。理由——一个 diff
    * 没有独立于其文件的身份（同一个 workspace+path），而新增 surface kind 要改 Core 里已发货的 Control
    * 协议（AgentMuxRegion 枚举了每一种 kind）外加渲染层约七处 union 落点，为零新增身份付跨包代价。
-   * 所以 diff 是这张 file Region 的一个瞬态 UI 位，与 viewModes（session 的终端/对话切换）同构。
+   * 所以 diff 是这张 file Region 的一个瞬态 UI 位；Session 的 viewModes 是用户查看偏好，另行持久化。
    *
    * 不持久化：diff 依赖 git HEAD，是一个瞬时视图；重开该回到编辑态而不是复活一个可能已过期的 diff。
    * 缺省即 'edit'。生命周期随 Region：Region 关掉时由 reconcile/close 出口一并清掉，不留孤儿。
@@ -1723,6 +1723,7 @@ type PersistedAppState = {
   noticeReadReceipts?: Record<string, Record<string, string>>
   displacedAgentSessionIds?: string[]
   agentNames?: Record<string, string>
+  viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
   focusTimelineHeight?: number
@@ -1876,6 +1877,8 @@ function selectPersistedInputs(state: AppState) {
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
     // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
     agentNames: state.agentNames,
+    // Only the original Session mode owner writes this map; read-only defaults remain derived.
+    viewModes: state.viewModes,
     noticeReadReceipts: state.noticeReadReceipts,
     displacedAgentSessionIds: state.displacedAgentSessionIds,
     // These are Renderer presentation facts. They are deliberately persisted beside Workbench
