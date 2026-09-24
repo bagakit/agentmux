@@ -2,7 +2,7 @@ import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOf
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
-import type { AgentMuxRunExitReason, AgentProviderId } from '@agentmux/core'
+import type { AgentMuxRunExitReason } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import {
   dismissOpenDestinationRequest,
@@ -14,7 +14,8 @@ import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
-import type { ConversationSpeaker } from '../lib/conversation-speaker'
+import { createSpeakerResolver } from '../lib/conversation-speaker'
+import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import type { ConversationAnnotation } from './ConversationMessage'
@@ -150,6 +151,10 @@ export function SessionPane({
   }) : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
     startupDecision.reason === 'idle-over-day'
+  const { messages: userMessages } = useSessionUserMessages(
+    session?.kind === 'agent' ? session.control : undefined,
+    { enabled: visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore }
+  )
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,
@@ -161,22 +166,16 @@ export function SessionPane({
   const agentInputExecutor = session?.kind === 'agent'
     ? (connectingExecutor?.label ?? session.executorId)
     : undefined
-  // 说话人身份 → 「叫什么、画哪个 provider」。这一层是唯一持有 Session 的地方，所以查 store 归这里；
-  // ActivityView 与两条轴都保持受控，可以在无 DOM 的测试里直接求值。
-  //
-  // 名字是身份的判别器（见设计 SSOT 里那条实测：颜色在同 provider 下不足以区分），所以 agent 这一路
-  // 用 Session 自己的 label 而不是 provider 的品牌名——两条 Claude 会有两个不同的 label，却共用同一枚
-  // 品牌图标与可能相近的色相。人类这一路今天只有一个身份。
+  // Resolve actual sender identities without subscribing this pane to unrelated Session output.
   const describeSpeaker = useMemo(
-    () =>
-      (speaker: ConversationSpeaker): { name: string; providerId?: AgentProviderId } =>
-        speaker.role === 'human'
-          ? { name: 'You' }
-          : {
-              name: session?.label ?? 'Agent',
-              ...(session?.kind === 'agent' && session.providerId ? { providerId: session.providerId } : {})
-            },
-    [session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined]
+    () => createSpeakerResolver({
+      lookupAgent: (id) => {
+        const sender = useAppStore.getState().sessions.find((agent) => agent.id === id)
+        return sender?.kind === 'agent' ? sender : undefined
+      },
+      ...(session?.kind === 'agent' ? { currentSession: session } : {})
+    }),
+    [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined]
   )
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
@@ -458,6 +457,7 @@ export function SessionPane({
             workspaceRoot={activeWorkspaceRoot}
             openWorkspaceFile={openWorkspaceFile}
             openHttpLink={onProseLinkClick}
+            describeSpeaker={describeSpeaker}
             expandedTraces={historyDisclosures}
             onToggleTrace={(traceId, open) => {
               setHistoryDisclosures((prev) => {
@@ -507,6 +507,7 @@ export function SessionPane({
               <ActivityView
                 sessionId={session.id}
                 items={timeline}
+                userMessages={userMessages}
                 capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
                 displayState={session.status.state}
                 workspaceRoot={activeWorkspaceRoot}
