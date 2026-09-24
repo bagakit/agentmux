@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useSyncExternalStore } from 'react'
+import { useEffect, useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionControl } from '../../../shared/contracts'
@@ -12,6 +12,7 @@ type SessionEntry = {
   hostId: string
   agentSessionId: string
   runId: string
+  consumerCount: number
   subscribers: Set<() => void>
   historyPage: AgentSessionHistoryPage | null
   items: AgentSessionHistoryPage['items']
@@ -45,6 +46,7 @@ function getOrCreateEntry(control: AgentSessionControlInput): SessionEntry {
       hostId: control.hostId,
       agentSessionId: control.agentSessionId,
       runId: control.run.runId,
+      consumerCount: 0,
       subscribers: new Set(),
       historyPage: null,
       items: [],
@@ -162,98 +164,127 @@ export function useSessionUserMessages(
 } {
   const enabled = options?.enabled ?? true
   const isAgent = control?.kind === 'agent'
-  const active = Boolean(enabled && isAgent && control)
-  const controlKey = active && control ? makeSessionControlKey(control) : ''
+  const sessionKey = isAgent && control ? makeSessionControlKey(control) : ''
+  const active = Boolean(enabled && sessionKey)
 
   const timeline = useAppStore((state) =>
     active && control ? state.timelines[control.agentSessionId] : undefined
   )
 
+  const committedSnapshotRef = useRef<{
+    key: string
+    messages: AgentSessionUserMessage[]
+  }>({ key: '', messages: [] })
+
+  useEffect(() => {
+    if (!sessionKey || !control) return
+    const entry = getOrCreateEntry(control)
+    entry.consumerCount++
+
+    return () => {
+      entry.consumerCount--
+      if (entry.consumerCount <= 0) {
+        // When all consumers leave, release entry and cache so future consumers read fresh source
+        entry.consumerLifetimeId++
+        entry.inFlight = null
+        entry.loading = false
+        entry.historyPage = null
+        entry.items = []
+        entry.nextCursor = null
+        entry.error = null
+        entry.queuedRefresh = false
+        sessionRegistry.delete(sessionKey)
+      }
+    }
+  }, [sessionKey])
+
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
       if (!active || !control) return () => {}
       const entry = getOrCreateEntry(control)
-      const wasEmpty = entry.subscribers.size === 0
       entry.subscribers.add(onStoreChange)
-
-      if (wasEmpty) {
-        entry.consumerLifetimeId++
-      }
 
       return () => {
         entry.subscribers.delete(onStoreChange)
-        if (entry.subscribers.size === 0) {
-          // When all consumers leave, release entry and cache so future consumers read fresh source
-          entry.consumerLifetimeId++
-          entry.inFlight = null
-          entry.loading = false
-          entry.historyPage = null
-          entry.items = []
-          entry.nextCursor = null
-          entry.error = null
-          entry.queuedRefresh = false
-          sessionRegistry.delete(controlKey)
-        }
       }
     },
-    [active, controlKey]
+    [active, sessionKey]
   )
 
   const getSnapshot = useCallback(() => {
-    if (!active || !control) return 0
-    return sessionRegistry.get(controlKey)?.version ?? 0
-  }, [active, controlKey])
+    if (!sessionKey) return 0
+    return sessionRegistry.get(sessionKey)?.version ?? 0
+  }, [sessionKey])
 
   useSyncExternalStore(subscribe, getSnapshot, () => 0)
 
   useEffect(() => {
     if (!active || !control) return
-    const entry = sessionRegistry.get(controlKey)
+    const entry = sessionRegistry.get(sessionKey)
     if (entry && !entry.historyPage && !entry.inFlight && !entry.loading) {
       void fetchSessionHistoryPage(control, entry)
     }
-  }, [active, controlKey])
+  }, [active, sessionKey])
 
   const refresh = useCallback(async () => {
     if (!active || !control) return
-    const entry = sessionRegistry.get(controlKey)
+    const entry = sessionRegistry.get(sessionKey)
     if (!entry) return
     await fetchSessionHistoryPage(control, entry, undefined, true /* isExplicitRefresh */)
-  }, [active, controlKey])
+  }, [active, sessionKey])
 
   const loadEarlier = useCallback(async () => {
     if (!active || !control) return
-    const entry = sessionRegistry.get(controlKey)
+    const entry = sessionRegistry.get(sessionKey)
     if (!entry || !entry.nextCursor || entry.loading) return
     await fetchSessionHistoryPage(control, entry, entry.nextCursor)
-  }, [active, controlKey])
+  }, [active, sessionKey])
 
-  const entry = active && control ? sessionRegistry.get(controlKey) : undefined
+  // Non-speculative read during render: do not create entry on uncommitted/aborted renders
+  const entry = sessionKey ? sessionRegistry.get(sessionKey) : undefined
 
-  if (!active || !control || !entry) {
-    return {
-      messages: [],
-      nextCursor: null,
-      hasMore: false,
-      loading: false,
-      error: null,
-      loadEarlier: async () => {},
-      refresh: async () => {}
+  let messages: AgentSessionUserMessage[] = []
+
+  if (!isAgent || !control || !sessionKey) {
+    messages = []
+  } else if (active) {
+    // Pure derivation in render:
+    // If historyPage or timeline is present, project it directly.
+    // If timeline already exists before subscription, project real captured fact immediately without falling back to [].
+    if (entry?.historyPage || timeline) {
+      messages = projectSessionUserMessages({
+        agentSessionId: control.agentSessionId,
+        historyPage: entry?.historyPage ?? undefined,
+        timeline
+      })
+    } else if (entry?.loading && committedSnapshotRef.current.key === sessionKey) {
+      // Return pending revalidation: retain committed snapshot for this sessionKey until new source arrives
+      messages = committedSnapshotRef.current.messages
+    } else {
+      messages = []
     }
+  } else {
+    // Paused / hidden: read committed snapshot for THIS sessionKey.
+    // An aborted render of another key never committed, so committedSnapshotRef is untouched.
+    messages = committedSnapshotRef.current.key === sessionKey ? committedSnapshotRef.current.messages : []
   }
 
-  const messages = projectSessionUserMessages({
-    agentSessionId: control.agentSessionId,
-    historyPage: entry.historyPage ?? undefined,
-    timeline
-  })
+  // Commit phase only: save committed presentation snapshot
+  useLayoutEffect(() => {
+    if (active && sessionKey) {
+      committedSnapshotRef.current = {
+        key: sessionKey,
+        messages
+      }
+    }
+  }, [active, sessionKey, messages])
 
   return {
     messages,
-    nextCursor: entry.nextCursor,
-    hasMore: Boolean(entry.nextCursor),
-    loading: entry.loading,
-    error: entry.error,
+    nextCursor: entry?.nextCursor ?? null,
+    hasMore: Boolean(entry?.nextCursor),
+    loading: active ? (entry?.loading ?? false) : false,
+    error: entry?.error ?? null,
     loadEarlier,
     refresh
   }
