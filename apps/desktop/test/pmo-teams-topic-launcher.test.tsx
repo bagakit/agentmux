@@ -3,12 +3,9 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = { config: null, sessions: [] }
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign((selector: (value: typeof state) => unknown) => selector(state), { getState: () => state })
-}))
-
+import { useAppStore } from '../src/renderer/src/store.js'
 import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry.js'
+const baseline = useAppStore.getState()
 
 let root: Root
 let container: HTMLDivElement
@@ -16,6 +13,7 @@ let container: HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   window.localStorage.clear()
+  useAppStore.setState({ tabs: {}, layouts: {}, sessions: [], timelines: {}, agentNames: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -25,6 +23,7 @@ afterEach(async () => {
   await act(async () => root.unmount())
   container.remove()
   window.localStorage.clear()
+  useAppStore.setState(baseline, true)
 })
 
 describe('PMO teams topic launcher', () => {
@@ -38,14 +37,14 @@ describe('PMO teams topic launcher', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('uses the dragon asset and the open state for the eye signal', async () => {
+  it('uses the same dragon identity and a persistent expanded state without decorative particles', async () => {
     window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true, position: { left: 80, top: 72 }, size: { width: 720, height: 520 } }))
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
     const avatar = container.querySelector('.pmo-teams-topic-compact-launcher__button img') as HTMLImageElement
     expect(avatar.getAttribute('src')).toContain('pmo-teams-topic-avatar')
     expect(container.querySelector('button[aria-expanded="true"]')).toBeTruthy()
-    expect(container.querySelectorAll('.pmo-teams-topic-compact-launcher__firework')).toHaveLength(2)
-    expect(container.querySelectorAll('.pmo-teams-topic-compact-launcher__firework i')).toHaveLength(12)
+    expect(container.querySelectorAll('.pmo-teams-topic-compact-launcher__firework')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-particle]')).toHaveLength(0)
   })
 
   it('uses the avatar as the close toggle when the panel is already open', async () => {

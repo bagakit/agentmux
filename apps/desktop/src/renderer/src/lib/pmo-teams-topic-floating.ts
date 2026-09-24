@@ -10,14 +10,12 @@ const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
 const EVENT_NAME = 'agentmux:pmo-teams-topic-floating'
 const DEFAULT_POSITION = { left: 80, top: 72 }
 const DEFAULT_SIZE = { width: 720, height: 520 }
-export type PmoTeamsTopicPrompt = { id: string; text: string }
 
 type FloatingState = {
   open: boolean
   maximized: boolean
   position: { left: number; top: number }
   size: { width: number; height: number }
-  pendingPrompt?: PmoTeamsTopicPrompt | undefined
   targetTabId?: string | undefined
 }
 
@@ -76,22 +74,20 @@ function writeState(state: FloatingState): void {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* persistence is best effort */ }
 }
 
-export function requestPmoTeamsTopicFloatingOpen(options?: { prompt?: string; targetTabId?: string; onReturnFocus?: () => void }): void {
-  const prompt = options?.prompt?.trim()
+export function requestPmoTeamsTopicFloatingOpen(options?: { targetTabId?: string; onReturnFocus?: () => void }): void {
   const targetTabId = options?.targetTabId?.trim()
   window.dispatchEvent(new CustomEvent(EVENT_NAME, {
     detail: {
       open: true,
-      targetTabId,
-      onReturnFocus: options?.onReturnFocus,
-      pendingPrompt: prompt ? { id: crypto.randomUUID(), text: prompt } : undefined
+      ...(targetTabId ? { targetTabId } : {}),
+      onReturnFocus: options?.onReturnFocus
     }
   }))
 }
 
 export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boolean }): void {
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: {
-    open: false, targetTabId: undefined, pendingPrompt: undefined,
+    open: false,
     restoreFocus: options?.restoreFocus ?? true
   } }))
 }
@@ -105,7 +101,7 @@ export function usePmoTeamsTopicFloatingState(): [FloatingState, (next: Partial<
     const onEvent = (event: Event): void => {
       const { restoreFocus, onReturnFocus, ...detail } = (event as CustomEvent<Partial<FloatingState> & { restoreFocus?: boolean; onReturnFocus?: () => void }>).detail ?? {}
       const nextOpen = detail.open
-      if (typeof nextOpen !== 'boolean' && detail.pendingPrompt === undefined) return
+      if (Object.keys(detail).length === 0) return
       const current = stateRef.current
       if (nextOpen === true && !current.open) {
         const active = document.activeElement

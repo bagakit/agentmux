@@ -5,13 +5,13 @@ import { sessionPresentationById } from './session-presentation'
 import type { WorkbenchTab } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
 
-function tabSessionIds(tab: WorkbenchTab): string[] {
-  return [...new Set(Object.values(tab.regions).flatMap((surface) => isSessionSurface(surface) ? [surface.sessionId] : []))]
+function tabSessionIds(tab: WorkbenchTab | undefined): string[] {
+  return tab ? [...new Set(Object.values(tab.regions).flatMap((surface) => isSessionSurface(surface) ? [surface.sessionId] : []))] : []
 }
 
 /** A Tab consumes only its Regions' Session references, never another Tab's runtime updates. */
-export function useWorkbenchTabSessions(tab: WorkbenchTab) {
-  const ids = useMemo(() => tabSessionIds(tab), [tab.regions])
+export function useWorkbenchTabSessions(tab: WorkbenchTab | undefined) {
+  const ids = useMemo(() => tabSessionIds(tab), [tab?.regions])
   return useAppStore(useShallow((state) => {
     if (ids.length === 0) return []
     const byId = sessionPresentationById(state.sessions)
@@ -23,6 +23,6 @@ export function useWorkbenchTabSessions(tab: WorkbenchTab) {
 }
 
 /** Keep naming/timeline subscriptions on the same spatial consumers as the Session lookup. */
-export function recordForWorkbenchTab<T>(record: Readonly<Record<string, T>>, tab: WorkbenchTab): Record<string, T> {
+export function recordForWorkbenchTab<T>(record: Readonly<Record<string, T>>, tab: WorkbenchTab | undefined): Record<string, T> {
   return Object.fromEntries(tabSessionIds(tab).flatMap((id) => Object.hasOwn(record, id) ? [[id, record[id]!]] : []))
 }

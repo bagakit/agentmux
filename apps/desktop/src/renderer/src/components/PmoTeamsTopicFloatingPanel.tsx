@@ -5,15 +5,15 @@ import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from 
 import { api } from '../lib/api'
 import {
   clampPmoTeamsTopicFloatingState,
-  pmoTeamsTopicFloatingTargetTabId,
   requestPmoTeamsTopicFloatingClose,
   PMO_FLOATING_TAB_SLOT_PREFIX,
   type PmoTeamsTopicFloatingState
 } from '../lib/pmo-teams-topic-floating'
-import { topicIdForSession } from '../lib/workbench-tabs'
-import { executionFocusContextText, pmoFocusSessionId } from '../lib/agent-focus'
+import { usePmoTeamsTopicTarget, type PmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
+import { pmoFocusSessionId } from '../lib/agent-focus'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+import { StatusDot } from './StatusDot'
 const DRAG_THRESHOLD = 3
 
 type PanelDrag = {
@@ -34,27 +34,30 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
 }): React.JSX.Element | null {
   const config = useAppStore((state) => state.config)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
-  const launchAgent = useAppStore((state) => state.launchAgent)
-  const sessions = useAppStore((state) => state.sessions)
-  const tabs = useAppStore((state) => state.tabs)
-  const layouts = useAppStore((state) => state.layouts)
-  const setViewMode = useAppStore((state) => state.setViewMode)
   const focusPmoSession = useAppStore((state) => state.focusPmoSession)
-  const agentFocus = useAppStore((state) => state.agentFocus)
-  const pmoSessionId = useAppStore((state) => pmoFocusSessionId(state.agentFocus))
-  const agentNames = useAppStore((state) => state.agentNames)
+  const setViewMode = useAppStore((state) => state.setViewMode)
   const reportError = useAppStore((state) => state.reportError)
-  const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
-  const flushAgentSteerQueue = useAppStore((state) => state.flushAgentSteerQueue)
   const [opening, setOpening] = useState(false)
-  const handledPromptRef = useRef<string | null>(null)
-  const conversationInitializedRef = useRef<string | null>(null)
+  const [preparationAttempt, setPreparationAttempt] = useState(0)
+  const [preparationIssue, setPreparationIssue] = useState<string | null>(null)
   const wasOpenRef = useRef(false)
+  const spaceActionRef = useRef<AbortController | null>(null)
   const scratch = config?.workspaces.find((workspace) => workspace.id === SCRATCH_WORKSPACE_ID)
   const visible = floating.open
-  const targetTabId = useMemo(() => pmoTeamsTopicFloatingTargetTabId(
-    floating, tabs, layouts[SCRATCH_WORKSPACE_ID], pmoSessionId
-  ), [floating.targetTabId, tabs, layouts[SCRATCH_WORKSPACE_ID], pmoSessionId])
+  const target = usePmoTeamsTopicTarget(floating)
+  const targetTabId = target.tabId
+  const targetViewMode = useAppStore((state) => target.session ? state.viewModes[target.session.id] : undefined)
+
+  useEffect(() => () => {
+    spaceActionRef.current?.abort()
+    spaceActionRef.current = null
+  }, [floating.open, targetTabId])
+
+  useEffect(() => {
+    if (floating.open && !floating.targetTabId && targetTabId) {
+      setFloating({ targetTabId })
+    }
+  }, [floating.open, floating.targetTabId, targetTabId, setFloating])
 
   useEffect(() => {
     if (floating.open && !wasOpenRef.current) {
@@ -67,83 +70,31 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   }, [floating.open])
 
   useEffect(() => {
-    if (!floating.open) {
-      conversationInitializedRef.current = null
-      return
+    if (floating.open && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) {
+      focusPmoSession(target.session.id)
     }
-    const targetTab = targetTabId ? tabs[targetTabId] : undefined
-    const targetSurface = targetTab?.regions[targetTab.layout.activeRegionId]
-    const targetSession = targetSurface?.kind === 'agent'
-      ? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSurface.sessionId)
-      : undefined
-    const pmoTeamsSession = targetTabId
-      ? targetSession
-      : sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
-    if (pmoTeamsSession && (conversationInitializedRef.current !== pmoTeamsSession.id || pmoSessionId !== pmoTeamsSession.id)) {
-      conversationInitializedRef.current = pmoTeamsSession.id
-      focusPmoSession(pmoTeamsSession.id)
-      setViewMode(pmoTeamsSession.id, 'activity')
-    }
-  }, [config, floating.open, targetTabId, focusPmoSession, pmoSessionId, sessions, setViewMode, tabs])
+    if (floating.open && target.session && targetViewMode === undefined) setViewMode(target.session.id, 'activity')
+  }, [floating.open, target.session, targetViewMode, focusPmoSession, setViewMode])
 
   useEffect(() => {
     if (!floating.open || !scratch) return
+    let current = true
     void api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
       .then(async () => {
         await openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
           reveal: false,
           ...(targetTabId ? { tabId: targetTabId } : {})
         })
+        if (current) setPreparationIssue(null)
       })
-      .catch(reportError)
-  }, [floating.open, floating.pendingPrompt, targetTabId, openScratchTopic, reportError, scratch, setFloating])
-
-  useEffect(() => {
-    const pending = floating.open ? floating.pendingPrompt : undefined
-    if (!pending || handledPromptRef.current === pending.id || !scratch) return
-    const targetTab = targetTabId ? tabs[targetTabId] : undefined
-    const targetSurface = targetTab?.regions[targetTab.layout.activeRegionId]
-    const targetSessionId = targetSurface?.kind === 'agent' ? targetSurface.sessionId : undefined
-    const pmoTeamsSession = targetTabId
-      ? sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => session.kind === 'agent' && session.id === targetSessionId)
-      : sessions.find((session): session is Extract<typeof session, { kind: 'agent' }> => topicIdForSession(config, session) === PMO_TEAMS_TOPIC_ID && session.kind === 'agent')
-    if (pmoTeamsSession) {
-      handledPromptRef.current = pending.id
-      // A refused handoff keeps its original floating text. Re-rendering grants no
-      // new attempt and must not repeat focus changes or the rejection notice.
-      if (!enqueueAgentSteer(pmoTeamsSession.id, pending.text, reportError, pending.id)) return
-      focusPmoSession(pmoTeamsSession.id)
-      setViewMode(pmoTeamsSession.id, 'activity')
-      void flushAgentSteerQueue(pmoTeamsSession.id, pending.id)
-        .then(() => {
-          // The canonical outbox now owns this intent, including any uncertainty.
-          // Clearing the floating handoff does not claim that the Agent consumed it.
-          setFloating({ pendingPrompt: undefined })
-        })
-        .catch((error) => {
-          handledPromptRef.current = null
+      .catch((error) => {
+        if (current) {
+          setPreparationIssue('Mote context preparation did not complete. The original context is kept; its current Agent status is shown above. Retry this context to finish preparation.')
           reportError(error)
-        })
-      return
-    }
-    const pmoTeamsTab = targetTabId
-      ? (targetTab?.workspaceId === SCRATCH_WORKSPACE_ID && targetTab.topicId === PMO_TEAMS_TOPIC_ID ? targetTab : undefined)
-      : Object.values(tabs).find((tab) => tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === PMO_TEAMS_TOPIC_ID)
-    const layout = layouts[SCRATCH_WORKSPACE_ID]
-    const group = pmoTeamsTab && layout?.groups.find((entry) => entry.tabOrder.includes(pmoTeamsTab.id))
-    const regionId = pmoTeamsTab?.layout.activeRegionId
-    const executorId = Object.keys(config?.executors ?? {})[0]
-    if (!pmoTeamsTab || !group || !regionId || !executorId) return
-    handledPromptRef.current = pending.id
-    const executionContext = executionFocusContextText(agentFocus, sessions, (session) => agentNames[session.id] ?? session.label)
-    void launchAgent(executorId, [pending.text, executionContext].join('\n\n'), group.id, {
-      tabId: pmoTeamsTab.id,
-      regionId
-    }).then(() => setFloating({ pendingPrompt: undefined })).catch((error) => {
-      handledPromptRef.current = null
-      reportError(error)
-    })
-  }, [agentFocus, agentNames, config, enqueueAgentSteer, flushAgentSteerQueue, floating.open, floating.pendingPrompt, targetTabId, focusPmoSession, launchAgent, layouts, reportError, scratch, sessions, setFloating, setViewMode, tabs])
+        }
+      })
+    return () => { current = false }
+  }, [floating.open, targetTabId, preparationAttempt, openScratchTopic, reportError, scratch])
 
   useEffect(() => {
     const onResize = (): void => setFloating(clampPmoTeamsTopicFloatingState(floating))
@@ -152,21 +103,58 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   }, [floating, setFloating])
 
   const workbench = useMemo(
-    () => <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" viewOwnership="projection" viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX} projectionTabId={targetTabId} visible={visible} interactiveResize={false} />,
-    [visible, targetTabId]
+    () => <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={PMO_TEAMS_TOPIC_ID} topicIsolation="bound-only" viewOwnership="projection" viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX} projectionTabId={targetTabId} visible={visible} interactiveResize={false}
+      onTabSelect={(tabId) => {
+        if (tabId !== targetTabId) {
+          spaceActionRef.current?.abort()
+          setFloating({ targetTabId: tabId })
+        }
+      }} />,
+    [visible, targetTabId, setFloating]
   )
-
-  if (!scratch) return null
 
   return (
     <PmoTeamsFloatingWindow
       floating={floating}
-      targetTabId={targetTabId}
+      target={target}
       opening={opening}
       visible={visible}
       onUpdate={setFloating}
-      onClose={() => requestPmoTeamsTopicFloatingClose()}
+      onClose={() => {
+        spaceActionRef.current?.abort()
+        requestPmoTeamsTopicFloatingClose()
+      }}
+      onOpenSpace={() => {
+        spaceActionRef.current?.abort()
+        const controller = new AbortController()
+        spaceActionRef.current = controller
+        const opening = openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
+          ...(targetTabId ? { tabId: targetTabId } : {}), signal: controller.signal
+        })
+        const navigation = useAppStore.getState()
+        const unsubscribe = useAppStore.subscribe((state) => {
+          if (state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId) controller.abort()
+        })
+        const disposeNavigation = (): void => {
+          unsubscribe()
+          controller.signal.removeEventListener('abort', disposeNavigation)
+        }
+        if (controller.signal.aborted) disposeNavigation()
+        else controller.signal.addEventListener('abort', disposeNavigation, { once: true })
+        void opening.then(() => {
+          if (controller === spaceActionRef.current && !controller.signal.aborted) {
+            requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+          }
+        }).catch((error) => {
+          if (controller === spaceActionRef.current && !controller.signal.aborted) {
+            setPreparationIssue('Opening this context in Space did not complete. The original context is kept here; retry Open Mote Space to continue its recovery.')
+            reportError(error)
+          }
+        }).finally(disposeNavigation)
+      }}
     >
+      {!scratch ? <div role="status" className="workbench-restore-notice">Original Mote context retained · Workspace is still restoring · Reopen this context in Space to continue recovery</div> : null}
+      {preparationIssue ? <div role="status" className="workbench-restore-notice mote-context-notice"><span>{preparationIssue}</span><button type="button" className="small-button" onClick={() => setPreparationAttempt((attempt) => attempt + 1)}>Retry context</button></div> : null}
       {workbench}
     </PmoTeamsFloatingWindow>
   )
@@ -174,21 +162,23 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
 
 type PmoTeamsFloatingWindowProps = {
   floating: PmoTeamsTopicFloatingState
-  targetTabId: string | undefined
+  target: PmoTeamsTopicTarget
   opening: boolean
   visible: boolean
   onUpdate: (next: Partial<PmoTeamsTopicFloatingState>) => void
   onClose: () => void
+  onOpenSpace: () => void
   children: React.ReactNode
 }
 
 const PmoTeamsFloatingWindow = memo(function PmoTeamsFloatingWindow({
   floating,
-  targetTabId,
+  target,
   opening,
   visible,
   onUpdate,
   onClose,
+  onOpenSpace,
   children
 }: PmoTeamsFloatingWindowProps): React.JSX.Element {
   const [dragging, setDragging] = useState(false)
@@ -331,8 +321,13 @@ const PmoTeamsFloatingWindow = memo(function PmoTeamsFloatingWindow({
       role="dialog"
       aria-modal="false"
       aria-hidden={!visible}
-      aria-label={PMO_TEAMS_TOPIC_TITLE}
+      aria-label={target.label}
+      aria-describedby="mote-floating-context-status"
       data-pmo-teams-topic-floating
+      data-mote-target-tab={target.tabId}
+      data-mote-target-region={target.region?.regionId}
+      data-mote-target-session={target.session?.id}
+      data-mote-status={target.statusText}
       tabIndex={-1}
       style={floating.open ? { left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height } : undefined}
     >
@@ -347,15 +342,14 @@ const PmoTeamsFloatingWindow = memo(function PmoTeamsFloatingWindow({
           >
             <span className="pmo-teams-topic-floating__identity">
               <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" />
-              <strong className="pmo-teams-topic-floating__title" title={PMO_TEAMS_TOPIC_TITLE}>Mote</strong>
+              <strong className="pmo-teams-topic-floating__title">Mote</strong>
+            </span>
+            {target.name !== PMO_TEAMS_TOPIC_TITLE ? <span className="pmo-teams-topic-floating__topic" title={target.name}>{target.name}</span> : null}
+            <span className="pmo-teams-topic-floating__status" id="mote-floating-context-status" title={`${target.label} · ${target.statusText}`}>
+              {target.session ? <StatusDot status={target.session.status} /> : null}<span>{target.statusText}</span>
             </span>
             <div className="pmo-teams-topic-floating__actions" onPointerDown={(event) => event.stopPropagation()}>
-              <button type="button" aria-label="Open Mote Space" title="Open Mote Space" onClick={() => {
-                requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
-                void useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID,
-                  targetTabId ? { tabId: targetTabId } : undefined
-                ).catch(useAppStore.getState().reportError)
-              }}><Maximize2 size={13} /></button>
+              <button type="button" aria-label="Open Mote Space" aria-describedby="mote-floating-context-status" title={`Open ${target.label} in Space`} onClick={onOpenSpace}><Maximize2 size={13} /></button>
               <button type="button" aria-label={`Close ${PMO_TEAMS_TOPIC_TITLE}`} title="Close" onClick={onClose}><X size={13} /></button>
             </div>
           </div>

@@ -29,7 +29,6 @@ import { sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
-import { agentProviderLabel } from './AgentProviderIcon'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { NewTabSurface } from './NewTabSurface'
@@ -67,17 +66,14 @@ import {
   type WorkbenchRegionLayoutNode
 } from '@agentmux/layout'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import type { AgentTimelineSnapshot } from '@agentmux/core'
+import { workbenchAgentFactsFor, workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import {
   activeWorkbenchSurface,
   agentDisplayName,
   documentKey,
-  firstPromptFromTimeline,
   sessionIdsWithoutViewsAfterClosingTabs,
-  tabDisplayName,
   titleWorkbenchSurface,
   workbenchSurfaces,
-  type AgentNameFacts,
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../lib/workbench-tabs'
@@ -110,64 +106,11 @@ type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 
-function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
-  const surface = titleWorkbenchSurface(tab)
-  switch (surface.kind) {
-    case 'git-diff':
-      return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
-    case 'file':
-      return surface.path.split('/').at(-1) ?? surface.path
-    case 'launcher':
-      return 'New Tab'
-    case 'browser':
-      return surface.title && surface.title !== 'about:blank'
-        ? surface.title
-        : surface.url === 'about:blank' ? 'New Tab' : surface.url
-    case 'agent':
-    case 'terminal': {
-      // Agent/terminal title surface: the Provider·Workspace fact is the session's own label (built once
-      // in Main), used verbatim as the chain's lowest tier — the renderer never re-derives that string.
-      const session = sessions.find((item) => item.id === surface.sessionId)
-      return session?.label ?? surface.sessionId
-    }
-    default:
-      return assertUnreachableSurface(surface)
-  }
-}
-
-/**
- * The renderer-side seam that feeds the naming SSOT chain: it turns a Store's Session projection into the
- * per-Agent facts `tabDisplayName`/`agentDisplayName` consume. Every fact here already lives in the Store
- * — user rename (`agentNames`), first prompt (`timelines`), the Provider·Workspace label (`session.label`)
- * — so no second source of truth is introduced.
- */
-function makeAgentFactsFor(
-  sessions: readonly SessionSnapshot[],
-  agentNames: Record<string, string>,
-  timelines: Record<string, AgentTimelineSnapshot>
-): (sessionId: string) => AgentNameFacts | null {
-  const sessionById = new Map(sessions.map((session) => [session.id, session]))
-  return (sessionId) => {
-    const session = sessionById.get(sessionId)
-    if (!session || session.kind !== 'agent') return null
-    return {
-      userName: agentNames[sessionId],
-      firstPrompt: firstPromptFromTimeline(timelines[sessionId]),
-      fallbackLabel: session.label,
-      providerLabel: agentProviderLabel(session.providerId)
-    }
-  }
-}
-
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
-  const label = tabDisplayName({
-    tab,
-    fallback: tabSurfaceFallback(tab, sessions),
-    agentFactsFor: makeAgentFactsFor(sessions, agentNames, timelines)
-  })
+  const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines)
   return (
     <div className="tab-drag-preview">
       <GripVertical size={12} />
@@ -220,11 +163,7 @@ function SortableWorkbenchTab({
   // The one place a tab's shown name is decided: the naming SSOT chain, fed the Store's own facts. It is
   // NOT `session.label` — that is only the chain's lowest tier (Provider·Workspace), overridden by a user
   // rename, a single Agent's own name, or the multi-Agent family name.
-  const displayName = tabDisplayName({
-    tab,
-    fallback: tabSurfaceFallback(tab, sessions),
-    agentFactsFor: makeAgentFactsFor(sessions, agentNames, timelines)
-  })
+  const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines)
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   // 文件 Tab 才有路径复制与「在文件管理器中显示」；其余类型缺席，那三项整组不出现。workspaceRoot 用于把
   // 相对 path 接成绝对路径（走共用的 formatPathsForCopy 出口）；reveal 走 FileExplorer 同一条 api.files.reveal。
@@ -595,7 +534,7 @@ function WorkbenchRegionTree(props: {
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   const swapTargets = useMemo(() => {
-    const agentFactsFor = makeAgentFactsFor(sessions, agentNames, timelines)
+    const agentFactsFor = workbenchAgentFactsFor(sessions, agentNames, timelines)
     return regionIds(tab.layout.root).flatMap((regionId) => {
       const region = tab.regions[regionId]
       if (!region) return []
@@ -1019,7 +958,7 @@ function PaneGroup({
       onPointerDown={() => focusTabGroup(workspaceId, group.id)}
     >
       <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
-        {isRootLeaf || showWindowChrome ? (
+        {showWindowChrome ? (
           <TopRowLeadingChrome />
         ) : null}
         <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
@@ -1085,7 +1024,7 @@ function PaneGroup({
             // 隐藏的格子退出可交互树：它仍在 DOM 里，但不该被 Tab 键走到、不该被搜索命中。
             inert={tab.id !== group.activeTabId}
           >
-            <div id={`${viewHostPrefix}:${tab.id}`} className="workbench-tab-slot" />
+            <div id={`${viewHostPrefix}:${tab.id}`} data-workbench-tab-id={tab.id} className="workbench-tab-slot" />
           </div>
         )) : (
           <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
@@ -1293,7 +1232,8 @@ export function WorkspaceWorkbench({
   viewOwnership = 'owner',
   viewHostPrefix = 'workbench-tab-slot',
   viewTargets,
-  projectionTabId
+  projectionTabId,
+  onTabSelect
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1316,7 +1256,10 @@ export function WorkspaceWorkbench({
   viewTargets?: Readonly<Record<string, string>> | undefined
   /** Select within projection chrome without changing the durable main workface. */
   projectionTabId?: string | undefined
+  /** Explicit navigation inside this projection may retain its own selected Tab. */
+  onTabSelect?: ((tabId: string) => void) | undefined
 }) {
+  const workbenchRef = useRef<HTMLDivElement>(null)
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const tabs = useAppStore((state) => state.tabs)
   const retainedLayout = useRef(storedLayout)
@@ -1362,6 +1305,35 @@ export function WorkspaceWorkbench({
   for (const [id, groupId] of ownerByTab) retainedOwners.current.set(id, groupId)
   for (const id of retainedOwners.current.keys()) if (!tabs[id]) retainedOwners.current.delete(id)
 
+  useEffect(() => {
+    const element = workbenchRef.current
+    if (!element || !visible || !onTabSelect) return
+    // Retained View contents arrive through a portal owned by another Workbench.
+    // Native events follow the visible DOM host, so both Tab clicks and a Region
+    // focus inside that moved View identify the projection the person selected.
+    const select = (event: Event): void => {
+      if (!(event.target instanceof Element)) return
+      const tabElement = event.target.closest<HTMLElement>('[data-workbench-tab-id]')
+      if (event.type === 'focusin' && tabElement?.matches('button')) return
+      const explicitTabId = tabElement?.dataset.workbenchTabId
+      const groupId = event.target.closest<HTMLElement>('[data-pane-group-id]')?.dataset.paneGroupId
+      if (!explicitTabId && !groupId) return
+      queueMicrotask(() => {
+        if (!element.isConnected) return
+        const state = useAppStore.getState()
+        const tabId = explicitTabId ?? state.layouts[workspaceId]?.groups.find((group) => group.id === groupId)?.activeTabId
+        const tab = tabId ? state.tabs[tabId] : undefined
+        if (tab && tab.workspaceId === workspaceId && (!topicId || tab.topicId === topicId)) onTabSelect(tab.id)
+      })
+    }
+    element.addEventListener('click', select)
+    element.addEventListener('focusin', select)
+    return () => {
+      element.removeEventListener('click', select)
+      element.removeEventListener('focusin', select)
+    }
+  }, [visible, onTabSelect, workspaceId, topicId, layout])
+
   function onDragStart(event: DragStartEvent): void {
     const data = event.active.data.current as DragTabData | undefined
     if (data?.kind === 'tab') setActiveDrag(data)
@@ -1396,6 +1368,12 @@ export function WorkspaceWorkbench({
     moveTab(workspaceId, drag.tabId, drag.groupId, targetGroupId, visibleTargetIndex)
   }
 
+  if (viewOwnership === 'projection' && projectionTabId && (!tabs[projectionTabId] || !ownerByTab.has(projectionTabId))) {
+    return <div ref={workbenchRef} className="workspace-workbench">
+      <div role="status" className="workbench-restore-notice">Original Tab retained · Its layout is still restoring · Reopen this context in Space to continue recovery</div>
+      <div id={`${viewHostPrefix}:${projectionTabId}`} data-workbench-tab-id={projectionTabId} className="workbench-tab-slot" />
+    </div>
+  }
   if (!layout) return null
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
@@ -1412,7 +1390,7 @@ export function WorkspaceWorkbench({
       }}
       autoScroll={false}
     >
-      <div className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-source' : ''}`}>
+      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-source' : ''}`}>
         <SplitNode
           node={layout.root}
           nodePath=""
@@ -1424,7 +1402,7 @@ export function WorkspaceWorkbench({
           nativeSurfacesVisible={visible && !focusTab && activeDrag === null}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
-          showWindowChrome={!rootIsLeaf}
+          showWindowChrome={viewOwnership === 'owner'}
           viewHostPrefix={viewHostPrefix}
         />
       </div>
