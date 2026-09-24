@@ -8,7 +8,7 @@ palette 与 TUI 自身表现层的边界。
 
 # Terminal 运行时：CtxMux 内核与外观所有权
 
-本文只描述当前源码能证明的事实。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/agentmux-desktop-interaction.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。本文旧 Control 命令描述当前来源，新命令按[空间 CLI 实施合同](../plans/pmo-cross-workspace-worktree-cli-design.md)闭合后更新，不提前宣称可用。
+本文只描述当前源码能证明的事实。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/agentmux-desktop-interaction.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 设计](../plans/pmo-cross-workspace-worktree-cli-design.md)。
 
 CtxMux 作为唯一 Run Kernel 的取舍见 `docs/plans/mux-runtime-decision.md`。本文只做
 端到端链路与所有权的技术还原。
@@ -63,9 +63,9 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
 ```
 
 Core 的 Control 合同只表达类型化的
-`inspect.tab/inspect.region/list.agents/open.agent/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
+`inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
 请求和 receipt；它不保存
-布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。新合同要求 Space/Zone 绑定、失败保留健康 Agent，并将空间归属与执行 cwd 分开；当前 cleanup 与按 cwd 过滤恢复的真实来源尚待本轮修正，不能把这些要求写成已经实现的事实。当前命令来源见 `docs/plans/agentmux-ai-native-desktop-composition-cli.md`；本轮 Agent 空间扩展合同与 source 差异见上述空间 CLI 设计及 [概念审阅](../reviews/space-zone-concept-unification-review.md)。布局变化最终只通过既有 viewport
+布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令在同一个持久 Workbench 中记录 Space/Zone 绑定和最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；Renderer 的空间归属独立于执行 cwd，恢复时保留布局并自动尝试原 Session。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计见 `docs/plans/agentmux-ai-native-desktop-composition-cli.md`；当前空间命令以实施合同为准。布局变化最终只通过既有 viewport
 synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
 
 ## 2. 所有权矩阵
@@ -88,7 +88,7 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | --- | --- | --- |
 | PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | `ctxmux-run-adapter.ts:418`（`decodeChunk`）、`ctxmux-run-adapter.ts:829`（`emitRunEvent`） |
 | Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | `ctxmux-run-adapter.ts:587`（`start`）、`:774`（`resize`）、`:787`（`interrupt`）、`:795`（`stop`） |
-| Control transaction（inspect.tab/inspect.region/list.agents/open.agent/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/control-host.ts` |
+| Control transaction（inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/control-host.ts` |
 | Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | `apps/desktop/src/renderer/src/store.ts`、`lib/control.ts`、`lib/workbench-view-layout.ts`、`lib/workbench-layout.ts` |
 | Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
 | Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | `terminal-viewport-sync.ts`、`TerminalView.tsx`、`runtime-controller.ts` |
@@ -141,9 +141,9 @@ exact Run，并让 Resize、Detach 与 Stop 进入同一个 per-Run Attachment �
 
 Desktop 启动时通过用户 `SHELL` 的交互式登录模式读取全部导出变量，使用 NUL 分隔与随机边界隔离启动 banner，保留空值、换行和等号。由 shell 自己选择配置文件，不手工 source 某个 dotfile。非导出变量、alias、function 不作为环境传递。交互式读取失败后可使用非交互式登录结果，但会持续显示部分读取告示；全部失败则保留继承环境并告知用户。
 
-Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线，避免常驻 daemon 的旧环境覆盖应用重启后新读取的值。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
+Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线；SDK 的 `RunSpec.env` 仍然是 additive，删除 client 的 key 不会清掉常驻 daemon 已持有的同名变量。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
 
-基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`；最终 Agent/Terminal 启动边界再次执行这条清理，避免 executor 快照或长寿命 Runtime 把禁色信号带回来。配置修改对重启应用后创建的新进程生效，不能修改既有进程的环境。
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`。最终 `CtxmuxRunAdapter.start` 用系统 `/usr/bin/env -u … -- program args…` 显式 unset 清理后缺省的策略 key，再 exec 原程序；PID、PTY、cwd、literal argv 和退出/信号语义保持，显式有效覆盖值继续生效。新建与 semantic resume 都走该边界，已启动进程的环境不能在线改写。产品修复与实际安装现场验收分开记录，见[颜色修复交付证据](../reviews/resume-terminal-colors-product-delivery.md)。
 
 ## 4. 完整 ANSI palette 与 Graphite 工作面
 

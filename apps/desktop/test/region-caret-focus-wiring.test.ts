@@ -34,7 +34,8 @@ describe('caret consumer entry points', () => {
     })
     expect(focus).toHaveLength(1)
     expect(earlyExitConditionsBefore(focus[0]!).map((s) => s.replace(/\s/g, ''))).toEqual([
-      '!regionCaretFocusTargets(request,linkOriginRef.current.regionId)', '!visibleRef.current', '!target'
+      '!regionCaretFocusTargets(request,linkOriginRef.current.regionId)', '!visibleRef.current', '!target',
+      "!element?.isConnected||element.closest('[inert]')"
     ])
   })
 })

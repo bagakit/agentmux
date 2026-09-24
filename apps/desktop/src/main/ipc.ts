@@ -1,3 +1,4 @@
+import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_POINTER_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
@@ -129,6 +130,8 @@ import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
+import { createSpaceZoneResource } from './space-zone-resources.js'
+import type { SpaceZoneResourceInput } from '../shared/space-addresses.js'
 import { sessionSnapshotPayload } from './session-snapshot-payload.js'
 import { rebindLocalFolder } from './workspace-rebind.js'
 import { executeSettingsWorkspaceAddControl, registerWorkspace } from './settings-workspace-add-control.js'
@@ -408,6 +411,16 @@ export async function registerIpc(args: {
     const selection = await worktrees.createForBranch(input, config)
     return selection
   })
+  handle('workspaces:createZoneResource', input => createSpaceZoneResource(input as SpaceZoneResourceInput, {
+    host: id => args.runtime.executionHost(id),
+    config: () => config,
+    topics: async () => {
+      const scratch = config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+      return scratch ? await args.scratchTopics.list(scratch) : []
+    },
+    worktrees,
+    register: fields => registerWorkspace(fields, configOwner, id => args.runtime.executionHost(id))
+  }))
   // 单条删除。与批量收尾（keepOneOfFanOut）共用同一个 teardown primitive，所以脏树保护在这条路上
   // 一样在场：`removeWorktree` 只在 git 确认后才撤记录。
   //
@@ -722,6 +735,7 @@ export async function registerIpc(args: {
   })
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
   handle('sessions:timeline', async (session: AgentSessionControl) => await args.runtime.sessionTimeline(session))
+  handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handle('sessions:historyPage', async (session: AgentSessionControl, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))

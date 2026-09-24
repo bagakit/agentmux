@@ -239,6 +239,8 @@ fixture 只定义场景数据、操作、观察点与模拟边界，并引用当
 
 `space mv` 只改变 AgentMux 中的空间位置。用户明确「不改变执行目录，只改变在agentmux里的空间位置」；移动保留同一 AgentSession、Run、cwd 与原生句柄，不停止健康 Agent，也不复制所选投影。跨 Zone 时，目标空间归属与 Agent 原执行目录分别如实可读。Session 的额外展示与移动是两种明确动作，不能用创建副本或复用第一块同 Session Region 代替移动。
 
+已有 Session 投影的进入动作（包括观察面里的 Open Session 与 Continue in Session）以该投影持久保存的 Workspace/Tab/Region 位置为导航事实。执行 cwd 只能为没有投影的 Session 提供新展示来源，不能在进入已有展示时把整个 Tab、Topic 或其他 Region 搬回执行目录所属 Workspace、重复加入另一个布局或改写额外投影。启动快照暂时没有 Session 事实时，仍可进入已保留的持久投影查看恢复状态；导航不能伪造新的 Session/Run 或触发重新启动。
+
 本节统一合同不宣称当前源码已具有公开 Space/Zone 类型或 Topic 多 Zone；实际来源差异、命令语法与实施验收见 [来源核对与差异清单](../reviews/space-zone-concept-unification-review.md) 及 [CLI 合同](../plans/pmo-cross-workspace-worktree-cli-design.md)。本轮先统一定义，再闭合 CLI；既有 Renderer 文案与视觉不作全仓机械改名。
 
 ### Space、Folder 与 Topic

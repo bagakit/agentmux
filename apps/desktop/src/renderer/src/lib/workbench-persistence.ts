@@ -28,7 +28,6 @@ import {
   type WorkbenchTab
 } from './workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 
 /**
  * 一个 browser 面**存到盘上的**最小可再实例化子集。只有这几位：browserId + url（+ title 供加载完成前
@@ -422,7 +421,7 @@ export function persistedSessionSurfaceIds(
 ): Set<string> {
   return new Set(persisted ? Object.values(persisted.tabs).flatMap((tab) => (
     workbenchSurfaces(hydratePersistedTab(tab)).flatMap((surface) => (
-      sessionSurface(surface) ? [surface.sessionId] : []
+      sessionSurface(surface) || tab.space && isSessionSurface(surface) ? [surface.sessionId] : []
     ))
   )) : [])
 }
@@ -455,10 +454,11 @@ function sessionSurface(surface: WorkbenchSurface): surface is SessionWorkbenchS
  */
 function persistedSurfaceSurvives(
   surface: WorkbenchSurface,
-  ctx: { hasTopic: boolean; fileSurvives: (surface: FileWorkbenchSurface) => boolean }
+  ctx: { hasTopic: boolean; spatiallyBound?: boolean; fileSurvives: (surface: FileWorkbenchSurface) => boolean }
 ): boolean {
   switch (surface.kind) {
     case 'agent':
+      return ctx.spatiallyBound === true
     case 'terminal':
       return false
     case 'launcher':
@@ -491,7 +491,7 @@ function sessionOnlyTab(tab: WorkbenchTab): WorkbenchTab | null {
     // 没有运行时内容可剥，且 tab id 本就是 `file:${workspaceId}:${path}`——存 file 面与存路径是同一件事，
     // 分不开。path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。谁若日后以「过时的直接删」为由
     // 把下面这条 file→存 一并删掉，就会原样重犯这个 bug——这个机制不是冗余，删它=回归。
-    if (persistedSurfaceSurvives(surface, { hasTopic: Boolean(tab.topicId), fileSurvives: () => true })) {
+    if (persistedSurfaceSurvives(surface, { hasTopic: Boolean(tab.topicId), spatiallyBound: Boolean(tab.space), fileSurvives: () => true })) {
       continue
     }
     next = next ? removeWorkbenchRegion(next, surface.regionId) : null
@@ -552,25 +552,18 @@ export function projectPersistedWorkbench(input: PersistedWorkbench): PersistedW
   return { tabs, layouts }
 }
 
-function sessionBelongsToWorkspace(
-  config: AppConfig,
-  session: SessionSnapshot,
-  workspaceId: string
-): boolean {
-  const workspace = config.workspaces.find((candidate) => candidate.id === workspaceId)
-  return Boolean(
-    workspace && workspaceOwnsSessionPath(workspace, session)
-  )
-}
-
 function restoreTab(
   config: AppConfig,
   sessions: ReadonlyMap<string, SessionSnapshot>,
   tab: WorkbenchTab,
-  preserveUnknownSessionViews = false
+  retiredSessionIds: ReadonlySet<string> = new Set()
 ): WorkbenchTab | null {
   let next: WorkbenchTab | null = tab
   for (const surface of workbenchSurfaces(tab)) {
+    if (isSessionSurface(surface) && retiredSessionIds.has(surface.sessionId)) {
+      next = next ? removeWorkbenchRegion(next, surface.regionId) : null
+      continue
+    }
     if (!sessionSurface(surface)) {
       // 一个文件面在其 workspace 仍被配置时生还，原样保留（含 path）。文件是否还在磁盘上不在这里判：
       // 本函数是纯 presentation 投影，无磁盘/无 IPC——stat 会把同步启动恢复变成异步，且新增一个与 Core/
@@ -589,6 +582,7 @@ function restoreTab(
       if (
         persistedSurfaceSurvives(surface, {
           hasTopic: Boolean(tab.topicId),
+          spatiallyBound: Boolean(tab.space),
           fileSurvives: (file) =>
             config.workspaces.some((workspace) => workspace.id === file.workspaceId)
         })
@@ -596,22 +590,10 @@ function restoreTab(
       next = next ? removeWorkbenchRegion(next, surface.regionId) : null
       continue
     }
-    const session = sessions.get(surface.sessionId)
-    // A Runtime snapshot can be temporarily unavailable while the persisted presentation is still
-    // perfectly usable. Keep the exact Region identity in that narrow fail-open state; Core remains
-    // the owner of whether the Session/Run exists and SessionPane will show its neutral connecting
-    // state until a later canonical snapshot arrives. Never apply this to a successful snapshot: a
-    // known missing or mismatched Session must still be removed by the normal verified restore path.
-    if (
-      preserveUnknownSessionViews &&
-      !session &&
-      config.workspaces.some((workspace) => workspace.id === tab.workspaceId) &&
-      surface.workspaceId === tab.workspaceId
-    ) continue
-    if (
-      session?.kind === surface.kind &&
-      sessionBelongsToWorkspace(config, session, tab.workspaceId)
-    ) continue
+    // Membership lists are snapshots, not per-Session terminal dispositions. Display location
+    // is owned by this durable Tab, independently of Core's execution cwd. Only an explicit Core
+    // retirement/unknown fact authorizes deleting a retained Session projection.
+    if (!retiredSessionIds.has(surface.sessionId)) continue
     next = next ? removeWorkbenchRegion(next, surface.regionId) : null
   }
   return next
@@ -622,12 +604,8 @@ export function restorePersistedWorkbench(input: {
   sessions: readonly SessionSnapshot[]
   persisted: PersistedWorkbench | null
   createTabGroupId(): string
-  /**
-   * Keep session Regions whose identities could not be checked because the Runtime snapshot failed.
-   * This is a one-shot presentation projection, not a second Session truth source; callers should
-   * set it only for an explicitly rejected snapshot and let the next canonical snapshot reconcile it.
-   */
-  preserveUnknownSessionViews?: boolean
+  /** Exact Core terminal dispositions, never inferred from a Session list's missing entries. */
+  retiredSessionIds?: ReadonlySet<string>
 }): RestoredWorkbench & { repairs: PersistedTabRepair[] } {
   if (!input.persisted) {
     return {
@@ -656,7 +634,7 @@ export function restorePersistedWorkbench(input: {
             input.config,
             sessions,
             reconciled,
-            input.preserveUnknownSessionViews === true
+            input.retiredSessionIds
           )
         : null
       const normalized = restored ? normalizePersistedTab(restored) : null
@@ -664,10 +642,11 @@ export function restorePersistedWorkbench(input: {
     })
   )
   const layouts: Record<string, WorkspaceLayout> = {}
-  for (const workspace of input.config.workspaces) {
+  const workspaceIds = new Set([...input.config.workspaces.map(workspace => workspace.id), ...Object.values(tabs).map(tab => tab.workspaceId)])
+  for (const workspaceId of workspaceIds) {
     const workspaceTabIds = new Set(
       Object.values(tabs)
-        .filter((tab) => tab.workspaceId === workspace.id)
+        .filter((tab) => tab.workspaceId === workspaceId)
         .map((tab) => tab.id)
     )
     // 归一化排在补挂之前，不是之后：下面的 `addTabWithoutStealingFocus` 把无处安放的 Tab 挂到
@@ -675,8 +654,8 @@ export function restorePersistedWorkbench(input: {
     // 再归一化，那些 Tab 已经进了一个画不出来的分组（`workbench-layout.ts:350-352` 记的孤儿形状），之后
     // 再把指针重座也救不回它们。先把指针落到一个真在场的分组上，补挂才有正确的落点。
     let layout = normalizePersistedLayout(
-      input.persisted.layouts[workspace.id]
-        ? keepTabsInLayout(input.persisted.layouts[workspace.id]!, workspaceTabIds)
+      input.persisted.layouts[workspaceId]
+        ? keepTabsInLayout(input.persisted.layouts[workspaceId]!, workspaceTabIds)
         : createWorkspaceLayout(input.createTabGroupId())
     )
     for (const tabId of workspaceTabIds) {
@@ -684,7 +663,7 @@ export function restorePersistedWorkbench(input: {
         layout = addTabWithoutStealingFocus(layout, layout.activeGroupId, tabId)
       }
     }
-    layouts[workspace.id] = layout
+    layouts[workspaceId] = layout
   }
   return { tabs, layouts, repairs }
 }

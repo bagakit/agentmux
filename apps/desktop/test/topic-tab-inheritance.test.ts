@@ -1,5 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -114,6 +116,7 @@ function createdTabExcept(anchorId: string): WorkbenchTab {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useAppStore.setState(initialState, true)
 })
 
@@ -170,16 +173,24 @@ describe('Scratch Topic binding at new Tab creation boundaries', () => {
     expect(useAppStore.getState().tabs[pending.id]?.topicId).toBe(topicId)
   })
 
-  it('copies the active Topic into a Control new Tab while preserving explicit Session targets', async () => {
+  it('opens the exact Topic Zone in a new Control Tab while preserving explicit Session targets', async () => {
     const anchor = mountAnchor()
+    await initializeSpatialControlFixture([{ id: topicId, directoryPath: topicPath,
+      topicPath: `${topicPath}/TOPIC.md`, title: 'Shared Topic', summary: '', collaborators: [] }])
+    const inspected = await useAppStore.getState().executeControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-topic-zone',
+      operation: 'space.inspect', target: { tabId: anchor.id }
+    })
+    if (inspected.operation !== 'space.inspect') throw new Error('Expected spatial inspection')
+    expect(inspected.catalog.zones).toHaveLength(1)
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
       .mockImplementation(async (input) => launch(agentSession(input.agentSessionId!)))
     await useAppStore.getState().executeControl({
-      schemaVersion: 1,
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'control-open-agent',
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'work' },
-      destination: { kind: 'new-tab', after: { kind: 'tab', tabId: anchor.id } }
+      destination: { zoneId: inspected.catalog.zones[0]!.zoneId, newTab: true }, focus: false
     })
 
     const created = createdTabExcept(anchor.id)

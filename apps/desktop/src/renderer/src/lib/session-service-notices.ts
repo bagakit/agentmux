@@ -11,6 +11,12 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
   lifecycleError?: { message: string | null; failure: AgentLifecycleFailure | undefined }): ServiceNoticeItem[] {
   if (session?.kind !== 'agent') return []
   const notices: ServiceNoticeItem[] = []
+  if (session.creation?.initialPrompt === 'unconfirmed' || session.creation?.initialPrompt === 'unknown') notices.push({
+    id: 'initial-prompt', occurrence: session.creation.createOperationId, notice: { kind: 'indeterminate', notice: {
+      step: 'The original first prompt is unconfirmed', mode: 'The existing Agent Session remains available. Its first prompt will not be sent again automatically.',
+      restore: `Inspect request ${session.creation.createOperationId} and the existing Session before choosing a new message.`
+    } }
+  })
   const identity = [session.hostId, session.id, session.control.run.runId]
   if (lifecycleError?.message && lifecycleError.failure && lifecycleFailureBelongsTo(lifecycleError.failure, { subject: session.control })) {
     notices.push({ id: 'recovery', occurrence: JSON.stringify(identity),

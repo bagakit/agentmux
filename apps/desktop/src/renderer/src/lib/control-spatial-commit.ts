@@ -4,12 +4,12 @@ import { isSessionSurface } from './workbench-surface-kinds'
 import type { StepOutcome } from './service-window-notice'
 
 /**
- * 异步创建（open.agent / open.terminal）的**落点回执**——在完成时对着**当前**布局重新解析，绝不回放
+ * 异步创建（agent.open / open.terminal）的**落点回执**——在完成时对着**当前**布局重新解析，绝不回放
  * 计划里的坐标。启动是异步的：从 planControlOpen 造出 `plan.tabId` 到 launch 完成之间有一段网络窗口
  * （远端可达 15s），用户可能把那一格搬走、把它所在的 Tab 关掉或重排。此刻若照 `plan.tabId` 生成回执，
  * 就把旧坐标交回给发起方；若照计划把布局写回去，就覆盖掉用户刚摆好的新布局。
  *
- * 这是**唯一一处** re-resolution：`open.agent` 与 `open.terminal` 两条完成路径都调用它。两条路本是同一个
+ * 这是**唯一一处** re-resolution：`agent.open` 与 `open.terminal` 两条完成路径都调用它。两条路本是同一个
  * 判断的两份拷贝——commit 589ab7bf 只补了 agent 那份（改回 `committedOwner.tab.id`），terminal 那份仍在
  * 返回 `plan.tabId`（本仓库反复被这种 two-write-sites 咬过：见 memory `two-write-sites-need-one-projection`）。
  * 收成一处纯函数，两条路共用同一个「实际落点 / 已错位」的判定，拷贝无从漂移。

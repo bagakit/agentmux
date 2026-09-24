@@ -8,21 +8,22 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from './agent-session-store.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT, type SelfViewOutcome } from './agent-self-context.js'
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, AGENTMUX_SELF_CONTEXT_VERB, agentMuxCommandHelp } from './agentmux-cli-help.js'
-import { AgentMuxClient } from './client.js'
+import type { AgentMuxClient } from './client.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   AGENTMUX_DEMAND_PRIORITIES,
   AGENTMUX_DEMAND_STATUSES,
   type AgentMuxControlCaller,
-  type AgentMuxOpenDestination
+  type AgentMuxOpenDestination,
+  type AgentMuxSpaceDestination,
+  type AgentMuxSpaceSelector
   , type AgentMuxDemandPriority
   , type AgentMuxDemandStatus
 } from './control.js'
 import { requestAgentMuxControl, subscribeAgentMuxControl } from './control-host.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { AgentMuxError } from './errors.js'
-import { connectLocalAgentMux } from './runtime-client.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { pmoSessionMatches } from './pmo-session-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
@@ -34,13 +35,14 @@ import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDel
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { settingsResourceBudget } from './settings-resource-json.js'
+import { parseSpaceControlRequest, spaceControlId } from './space-control-parser.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
 // package.json 拉进程序（`resolveJsonModule`），JSON import 原样出到 dist，运行时由 Node 解析同一份
 // 文件。所以这不是「构建图之外的手抄常量」——改 package.json 的 version，编译产物与 `--version` 一起变。
 const VERSION = packageManifest.version
-const CLI_REQUEST_ID = randomUUID()
+let CLI_REQUEST_ID: string = randomUUID()
 const CLI_ERROR_CODES = [
   ...AGENTMUX_CONTROL_ERROR_CODES,
   'INVALID_CLI_ARGUMENT',
@@ -204,6 +206,7 @@ function printStream(operation: string, event: string, result: unknown): void {
 }
 
 async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>): Promise<T> {
+  const { connectLocalAgentMux } = await import('./runtime-client.js')
   const client = await connectLocalAgentMux()
   try { return await operation(client) } finally { await client.dispose() }
 }
@@ -328,6 +331,18 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
   const sinceValue = flags.values.get('--since')
   const since = sinceValue === undefined ? undefined : Number(sinceValue)
   if (since !== undefined && !Number.isFinite(since)) throw cliError('--since must be a timestamp in milliseconds.')
+  if (action === 'workspaces') {
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'space.ls', target: {} })
+    if (receipt.operation !== 'space.ls') throw new AgentMuxError('Workspace discovery receipt operation is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+    const { spaces, zones } = receipt.result.catalog
+    const workspaceId = flags.values.get('--workspace'), projectId = flags.values.get('--project')
+    const selected = zones.filter(zone => (!workspaceId || zone.workspaceId === workspaceId) &&
+      (!projectId || spaces.some(space => space.spaceId === zone.spaceId && space.projectId === projectId)))
+    const workspaces = [...new Set(selected.map(zone => zone.workspaceId))].map(workspaceId => ({
+      workspaceId, zones: selected.filter(zone => zone.workspaceId === workspaceId)
+    })).slice(0, limit)
+    printPmoSuccess('pmo.workspaces', { workspaces }); return 0
+  }
   // PMO's mixed observations include generic Desktop Session links in Demands.
   // Only the strictly Agent projections resolve --session through Core.
   await normalizeSessionFlags(flags, action === 'agents' || action === 'sessions' ? ['--session', '--agent'] : ['--agent'])
@@ -361,7 +376,7 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
     return results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   })
   const filteredSessions = sessions.filter((session) => pmoSessionMatches(session, { sessionId, status, since })).slice(0, limit)
-  if (action === 'projects' || action === 'workspaces') { printPmoSuccess(`pmo.${action}`, { projects: filteredProjects, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
+  if (action === 'projects') { printPmoSuccess(`pmo.${action}`, { projects: filteredProjects, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
   if (action === 'agents') { printPmoSuccess('pmo.agents', { agents: filteredAgents, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
   if (action === 'sessions') { printPmoSuccess('pmo.sessions', { sessions: filteredSessions, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
   if (action === 'demands') { printPmoSuccess('pmo.demands', { demands: filteredDemands, ...(unavailable.length ? { unavailable } : {}) }); return 0 }
@@ -481,73 +496,105 @@ async function demandCommand(args: readonly string[]): Promise<number> {
 }
 
 function openDestination(flags: ParsedFlags): { destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller } {
-  // 方向 flag 清单从 SPLIT_FLAG_DIRECTIONS 的键派生，不再手抄一份——「哪些 flag 是方向 flag」只有一处。
   const splitFlags = Object.keys(SPLIT_FLAG_DIRECTIONS)
-  const selected = exactlyOne(flags, [...splitFlags, '--new-tab-after', '--in-region'], 'open')
+  const selected = exactlyOne(flags, [...splitFlags, '--tab', '--in-region'], 'open')
   const value = flags.values.get(selected)!
   const owner = callerForSelf(value)
-  if (selected === '--new-tab-after') return { destination: { kind: 'new-tab', after: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } }, ...(owner ? { caller: owner } : {}) }
+  if ((selected === '--tab') !== flags.booleans.has('--new-tab')) throw cliError('--tab and --new-tab must be used together.')
+  if (selected === '--tab') return { destination: { kind: 'new-tab', after: value === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') } }, ...(owner ? { caller: owner } : {}) }
   if (selected === '--in-region') return { destination: { kind: 'launcher', regionId: explicitSelectorId(value, 'Launcher Region id') } }
-  // 查表取方向，取代 `? 'left' : … : 'down'` 的兜底三元——那条 `: 'down'` 会把写错/新增的 flag 静默投成
-  // down。未命中当前**不可达**：`exactlyOne` 只会返回它收到的清单里的项，而那份清单里除了上面两个已被
-  // return 的 flag，其余都是 SPLIT_FLAG_DIRECTIONS 的键。保留这道显式抛错是为了让将来往清单里加一个方向
-  // flag 却漏配映射时响亮失败（INVALID_CLI_ARGUMENT），而不是像旧三元那样悄悄落进 down。
   const direction = (SPLIT_FLAG_DIRECTIONS as Record<string, SplitDirection>)[selected]
   if (!direction) throw cliError(`open received an unmapped direction flag: ${selected}.`)
   return { destination: { kind: 'split', direction, region: value === 'self' ? { kind: 'self' } : { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } }, ...(owner ? { caller: owner } : {}) }
 }
 
 async function openCommand(args: readonly string[]): Promise<number> {
-  if (args[0] !== 'agent' && args[0] !== 'terminal' && args[0] !== 'browser') {
-    throw cliError('open requires agent, terminal, or browser.')
-  }
+  if (args[0] !== 'terminal' && args[0] !== 'browser') throw cliError('open requires terminal or browser. Use agentmux agent open for an Agent.')
   const flags = parseFlags(args.slice(1), {
-    '--agent': 'value', '--session': 'data', '--prompt': 'data',
-    '--command': 'data', '--url': 'value',
+    ...(args[0] === 'terminal' ? { '--command': 'data' as const } : { '--url': 'value' as const }),
     '--left-of': 'value', '--right-of': 'value', '--above': 'value', '--below': 'value',
-    '--new-tab-after': 'value', '--in-region': 'value'
+    '--tab': 'value', '--new-tab': 'boolean', '--in-region': 'value'
   })
   const placement = openDestination(flags)
-  if (args[0] === 'terminal') {
-    if (flags.values.has('--agent') || flags.values.has('--session') || flags.values.has('--prompt') || flags.values.has('--url')) {
-      throw cliError('open terminal accepts only --command and one destination.')
-    }
-    const receipt = await requestAgentMuxControl({
-      ...requestBase(),
-      operation: 'open.terminal',
-      ...(flags.values.has('--command') ? { shellCommand: flags.values.get('--command')! } : {}),
-      ...placement
-    })
-    printSuccess(receipt.operation, receipt.result); return 0
-  }
-  if (args[0] === 'browser') {
-    if (flags.values.has('--agent') || flags.values.has('--session') || flags.values.has('--prompt') || flags.values.has('--command')) {
-      throw cliError('open browser accepts only --url and one destination.')
-    }
-    const receipt = await requestAgentMuxControl({
-      ...requestBase(),
-      operation: 'open.browser',
-      url: identifier(flags.values.get('--url'), 'Browser URL'),
-      ...placement
-    })
-    printSuccess(receipt.operation, receipt.result); return 0
-  }
-  if (flags.values.has('--command') || flags.values.has('--url')) {
-    throw cliError('open agent accepts only --agent/--session, --prompt, and one destination.')
-  }
-  const contentFlag = exactlyOne(flags, ['--agent', '--session'], 'open agent')
-  if (contentFlag === '--session' && flags.values.has('--prompt')) throw cliError('--prompt is valid only with --agent.')
-  if (contentFlag === '--session') explicitSelectorId(flags.values.get(contentFlag), 'Agent Session id')
-  await normalizeSessionFlags(flags)
-  const receipt = await requestAgentMuxControl({
-    ...requestBase(), operation: 'open.agent',
-    content: contentFlag === '--agent'
-      ? { kind: 'new-agent', executorId: identifier(flags.values.get(contentFlag), 'Agent Executor id'), ...(flags.values.has('--prompt') ? { prompt: flags.values.get('--prompt')! } : {}) }
-      : { kind: 'agent-session', agentSessionId: explicitSelectorId(flags.values.get(contentFlag), 'Agent Session id') },
-    ...placement,
-    ...(process.env.AGENTMUX_ENV === '1' ? { caller: managedCaller() } : {})
-  })
+  const receipt = args[0] === 'terminal'
+    ? await requestAgentMuxControl({ ...requestBase(), operation: 'open.terminal',
+      ...(flags.values.has('--command') ? { shellCommand: flags.values.get('--command')! } : {}), ...placement })
+    : await requestAgentMuxControl({ ...requestBase(), operation: 'open.browser',
+      url: identifier(flags.values.get('--url'), 'Browser URL'), ...placement })
   printSuccess(receipt.operation, receipt.result); return 0
+}
+
+const SPACE_SELECTOR_FLAGS = { '--space': 'data', '--zone': 'data', '--tab': 'data', '--region': 'data' } as const
+const SPACE_DESTINATION_FLAGS = { ...SPACE_SELECTOR_FLAGS, '--new-tab': 'boolean', '--split': 'value', '--focus': 'boolean', '--request-id': 'data' } as const
+function spaceSelector(flags: ParsedFlags): AgentMuxSpaceSelector {
+  return Object.fromEntries(['space', 'zone', 'tab', 'region'].filter(key => flags.values.has(`--${key}`))
+    .map(key => [`${key}Id`, spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT', key === 'space' || key === 'zone')]))
+}
+function useSpaceRequestId(flags: ParsedFlags): void {
+  if (flags.values.has('--request-id')) CLI_REQUEST_ID = spaceControlId(flags.values.get('--request-id'), 'Request ID', 'INVALID_CLI_ARGUMENT')
+}
+function spaceDestination(flags: ParsedFlags): AgentMuxSpaceDestination {
+  const target: AgentMuxSpaceDestination = { ...spaceSelector(flags),
+    ...(flags.booleans.has('--new-tab') ? { newTab: true } : {}),
+    ...(flags.values.has('--split') ? { split: flags.values.get('--split') as NonNullable<AgentMuxSpaceDestination['split']> } : {}) }
+  const resources = ['--path', '--branch', '--new-branch', '--directory'].filter(key => flags.values.has(key))
+  if (!flags.booleans.has('--new-zone')) {
+    if (resources.length || flags.booleans.has('--worktree')) throw cliError('Zone resource options require --new-zone.')
+    return target
+  }
+  if (flags.booleans.has('--worktree')) {
+    if (flags.values.has('--directory')) throw cliError('--worktree cannot be combined with --directory.')
+    const branch = exactlyOne(flags, ['--branch', '--new-branch'], 'New worktree Zone')
+    target.newZone = { kind: 'worktree', path: identifier(flags.values.get('--path'), 'Worktree absolute path'),
+      branch: identifier(flags.values.get(branch), 'Worktree branch'), createBranch: branch === '--new-branch' }
+  } else {
+    if (resources.some(key => key !== '--directory')) throw cliError('Git branch/path options require --worktree.')
+    target.newZone = { kind: 'directory', path: identifier(flags.values.get('--directory'), 'Existing absolute directory') }
+  }
+  return target
+}
+async function agentCommand(args: readonly string[]): Promise<number> {
+  if (args[0] !== 'open') throw cliError('agent requires open. Run agentmux agent open --help.')
+  const flags = parseFlags(args.slice(1), { ...SPACE_DESTINATION_FLAGS,
+    '--executor': 'data', '--session': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean',
+    '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data' })
+  useSpaceRequestId(flags)
+  const contentFlag = exactlyOne(flags, ['--executor', '--session'], 'agent open')
+  if (contentFlag === '--session' && (flags.values.has('--prompt') || flags.booleans.has('--new-zone'))) throw cliError('--session cannot supply an initial prompt or create a Zone.')
+  const request = parseSpaceControlRequest({ ...requestBase(), operation: 'agent.open',
+    content: contentFlag === '--executor'
+      ? { kind: 'new-agent', executorId: identifier(flags.values.get('--executor'), 'Exact Executor ID'),
+        ...(flags.values.has('--prompt') ? { prompt: flags.values.get('--prompt')! } : {}) }
+      : { kind: 'agent-session', agentSessionId: explicitSelectorId(flags.values.get('--session'), 'Exact Agent Session ID') },
+    destination: spaceDestination(flags), focus: flags.booleans.has('--focus'),
+    ...(process.env.AGENTMUX_ENV === '1' ? { caller: managedCaller() } : {})
+  }, 'INVALID_CLI_ARGUMENT')
+  const receipt = await requestAgentMuxControl(request)
+  if (receipt.operation !== 'agent.open') throw new AgentMuxError('Agent open receipt operation is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+  writeJson(receipt)
+  return receipt.result.outcome === 'partial' || receipt.result.outcome === 'unknown' ? 1 : 0
+}
+async function spaceCommand(args: readonly string[]): Promise<number> {
+  const action = args[0]
+  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, or mv.')
+  const flags = parseFlags(args.slice(1), action === 'mv'
+    ? { ...SPACE_DESTINATION_FLAGS, '--from-region': 'data', '--expect-session': 'data' }
+    : action === 'inspect' ? { ...SPACE_SELECTOR_FLAGS, '--request': 'data' } : { '--space': 'data', '--zone': 'data' })
+  useSpaceRequestId(flags)
+  const target = spaceSelector(flags)
+  if (flags.values.has('--request') && Object.keys(target).length) throw cliError('--request cannot be combined with a spatial selector.')
+  const request = parseSpaceControlRequest(action === 'mv'
+    ? { ...requestBase(), operation: 'space.mv', fromRegionId: identifier(flags.values.get('--from-region'), 'Source Region'),
+      expectedAgentSessionId: identifier(flags.values.get('--expect-session'), 'Expected Session'), destination: spaceDestination(flags), focus: flags.booleans.has('--focus') }
+    : { ...requestBase(), operation: action === 'ls' ? 'space.ls' : 'space.inspect',
+      target: flags.values.has('--request') ? { requestId: flags.values.get('--request')! } : target }, 'INVALID_CLI_ARGUMENT')
+  const receipt = await requestAgentMuxControl(request)
+  writeJson(receipt)
+  if (receipt.operation === 'space.inspect' && flags.values.has('--request')) {
+    const inspected = receipt.result.request
+    return inspected?.known && inspected.report && inspected.report.outcome !== 'partial' && inspected.report.outcome !== 'unknown' ? 0 : 1
+  }
+  return receipt.operation === 'space.mv' && (receipt.result.outcome === 'partial' || receipt.result.outcome === 'unknown') ? 1 : 0
 }
 
 async function arrangeCommand(args: readonly string[]): Promise<number> {
@@ -1018,7 +1065,7 @@ function operationPath(args: readonly string[]): string | null {
   // browser run → browser.run。与上面 open.* 同形：两级动词的 help 路径就是它的 operation 名。
   // 不写死 'run' 是因为将来若有第二个 browser 子命令，漏改这里会让它的 --help 静默落到 'browser'
   // 那条上（拿到一份讲别的命令的帮助，而不是一句"没这个命令"）。
-  if ((args[0] === 'browser' || args[0] === 'deliveries' || args[0] === 'dispatch' || args[0] === 'settings') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
+  if ((args[0] === 'agent' || args[0] === 'space' || args[0] === 'browser' || args[0] === 'deliveries' || args[0] === 'dispatch' || args[0] === 'settings') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
     return `${args[0]}.${args[1]}`
   }
   return args[0] ?? null
@@ -1042,6 +1089,10 @@ function requestsHelp(args: readonly string[]): boolean {
       (args.length === 3 && (args[1] === 'get' || args[1] === 'set' || args[1] === 'executors' || args[1] === 'prompts') && help(args[2])) ||
       (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3])) ||
       (args.length === 4 && args[1] === 'executors' && args[2] === 'refresh' && help(args[3]))
+  }
+  if (args[0] === 'agent' || args[0] === 'space') {
+    const data = ['--executor', '--session', '--prompt', '--space', '--zone', '--tab', '--region', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
+    return args.some((argument, index) => (argument === '--help' || argument === '-h') && !data.includes(args[index - 1] ?? ''))
   }
   return args.some((argument, index) => (
     (argument === '--help' || argument === '-h') &&
@@ -1091,6 +1142,7 @@ async function whoamiCommand(args: readonly string[]): Promise<number> {
  */
 async function doctorCommand(args: readonly string[]): Promise<number> {
   if (args.length > 0) throw cliError('doctor takes no arguments.')
+  const { AgentMuxClient } = await import('./client.js')
   const client = new AgentMuxClient()
   try {
     printSuccess('doctor', await diagnoseAgentMux({ client, workspacePath: process.cwd(),
@@ -1154,6 +1206,8 @@ async function main(): Promise<number> {
   if (args[0] === 'pmo') return await pmoCommand(args.slice(1))
   if (args[0] === 'demand') return await demandCommand(args.slice(1))
   if (args[0] === 'roles') return await roleCommand(args.slice(1))
+  if (args[0] === 'agent') return await agentCommand(args.slice(1))
+  if (args[0] === 'space') return await spaceCommand(args.slice(1))
   if (args[0] === 'open') return await openCommand(args.slice(1))
   if (args[0] === 'browser') return await browserCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))

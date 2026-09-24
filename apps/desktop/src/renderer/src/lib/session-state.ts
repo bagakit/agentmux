@@ -656,6 +656,7 @@ export function projectRuntimeEvent(
       workspacePath: core.session.workspacePath,
       updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
       agentSessionUpdatedAt: core.session.updatedAt,
+      ...(core.session.creation ? { creation: structuredClone(core.session.creation) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(core.session),
       // Mirror the Core fact independently of the display freshness gate below.
       // An accepted snapshot may clear an idle epoch without a new observation.

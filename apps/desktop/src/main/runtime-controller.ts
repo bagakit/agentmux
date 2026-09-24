@@ -246,6 +246,7 @@ function projectSession(
       ...(subject.agentSession.terminalPromptDelivery
         ? { terminalPromptDelivery: structuredClone(subject.agentSession.terminalPromptDelivery) }
         : {}),
+      ...(subject.agentSession.creation ? { creation: structuredClone(subject.agentSession.creation) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(subject.agentSession),
       ...(subject.agentSession.terminalOutputChannel
         ? { terminalOutputChannel: structuredClone(subject.agentSession.terminalOutputChannel) }
@@ -712,6 +713,7 @@ export class RuntimeController {
       const client = await this.connectedClient(request.hostId)
       let preparedTopic: PreparedScratchAgentTopic | null = null
       let created: AgentLaunchResult['created']
+      let creation: AgentLaunchResult['creation']
       try {
         if (request.scratchTopicId !== undefined) {
           if (!request.agentSessionId) {
@@ -728,7 +730,7 @@ export class RuntimeController {
         }
         // Topic 说明是 AgentMux 自己的话，作为 agentMuxNote 交给 Core 的出口署名进信封；
         // 用户的真实请求原样留在 prompt（user 段）。desktop 不自己拼信封，也不再把两者混成一段。
-        created = await client.createAgent({
+        const receipt = await client.createAgentWithDelivery({
           providerId: executor.providerId,
           executorId: request.executorId,
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
@@ -748,6 +750,8 @@ export class RuntimeController {
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })
+        created = receipt.session
+        creation = receipt.creation
       } catch (error) {
         try {
           if (preparedTopic) await this.scratchTopics.discardPreparedIdentity(preparedTopic)
@@ -759,7 +763,7 @@ export class RuntimeController {
         }
         throw error
       }
-      const result: AgentLaunchResult = { created, projectionFailures: [] }
+      const result: AgentLaunchResult = { created, creation, projectionFailures: [] }
       try {
         const session = await this.sessionByTarget(
           client,
@@ -813,6 +817,12 @@ export class RuntimeController {
       if (subject) return projectSession(subject, config, providerCapabilitiesFrom(client))
     }
     return null
+  }
+
+  async agentCreation(hostId: string, agentSessionId: string) {
+    const client = await this.connectedClient(hostId)
+    const session = client.agentSession(agentSessionId)
+    return await client.refreshAgentSession(agentSessionId, session.run)
   }
 
   async sessionTimeline(control: Extract<SessionControl, { kind: 'agent' }>) {
