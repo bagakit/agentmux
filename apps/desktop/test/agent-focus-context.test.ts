@@ -69,9 +69,13 @@ describe('Agent focus context', () => {
     expect(text).not.toContain('pmo-1')
   })
 
-  it('classifies only the fixed PMO Topic into the PMO lane', () => {
-    expect(focusLaneForSession('launcher:leader', 'launcher:leader')).toBe('pmo')
-    expect(focusLaneForSession('launcher:other', 'launcher:leader')).toBe('execution')
-    expect(focusLaneForSession(null, 'launcher:leader')).toBe('execution')
+  it('classifies default and SOUL Motes from raw Topic facts while unknown identity keeps its lane', () => {
+    const topic = { id: 'launcher:other', title: 'Other', directoryPath: _hygiene_fixturePath("scratch/topic--launcher--other"),
+      topicPath: _hygiene_fixturePath("scratch/topic--launcher--other/topic.md"), summary: '', collaborators: [] }
+    expect(focusLaneForSession('launcher:leader', [topic])).toBe('pmo')
+    expect(focusLaneForSession('launcher:other', [topic])).toBe('execution')
+    expect(focusLaneForSession('launcher:other', [{ ...topic, soul: { path: _hygiene_fixturePath("scratch/SOUL.md"), content: '# Identity', version: 'v1' } }])).toBe('pmo')
+    expect(focusLaneForSession('launcher:other', null)).toBeNull()
+    expect(focusLaneForSession(null, [topic])).toBe('execution')
   })
 })

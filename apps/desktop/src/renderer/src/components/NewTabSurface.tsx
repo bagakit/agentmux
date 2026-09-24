@@ -6,6 +6,7 @@ import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { currentHostCheck, hostCheckLabel } from '../lib/host-check'
 import { configuredExecutors } from '../lib/executors'
 import { currentExecutorDetection, executorDetectionLabel } from '../lib/executor-detection'
@@ -43,6 +44,7 @@ export function NewTabSurface({
   /** Hidden Workbench slots stay mounted, but only the visible launcher may own the warm PTY. */
   visible?: boolean
 }) {
+  const presentationActive = useWorkbenchPresentationActive()
   const [executorId, setExecutorId] = useState('codex')
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   // 草稿存进 store，按 regionId 归属。启动的一瞬间本组件就被换成 pending agent surface 而卸载，
@@ -178,14 +180,14 @@ export function NewTabSurface({
     // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
     // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
     // 所以这条 effect 多跑几次不会攒出多余进程。
-    if (workspace && visible) prewarmTerminal(workspace.id, launcherId)
-  }, [prewarmTerminal, visible, workspace?.id, launcherId, warmSlotHeld])
+    if (workspace && visible && presentationActive) prewarmTerminal(workspace.id, launcherId)
+  }, [prewarmTerminal, visible, presentationActive, workspace?.id, launcherId, warmSlotHeld])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
-    if (!visible) return
+    if (!visible || !presentationActive) return
     void detectExecutors(workspace.hostId)
-  }, [executors, detectExecutors, visible, workspace])
+  }, [executors, detectExecutors, visible, presentationActive, workspace])
 
   useEffect(() => {
     if (installedExecutors.some((executor) => executor.id === executorId)) return
@@ -352,7 +354,7 @@ export function NewTabSurface({
           const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
           return appendFileReferences('', [path])
         }, { separate: true })) }}
-        autoFocus={visible}
+        autoFocus={visible && presentationActive}
         value={prompt}
         onValueChange={setPrompt}
         // Cmd/Ctrl+Enter 从这里发车。挂在富文本输入上而不是整个 section 上：section 里还嵌着热终端的

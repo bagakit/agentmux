@@ -123,7 +123,7 @@ afterEach(() => {
 describe('Scratch Topic binding at new Tab creation boundaries', () => {
   it('copies the active Topic into the Tabbar plus Launcher', () => {
     const anchor = mountAnchor()
-    useAppStore.getState().openLauncher('group')
+    useAppStore.getState().openLauncher({ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'group', reveal: true })
     expect(createdTabExcept(anchor.id).topicId).toBe(topicId)
   })
 
@@ -209,7 +209,7 @@ describe('Scratch Topic binding at new Tab creation boundaries', () => {
       tabs: { [anchor.id]: anchor },
       layouts: { project: createWorkspaceLayout('group', [anchor.id]) }
     })
-    useAppStore.getState().openLauncher('group')
+    useAppStore.getState().openLauncher({ workspaceId: 'project', tabGroupId: 'group', reveal: true })
     expect(createdTabExcept(anchor.id).topicId).toBeUndefined()
   })
 

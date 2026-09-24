@@ -38,7 +38,7 @@ describe('PMO teams topic launcher', () => {
   })
 
   it('uses the same dragon identity and a persistent expanded state without decorative particles', async () => {
-    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true, position: { left: 80, top: 72 }, size: { width: 720, height: 520 } }))
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
     const avatar = container.querySelector('.pmo-teams-topic-compact-launcher__button img') as HTMLImageElement
     expect(avatar.getAttribute('src')).toContain('pmo-teams-topic-avatar')

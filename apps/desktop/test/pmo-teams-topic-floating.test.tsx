@@ -3,7 +3,6 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  clampPmoTeamsTopicFloatingState,
   requestPmoTeamsTopicFloatingClose,
   requestPmoTeamsTopicFloatingOpen,
   usePmoTeamsTopicFloatingState
@@ -14,7 +13,7 @@ function Harness() {
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
     createElement('div', { id: 'floating-panel', 'data-pmo-teams-topic-floating': true, tabIndex: -1 }),
-    createElement('output', { 'data-open': String(state.open), 'data-left': String(state.position.left), 'data-top': String(state.position.top), 'data-target': state.targetTabId ?? '' })
+    createElement('output', { 'data-open': String(state.open), 'data-preview': String(state.preview), 'data-keys': Object.keys(state).sort().join(','), 'data-target': state.targetTabId ?? '' })
   )
 }
 
@@ -38,40 +37,23 @@ describe('PMO teams topic floating workspace state', () => {
     window.localStorage.clear()
   })
 
-  it('clamps both the persisted window and draggable launcher inside the viewport', () => {
-    const next = clampPmoTeamsTopicFloatingState({
-      open: true,
-      maximized: false,
-      position: { left: 880, top: 680 },
-      size: { width: 900, height: 700 }
-    })
-    expect(next.size).toEqual({ width: 868, height: 652 })
-    expect(next.position).toEqual({ left: 16, top: 32 })
-  })
-
-  it('persists placement and open state, and returns focus to the launcher after close', async () => {
+  it('persists pinned open state, and returns focus to the launcher after close', async () => {
     await act(async () => root.render(createElement(Harness)))
     const trigger = container.querySelector('#trigger') as HTMLButtonElement
     trigger.focus()
     await act(async () => requestPmoTeamsTopicFloatingOpen())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
     expect(container.querySelector('output')?.dataset.open).toBe('true')
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":true')
     trigger.focus()
     await act(async () => requestPmoTeamsTopicFloatingOpen())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
     expect(document.activeElement).toBe(container.querySelector('#floating-panel'))
     await act(async () => requestPmoTeamsTopicFloatingClose())
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
     expect(container.querySelector('output')?.dataset.open).toBe('false')
     expect(document.activeElement).toBe(trigger)
     expect(window.localStorage.getItem('agentmux.leader-topic-floating.v1')).toContain('"open":false')
-  })
-
-  it('opens at the persisted position instead of recalculating from the bottom entry', async () => {
-    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, position: { left: 212, top: 148 }, size: { width: 720, height: 520 } }))
-    await act(async () => root.render(createElement(Harness)))
-    await act(async () => requestPmoTeamsTopicFloatingOpen())
-    expect(container.querySelector('output')?.dataset.left).toBe('212')
-    expect(container.querySelector('output')?.dataset.top).toBe('148')
   })
 
   it('keeps its target across closing and untargeted opens while explicit context choices replace it', async () => {
@@ -79,6 +61,7 @@ describe('PMO teams topic floating workspace state', () => {
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-one' }))
     expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-one')
     await act(async () => requestPmoTeamsTopicFloatingOpen())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
     expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-one')
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-two' }))
     expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-two')
@@ -86,13 +69,13 @@ describe('PMO teams topic floating workspace state', () => {
     expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-two')
   })
 
-  it('restores the selected target and geometry', async () => {
+  it('restores the selected target with only the current state fields', async () => {
     window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true, targetTabId: 'pmo-demand-one',
-      position: { left: 212, top: 148 }, size: { width: 640, height: 420 } }))
+      targetTopicId: 'launcher:analyst' }))
     await act(async () => root.render(createElement(Harness)))
     const output = container.querySelector('output')!
     expect(output.dataset.target).toBe('pmo-demand-one')
-    expect(output.dataset.left).toBe('212')
-    expect(output.dataset.top).toBe('148')
+    expect(output.dataset.preview).toBe('false')
+    expect(output.dataset.keys).toBe('open,preview,targetTabId,targetTopicId')
   })
 })

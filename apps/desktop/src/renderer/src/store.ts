@@ -88,6 +88,7 @@ import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
 import { resolveSessionPlacement } from './lib/session-placement'
 import { regionFocusClaimsCaret, type RegionFocusCause } from './lib/region-focus'
+import { scratchTopicsForWorkspace, scratchTopicsScope, type ScratchTopicsSnapshot } from './lib/scratch-topic-snapshots'
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
@@ -406,6 +407,7 @@ type AppState = {
   // 意图停在这里是惰性的（下一次投递会覆盖它）。
   regionCaretFocus: { regionId: string; nonce: number } | null
   workspaceFileRevisions: Record<string, number>
+  scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot>
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
   executorDetections: Record<string, ExecutorDetectionState>
@@ -602,7 +604,7 @@ type AppState = {
     signal?: AbortSignal
   ): Promise<AgentMuxControlResult>
   selectSession(id: string, tabGroupId?: string): void
-  openLauncher(tabGroupId?: string): void
+  openLauncher(target: { workspaceId: string; tabGroupId?: string; topicId?: string; reveal: boolean }): string | undefined
   closeTab(
     workspaceId: string,
     tabGroupId: string,
@@ -735,6 +737,7 @@ type AppState = {
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
   createScratchTopic(preset?: 'mote'): Promise<ScratchTopicSnapshot>
+  refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
   /**
@@ -874,19 +877,25 @@ type AppState = {
  * reveals, so Agent and Terminal Sessions share one execution MRU while PMO stays isolated.
  */
 function focusSessionContext(
-  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config' | 'agentNames' | 'timelines'>,
+  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config' | 'agentNames' | 'timelines' | 'scratchTopicSnapshots'>,
   sessionId: string | null,
   observedSession?: SessionSnapshot
 ): AgentFocusContext {
   if (sessionId === null) return focusExecution(state.agentFocus, null)
   const session = observedSession ?? state.sessions.find((candidate) => candidate.id === sessionId)
   if (!session) return state.agentFocus
-  return focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo'
+  const lane = session ? focusLaneForSession(topicIdForSession(state.config, session),
+    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session))) : 'execution'
+  if (lane === null) return state.agentFocus
+  return lane === 'pmo'
     ? focusPmo(state.agentFocus, sessionId)
     : focusExecution(state.agentFocus, sessionId, Date.now(), session
       ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id])
       : undefined)
 }
+
+// In-flight filesystem reads share the original snapshot owner. No identity registry is stored.
+const scratchTopicReads = new Map<string, { key: string; promise: Promise<void> }>()
 
 function emptyRuntimeSnapshot(): RuntimeSnapshot {
   return {
@@ -2122,7 +2131,8 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
     const surface = tab?.regions[tab.layout.activeRegionId]
     if (surface?.kind !== 'agent') return
     const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
-    if (session && focusLaneForSession(topicIdForSession(get().config, session), PMO_TEAMS_TOPIC_ID) === 'pmo') {
+    if (session && focusLaneForSession(topicIdForSession(get().config, session),
+      scratchTopicsForWorkspace(get().scratchTopicSnapshots, workspaceForSession(get().config, session))) === 'pmo') {
       get().focusPmoSession(session.id)
     }
   }
@@ -2218,6 +2228,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   closeRegionRequest: null,
   regionCaretFocus: null,
   workspaceFileRevisions: {},
+  scratchTopicSnapshots: {},
   fileExplorerStates: {},
   viewModes: {},
   editorWordWrap: false,
@@ -2537,7 +2548,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
-        (session) => focusLaneForSession(topicIdForSession(config, session), PMO_TEAMS_TOPIC_ID),
+        (session) => focusLaneForSession(topicIdForSession(config, session),
+          scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspaceForSession(config, session))),
         new Set([...persistedSessionIds].filter((id) => (
           !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
         )))
@@ -3674,7 +3686,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const createdTab = createWorkbenchTab(tabId, surface)
     const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
-    const focusLane = focusLaneForSession(sessionTopicId, PMO_TEAMS_TOPIC_ID)
     const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
     // Tab 已在某个分组里就只需激活；新建时必须真的挂上。挂不上（`preferredTabGroupId` 指向一个
     // 已不存在的分组）原先静默回落成原 layout：Tab 记录进了 state.tabs 而不在任何 tabOrder 里。
@@ -3692,37 +3703,45 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
       regionCaretFocus: null,
-      agentFocus: focusLane === 'pmo'
-        ? focusPmo(state.agentFocus, id)
-        : focusSessionContext(state, id),
+      agentFocus: focusSessionContext(state, id),
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspace.id]: nextLayout },
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
       displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
   },
-  openLauncher(tabGroupId) {
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+  openLauncher({ workspaceId, tabGroupId, topicId: requestedTopicId, reveal }) {
+    if (reveal && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const state = get()
-    const workspaceId = state.activeWorkspaceId
-    const layout = workspaceId ? state.layouts[workspaceId] : undefined
-    if (!workspaceId || !layout) return
+    const layout = state.layouts[workspaceId]
+    if (!layout) {
+      get().reportError(new Error('The Workspace layout is still restoring'))
+      return
+    }
     const targetTabGroupId = tabGroupId ?? layout.activeGroupId
-    const topicId = inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
+    const topicId = isScratchWorkspaceId(workspaceId)
+      ? requestedTopicId ?? inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
+      : undefined
     const tab = newLauncherTab(workspaceId, topicId)
-    // 同 selectSession：挂不上就报错并放弃，不留一条永不显示的孤儿 Tab。这是同步 void 动作
-    // （唯一调用方是 Tab Bar 上的「+」），所以不抛。
+    // Placement failure is visible without leaving an orphan View or throwing from a UI handler.
     const nextLayout = addTabPlacement(layout, targetTabGroupId, tab.id)
     if (!nextLayout) {
       get().reportError(new Error('The Tab Group is no longer available'))
       return
     }
     set((state) => ({
-      mainSurface: 'workbench',
-      regionCaretFocus: null,
+      ...(reveal ? { activeWorkspaceId: workspaceId, mainSurface: 'workbench' as const, regionCaretFocus: null } : {}),
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: { ...state.layouts, [workspaceId]: nextLayout }
+      layouts: { ...state.layouts, [workspaceId]: reveal ? nextLayout : {
+        ...nextLayout,
+        activeGroupId: layout.activeGroupId,
+        groups: nextLayout.groups.map(group => {
+          const original = layout.groups.find(candidate => candidate.id === group.id)
+          return original ? { ...group, activeTabId: original.activeTabId, recentTabIds: original.recentTabIds } : group
+        })
+      } }
     }))
+    return tab.id
   },
   closeTab(workspaceId, tabGroupId, tabId, options) {
     const state = get()
@@ -4228,8 +4247,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   focusPmoSession(id) {
     set((state) => {
       const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
-      if (session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) !== 'pmo') {
-        return { agentFocus: focusSessionContext(state, id) }
+      if (id && !session) return state
+      if (session) {
+        const lane = focusLaneForSession(topicIdForSession(state.config, session),
+          scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session)))
+        if (lane === null) return state
+        if (lane === 'execution') return { agentFocus: focusSessionContext(state, id) }
       }
       return { agentFocus: focusPmo(state.agentFocus, id) }
     })
@@ -4758,6 +4781,51 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? { config: { ...current.config, workspaces: [...current.config.workspaces, workspace] } }
       : current)
     await get().selectWorkspace(workspace.id)
+  },
+  refreshScratchTopics(workspaceId, force = false) {
+    const state = get()
+    const workspace = state.config?.workspaces.find(candidate => candidate.id === workspaceId)
+    if (!workspace || !isScratchWorkspaceId(workspace.id)) return Promise.resolve()
+    const scope = scratchTopicsScope(workspace)
+    const revision = state.workspaceFileRevisions[workspaceId] ?? 0
+    const key = JSON.stringify([scope, revision])
+    const pending = scratchTopicReads.get(workspaceId)
+    if (pending?.key === key) return pending.promise
+    const previous = state.scratchTopicSnapshots[workspaceId]
+    if (!force && previous?.scope === scope && previous.revision === revision && !previous.reading) return Promise.resolve()
+    set(current => ({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
+      scope, revision, topics: previous?.scope === scope ? previous.topics : null, error: null, reading: true
+    } } }))
+    const stillCurrent = (): boolean => {
+      const current = get()
+      const currentWorkspace = current.config?.workspaces.find(candidate => candidate.id === workspaceId)
+      return Boolean(currentWorkspace && scratchTopicsScope(currentWorkspace) === scope &&
+        (current.workspaceFileRevisions[workspaceId] ?? 0) === revision && scratchTopicReads.get(workspaceId)?.promise === job)
+    }
+    const job = api.scratch.listTopics(workspaceId).then(topics => {
+      if (!stillCurrent()) return
+      const retained = get().scratchTopicSnapshots[workspaceId]?.topics
+      const errors = topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] : [])
+      const facts = topics.map(topic => {
+        const previousTopic = retained?.find(candidate => candidate.id === topic.id)
+        // A failed file read is no new identity fact. Keep the last complete object,
+        // with the read failure alongside it rather than guessing away its SOUL.
+        return topic.readError && previousTopic && !previousTopic.readError ? previousTopic : topic
+      })
+      set(current => ({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
+        scope, revision, topics: facts, error: errors.length ? errors.join(' · ') : null, reading: false
+      } } }))
+    }).catch(error => {
+      if (!stillCurrent()) return
+      set(current => ({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
+        scope, revision, topics: current.scratchTopicSnapshots[workspaceId]?.topics ?? null,
+        error: presentError(error), reading: false
+      } } }))
+    }).finally(() => {
+      if (scratchTopicReads.get(workspaceId)?.promise === job) scratchTopicReads.delete(workspaceId)
+    })
+    scratchTopicReads.set(workspaceId, { key, promise: job })
+    return job
   },
   async createScratchTopic(preset) {
     const state = get()

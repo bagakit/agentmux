@@ -1,4 +1,4 @@
-import { sessionPresentationById } from '../lib/session-presentation'
+import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { useRef } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '../lib/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
@@ -86,7 +86,7 @@ export function AgentSessionComposer({
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const lifecycleFailure = useAppStore(state => state.errorNoticeContext?.lifecycle)
   const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
-  const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
+  const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
   const setViewMode = useAppStore((state) => state.setViewMode)
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
   const timeline = useAppStore((state) => state.timelines?.[sessionId])

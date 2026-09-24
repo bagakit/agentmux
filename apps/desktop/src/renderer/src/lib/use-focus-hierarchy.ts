@@ -3,12 +3,13 @@ import { useShallow } from 'zustand/react/shallow'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceBranchesSnapshot } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore } from '../store'
+import { useScratchTopics } from '../hooks/useScratchTopics'
 import { api } from './api'
 import { presentError } from './error-presentation'
 import { EMPTY_FOCUS_HIERARCHY, focusProjectRoots, retainedWorktreeFacts, type FocusHierarchyFacts } from './focus-project-lanes'
 import type { FocusContext } from './focus-context'
 
-type Snapshot = { id: string; topics?: ScratchTopicSnapshot[]; branches?: WorkspaceBranchesSnapshot; error?: string }
+type Snapshot = { id: string; topics?: readonly ScratchTopicSnapshot[]; branches?: WorkspaceBranchesSnapshot; error?: string }
 /** Query only represented workspaces; unchanged scopes reuse their requests across unrelated updates. */
 export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConfig | null) {
   const [facts, setFacts] = useState<FocusHierarchyFacts>(EMPTY_FOCUS_HIERARCHY)
@@ -24,6 +25,8 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     }
     return [...scopes.values()]
   }, [rows, config, facts])
+  const scratchScope = scopes.find(scope => isScratchWorkspaceId(scope.id))
+  const { topics: scratchTopics, error: scratchError } = useScratchTopics(scratchScope?.id ?? null)
   const revisions = useAppStore(useShallow(state => scopes.map(workspace => state.workspaceFileRevisions[workspace.id] ?? 0)))
   const signature = JSON.stringify(scopes.map((scope, index) => [scope.id, scope.path, scope.branch, revisions[index]]))
   const requests = useRef(new Map<string, Promise<Snapshot>>())
@@ -31,12 +34,12 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
   useEffect(() => {
     let active = true
     const jobs = scopes.map((scope, index) => {
+      if (isScratchWorkspaceId(scope.id)) return Promise.resolve<Snapshot>({ id: scope.id,
+        ...(scratchTopics ? { topics: scratchTopics } : {}), ...(scratchError ? { error: `${scope.name}: ${scratchError}` } : {}) })
       const key = JSON.stringify([scope.id, scope.path, scope.branch, revisions[index]])
       let job = requests.current.get(key)
       if (!job) {
-        job = (isScratchWorkspaceId(scope.id)
-          ? api.scratch.listTopics(scope.id).then(topics => ({ id: scope.id, topics }))
-          : api.workspaces.listBranches(scope.id).then(branches => ({ id: scope.id, branches })))
+        job = api.workspaces.listBranches(scope.id).then(branches => ({ id: scope.id, branches }))
           .catch(cause => ({ id: scope.id, error: `${scope.name}: ${presentError(cause)}` }))
         requests.current.set(key, job)
       }
@@ -59,6 +62,6 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     })
     return () => { active = false }
     // Immutable signature includes each owned scope and its revision; byte/state changes don't query again.
-  }, [signature])
+  }, [signature, scratchTopics, scratchError])
   return { facts, errors }
 }
