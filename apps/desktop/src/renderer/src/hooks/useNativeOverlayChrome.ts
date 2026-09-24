@@ -31,12 +31,12 @@ export function useNativeOverlayChrome(): string | undefined {
       pending = { regions, ...(notice ? { warning: notice } : {}) }
       void drain()
     })
-    const unsubscribePointer = api.ui.onNativeBrowserPointer(overlays.dismissAtPoint)
+    const unsubscribeInput = api.ui.onNativeBrowserInput(overlays.handleNativeInput)
     return () => {
       disposed = true
       pending = undefined
       overlays.dispose()
-      unsubscribePointer()
+      unsubscribeInput()
       unsubscribe()
       void api.ui.publishNativeOverlays([]).catch(() => {})
     }

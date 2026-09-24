@@ -255,6 +255,8 @@ export interface AppLinkHost {
 }
 
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
+export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView }
+export type NativeBrowserPageInput = { type: 'pointer'; event: Electron.MouseInputEvent } | { type: 'escape' }
 const BROWSER_SELECTION_TIMEOUT_MS = 120_000
 const BROWSER_MARKER_MAX_COUNT = 50
 const BROWSER_MARKER_MAX_COORDINATE = 10_000_000
@@ -290,7 +292,7 @@ export function normalizeBrowserUrl(value: string): string {
 
 export class BrowserViewManager {
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
-  onNativePointer: ((bounds: BrowserBounds, input: Electron.InputEvent) => void) | undefined
+  onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   private readonly entries = new Map<string, BrowserEntry>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private demonstrationCapture: { entry: BrowserEntry; view: WebContentsView; contents: WebContents; capture: BrowserDemonstrationCapture } | null = null
@@ -339,6 +341,13 @@ export class BrowserViewManager {
   visibleNativeBounds(): BrowserBounds[] {
     return [...this.entries.values()].flatMap(entry =>
       entry.visible && entry.bounds && !entry.view.webContents.isDestroyed() ? [{ ...entry.bounds }] : [])
+  }
+
+  /** O(1) lookup of the current physically attached owner; no second native Browser registry. */
+  nativeOwner(browserId: string): NativeBrowserOwner | undefined {
+    const entry = this.entries.get(browserId)
+    if (!entry || !entry.visible || !entry.bounds || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || !entry.view.getVisible()) return
+    return { browserId, bounds: entry.view.getBounds(), view: entry.view }
   }
 
   /** Actual OS owners, including out-of-process frames; a shared PID is reported only once. */
@@ -2009,7 +2018,16 @@ export class BrowserViewManager {
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     const contents = view.webContents
     contents.on('input-event', (_event, input) => {
-      if (this.owns(entry, view) && entry.visible && entry.bounds) this.onNativePointer?.(entry.bounds, input)
+      if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
+      const owner = this.nativeOwner(entry.id)
+      if (owner) this.onNativeInput(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
+    })
+    contents.on('before-input-event', (event, input) => {
+      // Only this real page's non-IME Escape may be consumed by its open containing float.
+      // Electron Input.isComposing is authoritative; input-event keyboard modifiers are not.
+      if (!this.onNativeInput || !this.owns(entry, view) || input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
+      const owner = this.nativeOwner(entry.id)
+      if (owner && this.onNativeInput(owner, { type: 'escape' })) event.preventDefault()
     })
     const guardNavigation = (event: { url: string; isMainFrame: boolean; preventDefault(): void }): void => {
       // 应用链接在闸门**之前**分流。闸门本身逐字不变：`customapp://` 装不进 WebContentsView，它要的不是

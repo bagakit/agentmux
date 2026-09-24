@@ -40,13 +40,29 @@ vi.mock('electron', () => ({ WebContentsView: class {
 function fixture() {
   const contents = { capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => Buffer.from('chrome-frame') })),
     getZoomFactor: () => 1.25, sendInputEvent: vi.fn(), isDestroyed: () => false, focus: vi.fn() }
+  const pageView = originalPage({ x: 100, y: 100, width: 600, height: 500 })
   const window = { getContentBounds: () => ({ width: 1000, height: 700 }), webContents: contents,
-    contentView: { addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false }
-  window.contentView.addChildView.mockImplementation(view => { view.ownerWindow = window })
-  window.contentView.removeChildView.mockImplementation(view => { view.ownerWindow = null })
+    contentView: { children: [pageView] as any[], addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false }
+  window.contentView.addChildView.mockImplementation(view => {
+    const index = window.contentView.children.indexOf(view)
+    if (index >= 0) window.contentView.children.splice(index, 1)
+    window.contentView.children.push(view); view.ownerWindow = window
+  })
+  window.contentView.removeChildView.mockImplementation(view => {
+    const index = window.contentView.children.indexOf(view)
+    if (index >= 0) window.contentView.children.splice(index, 1)
+    view.ownerWindow = null
+  })
   const visible = vi.fn(() => [{ x: 100, y: 100, width: 600, height: 500 }])
+  const pages = new Map([['page', pageView]])
+  const nativeOwner = vi.fn((browserId: string) => { const view = pages.get(browserId); return view ? { browserId, bounds: view.getBounds(), view } : undefined })
   const warning = vi.fn(), pointer = vi.fn()
-  return { owner: new NativeOverlaySurfaces(window as any, visible, warning, pointer), window, contents, visible, warning, pointer }
+  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner } as any, warning, pointer), window, contents, visible, nativeOwner, pages, pageView, warning, pointer }
+}
+function originalPage(bounds: { x: number; y: number; width: number; height: number }) {
+  const page = { bounds, getBounds: () => page.bounds, getVisible: () => true,
+    setBounds: vi.fn(), setVisible: vi.fn(), webContents: { close: vi.fn(), focus: vi.fn(), sendInputEvent: vi.fn() } }
+  return page
 }
 const float = { id: 'chrome-1', bounds: { x: 120, y: 150, width: 100, height: 80 }, radius: 8 }
 
@@ -101,7 +117,7 @@ function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
           }, removeChildView() {}
         }
       };
-      const owner = new Owner(window, () => [{ x: 0, y: 0, width: 800, height: 600 }], () => {}, () => {});
+      const owner = new Owner(window, { visibleNativeBounds: () => [{ x: 0, y: 0, width: 800, height: 600 }], nativeOwner: () => undefined }, () => {}, () => {});
       const receipt = await owner.update([{ id: 'chrome-1', bounds: { x: 20, y: 20, width: 100, height: 100 }, radius: 11.25 }]);
       await new Promise(resolve => setTimeout(resolve, 20));
       owner.dispose();
@@ -116,6 +132,54 @@ function lateDocumentAfterRemoval(geometry: 'radius' | 'reorder'): {
 
 beforeEach(() => { fake.views.length = 0; fake.load = null; fake.image = null; fake.radiusError = null })
 describe('actual native Chrome owner', () => {
+  it('raises only the original contained page, preserves background owners, and keeps a later float above it', async () => {
+    const { owner, window, contents, visible, pages, pageView, nativeOwner, pointer } = fixture()
+    const inside = originalPage({ x: 130, y: 160, width: 80, height: 60 })
+    const unrelated = originalPage({ x: 800, y: 500, width: 100, height: 100 })
+    pages.set('inside', inside); pages.set('unrelated', unrelated)
+    window.contentView.children.push(inside, unrelated)
+    visible.mockReturnValue([...pages.values()].map(view => view.getBounds()))
+    const containing = { ...float, browserStages: [{ browserId: 'inside', bounds: inside.getBounds() }] }
+    expect(await owner.update([containing])).toEqual({ projected: 1, capturedPixels: 8000 })
+    expect(fake.views).toHaveLength(1)
+    expect(window.contentView.children).toEqual([pageView, unrelated, fake.views[0], inside])
+    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[0], fake.views[0], inside])
+    const origin = nativeOwner('inside') as any
+    owner.forwardBrowserInput(origin, { type: 'pointer', event: { type: 'mouseMove', x: 20, y: 20 } })
+    expect(pointer.mock.calls).toEqual([[{ type: 'pointerMove', browserId: 'inside', overlayId: 'chrome-1', x: 120, y: 144, button: 0 }]])
+    expect(owner.forwardBrowserInput(origin, { type: 'escape' })).toBe(true)
+    expect(pointer.mock.calls.at(-1)).toEqual([{ type: 'escape', browserId: 'inside', overlayId: 'chrome-1' }])
+    window.contentView.addChildView.mockClear()
+    const later = { id: 'chrome-2', bounds: { x: 140, y: 170, width: 30, height: 30 }, radius: 2 }
+    expect(await owner.update([containing, later])).toEqual({ projected: 2, capturedPixels: 8900 })
+    expect(window.contentView.children).toEqual([pageView, unrelated, fake.views[0], inside, fake.views[1]])
+    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[1], fake.views[1]])
+    pointer.mockClear()
+    owner.forwardBrowserInput(origin, { type: 'pointer', event: { type: 'mouseDown', x: 20, y: 20, button: 'left' } })
+    expect(pointer).not.toHaveBeenCalled()
+    for (const page of [pageView, inside, unrelated]) {
+      expect(page.setBounds).not.toHaveBeenCalled(); expect(page.setVisible).not.toHaveBeenCalled(); expect(page.webContents.close).not.toHaveBeenCalled()
+      expect(page.webContents.focus).not.toHaveBeenCalled(); expect(page.webContents.sendInputEvent).not.toHaveBeenCalled()
+    }
+    expect(contents.sendInputEvent).not.toHaveBeenCalled()
+    expect(await owner.update([])).toEqual({ projected: 0, capturedPixels: 0 })
+    expect(window.contentView.children).toEqual([pageView, unrelated, inside])
+    owner.dispose()
+  })
+  it.each(['wrong-id', 'outside-stage', 'outside-float'] as const)('cannot promote a page from an invalid %s containment fact', async defect => {
+    const { owner, window, pages, pageView, pointer } = fixture()
+    const inside = originalPage({ x: 130, y: 160, width: 80, height: 60 })
+    pages.set('inside', inside); window.contentView.children.push(inside)
+    const stage = { browserId: defect === 'wrong-id' ? 'absent' : 'inside', bounds: defect === 'outside-stage' ? { x: 400, y: 400, width: 80, height: 60 } : inside.getBounds() }
+    const containing = { ...float, ...(defect === 'outside-float' ? { bounds: { x: 120, y: 150, width: 30, height: 30 } } : {}), browserStages: [stage] }
+    await owner.update([containing])
+    expect(fake.views).toHaveLength(1)
+    expect(window.contentView.children).toEqual([pageView, inside, fake.views[0]])
+    expect(window.contentView.addChildView.mock.calls.map(call => call[0])).toEqual([fake.views[0], fake.views[0]])
+    expect(owner.forwardBrowserInput({ browserId: 'inside', bounds: inside.getBounds(), view: inside } as any, { type: 'escape' })).toBe(false)
+    expect(pointer).not.toHaveBeenCalled()
+    owner.dispose()
+  })
   it.each(['radius', 'reorder'] as const)('consumes a removed owner document rejection after synchronous %s failure', geometry => {
     const result = lateDocumentAfterRemoval(geometry)
     expect(result.views).toBe(1)
@@ -286,26 +350,28 @@ describe('actual native Chrome owner', () => {
     owner.dispose()
   })
   it('relays only ordinary native outside pointer coordinates while retaining page input and focus', async () => {
-    const { owner, pointer, contents, warning } = fixture()
+    const { owner, pointer, contents, warning, pageView } = fixture()
     const page = { x: 100, y: 100, width: 600, height: 500 }
-    owner.forwardBrowserPointer(page, { type: 'mouseDown', x: 300, y: 50, button: 'left' } as Electron.MouseInputEvent)
+    const origin = { browserId: 'page', bounds: page, view: pageView } as any
+    const send = (event: Electron.MouseInputEvent) => owner.forwardBrowserInput(origin, { type: 'pointer', event })
+    send({ type: 'mouseDown', x: 300, y: 50, button: 'left' })
     expect(pointer).not.toHaveBeenCalled()
     await owner.update([float])
-    owner.forwardBrowserPointer(page, { type: 'mouseDown', x: 300, y: 50, button: 'left' } as Electron.MouseInputEvent)
-    expect(pointer.mock.calls).toEqual([[{ x: 320, y: 120, button: 0 }]])
-    owner.forwardBrowserPointer(page, { type: 'mouseDown', x: 25, y: 57, button: 'left' } as Electron.MouseInputEvent)
-    owner.forwardBrowserPointer(page, { type: 'mouseMove', x: 300, y: 50 } as Electron.MouseInputEvent)
-    owner.forwardBrowserPointer(page, { type: 'mouseDown', x: -1, y: 50, button: 'left' } as Electron.MouseInputEvent)
-    expect(pointer).toHaveBeenCalledTimes(1)
+    send({ type: 'mouseDown', x: 300, y: 50, button: 'left' })
+    expect(pointer.mock.calls).toEqual([[{ type: 'pointerDown', browserId: 'page', x: 320, y: 120, button: 0 }]])
+    send({ type: 'mouseDown', x: 25, y: 57, button: 'left' })
+    send({ type: 'mouseMove', x: 300, y: 50 })
+    send({ type: 'mouseDown', x: -1, y: 50, button: 'left' })
+    expect(pointer).toHaveBeenCalledTimes(2)
     expect(contents.sendInputEvent).not.toHaveBeenCalled()
     expect(contents.focus).not.toHaveBeenCalled()
     expect(contents.capturePage).toHaveBeenCalledTimes(1)
     pointer.mockImplementationOnce(() => { throw new Error('Renderer notice transport closed') })
-    expect(() => owner.forwardBrowserPointer(page, { type: 'mouseDown', x: 300, y: 50, button: 'left' } as Electron.MouseInputEvent)).not.toThrow()
-    expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('outside-click notice could not reach'))
+    expect(() => send({ type: 'mouseDown', x: 300, y: 50, button: 'left' })).not.toThrow()
+    expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('floating-panel notice could not reach'))
     owner.dispose()
-    owner.forwardBrowserPointer(page, { type: 'mouseDown', x: 300, y: 50, button: 'left' } as Electron.MouseInputEvent)
-    expect(pointer).toHaveBeenCalledTimes(2)
+    send({ type: 'mouseDown', x: 300, y: 50, button: 'left' })
+    expect(pointer).toHaveBeenCalledTimes(3)
   })
   it('zero floats do no Browser traversal, native allocation, capture or polling', async () => {
     const { owner, visible, contents } = fixture()
@@ -317,12 +383,12 @@ describe('actual native Chrome owner', () => {
     expect(owner.resourceProcessIds()).toEqual([])
   })
   it('an unrelated float does not allocate or touch any Browser view', async () => {
-    const { owner, contents, pointer } = fixture()
+    const { owner, contents, pointer, pageView } = fixture()
     expect(await owner.update([{ ...float, bounds: { x: 5, y: 5, width: 30, height: 30 } }])).toEqual({ projected: 0, capturedPixels: 0 })
     expect(contents.capturePage).not.toHaveBeenCalled()
     expect(fake.views).toEqual([])
-    owner.forwardBrowserPointer({ x: 100, y: 100, width: 600, height: 500 }, { type: 'mouseDown', x: 300, y: 50, button: 'left' } as Electron.MouseInputEvent)
-    expect(pointer.mock.calls).toEqual([[{ x: 320, y: 120, button: 0 }]])
+    owner.forwardBrowserInput({ browserId: 'page', bounds: pageView.getBounds(), view: pageView } as any, { type: 'pointer', event: { type: 'mouseDown', x: 300, y: 50, button: 'left' } })
+    expect(pointer.mock.calls).toEqual([[{ type: 'pointerDown', browserId: 'page', x: 320, y: 120, button: 0 }]])
   })
   it('captures only the intersecting original Chrome rectangle and disposes on close', async () => {
     const { owner, contents, window } = fixture()
