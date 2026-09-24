@@ -142,13 +142,6 @@ export class AgentMuxPluginRegistry {
     if (this.plugins.has(plugin.id)) {
       throw new AgentMuxError(`AgentMux plugin already registered: ${plugin.id}`, 'DUPLICATE_PLUGIN')
     }
-    const providerIds = new Set(this.providers.list().map((provider) => provider.id))
-    for (const provider of plugin.providers ?? []) {
-      if (providerIds.has(provider.id)) {
-        throw new AgentMuxError(`Agent provider already registered: ${provider.id}`, 'DUPLICATE_PROVIDER')
-      }
-      providerIds.add(provider.id)
-    }
     for (const skill of plugin.skills ?? []) {
       if (this.skills.has(skill.id)) throw new AgentMuxError(`AgentMux Skill already registered: ${skill.id}`, 'DUPLICATE_PLUGIN_CONTRIBUTION')
     }
@@ -158,7 +151,7 @@ export class AgentMuxPluginRegistry {
     for (const capability of plugin.pmoCapabilities ?? []) {
       if (this.pmoCapabilities.has(capability.id)) throw new AgentMuxError(`PMO capability already registered: ${capability.id}`, 'DUPLICATE_PLUGIN_CONTRIBUTION')
     }
-    for (const provider of plugin.providers ?? []) this.providers.register(provider)
+    this.providers.registerAll(plugin.providers ?? [])
     for (const skill of plugin.skills ?? []) this.skills.set(skill.id, { ...skill })
     for (const command of plugin.commands ?? []) this.commands.set(command.id, { ...command })
     for (const capability of plugin.pmoCapabilities ?? []) this.pmoCapabilities.set(capability.id, { ...capability, inputSchema: { ...capability.inputSchema }, outputSchema: { ...capability.outputSchema } })

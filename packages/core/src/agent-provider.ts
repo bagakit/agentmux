@@ -377,15 +377,24 @@ export class AgentProviderRegistry {
   private readonly providers = new Map<AgentProviderId, AgentProvider>()
 
   constructor(providers: readonly AgentProvider[] = BUILT_IN_AGENT_PROVIDERS) {
-    for (const provider of providers) this.register(provider)
+    this.registerAll(providers)
   }
 
   register(provider: AgentProvider): void {
-    assertManagedHookContribution(provider)
-    if (this.providers.has(provider.id)) {
-      throw new AgentMuxError(`Agent provider already registered: ${provider.id}`, 'DUPLICATE_PROVIDER')
+    this.registerAll([provider])
+  }
+
+  /** Reject the whole contribution before making any of its Providers discoverable. */
+  registerAll(providers: readonly AgentProvider[]): void {
+    const ids = new Set(this.providers.keys())
+    for (const provider of providers) {
+      assertManagedHookContribution(provider)
+      if (ids.has(provider.id)) {
+        throw new AgentMuxError(`Agent provider already registered: ${provider.id}`, 'DUPLICATE_PROVIDER')
+      }
+      ids.add(provider.id)
     }
-    this.providers.set(provider.id, provider)
+    for (const provider of providers) this.providers.set(provider.id, provider)
   }
 
   replace(provider: AgentProvider): void {

@@ -50,6 +50,71 @@ describe('AgentMux plugin boundary', () => {
     })).toThrow('Duplicate plugin Skill id')
   })
 
+  it('keeps existing contributions after a rejected Provider batch and accepts the corrected plugin', () => {
+    const builtins = new AgentProviderRegistry()
+    const pi = builtins.get('pi'), codex = builtins.get('codex'), claude = builtins.get('claude')
+    const registry = new AgentMuxPluginRegistry([{
+      id: 'existing', version: '1.0.0', providers: [pi],
+      skills: [{ id: 'existing.skill', name: 'Existing', description: 'Existing skill' }],
+      commands: [{ id: 'existing.command', description: 'Existing command' }],
+      pmoCapabilities: [{ id: 'existing.observe', version: '1.0.0', effect: 'observe', inputSchema: {}, outputSchema: {}, requiredAuthority: 'observe' }]
+    }])
+    const snapshot = () => ({
+      catalog: registry.catalog(), plugins: registry.list(), skills: registry.skillsList(),
+      commands: registry.commandsList(), pmo: registry.pmoCapabilitiesList()
+    })
+    const before = snapshot()
+    expect(before.catalog.map(provider => provider.id)).toEqual(['pi'])
+    expect(before.plugins.map(plugin => plugin.id)).toEqual(['existing'])
+    expect(before.skills.map(skill => skill.id)).toEqual(['existing.skill'])
+    expect(before.commands.map(command => command.id)).toEqual(['existing.command'])
+    expect(before.pmo.map(capability => capability.id)).toEqual(['existing.observe'])
+    const candidate = {
+      id: 'candidate', version: '1.0.0', providers: [codex, claude],
+      skills: [{ id: 'candidate.skill', name: 'Candidate', description: 'Candidate skill' }],
+      commands: [{ id: 'candidate.command', description: 'Candidate command' }],
+      pmoCapabilities: [{ id: 'candidate.observe', version: '1.0.0', effect: 'observe' as const, inputSchema: {}, outputSchema: {}, requiredAuthority: 'observe' }]
+    }
+    const incompleteClaude = { ...claude }
+    delete incompleteClaude.planManagedHooks
+    expect(() => registry.register({ ...candidate, providers: [codex, incompleteClaude] }))
+      .toThrow(expect.objectContaining({ code: 'INVALID_AGENT_PROVIDER' }))
+    expect(snapshot()).toEqual(before)
+    expect(registry.providers.get('pi')).toBe(pi)
+    expect(() => registry.providers.get('codex')).toThrow('Unknown agent provider')
+
+    registry.register(candidate)
+    expect(registry.catalog().map(provider => provider.id)).toEqual(['pi', 'codex', 'claude'])
+    expect(registry.list().map(plugin => plugin.id)).toEqual(['existing', 'candidate'])
+    expect(registry.skillsList().map(skill => skill.id)).toEqual(['existing.skill', 'candidate.skill'])
+    expect(registry.commandsList().map(command => command.id)).toEqual(['existing.command', 'candidate.command'])
+    expect(registry.pmoCapabilitiesList().map(capability => capability.id)).toEqual(['existing.observe', 'candidate.observe'])
+    expect(registry.providers.get('pi')).toBe(pi)
+    expect(registry.providers.get('codex')).toBe(codex)
+    expect(registry.providers.get('claude')).toBe(claude)
+    registry.unregister('candidate')
+    expect(snapshot()).toEqual(before)
+    expect(registry.providers.get('pi')).toBe(pi)
+  })
+
+  it('rejects existing and within-batch duplicate Providers before admitting any new object', () => {
+    const builtins = new AgentProviderRegistry()
+    const pi = builtins.get('pi'), codex = builtins.get('codex')
+    const registry = new AgentMuxPluginRegistry([{ id: 'existing', version: '1.0.0', providers: [pi] }])
+    const before = registry.catalog()
+    expect(before.map(provider => provider.id)).toEqual(['pi'])
+    for (const providers of [[codex, pi], [codex, codex]]) {
+      expect(() => registry.register({ id: 'candidate', version: '1.0.0', providers }))
+        .toThrow(expect.objectContaining({ code: 'DUPLICATE_PROVIDER' }))
+      expect(registry.catalog()).toEqual(before)
+      expect(registry.providers.get('pi')).toBe(pi)
+      expect(registry.list().map(plugin => plugin.id)).toEqual(['existing'])
+    }
+    registry.register({ id: 'candidate', version: '1.0.0', providers: [codex] })
+    expect(registry.providers.get('codex')).toBe(codex)
+    expect(registry.catalog().map(provider => provider.id)).toEqual(['pi', 'codex'])
+  })
+
   it('unregisters every contribution so a candidate plugin can be rolled back', () => {
     const registry = new AgentMuxPluginRegistry()
     registry.register({ id: 'candidate', version: '1.0.0', skills: [{ id: 'candidate.skill', name: 'Candidate', description: 'Candidate' }], pmoCapabilities: [{ id: 'candidate.observe', version: '1.0.0', effect: 'observe', inputSchema: {}, outputSchema: {}, requiredAuthority: 'pmo.read' }] })
