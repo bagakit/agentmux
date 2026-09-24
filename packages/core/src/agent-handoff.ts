@@ -1,19 +1,9 @@
-/**
- * 交出去（Handoff）与派出去（Dispatch）。
- *
- * 两者的区别只有一个，但它决定了**谁在等**：
- *   - **Handoff** 是交出去——交完原 Owner 就不再等了，责任跟着工作一起走；
- *   - **Dispatch** 是派出去——派完原 Owner 仍然担着，要接问题、接升级、接收工、负责收尾。
- *
- * 把两者混成一件事，就会出现"我以为你在管、你以为我交出去了"的悬空工作。
- *
- * Core 只持有**通信事实**：谁派给谁、发生过哪些事件。它不做自动调度、不选 Agent、
- * 不评判结果——那些是 Core 之上的事。
- */
+import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
+import { AgentMuxError } from './errors.js'
 
+/** A caller's declared communication handoff; this does not transfer an external Task. */
 export type HandoffResult = {
   readonly ownerAgentSessionId: string
-  /** 交出去之后原 Owner 不再等待。这是 Handoff 与 Dispatch 唯一的分界。 */
   readonly originAwaits: false
   readonly taskId: string
   readonly at: number
@@ -33,64 +23,77 @@ export function handOff(input: {
   })
 }
 
-/** 一次派发里 Owner 仍需负责的四件事。 */
 export type DispatchEventKind = 'question' | 'escalation' | 'worker_done' | 'cleanup'
 
 export type DispatchEvent = {
   readonly kind: DispatchEventKind
-  /** 由 dispatch + attempt + kind 派生，因此重放同一事件不会产生第二条记录。 */
-  readonly correlationId: string
+  /** The actual reply is the event identity; separate questions remain separate events. */
+  readonly replyMessageId: string
   readonly at: number
 }
 
+/** Communication supervision only. Delivery/consumption never settles this waiting fact. */
 export type Dispatch = {
-  readonly dispatchId: string
-  /** 所有权始终留在派发方——派出去不是交出去。 */
+  readonly sourceMessageId: string
   readonly ownerAgentSessionId: string
   readonly workerAgentSessionId: string
-  readonly taskId: string
-  /** 同一个 Task 重试一次是另一回事，故 attempt 参与身份。 */
-  readonly attempt: number
+  readonly threadId: string
+  readonly openedAt: number
   readonly originAwaits: boolean
   readonly events: readonly DispatchEvent[]
 }
 
-export function openDispatch(input: {
-  dispatchId: string
-  ownerAgentSessionId: string
-  workerAgentSessionId: string
-  taskId: string
-  attempt: number
-  at: number
-}): Dispatch {
+export function assertDispatchEventKind(value: unknown): asserts value is DispatchEventKind {
+  if (value !== 'question' && value !== 'escalation' && value !== 'worker_done' && value !== 'cleanup') {
+    throw new AgentMuxError('Dispatch event kind is invalid.', 'DISPATCH_MESSAGE_INVALID')
+  }
+}
+
+/** These are envelope facts, not authentication. The public Client separately admits the caller. */
+export function assertDispatchMessage(message: AgentMuxMessageEnvelope): void {
+  if (message.sender.kind !== 'agent-session' || message.recipient.kind !== 'agent-session' ||
+    message.sender.agentSessionId !== message.senderSessionId ||
+    message.recipient.agentSessionId !== message.recipientSessionId ||
+    message.senderRunId === null || message.recipientRunId === null) {
+    throw new AgentMuxError('Dispatch requires resolved Agent-authored Session/Run message facts.', 'DISPATCH_MESSAGE_INVALID')
+  }
+}
+
+export function openDispatch(source: AgentMuxMessageEnvelope, at: number): Dispatch {
+  assertDispatchMessage(source)
   return Object.freeze({
-    dispatchId: input.dispatchId,
-    ownerAgentSessionId: input.ownerAgentSessionId,
-    workerAgentSessionId: input.workerAgentSessionId,
-    taskId: input.taskId,
-    attempt: input.attempt,
-    // 派出去了，但还等着结果。
+    sourceMessageId: source.messageId,
+    ownerAgentSessionId: source.senderSessionId!,
+    workerAgentSessionId: source.recipientSessionId!,
+    threadId: source.threadId,
+    openedAt: at,
     originAwaits: true,
     events: Object.freeze([])
   })
 }
 
-function correlationIdFor(dispatch: Dispatch, kind: DispatchEventKind): string {
-  return `${dispatch.dispatchId}:${dispatch.attempt}:${kind}`
-}
-
 export function recordDispatchEvent(
   dispatch: Dispatch,
+  reply: AgentMuxMessageEnvelope,
   kind: DispatchEventKind,
   at: number
 ): Dispatch {
-  const correlationId = correlationIdFor(dispatch, kind)
-  // 重放同一事件是幂等的：时刻保留第一次的，那才是它真正发生的时候。
-  if (dispatch.events.some((event) => event.correlationId === correlationId)) return dispatch
+  assertDispatchEventKind(kind)
+  assertDispatchMessage(reply)
+  const sender = kind === 'cleanup' ? dispatch.ownerAgentSessionId : dispatch.workerAgentSessionId
+  const recipient = kind === 'cleanup' ? dispatch.workerAgentSessionId : dispatch.ownerAgentSessionId
+  if (reply.replyTo !== dispatch.sourceMessageId || reply.threadId !== dispatch.threadId ||
+    reply.senderSessionId !== sender || reply.recipientSessionId !== recipient) {
+    throw new AgentMuxError('Dispatch reply does not match its source, thread and participants.', 'DISPATCH_MESSAGE_INVALID')
+  }
+  const existing = dispatch.events.find((event) => event.replyMessageId === reply.messageId)
+  if (existing) {
+    if (existing.kind !== kind) throw new AgentMuxError('Dispatch reply already names a different event kind.', 'DISPATCH_EVENT_CONFLICT')
+    return dispatch
+  }
   return Object.freeze({
     ...dispatch,
-    // 只有收工才解除等待。提问与升级恰恰是 Owner 该处理的事，不解除。
     originAwaits: kind === 'worker_done' ? false : dispatch.originAwaits,
-    events: Object.freeze([...dispatch.events, Object.freeze({ kind, correlationId, at })])
+    events: Object.freeze([...dispatch.events, Object.freeze({ kind, replyMessageId: reply.messageId, at })])
   })
 }

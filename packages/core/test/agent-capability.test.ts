@@ -74,7 +74,7 @@ describe('每个通信动作都验凭证', () => {
   it('通信动作都调用 resolveMessageAuthor', () => {
     for (const action of [
       'checkDeliveries', 'ackDeliveryBatch', 'answerAsk',
-      'cancelAsk', 'handOff', 'openDispatch', 'recordDispatchEvent'
+      'cancelAsk', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch'
     ]) {
       const anchor = new RegExp(`\\n  (?:async )?${action}\\(input: \\{`).exec(source)
       expect(anchor?.index).toBeGreaterThan(-1)

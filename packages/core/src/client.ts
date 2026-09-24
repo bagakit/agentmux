@@ -38,7 +38,8 @@ import { planDiscussion } from './agent-discussion.js'
 import {
   DurableAgentMuxMessageQueue,
   type AgentMuxDeliveryBatch,
-  type AgentMuxDeliveryAcknowledgement
+  type AgentMuxDeliveryAcknowledgement,
+  type AgentMuxMessageEnvelope
 } from './agent-global-message-queue.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
 import {
@@ -51,8 +52,6 @@ import {
 } from './agent-terminal-handshake-outcome.js'
 import {
   handOff,
-  openDispatch,
-  recordDispatchEvent,
   type Dispatch,
   type DispatchEventKind,
   type HandoffResult
@@ -1848,7 +1847,7 @@ export class AgentMuxClient {
     return cancelAsk(input.ask, Date.now())
   }
 
-  /** 交出去：责任跟着工作走，原 Owner 不再等待。 */
+  /** Declare a communication handoff; external Task ownership is not changed by Core. */
   handOff(input: {
     capability: string
     callerAgentSessionId: string
@@ -1864,35 +1863,70 @@ export class AgentMuxClient {
     })
   }
 
-  /** 派出去：所有权留在派发方，它仍要接问题、接升级、接收工。 */
-  openDispatch(input: {
+  /** Open supervision for an already recorded message; no input or external Task mutation. */
+  async openDispatch(input: {
     capability: string
     callerAgentSessionId: string
-    dispatchId: string
-    workerAgentSessionId: string
-    taskId: string
-    attempt: number
-  }): Dispatch {
-    const owner = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
-    return openDispatch({
-      dispatchId: input.dispatchId,
-      ownerAgentSessionId: owner,
-      workerAgentSessionId: input.workerAgentSessionId,
-      taskId: input.taskId,
-      attempt: input.attempt,
-      at: Date.now()
-    })
+    sourceMessageId: string
+  }): Promise<Dispatch> {
+    this.requireConnected()
+    const caller = await this.currentMessageReader(input.callerAgentSessionId)
+    const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
+    return await this.messageQueue.openDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
+      async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
   }
 
-  /** 记一次派发事件。同一事件重放幂等，不会记两次。 */
-  recordDispatchEvent(input: {
+  /** Each actual reply is one durable event; only an authorized worker_done settles waiting. */
+  async recordDispatchEvent(input: {
     capability: string
     callerAgentSessionId: string
-    dispatch: Dispatch
+    sourceMessageId: string
+    replyMessageId: string
     kind: DispatchEventKind
-  }): Dispatch {
-    this.resolveMessageAuthor(input.capability, input.callerAgentSessionId)
-    return recordDispatchEvent(input.dispatch, input.kind, Date.now())
+  }): Promise<Dispatch> {
+    this.requireConnected()
+    const caller = await this.currentMessageReader(input.callerAgentSessionId)
+    const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
+    return await this.messageQueue.recordDispatchEvent({ callerAgentSessionId: author,
+      sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId, kind: input.kind },
+    async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
+  }
+
+  async showDispatch(input: {
+    capability: string
+    callerAgentSessionId: string
+    sourceMessageId: string
+  }): Promise<Dispatch> {
+    this.requireConnected()
+    const caller = await this.currentMessageReader(input.callerAgentSessionId)
+    const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
+    return await this.messageQueue.showDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
+      async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
+  }
+
+  private async assertDispatchAdmission(
+    capability: string, author: string, expectedRun: AgentMuxRunRef,
+    messages: readonly AgentMuxMessageEnvelope[]
+  ): Promise<void> {
+    // Admission runs inside the existing journal lock. The SessionStore is a separate authority,
+    // not an atomic transaction with this journal; no Provider probe or Session write is added.
+    const sessions = await loadAgentSessions(this.store)
+    const current = sessions.find((session) => session.hostId === 'local' && session.agentSessionId === author)
+    if (!current) throw new AgentMuxError('Dispatch caller Session is unknown.', 'UNKNOWN_AGENT_SESSION')
+    this.resolveMessageAuthor(capability, author, current)
+    if (!sameRun(current.run, expectedRun)) {
+      throw new AgentMuxError('The Dispatch caller Run changed before admission.', 'AGENT_CAPABILITY_STALE_RUN')
+    }
+    for (const message of messages) {
+      for (const [agentSessionId, runId] of [
+        [message.senderSessionId, message.senderRunId], [message.recipientSessionId, message.recipientRunId]
+      ]) {
+        const participant = sessions.find((session) => session.hostId === 'local' && session.agentSessionId === agentSessionId)
+        if (!participant || (participant.run.runId !== runId && !participant.retiredRuns.some((run) => run.runId === runId))) {
+          throw new AgentMuxError('A Dispatch message Run is outside the retained Session identity history.', 'DISPATCH_IDENTITY_UNAVAILABLE')
+        }
+      }
+    }
   }
 
   async startDiscussion(input: {

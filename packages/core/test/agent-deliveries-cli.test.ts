@@ -308,13 +308,12 @@ describe('actual built agentmux deliveries CLI', () => {
   it('replays exact recipient batches after consumer SIGKILL, independently ACKs and keeps healthy Agent input usable', async () => {
     const root = await privateRoot()
     const runtime = join(root, 'runtime')
-    const home = join(root, 'codex-home')
     const captures = join(root, 'captures')
-    await Promise.all([runtime, home, captures].map(async (path) => await mkdir(path, { recursive: true, mode: 0o700 })))
+    await Promise.all([runtime, captures].map(async (path) => await mkdir(path, { recursive: true, mode: 0o700 })))
     const queuePath = join(root, 'global-messages.ndjson')
     const storePath = join(root, 'sessions.json')
     const env: NodeJS.ProcessEnv = {
-      PATH: process.env.PATH, CODEX_HOME: home, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'),
+      PATH: process.env.PATH, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'),
       AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath
     }
     for (const [key, value] of Object.entries(env)) if (value !== undefined) vi.stubEnv(key, value)
