@@ -734,9 +734,10 @@ export async function registerIpc(args: {
     throw primary
   })
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
-  handle('sessions:timeline', async (session: AgentSessionControl) => await args.runtime.sessionTimeline(session))
+  handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
-  handle('sessions:historyPage', async (session: AgentSessionControl, options?: SessionHistoryPageOptions) => (
+  handle('sessions:historySources', async () => args.runtime.sessionHistorySources())
+  handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
   handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {

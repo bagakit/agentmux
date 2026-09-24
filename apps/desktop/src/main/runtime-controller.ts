@@ -9,6 +9,7 @@ import {
   connectSshAgentMux,
   runtimeStorageUsage,
   loadAgentSessions,
+  loadSessionHistorySources,
   agentInteractionResponseUnavailableReason,
   type AgentCapabilities,
   type AgentCatalogEntry,
@@ -47,6 +48,7 @@ import type {
   SessionRecoveryResult,
   SessionSnapshot,
   SessionHistoryPageOptions,
+  SessionHistoryReference,
   TerminalLaunchInput
 } from '../shared/contracts.js'
 import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
@@ -825,9 +827,17 @@ export class RuntimeController {
     return await client.refreshAgentSession(agentSessionId, session.run)
   }
 
-  async sessionTimeline(control: Extract<SessionControl, { kind: 'agent' }>) {
-    const client = await this.connectedClient(control.hostId)
-    const timeline = await client.sessionTimeline(control.agentSessionId)
+  async sessionHistorySources() {
+    return await loadSessionHistorySources(this.agentSessionStore)
+  }
+
+  async sessionTimeline(control: SessionHistoryReference) {
+    const host = this.hosts.get(control.hostId)
+    if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
+    const descriptor = (await this.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId)
+    if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
+    const timeline = await host.client.sessionTimeline(control.agentSessionId)
+    if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
     if (timeline.agentSessionId !== control.agentSessionId) {
       throw new Error(`Timeline snapshot belongs to another Session: ${timeline.agentSessionId}`)
     }
@@ -835,21 +845,22 @@ export class RuntimeController {
   }
 
   async sessionHistoryPage(
-    control: Extract<SessionControl, { kind: 'agent' }>,
+    control: SessionHistoryReference,
     options: SessionHistoryPageOptions | undefined,
     config: AppConfig
   ): Promise<AgentSessionHistoryPage> {
-    if (control.kind !== 'agent') throw new Error('Conversation history requires an Agent Session.')
+    if (typeof control.agentSessionId !== 'string' || !control.agentSessionId) throw new Error('Conversation history requires an Agent Session.')
     if (this.hostReconfigurationReservations.has(control.hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${control.hostId}`)
     }
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const session = (await loadAgentSessions(this.agentSessionStore)).find((entry) => (
+    const descriptor = (await this.sessionHistorySources()).find((entry) => (
       entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId
     ))
-    if (!session) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
-    const executor = requireSessionExecutor(config, session)
+    if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
+    if (!descriptor.history) throw new Error('No native history locator was retained for this Session.')
+    const executor = requireSessionExecutor(config, descriptor.history)
     const page = await host.client.sessionHistoryPage(control.agentSessionId, {
       ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
       ...(options?.limit === undefined ? {} : { limit: options.limit }),

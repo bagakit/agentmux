@@ -48,7 +48,7 @@ it('actual preload/registered IPC/RuntimeController use trusted exact durable Ex
  client.connect.mockRejectedValue(new Error('synthetic Runtime is temporarily unavailable'))
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:77,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({window:{webContents:sender} as unknown as BrowserWindow,runtime:controller,
+ const dispose=await registerIpc({window:{webContents:sender} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{} as ScratchTopics,
  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
