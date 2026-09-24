@@ -553,29 +553,60 @@ describe('Scratch Topic workbench binding', () => {
 
     const state = useAppStore.getState()
     const activeTabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
-    expect(topic.id).toBe(activeTabId)
-    expect(state.tabs[activeTabId]?.topicId).toBe(activeTabId)
-    expect(ensure).toHaveBeenCalledWith(workspace.id, activeTabId)
+    expect(activeTabId).not.toBe(topic.id)
+    expect(state.tabs[activeTabId]).toMatchObject({ id: activeTabId, workspaceId: workspace.id, topicId: topic.id })
+    expect(titleWorkbenchSurface(state.tabs[activeTabId]!)).toMatchObject({
+      kind: 'terminal', phase: 'attached', workspaceId: workspace.id
+    })
+    expect(state.layouts[workspace.id]!.activeGroupId).toBe('scratch-pane')
+    expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([activeTabId])
+    expect(ensure).toHaveBeenCalledExactlyOnceWith(workspace.id, topic.id)
     expect(state.workspaceFileRevisions[workspace.id]).toBe(1)
 
     const nextTopic = await useAppStore.getState().createScratchTopic()
     const nextState = useAppStore.getState()
+    const nextTabId = nextState.layouts[workspace.id]!.groups[0]!.activeTabId!
     expect(nextTopic.id).not.toBe(topic.id)
-    expect(nextState.layouts[workspace.id]!.groups[0]!.tabOrder).toHaveLength(2)
-    expect(nextState.tabs[nextTopic.id]?.topicId).toBe(nextTopic.id)
+    expect(nextTabId).not.toBe(nextTopic.id)
+    expect(nextState.tabs[activeTabId]).toBe(state.tabs[activeTabId])
+    expect(nextState.tabs[nextTabId]).toMatchObject({ id: nextTabId, workspaceId: workspace.id, topicId: nextTopic.id })
+    expect(titleWorkbenchSurface(nextState.tabs[nextTabId]!)).toMatchObject({
+      kind: 'terminal', phase: 'attached', workspaceId: workspace.id
+    })
+    expect(nextState.layouts[workspace.id]!.activeGroupId).toBe('scratch-pane')
+    expect(nextState.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([activeTabId, nextTabId])
+    expect(nextState.layouts[workspace.id]!.groups[0]!.activeTabId).toBe(nextTabId)
+    expect(ensure).toHaveBeenCalledTimes(2)
+    expect(ensure).toHaveBeenNthCalledWith(2, workspace.id, nextTopic.id)
   })
 
   it('opens a filesystem Topic by focusing its bound View or starting a Terminal in a new View', async () => {
     const workspace = prepareScratch()
+    const ensure = vi.spyOn(api.scratch, 'ensureTopic')
     const firstTopic = await useAppStore.getState().createScratchTopic()
+    const firstState = useAppStore.getState()
+    const firstTabId = firstState.layouts[workspace.id]!.groups[0]!.activeTabId!
+    const firstTab = firstState.tabs[firstTabId]!
     const secondTopic = await useAppStore.getState().createScratchTopic()
+    const secondState = useAppStore.getState()
+    const secondTabId = secondState.layouts[workspace.id]!.groups[0]!.activeTabId!
+    expect(firstTabId).not.toBe(firstTopic.id)
+    expect(secondTabId).not.toBe(secondTopic.id)
+    expect(secondState.tabs[firstTabId]).toBe(firstTab)
+    expect(secondState.tabs[secondTabId]?.topicId).toBe(secondTopic.id)
+    expect(secondState.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([firstTabId, secondTabId])
+    expect(secondState.layouts[workspace.id]!.groups[0]!.activeTabId).toBe(secondTabId)
+    expect(ensure.mock.calls).toEqual([[workspace.id, firstTopic.id], [workspace.id, secondTopic.id]])
 
     await useAppStore.getState().openScratchTopic(firstTopic.id)
 
     let state = useAppStore.getState()
     let activeTabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
-    expect(activeTabId).toBe(firstTopic.id)
+    expect(activeTabId).toBe(firstTabId)
+    expect(state.tabs[activeTabId]).toBe(firstTab)
     expect(state.tabs[activeTabId]?.topicId).toBe(firstTopic.id)
+    expect(state.layouts[workspace.id]!.activeGroupId).toBe('scratch-pane')
+    expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([firstTabId, secondTabId])
 
     const terminalTab = createWorkbenchTab('session:plain-terminal', {
       regionId: initialWorkbenchRegionId('session:plain-terminal'),
@@ -599,8 +630,11 @@ describe('Scratch Topic workbench binding', () => {
       workspaceId: workspace.id,
       phase: 'attached'
     })
+    expect(state.tabs[terminalTab.id]).toBe(terminalTab)
     expect(state.tabs[terminalTab.id]?.topicId).toBeUndefined()
-    expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toContain(terminalTab.id)
+    expect(state.layouts[workspace.id]!.activeGroupId).toBe('scratch-pane')
+    expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([terminalTab.id, activeTabId])
+    expect(state.layouts[workspace.id]!.groups[0]!.activeTabId).toBe(activeTabId)
   })
 
   it('renames a Topic title without changing its View binding and invalidates the filesystem snapshot', async () => {
@@ -641,25 +675,48 @@ describe('Scratch Topic workbench binding', () => {
 
   it('carries the View’s bound Topic into the launch without changing ordinary launch inputs', async () => {
     const workspace = prepareScratch()
-    // The owner View created here is bound to a real Topic; the launch must carry that
-    // binding. A Topic is never minted from the Tab identity — see scratch-topic-agents.
-    const topic = await useAppStore.getState().createScratchTopic()
+    // Public Mote creation retains a real bound launcher. Ordinary Topic creation
+    // promotes it to an attached Terminal, which is not a legal launch target.
+    const ensureMote = vi.spyOn(api.scratch, 'ensureMote')
+    const ensureTopic = vi.spyOn(api.scratch, 'ensureTopic')
+    const terminal = vi.spyOn(api.sessions, 'launchTerminal')
+    const topic = await useAppStore.getState().createScratchTopic('mote')
     const state = useAppStore.getState()
     const tabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
     const launcher = state.tabs[tabId]!
+    const regionId = launcher.layout.activeRegionId
+    expect(tabId).not.toBe(topic.id)
+    expect(topic.soul).toBeDefined()
+    expect(ensureMote).toHaveBeenCalledExactlyOnceWith(workspace.id, topic.id)
+    // The existing preview implementation delegates to ensureTopic/readTopic and
+    // adds SOUL; no fabricated ensureMote result or surface kind is installed here.
+    expect(ensureTopic).toHaveBeenCalledExactlyOnceWith(workspace.id, topic.id)
+    expect(terminal).not.toHaveBeenCalled()
+    expect(launcher.topicId).toBe(topic.id)
+    expect(titleWorkbenchSurface(launcher)).toEqual({ kind: 'launcher', regionId, workspaceId: workspace.id })
+    expect(state.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([tabId])
     const launch = vi.spyOn(api.sessions, 'launchAgent')
 
     await useAppStore.getState().launchAgent('codex', 'work together', 'scratch-pane', {
       tabId,
-      regionId: launcher.layout.activeRegionId
+      regionId
     })
 
-    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
-      workspacePath: workspace.path,
-      scratchTopicId: topic.id
+    expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      executorId: 'codex', hostId: workspace.hostId, workspacePath: workspace.path,
+      prompt: 'work together', scratchTopicId: topic.id,
+      agentSessionId: expect.any(String), createOperationId: expect.any(String)
     }))
-    expect(useAppStore.getState().tabs[tabId]?.topicId).toBe(topic.id)
-    expect(useAppStore.getState().workspaceFileRevisions[workspace.id]).toBe(2)
+    const launched = await launch.mock.results[0]!.value
+    const attached = useAppStore.getState()
+    expect(attached.tabs[tabId]?.topicId).toBe(topic.id)
+    expect(titleWorkbenchSurface(attached.tabs[tabId]!)).toMatchObject({
+      kind: 'agent', phase: 'attached', regionId, workspaceId: workspace.id, sessionId: launched.session.id
+    })
+    expect(attached.layouts[workspace.id]!.activeGroupId).toBe('scratch-pane')
+    expect(attached.layouts[workspace.id]!.groups[0]!.tabOrder).toEqual([tabId])
+    expect(attached.layouts[workspace.id]!.groups[0]!.activeTabId).toBe(tabId)
+    expect(attached.workspaceFileRevisions[workspace.id]).toBe(2)
   })
 
   it('launches with no Topic from an unbound View instead of minting one from the Tab id', async () => {
