@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
-import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { CURSOR_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { cursorDataRoot, cursorWorkspaceSlug, readCursorSessionHistoryPage } from './cursor-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -77,16 +77,6 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
     startEvents: ['subagentStart'], stopEvents: ['subagentStop'], mainStopEvents: ['stop'], idKeys: ['subagent_id']
   },
   nativeHandle: { sessionIdKeys: ['conversation_id'], transcriptPathKeys: ['transcript_path'] }
-}
-
-/** Cursor preserves a nonblank native override and resolves relative paths at its launch workspace. */
-function cursorDataRoot(workspacePath: string, env?: Readonly<Record<string, string>>): string {
-  const value = env?.CURSOR_DATA_DIR
-  return value !== undefined && value.trim() ? resolve(workspacePath, value) : join(homedir(), '.cursor')
-}
-
-function cursorWorkspaceSlug(workspacePath: string): string {
-  return workspacePath.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 /**
@@ -200,6 +190,7 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
     launchOptions: CURSOR_LAUNCH_OPTIONS,
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: CURSOR_HOOKS,
+    readSessionHistoryPage: readCursorSessionHistoryPage,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]

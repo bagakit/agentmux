@@ -115,9 +115,11 @@
   ],
   "dependencies": {
     "@agentmux/demand": "workspace:*",
+    "@bufbuild/protobuf": "1.10.1",
     "@noble/hashes": "2.4.0",
     "@xterm/headless": "5.5.0",
     "fs-native-extensions": "1.5.1",
+    "wa-sqlite": "1.0.0",
     "yaml": "2.9.0"
   },
   "scripts": {
