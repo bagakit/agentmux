@@ -204,10 +204,11 @@ describe('completion scenario source oracles, without launching a Desktop', () =
 
   it('executes the actual emitted evidence/chunk/history reads and consumes exact bounded bytes', async () => {
     const data = sample(), { ctx, calls } = transport(data)
+    const readCost = { metadataBytes: 123, payloadBytes: data.bytes.length }; Object.assign(data.chunk, { readCost })
     const result = await readRecordedOutcome(ctx, data.actual)
     expect(result.document).toEqual(data.document)
     expect(result.sha256).toBe(createHash('sha256').update(data.bytes).digest('hex'))
-    expect(result.chunks).toEqual([{ offset: 0, returnedBytes: data.bytes.length, nextOffset: null }])
+    expect(result.chunks).toEqual([{ offset: 0, returnedBytes: data.bytes.length, nextOffset: null, readCost }])
     expect(calls).toHaveLength(4)
     expect(calls.join('\n')).toContain('readStepResult')
     expect(calls.join('\n')).not.toContain('runScript')

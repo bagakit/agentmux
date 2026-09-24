@@ -49,12 +49,12 @@ export function BrowserOutcomeCriteria({ evaluation, busy = false, historical = 
       </label>)}</div>
     </fieldset>
     <label className="browser-task-asset__field">Equals<input value={expected} maxLength={16384} onChange={event => setExpected(event.target.value)} /></label>
-    <div className="browser-task-asset__run-actions"><button className="browser-rsi-replay__run" disabled={busy || pending} onClick={event => { void run(event) }}>
+    <div className="browser-task-asset__run-actions"><button className="browser-rsi-button browser-rsi-button--primary browser-rsi-replay__run" disabled={busy || pending} onClick={event => { void run(event) }}>
       {pending || busy ? 'Checking…' : 'Check current field'}
     </button></div>
     {error && <p role="status" className="browser-task-asset__progress">{error}</p>}
     {historical && <p className="browser-task-asset__progress">This belongs to an earlier operation or document. Check the current field for a fresh observation.</p>}
-    {evaluation && onVerify && <button className="browser-rsi-replay__run" disabled={busy || pending} onClick={event => {
+    {evaluation && onVerify && <button className="browser-rsi-button browser-rsi-button--primary browser-rsi-replay__run" disabled={busy || pending} onClick={event => {
       if (busy || pending) return
       setPending(true); setError(undefined)
       void onVerify(event).catch(() => setError('Recorded evidence could not be verified. Existing Browser work remains.'))
