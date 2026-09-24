@@ -10,6 +10,7 @@ import { isNeedsYouState } from './attention-vocabulary'
 import { turnWorking } from './activity-working-state'
 import { clampStep } from './activity-step-summary'
 import { sessionRecentActivity } from './session-recency'
+import { sessionStatusLabel } from './session-presentation'
 
 export type FocusBucket = 'attention' | 'working' | 'results' | 'idle'
 export type FocusContext = {
@@ -47,9 +48,7 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   const result = latest?.kind === 'assistant_message' && latest.status === 'complete' && latest.content?.trim() ? latest : null
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const bucket = focusBucketForSession(session, Boolean(result))
-  const stateLabel = state === 'error' ? 'Failed' : pending ? 'Request pending' : isNeedsYouState(state) ? (state === 'blocked' ? 'Blocked' : 'Needs reply')
-    : state === 'done' ? 'Idle' : state === 'running' ? (session.kind === 'agent' ? 'Status unknown' : 'Shell open')
-    : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? (session.kind === 'terminal' && session.status.exitReason !== 'user-stopped' ? 'Exited' : 'Stopped') : state === 'starting' ? 'Starting' : 'Working'
+  const stateLabel = sessionStatusLabel(session)
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const activityTimes = items.filter(item => item.kind !== 'lifecycle').map(item => item.updatedAt)
   const enteredAt = activityEntryTime(session)
