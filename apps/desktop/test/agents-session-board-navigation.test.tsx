@@ -10,7 +10,7 @@ import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSu
 import { WindowUtilityBar } from '../src/renderer/src/components/WindowUtilityBar.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-describe('PMO / Space / Focus / Goals / Survey navigation', () => {
+describe('PMO / Space / Focus / Goals / Search navigation', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
@@ -29,8 +29,8 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     localStorage.removeItem('agentmux.leader-topic-floating.v1')
   })
 
-  it('renders the confirmed order with Settings after Survey and names with one selected surface', async () => {
-    useAppStore.setState({ mainSurface: 'survey' })
+  it('renders the confirmed order with Settings after Search and names with one selected surface', async () => {
+    useAppStore.setState({ mainSurface: 'search' })
     await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons).toHaveLength(6)
@@ -39,7 +39,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
       'Space: show terminal and file workbench',
       expect.stringMatching(/^Focus: show execution contexts\. \d+ working, \d+ requests, \d+ failed$/),
       'Goals: show goals and progress',
-      'Survey: browse and verify information',
+      'Search: search and manage browsers',
       'Settings'
     ])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
@@ -57,13 +57,13 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
   })
 
   it('switches each product entry to its existing main surface', async () => {
-    useAppStore.setState({ mainSurface: 'survey', sessions: [] })
+    useAppStore.setState({ mainSurface: 'search', sessions: [] })
     await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
     const entries = [
       ['Space:', 'workbench'],
       ['Focus:', 'agents'],
       ['Goals:', 'board'],
-      ['Survey:', 'survey']
+      ['Search:', 'search']
     ] as const
     for (const [label, surface] of entries) {
       const button = container.querySelector(`button[aria-label^="${label}"]`) as HTMLButtonElement
@@ -94,20 +94,20 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     }
   })
 
-  it('opens Settings after Survey without changing the selected surface or execution focus', async () => {
+  it('opens Settings after Search without changing the selected surface or execution focus', async () => {
     const openSettings = vi.fn()
     useAppStore.setState({ mainSurface: 'board' })
     const focus = useAppStore.getState().agentFocus
     await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: openSettings })))
-    const buttons = [...container.querySelectorAll('nav button')]
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('nav button')]
     expect(buttons).toHaveLength(5)
     const settings = buttons[4]!
-    expect(buttons[3]!.getAttribute('aria-label')).toBe('Survey: browse and verify information')
+    expect(buttons[3]!.getAttribute('aria-label')).toBe('Search: search and manage browsers')
     expect(settings.getAttribute('aria-label')).toBe('Settings')
     expect(settings.hasAttribute('aria-current')).toBe(false)
     expect(settings.classList.contains('selected')).toBe(false)
     await act(async () => settings.click())
-    expect(openSettings).toHaveBeenCalledExactlyOnceWith('workspaces')
+    expect(openSettings).toHaveBeenCalledExactlyOnceWith('overview')
     expect(useAppStore.getState().mainSurface).toBe('board')
     expect(useAppStore.getState().agentFocus).toEqual(focus)
     await act(async () => root.render(createElement(WindowUtilityBar)))
@@ -117,7 +117,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
   it('clamps the rendered tooltip at both window edges', async () => {
     let anchorLeft = 4
     const viewport = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(300)
-    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return { left: anchorLeft, top: 760, width: this.classList.contains('surface-navigation__tooltip') ? 180 : 36 } as DOMRect
     })
     try {
@@ -142,7 +142,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     // `import.meta.url` 是 http scheme，`readFileSync` 会抛 "The URL must be of scheme file"。
     // 本仓其它 happy-dom 测试（session-connecting-surface、message-tools-three-state）也都这么写。
     const source = readFileSync(join(import.meta.dirname, '../src/renderer/src/App.tsx'), 'utf8')
-    expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'")
+    expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'search'")
     expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
 

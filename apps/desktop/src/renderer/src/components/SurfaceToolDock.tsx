@@ -8,28 +8,17 @@ import {
   ChevronDown,
   ChevronRight,
   FolderGit2,
-  Globe2,
   History,
-  LoaderCircle,
-  MessageSquarePlus,
   NotebookText,
   Plus,
-  RadioTower,
-  Send,
-  SlidersHorizontal,
-  Trash2
+  RadioTower
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type {
-  BrowserToolbarConfig,
   SessionSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
-import { BROWSER_TOOLBAR_ITEM_LABELS } from '../lib/browser-toolbar'
-import { BROWSER_TOOLBAR_ITEM_ORDER, type BrowserToolbarItem } from '../../../shared/browser-toolbar'
-import { useSettingDraftRecord } from './settings/use-setting-draft'
-import { useSettingsSave } from './settings/SettingsSaveBar'
 import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import {
@@ -40,25 +29,14 @@ import {
   type WorkspaceAgentGroupId,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { api } from '../lib/api'
 import { formatRelativeAge } from '../lib/relative-age'
 import { contextPressure, contextUsedPercent } from '../lib/agent-usage'
 import { CONTEXT_PRESSURE_HINT } from './AgentRoster'
-import {
-  browserAnnotationDisplayNumber,
-  formatBrowserAnnotationsContext,
-  type BrowserAnnotation
-} from '../lib/browser-annotations'
-import { workbenchSurfaces } from '../lib/workbench-tabs'
-import { browserOpenError } from '../lib/browser-open-feedback'
-import { presentError } from '../lib/error-presentation'
 import { useAppStore } from '../store'
-import { agentComposerAvailability } from './AgentSessionComposer'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
-import { BrowserProfilesPanel } from './BrowserProfilesPanel'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
 import { SidebarToggleChrome } from './TopRowChrome'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
@@ -72,142 +50,7 @@ type ToolDefinition<T extends string> = {
 
 const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTool>, 'id'>> = {
   'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: FolderGit2 },
-  agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot },
-  'browser-tools': { label: 'Browser Tools', description: 'Open browsers and configure their tools', icon: Globe2 }
-}
-
-export function BrowserToolbarPreferences({
-  toolbar,
-  saving,
-  onSave
-}: {
-  toolbar: BrowserToolbarConfig
-  saving: boolean
-  onSave(toolbar: BrowserToolbarConfig, expected: BrowserToolbarConfig): Promise<void>
-}) {
-  const draft = useSettingDraftRecord(toolbar)
-  const saveState = useSettingsSave()
-  const busy = saving || saveState.saving
-
-  function setItem(item: BrowserToolbarItem, shown: boolean): void {
-    draft.setField(item, shown)
-  }
-
-  async function save(): Promise<void> {
-    const submitted = draft.beginSave()
-    submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
-  }
-
-  return (
-    <section className="browser-tools-preferences" aria-label="Browser bar visibility">
-      <details>
-        <summary aria-label="Browser bar settings">
-          {busy ? <LoaderCircle className="spin" size={14} /> : <SlidersHorizontal size={14} />}
-          <strong>Browser bar</strong>{draft.dirty ? <small>Unsaved</small> : null}<ChevronRight size={13} />
-        </summary>
-        <div className="browser-tools-preferences__body">
-          <p>External open is always visible. Narrow panes keep More available.</p>
-          <div className="browser-tools-preferences__items">
-            {BROWSER_TOOLBAR_ITEM_ORDER.map((item) => (
-              <label key={item}>
-                <input
-                  type="checkbox"
-                  checked={draft.value[item]}
-                  disabled={busy}
-                  onChange={(event) => setItem(item, event.target.checked)}
-                />
-                <span>{BROWSER_TOOLBAR_ITEM_LABELS[item]}</span>
-              </label>
-            ))}
-          </div>
-          <button
-            className="small-button"
-            type="button"
-            disabled={!draft.dirty || busy}
-            onClick={() => void save()}
-          >
-            {busy ? <LoaderCircle className="spin" size={12} /> : null}
-            {busy ? 'Saving…' : 'Save Browser bar'}
-          </button>
-        </div>
-      </details>
-      {saveState.error ? <p className="settings-inline-error" role="alert">{saveState.error}</p> : null}
-    </section>
-  )
-}
-
-export function BrowserAnnotationsPanel({
-  annotations,
-  currentNavigationByBrowserId,
-  agentSessions,
-  onDelete,
-  onClear,
-  onAddToComposer
-}: {
-  annotations: BrowserAnnotation[]
-  currentNavigationByBrowserId: Readonly<Record<string, string>>
-  agentSessions: Array<Extract<SessionSnapshot, { kind: 'agent' }>>
-  onDelete(browserId: string, annotationId: string): void
-  onClear(): void
-  onAddToComposer(sessionId: string, annotations: BrowserAnnotation[]): void
-}) {
-  const eligibleAgents = agentSessions.filter((session) => !agentComposerAvailability(session).disabled)
-  const [targetSessionId, setTargetSessionId] = useState('')
-  const currentAnnotations = annotations.filter((annotation) => (
-    currentNavigationByBrowserId[annotation.browserId] === annotation.navigationId
-  ))
-
-  useEffect(() => {
-    if (eligibleAgents.some(({ id }) => id === targetSessionId)) return
-    setTargetSessionId(eligibleAgents.length === 1 ? eligibleAgents[0]!.id : '')
-  }, [eligibleAgents, targetSessionId])
-
-  return (
-    <section className="browser-annotations" aria-label="Browser annotations">
-      <header><MessageSquarePlus size={14} /><span><strong>Element annotations</strong><small>Send current-page notes to an Agent.</small></span></header>
-      {annotations.length === 0 ? (
-        <p>Select an element in a Browser tab, then add an annotation.</p>
-      ) : (
-        <div className="browser-annotations__list">
-          {annotations.map((annotation, index) => {
-            const current = currentNavigationByBrowserId[annotation.browserId] === annotation.navigationId
-            return (
-              <article key={annotation.id} className={current ? '' : 'stale'}>
-                <b>{browserAnnotationDisplayNumber(annotations, index)}</b>
-                <span>
-                  <strong>{annotation.selection.accessibleName || `<${annotation.selection.tagName}>`}</strong>
-                  <small>{current ? annotation.note || annotation.selection.selector : 'Page changed · annotation is stale'}</small>
-                </span>
-                <button type="button" aria-label="Delete annotation" onClick={() => onDelete(annotation.browserId, annotation.id)}><Trash2 size={12} /></button>
-              </article>
-            )
-          })}
-        </div>
-      )}
-      {annotations.length > 0 ? (
-        <div className="browser-annotations__handoff">
-          <label>
-            <span>Agent Composer</span>
-            <select value={targetSessionId} onChange={(event) => setTargetSessionId(event.target.value)}>
-              <option value="">Choose an Agent…</option>
-              {eligibleAgents.map((session) => <option key={session.id} value={session.id}>{session.label}</option>)}
-            </select>
-          </label>
-          <div>
-            <button className="small-button" type="button" onClick={onClear}>Clear all</button>
-            <button
-              className="primary-button"
-              type="button"
-              disabled={!targetSessionId || currentAnnotations.length === 0}
-              onClick={() => onAddToComposer(targetSessionId, currentAnnotations)}
-            >
-              <Send size={12} /> Add to Composer
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  )
+  agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot }
 }
 
 function WorkspaceFilesTool({
@@ -431,19 +274,9 @@ export function SurfaceToolDock({
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
-  const createBrowser = useAppStore((state) => state.createBrowser)
   const openLauncher = useAppStore((state) => state.openLauncher)
   const selectSession = useAppStore((state) => state.selectSession)
-  const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
-  const tabs = useAppStore((state) => state.tabs)
-  const browserAnnotationsByBrowserId = useAppStore((state) => state.browserAnnotationsByBrowserId)
-  const deleteBrowserAnnotation = useAppStore((state) => state.deleteBrowserAnnotation)
-  const clearBrowserAnnotations = useAppStore((state) => state.clearBrowserAnnotations)
-  const appendAgentComposerDraft = useAppStore((state) => state.appendAgentComposerDraft)
-  const [startingBrowser, setStartingBrowser] = useState(false)
-  const [savingBrowserToolbar, setSavingBrowserToolbar] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const fileEditingProbe = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
   // Scratch is a wiki-first workspace: the content slot keeps its `files-branches` role but is
@@ -465,50 +298,6 @@ export function SurfaceToolDock({
       })
   const selectedTool = fileEditingProbe ? 'files-branches' : effectiveWorkspaceTool
   const activePaneId = layout?.activeGroupId
-  const allBrowserSurfaces = Object.values(tabs).flatMap((tab) => workbenchSurfaces(tab))
-    .flatMap((candidate) => candidate.kind === 'browser' ? [candidate] : [])
-  const browserSurfaces = allBrowserSurfaces.filter((candidate) => candidate.workspaceId === workspace?.id)
-  const currentNavigationByBrowserId = Object.fromEntries(browserSurfaces.map((browser) => [
-    browser.browserId,
-    browser.navigationId
-  ]))
-  const browserAnnotations = Object.values(browserAnnotationsByBrowserId).flat()
-    .filter((annotation) => annotation.workspaceId === workspace?.id)
-  const workspaceAgentSessions = sessions.flatMap((session) => (
-    workspace && session.kind === 'agent' && workspaceOwnsSessionPath(workspace, session) ? [session] : []
-  ))
-
-  async function openBrowser(): Promise<void> {
-    if (startingBrowser) return
-    const focusError = browserOpenError(activePaneId)
-    if (focusError || !activePaneId) {
-      setError(focusError ?? browserOpenError(undefined)!)
-      return
-    }
-    setStartingBrowser(true)
-    setError(null)
-    try {
-      await createBrowser(activePaneId)
-    } catch (cause) {
-      setError(presentError(cause))
-    } finally {
-      setStartingBrowser(false)
-    }
-  }
-
-  async function saveBrowserToolbar(toolbar: BrowserToolbarConfig, expected: BrowserToolbarConfig): Promise<void> {
-    if (savingBrowserToolbar) return
-    const current = useAppStore.getState().config
-    if (!current) return
-    setSavingBrowserToolbar(true)
-    try {
-      await api.config.save({ ...current, browser: { ...current.browser, toolbar } },
-        { ...current, browser: { ...current.browser, toolbar: expected } })
-    } finally {
-      setSavingBrowserToolbar(false)
-    }
-  }
-
   return (
     <aside className="surface-tool-panel" aria-label="Space tools">
       <header className={`surface-tool-activitybar surface-tool-activitybar--space ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
@@ -544,18 +333,6 @@ export function SurfaceToolDock({
             <Plus size={15} />
           </button>
         ) : null}
-        {selectedTool === 'browser-tools' && workspace ? (
-          <button
-            type="button"
-            className="surface-tool-create icon-button"
-            aria-label="New Browser"
-            title={startingBrowser ? 'Opening Browser…' : 'New Browser'}
-            disabled={startingBrowser}
-            onClick={() => void openBrowser()}
-          >
-            {startingBrowser ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}
-          </button>
-        ) : null}
       </header>
       <div className="surface-tool-content">
         {selectedTool === 'files-branches' && workspace ? (
@@ -568,33 +345,6 @@ export function SurfaceToolDock({
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}
           />
         ) : null}
-        {effectiveWorkspaceTool === 'browser-tools' && workspace && config ? (
-          <section className="browser-tools-panel" aria-label="Browser Tools">
-            {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
-            <BrowserToolbarPreferences
-              toolbar={config.browser.toolbar}
-              saving={savingBrowserToolbar}
-              onSave={saveBrowserToolbar}
-            />
-            <BrowserProfilesPanel browsers={browserSurfaces} allBrowsers={allBrowserSurfaces} />
-            <BrowserAnnotationsPanel
-              annotations={browserAnnotations}
-              currentNavigationByBrowserId={currentNavigationByBrowserId}
-              agentSessions={workspaceAgentSessions}
-              onDelete={deleteBrowserAnnotation}
-              onClear={() => {
-                for (const browserId of new Set(browserAnnotations.map(({ browserId }) => browserId))) {
-                  clearBrowserAnnotations(browserId)
-                }
-              }}
-              onAddToComposer={(sessionId, currentAnnotations) => {
-                appendAgentComposerDraft(sessionId, formatBrowserAnnotationsContext(currentAnnotations))
-                selectSession(sessionId, activePaneId)
-              }}
-            />
-          </section>
-        ) : null}
-        {error && effectiveWorkspaceTool !== 'browser-tools' ? <div className="surface-tool-error" role="alert">{error}</div> : null}
       </div>
     </aside>
   )

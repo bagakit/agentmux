@@ -8,14 +8,14 @@ const SOURCE = readFile(
 )
 
 describe('main surface persistence', () => {
-  it('restores Survey through the same durable mainSurface projection', async () => {
+  it('restores Search through the same durable mainSurface projection', async () => {
     const source = await SOURCE
     const restoreStart = source.indexOf('function restoredMainSurface(candidate: unknown): MainSurface {')
     expect(restoreStart).toBeGreaterThan(-1)
     const restoreEnd = source.indexOf('\n}\n', restoreStart)
     expect(restoreEnd).toBeGreaterThan(restoreStart)
     const restoreBody = source.slice(restoreStart, restoreEnd)
-    expect(restoreBody).toContain("candidate === 'survey'")
+    expect(restoreBody).toContain("candidate === 'search'")
     expect(source).toContain('mainSurface: state.mainSurface')
   })
 })

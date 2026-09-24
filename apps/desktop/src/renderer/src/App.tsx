@@ -21,7 +21,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
-import { GlobalSurveySurface } from './components/GlobalSurveySurface'
+import { GlobalSearchSurface } from './components/GlobalSearchSurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { PMO_FLOATING_TAB_SLOT_PREFIX, pmoTeamsTopicFloatingTargetTabId, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
@@ -87,8 +87,12 @@ function DesktopApp() {
     return targets
   }, [moteFloating.open, layouts[SCRATCH_WORKSPACE_ID], tabs, moteTargetTabId])
   const mainSurface = useAppStore((state) => state.mainSurface)
+  const [searchVisited, setSearchVisited] = useState(mainSurface === 'search')
+  useEffect(() => {
+    if (mainSurface === 'search') setSearchVisited(true)
+  }, [mainSurface])
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
-  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'
+  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'search'
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
@@ -298,7 +302,7 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
                 </section>
               ) : null}
-              {mainSurface === 'survey' ? <GlobalSurveySurface /> : null}
+              {searchVisited || mainSurface === 'search' ? <GlobalSearchSurface visible={mainSurface === 'search' && !settingsRoute} /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (

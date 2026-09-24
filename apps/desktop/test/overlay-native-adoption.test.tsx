@@ -226,17 +226,17 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(TOP_ROW_TSX).toContain('window.addEventListener(\'keydown\', onKeyDown)')
     expect(TOP_ROW_TSX).toContain('window.addEventListener(\'blur\', onBlur)')
 
-    useAppStore.setState({ mainSurface: 'survey' })
+    useAppStore.setState({ mainSurface: 'search' })
     await act(async () => {
       root?.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }))
     })
 
-    const surveyBtn = container?.querySelector('button[aria-label^="Survey"]') as HTMLButtonElement
-    expect(surveyBtn).toBeTruthy()
+    const searchBtn = container?.querySelector('button[aria-label^="Search"]') as HTMLButtonElement
+    expect(searchBtn).toBeTruthy()
 
     // Mouse over triggers tooltip in host
     await act(async () => {
-      surveyBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      searchBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     })
     expect(host?.querySelector('.surface-navigation__tooltip')).toBeTruthy()
 
@@ -248,7 +248,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
 
     // Reopen and test window blur
     await act(async () => {
-      surveyBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      searchBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     })
     expect(host?.querySelector('.surface-navigation__tooltip')).toBeTruthy()
 
@@ -262,7 +262,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     host = null
 
     await act(async () => {
-      surveyBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      searchBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     })
     expect(container?.querySelector('.surface-navigation__tooltip')).toBeNull()
   })
