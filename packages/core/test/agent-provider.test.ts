@@ -6,6 +6,27 @@ import { LAUNCH_OPTIONS_BY_PROVIDER_ID } from '../src/agent-launch-option.js'
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
 
+  it('keeps existing objects when singular registration or replacement is invalid', () => {
+    const pi = providers.get('pi'), codex = providers.get('codex'), claude = providers.get('claude')
+    const registry = new AgentProviderRegistry([pi, codex])
+    const before = registry.catalog()
+    expect(before.map(provider => provider.id)).toEqual(['pi', 'codex'])
+    const incompleteClaude = { ...claude }, incompleteCodex = { ...codex }
+    delete incompleteClaude.planManagedHooks
+    delete incompleteCodex.planManagedHooks
+    expect(() => registry.register(incompleteClaude))
+      .toThrow(expect.objectContaining({ code: 'INVALID_AGENT_PROVIDER' }))
+    expect(registry.catalog()).toEqual(before)
+    expect(() => registry.replace(incompleteCodex))
+      .toThrow(expect.objectContaining({ code: 'INVALID_AGENT_PROVIDER' }))
+    expect(registry.catalog()).toEqual(before)
+    expect(registry.get('pi')).toBe(pi)
+    expect(registry.get('codex')).toBe(codex)
+    registry.register(claude)
+    expect(registry.catalog().map(provider => provider.id)).toEqual(['pi', 'codex', 'claude'])
+    expect(registry.get('claude')).toBe(claude)
+  })
+
   it('publishes a complete catalog for every built-in Agent', () => {
     expect(providers.catalog().map((entry) => ({
       id: entry.id,
