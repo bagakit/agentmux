@@ -1193,5 +1193,451 @@ describe('Hermes session analysis and native history', () => {
         prepareSpy.mockRestore()
       }
     })
+
+    it('reads full conversation across compression continuation chain and paginates with limit 1 without holes or duplicates while excluding branch/delegate/tool siblings', async () => {
+      const db = createTestDatabase()
+      const workspacePath = join(tempDir, 'workspace')
+
+      // Root session that ended with compression
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason)
+        VALUES ('sess-comp-root', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920000.0, 1774920003.0, 'compression');
+      `)
+
+      // Valid compression continuation child
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id, model_config)
+        VALUES ('sess-comp-child', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920004.0, 'sess-comp-root', '{}');
+      `)
+
+      // Sibling: branch child (must be excluded)
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id, model_config)
+        VALUES ('sess-branch-sibling', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920004.5, 'sess-comp-root', '{"_branched_from":"sess-comp-root"}');
+      `)
+
+      // Sibling: delegate subagent child (must be excluded)
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id, model_config)
+        VALUES ('sess-delegate-sibling', 'subagent', 'nous-hermes-3', '${workspacePath}', 1774920004.6, 'sess-comp-root', '{"_delegate_from":"sess-comp-root"}');
+      `)
+
+      // Sibling: tool child (must be excluded)
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id)
+        VALUES ('sess-tool-sibling', 'tool', 'nous-hermes-3', '${workspacePath}', 1774920004.7, 'sess-comp-root');
+      `)
+
+      // Messages in root session
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (101, 'sess-comp-root', 'user', 'Root user message 1', 1774920001.0);
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (102, 'sess-comp-root', 'assistant', 'Root assistant message 2', 1774920002.0);
+      `)
+
+      // Messages in compression continuation child
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (103, 'sess-comp-child', 'user', 'Continuation user message 3', 1774920005.0);
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (104, 'sess-comp-child', 'assistant', 'Continuation assistant message 4', 1774920006.0);
+      `)
+
+      // Messages in siblings (must NEVER appear)
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (105, 'sess-branch-sibling', 'user', 'Branch sibling message', 1774920007.0);
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (106, 'sess-delegate-sibling', 'user', 'Delegate sibling message', 1774920008.0);
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (107, 'sess-tool-sibling', 'user', 'Tool sibling message', 1774920009.0);
+      `)
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-comp-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath,
+        run: { runId: 'run-comp' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-comp-root',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      // Test 1: Full read with limit 10 should return all 4 messages across root + continuation
+      const pageFull = await client.sessionHistoryPage('hermes-comp-session', { limit: 10 })
+      expect(pageFull.items).toHaveLength(4)
+      expect(pageFull.items.map((it) => (it.contentParts[0] as { text: string }).text)).toEqual([
+        'Root user message 1',
+        'Root assistant message 2',
+        'Continuation user message 3',
+        'Continuation assistant message 4'
+      ])
+
+      // Test 2: Paginating with limit 1 across root->continuation boundary without holes or duplicates
+      const p1 = await client.sessionHistoryPage('hermes-comp-session', { limit: 1 })
+      expect(p1.items).toHaveLength(1)
+      expect((p1.items[0]!.contentParts[0] as { text: string }).text).toBe('Continuation assistant message 4')
+      expect(p1.nextCursor).toBeTruthy()
+
+      const p2 = await client.sessionHistoryPage('hermes-comp-session', { limit: 1, cursor: p1.nextCursor! })
+      expect(p2.items).toHaveLength(1)
+      expect((p2.items[0]!.contentParts[0] as { text: string }).text).toBe('Continuation user message 3')
+      expect(p2.nextCursor).toBeTruthy()
+
+      const p3 = await client.sessionHistoryPage('hermes-comp-session', { limit: 1, cursor: p2.nextCursor! })
+      expect(p3.items).toHaveLength(1)
+      expect((p3.items[0]!.contentParts[0] as { text: string }).text).toBe('Root assistant message 2')
+      expect(p3.nextCursor).toBeTruthy()
+
+      const p4 = await client.sessionHistoryPage('hermes-comp-session', { limit: 1, cursor: p3.nextCursor! })
+      expect(p4.items).toHaveLength(1)
+      expect((p4.items[0]!.contentParts[0] as { text: string }).text).toBe('Root user message 1')
+      expect(p4.nextCursor).toBeNull()
+    })
+
+    it('rejects with AGENT_SESSION_HISTORY_SOURCE_CHANGED when a compression continuation descendant is in a different cwd', async () => {
+      const wsA = join(tempDir, 'ws-a')
+      const wsB = join(tempDir, 'ws-b')
+      await mkdir(wsA, { recursive: true })
+      await mkdir(wsB, { recursive: true })
+
+      const db = createTestDatabase()
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason)
+        VALUES ('sess-cross-root', 'cli', 'nous-hermes-3', '${wsA}', 1774920000.0, 1774920003.0, 'compression');
+
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id, model_config)
+        VALUES ('sess-cross-child', 'cli', 'nous-hermes-3', '${wsB}', 1774920004.0, 'sess-cross-root', '{}');
+
+        INSERT INTO messages (session_id, role, content, timestamp)
+        VALUES ('sess-cross-root', 'user', 'Root in A', 1774920001.0);
+
+        INSERT INTO messages (session_id, role, content, timestamp)
+        VALUES ('sess-cross-child', 'user', 'Continuation in B', 1774920005.0);
+      `)
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-cross-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath: wsA,
+        run: { runId: 'run-cross' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-cross-root',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      await expect(client.sessionHistoryPage('hermes-cross-session')).rejects.toMatchObject({
+        code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+      })
+    })
+
+    it('rejects with AGENT_SESSION_HISTORY_TOO_LARGE when compression continuation chain exceeds maximum depth budget (100)', async () => {
+      const db = createTestDatabase()
+      const workspacePath = join(tempDir, 'workspace')
+
+      // Create 102 chained sessions: s0 .. s101 (101 compressions, exceeding depth 100)
+      for (let i = 0; i < 102; i++) {
+        const parentId = i === 0 ? null : `sess-depth-${i - 1}`
+        const endReason = i < 101 ? "'compression'" : 'NULL'
+        const endedAt = i < 101 ? `${1774920000 + i + 1}` : 'NULL'
+        db.exec(`
+          INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason, parent_session_id, model_config)
+          VALUES ('sess-depth-${i}', 'cli', 'nous-hermes-3', '${workspacePath}', ${1774920000 + i}, ${endedAt}, ${endReason}, ${parentId ? `'${parentId}'` : 'NULL'}, '{}');
+        `)
+      }
+
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (1001, 'sess-depth-0', 'user', 'Depth message 0', 1774920000.5);
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (1002, 'sess-depth-101', 'assistant', 'Depth message 101', 1774920150.0);
+      `)
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-depth-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath,
+        run: { runId: 'run-depth' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-depth-0',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      await expect(client.sessionHistoryPage('hermes-depth-session', { limit: 10 })).rejects.toMatchObject({
+        code: 'AGENT_SESSION_HISTORY_TOO_LARGE'
+      })
+    })
+
+    it('rejects with AGENT_SESSION_HISTORY_SOURCE_CHANGED when a compression continuation cycle is detected', async () => {
+      const db = createTestDatabase()
+      const workspacePath = join(tempDir, 'workspace')
+
+      // Create cycle: s0 -> s1 -> s0
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason, parent_session_id, model_config)
+        VALUES ('sess-cycle-0', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920000.0, 1774920001.0, 'compression', 'sess-cycle-1', '{}');
+
+        INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason, parent_session_id, model_config)
+        VALUES ('sess-cycle-1', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920002.0, 1774920003.0, 'compression', 'sess-cycle-0', '{}');
+
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (2001, 'sess-cycle-0', 'user', 'Cycle msg 0', 1774920000.5);
+      `)
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-cycle-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath,
+        run: { runId: 'run-cycle' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-cycle-0',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      await expect(client.sessionHistoryPage('hermes-cycle-session', { limit: 10 })).rejects.toMatchObject({
+        code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+      })
+    })
+
+    it('rejects with AGENT_SESSION_HISTORY_SOURCE_CHANGED when a compression continuation cycle occurs at the depth budget limit', async () => {
+      const db = createTestDatabase()
+      const workspacePath = join(tempDir, 'workspace')
+
+      // Create 101 sessions: s0 .. s100
+      for (let i = 0; i < 101; i++) {
+        const parentId = i === 0 ? 'sess-cycle-limit-100' : `sess-cycle-limit-${i - 1}`
+        db.exec(`
+          INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason, parent_session_id, model_config)
+          VALUES ('sess-cycle-limit-${i}', 'cli', 'nous-hermes-3', '${workspacePath}', ${1774920000 + i}, ${1774920000 + i + 1}, 'compression', '${parentId}', '{}');
+        `)
+      }
+
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (3001, 'sess-cycle-limit-0', 'user', 'Cycle at limit msg', 1774920000.5);
+      `)
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-cycle-limit-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath,
+        run: { runId: 'run-cycle-limit' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-cycle-limit-0',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      await expect(client.sessionHistoryPage('hermes-cycle-limit-session', { limit: 10 })).rejects.toMatchObject({
+        code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+      })
+    })
+
+    it('successfully reads full history across exact 100-hop compression continuation chain (terminal success positive)', async () => {
+      const db = createTestDatabase()
+      const workspacePath = join(tempDir, 'workspace')
+
+      // Create 101 sessions: s0 .. s100 (exact 100 compressions, 100 hops)
+      for (let i = 0; i < 101; i++) {
+        const parentId = i === 0 ? null : `sess-exact-${i - 1}`
+        const endReason = i < 100 ? "'compression'" : 'NULL'
+        const endedAt = i < 100 ? `${1774920000 + i + 1}` : 'NULL'
+        db.exec(`
+          INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason, parent_session_id, model_config)
+          VALUES ('sess-exact-${i}', 'cli', 'nous-hermes-3', '${workspacePath}', ${1774920000 + i}, ${endedAt}, ${endReason}, ${parentId ? `'${parentId}'` : 'NULL'}, '{}');
+        `)
+      }
+
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (4001, 'sess-exact-0', 'user', 'Exact hop msg 0', 1774920000.5);
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (4002, 'sess-exact-100', 'assistant', 'Exact hop msg 100', 1774920150.0);
+      `)
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-exact-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath,
+        run: { runId: 'run-exact' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-exact-0',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      const page = await client.sessionHistoryPage('hermes-exact-session', { limit: 10 })
+      expect(page.items).toHaveLength(2)
+      expect(page.items.map((it) => (it.contentParts[0] as { text: string }).text)).toEqual([
+        'Exact hop msg 0',
+        'Exact hop msg 100'
+      ])
+    })
+
+    it('rejects with AGENT_SESSION_HISTORY_SOURCE_CHANGED when multiple eligible continuation children exist (ambiguous continuation)', async () => {
+      const db = createTestDatabase()
+      const workspacePath = join(tempDir, 'workspace')
+
+      // Root session that compressed
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, ended_at, end_reason)
+        VALUES ('sess-ambig-root', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920000.0, 1774920001.0, 'compression');
+      `)
+
+      // Two eligible continuation children under the same parent without branch/delegate/tool markers
+      db.exec(`
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id, model_config)
+        VALUES ('sess-ambig-child-a', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920002.0, 'sess-ambig-root', '{}');
+
+        INSERT INTO sessions (id, source, model, cwd, started_at, parent_session_id, model_config)
+        VALUES ('sess-ambig-child-b', 'cli', 'nous-hermes-3', '${workspacePath}', 1774920003.0, 'sess-ambig-root', '{}');
+      `)
+
+      // Messages in root and both eligible children (assert nonempty messages)
+      db.exec(`
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (5001, 'sess-ambig-root', 'user', 'Root message before ambiguous fork', 1774920000.5);
+
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (5002, 'sess-ambig-child-a', 'assistant', 'First eligible continuation branch', 1774920002.5);
+
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+        VALUES (5003, 'sess-ambig-child-b', 'assistant', 'Second eligible continuation branch', 1774920003.5);
+      `)
+
+      // Assert that both children exist and their messages are nonempty in database
+      const eligibleRows = db.prepare("SELECT id FROM sessions WHERE parent_session_id = 'sess-ambig-root'").all() as Array<{ id: string }>
+      expect(eligibleRows).toHaveLength(2)
+      const msgRows = db.prepare("SELECT id, content FROM messages WHERE session_id IN ('sess-ambig-child-a', 'sess-ambig-child-b')").all() as Array<{ id: number; content: string }>
+      expect(msgRows).toHaveLength(2)
+      expect(msgRows.every((m) => Boolean(m.content))).toBe(true)
+
+      db.close()
+
+      const store = new AgentMuxMemoryAgentSessionStore()
+      await store.compareAndSwap(null, {
+        kind: 'agent',
+        agentSessionId: 'hermes-ambig-session',
+        providerId: 'hermes',
+        executorId: 'hermes',
+        hostId: 'local',
+        workspacePath,
+        run: { runId: 'run-ambig' },
+        retiredRuns: [],
+        hookBindingId: 'b',
+        hookToken: 't',
+        createdAt: 1,
+        updatedAt: 1,
+        nativeHandle: {
+          kind: 'provider',
+          providerId: 'hermes',
+          sessionId: 'sess-ambig-root',
+          transcriptPath: dbPath
+        }
+      })
+
+      const client = new AgentMuxClient({ store, providers: [new AgentProviderRegistry().get('hermes')] })
+      clients.push(client)
+
+      // Must NOT silently pick the latest child (child-b); must throw AGENT_SESSION_HISTORY_SOURCE_CHANGED
+      await expect(client.sessionHistoryPage('hermes-ambig-session', { limit: 10 })).rejects.toMatchObject({
+        code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+      })
+    })
   })
 })
