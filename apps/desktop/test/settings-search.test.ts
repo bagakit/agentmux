@@ -83,7 +83,7 @@ describe('设置搜索', () => {
 
     // 前提自检：判据认得出 `.filter(` 这个形状本身。若这段遍历写错，主断言会在「一处都没找到」
     // 上静默通过——正是它要取代的那种失明。
-    const filterCallsIn = (node: ts.Node): number[] => {
+    const filterCallsIn = (node: ts.Node, sourceFile = ast): number[] => {
       const lines: number[] = []
       const walk = (current: ts.Node): void => {
         if (
@@ -91,16 +91,19 @@ describe('设置搜索', () => {
           ts.isPropertyAccessExpression(current.expression) &&
           current.expression.name.text === 'filter'
         ) {
-          lines.push(ast.getLineAndCharacterOfPosition(current.getStart(ast)).line + 1)
+          lines.push(sourceFile.getLineAndCharacterOfPosition(current.getStart(sourceFile)).line + 1)
         }
         ts.forEachChild(current, walk)
       }
       walk(node)
       return lines
     }
-    // 自检的靶子取模块顶层：`visibleSettingsSections` 与 `settingsNavGroups` 各有一处合法的
-    // `.filter(`，判据必须数得出来。数成 0 就说明遍历坏了。
-    expect(filterCallsIn(ast).length, '整份文件一处 `.filter(` 都没找到——判据失效，主断言恒绿')
+    // Positive scanner control follows the actual catalog owner after extraction.
+    const catalogSource = readFileSync(
+      fileURLToPath(new URL('../src/renderer/src/components/settings/settings-catalog.ts', import.meta.url)), 'utf8'
+    )
+    const catalog = ts.createSourceFile('settings-catalog.ts', catalogSource, ts.ScriptTarget.Latest, true)
+    expect(filterCallsIn(catalog, catalog).length, 'Actual catalog has no filter calls; scanner control is empty')
       .toBeGreaterThanOrEqual(2)
 
     expect(filterCallsIn(shell!), [
