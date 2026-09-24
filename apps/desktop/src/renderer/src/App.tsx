@@ -66,6 +66,7 @@ function DesktopApp() {
   const lastError = useAppStore((state) => state.lastError)
   const errorDismissed = useAppStore((state) => state.errorDismissed)
   const errorNoticeKind = useAppStore((state) => state.errorNoticeContext?.kind ?? 'indeterminate')
+  const errorSummary = useAppStore((state) => state.errorNoticeContext?.summary)
   const lifecycleError = useAppStore((state) => state.errorNoticeContext?.lifecycle !== undefined)
   const dismissError = useAppStore((state) => state.dismissError)
   const reopenError = useAppStore((state) => state.reopenError)
@@ -349,6 +350,7 @@ function DesktopApp() {
             dismissed={errorDismissed}
             lastError={lifecycleError ? null : lastError}
             kind={errorNoticeKind}
+            summary={errorSummary}
             onDismiss={dismissError}
             onReopen={reopenError}
           />

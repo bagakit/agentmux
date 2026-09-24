@@ -312,6 +312,8 @@ export type HostCheckState = {
 /** Attributes of the one current/last transient notice, never a second Agent status record. */
 export type ErrorNoticeContext = {
   kind: ServiceNoticeKind
+  /** Explicit presentation from the diagnostic producer; the complete error remains authoritative. */
+  summary?: string
   subject?: SessionControl
   lifecycle?: AgentLifecycleFailure
 }
@@ -1567,7 +1569,7 @@ function startSessionMembershipResync(
         })
         for (const pending of events) {
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
-          if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate',
+          if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
             ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
         }
         for (const candidate of startupCandidates) {
@@ -6364,7 +6366,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Diagnostics use the existing notice owner, even while membership is reconciling.
     // They never replace semantic state or its clock.
     const diagnostic = runtimeDiagnosticNotice(get(), event)
-    if (diagnostic) get().reportError(diagnostic.message, { kind: 'indeterminate',
+    if (diagnostic) get().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
       ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
     if (sessionMembershipResync) {
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
