@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -77,6 +76,8 @@ export async function readOpenCodeSessionHistoryPage(
   }
   const physicalDbToken = `${stat.dev.toString(16)}_${stat.ino.toString(16)}`
 
+  const { DatabaseSync } = await import('node:sqlite')
+  context.signal.throwIfAborted()
   const db = new DatabaseSync(dbPath, { readOnly: true })
   try {
     db.exec('PRAGMA query_only = ON;')
