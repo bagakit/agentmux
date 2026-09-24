@@ -1202,13 +1202,23 @@ export class BrowserViewManager {
 
   private async evaluateOutcome(entry: BrowserEntry, view: WebContentsView,
     registration: BrowserOutcomeRegistration, operationId: string, registrationSaved: boolean): Promise<BrowserOutcomeEvaluation> {
-    const current = () => {
-      if (!this.owns(entry, view) || view.webContents.isDestroyed() || entry.activity.operation?.id !== operationId) {
+    const current = async () => {
+      if (!this.owns(entry, view) || view.webContents.isDestroyed()) {
         throw new Error('The registered execution no longer owns this Browser.')
       }
+      if (registration.assetRun) {
+        const run = await this.taskAssets?.currentRun(entry.id)
+        if (!this.owns(entry, view) || view.webContents.isDestroyed()) throw new Error('The original Browser owner changed while reading its asset facts.')
+        if (!run || run.completionWarning || run.id !== registration.assetRun.runId || run.assetId !== registration.assetRun.assetId ||
+            run.version !== registration.assetRun.version || !run.operationIds.includes(operationId) ||
+            (entry.activity.operation && !run.operationIds.includes(entry.activity.operation.id))) throw new Error('The actual asset execution changed.')
+        return { workspaceId: entry.workspaceId, browserId: entry.id, navigationId: entry.navigationId,
+          assetRun: { runId: run.id, assetId: run.assetId, version: run.version, operationIds: run.operationIds } }
+      }
+      if (entry.activity.operation?.id !== operationId) throw new Error('The registered execution no longer owns this Browser.')
       return { workspaceId: entry.workspaceId, browserId: entry.id, navigationId: entry.navigationId, assetRun: null }
     }
-    const unavailable = (): BrowserOutcomeEvaluation => ({ context: registration.context, status: 'unavailable',
+    const unavailable = (): BrowserOutcomeEvaluation => ({ context: registration.context, ...(registration.assetRun ? { assetRun: registration.assetRun } : {}), status: 'unavailable',
       conditions: registration.criteria.map(c => ({ criterion: c.kind === 'field-equals'
         ? { kind: c.kind, key: c.key, expected: c.expected } : c.kind === 'download-readable'
           ? { kind: c.kind, path: c.path } : { kind: c.kind, checkpointId: c.checkpointId },
@@ -1218,13 +1228,27 @@ export class BrowserViewManager {
         current, getOperation: id => this.getOperation(id),
         getStepEvidence: (id, sequence) => this.getStepEvidence(id, sequence),
         readStepResult: (id, sequence, options) => this.readStepResult(id, sequence, options),
+        getDownloads: async () => {
+          if (!this.downloads) throw new Error('Download facts are unavailable.')
+          return await this.downloads.list({ workspaceId: entry.workspaceId, browserId: entry.id })
+        },
+        readDownload: async (reference, options) => {
+          if (!this.downloads) throw new Error('Download files are unavailable.')
+          return await this.downloads.read(reference, { workspaceId: entry.workspaceId, browserId: entry.id }, options)
+        },
+        getHumanCheckpoint: async (tuple, checkpointId) => {
+          if (!this.taskAssets) throw new Error('Task facts are unavailable.')
+          const read = await this.taskAssets.readExactFact({ ...tuple, browserId: entry.id }, checkpointId)
+          if (read.status === 'unavailable') throw new Error(read.warning)
+          return read.status === 'available' ? read.fact : null
+        },
         isStructuredSourceCurrent: async source => {
-          current()
+          await current()
           if (source.navigationId !== entry.navigationId || source.scope.withinRef) return false
           const session = BrowserCdpSession.attach(view.webContents)
           try {
             const target = await resolveBrowserStructuredTarget(session.sendCommand, source.scope.within ? { within: source.scope.within } : {})
-            try { const valid = target.document === source.document && await target.isCurrent(); current(); return valid }
+            try { const valid = target.document === source.document && await target.isCurrent(); await current(); return valid }
             finally { await target.release() }
           } finally { session.detach() }
         }
@@ -1375,12 +1399,32 @@ export class BrowserViewManager {
         onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
         yieldControl: id => this.yieldControl(id),
-        runScript: async (id, code) => {
+        runScript: async (id, code, cursor) => {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
           if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
           try {
-            return await this.runScript(id, code, undefined, undefined, undefined, operation => {
+            return await this.runScript(id, code, undefined, undefined, undefined, async operation => {
               execution.operationId = operation.id
+              const version = await this.taskAssets!.executionVersion(cursor)
+              const bound = await this.taskAssets!.bindOperation(cursor, operation.id)
+              const declaration = version?.completion
+              const download = declaration?.criteria.find(item => item.kind === 'download-readable')
+              const producer = download?.stepId ?? version?.steps.find(step => step.kind !== 'checkpoint')?.id
+              if (declaration && producer === cursor.stepId && this.operationJournal) {
+                const registration: BrowserOutcomeRegistration = {
+                  context: { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId },
+                  assetRun: { runId: cursor.runId, assetId: cursor.assetId, version: cursor.version },
+                  criteria: declaration.criteria.map(item => item.kind === 'download-readable'
+                    ? { kind: item.kind, path: item.path, producer: { operationId: operation.id, navigationId: entry.navigationId } }
+                    : { kind: item.kind, checkpointId: item.checkpointId })
+                }
+                const saved = await this.operationJournal.registerOutcome(operation.id, registration)
+                if (saved?.operation.outcome) operation.outcome = saved.operation.outcome
+                if (!bound || !saved?.saved) {
+                  await this.taskAssets!.markCompletionUnavailable(cursor)
+                  operation.warning = 'Completion recording is unavailable. Existing Browser and Agent work remains; restore local storage before verifying again.'
+                }
+              }
               // Preparation can finish after the person stopped this exact cursor.
               // Hand that intent to the existing operation cancellation owner before any page work.
               if (execution.stopRequested) void this.stopOperationById(operation.id)

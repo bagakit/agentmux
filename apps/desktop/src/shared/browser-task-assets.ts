@@ -21,7 +21,12 @@ export type BrowserTaskStep = {
   reviewed: boolean
   warning?: string
 }
-export type BrowserTaskContent = { name: string; url: string; steps: BrowserTaskStep[]; parameters: BrowserTaskParameter[] }
+export type BrowserTaskCompletion = { criteria: (
+  | { kind: 'download-readable'; stepId: string; path: string }
+  | { kind: 'human-checkpoint'; checkpointId: string }
+)[] }
+export type BrowserTaskStepExecution = BrowserTaskRunIdentity & { stepId: string }
+export type BrowserTaskContent = { name: string; url: string; steps: BrowserTaskStep[]; parameters: BrowserTaskParameter[]; completion?: BrowserTaskCompletion }
 export type BrowserTaskVersion = BrowserTaskContent & { version: number; savedAt: number }
 export type BrowserTaskAsset = {
   id: string
@@ -45,11 +50,12 @@ export type BrowserTaskAssetRun = {
   pendingCheckpointId?: string
   /** Main-created trusted Continue events. Absence means their recording information is unavailable. */
   humanCheckpoints?: BrowserTaskHumanCheckpoint[]
+  completionWarning?: string
   warning?: string
   startedAt: number
   updatedAt: number
 }
-export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[] }
+export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; selectedRuns?: { browserId: string; runId: string }[] }
 export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; warning?: string }
 export type BrowserTaskAssetRunInput = {
   assetId: string

@@ -32,7 +32,7 @@ export async function native(ctx, selector, value) {
     }finally{contents.removeListener('input-event',listener)}
   })()`)
   ;(ctx.receipt.nativeInputAttempts ??= []).push({ browserId: ctx.browserId, selector, typing: value !== undefined, ...result })
-  assert.ok(result.after.click > result.before.click, 'Real native input must reach a trusted page click')
+  assert.equal(result.after.click, result.before.click + 1, 'Real native input must reach the intended page exactly once')
   assert.equal(result.after.lastTarget, result.cssPoint.targetId, 'Real native input must reach the intended fixture target')
   assert.ok(result.types.includes('mouseUp'), 'Native Electron input must be observed by the actual owner')
   if (value !== undefined) {
@@ -51,6 +51,69 @@ async function open(ctx) {
     await click(probe.cdp, owned(ctx, '[aria-label="More browser tools"]'))
     await click(probe.cdp, selectors('[aria-label="Open human demonstration draft"]'))
   }
+}
+
+async function toolbarFacts(ctx, label, actualWindow) {
+  const result = await ctx.probe.cdp.evaluate(`(async()=>{
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const more=(${owned(ctx, '[aria-label="More browser tools"]')})[0];
+    if(!more)throw new Error('The original Browser needs its overflow entry');
+    const surface=more.closest('.browser-surface'),toolbar=more.closest('.browser-toolbar'),region=more.closest('[data-workbench-region-id]'),close=region?.querySelector('.workbench-region__close');
+    if(!surface||!toolbar||!region||!close)throw new Error('Actual toolbar, split and its close control are required');
+    const rect=element=>{const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}};
+    const identity=element=>({tag:element.tagName,label:element.getAttribute('aria-label'),regionId:element.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId??null});
+    const samples=element=>{const r=element.getBoundingClientRect();return [[r.x+r.width/2,r.y+r.height/2],[r.x+1,r.y+r.height/2],[r.right-1,r.y+r.height/2],[r.x+r.width/2,r.y+1],[r.x+r.width/2,r.bottom-1]].map(([x,y])=>({point:{x,y},owns:element.contains(document.elementFromPoint(x,y)),stack:document.elementsFromPoint(x,y).slice(0,8).map(identity)}))};
+    const visible=element=>element.getClientRects().length&&getComputedStyle(element).display!=='none'&&getComputedStyle(element).visibility!=='hidden';
+    const moreSamples=samples(more),closeSamples=samples(close),m=rect(more),c=rect(close);
+    return {label:${JSON.stringify(label)},actualWindow:${JSON.stringify(actualWindow)},regionId:region.dataset.workbenchRegionId,region:rect(region),stage:rect(surface.querySelector('[data-native-browser-stage]')),address:rect(toolbar.querySelector('label')),more:m,close:c,moreOwnsPoint:moreSamples[0].owns,moreHitSamples:moreSamples.map(sample=>sample.owns),closeHitSamples:closeSamples.map(sample=>sample.owns),moreSamples,closeSamples,
+      buttons:Array.from(toolbar.querySelectorAll('button')).filter(visible).map(element=>({label:element.getAttribute('aria-label'),disabled:element.disabled,bounds:rect(element),samples:samples(element)})),
+      browserRegions:Array.from(document.querySelectorAll('[data-workbench-region-id]')).filter(element=>element.querySelector('[aria-label="Browser address"]')).map(element=>({regionId:element.dataset.workbenchRegionId,url:element.querySelector('[aria-label="Browser address"]').value})).sort((a,b)=>a.regionId.localeCompare(b.regionId))};
+  })()`)
+  assert.ok(result.region.width > 0 && result.region.height > 0 && result.stage.width > 0 && result.stage.height > 0)
+  assert.ok(result.more.width > 0 && result.more.height > 0 && result.close.width > 0 && result.close.height > 0)
+  assert.equal(result.address.width >= 96, true, 'The address retains its usable input width')
+  assert.equal(result.moreOwnsPoint, true, 'More must own its actual split hit point')
+  assert.deepEqual(result.moreHitSamples, [true,true,true,true,true], 'More owns its complete split hit edges')
+  assert.deepEqual(result.closeHitSamples, [true,true,true,true,true], 'Close split keeps its complete hit edges')
+  assert.ok(result.more.x + result.more.width <= result.close.x, 'More must not occupy Close split')
+  assert.ok(result.buttons.length >= 3, 'The real toolbar has nonempty necessary actions')
+  assert.equal(result.browserRegions.length, 2, 'The two original Browser Regions remain present')
+  for (const button of result.buttons) {
+    assert.ok(button.bounds.width > 0 && button.bounds.height > 0)
+    assert.deepEqual(button.samples.map(sample=>sample.owns), [true,true,true,true,true], `${button.label} keeps its complete hit area`)
+    assert.ok(button.samples.every(sample=>sample.stack.length > 0), 'Actual elementsFromPoint must return a nonempty stack')
+    assert.ok(button.bounds.x + button.bounds.width <= result.close.x, 'Necessary toolbar actions keep Close split clear')
+  }
+  return result
+}
+
+async function closeDraft(ctx) {
+  const close = owned(ctx, '[aria-label="Close browser activity timeline"]')
+  if (await ctx.probe.cdp.evaluate(`(${close}).length===1`)) {
+    await ctx.click(ctx.probe.cdp, close)
+    await ctx.waitFor('original demonstration drawer closed', () => ctx.probe.cdp.evaluate(`(${owned(ctx, '[aria-label="Human demonstration draft"]')}).length===0`))
+  }
+}
+
+async function verifyCloseSplit(ctx) {
+  await closeDraft(ctx)
+  const size = await ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(ctx.desktopRoot,'package.json'))})('electron');return BrowserWindow.getAllWindows()[0].getMinimumSize()})()`)
+  const actual = await ctx.resize(ctx.probe, ...size)
+  const toolbar = await toolbarFacts(ctx, 'restarted-minimum-before-close', actual)
+  const pageOwners = () => ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(ctx.desktopRoot,'package.json'))})('electron');return BrowserWindow.getAllWindows()[0].contentView.children.filter(view=>view.webContents&&!view.webContents.isDestroyed()&&${JSON.stringify(ctx.urls)}.includes(view.webContents.getURL().split('#')[0])).map(view=>({id:view.webContents.id,url:view.webContents.getURL().split('#')[0],visible:view.getVisible(),bounds:view.getBounds()})).sort((a,b)=>a.url.localeCompare(b.url))})()`)
+  const before = await pageOwners()
+  assert.equal(before.length, 2, 'The restored two Browser owners must be nonempty before explicit Close')
+  const original = before.find(page=>page.url===ctx.pageUrl), sibling = before.find(page=>page.url!==ctx.pageUrl)
+  assert.ok(original && sibling)
+  await ctx.click(ctx.probe.cdp, `${ctx.selectors('.workbench-region__close')}.filter(element=>element.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId===${JSON.stringify(toolbar.regionId)})`)
+  const after = await ctx.waitFor('the intended Close split releases only its actual Browser', async()=>{const pages=await pageOwners();return pages.length===1&&pages[0].id===sibling.id?pages:null})
+  assert.equal(after[0].url, sibling.url)
+  assert.equal(after[0].visible, true)
+  assert.ok(after[0].bounds.width > 0 && after[0].bounds.height > 0)
+  const durable = await ctx.waitFor('explicit Close retires only its intended durable Region',()=>ctx.probe.cdp.evaluate(`(()=>{const state=JSON.parse(localStorage.getItem('agentmux-workbench-v1')??'null')?.state?.restoredWorkbench;if(!state)return null;const regions=Object.values(state.tabs).flatMap(tab=>Object.values(tab.regions)).filter(region=>region.kind==='browser');return regions.length===1&&regions[0].regionId!==${JSON.stringify(toolbar.regionId)}?regions:null})()`))
+  const siblingInput = await native({ ...ctx, pageUrl: sibling.url }, '#demo-click')
+  ctx.receipt.demonstration.closeSplit = { boundary: 'Explicit private Close after ordinary restart identity/layout comparison; original restoration was already asserted', toolbar, before, after, durable, siblingInput }
+  await ctx.capture(ctx.probe, 'restarted-explicit-close-keeps-sibling', 'page', sibling.url)
 }
 
 export async function reviewDemonstration(ctx) {
@@ -124,11 +187,20 @@ export async function reviewDemonstration(ctx) {
 }
 
 export async function startInterruptedDemonstration(ctx) {
+  // The first scenario leaves the draft open. Close it through its original action so
+  // the real minimum split must consume More before the next explicit recording.
+  await closeDraft(ctx)
+  ctx.receipt.demonstration.splitToolbar = []
+  for (const [label,width,height] of [['normal',1440,900],['narrow',1000,720],['short',1000,660]]) {
+    const actual = await ctx.resize(ctx.probe,width,height)
+    ctx.receipt.demonstration.splitToolbar.push(await toolbarFacts(ctx,label,actual))
+    await ctx.capture(ctx.probe, `${label}-split-toolbar-before-more`, 'page')
+  }
   const size = await ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(ctx.desktopRoot,'package.json'))})('electron');return BrowserWindow.getAllWindows()[0].getMinimumSize()})()`)
   assert.equal(size.length, 2)
   assert.ok(size[0] > 0 && size[1] > 0, 'The real supported minimum window geometry is required')
   const actual = await ctx.resize(ctx.probe, ...size)
-  ctx.receipt.demonstration.minimumSplit = await ctx.probe.cdp.evaluate(`(()=>{const more=(${owned(ctx, '[aria-label="More browser tools"]')})[0];if(!more)throw new Error('The original Browser needs its overflow entry');const region=more.closest('[data-workbench-region-id]'),close=region?.querySelector('.workbench-region__close');if(!region||!close)throw new Error('Actual split and its close control are required');const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}};const m=rect(more),c=rect(close),point={x:m.x+m.width/2,y:m.y+m.height/2};const hits=element=>{const r=element.getBoundingClientRect();return [[r.x+r.width/2,r.y+r.height/2],[r.x+1,r.y+r.height/2],[r.right-1,r.y+r.height/2],[r.x+r.width/2,r.y+1],[r.x+r.width/2,r.bottom-1]].map(([x,y])=>element.contains(document.elementFromPoint(x,y)))};return {moreHitSamples:hits(more),closeHitSamples:hits(close),actualWindow:${JSON.stringify(actual)},regionId:region.dataset.workbenchRegionId,region:rect(region),more:m,close:c,moreOwnsPoint:more.contains(document.elementFromPoint(point.x,point.y))}})()`)
+  ctx.receipt.demonstration.minimumSplit = await toolbarFacts(ctx, 'minimum', actual)
   const minimum = ctx.receipt.demonstration.minimumSplit
   await ctx.capture(ctx.probe, 'minimum-split-before-more', 'page')
   assert.ok(minimum.region.width > 0 && minimum.more.width > 0 && minimum.close.width > 0)
@@ -136,7 +208,17 @@ export async function startInterruptedDemonstration(ctx) {
   assert.deepEqual(minimum.moreHitSamples,[true,true,true,true,true],'More owns its complete minimum split hit edges')
   assert.deepEqual(minimum.closeHitSamples,[true,true,true,true,true],'Close split keeps its complete hit edges')
   assert.ok(minimum.more.x + minimum.more.width <= minimum.close.x, 'More must not occupy Close split')
+  await ctx.probe.cdp.evaluate(`(${owned(ctx, '[aria-label="Browser address"]')})[0].focus();null`)
+  for (let index = 0; index < 2; index++) for (const type of ['keyDown','keyUp']) await ctx.probe.cdp.call('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9})
+  ctx.receipt.demonstration.minimumKeyboardFocus = await ctx.probe.cdp.evaluate(`(()=>{const more=(${owned(ctx, '[aria-label="More browser tools"]')})[0],style=getComputedStyle(more);return {isMore:document.activeElement===more,focusVisible:more.matches(':focus-visible'),outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth}})()`)
+  assert.equal(ctx.receipt.demonstration.minimumKeyboardFocus.isMore, true, 'The minimum toolbar reaches More through its real keyboard order')
+  assert.equal(ctx.receipt.demonstration.minimumKeyboardFocus.focusVisible, true)
+  assert.notEqual(ctx.receipt.demonstration.minimumKeyboardFocus.outlineStyle, 'none')
+  assert.ok(Number.parseFloat(ctx.receipt.demonstration.minimumKeyboardFocus.outlineWidth) > 0)
   await open(ctx)
+  const afterMore = await toolbarFacts(ctx, 'minimum-after-more', actual)
+  assert.deepEqual(afterMore.browserRegions, minimum.browserRegions, 'The actual More click preserves both original Browser Regions')
+  ctx.receipt.demonstration.minimumAfterMore = afterMore
   await ctx.click(ctx.probe.cdp, ctx.selectors('[aria-label="Start recording demonstration"]'))
   const state = await ctx.waitFor('actual active recording at ordinary quit', async () => { const state = await current(ctx); return state.draft?.status === 'recording' ? state : null })
   assert.deepEqual(state.draft.steps, [], 'Minimum split starts a real fresh recording, without seeding old demonstrated steps')
@@ -171,10 +253,15 @@ export async function recoverDemonstration(ctx) {
   assert.equal(nativeState.attached, false); assert.equal(nativeState.visible, true)
   await native(ctx, '#demo-click')
   assert.deepEqual((await current(ctx)).draft, restored.draft, 'Restart must not automatically resume capture')
+  await closeDraft(ctx)
   await open(ctx)
   assert.ok(await probe.cdp.evaluate(`document.querySelector('[aria-label="Human demonstration draft"]').textContent.includes('Interrupted')`))
+  const recoveredSteps = await probe.cdp.evaluate(`(()=>{const draft=(${owned(ctx, '[aria-label="Human demonstration draft"]')})[0];return {label:draft?.getAttribute('aria-label'),steps:draft?.querySelectorAll('[data-sequence]').length??0,text:draft?.textContent??''}})()`)
+  assert.ok(recoveredSteps.steps > 0, 'Ordinary restart reaches the nonempty interrupted demonstration through More')
+  receipt.demonstration.restoredMore = recoveredSteps
   receipt.demonstration.restored = restored.draft
   receipt.demonstration.nativeStateAfterRestart = nativeState
   receipt.demonstration.noAutomaticRecording = true
+  await verifyCloseSplit(ctx)
   receipt.demonstration.complete = true
 }

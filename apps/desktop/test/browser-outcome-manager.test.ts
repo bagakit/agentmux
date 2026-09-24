@@ -12,6 +12,7 @@ vi.mock('electron', async () => {
     url = ''; destroyed = false; contextId = 17
     attached = false; attaches = 0; detaches = 0; reads = 0
     beforeRead?: () => Promise<void>
+    beforeLoad?: () => Promise<void>
     session = { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} }
     navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     mainFrame = { framesInSubtree: [] }
@@ -44,6 +45,7 @@ vi.mock('electron', async () => {
     setWindowOpenHandler() {}
     async executeJavaScriptInIsolatedWorld() { return true }
     async loadURL(url: string) {
+      await this.beforeLoad?.()
       this.emit('did-start-navigation', { url, isMainFrame: true, isSameDocument: false })
       this.url = url; this.emit('did-finish-load')
     }
@@ -234,5 +236,71 @@ describe('the existing trusted task action records confirmation before returning
     expect(await f.taskAssets.readExactFact({ runId: waiting.id, browserId: 'browser-a', assetId: asset.id, version: 1 }, 'checkpoint-a'))
       .toMatchObject({ status: 'unavailable' })
     expect(f.view.webContents.attached).toBe(false)
+  }, 30_000)
+})
+
+describe('declared task completion consumes the actual asset owner through Main', () => {
+  it('registers the immutable version and actual run before the producer, reads trusted Continue, and verifies after owner rebuild without replay', async () => {
+    const f = await fixture()
+    const imported = await f.taskAssets.importRecording({ id: 'recording-contract', browserId: 'browser-a', navigationId: 'nav-original',
+      url: 'https://generic.invalid/form', status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
+    const edited = await f.taskAssets.edit(imported.id, imported.revision, { ...imported.draft, steps: [
+      { id: 'producer', kind: 'navigate', url: 'https://generic.invalid/next', reviewed: true },
+      { id: 'confirm', kind: 'checkpoint', url: 'https://generic.invalid/next', reviewed: true },
+      { id: 'remaining', kind: 'navigate', url: 'https://generic.invalid/final', reviewed: true }
+    ], completion: { criteria: [{ kind: 'human-checkpoint', checkpointId: 'confirm' }] } } as any)
+    const saved = await f.taskAssets.saveVersion(edited.id, edited.revision)
+    let beforeProducer: any
+    f.view.webContents.beforeLoad = async () => {
+      beforeProducer = { journal: JSON.parse(await readFile(f.path, 'utf8')), tasks: JSON.parse(await readFile(f.taskPath, 'utf8')) }
+    }
+    const waiting = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: saved.id, version: 1, parameters: {} })
+    expect(waiting.status).toBe('waiting-human')
+    expect(waiting.operationIds).toHaveLength(1)
+    expect(beforeProducer.tasks.runs[0].operationIds).toEqual(waiting.operationIds)
+    expect(beforeProducer.journal.operations[0].outcome.registration.assetRun).toEqual({ runId: waiting.id, assetId: saved.id, version: 1 })
+    const operation = await f.journal.get(waiting.operationIds[0]!)
+    expect(operation?.outcome?.registration).toMatchObject({ assetRun: { runId: waiting.id, assetId: saved.id, version: 1 },
+      context: { browserId: 'browser-a', operationId: waiting.operationIds[0] }, criteria: [{ kind: 'human-checkpoint', checkpointId: 'confirm' }] })
+    expect((await f.manager.verifyOutcome('browser-a', operation!.id)).conditions.map(item => item.status)).toEqual(['not-met'])
+    const complete = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: saved.id, version: 1, runId: waiting.id, parameters: {} })
+    expect(complete.operationIds).toHaveLength(2)
+    expect((await f.manager.verifyOutcome('browser-a', operation!.id)).conditions.map(item => item.status)).toEqual(['passed'])
+    const count = (await f.journal.list()).length
+    await f.manager.verifyOutcome('browser-a', operation!.id)
+    expect((await f.journal.list()).length).toBe(count)
+    const rebuilt = new BrowserTaskAssets(new BrowserTaskAssetFileStore(f.taskPath))
+    expect((await rebuilt.state('browser-a')).runs[0]?.operationIds).toEqual(complete.operationIds)
+    expect((await rebuilt.get(saved.id))?.versions[0]?.completion).toEqual(saved.versions[0]?.completion)
+    expect((await rebuilt.readExactFact({ browserId: 'browser-a', runId: waiting.id, assetId: saved.id, version: 1 }, 'confirm')).status).toBe('available')
+    await f.manager.runScript('browser-a', 'return "independent healthy operation"')
+    expect((await f.manager.verifyOutcome('browser-a', operation!.id)).conditions.map(item => item.status)).toEqual(['unavailable'])
+    expect(f.view.webContents.isDestroyed()).toBe(false)
+  }, 30_000)
+
+  it('keeps failed pre-producer completion recording unavailable while the same healthy action finishes', async () => {
+    let failOnce = true
+    const f = await fixture(async value => {
+      if (failOnce && value.runs.some(run => run.status === 'running' && run.operationIds.length > 0)) {
+        failOnce = false; throw new Error('Optional binding save failed')
+      }
+    })
+    const imported = await f.taskAssets.importRecording({ id: 'recording-unknown', browserId: 'browser-a', navigationId: 'nav-original',
+      url: 'https://generic.invalid/form', status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
+    const edited = await f.taskAssets.edit(imported.id, imported.revision, { ...imported.draft, steps: [
+      { id: 'producer', kind: 'navigate', url: 'https://generic.invalid/next', reviewed: true },
+      { id: 'confirm', kind: 'checkpoint', url: 'https://generic.invalid/next', reviewed: true }
+    ], completion: { criteria: [{ kind: 'human-checkpoint', checkpointId: 'confirm' }] } })
+    const saved = await f.taskAssets.saveVersion(edited.id, edited.revision)
+    const waiting = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: saved.id, version: 1, parameters: {} })
+    expect(waiting.status).toBe('waiting-human')
+    expect(waiting.completionWarning).toContain('unavailable')
+    expect(f.view.webContents.getURL()).toBe('https://generic.invalid/next')
+    const complete = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: saved.id, version: 1, runId: waiting.id, parameters: {} })
+    expect(complete.status).toBe('completed')
+    expect(complete.humanCheckpoints).toHaveLength(1)
+    expect((await f.manager.verifyOutcome('browser-a', complete.operationIds[0]!)).conditions.map(item => item.status)).toEqual(['unavailable'])
+    expect((await new BrowserTaskAssets(new BrowserTaskAssetFileStore(f.taskPath)).state('browser-a')).runs[0]?.completionWarning).toContain('unavailable')
+    expect(f.view.webContents.isDestroyed()).toBe(false)
   }, 30_000)
 })

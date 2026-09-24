@@ -533,12 +533,12 @@ export function BrowserPane({
   const taskAsset = tab.taskAssets?.assets.find(asset => asset.id === selectedTaskAssetId) ?? tab.taskAssets?.assets.at(-1) ?? null
   const taskRun = taskAsset ? tab.taskAssets?.runs.filter(run => run.assetId === taskAsset.id).at(-1) ?? null : null
 
-  async function taskAction(event: MouseEvent<HTMLButtonElement>, action: () => Promise<unknown>): Promise<void> {
+  async function taskAction<T>(event: MouseEvent<HTMLButtonElement>, action: () => Promise<T>): Promise<T | undefined> {
     if (event.nativeEvent.isTrusted !== true) return
     const id = tab.browserId
     const request = ++taskRequest.current
     setTaskBusy(true)
-    try { await action() }
+    try { return await action() }
     finally { if (browserIdentity.current.id === id && taskRequest.current === request) setTaskBusy(false) }
   }
 
@@ -953,6 +953,19 @@ export function BrowserPane({
               await api.browser.runTaskAsset({ ...input, assetId: taskAsset.id, browserId: tab.browserId })
             })}
             onStop={(runId, event) => { if (event.nativeEvent.isTrusted !== true) return; void api.browser.stopTaskAsset(tab.browserId, runId).catch(reportError) }}
+            onVerify={async (runId, event) => {
+              const result = await taskAction(event, async () => {
+                const operations = await api.browser.listOperationHistory()
+                const original = operations.find(operation => operation.browserId === tab.browserId && operation.outcome?.registration.assetRun?.runId === runId &&
+                  operation.outcome.registration.assetRun.assetId === taskAsset?.id && operation.outcome.registration.assetRun.version === taskRun?.version)
+                if (!original) throw new Error('The declared producer is unavailable. Existing work remains; no action was repeated.')
+                const result = await api.browser.verifyOutcome(tab.browserId, original.id)
+                await loadOperationHistory()
+                return result
+              })
+              if (!result) throw new Error('Verification requires the actual person using this Browser.')
+              return result
+            }}
           />
           <BrowserOutcomeCriteria
             evaluation={timelineOperation?.outcome?.evaluation ?? null}
@@ -989,7 +1002,7 @@ export function BrowserPane({
               setReplayOutcome(undefined)
             }}
           />
-          <BrowserOperationTimeline
+          {timelineOperation ? <BrowserOperationTimeline
             operation={timelineOperation}
             {...(timelineSelectedStep ? { selectedSequence: timelineSelectedStep.sequence } : {})}
             onSelectStep={(step) => {
@@ -1011,7 +1024,7 @@ export function BrowserPane({
                 if (receipt.operation === 'browser.replay' && receipt.mode === 'preview') setReplayPlan(narrowBrowserReplayPlan(receipt.plan))
               }).catch(reportError)
             }}
-          />
+          /> : null}
           {timelineOperation && timelineSelectedStep
             ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep} /> : null}
           {replayPlan ? (
