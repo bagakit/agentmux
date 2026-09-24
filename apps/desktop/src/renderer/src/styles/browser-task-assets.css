@@ -14,6 +14,7 @@
 .browser-task-asset__progress[data-run-status='failed'] { color: var(--red-text); }
 .browser-task-asset__progress p { margin: 0; color: var(--amber-text); }
 .browser-task-asset__progress[data-run-status='failed'] p { color: var(--red-text); }
+.browser-outcome-criteria .browser-task-asset__progress p[data-outcome-status='passed'] { color: var(--text-2); }
 .browser-task-asset__run-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .browser-task-asset__version > .browser-task-asset__field { padding-inline: 0; }
 .browser-outcome-criteria__types { min-inline-size: 0; margin: 0; border: 0; padding: var(--sp-2) var(--sp-3); color: var(--text-3); }
