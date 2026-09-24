@@ -22,12 +22,15 @@ async function section(title: string) {
   await act(async () => button!.click())
 }
 
-it('renders eight daily-preference/resource entries and opens Appearance by default', async () => {
+it('renders eight daily-preference/resource entries, with Overview before the unchanged Appearance pane', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] p')].map(node => node.textContent))
     .toEqual(['Preferences', 'Resources'])
-  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')].map(node => node.textContent))
+  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')].map(node => node.textContent))
     .toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Agents', 'Prompts', 'Workspaces', 'Hosts'])
+  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Overview')
+  expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
+  await section('Appearance')
   expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Appearance')
   const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!
   expect(pane.isConnected).toBe(true)
@@ -36,11 +39,11 @@ it('renders eight daily-preference/resource entries and opens Appearance by defa
   expect(dom.container.querySelector('[data-settings-pane="copy-paths"]')).toBeNull()
 })
 
-it('ordinary settings entry targets Appearance through the actual SurfaceSwitch control', async () => {
+it('ordinary settings entry targets Overview through the actual SurfaceSwitch control', async () => {
   const open = vi.fn()
   await dom.render(<SurfaceSwitch onOpenSettings={open} />)
   await dom.click('[aria-label="Settings"]')
-  expect(open).toHaveBeenCalledExactlyOnceWith('appearance')
+  expect(open).toHaveBeenCalledExactlyOnceWith('overview')
 })
 
 it('General saves only copied paths through the existing config owner with its captured expected value', async () => {
