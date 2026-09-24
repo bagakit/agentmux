@@ -53,6 +53,12 @@ app.whenReady().then(async () => {
     do { const observed = await win.webContents.executeJavaScript(expression); if (observed) return observed; await delay(30) } while (Date.now() < deadline)
     throw new Error(`Private Focus condition did not settle: ${expression}`)
   }
+  const shot = async (name: string) => {
+    // A mounted Portal can precede Chromium's painted frame. Observe two actual
+    // frame boundaries rather than treating DOM presence as a visual result.
+    await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    await fs.writeFile(path.join(evidence, `${phase}-${name}.png`), (await win.webContents.capturePage()).toPNG())
+  }
   const click = async (selector: string) => {
     const point = await win.webContents.executeJavaScript(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!node)throw new Error('Missing click target'); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2};})()`)
     for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1, ...point })
@@ -99,7 +105,15 @@ app.whenReady().then(async () => {
     assert.match(result.archive.text, /Beta · closed work/)
     assert.match(result.archive.text, /Focus visits/)
     assert.deepEqual(result.archive.focus, result.state.focus)
-    await fs.writeFile(path.join(evidence, `${phase}-wide-archive.png`), (await win.webContents.capturePage()).toPNG())
+    await until('(() => { const node=document.querySelector(".recent-focus__observation");if(!node?.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return false;const r=node.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&node.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})()')
+    result.archive.paragraphs = await win.webContents.executeJavaScript('Array.from(document.querySelectorAll(".recent-focus__observation > p"), node => ({text:node.textContent,whiteSpace:getComputedStyle(node).whiteSpace,overflow:getComputedStyle(node).overflow}))')
+    assert.equal(result.archive.paragraphs.length, 2, 'Both historical reading and coverage explanations must actually be present')
+    for (const paragraph of result.archive.paragraphs) {
+      assert.ok(paragraph.text.trim().length > 0)
+      assert.equal(paragraph.whiteSpace, 'normal', 'Historical reading and coverage explanations must wrap instead of being ellipsized')
+      assert.equal(paragraph.overflow, 'visible', 'The complete explanation remains readable')
+    }
+    await shot('wide-archive')
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await until('!document.querySelector(".recent-focus__observation")')
@@ -107,7 +121,7 @@ app.whenReady().then(async () => {
     await click('[data-timeline-project] .recent-focus__project-heading')
     result.fold = await win.webContents.executeJavaScript('(() => { const group=document.querySelector("[data-timeline-project]");const tracks=group.querySelector(".recent-focus__project-tracks");return {expanded:group.querySelector("button").getAttribute("aria-expanded"),inert:tracks.inert,fragments:tracks.querySelectorAll(".recent-focus__segment").length};})()')
     assert.equal(result.fold.expanded, 'false'); assert.equal(result.fold.inert, true); assert.ok(result.fold.fragments > 0)
-    await fs.writeFile(path.join(evidence, `${phase}-wide-fold.png`), (await win.webContents.capturePage()).toPNG())
+    await shot('wide-fold')
     await click('[data-timeline-project] .recent-focus__project-heading')
     await click('[aria-label="Next focus window"]')
     await until('projectHistoryUi().projects.length === 0')
@@ -117,7 +131,7 @@ app.whenReady().then(async () => {
     await until('projectHistoryUi().projects.length === 2')
     win.setContentSize(800, 720)
     await until('innerWidth === 800 && document.querySelector(".recent-focus").clientWidth <= 800')
-    await fs.writeFile(path.join(evidence, `${phase}-narrow.png`), (await win.webContents.capturePage()).toPNG())
+    await shot('narrow')
     assert.equal(await win.webContents.executeJavaScript('window.originalPrivateTerminal === document.querySelector("[data-workbench-region-id=original-region] .xterm")'), true, 'Window width, archive and fold preserve the original mounted terminal')
     win.setContentSize(1440, 908)
     await until('innerWidth === 1440 && projectHistoryObservation()?.liveReady && projectHistoryObservation()?.acceptsInput')
