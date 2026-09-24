@@ -94,6 +94,9 @@ it.each(['portal', 'popover'])('the original %s DOM owner receives enter/leave, 
   overlays.handleNativeInput({ ...move, type: 'pointerDown' })
   expect(down).toHaveBeenCalledTimes(1); expect(click).not.toHaveBeenCalled()
   target.mockReturnValue(document.getElementById('outside')!)
+  // The named original float remains mounted, but its old page point now hits other Chrome.
+  overlays.handleNativeInput({ ...move, type: 'pointerDown', x: 500, y: 160 })
+  expect(down).toHaveBeenCalledTimes(1); expect(click).not.toHaveBeenCalled()
   overlays.handleNativeInput({ ...move, type: 'pointerLeave', x: 500, y: 160 })
   expect(leave).toHaveBeenCalledTimes(1)
   expect((leave.mock.calls[0][0] as PointerEvent).bubbles).toBe(false)
