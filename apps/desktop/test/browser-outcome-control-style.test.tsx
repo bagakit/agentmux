@@ -12,7 +12,15 @@ import type { BrowserOutcomeEvaluation } from '../src/shared/browser-outcome-cri
 // Actual production component + complete product stylesheet in Chromium. These local layout
 // fixtures do not claim Browser native-page composition, operation input or ordinary restart.
 it('gives both real outcome actions the existing compact Mint controls, hits and trusted Tab focus', async () => {
-  const evaluation = { status: 'passed', conditions: [] } as unknown as BrowserOutcomeEvaluation
+  const reason = 'The recorded field equals the declared value.'
+  const notMetReason = 'The recorded value differs from its declaration.'
+  const unavailableReason = 'The original evidence cannot be read.'
+  const warning = 'The separate recorded warning remains visible.'
+  const evaluation = { status: 'unavailable', warning, conditions: [
+    { criterion: { kind: 'field-equals', key: 'result', expected: 0 }, status: 'passed', reason },
+    { criterion: { kind: 'field-equals', key: 'pending', expected: 0 }, status: 'not-met', reason: notMetReason },
+    { criterion: { kind: 'field-equals', key: 'unobserved', expected: 0 }, status: 'unavailable', reason: unavailableReason }
+  ] } as unknown as BrowserOutcomeEvaluation
   const cases = [
     { width: 760, height: 580 }, { width: 234.5, height: 580 }, { width: 234.5, height: 320 }
   ].flatMap(size => [false, true].map(busy => ({ ...size, busy,
@@ -63,7 +71,7 @@ app.whenReady().then(async()=>{
      const rail=document.querySelector('.browser-trace-rail').getBoundingClientRect()
      return {count:buttons.length,label:button.textContent.trim(),disabled:button.disabled,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},rail:{x:rail.x,y:rail.y,width:rail.width,height:rail.height},points,
       style:{background:s.backgroundColor,color:s.color,borderColor:s.borderTopColor,borderWidth:s.borderTopWidth,padding:s.paddingInlineStart,fontSize:s.fontSize,opacity:s.opacity,cursor:s.cursor},
-      tokens:{background:token('--green-bg','backgroundColor'),hover:token('--green-bg-hover','backgroundColor'),color:token('--green-text','color'),border:token('--green-line','color')}}
+      tokens:{background:token('--green-bg','backgroundColor'),hover:token('--green-bg-hover','backgroundColor'),color:token('--green-text','color'),border:token('--green-line','color'),neutral:token('--text-2','color'),warning:token('--amber-text','color')}}
     }).toString()+')('+index+')')
     await input('dispatchMouseEvent',{type:'mouseMoved',x:observed.bounds.x+observed.bounds.width/2,y:observed.bounds.y+observed.bounds.height/2})
     await tick()
@@ -75,6 +83,12 @@ app.whenReady().then(async()=>{
     // The normal product order is summary, key, selector, checked radio, expected value, then both actions.
     for(let index=0;index<7;index++){await tab();result.tabOrder.push(await read('({tag:document.activeElement.tagName,type:document.activeElement.type,text:document.activeElement.textContent.trim()})'));if(index>=5){result.buttons[index-5].focus=await read('('+((index)=>{const button=document.querySelectorAll('.browser-outcome-criteria button')[index],s=getComputedStyle(button);return {focused:document.activeElement===button,visible:button.matches(':focus-visible'),outline:s.outlineStyle,width:s.outlineWidth,color:s.outlineColor,offset:s.outlineOffset}}).toString()+')('+(index-5)+')')}}
    }
+   result.outcome=await read('('+(()=>{
+    const root=document.querySelector('.browser-outcome-criteria'),paragraphs=[...root.querySelectorAll('[role="status"] p')]
+    const rules=[];const visit=items=>{for(const rule of items){if(rule.selectorText?.includes('.browser-outcome-criteria')&&rule.selectorText.includes('[data-outcome-status'))rules.push(rule);if(rule.cssRules)visit(rule.cssRules)}}
+    for(const sheet of document.styleSheets)visit(sheet.cssRules)
+    return {conditions:paragraphs.filter(p=>p.hasAttribute('data-outcome-status')).map(p=>({text:p.textContent,status:p.dataset.outcomeStatus,color:getComputedStyle(p).color,rules:rules.filter(rule=>p.matches(rule.selectorText)).map(rule=>({selector:rule.selectorText,color:rule.style.color}))})),warnings:paragraphs.filter(p=>!p.hasAttribute('data-outcome-status')).map(p=>({text:p.textContent,color:getComputedStyle(p).color}))}
+   }).toString()+')()')
    report.cases.push(result)
   }
  }catch(error){report.error=error.stack||String(error)}
@@ -98,6 +112,14 @@ app.whenReady().then(async()=>{
     for (const result of report.cases) {
       const context = JSON.stringify(result)
       expect(result.buttons).toHaveLength(2)
+      expect(result.outcome.conditions.map((condition: { text: string; status: string }) => [condition.status, condition.text])).toEqual([
+        ['passed', reason], ['not-met', notMetReason], ['unavailable', unavailableReason]
+      ])
+      expect(result.outcome.conditions[0].rules.length).toBeGreaterThan(0)
+      expect(result.outcome.conditions[0].color).toBe(result.buttons[0].tokens.neutral)
+      expect(result.outcome.conditions[0].rules.map((rule: { color: string }) => rule.color)).toEqual(['var(--text-2)'])
+      expect(result.outcome.conditions.slice(1).map((condition: { color: string }) => condition.color)).toEqual([result.buttons[0].tokens.warning, result.buttons[0].tokens.warning])
+      expect(result.outcome.warnings).toEqual([{ text: warning, color: result.buttons[0].tokens.warning }])
       expect(result.buttons.map((button: { label: string }) => button.label)).toEqual([result.busy ? 'Checking…' : 'Check current field', 'Verify recorded evidence'])
       for (const button of result.buttons) {
         expect(button.count, context).toBe(2)

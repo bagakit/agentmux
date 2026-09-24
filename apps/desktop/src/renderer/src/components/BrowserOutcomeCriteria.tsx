@@ -61,9 +61,8 @@ export function BrowserOutcomeCriteria({ evaluation, busy = false, historical = 
         .finally(() => setPending(false))
     }}>Verify recorded evidence</button>}
     {evaluation && <div className="browser-task-asset__progress" role="status">
-      <span>{labels[evaluation.status]}</span>
       {evaluation.warning && <p>{evaluation.warning}</p>}
-      {evaluation.conditions.map((condition, index) => <p key={index}>{labels[condition.status]} · {condition.reason}</p>)}
+      {evaluation.conditions.map((condition, index) => <p key={index} data-outcome-status={condition.status}>{condition.reason}</p>)}
     </div>}
   </details>
 }
