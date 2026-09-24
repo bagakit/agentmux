@@ -15,6 +15,7 @@ import type { BrowserDownloadReference, BrowserDownloadReadOptions } from '../sh
 import type { BrowserResultArtifactReference, BrowserResultContext, BrowserResultCurrentOwner, BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
 import { extractBrowserStructuredOutput, parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
+import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -55,6 +56,8 @@ export type BrowserPageContext = {
   note(text: string): void
   /** Receives the semantic identity of the ref that is about to be acted on. */
   recordTarget?(target: BrowserReplayTarget): void
+  /** Main rechecks original stop/control/view after resolving a handle, before an action is sent. */
+  beforeAction?(): void
   /** Result source identity lives in storage; a continuation run supplies only its current authorization. */
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
   /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */
@@ -133,12 +136,14 @@ function refFailureError(failure: Awaited<ReturnType<typeof resolveBrowserRef>> 
     )
   }
   if (reason.kind === 'stale-snapshot') {
-    return new Error(
+    return new BrowserLocalRecoveryFailure(
       `The page navigated since that snapshot was taken (${reason.snapshotNavigationId} → ` +
-        `${reason.currentNavigationId}), so every ref in it is void, ${reason.ref} included. Take a new snapshot().`
+        `${reason.currentNavigationId}), so every ref in it is void, ${reason.ref} included. Take a new snapshot().`,
+      'locator-changed', 'not-dispatched'
     )
   }
-  return new Error(`Element ${reason.ref} is gone from the page (${reason.reason}). Take a new snapshot().`)
+  return new BrowserLocalRecoveryFailure(`Element ${reason.ref} is gone from the page (${reason.reason}). Take a new snapshot().`,
+    'locator-changed', 'not-dispatched')
 }
 
 /**
@@ -273,7 +278,8 @@ export function createBrowserPageDispatch(
     const send = resolution.sessionId ? session.frames.get(resolution.sessionId) : session.sendCommand
     // 解开的那一刻 frame 还在，取 sender 时没了。这条极少发生，但不判就会变成一句
     // "cannot read property of undefined"——那看起来像我们的 bug，而不是页面变了。
-    if (!send) throw new Error(`The frame holding ${ref} went away. Take a new snapshot().`)
+    if (!send) throw new BrowserLocalRecoveryFailure(`The frame holding ${ref} went away. Take a new snapshot().`,
+      'locator-changed', 'not-dispatched')
     return { objectId: resolution.objectId, send, node: snapshot.nodes.find((node) => node.ref === ref)! }
   }
 
@@ -312,6 +318,7 @@ export function createBrowserPageDispatch(
       const same = current?.nodes.filter((candidate) => candidate.role === node.role && candidate.name === node.name) ?? []
       context.recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === ref) + 1, count: same.length })
     }
+    context.beforeAction?.()
     const response = (await send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: declaration,

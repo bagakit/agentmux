@@ -20,6 +20,8 @@ await verifyRendererSourceMutations({
     'apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx',
     'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx'],
   mutations: [
+    { label: 'empty-demonstration-narrow-first-column', file: css,
+      before: '.browser-demonstration__steps .browser-rsi-timeline__empty { display: block; }', after: '' },
     { label: 'narrow-trace-horizontal-again', file: css,
       before: '.browser-body { flex-direction: column; }', after: '.browser-body { flex-direction: row; }' },
     { label: 'narrow-trace-consumes-page', file: css,

@@ -113,6 +113,15 @@ export class BrowserTaskAssets {
     return bound && bound.run.status === 'running' && bound.version.steps[bound.run.nextStep]?.id === execution.stepId ? copy(bound.version) : null
   }
 
+  /** Synchronous authority check after async observation/handle resolution, before dispatch. */
+  isExecutionCurrent(execution: BrowserTaskStepExecution, operationId: string): boolean {
+    if (this.loadUnavailable) return false
+    const selected = this.document.selectedRuns?.find(item => item.browserId === execution.browserId)
+    const bound = this.exactRun(execution)
+    return selected?.runId === execution.runId && !!bound && bound.run.status === 'running' &&
+      bound.version.steps[bound.run.nextStep]?.id === execution.stepId && bound.run.operationIds.includes(operationId)
+  }
+
   async markCompletionUnavailable(tuple: BrowserTaskRunIdentity): Promise<void> {
     await this.change(async () => {
       const bound = this.exactRun(tuple)
