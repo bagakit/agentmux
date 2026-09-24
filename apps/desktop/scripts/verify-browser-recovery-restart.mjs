@@ -300,10 +300,11 @@ async function launch(label) {
 }
 async function click(cdp, expression, button = 'left') {
   let point
-  try { point = await waitFor('exact visible UI control', () => cdp.evaluate(`(async () => {
+  try { point = await waitFor('exact visible UI control', () => cdp.evaluate(`(() => {
     const matches = ${expression}; if (matches.length !== 1) return null;
     const element = matches[0]; if (element.disabled || !element.getClientRects().length) return null;
-    element.scrollIntoView({block:'nearest'}); await new Promise(done=>requestAnimationFrame(done));
+    // Geometry and hit testing flush layout; an occluded window may never deliver an animation frame.
+    element.scrollIntoView({block:'nearest'});
     if(!element.isConnected)return null;
     const r=element.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);
     if(!r.width||!r.height||!hit||!element.contains(hit))return null;
@@ -435,7 +436,7 @@ async function observeNativeFrameReady(probe, url) {
   }, 5_000)
 }
 async function capture(probe, label, content = 'operations', pageUrl) {
-  await probe.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  // The original webContents.capturePage below awaits the actual image, including in an occluded window.
   const observation = await probe.cdp.evaluate(`(() => {
     const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
     const rows=Array.from(document.querySelectorAll('.browser-rsi-timeline__step')).filter(visible);
