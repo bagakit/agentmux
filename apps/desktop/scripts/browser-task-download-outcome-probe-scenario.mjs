@@ -35,7 +35,13 @@ export async function reviewTaskDownloadOutcome(ctx) {
   await ctx.click(probe.cdp, ctx.selectors('[aria-label="More browser tools"]'))
   await ctx.click(probe.cdp, ctx.selectors('[aria-label="Open human demonstration draft"]'))
   await ctx.click(probe.cdp, ctx.selectors('[aria-label="Start recording demonstration"]'))
+  const recording = await ctx.waitFor('actual recording setup before the one native gesture', async () => {
+    const draft = await probe.cdp.evaluate(`window.agentmux.browser.getDemonstration(${q(ctx.browserId)}).then(value=>value.draft)`)
+    const ready = await probe.cdp.evaluate(`(()=>{const controls=${ctx.selectors('[aria-label="Stop recording demonstration"]')};return controls.length===1&&!controls[0].disabled})()`)
+    return draft?.status === 'recording' && ready ? draft : null
+  })
   await native(ctx, '#task-download') // The first real demonstration prepares the file, without starting a transfer.
+  await ctx.waitFor('the same recording retains its one semantic file gesture before Stop', () => probe.cdp.evaluate(`window.agentmux.browser.getDemonstration(${q(ctx.browserId)}).then(value=>value.draft?.id===${q(recording.id)}&&value.draft.status==='recording'&&value.draft.steps.length===1&&value.draft.steps[0].target?.name==='Create file')`))
   await ctx.click(probe.cdp, ctx.selectors('[aria-label="Stop recording demonstration"]'))
   await ctx.waitFor('actual stopped semantic demonstration', () => probe.cdp.evaluate(`window.agentmux.browser.getDemonstration(${q(ctx.browserId)}).then(value=>value.draft?.status==='stopped'&&value.draft.steps.length>0)`))
   await ctx.click(probe.cdp, buttons(ctx, 'Edit demonstration'))

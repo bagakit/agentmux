@@ -29,13 +29,22 @@ function makeSender(
   nodes: AxFixture,
   resolveNode: (backendNodeId: number) => unknown = (backendNodeId) => ({
     object: { objectId: `obj-${backendNodeId}` }
-  })
+  }),
+  frameId = 'main-document',
+  embedded = false
 ): { send: BrowserCdpSender; commands: { method: string; params?: Record<string, unknown> }[] } {
   const commands: { method: string; params?: Record<string, unknown> }[] = []
   const send: BrowserCdpSender = async (method, params) => {
     // 显式传 `params: undefined` 在 exactOptionalPropertyTypes 下不等于"没传"。
     commands.push(params === undefined ? { method } : { method, params })
-    if (method === 'Accessibility.getFullAXTree') return { nodes }
+    // The snapshot owner discovers native documents before reading AX. The
+    // fake session key is deliberately different from its document identity.
+    if (method === 'Page.getFrameTree') return { frameTree: {
+      frame: { id: frameId, loaderId: `loader-${frameId}`, ...(frameId === 'embedded-document' ? { parentId: 'main-document' } : {}) },
+      ...(embedded ? { childFrames: [{ frame: { id: 'embedded-document', parentId: frameId, loaderId: 'loader-embedded-document' } }] } : {})
+    } }
+    if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
+    if (method === 'Accessibility.getFullAXTree') return { nodes: nodes.map(node => ({ ...node, frameId })) }
     if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
     if (method === 'DOM.resolveNode') {
       return resolveNode(Number((params as { backendNodeId?: number }).backendNodeId))
@@ -50,7 +59,7 @@ async function realSnapshot(
   nodes: AxFixture,
   frames?: Map<string, BrowserCdpSender>
 ): Promise<{ snapshot: BrowserPageSnapshot; send: BrowserCdpSender }> {
-  const { send } = makeSender(nodes)
+  const { send } = makeSender(nodes, undefined, 'main-document', Boolean(frames?.size))
   const snapshot = await captureBrowserPageSnapshot({
     send,
     url: 'https://example.invalid/',
@@ -157,12 +166,14 @@ describe('按 ref 解析元素', () => {
 
 describe('按 ref 解析元素：iframe', () => {
   it('iframe 里的节点，命令发到该 frame 自己的 session', async () => {
-    const { send: frameSend, commands: frameCommands } = makeSender(FRAME_TREE)
+    const { send: frameSend, commands: frameCommands } = makeSender(FRAME_TREE, undefined, 'embedded-document')
     const frames = new Map([['frame-a', frameSend]])
     const { snapshot, send } = await realSnapshot(PAGE_TREE, frames)
 
     const inFrame = snapshot.nodes.find((node) => node.name === 'In frame')
     expect(inFrame?.ref, 'iframe 里的按钮没进快照——被测对象不存在').toBeTruthy()
+    expect(inFrame?.frameId).toBe('embedded-document')
+    expect(snapshot.missingFrames).toEqual([])
 
     const result = await resolveBrowserRef({ snapshot, ref: inFrame!.ref, send, frames })
     expect(result.resolved).toBe(true)
@@ -177,9 +188,11 @@ describe('按 ref 解析元素：iframe', () => {
   })
 
   it('frame 的 session 已经不在了，报 stale-ref 而不是退回主 frame 去解', async () => {
-    const { send: frameSend } = makeSender(FRAME_TREE)
+    const { send: frameSend } = makeSender(FRAME_TREE, undefined, 'embedded-document')
     const { snapshot, send } = await realSnapshot(PAGE_TREE, new Map([['frame-a', frameSend]]))
     const inFrame = snapshot.nodes.find((node) => node.name === 'In frame')!
+    expect(inFrame?.ref).toBeTruthy()
+    expect(inFrame?.frameId).toBe('embedded-document')
 
     // 解析时不再提供这个 frame 的 sender——frame 没了。
     const result = await resolveBrowserRef({ snapshot, ref: inFrame.ref, send, frames: new Map() })

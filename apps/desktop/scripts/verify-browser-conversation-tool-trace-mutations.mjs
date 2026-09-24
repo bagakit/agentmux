@@ -7,7 +7,7 @@ await verifyRendererSourceMutations({
   sources: [component, message, 'apps/desktop/src/renderer/src/styles/conversation-tool-trace.css'],
   mutations: [
     { label: 'eager-payload', file: component, before: '{open ? <div', after: '{true ? <div' },
-    { label: 'call-identity-lost', file: message, before: 'if (callCounts.get(k) === 1) return k', after: 'if (callCounts.get(k) === 1) return `${k}:${nextLocalKeyRef.current++}`' },
+    { label: 'call-identity-lost', file: message, before: 'return JSON.stringify([part.kind, callId, occ])', after: 'return JSON.stringify([part.kind, null, occ])' },
     { label: 'failure-hidden', file: component, before: "const failed = part.kind === 'tool-result' && part.failed === true", after: 'const failed = false' }
   ]
 })
