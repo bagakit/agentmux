@@ -416,15 +416,141 @@ async function moveActivePointerDrag(
   return point
 }
 
+// Diagnostic-only: no input, focus, scroll, state dispatch or drag ownership here.
+async function installCancelPointerTrace(window: BrowserWindow): Promise<void> {
+  await window.webContents.executeJavaScript(`(() => {
+    const tokens = new WeakMap()
+    let nextToken = 0
+    const token = (node) => {
+      if (!node) return null
+      if (!tokens.has(node)) tokens.set(node, ++nextToken)
+      return tokens.get(node)
+    }
+    const events = []
+    let droppedEvents = 0
+    let lastPointer = null
+    let lastDnd = { collected: false, reason: 'No original DndContext monitor event observed' }
+    const append = (value) => {
+      if (events.length < 256) events.push(value)
+      else droppedEvents += 1
+    }
+    const pathOf = (node) => node instanceof Element
+      ? node.closest('[data-tree-path]')?.getAttribute('data-tree-path') ?? null : null
+    const onEvent = (event) => {
+      const pointer = event instanceof PointerEvent
+      const entry = {
+        monotonicMs: performance.now(), source: 'actual-renderer-event', type: event.type,
+        isTrusted: event.isTrusted, targetToken: token(event.target), hitPath: pathOf(event.target),
+        ...(pointer ? { pointerId: event.pointerId, pointerType: event.pointerType,
+          x: event.clientX, y: event.clientY, buttons: event.buttons } : {}),
+        ...(event instanceof KeyboardEvent ? { code: event.code, key: event.key } : {}),
+        ...(event.target instanceof HTMLElement ? {
+          scrollTop: event.target.scrollTop, scrollLeft: event.target.scrollLeft
+        } : {}),
+        documentFocused: document.hasFocus(), visibility: document.visibilityState
+      }
+      if (pointer) lastPointer = entry
+      append(entry)
+    }
+    const names = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+      'gotpointercapture', 'lostpointercapture', 'keydown', 'keyup', 'scroll',
+      'focus', 'blur', 'resize', 'visibilitychange']
+    for (const name of names) window.addEventListener(name, onEvent, true)
+    const value = {
+      observeDnd(event) {
+        lastDnd = { collected: true, monotonicMs: performance.now(), ...event }
+        append({ source: 'original-DndContext-monitor', ...lastDnd })
+      },
+      snapshot(path, point) {
+        try {
+          const row = [...document.querySelectorAll('[data-tree-path]')]
+            .find((candidate) => candidate.getAttribute('data-tree-path') === path) ?? null
+          const rect = row?.getBoundingClientRect()
+          const hit = document.elementFromPoint(point.x, point.y)
+          const parents = []
+          for (let parent = row?.parentElement; parent; parent = parent.parentElement) {
+            if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth ||
+                parent.classList.contains('file-tree')) {
+              parents.push({ token: token(parent), className: parent.className,
+                top: parent.scrollTop, left: parent.scrollLeft,
+                clientHeight: parent.clientHeight, scrollHeight: parent.scrollHeight })
+            }
+          }
+          return {
+            collected: true, rendererMonotonicMs: performance.now(), clock: 'renderer.performance.now',
+            path, point, rowToken: token(row), connected: row?.isConnected ?? null,
+            explorerToken: token(row?.closest('.file-explorer')),
+            rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+              top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right } : null,
+            active: row?.classList.contains('tree-row--drop-over') === true,
+            disabled: row?.getAttribute('data-move-drop-disabled') ?? null,
+            expanded: row?.getAttribute('aria-expanded') ?? null,
+            hitToken: token(hit), hitPath: pathOf(hit), scrollParents: parents,
+            windowScroll: { x: window.scrollX, y: window.scrollY },
+            documentFocused: document.hasFocus(), visibility: document.visibilityState,
+            focusedElementToken: token(document.activeElement), focusedElementPath: pathOf(document.activeElement),
+            overlay: Boolean(document.querySelector('.file-tree-drag-preview')),
+            mountedExplorerReceipt: document.documentElement.dataset.fileEditingExplorerEvidence ?? null,
+            lastPointer: lastPointer ?? { collected: false, reason: 'No pointer event observed' },
+            dnd: lastDnd, events: [...events], droppedEvents
+          }
+        } catch (error) {
+          return { collected: false, error: String(error), rendererMonotonicMs: performance.now() }
+        }
+      },
+      dispose() {
+        for (const name of names) window.removeEventListener(name, onEvent, true)
+        delete window.__agentmuxFileEditingCancelTrace
+        return { collected: true, events: [...events], droppedEvents }
+      }
+    }
+    window.__agentmuxFileEditingCancelTrace = value
+  })()`)
+}
+
+function emitCancelPointerTrace(window: BrowserWindow, phase: string, renderer: unknown): void {
+  const nativeReadStartedNs = process.hrtime.bigint().toString()
+  const ownerIdentity: Record<string, unknown> = { mainPid: process.pid }
+  const identityReadErrors: Record<string, string> = {}
+  const identityReads: Array<[string, () => number | string]> = [
+    ['windowId', () => window.id],
+    ['webContentsId', () => window.webContents.id],
+    ['rendererOsPid', () => window.webContents.getOSProcessId()],
+    ['url', () => window.webContents.getURL()]
+  ]
+  for (const [key, read] of identityReads) {
+    try { ownerIdentity[key] = read() }
+    catch (error) { ownerIdentity[key] = null; identityReadErrors[key] = String(error) }
+  }
+  let nativeWindow: unknown
+  try {
+    nativeWindow = { collected: true, focused: window.isFocused(), visible: window.isVisible(),
+      minimized: window.isMinimized(), bounds: window.getBounds(), webContentsFocused: window.webContents.isFocused() }
+  } catch (error) {
+    nativeWindow = { collected: false, error: String(error) }
+  }
+  process.stderr.write('file_editing_cancel_trace=' + JSON.stringify({
+    phase, nativeReadStartedNs, mainMonotonicNs: process.hrtime.bigint().toString(), clock: 'main.process.hrtime',
+    ownerIdentity, identityReadErrors, nativeWindow, renderer,
+    osFrontmostApplication: { collected: false, reason: 'No OS frontmost application probe collected' }
+  }) + '\n')
+}
+
 async function waitForActivePointerDropTarget(
   window: BrowserWindow,
   path: string,
-  point: Point
+  point: Point,
+  onAdmission?: (snapshot: unknown) => void
 ): Promise<void> {
   await waitFor(`PointerSensor drop target ${path}`, async () => {
-    const active = await window.webContents.executeJavaScript(
-      `${treeRowSource(path)}?.classList.contains('tree-row--drop-over') === true`
-    ) as boolean
+    const result = await window.webContents.executeJavaScript(onAdmission ? `(() => {
+      const active = ${treeRowSource(path)}?.classList.contains('tree-row--drop-over') === true
+      return { active, snapshot: active ? window.__agentmuxFileEditingCancelTrace?.snapshot(
+        ${JSON.stringify(path)}, ${JSON.stringify(point)}) ?? { collected: false, reason: 'Trace unavailable' } : null }
+    })()` : `${treeRowSource(path)}?.classList.contains('tree-row--drop-over') === true`) as
+      boolean | { active: boolean; snapshot: unknown }
+    const active = typeof result === 'boolean' ? result : result.active
+    if (active && onAdmission && typeof result !== 'boolean') onAdmission(result.snapshot)
     if (!active) sendMouse(window, 'mouseMove', point, undefined, ['leftbuttondown'])
     return active
   })
@@ -807,22 +933,49 @@ async function runExplorerInteractionProbe(options: {
       await readFile(join(options.workspacePath, 'targets', 'collision', 'drag-invalid.txt'), 'utf8') === 'collision owner'
   }
 
-  await beginPointerDrag(window, 'explorer-source/drag-invalid.txt')
-  const cancelTarget = await moveActivePointerDrag(window, 'cancelled hover destination', treeRowSource('targets/cancel'))
-  await waitForActivePointerDropTarget(window, 'targets/cancel', cancelTarget)
-  await delay(150)
-  const cancelTargetStayedActive = await window.webContents.executeJavaScript(
-    `${treeRowSource('targets/cancel')}?.classList.contains('tree-row--drop-over') === true`
-  ) as boolean
-  assertProbe(cancelTargetStayedActive, 'Cancelled hover target lost PointerSensor admission before Escape')
-  cancelPointerDrag(window, cancelTarget)
-  await waitFor('cancelled hover PointerSensor cleanup', async () => !(
-    await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
-  ))
-  await delay(600)
-  const cancelledStayedCollapsed = await window.webContents.executeJavaScript(
-    `${treeRowSource('targets/cancel')}?.getAttribute('aria-expanded') === 'false'`
-  ) as boolean
+  const traceCancel = process.env.AGENTMUX_DESKTOP_FILE_EDITING_CANCEL_TRACE === '1'
+  if (traceCancel) {
+    try { await installCancelPointerTrace(window) }
+    catch (error) { emitCancelPointerTrace(window, 'install-read-failed', { collected: false, error: String(error) }) }
+  }
+  const cancelledStayedCollapsed = await (async () => {
+    try {
+      await beginPointerDrag(window, 'explorer-source/drag-invalid.txt')
+      const cancelTarget = await moveActivePointerDrag(window, 'cancelled hover destination', treeRowSource('targets/cancel'))
+      await waitForActivePointerDropTarget(window, 'targets/cancel', cancelTarget, traceCancel ?
+        (snapshot) => emitCancelPointerTrace(window, 'first-admission', snapshot) : undefined)
+      await delay(150)
+      const cancelRead = await window.webContents.executeJavaScript(traceCancel ? `(() => {
+        const active = ${treeRowSource('targets/cancel')}?.classList.contains('tree-row--drop-over') === true
+        return { active, snapshot: window.__agentmuxFileEditingCancelTrace?.snapshot('targets/cancel',
+          ${JSON.stringify(cancelTarget)}) ?? { collected: false, reason: 'Trace unavailable' } }
+      })()` : `${treeRowSource('targets/cancel')}?.classList.contains('tree-row--drop-over') === true`) as
+        boolean | { active: boolean; snapshot: unknown }
+      if (traceCancel && typeof cancelRead !== 'boolean') {
+        emitCancelPointerTrace(window, 'after-quiet-150ms', cancelRead.snapshot)
+      }
+      const cancelTargetStayedActive = typeof cancelRead === 'boolean' ? cancelRead : cancelRead.active
+      assertProbe(cancelTargetStayedActive, 'Cancelled hover target lost PointerSensor admission before Escape')
+      cancelPointerDrag(window, cancelTarget)
+      await waitFor('cancelled hover PointerSensor cleanup', async () => !(
+        await window.webContents.executeJavaScript("Boolean(document.querySelector('.file-tree-drag-preview'))") as boolean
+      ))
+      await delay(600)
+      const collapsed = await window.webContents.executeJavaScript(
+        `${treeRowSource('targets/cancel')}?.getAttribute('aria-expanded') === 'false'`
+      ) as boolean
+      return collapsed
+    } finally {
+      if (traceCancel) {
+        try {
+          const trace = await window.webContents.executeJavaScript(
+            "window.__agentmuxFileEditingCancelTrace?.dispose() ?? { collected: false, reason: 'Trace unavailable' }"
+          )
+          emitCancelPointerTrace(window, 'trace-disposed', trace)
+        } catch (error) { emitCancelPointerTrace(window, 'dispose-read-failed', { collected: false, error: String(error) }) }
+      }
+    }
+  })()
 
   await beginPointerDrag(window, 'explorer-source/drag-invalid.txt')
   const hoverTarget = await moveActivePointerDrag(window, 'hover-expand destination', treeRowSource('targets/hover'))
