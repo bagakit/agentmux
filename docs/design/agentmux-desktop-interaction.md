@@ -113,6 +113,8 @@ fixture 只定义场景数据、操作、观察点与模拟边界，并引用当
 
 用户进一步要求「优化一轮到相当高的水准，让后续各类迭代少走弯路」。Provider 的 managed Hook 安装能力须由同一注册对象完整贡献，真实检查、启动与恢复消费同一贡献及其原工作区、环境和 endpoint；新增自定义 Provider 不应要求修改客户端或第二份内建能力名单。贡献替换后下一次消费使用新对象，非法替换保留原对象；上下文不足、计划失败与真实安装结果准确区分，流程失败不阻断健康 Run，既有 installer 保持唯一写盘责任。此要求不宣称任意活跃语义 Provider 热卸载已经成立。Desktop 的组合入口仍归 client，草稿、附件、Session、Run 与截图子进程各保持原 owner；可复用的展示必须在 Session 与新建工作面均有实际消费者，不能以拆文件或新增插件框架代替能力闭合。
 
+插件 Provider 贡献的合法性及 duplicate 检查必须在本次任何贡献进入目录前全部成立。注册被拒绝时，原 Provider 对象目录、已注册插件与 Skill、command、PMO metadata 保持不变；修正后原 pluginId 可以直接重试。Provider 注册校验与提交保持同一 Registry owner，插件入口不复制校验规则，不先写入再回滚，不新增 Registry 或 transaction 平台，也不操作或阻断健康 Run。
+
 ### AgentMux 自操作与 Computer Use 边界
 
 - Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility 或其他通用 Computer Use 旁路完成本产品已有的操作。
