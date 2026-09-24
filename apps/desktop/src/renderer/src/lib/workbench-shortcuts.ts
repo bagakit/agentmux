@@ -37,7 +37,7 @@ export type WorkbenchShortcutCommand =
   | { kind: 'close-region' }
   /** 关闭整张 Tab，无论是否分屏。 */
   | { kind: 'close-tab' }
-  /** 在活动组里新开一张初始页（launcher）Tab。落点无参：openLauncher 自己解析活动组。 */
+  /** 在所见活动组里新开一张初始页（launcher）Tab。 */
   | { kind: 'new-tab' }
   /** 沿 `direction` 分出一格。 */
   | { kind: 'split'; direction: SplitDirection }
@@ -190,11 +190,11 @@ export type WorkbenchShortcutStore = {
   sessions: readonly SessionSnapshot[]
   selectSession(id: string, tabGroupId?: string): void
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
-  // 键盘新建 Tab 走这条：落点交给 openLauncher 自己（它解析活动组、继承 Topic、失败时响亮报错）。
+  // Keyboard navigation supplies its visible scope; placement failures stay with the common owner.
   // 留在这个类型里而不是让 handler 直接摸真实 store，是因为本层是纯函数缝——接线测试喂进来的是 spyStore，
   // 只有类型带着它，转发才被 store.calls 观察得到；handler 里裸调 useAppStore.getState() 会绕过注入的
   // store，整个转发退化成不可观测的假绿（本仓已复发多次的形状）。
-  openLauncher(tabGroupId?: string): void
+  openLauncher(target: { workspaceId: string; tabGroupId?: string; topicId?: string; reveal: boolean }): string | undefined
   // 保留在类型里但键盘层不再直接调它：真正的关格在组件消费 requestCloseRegion 后才发生。留着是因为接线
   // 测试要能断言「键盘路没有裸调 closeRegion」——删掉它 vitest 只转译不查类型，回退到裸调时运行期照样
   // 静默丢改动而不报错，那条守卫就抓不住了。
@@ -272,7 +272,8 @@ export function dispatchWorkbenchCommand(
     //
     // 恒返回 true：到这里活动组已由上面的 `if (!group) return false` 证在场，openLauncher 要么加出一张
     // Tab、要么走它自己的 reportError 响亮报错，两条都不是静默 no-op，所以这个键确实被吃下。
-    store.openLauncher(group.id)
+    const topicId = activeTopicIdFromLayout(layout, store.tabs)
+    store.openLauncher({ workspaceId, tabGroupId: group.id, ...(topicId ? { topicId } : {}), reveal: true })
     return true
   }
 

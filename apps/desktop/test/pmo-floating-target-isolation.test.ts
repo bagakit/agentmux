@@ -7,7 +7,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 it('keeps the saved target authoritative over a different focus, order or delayed Tab restoration', () => {
   const other = { ...createWorkbenchTab('other-tab', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID,
     regionId: 'other-region', sessionId: 'other-agent' }), topicId: PMO_TEAMS_TOPIC_ID }
-  const saved = { open: false, maximized: false, position: { left: 80, top: 72 }, size: { width: 720, height: 520 }, targetTabId: 'saved-tab' }
+  const saved = { open: false, preview: false, targetTabId: 'saved-tab' }
   expect(pmoTeamsTopicFloatingTargetTabId(saved, { [other.id]: other }, createWorkspaceLayout('group', [other.id]), 'other-agent')).toBe('saved-tab')
   expect(pmoTeamsTopicFloatingTargetTabId(saved, {}, undefined, null)).toBe('saved-tab')
 })

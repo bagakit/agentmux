@@ -185,7 +185,7 @@ function store(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchShortc
     sessions: [],
     selectSession: (id) => calls.push(`selectSession:${id}`),
     activateTab: () => {},
-    openLauncher: () => {},
+    openLauncher: () => undefined,
     closeRegion: () => {},
     requestCloseTab: () => {},
     requestCloseRegion: () => {},

@@ -19,6 +19,7 @@ import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floatin
 import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusSessionId } from '../lib/agent-focus'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { topicIdForSession } from '../lib/workbench-tabs'
 
 export function GlobalFocusSurface() {
   const contextSelector = useMemo(createTerminalFocusProjectionSelector, [])
@@ -112,11 +113,18 @@ export function GlobalFocusSurface() {
       {hierarchyErrors.length ? <p className="focus-hierarchy-warning" role="status" title={hierarchyErrors.join('\n')}>Some lane details could not load. Contexts remain available.</p> : null}
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
+        const current = useAppStore.getState()
+        const tab = tabForFocusedSession(current.tabs, id)
+        const session = sessionPresentationById(current.sessions).get(id)
+        const topicId = tab?.topicId ?? (session ? topicIdForSession(current.config, session) : null)
+        if (!topicId) {
+          current.reportError(new Error('Mote context identity is not confirmed. The original work surface is retained.'))
+          return
+        }
         focusPmoSession(id)
-        const tab = tabForFocusedSession(tabs, id)
         const region = tab && Object.values(tab.regions).find(region => region.kind === 'agent' && region.sessionId === id)
         if (tab && region && tab.layout.activeRegionId !== region.regionId) focusRegion(tab.workspaceId, tab.id, region.regionId)
-        requestPmoTeamsTopicFloatingOpen({ ...(tab ? { targetTabId: tab.id } : {}), onReturnFocus: () => {
+        requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), onReturnFocus: () => {
           if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
         } })
       }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}

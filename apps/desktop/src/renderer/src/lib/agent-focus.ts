@@ -1,4 +1,5 @@
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
+import { scratchTopicKind } from './scratch-topic-snapshots'
 
 export const MAX_EXECUTION_FOCUS_HISTORY = 12
 export const MAX_EXECUTION_FOCUS_EVENTS = 2000
@@ -58,9 +59,11 @@ export function pmoFocusSessionId(context: AgentFocusContext): string | null {
 
 export function focusLaneForSession(
   topicId: string | null,
-  pmoTopicId: string
-): AgentFocusLane {
-  return topicId === pmoTopicId ? 'pmo' : 'execution'
+  topics: readonly ScratchTopicSnapshot[] | null | undefined
+): AgentFocusLane | null {
+  if (!topicId) return 'execution'
+  const kind = scratchTopicKind(topicId, topics)
+  return kind === 'mote' ? 'pmo' : kind === 'topic' ? 'execution' : null
 }
 
 /** Retain the newest complete prefix, counting the actual JSON including escaping and commas. */
@@ -173,7 +176,7 @@ export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
 export function sanitizeAgentFocus(
   context: AgentFocusContext,
   sessions: readonly SessionSnapshot[],
-  laneForSession: (session: SessionSnapshot) => AgentFocusLane,
+  laneForSession: (session: SessionSnapshot) => AgentFocusLane | null,
   retainedUnknownSessionIds?: ReadonlySet<string>
 ): AgentFocusContext {
   const byId = new Map(sessions.map((session) => [session.id, session]))
@@ -185,7 +188,7 @@ export function sanitizeAgentFocus(
     : undefined
   return {
     execution: {
-      sessionId: executionSession && laneForSession(executionSession) === 'execution'
+      sessionId: executionSession && laneForSession(executionSession) !== 'pmo'
         ? executionSession.id
         : !executionSession && context.execution.sessionId && retainedUnknownSessionIds?.has(context.execution.sessionId)
           ? context.execution.sessionId : null,
@@ -193,7 +196,7 @@ export function sanitizeAgentFocus(
       history: context.execution.history
     },
     pmo: {
-      sessionId: pmoSession && laneForSession(pmoSession) === 'pmo'
+      sessionId: pmoSession && laneForSession(pmoSession) !== 'execution'
         ? pmoSession.id
         : !pmoSession && context.pmo.sessionId && retainedUnknownSessionIds?.has(context.pmo.sessionId)
           ? context.pmo.sessionId : null

@@ -337,7 +337,7 @@ function spyStore(overrides: Partial<WorkbenchShortcutStore> = {}): WorkbenchSho
     sessions: [],
     selectSession: (id) => calls.push(`selectSession:${id}`),
     activateTab: (w, g, t) => calls.push(`activateTab:${w}:${g}:${t}`),
-    openLauncher: (g) => calls.push(`openLauncher:${g ?? ''}`),
+    openLauncher: (target) => { calls.push(`openLauncher:${target.workspaceId}:${target.tabGroupId ?? ''}:${target.reveal}`); return 'new-tab' },
     closeRegion: (w, t, r) => { calls.push(`closeRegion:${w}:${t}:${r}`) },
     requestCloseTab: (w, g, t) => calls.push(`requestCloseTab:${w}:${g}:${t}`),
     requestCloseRegion: (w, t, r) => calls.push(`requestCloseRegion:${w}:${t}:${r}`),
@@ -506,10 +506,10 @@ describe('接线：命令转发到 store action', () => {
 
   it('new-tab 调 openLauncher，落点是投影后的活动组，并吃下这个键', () => {
     // 落点传的是投影后的 group.id，不是让 openLauncher 自己兜底读原始 activeGroupId——Topic 过滤后
-    // 两者可以不是同一个组。把 `store.openLauncher(group.id)` 改成 `store.openLauncher()` 这条就红。
+    // 两者可以不是同一个组；必须将眼前的 Workspace 与 group 一起交给创建 owner。
     const store = spyStore()
     expect(dispatchId('workbench.new-tab', store)).toBe(true)
-    expect(store.calls).toEqual(['openLauncher:g'])
+    expect(store.calls).toEqual(['openLauncher:ws:g:true'])
   })
 
   it('非 Workbench 主面时 new-tab 不接管：不调 openLauncher，也不吞键', () => {

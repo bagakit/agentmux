@@ -23,15 +23,14 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalSearchSurface } from './components/GlobalSearchSurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
-import { PMO_FLOATING_TAB_SLOT_PREFIX, pmoTeamsTopicFloatingTargetTabId, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
+import { pmoTeamsTopicFloatingViewTargets, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
+import { SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
 import { tabForFocusedSession } from './lib/focus-tab-projection'
-import { layoutForActiveTopic } from './lib/scratch-topic-layout'
 import { api } from './lib/api'
 import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
@@ -76,20 +75,9 @@ function DesktopApp() {
   const tabs = useAppStore((state) => state.tabs)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
-  const moteTargetTabId = useMemo(() => pmoTeamsTopicFloatingTargetTabId(
+  const moteViewTargets = useMemo(() => pmoTeamsTopicFloatingViewTargets(
     moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId
-  ), [moteFloating.targetTabId, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
-  const moteViewTargets = useMemo(() => {
-    const layout = layouts[SCRATCH_WORKSPACE_ID]
-    if (!moteFloating.open || !layout) return undefined
-    const targets: Record<string, string> = {}
-    // Move only the floating projection's active Views. Hidden Tabs stay parked and cannot
-    // resize their terminal against an inactive slot; the projection uses this same layout.
-    for (const group of layoutForActiveTopic(layout, tabs, PMO_TEAMS_TOPIC_ID, false, moteTargetTabId).groups) {
-      if (group.activeTabId) targets[group.activeTabId] = `${PMO_FLOATING_TAB_SLOT_PREFIX}:${group.activeTabId}`
-    }
-    return targets
-  }, [moteFloating.open, layouts[SCRATCH_WORKSPACE_ID], tabs, moteTargetTabId])
+  ), [moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
   const mainSurface = useAppStore((state) => state.mainSurface)
   const [searchVisited, setSearchVisited] = useState(mainSurface === 'search')
   useEffect(() => {

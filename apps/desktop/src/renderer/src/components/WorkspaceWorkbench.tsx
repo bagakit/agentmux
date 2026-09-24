@@ -44,6 +44,7 @@ import {
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { StableWorkbenchView } from './StableWorkbenchView'
+import { WorkbenchPresentationContext, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -884,7 +885,8 @@ function PaneGroup({
   interactiveResize,
   isRootLeaf,
   showWindowChrome = false,
-  viewHostPrefix
+  viewHostPrefix,
+  onNewTab
 }: {
   group: TabGroup
   workspaceId: string
@@ -898,11 +900,11 @@ function PaneGroup({
   isRootLeaf?: boolean
   showWindowChrome?: boolean
   viewHostPrefix: string
+  onNewTab(groupId: string): void
 }) {
   const tabsById = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
-  const openLauncher = useAppStore((state) => state.openLauncher)
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
   const stopSession = useAppStore((state) => state.stopSession)
@@ -1011,7 +1013,7 @@ function PaneGroup({
           <button
             type="button"
             className="pane-action"
-            onClick={() => openLauncher(group.id)}
+            onClick={() => onNewTab(group.id)}
             title="New tab"
           >
             <Plus size={13} />
@@ -1079,7 +1081,8 @@ function SplitNode({
   interactiveResize = false,
   isRootLeaf = false,
   showWindowChrome = false,
-  viewHostPrefix
+  viewHostPrefix,
+  onNewTab
 }: {
   node: TabGroupLayoutNode
   nodePath: string
@@ -1093,6 +1096,7 @@ function SplitNode({
   isRootLeaf?: boolean
   showWindowChrome?: boolean
   viewHostPrefix: string
+  onNewTab(groupId: string): void
 }) {
   if (node.type === 'leaf') {
     const group = layout.groups.find((candidate) => candidate.id === node.groupId)
@@ -1109,6 +1113,7 @@ function SplitNode({
         isRootLeaf={isRootLeaf}
         showWindowChrome={showWindowChrome}
         viewHostPrefix={viewHostPrefix}
+        onNewTab={onNewTab}
       />
     ) : null
   }
@@ -1125,6 +1130,7 @@ function SplitNode({
       interactiveResize={interactiveResize}
       showWindowChrome={showWindowChrome}
       viewHostPrefix={viewHostPrefix}
+      onNewTab={onNewTab}
     />
   )
 }
@@ -1140,7 +1146,8 @@ function SplitBranch({
   nativeSurfacesVisible,
   interactiveResize,
   showWindowChrome,
-  viewHostPrefix
+  viewHostPrefix,
+  onNewTab
 }: {
   node: Extract<TabGroupLayoutNode, { type: 'split' }>
   nodePath: string
@@ -1153,6 +1160,7 @@ function SplitBranch({
   interactiveResize: boolean
   showWindowChrome: boolean
   viewHostPrefix: string
+  onNewTab(groupId: string): void
 }) {
   const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
   const [dragging, setDragging] = useState(false)
@@ -1190,6 +1198,7 @@ function SplitBranch({
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
           viewHostPrefix={viewHostPrefix}
+          onNewTab={onNewTab}
         />
       </Panel>
       <PanelResizeHandle
@@ -1212,6 +1221,7 @@ function SplitBranch({
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={false}
           viewHostPrefix={viewHostPrefix}
+          onNewTab={onNewTab}
         />
       </Panel>
     </PanelGroup>
@@ -1271,7 +1281,7 @@ export function WorkspaceWorkbench({
   viewOwnership?: 'owner' | 'projection'
   viewHostPrefix?: string
   /** Explicit visible destinations move existing Tab contents without mounting another tree. */
-  viewTargets?: Readonly<Record<string, string>> | undefined
+  viewTargets?: Readonly<Record<string, WorkbenchViewTarget>> | undefined
   /** Select within projection chrome without changing the durable main workface. */
   projectionTabId?: string | undefined
   /** Explicit navigation inside this projection may retain its own selected Tab. */
@@ -1295,6 +1305,7 @@ export function WorkspaceWorkbench({
     [residentLayout, tabs, topicId, topicIsolation, projectionTabId, retainedSpatialFocus, workspaceId]
   )
   const moveTab = useAppStore((state) => state.moveTab)
+  const openLauncher = useAppStore((state) => state.openLauncher)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
@@ -1334,14 +1345,14 @@ export function WorkspaceWorkbench({
       if (!(event.target instanceof Element)) return
       const tabElement = event.target.closest<HTMLElement>('[data-workbench-tab-id]')
       if (event.type === 'focusin' && tabElement?.matches('button')) return
-      const explicitTabId = tabElement?.dataset.workbenchTabId
-      const groupId = event.target.closest<HTMLElement>('[data-pane-group-id]')?.dataset.paneGroupId
-      if (!explicitTabId && !groupId) return
+      const tabId = tabElement?.dataset.workbenchTabId
+      // Header actions have their own navigation owner. They cannot choose a
+      // View by borrowing the durable main workface's active Tab after a click.
+      if (!tabId) return
       queueMicrotask(() => {
         if (!element.isConnected) return
         const state = useAppStore.getState()
-        const tabId = explicitTabId ?? state.layouts[workspaceId]?.groups.find((group) => group.id === groupId)?.activeTabId
-        const tab = tabId ? state.tabs[tabId] : undefined
+        const tab = state.tabs[tabId]
         if (tab && tab.workspaceId === workspaceId && (!topicId || tab.topicId === topicId)) onTabSelect(tab.id)
       })
     }
@@ -1387,9 +1398,23 @@ export function WorkspaceWorkbench({
     moveTab(workspaceId, drag.tabId, drag.groupId, targetGroupId, visibleTargetIndex)
   }
 
-  if (viewOwnership === 'projection' && projectionTabId && (!tabs[projectionTabId] || !ownerByTab.has(projectionTabId))) {
+  function newTab(groupId: string): void {
+    const projectedTopicId = topicId ?? (layout ? activeTopicIdFromLayout(layout, tabs) : undefined)
+    const tabId = openLauncher({ workspaceId, tabGroupId: groupId,
+      ...(projectedTopicId ? { topicId: projectedTopicId } : {}), reveal: viewOwnership === 'owner' })
+    if (tabId) onTabSelect?.(tabId)
+  }
+
+  if (viewOwnership === 'projection' && !projectionTabId) {
+    return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
+      <div role="status" className="workbench-restore-notice">This context has no prepared Tab yet · Select it to prepare its original work surface</div>
+    </div>
+  }
+  const projectedTab = projectionTabId ? tabs[projectionTabId] : undefined
+  if (viewOwnership === 'projection' && projectionTabId && (!projectedTab || projectedTab.workspaceId !== workspaceId ||
+    topicId && projectedTab.topicId !== topicId || !ownerByTab.has(projectionTabId))) {
     return <div ref={workbenchRef} className="workspace-workbench">
-      <div role="status" className="workbench-restore-notice">Original Tab retained · Its layout is still restoring · Reopen this context in Space to continue recovery</div>
+      <div role="status" className="workbench-restore-notice">Original Tab retained · Its placement in this context is not available · Reopen this context in Space to continue recovery</div>
       <div id={`${viewHostPrefix}:${projectionTabId}`} data-workbench-tab-id={projectionTabId} className="workbench-tab-slot" />
     </div>
   }
@@ -1423,14 +1448,17 @@ export function WorkspaceWorkbench({
           isRootLeaf={rootIsLeaf}
           showWindowChrome={viewOwnership === 'owner'}
           viewHostPrefix={viewHostPrefix}
+          onNewTab={newTab}
         />
       </div>
       {viewOwnership === 'owner' && Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
         const ownerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
-        const targetId = focusTab?.id === tab.id ? focusPortalTargetId : viewTargets?.[tab.id] ?? null
+        const projection = viewTargets?.[tab.id]
+        const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
         const tabVisible = targetId !== null || (visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}>
+          <WorkbenchPresentationContext.Provider value={focusTab?.id === tab.id ? true : projection?.active ?? true}>
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
@@ -1441,6 +1469,7 @@ export function WorkspaceWorkbench({
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}
           /> : <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />}
+          </WorkbenchPresentationContext.Provider>
         </StableWorkbenchView>
       })}
       <DragOverlay dropAnimation={null}>
