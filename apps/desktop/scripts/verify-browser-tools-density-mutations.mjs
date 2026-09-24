@@ -13,7 +13,8 @@ await verifyRendererSourceMutations({
   tests: ['apps/desktop/test/browser-tools-density.test.tsx', 'apps/desktop/test/search-surface.test.tsx'],
   sources: [search, tools, preferences, annotations, app, store, css, 'apps/desktop/src/renderer/src/components/BrowserProfilesPanel.tsx',
     'apps/desktop/src/renderer/src/components/settings/SettingsSaveBar.tsx',
-    'apps/desktop/src/renderer/src/components/settings/use-setting-draft.ts'],
+    'apps/desktop/src/renderer/src/components/settings/use-setting-draft.ts',
+    'apps/desktop/test/helpers/composer-dom-fixture.tsx'],
   mutations: [
     { label: 'create-disconnected', file: search,
       before: 'await createBrowser(layout.activeGroupId, undefined, input)', after: 'await Promise.resolve()' },

@@ -87,11 +87,83 @@ export function deriveOverlayInventoryFromSource(rendererSrcDir: string): Source
           return sf.getLineAndCharacterOfPosition(pos).line + 1
         }
 
+        /** A retained DOM node attached to its own JSX ref slot is layout, not a floating overlay. */
+        function isOwnedLayoutPortal(call: ts.CallExpression): boolean {
+          const target = call.arguments[1]
+          if (!target || !ts.isIdentifier(target)) return false
+          let component: ts.Node | undefined = call.parent
+          while (component && !ts.isFunctionDeclaration(component)) component = component.parent
+          if (!component || !ts.isFunctionDeclaration(component) || !component.body) return false
+
+          const declarations: ts.VariableDeclaration[] = []
+          const calls: ts.CallExpression[] = []
+          const refs: ts.JsxAttribute[] = []
+          function collect(node: ts.Node): void {
+            if (ts.isVariableDeclaration(node)) declarations.push(node)
+            if (ts.isCallExpression(node)) calls.push(node)
+            if (ts.isJsxAttribute(node) && node.name.getText(sf) === 'ref') refs.push(node)
+            ts.forEachChild(node, collect)
+          }
+          collect(component.body)
+          const states = declarations.filter(declaration => ts.isArrayBindingPattern(declaration.name)
+            && declaration.name.elements.some(element => ts.isBindingElement(element)
+              && ts.isIdentifier(element.name) && element.name.text === target.text))
+          const state = states.length === 1 ? states[0] : undefined
+          const initialize = state?.initializer
+          if (!initialize || !ts.isCallExpression(initialize) || initialize.expression.getText(sf) !== 'useState') return false
+          const factory = initialize.arguments[0]
+          if (!factory || !ts.isArrowFunction(factory) || !ts.isBlock(factory.body)) return false
+          const factoryBody = factory.body
+          const createsElement = (expression: ts.Expression | undefined): boolean => Boolean(expression
+            && ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression)
+            && ts.isIdentifier(expression.expression.expression) && expression.expression.expression.text === 'document'
+            && expression.expression.name.text === 'createElement')
+          const created = declarations.find(declaration => declaration.parent.parent.parent === factoryBody
+            && ts.isIdentifier(declaration.name) && createsElement(declaration.initializer))
+          if (!created || !ts.isIdentifier(created.name) || !factoryBody.statements.some(statement => ts.isReturnStatement(statement)
+            && statement.expression && ts.isIdentifier(statement.expression) && statement.expression.text === created.name.getText(sf))) return false
+
+          function enclosingReturn(node: ts.Node): ts.Node | undefined {
+            let current: ts.Node | undefined = node.parent
+            while (current && !ts.isReturnStatement(current)) current = current.parent
+            return current
+          }
+          const localRefs = new Set(declarations.flatMap(declaration => {
+            if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)
+              || declaration.initializer.expression.getText(sf) !== 'useRef') return []
+            const name = declaration.name.text
+            return refs.some(ref => ref.initializer && ts.isJsxExpression(ref.initializer)
+              && ref.initializer.expression && ts.isIdentifier(ref.initializer.expression) && ref.initializer.expression.text === name
+              && enclosingReturn(ref) === enclosingReturn(call)) ? [name] : []
+          }))
+          return calls.some(append => {
+            if (!ts.isPropertyAccessExpression(append.expression) || append.expression.name.text !== 'append'
+              || !ts.isIdentifier(append.expression.expression) || append.arguments.length !== 1
+              || !ts.isIdentifier(append.arguments[0]!) || append.arguments[0]!.getText(sf) !== target.text) return false
+            const receiver = append.expression.expression.text
+            const destination = declarations.find(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === receiver)?.initializer
+            if (!destination || !ts.isBinaryExpression(destination) || destination.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken
+              || !ts.isIdentifier(destination.left) || !ts.isPropertyAccessExpression(destination.right)
+              || destination.right.name.text !== 'current' || !ts.isIdentifier(destination.right.expression)
+              || !localRefs.has(destination.right.expression.text)) return false
+            const explicit = declarations.find(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === destination.left.getText(sf))?.initializer
+            return Boolean(explicit && ts.isConditionalExpression(explicit) && explicit.whenFalse.kind === ts.SyntaxKind.NullKeyword
+              && ts.isCallExpression(explicit.whenTrue) && ts.isPropertyAccessExpression(explicit.whenTrue.expression)
+              && ts.isIdentifier(explicit.whenTrue.expression.expression) && explicit.whenTrue.expression.expression.text === 'document'
+              && explicit.whenTrue.expression.name.text === 'getElementById')
+          })
+        }
+
         function visit(node: ts.Node): void {
           // 1. React createPortal call expression
           if (ts.isCallExpression(node)) {
             const expr = node.expression
             if (ts.isIdentifier(expr) && expr.text === 'createPortal') {
+              if (isOwnedLayoutPortal(node)) {
+                // Still scan nested menu/popover primitives; only the proven layout move is omitted.
+                ts.forEachChild(node, visit)
+                return
+              }
               const line = getLineNumber(node.getStart(sf))
               const contentArg = node.arguments[0] ? node.arguments[0].getText(sf) : ''
               const targetArg = node.arguments[1] ? node.arguments[1].getText(sf) : ''
@@ -110,10 +182,9 @@ export function deriveOverlayInventoryFromSource(rendererSrcDir: string): Source
                 // [[widening-a-guard-opens-the-laundering-hole]] warns about — any future
                 // `dialogPortalTarget`/`overlayPortalTarget`/`myPortalTarget` overlay would
                 // silently pass through the "every createPortal must be window-overlay-host"
-                // contract downstream, because a skipped row cannot fail the judge. Whitelist by
-                // the exact identifier used at the single known layout-portal site; new layout
-                // portals are gated by having to name themselves the same way (or add themselves
-                // here with the same audit).
+                // contract downstream, because a skipped row cannot fail the judge. Keep this
+                // exact existing layout target; other targets require their own source-derived
+                // layout-host proof above, and unexplained overlay hosts remain unclassified.
                 return
               } else if (targetArg.includes('document.body') || targetArg.includes('portalHost')) {
                 // Explicit body/legacy portal targets are deliberately unclassified.
