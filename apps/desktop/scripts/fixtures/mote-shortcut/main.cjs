@@ -80,6 +80,12 @@ app.whenReady().then(async () => {
       assert.equal(current.ui.globalChrome, 0, 'Projection cannot copy Goals/Focus global chrome')
       assert.equal(current.ui.titleRows, 0, 'The redundant independent title row is removed')
       assert.equal(current.ui.footerHeight, 32)
+      const footer = current.ui.footerRect
+      assert.ok(current.ui.entryRect && current.ui.entryAvatarRect, 'The real entry and avatar geometry are nonempty')
+      for (const rect of [current.ui.entryRect, current.ui.entryAvatarRect, current.ui.entryStatusRect].filter(Boolean)) {
+        assert.ok(rect.width > 0 && rect.height > 0, 'Each actual painted entry part has a positive area')
+        assert.ok(rect.y >= footer.y && rect.bottom <= footer.bottom, 'The complete Mote entry remains inside the original footer, clear of native Browser drawing')
+      }
       assert.deepEqual(current.ui.choices.map(one => one.topicId).sort(), ['launcher:custom-coordinator', 'launcher:custom-research', 'launcher:leader'])
       assert.equal(current.ui.choices.length, 3, 'One choice per real object, regardless of Tab/Session count')
       assert.equal(current.ui.actions.length, 2)
@@ -93,6 +99,20 @@ app.whenReady().then(async () => {
       assert.deepEqual([...current.ui.regions].sort(), expectedRegions, 'The original nonempty workface has exactly one View per Region')
       assert.deepEqual(current.calls.filter(forbidden), [])
       return current
+    }
+    const verifyNativeEntryClearance = async label => {
+      const current = await facts(), owners = native.owners(), zoom = win.webContents.getZoomFactor()
+      const entryBox = current.ui.entryRect
+      assert.ok(entryBox && entryBox.width > 0 && entryBox.height > 0)
+      const bounds = { x: entryBox.x * zoom, y: entryBox.y * zoom, width: entryBox.width * zoom, height: entryBox.height * zoom }
+      const drawn = owners.orderedChildren.filter(owner => owner.drawn)
+      assert.ok(drawn.length > 0, 'Actual native surfaces are present for the entry-clearance check')
+      for (const owner of drawn) {
+        const box = owner.bounds
+        assert.ok(bounds.x + bounds.width <= box.x || box.x + box.width <= bounds.x || bounds.y + bounds.height <= box.y || box.y + box.height <= bounds.y,
+          'The actual native owner cannot cover any part of the original footer entry')
+      }
+      ;(result.nativeEntryClearance ??= []).push({ label, entry: bounds, owners: drawn.map(owner => ({ webContentsId: owner.webContentsId, bounds: owner.bounds })) })
     }
     const choose = async (topic, target) => {
       const choice = panel + '.querySelector(' + JSON.stringify('[data-mote-topic-id="' + topic + '"]') + ')'
@@ -237,6 +257,7 @@ app.whenReady().then(async () => {
       await waitNative(owners => owners.browsers.some(one => one.browserId === 'private-browser-behind' && one.drawn && one.bounds.width > 0 && !one.loading))
       await pin(); await choose('launcher:leader', 'mote-primary-tab')
       await waitNative(owners => owners.chrome.length > 0 && owners.chrome.every(one => one.interactive))
+      await verifyNativeEntryClearance('browser-behind-mote')
       const behindOs = await native.captureOsWindow('browser-behind-mote')
       const behindFrames = await native.captureNativeFrames('browser-behind-mote')
       assert.equal(behindFrames.passed, true, JSON.stringify(behindFrames.failure))
@@ -246,6 +267,7 @@ app.whenReady().then(async () => {
       result.step = 'native-browser-inside-popover-composition-and-input'
       await pin(); await choose('launcher:custom-coordinator', 'custom-browser-tab')
       await waitNative(owners => owners.browsers.some(one => one.browserId === 'private-browser-inside' && one.drawn && one.bounds.width > 0 && !one.loading) && owners.chrome.length > 0 && owners.chrome.every(one => one.interactive))
+      await verifyNativeEntryClearance('browser-inside-mote')
       const insideOs = await native.captureOsWindow('browser-inside-mote')
       const insideFrames = await native.captureNativeFrames('browser-inside-mote')
       assert.equal(insideFrames.passed, true, JSON.stringify(insideFrames.failure))

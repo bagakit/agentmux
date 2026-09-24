@@ -17,3 +17,7 @@
 明确固定空 launcher 后，原 owner 可以预热 shell；本受控 Session API 保留该调用及准确 pinned/preview 来源，返回由既有 mock 公共工厂生成的 typed Terminal 事实，结果标记为 `typed-mock-terminal-no-core-run-created`，不创建 Core/ctxmux 进程。hover 的同类调用仍明确失败，不把它放行；原 Agent 启停、发送与排队始终没有隐式调用。私有图中的启动面和 Terminal 内容不代签真实 shell，实际初始空 launcher 的零预热/不抢焦点还须由 owning consumer 反例与源码变异验证。前一轮拒绝 warm 请求造成原 owner 重试，保留该失败，不以它代表正常 Terminal 返回路径。
 
 截图完成实际绘制后，与 Source/style/fixture/compiled、进程/profile、native owner/input 和 strict cleanup 放在同一 evidence 路径。Renderer capturePage 明确排除 native WebContentsViews；独立 native 帧与 OS 整窗分别标记，不能相互代签。独立 Agent 逐张实际看图，判断按钮—面板联系、对象选择与无独立标题、当前事情、状态、动作可读性和窄窗完成度；修改后复采复验。采图、几何或 owner 断言不自动签审美。
+
+样式绑定使用实际 PostCSS AST 的原 Input 字节，覆盖 Vite 记录的本地依赖集合，包含所有实际递归 @import；每份源字节在消费时与磁盘核对，完整回归结束再次核对。依赖与 Mote 样式必须非空，不以 JavaScript 模块图或手写清单代替样式来源。旧第17轮的 compiled CSS 绑定保留，其漏收 transitive CSS 的 Source 范围不改签。
+
+原头像、状态点与按钮几何完整落在32px footer内；背后和面内两种真实 Native 场景都从实际 drawn child owner/bounds 验证原入口未被覆盖，再采 OS 整窗。Renderer 图与几何通过仍须独立亲看 OS 可见完整轮廓和焦点环。
