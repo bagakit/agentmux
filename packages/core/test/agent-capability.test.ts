@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
@@ -34,7 +34,7 @@ describe('解析 author', () => {
   const raw = issueAgentCapability()
   const bound = {
     agentSessionId: 'agent-a',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     runId: 'run-1',
     capabilityHash: hashAgentCapability(raw)
   }
@@ -75,7 +75,7 @@ describe('每个通信动作都验凭证', () => {
   it('通信动作都调用 resolveMessageAuthor', () => {
     for (const action of [
       'checkDeliveries', 'ackDeliveryBatch', 'answerAsk',
-      'cancelAsk', 'handOff', 'openDispatch', 'recordDispatchEvent'
+      'cancelAsk', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch'
     ]) {
       const anchor = new RegExp(`\\n  (?:async )?${action}\\(input: \\{`).exec(source)
       expect(anchor?.index).toBeGreaterThan(-1)
