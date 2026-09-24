@@ -29,45 +29,37 @@ export const PI_HOOK_EVENTS = [
 /**
  * Pi 的 hook 合同。
  *
- * **`agent_settled` 是唯一的 done，`agent_end` 不是。** 这一条是本轮读第一方源码翻出来的实锤，此前
- * 两个名字都判 done：
- *
- * `agent_end` 之后 Pi 有三条各自独立的「继续干活」路径（`agent-session.ts:1121-1149` 的
- * `_handlePostAgentRun`，返回 true 就 `await this.agent.continue()` 再来一轮）：
- *   1. 可重试的错误（`_isRetryableError` + `_prepareRetry`，:1128）；
- *   2. 自动压缩（`_checkCompaction`，:1142）；
- *   3. `agent_end` 的 handler 自己排进队的消息（`hasQueuedMessages()`，:1148）。
- *
- * 而 `agent_settled` 只在那个 `while` 循环整个跑完后、在 `finally` 里发**一次**
- * （`agent-session.ts:1109-1117`）。上游自己的 RPC 客户端也是等 `agent_settled` 才认为一次调用结束
- * （`modes/rpc/rpc-client.ts:462` 的注释逐字："Resolves when agent_settled event is received"）。
- *
- * 所以把 `agent_end` 判成 done 会在**每一次重试/压缩/续跑之前**先报一次假完成——界面显示"做完了"，
- * 而 Agent 正要接着跑。这不是保守与激进之争：`agent_end` 判 working 时，真正的收尾仍由
- * `agent_settled` 给出，一条都不会漏；反过来则每次自动重试都是一次误报。
- *
- * **不订阅 `agent_end`**：它在 `agent_settled` 之前必然发生且语义已被 working 覆盖，订阅它只是多一条
- * 网络投递。这不同于「不知道」——是知道之后判定它不携带新状态。
- *
- * **没有 blocked 规则**。此前这里有一条按 `ask_user_question`/`askuserquestion` 判 blocked 的规则，
- * 它押的工具在 Pi 里**根本不存在**：Pi 的内置工具就是 bash/edit/find/grep/ls/powershell/read/write
- * 八个（`core/tools/` 目录逐个数过），仓库里 `AskUserQuestion` 的出现全在一张 **Claude Code** 的工具名
- * 映射表里（`packages/ai/src/api/anthropic-messages.ts:89`），与 Pi 自己的工具集无关。
- *
- * 那条规则是照别家（claude/codex/grok 都有同名工具）的拼法抄来的，唯一守它的测试自己构造了一个
- * `tool_name: 'ask_user_question'` 的负载喂进去——那是在证明「规则能匹配」，不是在证明「Pi 会发」。
- * 删掉它而不是留着：一条永不命中的规则不是无害的冗余，它是一句关于 Pi 有什么工具的谎，下一个人会
- * 据此以为 Pi 的等待态已经覆盖了。
- *
- * Pi 确实**没有**可观察的「卡在授权上等人」事件：`types.ts` 里没有任何 permission/approval 事件，
- * `ui_prompt_start`/`ui_prompt_end`（:748-761）只在**扩展自己**调 `ctx.ui.*` 弹窗时才发
- * （`extensions/runner.ts:441-480` 的 `wrapUIPromptContext`/`withUIPrompt`），与 Agent 自身的权限提示
- * 无关。所以 catalog 的 `permission` 如实记 `'none'`——不是 observe，因为连观察都做不到。
+ * - `agent_settled` 在 `_runAgentPrompt` 的 finally 块触发（active=false），标志 prompt 循环
+ *   （含 auto-retry 与 compaction）完全终止，统一发出 `turn-end` 以便建立提示就绪并放行后续输入。
+ * - 真实最终成功仅当最后一轮 assistant 消息 `stopReason === 'stop'` 时判 `done`；
+ *   `stopReason === 'error'` 判 `error`；
+ *   `aborted`、`length` 或缺失结果判中立 `unknown`，绝不谎报成功。
+ * - active 状态（before_agent_start, agent_start, tool_call, tool_execution_*, message_end）为 `working`。
+ * - Pi 自身无交互权限事件，catalog.permission 记 `none`；工具与轮次无双向关联，replyCorrelation 记 `none`。
  */
 export const PI_HOOKS: AgentNativeHookSpecification = {
   rules: [
-    // 唯一的收尾。理由见上：三条 continue 路径都在 agent_end 之后。
-    { events: ['agent_settled'], state: 'done' },
+    // stop: 正常成功收尾
+    {
+      events: ['agent_settled'],
+      matches: (payload) => payload.stopReason === 'stop',
+      state: 'done',
+      lifecycleEvent: 'turn-end'
+    },
+    // error: 明确报错收尾
+    {
+      events: ['agent_settled'],
+      matches: (payload) => payload.stopReason === 'error',
+      state: 'error',
+      lifecycleEvent: 'turn-end'
+    },
+    // aborted / length / 缺结果：循环已结束 (active=false)，收尾显式 turn-end，不阻碍后续输入
+    {
+      events: ['agent_settled'],
+      state: 'unknown',
+      lifecycleEvent: 'turn-end'
+    },
+    // 工作中事件
     {
       events: [
         'before_agent_start', 'agent_start', 'tool_call',
@@ -208,17 +200,51 @@ export default function (pi) {
     })
   }
 
-  pi.on('before_agent_start', (event, ctx) => { post('before_agent_start', ctx, { prompt: event.prompt || '' }) })
-  pi.on('agent_start', (_event, ctx) => { post('agent_start', ctx) })
+  let lastAssistant = null
+
+  pi.on('before_agent_start', (event, ctx) => {
+    lastAssistant = null
+    post('before_agent_start', ctx, { prompt: (event && event.prompt) || '' })
+  })
+  pi.on('agent_start', (_event, ctx) => {
+    lastAssistant = null
+    post('agent_start', ctx)
+  })
   // tool_call 的参数在 \`input\`，tool_execution_start 的在 \`args\`——两者的**工具名**都叫 toolName，
   // 但参数字段名不同（types.ts:889-896 对 :798-803）。都投成 tool_name/tool_input，让归一化层按
   // 它既有的两族拼法读到（hook-normalizer 的 stringField 已认 tool_name/toolName）。
   pi.on('tool_call', (event, ctx) => { post('tool_call', ctx, { tool_name: event.toolName, tool_input: event.input }) })
   pi.on('tool_execution_start', (event, ctx) => { post('tool_execution_start', ctx, { tool_name: event.toolName, tool_input: event.args }) })
   pi.on('tool_execution_end', (event, ctx) => { post('tool_execution_end', ctx, { tool_name: event.toolName }) })
-  pi.on('message_end', (_event, ctx) => { post('message_end', ctx) })
-  // 唯一的 done。agent_end 刻意不订阅——它之后还有 retry/compaction/queued 三条续跑路径。
-  pi.on('agent_settled', (_event, ctx) => { post('agent_settled', ctx) })
+  pi.on('message_end', (event, ctx) => {
+    const msg = event && event.message
+    const manager = ctx && ctx.sessionManager
+    const sessionId = manager && manager.getSessionId && manager.getSessionId()
+    if (msg && msg.role === 'assistant' && typeof sessionId === 'string' && sessionId) {
+      lastAssistant = {
+        sessionId: sessionId,
+        stopReason: msg.stopReason,
+        errorMessage: msg.errorMessage
+      }
+    }
+    const extra = msg ? {
+      role: msg.role,
+      stopReason: msg.stopReason,
+      errorMessage: msg.errorMessage
+    } : undefined
+    post('message_end', ctx, extra)
+  })
+  // 最终 quiescence：循环结束。上报当前会话最后一轮 assistant 结果，区分 stop / error / unknown。
+  pi.on('agent_settled', (_event, ctx) => {
+    const manager = ctx && ctx.sessionManager
+    const sessionId = manager && manager.getSessionId && manager.getSessionId()
+    const match = lastAssistant && typeof sessionId === 'string' && sessionId && lastAssistant.sessionId === sessionId
+    const extra = match && lastAssistant.stopReason ? {
+      stopReason: lastAssistant.stopReason,
+      errorMessage: lastAssistant.errorMessage
+    } : undefined
+    post('agent_settled', ctx, extra)
+  })
 }
 `
 }

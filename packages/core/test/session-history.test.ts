@@ -78,6 +78,30 @@ describe('public native Session history pages', () => {
     expect(reader.mock.calls[1]![0]).toMatchObject({ command: 'codex', args: [], env: {}, workspacePath: '/synthetic' })
   })
 
+  it('preserves reasoning part with optional signature, redacted flag, and legal empty text', async () => {
+    const reasoningPage: AgentProviderSessionHistoryPage = {
+      source,
+      nextCursor: null,
+      items: [{
+        id: 'msg-reasoning',
+        kind: 'assistant-message',
+        contentParts: [
+          { kind: 'reasoning', text: 'detailed thought', signature: 'opaque-sig', redacted: false },
+          { kind: 'reasoning', text: '', signature: 'empty-thought-sig', redacted: true },
+          { kind: 'reasoning', text: 'standard thought' }
+        ]
+      }]
+    }
+    const reader = vi.fn(async () => reasoningPage)
+    const { client } = await harness(reader)
+    const result = await client.sessionHistoryPage('main-session')
+    expect(result.items[0]!.contentParts).toEqual([
+      { kind: 'reasoning', text: 'detailed thought', signature: 'opaque-sig', redacted: false },
+      { kind: 'reasoning', text: '', signature: 'empty-thought-sig', redacted: true },
+      { kind: 'reasoning', text: 'standard thought' }
+    ])
+  })
+
   it('keeps an empty page continuation opaque and lets the next page continue', async () => {
     const reader = vi.fn(async (context: AgentProviderSessionHistoryContext) => context.cursor === undefined
       ? { source, items: [], nextCursor: 'same-native-empty-page-cursor' }

@@ -91,3 +91,166 @@ it('excludes a partial tail and keeps an empty v3 transcript honestly empty', as
   const empty = await fixture([])
   expect(await empty.client.sessionHistoryPage('private-agent')).toMatchObject({ items: [], nextCursor: null })
 })
+
+it('preserves native reasoning, toolCall, and mixed assistant speech in exact block order', async () => {
+  const f = await fixture([
+    message('root', null, 'user', 'Analyze files'),
+    message('mixed-assistant', 'root', 'assistant', [
+      { type: 'thinking', thinking: 'Evaluating current workspace tree' },
+      { type: 'text', text: 'Listing files...' },
+      { type: 'toolCall', id: 'call-bash-1', name: 'bash', arguments: { command: 'ls -1' } }
+    ]),
+    {
+      type: 'message',
+      id: 'tool-out',
+      parentId: 'mixed-assistant',
+      timestamp: '2026-10-01T01:02:04Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-bash-1',
+        toolName: 'bash',
+        isError: false,
+        content: [{ type: 'text', text: 'fileA\nfileB' }]
+      }
+    },
+    {
+      type: 'message',
+      id: 'tool-err',
+      parentId: 'tool-out',
+      timestamp: '2026-10-01T01:02:05Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-bash-2',
+        toolName: 'bash',
+        isError: true,
+        content: [{ type: 'text', text: 'permission denied' }]
+      }
+    }
+  ])
+  const page = await f.client.sessionHistoryPage('private-agent')
+  expect(page.items.map((item) => [item.id, item.kind])).toEqual([
+    ['root', 'user-message'],
+    ['mixed-assistant', 'assistant-message'],
+    ['tool-out', 'activity'],
+    ['tool-err', 'activity']
+  ])
+
+  // Mixed assistant maintains block order: reasoning -> text -> tool-call
+  expect(page.items[1]!.contentParts).toEqual([
+    { kind: 'reasoning', text: 'Evaluating current workspace tree' },
+    { kind: 'text', text: 'Listing files...' },
+    { kind: 'tool-call', name: 'bash', input: '{"command":"ls -1"}', callId: 'call-bash-1' }
+  ])
+
+  // Tool results preserve name, output, callId, and failed flag
+  expect(page.items[2]!.contentParts).toEqual([
+    { kind: 'tool-result', output: 'fileA\nfileB', name: 'bash', callId: 'call-bash-1' }
+  ])
+  expect(page.items[3]!.contentParts).toEqual([
+    { kind: 'tool-result', output: 'permission denied', name: 'bash', callId: 'call-bash-2', failed: true }
+  ])
+
+  expect(await f.bytes()).toEqual(f.before)
+  expect(f.controls).toHaveLength(6)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it('aborts on signal cancellation and client disposal without mutating transcript or store', async () => {
+  const f = await fixture([
+    message('one', null, 'user', 'first'),
+    message('two', 'one', 'assistant', 'second')
+  ])
+  const controller = new AbortController()
+  controller.abort()
+  const { readPiSessionHistoryPage } = await import('../src/providers/pi-native-history.js')
+  await expect(readPiSessionHistoryPage({
+    source: { providerId: 'pi', nativeSessionId: 'native-main' },
+    limit: 10,
+    signal: controller.signal,
+    workspacePath: f.root,
+    transcriptPath: f.path,
+    command: 'pi',
+    args: [],
+    env: {}
+  })).rejects.toThrow()
+
+  await f.client.dispose()
+  await expect(f.client.sessionHistoryPage('private-agent')).rejects.toMatchObject({
+    code: 'AGENT_SESSION_HISTORY_CANCELLED'
+  })
+  expect(await f.bytes()).toEqual(f.before)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it('preserves empty legal thinking, signature, redacted flag, and raw malformed thinking without guessing foreign text', async () => {
+  const f = await fixture([
+    {
+      type: 'message',
+      id: 'empty-thinking-msg',
+      parentId: null,
+      timestamp: '2026-10-01T01:02:00Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '', thinkingSignature: 'opaque-empty-replay', redacted: true }
+        ]
+      }
+    },
+    {
+      type: 'message',
+      id: 'malformed-thinking-msg',
+      parentId: 'empty-thinking-msg',
+      timestamp: '2026-10-01T01:02:01Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', text: 'foreign fallback must not become reasoning', rawExtra: { untouched: true } }
+        ]
+      }
+    }
+  ])
+  const page = await f.client.sessionHistoryPage('private-agent')
+  expect(page.items).toHaveLength(2)
+
+  // Empty thinking with signature and redacted preserved
+  expect(page.items[0]!.contentParts).toEqual([
+    { kind: 'reasoning', text: '', signature: 'opaque-empty-replay', redacted: true }
+  ])
+
+  // Malformed thinking without thinking: string preserves raw JSON text, no foreign text guessing
+  expect(page.items[1]!.contentParts).toEqual([
+    { kind: 'text', text: '{"type":"thinking","text":"foreign fallback must not become reasoning","rawExtra":{"untouched":true}}' }
+  ])
+
+  expect(await f.bytes()).toEqual(f.before)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it('preserves image-only toolResult message carrying tool metadata and outcome without inventing text output', async () => {
+  const f = await fixture([
+    {
+      type: 'message',
+      id: 'image-only',
+      parentId: null,
+      timestamp: '2026-10-01T01:02:00Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'image-only-call',
+        toolName: 'image_only_tool',
+        isError: true,
+        content: [
+          { type: 'image', mimeType: 'image/png', data: 'aW1hZ2Utb25seQ==' }
+        ]
+      }
+    }
+  ])
+  const page = await f.client.sessionHistoryPage('private-agent')
+  expect(page.items).toHaveLength(1)
+  expect(page.items[0]!.kind).toBe('activity')
+  expect(page.items[0]!.contentParts).toEqual([
+    { kind: 'tool-result', output: '', name: 'image_only_tool', callId: 'image-only-call', failed: true },
+    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,aW1hZ2Utb25seQ==' }
+  ])
+  expect(await f.bytes()).toEqual(f.before)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
