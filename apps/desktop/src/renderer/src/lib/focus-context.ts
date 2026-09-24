@@ -1,7 +1,9 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
+import { scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
+import { focusLaneForSession, type AgentFocusLane } from './agent-focus'
+import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { agentDisplayName, firstPromptFromTimeline, workspaceForSession, workbenchSurfaces, type WorkbenchTab } from './workbench-tabs'
 import { regionIds } from '@agentmux/layout'
 import { regionDisplayNames, regionSurfaceLabel } from './region-display-name'
@@ -23,7 +25,7 @@ export type FocusContext = {
   workspace: WorkspaceRecord | undefined
   originAddress?: string
 }
-type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null }
+type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
 function activityEntryTime(session: SessionSnapshot): number | undefined {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
   return activity && isAgentActivityStatusSource(activity.source) ? activity.stateEnteredAt : undefined
@@ -96,19 +98,19 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
 }
 /** One existing per-surface cache owns execution rows and the separate PMO attention projection. */
 function createFocusProjectionCache() {
-  const cache = new Map<string, { session: SessionSnapshot; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; model: FocusContext | null; laneModel: FocusContext | null }>()
+  const cache = new Map<string, { session: SessionSnapshot; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
   const select = (input: Inputs): FocusProjection => {
-    if (previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config) return result
+    if (previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config && previous.scratchTopicSnapshots === input.scratchTopicSnapshots) return result
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
     const pmoAttention: string[] = []
     for (const session of input.sessions) {
       const timeline = input.timelines[session.id], name = input.agentNames[session.id], old = cache.get(session.id)
-      if (old && sameSessionPresentation(old.session, session) && old.timeline === timeline && old.name === name && old.config === input.config) {
+      if (old && sameSessionPresentation(old.session, session) && old.timeline === timeline && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
-        else if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
+        else if (old.lane === 'pmo' && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         continue
       }
       const sameOwner = old && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
@@ -116,21 +118,23 @@ function createFocusProjectionCache() {
       const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) : null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
-      if (topicId === PMO_TEAMS_TOPIC_ID) {
+      const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))
+      if (lane === 'pmo') {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
       } else {
         const next = context(session, timeline, name, workspace, topicId)
+        if (lane === null) next.detail = 'Mote identity is not confirmed · ' + next.detail
         model = old?.model && Object.keys(next).every(key => next[key as keyof FocusContext] === old.model![key as keyof FocusContext]) ? old.model : next
         rows.push(model)
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
       }
-      cache.set(session.id, { session, timeline, name, config: input.config, workspace, topicId, model, laneModel })
+      cache.set(session.id, { session, timeline, name, config: input.config, workspace, topicId, lane, model, laneModel })
     }
     const retained = new Set(input.sessions.map(session => session.id))
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
     result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention}
-    previous = {sessions: input.sessions, timelines: input.timelines, agentNames: input.agentNames, config: input.config}
+    previous = {sessions: input.sessions, timelines: input.timelines, agentNames: input.agentNames, config: input.config, scratchTopicSnapshots: input.scratchTopicSnapshots}
     return result
   }
   return { select, session: (id: string) => cache.get(id)?.session }

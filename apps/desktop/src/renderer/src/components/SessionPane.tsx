@@ -1,7 +1,7 @@
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import {
@@ -108,7 +108,7 @@ export function SessionPane({
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
-  const viewMode = useAppStore((state) => state.viewModes[sessionId] ?? 'terminal')
+  const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
   const [historyOpen, setHistoryOpen] = useState(false)
   const surfaceRef = useRef<HTMLElement>(null)
   const historyReturnFocusRef = useRef<HTMLButtonElement | null>(null)

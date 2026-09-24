@@ -139,6 +139,8 @@ async function fixture(options: { branch?: boolean; missingTopic?: boolean; miss
     [RECIPIENT]: 'Recipient worker', [DECOY]: SENDER_NAME, [SENDER]: SENDER_NAME
   }, workspaceFileRevisions: {}, mainSurface: 'agents', activeWorkspaceId: 'recipient-project', error: null,
   agentFocus: { execution: { sessionId: RECIPIENT, history: [] }, pmo: { sessionId: null } } })
+  useAppStore.setState({ scratchTopicSnapshots: {} })
+  await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID)
   client.onEvent(event => { if (event.type === 'agent-timeline') useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event }) })
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, prompt, operationId, condition, authorAgentSessionId) => {
     await client.submitAgentPrompt({ agentSessionId: control.agentSessionId, prompt, operationId, ...condition,

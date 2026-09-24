@@ -328,7 +328,7 @@ export function SurfaceToolDock({
             className="surface-tool-create icon-button"
             aria-label="New Agent"
             title="New Agent — choose an Executor"
-            onClick={() => openLauncher(activePaneId)}
+            onClick={() => openLauncher({ workspaceId: workspace.id, ...(activePaneId ? { tabGroupId: activePaneId } : {}), reveal: true })}
           >
             <Plus size={15} />
           </button>

@@ -220,7 +220,7 @@ describe('selected worktree workspace context', () => {
     expect(selected.layouts[main.id]).toBe(oldLayout)
     expect(selected.layouts[feature.id]?.groups[0]?.tabOrder).toEqual([])
 
-    selected.openLauncher()
+    selected.openLauncher({ workspaceId: feature.id, reveal: true })
 
     const withLauncher = useAppStore.getState()
     const launcher = Object.values(withLauncher.tabs).find(
@@ -348,7 +348,7 @@ function prepareUniversalTab(): { workspace: WorkspaceRecord; tabId: string } {
     layouts: { [workspace.id]: createWorkspaceLayout('pane') },
     error: null
   })
-  useAppStore.getState().openLauncher('pane')
+  useAppStore.getState().openLauncher({ workspaceId: workspace.id, tabGroupId: 'pane', reveal: true })
   const tabId = useAppStore.getState().layouts[workspace.id]!.groups[0]!.activeTabId!
   expect(titleWorkbenchSurface(useAppStore.getState().tabs[tabId]!).kind).toBe('launcher')
   return { workspace, tabId }
@@ -664,7 +664,7 @@ describe('Scratch Topic workbench binding', () => {
 
   it('launches with no Topic from an unbound View instead of minting one from the Tab id', async () => {
     const workspace = prepareScratch()
-    useAppStore.getState().openLauncher('scratch-pane')
+    useAppStore.getState().openLauncher({ workspaceId: workspace.id, tabGroupId: 'scratch-pane', reveal: true })
     const state = useAppStore.getState()
     const tabId = state.layouts[workspace.id]!.groups[0]!.activeTabId!
     const launcher = state.tabs[tabId]!

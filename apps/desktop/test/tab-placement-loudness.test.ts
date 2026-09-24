@@ -178,7 +178,7 @@ describe('同步动作：不抛，但要把失败摆到界面上', () => {
   // 缺任何一半都是缺陷：静默回落（旧行为）两条都不满足，而「抛了但留了孤儿」满足前一半。
   it('openLauncher', () => {
     prepare()
-    useAppStore.getState().openLauncher('no-such-group')
+    useAppStore.getState().openLauncher({ workspaceId: workspace.id, tabGroupId: 'no-such-group', reveal: true })
     expect(orphanTabIds(), 'openLauncher 留下了永不显示的孤儿 Tab').toEqual([])
     expect(useAppStore.getState().error, '落点不在场却一句话都不说').toMatch(/Tab Group/)
   })

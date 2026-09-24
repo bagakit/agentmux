@@ -7,6 +7,7 @@ import type { SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
+import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import { orderTopics, partitionPinned } from '../lib/topic-order'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
@@ -53,11 +54,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
     return index
   }, [sessions, workspace.hostId, workspace.path])
   const entries = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && !topic.soul) ?? []
-  const defaultMote = topics?.find((topic) => topic.id === PMO_TEAMS_TOPIC_ID) ?? {
-    id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID),
-    topicPath: `${scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)}/topic.md`, collaborators: []
-  }
-  const motes: ScratchTopicSnapshot[] = [defaultMote, ...(topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && topic.soul) ?? [])]
+  const motes = scratchMoteTopics(topics)
 
   async function openOverview(): Promise<void> {
     try { await selectWorkspace(workspace.id); setWorkspaceTool('files-branches') } catch (cause) { reportError(cause) }

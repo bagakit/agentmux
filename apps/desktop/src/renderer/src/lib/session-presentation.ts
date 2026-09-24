@@ -1,5 +1,9 @@
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { isNeedsYouState } from './attention-vocabulary'
+import { focusLaneForSession } from './agent-focus'
+import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
+import { topicIdForSession, workspaceForSession } from './workbench-tabs'
+import type { SessionViewMode } from './session-state'
 
 let indexedSessions: readonly SessionSnapshot[] | undefined
 let index: ReadonlyMap<string, SessionSnapshot> = new Map()
@@ -11,6 +15,19 @@ export function sessionPresentationById(sessions: readonly SessionSnapshot[]): R
     indexedSessions = sessions
   }
   return index
+}
+
+/** An explicit choice wins; known Motes have one read-only Activity default in every consumer. */
+export function effectiveSessionViewMode(state: {
+  viewModes: Readonly<Record<string, SessionViewMode>>; sessions: readonly SessionSnapshot[]
+  config: AppConfig | null; scratchTopicSnapshots: Readonly<Record<string, ScratchTopicsSnapshot>>
+}, sessionId: string): SessionViewMode {
+  const explicit = state.viewModes[sessionId]
+  if (explicit !== undefined) return explicit
+  const session = sessionPresentationById(state.sessions).get(sessionId)
+  return session && focusLaneForSession(topicIdForSession(state.config, session),
+    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session))) === 'pmo'
+    ? 'activity' : 'terminal'
 }
 
 /** Human-readable status uses the same facts in Focus and a projected coordination context. */

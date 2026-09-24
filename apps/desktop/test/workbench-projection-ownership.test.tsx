@@ -11,21 +11,22 @@ import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTe
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
+import { installNativePopover } from './fixtures/mote-workface'
 
 const baseline = useAppStore.getState()
 const first = { ...createWorkbenchTab('first-tab', { kind: 'launcher', regionId: 'first-region', workspaceId: SCRATCH_WORKSPACE_ID }, 'First context'), topicId: PMO_TEAMS_TOPIC_ID }
 const second = { ...createWorkbenchTab('second-tab', { kind: 'launcher', regionId: 'second-region', workspaceId: SCRATCH_WORKSPACE_ID }, 'Second context'), topicId: PMO_TEAMS_TOPIC_ID }
-let root: Root, container: HTMLDivElement
+let root: Root, container: HTMLDivElement, restorePopover: () => void
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  window.localStorage.clear()
+  window.localStorage.clear(); restorePopover = installNativePopover()
   useAppStore.setState({ tabs: { [first.id]: first, [second.id]: second }, sessions: [], agentNames: {}, timelines: {},
-    config: null, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [first.id, second.id]) },
+    config: null, scratchTopicSnapshots: {}, workspaceFileRevisions: {}, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [first.id, second.id]) },
     mainSurface: 'board', projectRailOpen: false, toolsOpen: false })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); window.localStorage.clear()
+  await act(async () => root.unmount()); container.remove(); restorePopover(); window.localStorage.clear()
   vi.restoreAllMocks(); useAppStore.setState(baseline, true)
 })
 
@@ -95,7 +96,8 @@ it.each([
     ...(missing ? { tabs: { [second.id]: second }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [second.id]) } } : {}) })
   const topic = { id: PMO_TEAMS_TOPIC_ID, directoryPath: '/topics/topic--launcher--leader', topicPath: '/topics/topic--launcher--leader/topic.md',
     title: 'Mote', summary: '', collaborators: [] }
-  vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue(topic)
+  vi.spyOn(api.scratch, 'ensureMote').mockResolvedValue(topic)
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
   const read = vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
   const launch = vi.spyOn(api.sessions, 'launchTerminal')
   const key = 'agentmux.leader-topic-floating.v1'

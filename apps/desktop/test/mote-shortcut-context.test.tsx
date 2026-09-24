@@ -24,9 +24,11 @@ vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({
   }
 }))
 vi.mock('../src/renderer/src/components/SessionMailbox', () => ({ SessionMailbox: () => null }))
-import { PmoTeamsTopicEntry, PmoTeamsTopicShortcutPreview } from '../src/renderer/src/components/PmoTeamsTopicEntry'
+import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { effectiveSessionViewMode } from '../src/renderer/src/lib/session-presentation'
+import { installNativePopover } from './fixtures/mote-workface'
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 const baseline = useAppStore.getState()
@@ -60,7 +62,7 @@ function Probe({ rendered }: { rendered: () => void }) {
   rendered()
   return createElement('output', { 'data-probe-target': target.tabId }, target.statusText)
 }
-let root: Root, container: HTMLDivElement
+let root: Root, container: HTMLDivElement, restorePopover: () => void
 function saved() { return JSON.parse(window.localStorage.getItem(savedKey)!) }
 function button(label: string) {
   const element = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
@@ -71,26 +73,27 @@ async function settle() { await act(async () => { await new Promise((resolve) =>
 async function render(extra?: React.ReactNode) {
   await act(async () => root.render(createElement(Fragment, null,
     createElement('button', { id: 'original-input' }, 'Original input'), createElement(PmoTeamsTopicEntry),
-    createElement(PmoTeamsTopicShortcutPreview), createElement(Floating), extra)))
+    createElement(Floating), extra)))
   await settle()
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  window.localStorage.clear()
+  window.localStorage.clear(); restorePopover = installNativePopover()
   useAppStore.setState({ config, sessions: [current, other], tabs: { [currentTab.id]: currentTab, [otherTab.id]: otherTab },
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [currentTab.id, otherTab.id]) },
-    timelines: {}, agentNames: {}, viewModes: { [current.id]: 'terminal' }, activeWorkspaceId: 'original-project', mainSurface: 'board',
+    scratchTopicSnapshots: {}, workspaceFileRevisions: {}, timelines: {}, agentNames: {}, viewModes: { [current.id]: 'terminal' }, activeWorkspaceId: 'original-project', mainSurface: 'board',
     agentFocus: { execution: { sessionId: 'execution', history: [{ sessionId: 'execution', focusedAt: 123 }] }, pmo: { sessionId: other.id } },
     agentComposerDrafts: { [current.id]: 'Original draft', execution: 'Execution draft' }, agentSteerQueues: {}, agentSteerInFlight: {}, reportError: vi.fn() })
   window.localStorage.setItem(savedKey, JSON.stringify({ open: false, targetTabId: currentTab.id,
-    position: { left: 212, top: 148 }, size: { width: 640, height: 420 } }))
+    targetTopicId: PMO_TEAMS_TOPIC_ID }))
   const topic = { id: PMO_TEAMS_TOPIC_ID, directoryPath: current.workspacePath, topicPath: `${current.workspacePath}/topic.md`, title: 'Mote', summary: '', collaborators: [] }
-  vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue(topic)
+  vi.spyOn(api.scratch, 'ensureMote').mockResolvedValue(topic)
   vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); window.localStorage.clear()
+  await act(async () => root.unmount()); container.remove(); restorePopover(); window.localStorage.clear()
   vi.restoreAllMocks(); useAppStore.setState(baseline, true)
 })
 
@@ -103,7 +106,7 @@ describe('Mote shortcut current context', () => {
     expect(button('Open Mote').dataset.moteStatus).toBe(text)
     await act(async () => button('Open Mote').click()); await settle()
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteStatus).toBe(text)
-    expect(container.querySelector('.mote-shortcut-preview')!.textContent).toContain(text)
+    expect(container.querySelector('#mote-floating-context-status')!.textContent).toContain(text)
     expect(button('Close Mote').dataset.moteTargetSession).toBe(current.id)
   })
 
@@ -125,8 +128,8 @@ describe('Mote shortcut current context', () => {
     const state = useAppStore.getState(), execution = state.agentFocus.execution
     const input = container.querySelector<HTMLButtonElement>('#original-input')!; input.focus()
     const entry = button('Open Mote')
-    expect(entry.title).toBe('Open Mote · PMO · Ship the target goal · Working')
-    expect(container.querySelector('.mote-shortcut-preview')?.textContent).toContain('PMO · Ship the target goalWorking')
+    expect(entry.title).toBe('')
+    expect(container.querySelector('#mote-shortcut-status')?.textContent).toContain('PMO · Ship the target goal · Working')
     expect(entry.dataset.moteTargetSession).toBe(current.id)
     await act(async () => entry.click()); await settle()
     const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
@@ -145,8 +148,7 @@ describe('Mote shortcut current context', () => {
       button('Open Mote').click()
     }); await settle()
     expect(dialog.dataset.moteTargetTab).toBe(currentTab.id)
-    expect(saved().position).toEqual({ left: 212, top: 148 })
-    expect(saved().size).toEqual({ width: 640, height: 420 })
+    expect(Object.keys(saved()).sort()).toEqual(['open', 'targetTabId', 'targetTopicId'])
     await act(async () => button('Open Mote Space').click()); await settle()
     const full = useAppStore.getState()
     expect(full.layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(currentTab.id)
@@ -166,7 +168,7 @@ describe('Mote shortcut current context', () => {
     await act(async () => button('Open Mote').click()); await settle()
     await act(async () => container.querySelector<HTMLButtonElement>('[data-select-context]')!.click()); await settle()
     expect(saved().targetTabId).toBe(otherTab.id)
-    expect(button('Close Mote').title).toContain('PMO · Another goal')
+    expect(container.querySelector('#mote-shortcut-status')?.textContent).toContain('PMO · Another goal')
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteTargetTab).toBe(otherTab.id)
     await act(async () => button('Close Mote').click()); await act(async () => button('Open Mote').click()); await settle()
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteTargetTab).toBe(otherTab.id)
@@ -263,7 +265,7 @@ describe('Mote shortcut current context', () => {
     const queue = [{ operationId: 'saved-intent', runId: current.control.run.runId, text: 'Queued original input', status: 'deferred' as const, promptCondition: null }]
     useAppStore.setState({ enqueueAgentSteer: enqueue, flushAgentSteerQueue: flush, launchAgent: launch, agentSteerQueues: { [current.id]: queue } })
     window.localStorage.setItem(savedKey, JSON.stringify({ open: true, targetTabId: currentTab.id,
-      position: { left: 212, top: 148 }, size: { width: 640, height: 420 } }))
+      targetTopicId: PMO_TEAMS_TOPIC_ID }))
     await render()
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteTargetTab).toBe(currentTab.id)
     expect(useAppStore.getState().agentComposerDrafts[current.id]).toBe('Original draft')
@@ -292,22 +294,23 @@ describe('Mote shortcut current context', () => {
     useAppStore.setState({ viewModes: {} })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
-    expect(useAppStore.getState().viewModes[current.id]).toBe('activity')
+    expect(useAppStore.getState().viewModes).toEqual({})
+    expect(effectiveSessionViewMode(useAppStore.getState(), current.id)).toBe('activity')
     await act(async () => useAppStore.getState().setViewMode(current.id, 'terminal'))
     await act(async () => button('Close Mote').click()); await act(async () => button('Open Mote').click()); await settle()
     expect(useAppStore.getState().viewModes[current.id]).toBe('terminal')
   })
 
   it('keeps a preparation failure beside the healthy target and can retry the same context', async () => {
-    vi.mocked(api.scratch.ensureTopic).mockRejectedValueOnce(new Error('Metadata read failed'))
+    vi.mocked(api.scratch.ensureMote).mockRejectedValueOnce(new Error('Metadata read failed'))
     const launch = vi.fn(); useAppStore.setState({ launchAgent: launch })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
-    expect(container.textContent).toContain('Mote context preparation did not complete')
+    expect(container.textContent).toContain('Context preparation did not complete')
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteStatus).toBe('Working')
     expect(container.querySelector('[data-projected-target]')?.getAttribute('data-projected-target')).toBe(currentTab.id)
     await act(async () => Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Retry context')!.click()); await settle()
-    expect(container.textContent).not.toContain('Mote context preparation did not complete')
+    expect(container.textContent).not.toContain('Context preparation did not complete')
     expect(saved().targetTabId).toBe(currentTab.id)
     expect(useAppStore.getState().sessions).toEqual([current, other]); expect(launch).not.toHaveBeenCalled()
   })

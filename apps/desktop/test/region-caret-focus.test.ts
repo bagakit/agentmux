@@ -112,7 +112,7 @@ function spyStoreSideBySide(): WorkbenchShortcutStore & { caretCauses: string[] 
       }
     },
     activateTab: noop,
-    openLauncher: noop,
+    openLauncher: () => undefined,
     closeRegion: noop,
     requestCloseTab: noop,
     requestCloseRegion: noop,
@@ -247,7 +247,7 @@ describe('store.focusRegion：键盘投 caret 意图，指针不投，清除只�
       })
       else if (destination === 'tab-group') state.focusTabGroup('workspace', 'group-one')
       else if (destination === 'tab') state.activateTab('workspace', 'group-one', tabId)
-      else if (destination === 'launcher') state.openLauncher('group-one')
+      else if (destination === 'launcher') state.openLauncher({ workspaceId: 'workspace', tabGroupId: 'group-one', reveal: true })
       else state.setMainSurface('board')
       expect(useAppStore.getState().regionCaretFocus).toBeNull()
       state.clearRegionCaretFocus(pending!.nonce)

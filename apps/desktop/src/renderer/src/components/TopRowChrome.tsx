@@ -3,7 +3,6 @@ import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
-import { PmoTeamsTopicShortcutPreview } from './PmoTeamsTopicEntry'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import type { SettingsPageId } from './SettingsPanel'
@@ -170,7 +169,7 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
         element.style.left = `${Math.max(8, Math.min(tooltip.left, window.innerWidth - width - 8))}px`
       }}
     >
-      {plugin.id === 'focus' ? <FocusNavigationPreview /> : plugin.id === 'pmo-teams' ? <PmoTeamsTopicShortcutPreview /> : <><strong>{plugin.label}</strong><small>{plugin.tooltip}</small></>}
+      {plugin.id === 'focus' ? <FocusNavigationPreview /> : <><strong>{plugin.label}</strong><small>{plugin.tooltip}</small></>}
     </div>
   )
   const renderPlugin = (plugin: typeof SURFACE_NAVIGATION_PLUGINS[number]) => {
@@ -179,10 +178,6 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
         <div
           key={plugin.id}
           className="surface-navigation__slot surface-navigation__slot--launcher"
-          onMouseEnter={(event) => showTooltip(plugin.id, event.currentTarget)}
-          onMouseLeave={() => hideTooltip(plugin.id)}
-          onFocusCapture={(event) => showTooltip(plugin.id, event.currentTarget)}
-          onBlurCapture={() => hideTooltip(plugin.id)}
         >
           {plugin.render()}
         </div>
