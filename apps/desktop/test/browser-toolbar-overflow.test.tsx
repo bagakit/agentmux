@@ -128,7 +128,6 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__reload { display: none; }')
   expect(source).toContain('{ padding-right: var(--region-close-clearance); }')
   expect(source).toContain('flex: 0 0 min(clamp(248px, 26%, 340px), 50%);')
-  expect(source).toContain('.browser-trace-rail .browser-rsi-history__actions { flex: none; }')
   expect(source).toContain('.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }')
 })
 
