@@ -108,6 +108,10 @@ type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 
+function workspaceTabs(tabs: Readonly<Record<string, WorkbenchTab>>, workspaceId: string): Record<string, WorkbenchTab> {
+  return Object.fromEntries(Object.entries(tabs).filter(([, tab]) => tab.workspaceId === workspaceId))
+}
+
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
@@ -134,7 +138,6 @@ function SortableWorkbenchTab({
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
-  const tabsById = useAppStore((state) => state.tabs)
   const activateTab = useAppStore((state) => state.activateTab)
   const closeTab = useAppStore((state) => state.closeTab)
   const renameTab = useAppStore((state) => state.renameTab)
@@ -229,6 +232,7 @@ function SortableWorkbenchTab({
   }
 
   async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
+    const tabsById = useAppStore.getState().tabs
     const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId))
     if (currentTabIds.length === 0 || closing) return
     const dirtyCount = new Set(currentTabIds.flatMap((tabId) => {
@@ -895,7 +899,7 @@ function PaneGroup({
   showWindowChrome?: boolean
   viewHostPrefix: string
 }) {
-  const tabsById = useAppStore((state) => state.tabs)
+  const tabsById = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
@@ -1275,7 +1279,7 @@ export function WorkspaceWorkbench({
 }) {
   const workbenchRef = useRef<HTMLDivElement>(null)
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
-  const tabs = useAppStore((state) => state.tabs)
+  const tabs = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
   const retainedLayout = useRef(storedLayout)
   if (storedLayout) retainedLayout.current = storedLayout
   const residentLayout = storedLayout ?? retainedLayout.current
