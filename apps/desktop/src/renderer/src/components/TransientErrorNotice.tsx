@@ -26,6 +26,7 @@ export function TransientErrorNotice({
   error,
   dismissed,
   lastError,
+  summary,
   onDismiss,
   onReopen,
   // Reuse the service-window axis's own key type — referenced, not copied, and without needing a new
@@ -36,6 +37,7 @@ export function TransientErrorNotice({
   error: string | null
   dismissed: boolean
   lastError: string | null
+  summary?: string | undefined
   onDismiss: () => void
   onReopen: () => void
   kind?: Parameters<typeof serviceNoticeAriaLive>[0]
@@ -45,7 +47,15 @@ export function TransientErrorNotice({
     return (
       <aside className="error-notice" role={ariaLive === 'assertive' ? 'alert' : 'status'} aria-live={ariaLive}>
         <AlertTriangle size={14} aria-hidden="true" />
-        <span>{error}</span>
+        {summary ? (
+          <div className="error-notice__body">
+            <span className="error-notice__summary">{summary}</span>
+            <details className="service-window__details error-notice__details">
+              <summary>Details</summary>
+              <div className="error-notice__original">{error}</div>
+            </details>
+          </div>
+        ) : <span>{error}</span>}
         <button className="icon-button error-notice__close" type="button" aria-label="Dismiss error" title="Dismiss error" onClick={onDismiss}>
           <X size={14} />
         </button>

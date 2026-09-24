@@ -969,7 +969,7 @@ export class AgentMuxClient {
         // republish，再披露。同一条 `>=` 规则，谁最后发谁赢：披露走在后面就洗不掉了。早先它排在
         // republish 前面，于是「daemon 把你的历史输出丢了」这句话从未到过屏幕上，用户只看到输出里
         // 一段无法解释的断裂。与失败分支是同一个缺陷的两种形态，这里是另一种解法。
-        if (resumed === 'truncated') {
+        if (typeof resumed === 'object') {
           this.publisher.publishRunState(this.projectRun(run, agentSession), agentSession.agentSessionId)
           this.publisher.publish({
             type: 'agent-error',
@@ -979,7 +979,8 @@ export class AgentMuxClient {
             evidence: {
               source: 'terminal-output',
               observedAt: Date.now(),
-              run: runRef(run.runId)
+              run: runRef(run.runId),
+              outputGap: { kind: 'replay', latestOutputBytes: resumed.latestOutputBytes, ...resumed.gap }
             }
           })
           continue
@@ -1010,10 +1011,15 @@ export class AgentMuxClient {
    * - `'live'`：接上了，没有截断。照常 republish 成 running。
    * - `'dead'`：没接上。**跳过** republish——那条 running 会把刚发的 agent-error 洗回去（同刻时间戳 +
    *   `>=` 新鲜度判据），用户就看不见失败了。
-   * - `'truncated'`：接上了，但历史被逐出。既要 republish（流确实活着）**又**要披露，所以由调用方按
+   * - `{ type: 'truncated', gap, latestOutputBytes }`：接上了，但本次 Replay 请求有缺口。携带快照事实，
+   *   既要 republish（流确实活着）**又**要披露，所以由调用方按
    *   「先 running 后 error」的顺序发——披露走在后面才洗不掉。gap 事件因此由调用方发出，不在这里发。
    */
-  private async resumeLiveAttachment(agentSessionId: string): Promise<'live' | 'dead' | 'truncated'> {
+  private async resumeLiveAttachment(agentSessionId: string): Promise<'live' | 'dead' | {
+    type: 'truncated'
+    gap: NonNullable<CtxmuxAdapterAttachment['gap']>
+    latestOutputBytes: number
+  }> {
     let attached: CtxmuxAdapterAttachment
     try {
       const runId = this.requireAgentSession(agentSessionId).run.runId
@@ -1044,8 +1050,10 @@ export class AgentMuxClient {
       })
       return 'dead'
     }
-    // gap 的披露交给调用方，在它 republish 之后发——见本方法文档的 `'truncated'` 一条。
-    return attached.gap ? 'truncated' : 'live'
+    // 把本次快照的 Gap 事实带给调用方，在它 republish 之后披露。
+    return attached.gap
+      ? { type: 'truncated', gap: attached.gap, latestOutputBytes: attached.run.latestOutputBytes }
+      : 'live'
   }
 
   /**
@@ -4646,6 +4654,7 @@ export class AgentMuxClient {
       return
     }
     if (event.type === 'gap') {
+      const ownsAttachment = this.kernel.hasAttachment(event.runId)
       this.publisher.publish({
         type: 'agent-error',
         ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
@@ -4654,7 +4663,13 @@ export class AgentMuxClient {
         evidence: {
           source: 'terminal-output',
           observedAt: Date.now(),
-          run: runRef(event.runId)
+          run: runRef(event.runId),
+          outputGap: {
+            kind: 'live-stream',
+            latestOutputBytes: event.latestOutputBytes,
+            publishedThroughByte: ownsAttachment ? this.kernel.continuationByte(event.runId) : null,
+            representation: ownsAttachment ? this.kernel.continuationView(event.runId) : null
+          }
         }
       })
       return

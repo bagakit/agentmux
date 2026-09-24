@@ -265,6 +265,21 @@ export type AgentMuxEvidence = {
   source: AgentMuxEvidenceSource
   observedAt: number
   run?: AgentMuxRunRef
+  /** Facts from this output observation, never an Input or Renderer parsing acknowledgement. */
+  outputGap?:
+    | {
+        kind: 'live-stream'
+        latestOutputBytes: number
+        /** This Core client's publication boundary; null when it owns no live Attachment. */
+        publishedThroughByte: number | null
+        representation: AgentMuxRunAttachmentView | null
+      }
+    | {
+        kind: 'replay'
+        latestOutputBytes: number
+        requestedAfterByte: number
+        firstAvailableByte: number
+      }
   outputByteRange?: {
     startByte: number
     endByte: number

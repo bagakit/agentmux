@@ -102,7 +102,7 @@ function acceptsAgentSessionTransition(
 export function runtimeDiagnosticNotice(
   state: Pick<SessionProjectionState, 'sessions'>,
   event: RuntimeEvent
-): { message: string; subject?: SessionControl } | null {
+): { message: string; summary: string; subject?: SessionControl } | null {
   const core = event.event
   if (core.type !== 'agent-error') return null
   const run = core.evidence.run
@@ -133,8 +133,17 @@ export function runtimeDiagnosticNotice(
   const recovery = core.code === 'OUTPUT_GAP'
     ? 'Refresh the terminal observation to check available output. This does not establish complete history or confirm input delivery.'
     : 'Check the terminal and error details before choosing a recovery action.'
+  const gap = core.code === 'OUTPUT_GAP' ? core.evidence.outputGap : undefined
+  const observation = gap
+    ? `\nObserved at (Unix ms): ${core.evidence.observedAt}. Gap phase: ${gap.kind}. Cause: unknown.` +
+      (gap.kind === 'live-stream'
+        ? `\nGap latest output byte: ${gap.latestOutputBytes}. Core published-through byte: ${gap.publishedThroughByte ?? 'unknown'}. Representation: ${gap.representation ?? 'unknown'}.\nThe publication boundary is not a Renderer parsing or Input acknowledgement.`
+        : `\nReplay requested after byte: ${gap.requestedAfterByte}. First available byte: ${gap.firstAvailableByte}. Snapshot latest output byte: ${gap.latestOutputBytes}.`)
+    : ''
+  const summary = `${scope}${run ? `; Run "${run.runId}"` : ''}: ${core.code}: ${core.message}`
   return {
-    message: `${scope}${run ? `; Run "${run.runId}"` : ''}: ${core.code}: ${core.message}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}\n${recovery}`,
+    message: `${summary}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}${observation}\n${recovery}`,
+    summary,
     ...(confirmed ? { subject: confirmed.control } : {})
   }
 }
