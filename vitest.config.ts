@@ -79,6 +79,9 @@ export default defineConfig({
    */
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   test: {
+    // Product tests live in these roots. Frozen evidence contains test copies too;
+    // a CLI path is a substring filter, so those copies cannot share this authority.
+    include: ['{apps,packages,test}/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
     exclude: [...defaultExclude, ...nestedWorktreeGlobs()],
     // 见 vitest.dist-freshness.ts：desktop 经 dist 消费 @agentmux/core，dist 陈旧时整个 desktop
     // 测试面会为上一次构建的 Core 背书。放 globalSetup 而不是测试文件，是因为路径过滤在收集阶段
