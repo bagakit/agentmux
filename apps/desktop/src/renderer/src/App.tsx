@@ -9,7 +9,7 @@ import {
   getRenderedToolDockWidth,
   getToolDockMinimumWidth
 } from './lib/surface-tool-dock'
-import { SettingsPanel, type SettingsSectionId } from './components/SettingsPanel'
+import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
 import { ResourceUsagePanel } from './components/ResourceUsagePanel'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
@@ -51,8 +51,8 @@ export function App() {
 }
 
 function DesktopApp() {
-  const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsSectionId; executorId?: string | undefined } | null>(null)
-  const openSettings = (section: SettingsSectionId, executorId?: string): void => setSettingsRoute({ section, executorId })
+  const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsPageId; executorId?: string | undefined } | null>(null)
+  const openSettings = (section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId })
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)

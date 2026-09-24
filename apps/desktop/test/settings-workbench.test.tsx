@@ -37,7 +37,7 @@ async function section(title: string) {
 
 it('keeps drafts and each visited scroll container while leaving unvisited panes unmounted', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  expect([...dom.container.querySelectorAll<HTMLElement>('[data-settings-pane]')].map(el => el.dataset.settingsPane)).toEqual(['appearance'])
+  expect([...dom.container.querySelectorAll<HTMLElement>('[data-settings-pane]')].map(el => el.dataset.settingsPane)).toEqual([])
   await section('Appearance')
   await input('[aria-label="Terminal font size in pixels"]', '17')
   const appearance = dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!
@@ -161,7 +161,7 @@ it('keeps the real App footer interactive, returns through its surface controls 
   const settings = dom.container.querySelector('.settings-page')!
   const footer = dom.container.querySelector<HTMLElement>('.window-status-bar')!
   expect(settings).not.toBeNull()
-  expect(settings.querySelector('.settings-content__header h2')!.textContent).toBe('Appearance')
+  expect(settings.querySelector('.settings-content__header h2')!.textContent).toBe('Overview')
   await section('Workspaces')
   expect(settings.querySelector('.settings-content__header h2')!.textContent).toBe('Workspaces')
   expect(footer.closest('[inert]')).toBeNull()

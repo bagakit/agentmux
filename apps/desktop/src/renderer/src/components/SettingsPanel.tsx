@@ -1,6 +1,6 @@
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { Check, ChevronDown, Bell, Bot, FolderGit2, Globe, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
+import { Check, ChevronDown, Bell, Bot, FolderGit2, Globe, LayoutDashboard, MessageSquareText, Palette, Search, Server, Settings2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecutorConfig, AppConfig, AppearanceConfig, ComposerShortcut, HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -14,8 +14,10 @@ import { GeneralSettingsPane } from './settings/GeneralSettingsPane'
 import { HostSettingsPane } from './settings/HostSettingsPane'
 import { NotificationSettingsPane } from './settings/NotificationSettingsPane'
 import { WorkspaceSettingsPane } from './settings/WorkspaceSettingsPane'
+import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 
 export type SettingsSectionId = 'general' | 'appearance' | 'notifications' | 'agents' | 'hosts' | 'workspaces' | 'browser' | 'prompts'
+export type SettingsPageId = 'overview' | SettingsSectionId
 type SettingsGroupId = 'preferences' | 'resources'
 
 // Daily preferences lead; reusable resources remain separate. Both sidebar and
@@ -86,24 +88,28 @@ export function settingsNavGroups(
   })
 }
 
-export function SettingsPanel({ onClose, initialSection = 'appearance', executorId }: {
+export function SettingsPanel({ onClose, initialSection = 'overview', executorId }: {
   onClose: () => void
-  initialSection?: SettingsSectionId
+  initialSection?: SettingsPageId
   executorId?: string | undefined
 }) {
   const config = useAppStore((state) => state.config)
-  const [active, setActive] = useState<SettingsSectionId>(initialSection)
+  const [active, setActive] = useState<SettingsPageId>(initialSection)
   const [query, setQuery] = useState('')
   const searchInput = useRef<HTMLInputElement>(null)
-  const [visited, setVisited] = useState<SettingsSectionId[]>([initialSection])
+  const [visited, setVisited] = useState<SettingsSectionId[]>(initialSection === 'overview' ? [] : [initialSection])
 
   function clearSearch(): void {
     setQuery('')
     searchInput.current?.focus()
   }
 
-  useEffect(() => setActive(initialSection), [initialSection, executorId])
   useEffect(() => {
+    setQuery('')
+    setActive(initialSection)
+  }, [initialSection, executorId])
+  useEffect(() => {
+    if (active === 'overview') return
     setVisited((current) => current.includes(active) ? current : [...current, active])
   }, [active])
   const visibleSections = useMemo(() => visibleSettingsSections(query), [query])
@@ -112,10 +118,11 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
   const navGroups = useMemo(() => settingsNavGroups(query), [query])
 
   useEffect(() => {
+    if (!query.trim()) return
     if (visibleSections.some((section) => section.id === active)) return
     const first = visibleSections[0]
     if (first) setActive(first.id)
-  }, [active, visibleSections])
+  }, [active, query, visibleSections])
 
   useEffect(() => {
     const opener = document.activeElement
@@ -134,8 +141,10 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
   }, [onClose, query])
 
   if (!config) return null
-  const section = SECTIONS.find((candidate) => candidate.id === active) ?? SECTIONS[0]!
-  const groupTitle = GROUPS.find((group) => group.id === section.group)?.title ?? 'Configuration'
+  const currentSection = SECTIONS.find((candidate) => candidate.id === active)
+  const section = active === 'overview' ? { title: 'Overview', description: '' } : currentSection!
+  const groupTitle = currentSection ? GROUPS.find((group) => group.id === currentSection.group)!.title : 'Settings'
+  const overviewGroups = settingsNavGroups('')
 
   async function saveExecutors(executors: Record<string, AgentExecutorConfig>, expected: Record<string, AgentExecutorConfig>): Promise<void> {
     const current = useAppStore.getState().config
@@ -185,11 +194,13 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
   }
 
   return (
-    <div className="settings-page">
+    <div className="settings-page" data-settings-page={active}>
       <div className="window-drag-region" />
       <aside className="settings-sidebar">
         <header>
-          <div className="settings-sidebar__brand"><BrandIcon size={26} /><span><strong>AgentMux</strong><small>Settings</small></span></div>
+          {active === 'overview'
+            ? <div className="settings-sidebar__brand"><Settings2 size={24} aria-hidden="true" /><span><strong>Settings</strong></span></div>
+            : <div className="settings-sidebar__brand"><BrandIcon size={26} /><span><strong>AgentMux</strong><small>Settings</small></span></div>}
         </header>
         <label className="settings-search"><Search size={14} /><input ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={clearSearch}><X size={12} /></button> : null}</label>
         <DropdownMenu.Root modal={false}>
@@ -204,7 +215,8 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
                 && !focused.closest('[hidden], [inert]')
                 && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
             }}>
-              <DropdownMenu.RadioGroup value={active} onValueChange={(value) => setActive(value as SettingsSectionId)}>
+              <DropdownMenu.RadioGroup value={active} onValueChange={(value) => setActive(value as SettingsPageId)}>
+                {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><Check size={13} /></DropdownMenu.ItemIndicator></span>Overview</DropdownMenu.RadioItem> : null}
                 {navGroups.map((group) => <Fragment key={group.id}>
                   <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
                   {group.items.map((item) => <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item">
@@ -216,12 +228,13 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
         <nav aria-label="Settings sections">
+          {!query.trim() ? <button type="button" className={active === 'overview' ? 'selected' : ''} aria-current={active === 'overview' ? 'page' : undefined} data-settings-target="overview" data-settings-overview-nav onClick={() => setActive('overview')}><LayoutDashboard size={15} /><span><strong>Overview</strong></span></button> : null}
           {navGroups.map((group) => (
             <Fragment key={group.id}>
               <p>{group.title}</p>
               {group.items.map((item) => {
                 const Icon = item.icon
-                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} title={item.description} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong></span></button>
+                return <button key={item.id} className={active === item.id ? 'selected' : ''} aria-current={active === item.id ? 'page' : undefined} title={item.description} data-settings-target={item.id} onClick={() => setActive(item.id)}><Icon size={15} /><span><strong>{item.title}</strong></span></button>
               })}
             </Fragment>
           ))}
@@ -233,7 +246,7 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
             <div>
               <div className="settings-content__breadcrumb"><span>{groupTitle}</span></div>
               <h2>{section.title}</h2>
-              <p>{section.description}</p>
+              {section.description ? <p>{section.description}</p> : null}
             </div>
           </div>
           <div className="settings-content__actions">
@@ -242,6 +255,7 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
           </div>
         </header>
         {visibleSections.length === 0 ? <div className="settings-nav-empty" role="status">No settings match “{query}”. Try a different word.</div> : null}
+        {active === 'overview' && visibleSections.length > 0 ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={setActive} /> : null}
         {visited.map((pane) => (
         <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={active !== pane || visibleSections.length === 0} inert={active !== pane || visibleSections.length === 0}>
           {pane === 'general' ? <GeneralSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveCopyPathsAsAbsolute} /> : null}
@@ -249,7 +263,7 @@ export function SettingsPanel({ onClose, initialSection = 'appearance', executor
           {pane === 'notifications' ? <NotificationSettingsPane notifications={config.notifications} onSave={saveNotifications} /> : null}
           {pane === 'browser' ? <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} onForget={api.browser.forgetAppLinkScheme} /> : null}
           {pane === 'prompts' ? <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} /> : null}
-          {pane === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={executorId} /> : null}
+          {pane === 'agents' ? <AgentSettingsPane config={config} onSave={saveExecutors} executorId={active === 'agents' && visibleSections.length > 0 ? executorId : undefined} /> : null}
           {pane === 'hosts' ? <HostSettingsPane config={config} onSave={saveHosts} /> : null}
           {pane === 'workspaces' ? <WorkspaceSettingsPane config={config} onClose={onClose} /> : null}
         </div>

@@ -1,0 +1,110 @@
+/* The brand entry owns atmosphere; the eight configuration panes keep their existing controls. */
+.settings-overview { padding-bottom: var(--sp-7); }
+.settings-overview__hero {
+  position: relative;
+  isolation: isolate;
+  height: 220px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.settings-overview__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+}
+.settings-overview__hero::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(90deg, var(--surface-1), color-mix(in srgb, var(--surface-1) 82%, transparent) 32%, transparent 66%);
+  pointer-events: none;
+}
+.settings-overview__identity {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  height: 100%;
+  max-width: 52%;
+  padding: var(--sp-8);
+  color: var(--text);
+}
+.settings-overview__identity strong { font-size: var(--fs-display); font-weight: 700; letter-spacing: -.035em; }
+.settings-overview__identity p { margin: var(--sp-3) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.settings-overview__sweep {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, color-mix(in srgb, var(--green) 16%, transparent) 50%, transparent 70%);
+  animation: settings-overview-light var(--dur-sweep) var(--ease-enter) both;
+  pointer-events: none;
+}
+@keyframes settings-overview-light {
+  0% { opacity: 0; transform: translateX(-45%); }
+  20% { opacity: .6; }
+  100% { opacity: 0; transform: translateX(45%); }
+}
+.settings-overview[data-document-visible='false'] .settings-overview__sweep { animation-play-state: paused; }
+.settings-overview__groups { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-7); margin-top: var(--sp-7); }
+.settings-overview__group { min-width: 0; }
+.settings-overview__group > header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.settings-overview__group h3 { margin: 0; font-size: var(--fs-title); font-weight: 600; }
+.settings-overview__group > header small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-overview__entries { border-top: 1px solid var(--line-soft); }
+.settings-overview__entry {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: var(--sp-4);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--sp-4) var(--sp-3);
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+  color: var(--text-2);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.settings-overview__entry:hover { color: var(--text); background: var(--surface-1); }
+.settings-overview__entry:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; background: var(--surface-1); }
+.settings-overview__entry > svg:first-child { grid-column: 1; grid-row: 1 / 3; }
+.settings-overview__entry > svg:last-child { grid-column: 3; grid-row: 1 / 3; transition: transform var(--dur-fast); }
+.settings-overview__entry:hover > svg:last-child { transform: translateX(2px); }
+.settings-overview__entry-label { display: grid; gap: var(--sp-1); min-width: 0; }
+.settings-overview__entry-label strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.settings-overview__summary { grid-column: 2; color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+@media (max-width: 960px) {
+  .settings-overview__groups { grid-template-columns: minmax(0, 1fr); }
+  .settings-overview__entry { grid-template-columns: 18px minmax(0, 1fr) auto 14px; min-height: 60px; }
+  .settings-overview__entry > svg:first-child { grid-row: 1; }
+  .settings-overview__entry > svg:last-child { grid-column: 4; grid-row: 1; }
+  .settings-overview__summary { grid-column: 3; }
+}
+@media (max-width: 640px) {
+  .settings-overview__hero { height: 144px; }
+  .settings-overview__art { object-position: 64% center; }
+  .settings-overview__identity { padding: var(--sp-6); max-width: 60%; }
+  .settings-overview__hero::before { background: linear-gradient(90deg, var(--surface-1), color-mix(in srgb, var(--surface-1) 78%, transparent) 28%, transparent 88%); }
+  .settings-overview__groups { margin-top: var(--sp-6); gap: var(--sp-6); }
+  .settings-overview__entry { grid-template-columns: 18px minmax(0, 1fr) 14px; min-height: 64px; padding-block: var(--sp-4); }
+  .settings-overview__entry > svg:first-child { grid-row: 1 / 3; }
+  .settings-overview__entry > svg:last-child { grid-column: 3; grid-row: 1 / 3; }
+  .settings-overview__summary { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-overview__sweep { animation: none; }
+  .settings-overview__entry, .settings-overview__entry > svg:last-child { transition: none; }
+  .settings-overview__entry:hover > svg:last-child { transform: none; }
+}
