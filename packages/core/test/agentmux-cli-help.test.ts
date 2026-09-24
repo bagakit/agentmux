@@ -660,17 +660,29 @@ describe('agentmux CLI discovery', () => {
     expect(help).toContain('handoff')
     const handoffHelp = await run(['handoff', '--help'])
     expect(handoffHelp).toContain('agentmux handoff --to-session')
-    // help 说清边界：只转移所有权，不投递消息（呼应验收 #2/#3）。
-    expect(handoffHelp).toContain('--task <task-id>')
+    // Core 只声明通信交接，不更新外部 Task 的责任。
+    expect(handoffHelp).toContain('--task <caller-reference>')
     expect(handoffHelp).toContain('originAwaits')
+    expect(handoffHelp).toContain('does not update external Task ownership')
   })
 
-  it('documents handoff in --skill as ownership transfer, not a message', async () => {
+  it('resolves dispatch help for every explicit verb without a managed caller or Runtime', async () => {
+    const help = await run(['--help'])
+    expect(help).toContain('dispatch')
+    for (const verb of ['open', 'report', 'show']) {
+      const specific = await run(['dispatch', verb, '--help'])
+      expect(specific).toContain(`agentmux dispatch ${verb} --source-message`)
+    }
+    const specific = await run(['dispatch', '--help'])
+    expect(specific).toContain('Only worker_done settles communication waiting')
+    expect(specific).toContain('never complete an external Task or Demand')
+  })
+
+  it('documents handoff in --skill as a communication declaration with external responsibility explicit', async () => {
     const skill = await run(['--skill'])
     expect(skill).toContain('agentmux handoff --to-session')
-    expect(skill).toContain('--task <task-id>')
-    // skill 明说不要用 send 措辞模拟交接——所有权转移是 Core 事实。
-    expect(skill).toContain('ownership')
+    expect(skill).toContain('--task <caller-reference>')
+    expect(skill).toContain('Core does not change Task ownership')
   })
 
   it('dispatches handoff as a real command requiring managed identity, not an unknown one', async () => {

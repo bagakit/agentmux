@@ -56,7 +56,8 @@ Intents:
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
   deliveries  Explicitly check and acknowledge your durable incoming message batch.
   discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
-  handoff     Hand a task and its ownership to another Agent Session in one atomic act.
+  dispatch    Open, report and inspect supervision of existing durable Agent messages.
+  handoff     Declare a communication handoff to another Agent Session.
   focus       Focus one exact Tab or Region.
   promote     Promote one Region into its own new Tab.
   arrange     Apply one explicit layout operation to a Tab.
@@ -360,6 +361,44 @@ Usage: agentmux deliveries ack --generation <generation> --reader-run <Run from 
 The capability, current Session binding and stored readerRun/generation must match.
 Returns exact acknowledged IDs and the next generation. Wrong/empty/stale batches fail;
 no message body, delivery fact, other recipient cursor or Agent lifecycle is changed.`],
+  ['dispatch', `Supervise an already recorded Agent message
+
+Usage:
+  agentmux dispatch open --source-message <message-id>
+  agentmux dispatch report --source-message <message-id> --reply-message <message-id> --kind <question|escalation|worker_done|cleanup>
+  agentmux dispatch show --source-message <message-id>
+
+The source message is the Dispatch identity. Core derives owner, worker and thread from
+its immutable Agent-authored envelope. Open requires the source sender's current capability;
+show permits either participant. The worker reports question, escalation or worker_done;
+the owner reports cleanup. Every report references an existing reply to that exact source
+in the same thread, with the matching participants. Same reply/kind replays once; a different
+kind conflicts. Separate replies remain separate questions.
+
+Only worker_done settles communication waiting. Delivery, consumption ACK and cleanup
+never complete an external Task or Demand. These commands send no input and change no
+Agent lifecycle. Historical message Runs must still belong to retained Session identity
+history; unavailable identity or message bodies are reported explicitly, never reconstructed.`],
+  ['dispatch.open', `Open supervision for an existing source message
+
+Usage: agentmux dispatch open --source-message <message-id>
+
+Requires the current capability of the source sender. Replays the original open time and
+all recorded events. It creates no Task, message, input or Session.`],
+  ['dispatch.report', `Record one actual reply as a supervision event
+
+Usage: agentmux dispatch report --source-message <message-id> --reply-message <message-id> --kind <question|escalation|worker_done|cleanup>
+
+Worker: question, escalation, worker_done. Owner: cleanup. The reply must name this exact
+source via replyTo and share its thread and participant direction. Replay of the same reply
+and kind retains the first event time. A conflicting kind is refused without writing.`],
+  ['dispatch.show', `Inspect retained communication supervision
+
+Usage: agentmux dispatch show --source-message <message-id>
+
+Either currently authorized participant can inspect the durable open time, actual reply
+IDs and waiting fact. Missing referenced messages or historical identity produce an explicit
+unavailable error; this never affects ordinary Agent input or other recipients' messages.`],
   ['open', `Open typed content at one exact destination
 
 Usage:
@@ -645,19 +684,15 @@ Usage:
 
 Demand is the Board identity. Session links are explicit execution facts; a Demand can have zero,
 one, or multiple linked Sessions.`],
-  ['handoff', `Hand a task and its ownership to another Agent Session
+  ['handoff', `Declare a communication handoff to another Agent Session
 
 Usage:
-  agentmux handoff --to-session <session-id> --task <task-id>
+  agentmux handoff --to-session <session-id> --task <caller-reference>
 
-Handoff is the atomic ownership transfer: the task and the responsibility for it move together to
-the receiver, and the origin stops awaiting it (originAwaits=false). That single fact is the only
-difference between a Handoff and a Dispatch, and it is decided by Core, not by wording in a message.
-
-Core resolves the author from your invocation capability; AGENTMUX_AGENT_SESSION_ID is context only,
-never authentication. Handoff transfers ownership only — it does not deliver a message, open a
-Session, or prove the receiver accepted. Use send or discuss to deliver text. This is not a delivery
-receipt, an idempotency ledger, or a signed capability.`],
+Core authenticates the caller and returns the declared recipient, caller reference and
+originAwaits=false. This declaration does not update external Task ownership, prove receiver
+acceptance, deliver a message or open a Session. Use send or discuss to deliver text;
+verify external responsibility in its actual owner.`],
   ['send', `Send one prompt without resuming or broadcasting
 
 Usage:
@@ -954,17 +989,29 @@ Every receipt has stable \`schemaVersion\`, \`requestId\`, \`operation\`, and ex
 \`result\` or \`error\`. A \`MESSAGE_TARGET_NOT_UNIQUE\` error includes typed
 \`candidates[].agentSessionId\` and \`candidates[].regionIds\`; never parse its message.
 
-## Hand off ownership
+## Supervise a message
 
 \`\`\`bash
-agentmux handoff --to-session <session-id> --task <task-id>
+agentmux dispatch open --source-message <message-id>
+agentmux dispatch report --source-message <message-id> --reply-message <reply-id> --kind question
+agentmux dispatch show --source-message <message-id>
 \`\`\`
 
-Use handoff when you are giving a task away, not delegating it: ownership and responsibility move
-to the receiver and you stop awaiting it. The receipt reports \`ownerAgentSessionId\`,
-\`originAwaits: false\`, and \`taskId\`. Handoff transfers ownership only — it delivers no message and
-opens no Session; deliver any text with send or discuss. Do not simulate a handoff by wording a
-send: the ownership transfer is a Core fact, not a phrase.
+The original sender remains waiting until the authorized worker records worker_done.
+The worker can ask or escalate using separate real reply messages; the owner can record
+cleanup. Every action uses the current invocation capability and the same durable journal.
+It sends no input and does not complete an external Task. Referenced messages and historical
+Session/Run identities must still be retained.
+
+## Declare a handoff
+
+\`\`\`bash
+agentmux handoff --to-session <session-id> --task <caller-reference>
+\`\`\`
+
+The receipt declares the recipient and originAwaits=false. External responsibility remains
+with its own system; Core does not change Task ownership or prove acceptance. Use send or
+discuss for text delivery.
 
 ## Settings
 

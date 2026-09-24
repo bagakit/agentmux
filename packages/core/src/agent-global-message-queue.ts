@@ -3,6 +3,7 @@ import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
+import { assertDispatchEventKind, assertDispatchMessage, openDispatch, recordDispatchEvent, type Dispatch, type DispatchEvent, type DispatchEventKind } from './agent-handoff.js'
 import { validateAgentPromptCondition, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQueue } from './agent-delivery-queue.js'
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
@@ -109,12 +110,15 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
   | { readonly kind: 'consumer-check'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
+  | { readonly kind: 'dispatch-open'; readonly sequence: number; readonly sourceMessageId: string; readonly at: number }
+  | { readonly kind: 'dispatch-event'; readonly sequence: number; readonly sourceMessageId: string; readonly replyMessageId: string; readonly eventKind: DispatchEventKind; readonly at: number }
   | { readonly kind: 'consumer-ack'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
 type JournalMessage = Extract<AgentMuxMessageJournalRecord, { kind: 'message' }>
 type JournalDelivery = Extract<AgentMuxMessageJournalRecord, { kind: 'delivery' }>
 type JournalCheck = Extract<AgentMuxMessageJournalRecord, { kind: 'consumer-check' }>
 type JournalAck = Extract<AgentMuxMessageJournalRecord, { kind: 'consumer-ack' }>
 type JournalRecord = AgentMuxMessageJournalRecord
+type DispatchProjection = { readonly sourceMessageId: string; readonly openedAt: number; readonly events: readonly DispatchEvent[] }
 
 const DEFAULT_MAX_MESSAGES = 2_048
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024
@@ -233,6 +237,7 @@ export class DurableAgentMuxMessageQueue {
   private readonly messages = new Map<string, DurableAgentMuxMessage>()
   private readonly operations = new Map<string, string>()
   private readonly consumers = new Map<string, DurableConsumerCursor>()
+  private readonly dispatches = new Map<string, DispatchProjection>()
   private readonly journal: JournalRecord[] = []
   private tail: Promise<unknown> = Promise.resolve()
 
@@ -284,6 +289,7 @@ export class DurableAgentMuxMessageQueue {
       this.messages.clear()
       this.operations.clear()
       this.consumers.clear()
+      this.dispatches.clear()
       this.journal.length = 0
       await this.ensureLoaded()
       const result = await operation()
@@ -349,6 +355,27 @@ export class DurableAgentMuxMessageQueue {
       if (!current) throw new AgentMuxError('Message queue delivery references an unknown message.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const delivery = advanceDelivery(current.delivery, record.state, record.at)
       this.messages.set(record.messageId, { ...current, delivery: { ...delivery, ...(record.reason === undefined ? {} : { reason: record.reason }) } })
+      return
+    }
+    if (record.kind === 'dispatch-open' || record.kind === 'dispatch-event') {
+      const sourceMessageId = nonEmpty(record.sourceMessageId, 'Dispatch source message id')
+      finiteTimestamp(record.at, 'Dispatch time')
+      const previous = this.dispatches.get(sourceMessageId)
+      // References may outlive retained message bodies. Replaying those facts must not break
+      // unrelated mail; only a Dispatch read/report requires the actual referenced envelopes.
+      if (record.kind === 'dispatch-open') {
+        if (!previous) this.dispatches.set(sourceMessageId, { sourceMessageId, openedAt: record.at, events: [] })
+      } else {
+        if (!previous) throw new AgentMuxError('Dispatch event has no open fact.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        const replyMessageId = nonEmpty(record.replyMessageId, 'Dispatch reply message id')
+        assertDispatchEventKind(record.eventKind)
+        const existing = previous.events.find((event) => event.replyMessageId === replyMessageId)
+        if (existing && existing.kind !== record.eventKind) {
+          throw new AgentMuxError('Dispatch journal event identity conflicts.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        }
+        if (!existing) this.dispatches.set(sourceMessageId, { ...previous,
+          events: [...previous.events, { kind: record.eventKind, replyMessageId, at: record.at }] })
+      }
       return
     }
     if (record.kind !== 'consumer-check' && record.kind !== 'consumer-ack') {
@@ -537,6 +564,82 @@ export class DurableAgentMuxMessageQueue {
       const next = this.cursorAfterAck(record) // Validate before writing, including the pure generation fence.
       await this.appendRecord(record)
       return { ...identity, acknowledgedMessageIds: [...record.deliveryIds], nextGeneration: next.generation }
+    })
+  }
+
+  private dispatchMessage(messageId: string): AgentMuxMessageEnvelope {
+    const message = this.messages.get(nonEmpty(messageId, 'Dispatch message id'))
+    if (!message) {
+      throw new AgentMuxError('A referenced Dispatch message is not retained in this journal.', 'DISPATCH_MESSAGE_UNAVAILABLE')
+    }
+    assertDispatchMessage(message.envelope)
+    return message.envelope
+  }
+
+  private dispatchProjection(sourceMessageId: string): { dispatch: Dispatch; messages: readonly AgentMuxMessageEnvelope[] } {
+    const facts = this.dispatches.get(nonEmpty(sourceMessageId, 'Dispatch source message id'))
+    if (!facts) throw new AgentMuxError('This source message has no open Dispatch.', 'DISPATCH_NOT_FOUND')
+    const source = this.dispatchMessage(sourceMessageId)
+    let dispatch = openDispatch(source, facts.openedAt)
+    const messages = [source]
+    for (const event of facts.events) {
+      const reply = this.dispatchMessage(event.replyMessageId)
+      messages.push(reply)
+      dispatch = recordDispatchEvent(dispatch, reply, event.kind, event.at)
+    }
+    return { dispatch, messages }
+  }
+
+  async openDispatch(
+    input: { readonly callerAgentSessionId: string; readonly sourceMessageId: string },
+    reauthorize: (messages: readonly AgentMuxMessageEnvelope[]) => Promise<void>
+  ): Promise<Dispatch> {
+    return this.withLock(async () => {
+      const source = this.dispatchMessage(input.sourceMessageId)
+      const existing = this.dispatches.has(input.sourceMessageId) ? this.dispatchProjection(input.sourceMessageId) : null
+      const dispatch = existing?.dispatch ?? openDispatch(source, Date.now())
+      await reauthorize(existing?.messages ?? [source])
+      if (input.callerAgentSessionId !== dispatch.ownerAgentSessionId) {
+        throw new AgentMuxError('Only the source sender can open this Dispatch.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      }
+      if (!existing) await this.appendRecord({ kind: 'dispatch-open', sequence: this.nextSequence,
+        sourceMessageId: dispatch.sourceMessageId, at: dispatch.openedAt })
+      return structuredClone(dispatch)
+    })
+  }
+
+  async recordDispatchEvent(
+    input: { readonly callerAgentSessionId: string; readonly sourceMessageId: string; readonly replyMessageId: string; readonly kind: DispatchEventKind },
+    reauthorize: (messages: readonly AgentMuxMessageEnvelope[]) => Promise<void>
+  ): Promise<Dispatch> {
+    return this.withLock(async () => {
+      assertDispatchEventKind(input.kind)
+      const { dispatch, messages } = this.dispatchProjection(input.sourceMessageId)
+      const reply = this.dispatchMessage(input.replyMessageId)
+      await reauthorize([...messages, reply])
+      const actor = input.kind === 'cleanup' ? dispatch.ownerAgentSessionId : dispatch.workerAgentSessionId
+      if (input.callerAgentSessionId !== actor) {
+        throw new AgentMuxError('This caller cannot report that Dispatch event.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      }
+      const next = recordDispatchEvent(dispatch, reply, input.kind, Date.now())
+      if (next !== dispatch) await this.appendRecord({ kind: 'dispatch-event', sequence: this.nextSequence,
+        sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId,
+        eventKind: input.kind, at: next.events.at(-1)!.at })
+      return structuredClone(next)
+    })
+  }
+
+  async showDispatch(
+    input: { readonly callerAgentSessionId: string; readonly sourceMessageId: string },
+    reauthorize: (messages: readonly AgentMuxMessageEnvelope[]) => Promise<void>
+  ): Promise<Dispatch> {
+    return this.withLock(async () => {
+      const { dispatch, messages } = this.dispatchProjection(input.sourceMessageId)
+      await reauthorize(messages)
+      if (input.callerAgentSessionId !== dispatch.ownerAgentSessionId && input.callerAgentSessionId !== dispatch.workerAgentSessionId) {
+        throw new AgentMuxError('Only a Dispatch participant can inspect it.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      }
+      return structuredClone(dispatch)
     })
   }
 

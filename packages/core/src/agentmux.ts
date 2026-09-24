@@ -28,6 +28,7 @@ import { pmoSessionMatches } from './pmo-session-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { SPLIT_FLAG_DIRECTIONS, type SplitDirection } from './split-direction-ssot.js'
+import { assertDispatchEventKind } from './agent-handoff.js'
 import { registerAgentRole, resolveAgentRole, readAgentRoleBindings } from './agent-role-directory.js'
 import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery, recordGlobalMessageDeliveryIssue, type AgentMuxMessageAppendInput } from './agent-global-message-queue.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
@@ -78,6 +79,12 @@ const CLI_ERROR_CODES = [
   'MESSAGE_NOT_FOUND',
   'MESSAGE_QUEUE_BACKPRESSURE',
   'MESSAGE_QUEUE_UNAVAILABLE',
+  'DISPATCH_MESSAGE_UNAVAILABLE',
+  'DISPATCH_NOT_FOUND',
+  'DISPATCH_PARTICIPANT_MISMATCH',
+  'DISPATCH_MESSAGE_INVALID',
+  'DISPATCH_EVENT_CONFLICT',
+  'DISPATCH_IDENTITY_UNAVAILABLE',
   // Session 存档自身读不出来。判据是一条真命令：把 store 的 `version` 改成 5 以外的值，
   // `agentmux inspect --session <任意>` 报的是「Agent Session store is invalid.」，而码折成了
   // `AGENTMUX_FAILED`——与「命令打错了」同一个码。和 `AGENT_ROLE_DIRECTORY_UNREADABLE` 完全同族：
@@ -607,17 +614,7 @@ async function discussCommand(args: readonly string[]): Promise<number> {
   return 0
 }
 
-/**
- * 交出去（Handoff）：把一个任务连同所有权原子地交给另一个 Agent Session。
- *
- * 走 Core（`withClient`）而非 Control socket——所有权转移是通信事实，归 Core；它也因此不依赖
- * Desktop Host 活着。CLI 只把既有的 `client.handOff` 接上，不在这一侧重实现所有权转移：Handoff
- * 与 Dispatch 的唯一分界（`originAwaits`）留在 Core，CLI 连这个值都不复述，如实回显 Core 给的。
- *
- * 身份同 discuss：raw 凭证从环境取出交回 Core 验证，`AGENTMUX_AGENT_SESSION_ID` 只是上下文提示。
- * 目标用 `--to-session <session-id>`（复用 CLI 既有寻址词汇），必须是显式 id——交给"自己"没有意义，
- * 故不接受 self。handoff 只转移所有权，不投递消息、不开 Session：要送文本走 send/discuss。
- */
+/** Declare a communication handoff through Core; no send, lifecycle or external Task mutation. */
 async function handoffCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, { '--to-session': 'data', '--task': 'value' })
   const caller = managedCaller()
@@ -667,6 +664,30 @@ async function deliveriesCommand(args: readonly string[]): Promise<number> {
       capability, callerAgentSessionId: caller.agentSessionId, readerRun, generation
     }))
     printSuccess('deliveries.ack', result)
+  }
+  return 0
+}
+
+async function dispatchCommand(args: readonly string[]): Promise<number> {
+  const verb = args[0]
+  if (verb !== 'open' && verb !== 'report' && verb !== 'show') throw cliError('dispatch requires open, report or show.')
+  const flags = parseFlags(args.slice(1), verb === 'report'
+    ? { '--source-message': 'value', '--reply-message': 'value', '--kind': 'value' }
+    : { '--source-message': 'value' })
+  const caller = managedCaller()
+  const capability = process.env.AGENTMUX_AGENT_CAPABILITY?.trim()
+  if (!capability) throw new AgentMuxError('This command requires an AgentMux-managed Agent capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
+  const input = { capability, callerAgentSessionId: caller.agentSessionId,
+    sourceMessageId: identifier(flags.values.get('--source-message'), 'Source message id') }
+  if (verb === 'open') {
+    printSuccess('dispatch.open', await withClient(async (client) => await client.openDispatch(input)))
+  } else if (verb === 'show') {
+    printSuccess('dispatch.show', await withClient(async (client) => await client.showDispatch(input)))
+  } else {
+    const kind = requiredData(flags, '--kind', 'Dispatch event kind')
+    assertDispatchEventKind(kind)
+    const replyMessageId = identifier(flags.values.get('--reply-message'), 'Reply message id')
+    printSuccess('dispatch.report', await withClient(async (client) => await client.recordDispatchEvent({ ...input, replyMessageId, kind })))
   }
   return 0
 }
@@ -997,7 +1018,7 @@ function operationPath(args: readonly string[]): string | null {
   // browser run → browser.run。与上面 open.* 同形：两级动词的 help 路径就是它的 operation 名。
   // 不写死 'run' 是因为将来若有第二个 browser 子命令，漏改这里会让它的 --help 静默落到 'browser'
   // 那条上（拿到一份讲别的命令的帮助，而不是一句"没这个命令"）。
-  if ((args[0] === 'browser' || args[0] === 'deliveries' || args[0] === 'settings') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
+  if ((args[0] === 'browser' || args[0] === 'deliveries' || args[0] === 'dispatch' || args[0] === 'settings') && (args[1] ?? '') !== '' && !args[1]!.startsWith('-')) {
     return `${args[0]}.${args[1]}`
   }
   return args[0] ?? null
@@ -1137,6 +1158,7 @@ async function main(): Promise<number> {
   if (args[0] === 'browser') return await browserCommand(args.slice(1))
   if (args[0] === 'send') return await sendCommand(args.slice(1))
   if (args[0] === 'deliveries') return await deliveriesCommand(args.slice(1))
+  if (args[0] === 'dispatch') return await dispatchCommand(args.slice(1))
   if (args[0] === 'discuss') return await discussCommand(args.slice(1))
   if (args[0] === 'handoff') return await handoffCommand(args.slice(1))
   if (args[0] === 'focus') return await focusCommand(args.slice(1))
