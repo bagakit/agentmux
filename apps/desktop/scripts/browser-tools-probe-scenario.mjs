@@ -66,7 +66,7 @@ export async function reviewBrowserTools(ctx) {
   const { probe,click,waitFor,receipt }=ctx
   receipt.browserTools={...receipt.browserTools,physicalDeviceTested:false,nativeInput:[]}
   await enterSearchFromBrowser(ctx)
-  assert.equal(await probe.cdp.evaluate('document.querySelectorAll(".surface-tool-panel [aria-label=\"Browser Tools\"]").length'),0)
+  assert.equal(await probe.cdp.evaluate(`document.querySelectorAll(${JSON.stringify('.surface-tool-panel [aria-label="Browser Tools"]')}).length`),0)
   const original=await profiles(ctx)
   assert.ok(original.length>0)
   const primary=original.find(profile=>profile.isDefault)
