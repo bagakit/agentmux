@@ -2,8 +2,9 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -523,6 +524,32 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     // Zero unclassified items
     const unclassified = nativeAndBespoke.filter((item) => item.host === 'unclassified' || item.layer === 'unclassified')
     expect(unclassified).toHaveLength(0)
+  })
+
+  it('derives the retained Header layout host without allowing body-backed or otherwise unknown overlay hosts', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/AgentRegionHeader.tsx'), 'utf8')
+    const fixture = mkdtempSync(join(tmpdir(), 'agentmux-overlay-host-source-'))
+    const file = join(fixture, 'Header.tsx')
+    try {
+      writeFileSync(file, source)
+      const inventory = deriveOverlayInventoryFromSource(fixture)
+      expect(inventory.length).toBeGreaterThan(0)
+      expect(inventory.map(item => ({ kind: item.kind, host: item.host }))).toEqual([
+        { kind: 'radix-portal', host: 'window-overlay-host' }
+      ])
+      for (const [before, after] of [
+        ['destination.append(host)', 'document.body.append(host)'],
+        ['const destination = target ?? home.current', 'const destination = document.body'],
+        ['document.getElementById(targetId)', 'document.body']
+      ] as const) {
+        expect(source.split(before).length - 1).toBe(1)
+        writeFileSync(file, source.replace(before, after))
+        const unknown = deriveOverlayInventoryFromSource(fixture).filter(item => item.kind === 'createPortal')
+        expect(unknown.map(item => ({ host: item.host, layer: item.layer }))).toEqual([
+          { host: 'unclassified', layer: 'unclassified' }
+        ])
+      }
+    } finally { rmSync(fixture, { recursive: true, force: true }) }
   })
 
   it('neighboring Browser surface probe proves native views yield when overlays open and return on dismiss', async () => {
