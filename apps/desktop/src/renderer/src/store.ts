@@ -2,6 +2,7 @@ import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
 import { sessionPresentationById } from './lib/session-presentation'
+import { observeFocusHistoryIdentity } from './lib/focus-history-identity'
 import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
@@ -863,13 +864,16 @@ type AppState = {
  * reveals, so Agent and Terminal Sessions share one execution MRU while PMO stays isolated.
  */
 function focusSessionContext(
-  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config'>,
-  sessionId: string
+  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config' | 'agentNames' | 'timelines'>,
+  sessionId: string | null,
+  observedSession?: SessionSnapshot
 ): AgentFocusContext {
-  const session = state.sessions.find((candidate) => candidate.id === sessionId)
+  const session = observedSession ?? state.sessions.find((candidate) => candidate.id === sessionId)
   return session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo'
     ? focusPmo(state.agentFocus, sessionId)
-    : focusExecution(state.agentFocus, sessionId)
+    : focusExecution(state.agentFocus, sessionId, Date.now(), session
+      ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id])
+      : undefined)
 }
 
 function emptyRuntimeSnapshot(): RuntimeSnapshot {
@@ -1011,7 +1015,7 @@ function projectRecoveredSession(
   return {
     tabs,
     agentFocus: state.agentFocus.execution.sessionId === previousSessionId
-      ? focusExecution(state.agentFocus, session.id)
+      ? focusSessionContext(state, session.id, session)
       : state.agentFocus,
     sessions: [
       ...state.sessions.filter((item) => item.id !== previousSessionId && item.id !== session.id),
@@ -3708,7 +3712,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       mainSurface: 'workbench',
       agentFocus: focusLane === 'pmo'
         ? focusPmo(state.agentFocus, id)
-        : focusExecution(state.agentFocus, id),
+        : focusSessionContext(state, id),
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspace.id]: nextLayout },
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
@@ -4230,19 +4234,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ mainSurface })
   },
   focusExecutionSession(id) {
-    set((state) => {
-      const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
-      if (session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo') {
-        return { agentFocus: focusPmo(state.agentFocus, id) }
-      }
-      return { agentFocus: focusExecution(state.agentFocus, id) }
-    })
+    set((state) => ({ agentFocus: focusSessionContext(state, id) }))
   },
   focusPmoSession(id) {
     set((state) => {
       const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
       if (session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) !== 'pmo') {
-        return { agentFocus: focusExecution(state.agentFocus, id) }
+        return { agentFocus: focusSessionContext(state, id) }
       }
       return { agentFocus: focusPmo(state.agentFocus, id) }
     })
