@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import { native } from './browser-demonstration-probe-scenario.mjs'
 
 // Scenario hooks only. The canonical private harness owns launch, workbench,
