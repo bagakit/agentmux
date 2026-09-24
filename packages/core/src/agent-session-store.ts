@@ -28,6 +28,8 @@ import type {
   AgentMuxStoredAgentSession,
   AgentPromptInputPlan,
   AgentNativeSessionHandle,
+  AgentSessionHistoryMetadata,
+  AgentSessionHistoryDescriptor,
   AgentStatus,
   AgentTerminalCapabilityState,
   AgentTerminalPromptDeliveryState,
@@ -109,6 +111,7 @@ export type AgentMuxRetiredAgentSession = {
   run: AgentMuxRunRef
   source: 'user'
   observedAt: number
+  history?: AgentSessionHistoryMetadata
 }
 
 export type AgentMuxAgentSessionStore = {
@@ -313,8 +316,30 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     hostId: string(source.hostId, 'retiredAgentSession.hostId'),
     run: runRef(source.run),
     source: 'user',
-    observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt')
+    observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
+    ...(source.history === undefined ? {} : { history: normalizeHistoryMetadata(source.history) })
   }
+}
+
+function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
+  const source = record(value, 'Session history metadata')
+  const providerId = string(source.providerId, 'history.providerId')
+  const handle = source.nativeHandle === undefined ? undefined : nativeHandle(source.nativeHandle)
+  if (handle?.kind === 'provider' && handle.providerId !== providerId) {
+    throw new AgentMuxError('History locator belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return {
+    providerId,
+    executorId: string(source.executorId, 'history.executorId'),
+    workspacePath: string(source.workspacePath, 'history.workspacePath', MAX_PATH_BYTES),
+    createdAt: timestamp(source.createdAt, 'history.createdAt'),
+    ...(handle === undefined ? {} : { nativeHandle: handle })
+  }
+}
+
+/** Project only reading identity, never Hook secrets, permissions or lifecycle controls. */
+export function sessionHistoryMetadata(session: AgentMuxStoredAgentSession): AgentSessionHistoryMetadata {
+  return normalizeHistoryMetadata(session)
 }
 
 function retiredAgentSessions(value: unknown): AgentMuxRetiredAgentSession[] {
@@ -1371,6 +1396,21 @@ export async function loadAgentSessions(
   return normalizeAgentSessions(await store.load())
 }
 
+/** One bounded catalogue, derived from the existing durable Store. */
+export async function loadSessionHistorySources(store: AgentMuxAgentSessionStore): Promise<AgentSessionHistoryDescriptor[]> {
+  const [sessions, retired] = await Promise.all([loadAgentSessions(store), store.loadRetiredAgentSessions()])
+  const activeIds = new Set(sessions.map(session => session.agentSessionId))
+  return [
+    ...sessions.map(session => ({ agentSessionId: session.agentSessionId, hostId: session.hostId,
+      state: 'active' as const, history: sessionHistoryMetadata(session) })),
+    ...retired.filter(session => !activeIds.has(session.agentSessionId)).map(session => ({
+      agentSessionId: session.agentSessionId, hostId: session.hostId, state: 'retired' as const,
+      retiredAt: session.observedAt,
+      ...(session.history === undefined ? {} : { history: structuredClone(session.history) })
+    }))
+  ]
+}
+
 function normalizeLifecycleReservations(
   values: readonly unknown[]
 ): AgentMuxLifecycleReservation[] {
@@ -1557,6 +1597,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     this.retiredRuns = merged
     this.retiredAgentSessions = retainedSessions
+    this.pruneTimelines()
     this.reservations.delete(reservation.agentSessionId)
   }
 
@@ -1571,6 +1612,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     this.retiredRuns = merged
     this.retiredAgentSessions = retainedSessions
+    this.pruneTimelines()
   }
 
   async commitLifecycle(
@@ -1605,7 +1647,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             hostId: previous.hostId,
             run: { ...previous.run },
             source: 'user',
-            observedAt: Date.now()
+            observedAt: Date.now(),
+            history: sessionHistoryMetadata(previous)
           }])
         : this.retiredAgentSessions,
       retiredRuns
@@ -1617,11 +1660,16 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.sessions.set(normalized.agentSessionId, structuredClone(normalized))
     } else {
       this.sessions.delete(reservation.agentSessionId)
-      this.timelines.delete(reservation.agentSessionId)
     }
     this.retiredRuns = retiredRuns
     this.retiredAgentSessions = retiredAgentSessions
+    this.pruneTimelines()
     this.reservations.delete(reservation.agentSessionId)
+  }
+
+  private pruneTimelines(): void {
+    const retained = new Set([...this.sessions.keys(), ...this.retiredAgentSessions.map(session => session.agentSessionId)])
+    for (const id of this.timelines.keys()) if (!retained.has(id)) this.timelines.delete(id)
   }
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
@@ -1811,7 +1859,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       // One attempt is deliberate: cleanup is maintenance, never a reason to block a read caller.
       release = await this.acquireLock(undefined, 1)
       const document = await this.read()
-      await this.removeOrphanTimelineFiles(document.sessions)
+      await this.maintainTimelineFiles(document)
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_SESSION_STORE_BUSY') throw error
     } finally {
@@ -1950,7 +1998,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         reservations: document.reservations.filter(
           (item) => item.reservationId !== reservation.reservationId
         )
-      })
+      }, undefined, true)
     })
   }
 
@@ -1972,7 +2020,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         ...document,
         retiredRuns,
         retiredAgentSessions
-      })
+      }, undefined, true)
     })
   }
 
@@ -2014,7 +2062,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
               hostId: previous.hostId,
               run: { ...previous.run },
               source: 'user',
-              observedAt: Date.now()
+              observedAt: Date.now(),
+              history: sessionHistoryMetadata(previous)
             }])
           : document.retiredAgentSessions,
         retiredRuns
@@ -2032,8 +2081,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         ),
         retiredRuns,
         retiredAgentSessions
-      })
-      if (!normalized) await this.removeTimelineFile(reservation.agentSessionId).catch(() => {})
+      }, undefined, reservation.kind === 'stop')
     })
   }
 
@@ -2300,14 +2348,49 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
 
-  private async write(document: AgentSessionStoreDocument, signal?: AbortSignal): Promise<void> {
+  private async write(
+    document: AgentSessionStoreDocument,
+    signal?: AbortSignal,
+    pruneTimelines = false
+  ): Promise<void> {
     signal?.throwIfAborted()
-    const content = `${JSON.stringify(document, null, 2)}\n`
+    const serialize = (value: AgentSessionStoreDocument) => `${JSON.stringify(value, null, 2)}\n`
+    let retained = document
+    let content = serialize(retained)
+    if (Buffer.byteLength(content) > MAX_STORE_BYTES && document.retiredAgentSessions.length > 0) {
+      // The same durable document owns both limits. Evict the oldest complete archive
+      // records, keeping active Sessions, reservations and retired Run truth intact.
+      // Binary search bounds serialization work when a legal large locator fills it.
+      let lower = 1
+      let upper = document.retiredAgentSessions.length
+      while (lower < upper) {
+        const dropped = Math.floor((lower + upper) / 2)
+        const candidate = serialize({ ...document, retiredAgentSessions: document.retiredAgentSessions.slice(dropped) })
+        if (Buffer.byteLength(candidate) <= MAX_STORE_BYTES) upper = dropped
+        else lower = dropped + 1
+      }
+      retained = { ...document, retiredAgentSessions: document.retiredAgentSessions.slice(lower) }
+      content = serialize(retained)
+    }
     if (Buffer.byteLength(content) > MAX_STORE_BYTES) {
       throw new AgentMuxError('Agent Session store exceeds its size limit.', 'AGENT_SESSION_STORE_LIMIT')
     }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     await durableWriteFile(this.path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
+    if (pruneTimelines || retained !== document) await this.maintainTimelineFiles(retained)
+  }
+
+  private async maintainTimelineFiles(document: AgentSessionStoreDocument): Promise<void> {
+    try {
+      await this.removeOrphanTimelineFiles(document.sessions, document.retiredAgentSessions)
+    } catch (error) {
+      // Persistence already succeeded. Maintenance must not reject that lifecycle
+      // and send the public Client down its uncommitted-Run rollback path.
+      process.emitWarning(`Agent Session timeline cleanup failed; retained history and committed Sessions remain usable. ` +
+        `Cleanup will retry on the next Store load: ${error instanceof Error ? error.message : String(error)}`, {
+        code: 'AGENT_SESSION_TIMELINE_CLEANUP_FAILED'
+      })
+    }
   }
 
   private timelinePath(agentSessionId: string): string {
@@ -2413,10 +2496,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async removeOrphanTimelineFiles(
-    sessions: readonly AgentMuxStoredAgentSession[]
+    sessions: readonly AgentMuxStoredAgentSession[],
+    retired: readonly AgentMuxRetiredAgentSession[]
   ): Promise<void> {
     const directory = join(dirname(this.path), 'agent-timelines')
-    const currentPaths = new Set(sessions.map((session) => this.timelinePath(session.agentSessionId)))
+    const currentPaths = new Set([...sessions, ...retired].map((session) => this.timelinePath(session.agentSessionId)))
     let entries: string[]
     try {
       entries = await readdir(directory)

@@ -249,8 +249,9 @@ const api: AgentMuxPreloadApi = {
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
-    timeline: (session: AgentSessionControl) => ipcRenderer.invoke('sessions:timeline', session),
-    historyPage: (session: AgentSessionControl, options?: AgentSessionHistoryPageOptions) =>
+    historySources: () => ipcRenderer.invoke('sessions:historySources'),
+    timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
+    historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),

@@ -41,6 +41,7 @@ import type {
   AgentTimelineItem,
   AgentTimelineSnapshot,
   AgentSessionHistoryPage,
+  AgentSessionHistoryDescriptor,
   AgentSessionHistoryPageOptions
 } from '@agentmux/core'
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
@@ -801,6 +802,9 @@ export type AgentSessionControl = {
   run: AgentMuxRunRef
 }
 
+/** Reading a retained conversation needs identity, never a live Run lease. */
+export type SessionHistoryReference = Pick<AgentSessionControl, 'hostId' | 'agentSessionId'>
+
 // Not exported, unlike its sibling `AgentSessionControl` (11 external narrowing sites): the two
 // consumers are the `SessionControl` union below and the terminal arm of the Session union.
 type TerminalSessionControl = {
@@ -1451,8 +1455,9 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentSession>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
-    timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
-    historyPage(session: AgentSessionControl, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
+    historySources(): Promise<AgentSessionHistoryDescriptor[]>
+    timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
+    historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     refreshAttachment(session: SessionControl, attachmentId: string | null, afterByte: number): Promise<SessionAttachResult>
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>

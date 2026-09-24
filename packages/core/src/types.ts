@@ -544,11 +544,24 @@ export type AgentTerminalPromptReadinessState = {
 export type AgentSessionHistoryContentPart =
   | { kind: 'text'; text: string }
   | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other'; reference: string; label?: string }
-  | { kind: 'reasoning'; text: string }
+  | { kind: 'reasoning'; text: string; signature?: string; redacted?: boolean }
   | { kind: 'tool-call'; name: string; input: string; callId?: string }
   | { kind: 'tool-result'; output: string; name?: string; callId?: string; failed?: boolean }
 
 export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
+
+/** The durable locator for reading; deliberately carries no Run or input authority. */
+export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
+  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'createdAt'>
+
+export type AgentSessionHistoryDescriptor = {
+  agentSessionId: string
+  hostId: string
+  state: 'active' | 'retired'
+  retiredAt?: number
+  /** Absence means no retained locator, not an invitation to infer one. */
+  history?: AgentSessionHistoryMetadata
+}
 
 export type AgentSessionHistoryItem = {
   id: string
