@@ -1873,7 +1873,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
     } finally { finishClick(); await Promise.allSettled([running]); await f.close() }
   }, 30_000)
 
-  it('an initial checkpoint owns real idle control, refuses implicit continuation, and continues once after explicit return', async () => {
+  it('an initial checkpoint blocks Agent execution and the trusted Client continues the exact cursor once', async () => {
     const f = await fixture()
     try {
       const saved = await version(f, { ...f.imported.draft, steps: [
@@ -1882,16 +1882,34 @@ describe('versioned task assets via the actual Browser Manager', () => {
       ] })
       f.manager.returnControl('b1')
       const paused = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
-      expect(paused).toMatchObject({ status: 'waiting-human', nextStep: 1, operationIds: [] })
+      expect(paused).toMatchObject({ status: 'waiting-human', nextStep: 1, operationIds: [],
+        pendingCheckpointId: 'human-checkpoint', humanCheckpoints: [] })
       expect(f.sentEvents().at(-1)?.browser.activity).toMatchObject({ operation: null, control: 'human' })
       await expect(f.manager.runScript('b1', 'return 1')).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
-      await expect(f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} })).rejects.toThrow('Return control explicitly')
-      f.manager.returnControl('b1')
-      createDispatch.mockImplementationOnce(() => pageDispatch())
+      const tuple = { runId: paused.id, browserId: 'b1', assetId: saved.id, version: 1 }
+      expect(await f.assets.readExactFact(tuple, 'human-checkpoint')).toEqual({ status: 'not-recorded' })
+      expect(dispatchCalls).toEqual([])
+      const fact = { ...tuple, checkpointId: 'human-checkpoint', pendingCursor: 1,
+        origin: 'trusted-ui', controlBefore: 'human', confirmedAt: expect.any(Number) }
+      const click = vi.fn(async () => {
+        expect(await f.assets.readExactFact(tuple, 'human-checkpoint')).toEqual({ status: 'available', fact })
+        expect(f.sentEvents().at(-1)?.browser.activity.control).toBe('agent')
+        return true
+      })
+      createDispatch.mockImplementationOnce(() => pageDispatch(click))
+      // Direct Source call to the existing trusted Client action. The privileged IPC
+      // authenticates its sender; this method is not exposed by the public Agent API.
       const completed = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} })
       expect(completed).toMatchObject({ id: paused.id, status: 'completed', nextStep: 2 })
+      expect(completed.humanCheckpoints).toEqual([fact])
       expect(completed.operationIds).toHaveLength(1)
-      await expect(f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} })).rejects.toThrow('cannot be continued automatically')
+      expect(click).toHaveBeenCalledOnce()
+      const retained = await f.assets.state('b1'), operations = await f.journal.list()
+      await expect(f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', runId: paused.id, parameters: {} }))
+        .rejects.toThrow('cannot continue from its current cursor')
+      expect(await f.assets.state('b1')).toEqual(retained)
+      expect(await f.journal.list()).toEqual(operations)
+      expect(click).toHaveBeenCalledOnce()
     } finally { await f.close() }
   }, 30_000)
 
@@ -2167,8 +2185,15 @@ describe('versioned task assets via the actual Browser Manager', () => {
         expect(restored.contents.debugger.isAttached()).toBe(false)
         expect(dispatchCalls).toEqual([])
         expect(restored.sentEvents().at(-1)?.browser.taskAssets).toEqual(state)
-        await expect(restored.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {}, runId: 'uncertain-run' })).rejects.toThrow('cannot be continued automatically')
+        const activity = structuredClone(restored.sentEvents().at(-1)?.browser.activity)
+        await expect(restored.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {}, runId: 'uncertain-run' }))
+          .rejects.toThrow('cannot continue from its current cursor')
+        expect(await restored.manager.getTaskAssets('b1')).toEqual(state)
+        expect(restored.sentEvents().at(-1)?.browser.activity).toEqual(activity)
+        expect(restored.contents.debugger.isAttached()).toBe(false)
+        expect(dispatchCalls).toEqual([])
         expect(await restored.manager.runScript('b1', 'return 75')).toMatchObject({ result: 75, outcome: { kind: 'completed' } })
+        expect(restored.contents.debugger.isAttached()).toBe(false)
       } finally { restored.manager.dispose() }
     } finally { await f.close() }
   }, 30_000)
