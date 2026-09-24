@@ -24,6 +24,9 @@ const packageIdentity = { schema: 'agentmux.package-identity.v1', sourceCommit: 
 const renderer = { kind: 'bundled', id: 'a'.repeat(64), identity: { shell: 'private-shell', ctxmux: 'private-native' } } as const
 const runtime = { hostId: 'local', identity: { hostId: 'local', buildIdentity: 'private-serving',
   protocolVersion: 18, processId: null, instanceId: 'private-instance', ownership: 'unverified' as const } }
+const comparison = { snapshot: { hostId: 'local', repoPath: '/private-repo', mode: 'merge-base' as const,
+  baseBranch: 'base', targetBranch: 'target', baseOid: 'a'.repeat(40), targetOid: 'b'.repeat(40), comparisonBaseOid: 'a'.repeat(40) },
+  file: { path: 'original.txt', origPath: null } }
 afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -35,6 +38,9 @@ function workbench() {
     id: 'browser-id', navigationId: '', profileId: 'default', url: 'about:blank', title: 'Original page', loading: false,
     error: 'Native page has not reopened', canGoBack: false, canGoForward: false,
     viewport: 'responsive', driving: false, appLinkPrompt: null })
+  tab = addWorkbenchRegion(tab, 'original-browser', 'right', { kind: 'file', regionId: 'original-file', workspaceId: 'workspace', path: '/private-file' })
+  tab = addWorkbenchRegion(tab, 'original-file', 'down', { kind: 'git-diff', regionId: 'original-diff', workspaceId: 'workspace', comparison })
+  tab = addWorkbenchRegion(tab, 'original-diff', 'right', { kind: 'launcher', regionId: 'original-launcher', workspaceId: 'workspace' })
   useAppStore.setState({ loading: true, startupProgress: { step: 'browsers', current: 0, total: 1 }, sessions: [],
     tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('private-group', [tab.id]) },
     activeWorkspaceId: 'workspace', mainSurface: 'workbench',
@@ -60,10 +66,16 @@ it('projects every original Region through actual Store and IPC bridge, includin
     expect(observed.workbench.loading).toBe(true)
     expect(observed.workbench.tabs[0]?.layout).toEqual(tab.layout)
     expect(observed.workbench.layouts).toEqual(before.layouts)
-    expect(observed.workbench.tabs[0]?.regions.map(region => region.regionId)).toEqual(['missing-agent', 'launching-terminal', 'original-browser'])
+    expect(observed.workbench.tabs[0]?.regions.map(region => [region.kind, region.regionId])).toEqual([
+      ['agent', 'missing-agent'], ['terminal', 'launching-terminal'], ['browser', 'original-browser'],
+      ['file', 'original-file'], ['git-diff', 'original-diff'], ['launcher', 'original-launcher']
+    ])
     expect(observed.workbench.tabs[0]?.regions[0]).toMatchObject({ control: null, processState: null })
     expect(observed.workbench.tabs[0]?.regions[1]).toMatchObject({ phase: 'launching', control: null })
     expect(observed.workbench.tabs[0]?.regions[2]).toMatchObject({ browserId: 'browser-id', error: 'Native page has not reopened' })
+    expect(observed.workbench.tabs[0]?.regions[3]).toEqual({ kind: 'file', regionId: 'original-file', workspaceId: 'workspace', path: '/private-file' })
+    expect(observed.workbench.tabs[0]?.regions[4]).toEqual({ kind: 'git-diff', regionId: 'original-diff', workspaceId: 'workspace', comparison })
+    expect(observed.workbench.tabs[0]?.regions[5]).toEqual({ kind: 'launcher', regionId: 'original-launcher', workspaceId: 'workspace' })
     expect(JSON.stringify(observed)).not.toContain('MUST NOT LEAVE')
     expect(changed).toHaveBeenCalledTimes(0)
     expect(useAppStore.getState()).toBe(before)
@@ -148,7 +160,7 @@ it('binds the activated GUI serving identity and exact Run state to the existing
   const original = structuredClone(observed)
   const confirmation = { runtime: { daemonInstanceId: 'private-instance', buildId: 'private-serving', protocolGeneration: 18 },
     originalRuns: [{ id: 'confirmed-run', state: { type: 'running' } }, { id: 'unprojected-sibling', state: { type: 'running' } }] }
-  expect(original.workbench.tabs[0]!.regions).toHaveLength(3)
+  expect(original.workbench.tabs[0]!.regions).toHaveLength(6)
   expect(confirmation.originalRuns.map(run => run.id)).toEqual(['confirmed-run', 'unprojected-sibling'])
   expect(() => assertUiRuntimeObservation(observed, confirmation, original)).not.toThrow()
   expect(() => assertUiRuntimeObservation({ ...observed, main: { ...observed.main, runtimes: [] } }, confirmation, original)).toThrow('serving Runtime')

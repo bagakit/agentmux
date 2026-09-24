@@ -218,7 +218,7 @@ import {
   type WorkbenchSurface,
   type WorkbenchTab
 } from './lib/workbench-tabs'
-import { isAgentOrLauncherSurface, isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
+import { assertUnreachableSurface, isAgentOrLauncherSurface, isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
 import { resolveSpatialCommit } from './lib/control-spatial-commit'
 import {
   applyWorkbenchViewCloseTopology,
@@ -3029,6 +3029,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               case 'file': return { ...base, kind: surface.kind, path: surface.path }
               case 'git-diff': return { ...base, kind: surface.kind, comparison: surface.comparison }
               case 'launcher': return { ...base, kind: surface.kind }
+              default: return assertUnreachableSurface(surface)
             }
           })
         }))

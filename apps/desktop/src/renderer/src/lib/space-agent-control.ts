@@ -14,6 +14,7 @@ import { spatialSources, workspaceZoneId, type SpaceZoneBindings, type SpatialRe
 import { addWorkbenchRegion, assertRegionInvariant, createWorkbenchTab, removeWorkbenchRegion,
   type AgentWorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
 import { resolveSpatialCommit } from './control-spatial-commit'
+import { isSessionSurface } from './workbench-surface-kinds'
 
 export type SpatialWorkbench = {
   config: AppConfig | null
@@ -86,7 +87,7 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
     const parent = { spaceId: zone.spaceId, zoneId: zone.zoneId, workspaceId: tab.workspaceId, tabId: tab.id }
     catalog.tabs.push({ ...parent, groupId: group.id, name: tab.name ?? null, regionIds: Object.keys(tab.regions) })
     for (const surface of Object.values(tab.regions)) {
-      const session = surface.kind === 'agent' || surface.kind === 'terminal' ? sessions.get(surface.sessionId) : undefined
+      const session = isSessionSurface(surface) ? sessions.get(surface.sessionId) : undefined
       catalog.regions.push({ ...parent, regionId: surface.regionId, kind: surface.kind,
         agentSessionId: surface.kind === 'agent' ? surface.sessionId : null,
         runId: session?.control.run.runId ?? null,

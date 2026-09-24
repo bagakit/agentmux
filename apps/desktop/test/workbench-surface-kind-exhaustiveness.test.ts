@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 // WHO is allowed to read `surface.kind`, enforced structurally.
 //
-// `WorkbenchSurface` is a 5-arm discriminated union. Before #491, ~5 consumers each hand-copied their
+// `WorkbenchSurface` is a discriminated union. Before #491, ~5 consumers each hand-copied their
 // own list of surface kinds — a switch here, a `kind === 'agent' || kind === 'terminal'` there, a
 // `!== 'file' && !== 'browser'` somewhere else — and nothing tied them to the union. `tsconfig` runs
 // `strict` but NOT `noImplicitReturns`, so a consumer that forgot a kind compiled clean and silently
@@ -20,10 +20,10 @@ import { describe, expect, it } from 'vitest'
 //     or `issue.kind` (a document-issue union); both spellings are identical text. It also cannot see
 //     that a `switch` routes its default through `assertUnreachableSurface`.
 // So it drives the TypeScript type checker: it finds every place a surface's `kind` VALUE is obtained,
-// groups them by enclosing function, and requires every function that BRANCHES on 2+ distinct kind
-// literals to be anchored to the SSOT — it must reference `assertUnreachableSurface` (the exhaustive-
-// switch backstop) or `isSessionSurface` (the SSOT predicate for the agent-or-terminal membership
-// test). A function that tests a single kind (`is this a file?`) is not enumerating: a 6th kind
+// groups them by enclosing function and receiver, and requires every receiver read that BRANCHES on 2+ distinct kind
+// literals to be anchored to the actual central SSOT: call its never backstop or an exported
+// WorkbenchSurface predicate with that same real backstop. Owner Symbols, not names, bind calls.
+// A function that tests a single kind (`is this a file?`) is not enumerating: a new kind
 // correctly answers "no", so those are left alone.
 //
 // WHAT THIS SEES (each shape has a witness in self-check 2, so breaking one reds here):
@@ -43,7 +43,7 @@ import { describe, expect, it } from 'vitest'
 // are open holes; when one shows up, widen the origin list, do not add an exemption.
 //
 // The guard carries three self-checks so it cannot go vacuously green (the local precedent: a scan
-// whose root is wrong passes silently). (1) the union anchor must resolve to exactly the 5 members;
+// whose root is wrong passes silently). (1) the union anchor must resolve to its six members;
 // (2) a synthetic in-memory program proves the classifier FLAGS an unanchored enumerator of every
 // shape above and CLEARS an anchored one — if the checker wiring broke, this fails instead of passing
 // empty; (3) the set of files the scan actually WALKED must equal the renderer's `.ts`/`.tsx` files on
@@ -132,10 +132,67 @@ function rendererFilesOnDisk(): string[] {
     .map((entry) => path.join(entry.parentPath, entry.name))
 }
 
-// The SSOT symbols an enumerating consumer must route through. `assertUnreachableSurface` is the
-// exhaustive-switch backstop; `isSessionSurface` is the SSOT predicate that replaces every inlined
-// `kind === 'agent' || kind === 'terminal'`. Referencing either is proof of exhaustiveness enrollment.
-const ANCHOR_IDENTIFIERS = new Set(['assertUnreachableSurface', 'isSessionSurface'])
+// Derive enrollment from the actual central exports, never from a predicate-name list.
+// The backstop has the central never -> never signature; predicates must narrow this
+// exact WorkbenchSurface and call that backstop from their kind-switch default.
+function discoverSurfaceAnchors(
+  program: ts.Program,
+  checker: ts.TypeChecker,
+  surfaceType: ts.Type,
+  centralFile: string
+): { backstop: ts.Symbol | null; predicates: Set<ts.Symbol>; declaredPredicates: Set<ts.Symbol>; anchors: Set<ts.Symbol> } {
+  const source = program.getSourceFile(centralFile)
+  const module = source && checker.getSymbolAtLocation(source)
+  const exports = module ? checker.getExportsOfModule(module) : []
+  const functions = exports.flatMap((symbol) => (symbol.declarations ?? [])
+    .filter((decl): decl is ts.FunctionDeclaration => ts.isFunctionDeclaration(decl) && !!decl.body && !!decl.name)
+    .map((decl) => ({ symbol, decl, signature: checker.getSignatureFromDeclaration(decl) })))
+  const backstops = functions.filter(({ decl, signature }) => signature && decl.parameters.length === 1 &&
+    !!(checker.getTypeAtLocation(decl.parameters[0]).flags & ts.TypeFlags.Never) &&
+    !!(checker.getReturnTypeOfSignature(signature).flags & ts.TypeFlags.Never))
+  const backstop = backstops.length === 1 ? backstops[0].symbol : null
+  const predicates = new Set<ts.Symbol>()
+  const declaredPredicates = new Set<ts.Symbol>()
+  for (const { symbol, decl, signature } of functions) {
+    const predicate = signature && checker.getTypePredicateOfSignature(signature)
+    if (!predicate || predicate.kind !== ts.TypePredicateKind.Identifier || predicate.parameterIndex !== 0 ||
+        decl.parameters.length !== 1) continue
+    const parameter = decl.parameters[0]
+    const type = checker.getTypeAtLocation(parameter)
+    if (!type.isUnion() || !checker.isTypeAssignableTo(type, surfaceType) ||
+        !checker.isTypeAssignableTo(surfaceType, type)) continue
+    declaredPredicates.add(symbol)
+    const parameterSymbol = checker.getSymbolAtLocation(parameter.name)
+    const visit = (node: ts.Node): void => {
+      if (ts.isSwitchStatement(node) && ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === 'kind' && checker.getSymbolAtLocation(node.expression.expression) === parameterSymbol) {
+        for (const clause of node.caseBlock.clauses) {
+          if (!ts.isDefaultClause(clause)) continue
+          for (const statement of clause.statements) {
+            if (!ts.isReturnStatement(statement) || !statement.expression || !ts.isCallExpression(statement.expression)) continue
+            const call = statement.expression
+            const argument = call.arguments[0]
+            if (backstop && resolvedCallSymbol(checker, call) === backstop && call.arguments.length === 1 && argument &&
+                checker.getSymbolAtLocation(argument) === parameterSymbol &&
+                !!(checker.getTypeAtLocation(argument).flags & ts.TypeFlags.Never)) predicates.add(symbol)
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(decl.body!)
+  }
+  const anchors = new Set(predicates)
+  if (backstop) anchors.add(backstop)
+  return { backstop, predicates, declaredPredicates, anchors }
+}
+
+// Resolved signature declarations preserve imported/local aliases and distinguish a
+// foreign same-name function from the central owner. Merely spelling a name is no use.
+function resolvedCallSymbol(checker: ts.TypeChecker, call: ts.CallExpression): ts.Symbol | undefined {
+  const declaration = checker.getResolvedSignature(call)?.declaration
+  return declaration?.name ? checker.getSymbolAtLocation(declaration.name) : undefined
+}
 
 /**
  * How many distinct kind literals make a consumer an *enumerator* rather than a single-kind test.
@@ -151,7 +208,8 @@ const ENUMERATOR_MIN_LITERALS = 2
 type SurfaceKindReader = {
   file: string
   fn: string
-  /** Distinct kind string-literals this function compares the kind value against. */
+  receiver: string
+  /** Distinct kind string-literals this receiver's reads compare against. */
   literals: Set<string>
   /**
    * True when the function demonstrably branches on the kind but the literals are not statically
@@ -160,7 +218,7 @@ type SurfaceKindReader = {
    * alternative is reporting "not an enumerator" about code we failed to read.
    */
   opaque: boolean
-  /** True if the function references an SSOT anchor identifier. */
+  /** True if this value has an actual central owner call in its direct execution chain. */
   anchored: boolean
   /** Which origin shapes produced this reader — reported in failures so the shape is visible. */
   origins: Set<string>
@@ -193,6 +251,20 @@ function enclosingFunction(node: ts.Node): ts.SignatureDeclaration | null {
   return null
 }
 
+/** Only a syntactically direct IIFE execution chain can carry its same-value owner outward. */
+function belongsToInvocationChain(node: ts.Node, fn: ts.SignatureDeclaration): boolean {
+  let current = enclosingFunction(node)
+  while (current && current !== fn) {
+    if (!ts.isArrowFunction(current) && !ts.isFunctionExpression(current)) return false
+    let callee: ts.Node = current
+    while (ts.isParenthesizedExpression(callee.parent)) callee = callee.parent
+    const call = callee.parent
+    if (!ts.isCallExpression(call) || call.expression !== callee) return false
+    current = enclosingFunction(call)
+  }
+  return current === fn
+}
+
 /**
  * Resolve the `WorkbenchSurface` type from its declaration in `workbench-tabs.ts`. The union itself is
  * the anchor: the classifier compares each kind read's object type against it, so a kind added to the
@@ -220,8 +292,8 @@ function resolveSurfaceType(
  * The core classifier, reused for both the synthetic self-check and the real scan.
  *
  * Finds every place a surface's `kind` VALUE is obtained — four origin shapes, see the header — groups
- * them by enclosing function, records which kind literals each is compared against (following local
- * aliases, switch labels and membership receivers) and whether it references an SSOT anchor.
+ * them by enclosing function and static value lineage, records which kind literals each is compared
+ * against (following local aliases, switch labels and membership receivers) and its actual owner call.
  *
  * Returns `scanned` alongside the readers: the exact file set this run walked, emitted by the same
  * filter that drives the walk. Coverage is then asserted against what was scanned rather than inferred
@@ -231,27 +303,85 @@ function collectSurfaceKindReaders(
   program: ts.Program,
   checker: ts.TypeChecker,
   surfaceType: ts.Type,
-  rootDir: string
+  rootDir: string,
+  anchors: ReadonlySet<ts.Symbol>
 ): { readers: SurfaceKindReader[]; scanned: Set<string> } {
-  const byFunction = new Map<ts.SignatureDeclaration, SurfaceKindReader>()
+  const byFunction = new Map<ts.SignatureDeclaration, Map<string, SurfaceKindReader>>()
   const scanned = new Set<string>()
 
   // The kind union comes from the SAME anchor as the surface type, so the two can never disagree about
   // what "a kind" is. Deriving it from a separately-named alias would be a second hand-copy.
   const kindUnion = checker.getTypeOfPropertyOfType(surfaceType, 'kind') ?? null
 
-  const readerFor = (fn: ts.SignatureDeclaration, source: ts.SourceFile): SurfaceKindReader => {
-    let reader = byFunction.get(fn)
-    if (!reader) {
-      reader = {
-        file: path.relative(rootDir, source.fileName),
-        fn: functionName(fn),
-        literals: new Set<string>(),
-        opaque: false,
-        anchored: false,
-        origins: new Set<string>()
+  const symbols = new Map<ts.Symbol, number>()
+  const nodes = new Map<ts.Node, number>()
+  const symbolKey = (symbol: ts.Symbol): string => {
+    if (!symbols.has(symbol)) symbols.set(symbol, symbols.size)
+    return `symbol:${symbols.get(symbol)}`
+  }
+  const nodeKey = (node: ts.Node): string => {
+    if (!nodes.has(node)) nodes.set(node, nodes.size)
+    return `node:${nodes.get(node)}`
+  }
+  const bindingReceiver = (binding: ts.BindingElement): ts.Node | null => {
+    const owner = binding.parent.parent
+    return ts.isVariableDeclaration(owner) ? owner.initializer ?? null : ts.isParameter(owner) ? owner : null
+  }
+  // A static value lineage, not a printed-name or function-wide kind bucket. Known
+  // identifiers use declaration Symbols; stable aliases and indexed paths retain their
+  // actual base/index identities. Unsupported expressions remain conservative/opaque.
+  const receiverKey = (value: ts.Node, seen = new Set<ts.Symbol>()): string | null => {
+    if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isTypeAssertionExpression(value) || ts.isNonNullExpression(value))
+      return receiverKey(value.expression, seen)
+    if (ts.isParameter(value)) return nodeKey(value)
+    if (ts.isIdentifier(value)) {
+      const symbol = checker.getSymbolAtLocation(value)
+      if (!symbol) return null
+      const declaration = symbol.declarations?.[0]
+      if (declaration && ts.isBindingElement(declaration) &&
+          (declaration.propertyName ?? declaration.name).getText() === 'kind') {
+        const receiver = bindingReceiver(declaration)
+        return receiver ? receiverKey(receiver, seen) : null
       }
-      byFunction.set(fn, reader)
+      if (!seen.has(symbol) && declaration && ts.isVariableDeclaration(declaration) && declaration.initializer &&
+          ts.isVariableDeclarationList(declaration.parent) && (declaration.parent.flags & ts.NodeFlags.Const)) {
+        // Calls/object construction create a new bound value. Resolvable value/path
+        // aliases (including transparent wrappers) unfold; otherwise keep this binding.
+        const followed = new Set(seen); followed.add(symbol)
+        const key = receiverKey(declaration.initializer, followed)
+        if (key) return key
+      }
+      return symbolKey(symbol)
+    }
+    if (ts.isPropertyAccessExpression(value)) {
+      const base = receiverKey(value.expression, seen)
+      if (!base) return null
+      if (value.name.text === 'kind' && checker.isTypeAssignableTo(checker.getNonNullableType(checker.getTypeAtLocation(value.expression)), surfaceType))
+        return base
+      return `${base}.${value.name.text}`
+    }
+    if (ts.isElementAccessExpression(value) && value.argumentExpression) {
+      const base = receiverKey(value.expression, seen)
+      if (!base) return null
+      if (ts.isStringLiteralLike(value.argumentExpression) && value.argumentExpression.text === 'kind' &&
+          checker.isTypeAssignableTo(checker.getNonNullableType(checker.getTypeAtLocation(value.expression)), surfaceType)) return base
+      const index = receiverKey(value.argumentExpression, seen)
+      return index ? `${base}[${index}]` : null
+    }
+    if (ts.isStringLiteralLike(value) || ts.isNumericLiteral(value)) return `${value.kind}:${JSON.stringify(value.text)}`
+    return null
+  }
+  const readerFor = (fn: ts.SignatureDeclaration, source: ts.SourceFile, value: ts.Node): SurfaceKindReader => {
+    let receivers = byFunction.get(fn)
+    if (!receivers) { receivers = new Map(); byFunction.set(fn, receivers) }
+    const key = receiverKey(value)
+    const identity = key ?? 'unresolved-receiver'
+    let reader = receivers.get(identity)
+    if (!reader) {
+      reader = { file: path.relative(rootDir, source.fileName), fn: functionName(fn),
+        receiver: value.getText(source), literals: new Set<string>(), opaque: key === null,
+        anchored: false, origins: new Set<string>() }
+      receivers.set(identity, reader)
     }
     return reader
   }
@@ -389,7 +519,7 @@ function collectSurfaceKindReaders(
         if (checker.isTypeAssignableTo(objectType, surfaceType)) {
           const fn = enclosingFunction(node)
           if (fn) {
-            const reader = readerFor(fn, source)
+            const reader = readerFor(fn, source, node.expression)
             reader.origins.add('property')
             recordLiteralsAt(node, reader)
             followLocalAlias(node, fn, reader)
@@ -409,7 +539,7 @@ function collectSurfaceKindReaders(
         if (checker.isTypeAssignableTo(objectType, surfaceType)) {
           const fn = enclosingFunction(node)
           if (fn) {
-            const reader = readerFor(fn, source)
+            const reader = readerFor(fn, source, node.expression)
             reader.origins.add('element')
             recordLiteralsAt(node, reader)
             followLocalAlias(node, fn, reader)
@@ -427,7 +557,7 @@ function collectSurfaceKindReaders(
           if (checker.isTypeAssignableTo(patternType, surfaceType)) {
             const fn = enclosingFunction(node)
             if (fn) {
-              const reader = readerFor(fn, source)
+              const reader = readerFor(fn, source, bindingReceiver(node) ?? node.parent)
               reader.origins.add('destructure')
               recordLiteralsFromReferences(node.name, fn, reader)
             }
@@ -466,7 +596,7 @@ function collectSurfaceKindReaders(
             ts.isArrowFunction(fn) ||
             ts.isMethodDeclaration(fn)
           ) {
-            const reader = readerFor(fn, source)
+            const reader = readerFor(fn, source, node.name)
             reader.origins.add('kind-param')
             recordLiteralsFromReferences(node.name, fn, reader)
           }
@@ -478,32 +608,25 @@ function collectSurfaceKindReaders(
     visit(source)
   }
 
-  // Second pass: does each enumerating function REFERENCE an SSOT anchor identifier?
-  //
-  // "Reference", not "mention": the identifier that NAMES the function is excluded. Without that
-  // exclusion the SSOT predicate anchors itself — `isSessionSurface` is both an anchor name and its own
-  // declaration name, so collapsing its exhaustive switch to `default: return false` left this guard
-  // green (measured: the mutation survived at 7/7 before this exclusion existed). It is also a general
-  // bypass in the other direction: any unanchored enumerator could clear the guard by renaming itself
-  // to an anchor. A declaration name proves nothing about routing through the SSOT; only a use does.
-  for (const [fn, reader] of byFunction) {
-    const declarationNames = new Set<ts.Node>()
-    if ((ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) && fn.name) {
-      declarationNames.add(fn.name)
-    }
-    if (ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name)) {
-      declarationNames.add(fn.parent.name)
-    }
+  // Actual owner AND corresponding value, in this direct execution chain; another
+  // receiver or unused nested function cannot discharge this enumeration obligation.
+  for (const [fn, receivers] of byFunction) {
     const visit = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && ANCHOR_IDENTIFIERS.has(node.text) && !declarationNames.has(node)) {
-        reader.anchored = true
+      if (ts.isCallExpression(node) && belongsToInvocationChain(node, fn)) {
+        const symbol = resolvedCallSymbol(checker, node)
+        if (symbol && anchors.has(symbol) && node.arguments[0]) {
+          const key = receiverKey(node.arguments[0])
+          const reader = key && receivers.get(key)
+          if (reader) reader.anchored = true
+        }
       }
       ts.forEachChild(node, visit)
     }
     visit(fn)
   }
 
-  return { readers: [...byFunction.values()], scanned }
+  return { readers: [...byFunction.values()].flatMap(receivers => [...receivers.values()]), scanned }
+
 }
 
 function buildDesktopProgram(): { program: ts.Program; checker: ts.TypeChecker } {
@@ -519,6 +642,8 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
   const { program, checker } = buildDesktopProgram()
   const declFile = path.join(LIB_DIR, 'workbench-tabs.ts')
   const surfaceType = resolveSurfaceType(program, checker, declFile)
+  const centralFile = path.join(LIB_DIR, 'workbench-surface-kinds.ts')
+  const discovery = discoverSurfaceAnchors(program, checker, surfaceType!, centralFile)
 
   it('self-check 1: the WorkbenchSurface union anchor resolves to its six members', () => {
     // Without this the whole guard could pass by resolving `null`/`any` and matching nothing. Pinning
@@ -533,6 +658,19 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
       if (kindType.isStringLiteral()) kinds.add(kindType.value)
     }
     expect([...kinds].sort()).toEqual(['agent', 'browser', 'file', 'git-diff', 'launcher', 'terminal'])
+
+    expect(discovery.backstop, 'the central never backstop must resolve uniquely').not.toBeNull()
+    expect(discovery.declaredPredicates.size, 'central predicate discovery must be nonempty').toBeGreaterThan(0)
+    expect(discovery.predicates.size, 'every exported surface predicate must have its real never default').toBe(discovery.declaredPredicates.size)
+    expect(discovery.anchors.size).toBe(discovery.predicates.size + 1)
+    const { readers: centralReaders } = collectSurfaceKindReaders(program, checker, surfaceType!, RENDERER_DIR, discovery.anchors)
+    for (const symbol of discovery.declaredPredicates) {
+      const decl = symbol.declarations!.find(ts.isFunctionDeclaration)!
+      const reader = centralReaders.find((item) => item.file === path.relative(RENDERER_DIR, centralFile) && item.fn === functionName(decl))
+      expect(reader, 'every discovered predicate must remain visible to the original enumerator scan').toBeDefined()
+      expect(reader!.literals.size).toBe(kinds.size)
+      expect(reader!.anchored).toBe(true)
+    }
 
     // The kind union the classifier's ORIGIN-4 test compares against must be the same six, derived
     // from this same anchor. If this route ever returns undefined, origin 4 silently stops looking —
@@ -553,17 +691,40 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
     // the earlier property-access-only classifier.
     const syntheticName = '/synthetic-surface-guard/probe.ts'
     const syntheticSource = [
-      'type WorkbenchSurface =',
+      'export type WorkbenchSurface =',
       "  | { kind: 'a'; x: number }",
       "  | { kind: 'b'; y: number }",
       "  | { kind: 'c'; z: number }",
       // `noLib` means the array methods the membership shape needs must be declared here.
-      'interface Array<T> { includes(value: T): boolean; indexOf(value: T): number }',
-      'interface ReadonlyArray<T> { includes(value: T): boolean }',
+      'declare global {',
+      '  interface Array<T> { includes(value: T): boolean; indexOf(value: T): number }',
+      '  interface ReadonlyArray<T> { includes(value: T): boolean }',
+      '}',
       // A SUBSET union: assignable TO the kind union but not FROM it. A one-directional origin-4 test
       // would flag this as "the kind union" and police an unrelated helper.
       "type SessionKind = 'a' | 'b'",
-      'declare function assertUnreachableSurface(surface: never): never',
+      'export function centralBackstop(surface: never): never { throw 0 }',
+      'export function topicOwner(surface: WorkbenchSurface): surface is { kind: "a"; x: number } | { kind: "b"; y: number } {',
+      '  switch (surface.kind) {',
+      "    case 'a': case 'b': return true",
+      "    case 'c': return false",
+      '    default: return centralBackstop(surface)',
+      '  }',
+      '}',
+      'const renamedTopicOwner = topicOwner',
+      'function predicateAnchoredEnumerator(surface: WorkbenchSurface): number {',
+      "  if (renamedTopicOwner(surface)) return surface.kind === 'a' ? 1 : 2",
+      "  return surface.kind === 'c' ? 3 : 0",
+      '}',
+      'namespace foreignOwner {',
+      '  export function topicOwner(surface: WorkbenchSurface): surface is { kind: "a"; x: number } | { kind: "b"; y: number } {',
+      "    return surface.kind === 'a' || surface.kind === 'b'",
+      '  }',
+      '}',
+      'function falseOwnerEnumerator(surface: WorkbenchSurface): number {',
+      "  if (foreignOwner.topicOwner(surface)) return surface.kind === 'a' ? 1 : 2",
+      "  return surface.kind === 'c' ? 3 : 0",
+      '}',
       // The plain shape the original classifier already caught.
       'function unanchoredEnumerator(surface: WorkbenchSurface): number {',
       "  if (surface.kind === 'a') return surface.x",
@@ -607,12 +768,33 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
       '  return 0',
       '}',
       // The good citizen: exhaustive switch routed through the SSOT backstop.
+      'function sameReceiverTwoKinds(s: WorkbenchSurface, other: WorkbenchSurface) {',
+      '  const alias = s',
+      '  const knownOther = topicOwner(other)',
+      "  return (s.kind === 'a' || alias['kind'] === 'b') && knownOther",
+      '}',
+      'function differentReceiverSingleKinds(left: WorkbenchSurface, right: WorkbenchSurface) {',
+      "  return left.kind === 'a' && right.kind === 'b'",
+      '}',
+      'function unusedNestedOwner(surface: WorkbenchSurface) {',
+      '  const neverCalled = () => centralBackstop(surface as never)',
+      "  return surface.kind === 'a' || surface.kind === 'b'",
+      '}',
+      'function immediateIifeOwner(surface: WorkbenchSurface) {',
+      '  const label = (() => {',
+      '    switch (surface.kind) {',
+      "      case 'a': case 'b': case 'c': return surface.kind",
+      '      default: return centralBackstop(surface)',
+      '    }',
+      '  })()',
+      "  return (surface.kind === 'a' || surface.kind === 'b') && !!label",
+      '}',
       'function anchoredEnumerator(surface: WorkbenchSurface): number {',
       '  switch (surface.kind) {',
       "    case 'a': return surface.x",
       "    case 'b': return surface.y",
       "    case 'c': return surface.z",
-      '    default: return assertUnreachableSurface(surface)',
+      '    default: return centralBackstop(surface)',
       '  }',
       '}',
       // Named like an anchor, routes through nothing. Proves the anchor test reads USES, not the
@@ -663,12 +845,18 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
     const syntheticChecker = syntheticProgram.getTypeChecker()
     const syntheticSurface = resolveSurfaceType(syntheticProgram, syntheticChecker, syntheticName)
     expect(syntheticSurface).not.toBeNull()
+    const syntheticDiscovery = discoverSurfaceAnchors(syntheticProgram, syntheticChecker, syntheticSurface!, syntheticName)
+    expect(syntheticDiscovery.backstop).not.toBeNull()
+    expect(syntheticDiscovery.declaredPredicates.size).toBe(1)
+    expect(syntheticDiscovery.predicates.size).toBe(1)
+    expect(syntheticDiscovery.anchors.size).toBe(2)
 
     const { readers } = collectSurfaceKindReaders(
       syntheticProgram,
       syntheticChecker,
       syntheticSurface!,
-      '/synthetic-surface-guard'
+      '/synthetic-surface-guard',
+      syntheticDiscovery.anchors
     )
     const byName = new Map(readers.map((r) => [r.fn, r]))
 
@@ -683,7 +871,8 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
       'bypassComputedKey',
       'bypassKindParam',
       'bypassMembership',
-      'bypassLocalAlias'
+      'bypassLocalAlias',
+      'falseOwnerEnumerator'
     ]
     for (const name of mustBeFlagged) {
       const reader = byName.get(name)
@@ -698,10 +887,35 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
       expect(byName.get(name)!.literals.size, `${name} must sit exactly on the threshold`).toBe(2)
     }
 
+    const sameReceiver = readers.filter(reader => reader.fn === 'sameReceiverTwoKinds')
+    expect(sameReceiver).toHaveLength(1)
+    expect([...sameReceiver[0]!.literals].sort()).toEqual(['a', 'b'])
+    expect(isEnumerator(sameReceiver[0]!)).toBe(true)
+    expect(sameReceiver[0]!.anchored, 'central owner on another receiver cannot anchor this enumerator').toBe(false)
+    const differentReceivers = readers.filter(reader => reader.fn === 'differentReceiverSingleKinds')
+    expect(differentReceivers, 'different receivers must remain separate').toHaveLength(2)
+    expect(differentReceivers.map(reader => [reader.receiver, [...reader.literals], isEnumerator(reader), reader.anchored]))
+      .toEqual([['left', ['a'], false, false], ['right', ['b'], false, false]])
+
+    const unusedNested = readers.filter(reader => reader.fn === 'unusedNestedOwner')
+    expect(unusedNested).toHaveLength(1)
+    expect([...unusedNested[0]!.literals].sort()).toEqual(['a', 'b'])
+    expect(isEnumerator(unusedNested[0]!)).toBe(true)
+    expect(unusedNested[0]!.anchored, 'an unused nested function cannot anchor the outer reader').toBe(false)
+    const immediateIife = readers.filter(reader => reader.fn === 'immediateIifeOwner')
+    expect(immediateIife).toHaveLength(1)
+    expect([...immediateIife[0]!.literals].sort()).toEqual(['a', 'b'])
+    expect(isEnumerator(immediateIife[0]!)).toBe(true)
+    expect(immediateIife[0]!.anchored, 'a direct IIFE must propagate the same receiver owner').toBe(true)
+
     const anchored = byName.get('anchoredEnumerator')
     expect(anchored, 'classifier must see the anchored enumerator').toBeDefined()
     expect(isEnumerator(anchored!)).toBe(true)
     expect(anchored!.anchored).toBe(true)
+    const predicateAnchored = byName.get('predicateAnchoredEnumerator')
+    expect(predicateAnchored).toBeDefined()
+    expect(isEnumerator(predicateAnchored!)).toBe(true)
+    expect(predicateAnchored!.anchored, 'an aliased call must bind to the actual central exported predicate').toBe(true)
 
     // The self-anchoring bypass: a function may not clear the guard by carrying an anchor's NAME.
     // Measured before this held: collapsing the real `isSessionSurface` to `default: return false` kept
@@ -745,7 +959,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
     // `rendererSources` walk that feeds the program — see its docstring for why sharing that walk made
     // this assertion unable to fail. `ROOT_SKIP_DIRECTORIES` is therefore not taken on faith either: a
     // `.ts` file appearing under `assets`/`styles` shows up here as unscanned.
-    const { scanned } = collectSurfaceKindReaders(program, checker, surfaceType!, RENDERER_DIR)
+    const { scanned } = collectSurfaceKindReaders(program, checker, surfaceType!, RENDERER_DIR, discovery.anchors)
     const onDisk = rendererFilesOnDisk()
     expect(onDisk.length, 'the renderer must not be empty — a wrong root would read as full coverage')
       .toBeGreaterThan(20)
@@ -759,7 +973,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
   })
 
   it('every consumer that branches on 2+ surface kinds routes through the exhaustiveness SSOT', () => {
-    const { readers } = collectSurfaceKindReaders(program, checker, surfaceType!, RENDERER_DIR)
+    const { readers } = collectSurfaceKindReaders(program, checker, surfaceType!, RENDERER_DIR, discovery.anchors)
 
     // The scan must have actually found the known enumerators. A checker that resolved nothing yields an
     // empty list, which would make the assertion below pass for the wrong reason. (Directory coverage is
@@ -776,7 +990,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
       .filter((r) => !r.anchored)
       .map(
         (r) =>
-          `${r.file}::${r.fn} branches on {${[...r.literals].sort().join(', ')}}` +
+          `${r.file}::${r.fn} [${r.receiver}] branches on {${[...r.literals].sort().join(', ')}}` +
           `${r.opaque ? ' (+ unreadable branch)' : ''} via ${[...r.origins].sort().join('+')}`
       )
       .sort()
@@ -784,7 +998,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
     expect(
       unanchored,
       'A consumer branches on multiple WorkbenchSurface kinds without routing through the ' +
-        'exhaustiveness SSOT (assertUnreachableSurface / isSessionSurface). Add a `default: return ' +
+        'exhaustiveness SSOT (central never backstop / source-derived exported predicate). Add a `default: return ' +
         'assertUnreachableSurface(surface)` to its switch, or use `isSessionSurface` for the ' +
         'agent-or-terminal test, so a new surface kind fails to compile here instead of being ' +
         'silently mishandled. See src/renderer/src/lib/workbench-surface-kinds.ts.'
