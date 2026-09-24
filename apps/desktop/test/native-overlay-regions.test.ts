@@ -22,6 +22,31 @@ function node(role: string, bounds = { x: 20, y: 50, width: 120, height: 80 }): 
   return element
 }
 function flushFrame(): void { const pending = frame; frame = undefined; pending?.() }
+it.each(['portal', 'popover'])('only the open %s float declares its own real Browser stages and observes their resize', kind => {
+  const popup = node('dialog'), stage = document.createElement('div'), hidden = document.createElement('div')
+  stage.setAttribute('data-native-browser-stage', 'inside'); hidden.setAttribute('data-native-browser-stage', 'unrelated')
+  const bounds = { x: 25, y: 65, width: 100, height: 60 }
+  stage.getBoundingClientRect = () => ({ ...bounds, left: bounds.x, top: bounds.y, right: bounds.x + bounds.width, bottom: bounds.y + bounds.height, toJSON() {} })
+  const hiddenGeometry = vi.spyOn(hidden, 'getBoundingClientRect')
+  popup.appendChild(stage); document.getElementById('root')!.appendChild(hidden)
+  const observed = vi.fn(); let resized!: () => void
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized = callback } observe = observed; disconnect() {} })
+  if (kind === 'popover') { popup.setAttribute('popover', 'auto'); document.getElementById('root')!.appendChild(popup) }
+  const publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1.25, publish).dispose
+  if (kind === 'popover') {
+    expect(publish.mock.calls).toEqual([[[], undefined]])
+    const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' }); popup.dispatchEvent(event); flushFrame()
+  }
+  const expected = { id: 'chrome-1', bounds: { x: 25, y: 62.5, width: 150, height: 100 }, radius: 10,
+    browserStages: [{ browserId: 'inside', bounds: { x: 31.25, y: 81.25, width: 125, height: 75 } }] }
+  expect(publish.mock.calls.at(-1)).toEqual([[expected], undefined])
+  expect(observed.mock.calls.map(call => call[0])).toEqual([popup, stage])
+  expect(hiddenGeometry).not.toHaveBeenCalled()
+  bounds.width = 90; resized(); flushFrame()
+  expect(publish.mock.calls.at(-1)![0]).toEqual([{ ...expected, browserStages: [{ browserId: 'inside', bounds: { x: 31.25, y: 81.25, width: 112.5, height: 75 } }] }])
+  expect(hiddenGeometry).not.toHaveBeenCalled()
+})
 it.each([false, true])('root terminal scroll performs zero new overlay work with unrelated float=%s', withFloat => {
   const root = document.getElementById('root')!
   const terminal = document.createElement('div'), rows = document.createElement('div')

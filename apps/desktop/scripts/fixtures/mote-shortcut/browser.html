@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Original native page</title>
+<style>
+  html, body { margin: 0; min-height: 100%; background: #f3fff7; color: #233a2b; font: 16px/1.4 system-ui; }
+  main { padding: 20px; }
+  h1 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+  p { margin: 10px 0; }
+  button, input { display: block; box-sizing: border-box; margin: 16px 0; padding: 9px 12px; font: inherit; }
+  button { margin-left: auto; max-width: 100%; border: 1px solid #759983; border-radius: 6px; background: #ffffff; color: inherit; }
+  input { max-width: 100%; width: 250px; border: 1px solid #759983; border-radius: 6px; }
+</style>
+<main>
+  <h1 id="page-name">Original native page</h1>
+  <p>This is the original live Browser owner, with ordinary page controls.</p>
+  <button id="native-proof-action" type="button">Continue on this page</button>
+  <input id="native-proof-editor" aria-label="Original page draft" placeholder="Keep this page available">
+  <p>Completed clicks: <output id="click-count">0</output></p>
+</main>
+<script>
+  const params = new URLSearchParams(location.search)
+  const owner = params.get('owner')
+  if (!owner) throw new Error('The private native fixture requires its exact Browser owner id')
+  document.getElementById('page-name').textContent = params.get('label') || 'Original native page'
+  const counter = document.getElementById('click-count')
+  const events = []
+  const keyboardEvents = []
+  let clicks = 0, lastTrusted = null
+  const action = document.getElementById('native-proof-action')
+  for (const type of ['mousedown', 'mouseup', 'click']) action.addEventListener(type, event => {
+    events.push({ type: event.type, target: event.target.id, trusted: event.isTrusted })
+  })
+  action.addEventListener('click', event => {
+    clicks += 1
+    lastTrusted = event.isTrusted
+    counter.textContent = String(clicks)
+  })
+  const editor = document.getElementById('native-proof-editor')
+  for (const type of ['keydown', 'keyup', 'compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input']) editor.addEventListener(type, event => {
+    keyboardEvents.push({ type: event.type, key: event.key, code: event.code, data: event.data,
+      inputType: event.inputType, isComposing: event.isComposing, trusted: event.isTrusted })
+  })
+  window.nativeFixture = { owner, facts: () => ({ owner, clicks, lastTrusted, events: events.slice(),
+    keyboardEvents: keyboardEvents.slice(), editorFocused: document.activeElement === editor,
+    focused: document.hasFocus(), visibility: document.visibilityState, draft: editor.value }) }
+</script>
+</html>

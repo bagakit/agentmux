@@ -1,9 +1,13 @@
 import { WebContentsView, type BrowserWindow } from 'electron'
 import type { BrowserBounds } from '../shared/contracts.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
-import { boundsOverlap, NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT, type NativeBrowserPointer, type NativeOverlayReceipt, type NativeOverlayRegion } from '../shared/native-overlay.js'
+import { boundsOverlap, NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT, type NativeBrowserInput, type NativeOverlayReceipt, type NativeOverlayRegion } from '../shared/native-overlay.js'
+import type { BrowserViewManager, NativeBrowserOwner, NativeBrowserPageInput } from './browser-view-manager.js'
 
 const CHROME_DOCUMENT = 'data:text/html,' + encodeURIComponent('<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}img{display:block;width:100%;height:100%;pointer-events:none}</style><img alt="" aria-hidden="true">')
+const contains = (outer: BrowserBounds, inner: BrowserBounds): boolean => inner.x >= outer.x && inner.y >= outer.y &&
+  inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height
+const atPoint = (bounds: BrowserBounds, x: number, y: number): boolean => x >= bounds.x && y >= bounds.y && x < bounds.x + bounds.width && y < bounds.y + bounds.height
 
 interface Projection {
   view: WebContentsView
@@ -32,24 +36,37 @@ export class NativeOverlaySurfaces {
   private disposed = false
   private requested: NativeOverlayRegion[] = []
   private generation = 0
-  constructor(private readonly window: BrowserWindow, private readonly visibleBrowsers: () => BrowserBounds[], private readonly onWarning: (warning: string) => void,
-    private readonly onBrowserPointer: (point: NativeBrowserPointer) => void) {}
+  constructor(private readonly window: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner'>, private readonly onWarning: (warning: string) => void,
+    private readonly onBrowserInput: (input: NativeBrowserInput) => void) {}
 
-  forwardBrowserPointer(bounds: BrowserBounds, input: Electron.InputEvent): void {
-    if (!this.requested.length || this.disposed || this.window.webContents.isDestroyed() || input.type !== 'mouseDown') return
-    const pointer = input as Electron.MouseInputEvent
-    if (!Number.isFinite(pointer.x) || !Number.isFinite(pointer.y) || pointer.x < 0 || pointer.y < 0 || pointer.x >= bounds.width || pointer.y >= bounds.height) return
-    const x = bounds.x + pointer.x, y = bounds.y + pointer.y
-    // Projected content owns its own input. Only the still-operable page sends outside dismissal.
-    if ([...this.projections.values()].some(projection => {
-      const box = projection.region.bounds
-      return x >= box.x && x < box.x + box.width && y >= box.y && y < box.y + box.height
-    })) return
-    const zoom = this.window.webContents.getZoomFactor()
+  forwardBrowserInput(owner: NativeBrowserOwner, input: NativeBrowserPageInput): boolean {
+    if (!this.requested.length || this.disposed || this.window.webContents.isDestroyed() || this.browsers.nativeOwner(owner.browserId)?.view !== owner.view) return false
+    const projection = [...this.projections.values()].reverse().find(candidate => this.current(candidate) &&
+      candidate.region.browserStages?.some(stage => this.containedOwner(candidate, stage)?.view === owner.view))
     try {
-      this.onBrowserPointer({ x: x / zoom, y: y / zoom, button: pointer.button === 'right' ? 2 : pointer.button === 'middle' ? 1 : 0 })
+      if (input.type === 'escape') {
+        if (!projection) return false
+        this.onBrowserInput({ type: 'escape', browserId: owner.browserId, overlayId: projection.region.id })
+        return true
+      }
+      const pointer = input.event
+      if (!Number.isFinite(pointer.x) || !Number.isFinite(pointer.y)) return false
+      const x = owner.bounds.x + pointer.x, y = owner.bounds.y + pointer.y
+      if (pointer.type !== 'mouseLeave') {
+        if (!atPoint(owner.bounds, x, y)) return false
+        // CDP and other native producers also emit input-event. Never relay an action from a
+        // page covered by another actual native owner, even when the source Browser is alive.
+        const topmost = [...this.window.contentView.children].reverse().find(view => view.getVisible() && atPoint(view.getBounds(), x, y))
+        if (topmost !== owner.view) return false
+      }
+      const zoom = this.window.webContents.getZoomFactor()
+      this.onBrowserInput({ type: pointer.type === 'mouseDown' ? 'pointerDown' : pointer.type === 'mouseLeave' ? 'pointerLeave' : 'pointerMove',
+        browserId: owner.browserId, ...(projection ? { overlayId: projection.region.id } : {}),
+        x: x / zoom, y: y / zoom, button: pointer.button === 'right' ? 2 : pointer.button === 'middle' ? 1 : 0 })
+      return false
     } catch {
-      this.onWarning('The native page input reached the Browser, but its outside-click notice could not reach the floating panel. The Browser remains available; close the panel with Escape or its original control.')
+      this.onWarning('The native page input reached the Browser, but its floating-panel notice could not reach the original owner. The Browser remains available; close the panel with Escape or its original control.')
+      return false
     }
   }
 
@@ -63,7 +80,7 @@ export class NativeOverlaySurfaces {
       return { projected: 0, capturedPixels: 0 }
     }
     const { width, height } = this.window.getContentBounds()
-    const browsers = this.visibleBrowsers()
+    const browsers = this.browsers.visibleNativeBounds()
     const regions: NativeOverlayRegion[] = []
     let capturedPixels = 0
     for (const region of input) {
@@ -73,6 +90,8 @@ export class NativeOverlaySurfaces {
       bounds.height = Math.min(bounds.height, height - bounds.y)
       if (bounds.width <= 0 || bounds.height <= 0 || !browsers.some(browser => boundsOverlap(browser, bounds))) continue
       if (region.scrim !== undefined && !/^rgba?\([\d.,%\s]+\)$/.test(region.scrim)) throw new Error('Invalid native chrome scrim')
+      if (region.browserStages !== undefined && (!Array.isArray(region.browserStages) || region.browserStages.some(stage =>
+        typeof stage.browserId !== 'string' || !stage.browserId.trim() || !normalizeBrowserBounds(stage.bounds)))) throw new Error('Invalid native Browser stage declaration')
       if (region.scrim === undefined) capturedPixels += bounds.width * bounds.height
       if (capturedPixels > NATIVE_OVERLAY_PIXEL_LIMIT) throw new Error('Invalid native chrome pixel budget')
       regions.push({ ...region, bounds })
@@ -84,7 +103,9 @@ export class NativeOverlaySurfaces {
     for (const region of regions) {
       if (generation !== this.generation || this.disposed) break
       let projection = this.projections.get(region.id)
+      let created = false
       if (!projection) {
+        created = true
         const view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
         view.setBackgroundColor('#00000000')
         view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -107,7 +128,7 @@ export class NativeOverlaySurfaces {
         projection.paintStage = 'Chrome geometry'
         // CSS pixels scaled by UI zoom can be fractional; the native View takes integer pixels.
         projection.view.setBorderRadius(Math.round(region.radius))
-        this.window.contentView.addChildView(projection.view)
+        if (created) this.window.contentView.addChildView(projection.view)
         await projection.ready
         await boundedChromePaint(this.paint(projection))
         if (this.current(projection) && generation === this.generation) projection.interactive = true
@@ -173,6 +194,43 @@ export class NativeOverlaySurfaces {
       projection.throttlingSynchronized = true
     }
     projection.view.setBounds(projection.region.bounds)
+    this.arrangeLayers()
+  }
+
+  private containedOwner(projection: Projection, stage: NonNullable<NativeOverlayRegion['browserStages']>[number]): NativeBrowserOwner | undefined {
+    const declared = normalizeBrowserBounds(stage.bounds), owner = this.browsers.nativeOwner(stage.browserId)
+    if (!declared || !owner || !contains(declared, owner.bounds) || !contains(projection.view.getBounds(), owner.bounds) ||
+      !this.window.contentView.children.includes(owner.view)) return
+    return owner
+  }
+
+  private arrangeLayers(): void {
+    if (this.disposed || this.window.isDestroyed()) return
+    const layers = this.requested.flatMap(region => {
+      const projection = this.projections.get(region.id)
+      if (!projection || !this.current(projection)) return []
+      const pages = projection.region.browserStages?.flatMap(stage => {
+        const owner = this.containedOwner(projection, stage)
+        return owner ? [owner.view] : []
+      }) ?? []
+      return [{ projection, pages: [...new Set(pages)] }]
+    })
+    const contained = new Set(layers.flatMap(layer => layer.pages))
+    const chrome = new Set([...this.projections.values()].map(projection => projection.view))
+    const background = this.window.contentView.children.filter(view => !chrome.has(view as WebContentsView) && !contained.has(view as WebContentsView) && view.getVisible())
+    let previous = -1
+    for (const { projection, pages } of layers) {
+      // Original background pages stay put. Only a layer that is actually below an intersecting
+      // page or its preceding float moves. A later popup can still cover an earlier float's page.
+      let floor = previous
+      for (const view of background) if (boundsOverlap(view.getBounds(), projection.view.getBounds())) floor = Math.max(floor, this.window.contentView.children.indexOf(view))
+      if (this.window.contentView.children.indexOf(projection.view) <= floor) this.window.contentView.addChildView(projection.view)
+      previous = this.window.contentView.children.indexOf(projection.view)
+      for (const view of pages) {
+        if (this.window.contentView.children.indexOf(view) <= previous) this.window.contentView.addChildView(view)
+        previous = this.window.contentView.children.indexOf(view)
+      }
+    }
   }
 
   private forward(projection: Projection, input: Electron.InputEvent): void {
