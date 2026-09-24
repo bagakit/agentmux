@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import ts from 'typescript'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -526,28 +527,50 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(unclassified).toHaveLength(0)
   })
 
-  it('derives the retained Header layout host without allowing body-backed or otherwise unknown overlay hosts', () => {
-    const source = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/AgentRegionHeader.tsx'), 'utf8')
+  it('derives retained layout hosts without allowing any body-backed or otherwise unknown attachment', () => {
+    const sources = ['AgentRegionHeader.tsx', 'StableWorkbenchView.tsx'].map(file => ({
+      file, source: readFileSync(join(import.meta.dirname, '../src/renderer/src/components', file), 'utf8')
+    }))
     const fixture = mkdtempSync(join(tmpdir(), 'agentmux-overlay-host-source-'))
-    const file = join(fixture, 'Header.tsx')
     try {
-      writeFileSync(file, source)
+      for (const { file, source } of sources) {
+        const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+        const calls: ts.CallExpression[] = []
+        function visit(node: ts.Node): void {
+          if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'createPortal') calls.push(node)
+          ts.forEachChild(node, visit)
+        }
+        visit(ast)
+        expect(calls.length).toBe(1)
+        writeFileSync(join(fixture, file), source)
+      }
       const inventory = deriveOverlayInventoryFromSource(fixture)
       expect(inventory.length).toBeGreaterThan(0)
       expect(inventory.map(item => ({ kind: item.kind, host: item.host }))).toEqual([
         { kind: 'radix-portal', host: 'window-overlay-host' }
       ])
-      for (const [before, after] of [
-        ['destination.append(host)', 'document.body.append(host)'],
-        ['const destination = target ?? home.current', 'const destination = document.body'],
-        ['document.getElementById(targetId)', 'document.body']
-      ] as const) {
-        expect(source.split(before).length - 1).toBe(1)
-        writeFileSync(file, source.replace(before, after))
-        const unknown = deriveOverlayInventoryFromSource(fixture).filter(item => item.kind === 'createPortal')
-        expect(unknown.map(item => ({ host: item.host, layer: item.layer }))).toEqual([
-          { host: 'unclassified', layer: 'unclassified' }
-        ])
+      for (const { file, source } of sources) {
+        const attachments: [string, string][] = [
+          ['destination.append(host)', 'document.body.append(host)'],
+          ["document.createElement('div')", 'document.body'],
+          ['destination.append(host)', '{ destination.append(host); document.body.append(host) }']
+        ]
+        if (source.includes('target ?? home.current')) attachments.push(
+          ['const destination = target ?? home.current', 'const destination = document.body'],
+          ['document.getElementById(targetId)', 'document.body'])
+        if (source.includes('parking.current.append(host)')) attachments.push(
+          ['parking.current.append(host)', 'document.body.append(host)'],
+          ['document.getElementById(destinationId)', 'document.body'])
+        expect(attachments.length).toBe(5)
+        for (const [before, after] of attachments) {
+          expect(source.split(before).length - 1).toBe(1)
+          writeFileSync(join(fixture, file), source.replace(before, after))
+          const unknown = deriveOverlayInventoryFromSource(fixture).filter(item => item.kind === 'createPortal')
+          expect(unknown.map(item => ({ file: item.file, host: item.host, layer: item.layer }))).toEqual([
+            { file, host: 'unclassified', layer: 'unclassified' }
+          ])
+        }
+        writeFileSync(join(fixture, file), source)
       }
     } finally { rmSync(fixture, { recursive: true, force: true }) }
   })
