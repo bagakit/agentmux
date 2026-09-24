@@ -634,7 +634,6 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   try {
     await run('open', [
       '-n',
-      '-j',
       '--stdout', stdoutPath,
       '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
