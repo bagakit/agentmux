@@ -83,6 +83,7 @@ import { mintAgentSessionId } from './agent-session-id.js'
 import {
   AgentMuxFileAgentSessionStore,
   loadAgentSessions,
+  loadSessionHistorySources,
   type AgentMuxAgentSessionStore
 } from './agent-session-store.js'
 import {
@@ -132,6 +133,7 @@ import type {
   AgentNativeSessionHandle,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
+  AgentSessionHistoryDescriptor,
   AgentTerminalCapabilityState,
   AgentTerminalOutputChannelState,
   AgentTimelineItem,
@@ -1317,8 +1319,19 @@ export class AgentMuxClient {
   }
 
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
-    this.requireAgentSession(agentSessionId)
+    await this.historyDescriptor(agentSessionId)
     return await this.store.loadTimeline(agentSessionId)
+  }
+
+  /** Discover bounded retained sources without connecting to or controlling Runtime. */
+  async sessionHistorySources(): Promise<AgentSessionHistoryDescriptor[]> {
+    return await loadSessionHistorySources(this.store)
+  }
+
+  private async historyDescriptor(agentSessionId: string): Promise<AgentSessionHistoryDescriptor> {
+    const descriptor = (await this.sessionHistorySources()).find(entry => entry.agentSessionId === agentSessionId)
+    if (!descriptor) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
+    return descriptor
   }
 
   /** Read existing Provider conversation history without controlling the Session's Run. */
@@ -1341,10 +1354,10 @@ export class AgentMuxClient {
     const { controller, read } = lifetime
     try {
       // Conversation identity belongs to the durable Store, even before Runtime connection or recovery.
-      const sessions = await read(loadAgentSessions(this.store))
+      const descriptor = await read(this.historyDescriptor(agentSessionId))
       controller.signal.throwIfAborted()
-      const session = sessions.find((entry) => entry.agentSessionId === agentSessionId)
-      if (!session) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
+      const session = descriptor.history
+      if (!session) throw new AgentMuxError('No native history locator was retained for this Session.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
       const provider = this.providers.get(session.providerId)
       if (!provider.readSessionHistoryPage) {
         throw new AgentMuxError('This Provider does not expose native conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
@@ -1362,10 +1375,11 @@ export class AgentMuxClient {
         ...(options.cursor === undefined ? {} : { cursor: options.cursor })
       }))
       controller.signal.throwIfAborted()
-      const current = (await read(loadAgentSessions(this.store)))
+      const currentDescriptor = (await read(this.sessionHistorySources()))
         .find((entry) => entry.agentSessionId === agentSessionId)
+      const current = currentDescriptor?.history
       controller.signal.throwIfAborted()
-      if (!current || current.providerId !== source.providerId || current.nativeHandle?.kind !== 'provider' ||
+      if (!current || currentDescriptor?.hostId !== descriptor.hostId || current.providerId !== source.providerId || current.nativeHandle?.kind !== 'provider' ||
         current.nativeHandle.providerId !== source.providerId || current.nativeHandle.sessionId !== source.nativeSessionId ||
         current.nativeHandle.transcriptPath !== handle.transcriptPath) {
         throw new AgentMuxError('Native history identity changed while reading; reopen its newest page.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
