@@ -44,7 +44,7 @@ try {
   // Consume that shared producer; this Renderer-only proof must not clear its concurrent dist.
   receipt.owning = tests('owning', 'apps/desktop/scripts/fixtures/focus-project-history/vitest.owning.config.mts')
   receipt.mutations = []
-  for (const mutation of ['window-filter', 'current-members', 'historical-owner']) {
+  for (const mutation of ['window-filter', 'current-members', 'historical-owner', 'presence-cost']) {
     const result = tests(`mutation-${mutation}`, 'apps/desktop/scripts/fixtures/focus-project-history/vitest.mutation.config.mts', { red: true, env: { AGENTMUX_FOCUS_HISTORY_MUTATION: mutation } })
     if (result.total !== receipt.owning.total) throw new Error(`${mutation} changed the test population.`)
     receipt.mutations.push({ mutation, ...result })
