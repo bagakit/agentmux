@@ -68,9 +68,29 @@ try {
   receipt.sourcePass = true
   receipt.taskDone = false
   receipt.pending = ['ordinary private GUI restart with exact delivery binding', 'actual wide/narrow interaction and independent visual review']
+  if (!args.includes('--source-only')) {
+    const guiFile = process.env.AGENTMUX_FOCUS_PROJECT_HISTORY_GUI_RECEIPT
+    const reviewFile = process.env.AGENTMUX_FOCUS_PROJECT_HISTORY_VISUAL_REVIEW
+    if (!guiFile || !reviewFile) throw new Error('Source qualified; supply the sealed actual GUI receipt and independent image review for final qualification. This Task remains active.')
+    const guiBytes = readFileSync(resolve(root, guiFile)), gui = JSON.parse(guiBytes)
+    const reviewBytes = readFileSync(resolve(root, reviewFile)), review = JSON.parse(reviewBytes)
+    if (gui.schema !== 'agentmux.focus-project-history-gui.v1' || gui.passed !== true || gui.phases?.length !== 2 || gui.phases[0].actual.pid === gui.phases[1].actual.pid || gui.originalRuns?.length !== 3 || JSON.stringify(gui.originalRuns) !== JSON.stringify(gui.survivingRuns)) throw new Error('Final GUI qualification requires two ordinary processes and exact surviving private Run/PID facts.')
+    run('gui-main-ancestry', ['git', 'merge-base', '--is-ancestor', gui.candidate, 'HEAD'])
+    for (const path of sourcePaths) if (gui.inputs?.[path] !== before[path] || gui.inputsAfter?.[path] !== before[path]) throw new Error(`${path} differs from the actual complete Main GUI cut; recapture this slice rather than signing stale bytes.`)
+    if (!gui.cleanup?.privateRootRemoved || gui.cleanup.errors?.length || gui.cleanup.remaining?.length) throw new Error('Private GUI/profile/Run cleanup remains incomplete.')
+    if (review.schema !== 'agentmux.focus-project-history-visual-review.v1' || review.verdict !== 'pass' || typeof review.reviewerAgentId !== 'string' || !review.reviewerAgentId || review.guiReceiptSha256 !== sha(guiBytes) || !Array.isArray(review.viewedImages) || review.viewedImages.length !== gui.visualPaths?.length || review.viewedImages.length < 6) throw new Error('Independent review must identify the exact GUI receipt and every real wide/fold/narrow image; capture success alone is insufficient.')
+    for (const image of gui.visualPaths) {
+      const expected = sha(readFileSync(resolve(gui.sourceRoot, image)))
+      if (!review.viewedImages.some(viewed => viewed.path === image && viewed.sha256 === expected && typeof viewed.observation === 'string' && viewed.observation.trim().length > 0)) throw new Error(`${image} lacks an actual nonempty independent image observation on these bytes.`)
+    }
+    receipt.gui = { file: guiFile, sha256: sha(guiBytes), candidate: gui.candidate, compiled: gui.compiled, originalRuns: gui.originalRuns, phases: gui.phases.map(phase => ({ phase: phase.phase, pid: phase.actual.pid })) }
+    receipt.visualReview = { file: reviewFile, sha256: sha(reviewBytes), reviewerAgentId: review.reviewerAgentId, viewedImages: review.viewedImages }
+    receipt.taskDone = true
+    receipt.pending = []
+    receipt.scope = 'Exact retained-focus slice and bound complete Main GUI cut; not installation, native archived Agent body, full Focus or upstream Provider Writer sign-off.'
+  }
   writeFileSync(resolve(directory, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`)
   console.log(`Source qualification: ${relative(root, resolve(directory, 'receipt.json'))}`)
-  if (!args.includes('--source-only')) throw new Error('Source qualified; final GUI/review qualification is still pending. This Task remains active.')
 } catch (error) {
   receipt.error = error instanceof Error ? error.message : String(error)
   writeFileSync(resolve(directory, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`)

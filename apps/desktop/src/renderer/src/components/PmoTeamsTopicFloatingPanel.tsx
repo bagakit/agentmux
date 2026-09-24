@@ -63,6 +63,13 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, onSelect
   </div>
 })
 
+function foreignFloatOwnsKeyboardEvent(event: KeyboardEvent, panel: HTMLElement | null): boolean {
+  const owner = event.target instanceof Element
+    ? event.target.closest('[data-overlay-layer], [popover], [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"]')
+    : null
+  return Boolean(owner && owner !== panel && (!owner.hasAttribute('popover') || owner.matches(':popover-open')))
+}
+
 export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   floating: PmoTeamsTopicFloatingState; setFloating(next: Partial<PmoTeamsTopicFloatingState>): void
 }): React.JSX.Element {
@@ -133,7 +140,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   useEffect(() => {
     if (!floating.preview) return
     const dismiss = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return
+      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || foreignFloatOwnsKeyboardEvent(event, panelRef.current)) return
       event.preventDefault(); event.stopPropagation(); requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
     }
     document.addEventListener('keydown', dismiss, true)
@@ -148,7 +155,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     const leave = (event: PointerEvent) => { if (event.pointerType === 'mouse') leavePmoTeamsTopicFloatingPreview() }
     const pin = () => pinPmoTeamsTopicFloating()
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return
+      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || foreignFloatOwnsKeyboardEvent(event, panel)) return
       event.preventDefault(); event.stopPropagation(); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose()
     }
     panel.addEventListener('pointerenter', enter)
