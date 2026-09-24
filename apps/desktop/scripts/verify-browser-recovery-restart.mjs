@@ -175,7 +175,7 @@ async function identity() {
       'apps/desktop/src/main/browser-frame-documents.ts','apps/desktop/src/main/browser-cdp-session.ts',
       'apps/desktop/src/main/browser-page-dispatch.ts','apps/desktop/src/main/browser-ref-resolve.ts',
       'apps/desktop/src/main/browser-ref-ledger.ts','apps/desktop/src/main/browser-ref-ledger-store.ts',
-      'apps/desktop/src/main/browser-element-context.ts','packages/core/src/browser-page-capability.ts'] : []),
+      'apps/desktop/src/main/browser-selection-script.ts','packages/core/src/browser-page-capability.ts'] : []),
     ...(overlayCase ? ['apps/desktop/src/main/native-overlay-surfaces.ts','apps/desktop/src/shared/native-overlay.ts',
       'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts','apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts',
       'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',

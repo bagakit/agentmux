@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
@@ -15,6 +15,20 @@ function canonical(name: string, globals: Record<string, unknown>) {
 }
 
 describe('canonical Browser recovery boundaries', () => {
+  it('binds every static production source identity to an existing repository file', () => {
+    const file = ts.createSourceFile('canonical.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+    const identity = file.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === 'identity')
+    expect(identity).toHaveLength(1)
+    const paths = new Set<string>()
+    const visit = (node: ts.Node) => {
+      if (ts.isStringLiteral(node) && /^(apps|packages)\/.*\/src\//.test(node.text)) paths.add(node.text)
+      ts.forEachChild(node, visit)
+    }
+    visit(identity[0]!)
+    expect(paths.size).toBeGreaterThan(0)
+    for (const path of paths) expect(existsSync(new URL(`../../../${path}`, import.meta.url)), path).toBe(true)
+  })
+
   it('joins the actual error document by original visible Region geometry without navigating it', async () => {
     const regions = [{ regionId: 'original', browserId: 'browser-a', url: 'http://fixture/disconnected' }, { regionId: 'sibling', browserId: 'browser-b', url: 'http://fixture/b' }]
     const stages = regions.map((region, i) => ({ regionId: region.regionId, x: i * 240, y: 50, width: 234.5, height: 300 }))
