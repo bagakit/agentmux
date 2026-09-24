@@ -15,7 +15,7 @@ import {
   type AgentTerminalInteractionProtocol,
   type PostureControlDeclaration
 } from './agent-interaction.js'
-import { nativeHookHasSubagentSubject, normalizeNativeHook, type AgentNativeHookSpecification } from './hook-normalizer.js'
+import { normalizeNativeHook, type AgentNativeHookSpecification } from './hook-normalizer.js'
 import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import { createBuiltInAgentProviders } from './providers/index.js'
 import type {
@@ -349,17 +349,15 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       }
       return posture.planSet(modeId)
     },
-    normalizeHook(envelope, _context) {
+    normalizeHook(envelope, context) {
       if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }
-      const normalized = normalizeNativeHook(definition.hook, envelope)
+      const normalized = normalizeNativeHook(definition.hook, envelope, context)
       const resolvedEnvelope = envelope.eventName === normalized.eventName
         ? envelope
         : { ...envelope, eventName: normalized.eventName }
-      const mainInteraction = definition.interaction && !nativeHookHasSubagentSubject(
-        definition.hook, normalized.eventName, envelope.payload ?? {}
-      ) ? definition.interaction : undefined
+      const mainInteraction = normalized.mainSubject ? definition.interaction : undefined
       const interaction = mainInteraction
         ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction)
         : undefined

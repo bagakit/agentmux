@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,8 +15,8 @@ import type {
 } from '../src/types.js'
 
 const mainNativeId = 'shared-root-native-id'
-const mainPath = upstreamFixturePath("synthetic/main-native.jsonl")
-const childPath = upstreamFixturePath("synthetic/child-native.jsonl")
+const mainPath = fixturePath("synthetic/main-native.jsonl")
+const childPath = fixturePath("synthetic/child-native.jsonl")
 const providers = ['codex', 'claude'] as const
 type ProviderId = typeof providers[number]
 
@@ -43,7 +43,7 @@ async function withSession(
   const runId = randomUUID()
   await store.compareAndSwap(null, {
     kind: 'agent', agentSessionId, providerId, executorId: providerId,
-    hostId: 'local', workspacePath: upstreamFixturePath("synthetic"), run: { runId }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("synthetic"), run: { runId }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
      createdAt: 1, updatedAt: 1,
     ...(hasMainHandle ? {
@@ -136,13 +136,13 @@ describe('Provider Hook native handle belongs to the main subject', () => {
     await withSession(providerId, false, async ({ feed, stored, reopened }) => {
       await feed('SessionStart')
       expect((await stored()).nativeHandle).toMatchObject({ transcriptPath: mainPath })
-      await feed('PreToolUse', { agent_id: null, transcript_path: upstreamFixturePath("synthetic/updated-main.jsonl"),
+      await feed('PreToolUse', { agent_id: null, transcript_path: fixturePath("synthetic/updated-main.jsonl"),
         tool_input: { agent_id: 'tool-argument-is-not-the-hook-subject' } })
-      expect((await stored()).nativeHandle).toMatchObject({ transcriptPath: upstreamFixturePath("synthetic/updated-main.jsonl") })
-      await feed('PostToolUse', { agent_id: '  ', transcript_path: upstreamFixturePath("synthetic/final-main.jsonl") })
-      await feed('Stop', { transcript_path: upstreamFixturePath("synthetic/stopped-main.jsonl") })
+      expect((await stored()).nativeHandle).toMatchObject({ transcriptPath: fixturePath("synthetic/updated-main.jsonl") })
+      await feed('PostToolUse', { agent_id: '  ', transcript_path: fixturePath("synthetic/final-main.jsonl") })
+      await feed('Stop', { transcript_path: fixturePath("synthetic/stopped-main.jsonl") })
       expect((await reopened()).nativeHandle).toEqual({ kind: 'provider', providerId,
-        sessionId: mainNativeId, transcriptPath: upstreamFixturePath("synthetic/stopped-main.jsonl") })
+        sessionId: mainNativeId, transcriptPath: fixturePath("synthetic/stopped-main.jsonl") })
     })
   })
 
@@ -171,7 +171,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
     const normalize = (eventName: string, payload: Record<string, unknown> = {}) => normalizeNativeHook(specification, {
       receiptId: randomUUID(), agentSessionId: 'synthetic-session', runId, providerId: 'codex', eventName,
       payload: { native_id: mainNativeId, record_path: mainPath, ...payload }
-    })
+    }, {})
     try {
       expect(normalize('Work', { worker_key: 'worker-1', record_path: childPath }).nativeHandle).toBeUndefined()
       expect(normalize('ChildBorn', { record_path: childPath }).nativeHandle).toBeUndefined()
@@ -199,7 +199,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
       subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'], mainStopEvents: ['Stop'] }
     }
     const provider: AgentProvider = { ...base, hook: specification,
-      normalizeHook: (envelope) => normalizeNativeHook(specification, envelope) }
+      normalizeHook: (envelope) => normalizeNativeHook(specification, envelope, {}) }
     await withSession('codex', false, async ({ feed, stored, reopened, events }) => {
       await feed('PreToolUse', { [idKey]: 'child-native-id', transcript_path: childPath })
       expect((await stored()).nativeHandle).toBeUndefined()
