@@ -35,6 +35,7 @@ const uploadCase = process.argv.includes('--case-upload')
 const demonstrationCase = process.argv.includes('--case-demonstration')
 const overlayCase = process.argv.includes('--case-overlay')
 const taskAssetsCase = process.argv.includes('--case-task-assets')
+const taskDownloadCase = process.argv.includes('--case-task-outcome-download')
 const browserToolsCase = process.argv.includes('--case-browser-tools')
 const structuredCase = process.argv.includes('--case-structured-output')
 const outcomeCase = process.argv.includes('--case-outcome')
@@ -50,7 +51,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,browserToolsCase,structuredCase,outcomeCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,browserToolsCase,structuredCase,outcomeCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -58,6 +59,7 @@ if(uploadCase)receipt.case='upload'
 if(demonstrationCase)receipt.case='demonstration'
 if(overlayCase)receipt.case='overlay'
 if(taskAssetsCase)receipt.case='task-assets'
+if(taskDownloadCase)receipt.case='task-outcome-download'
 if(browserToolsCase)receipt.case='browser-tools'
 if(structuredCase)receipt.case='structured-output'
 if(outcomeCase)receipt.case='outcome'
@@ -128,15 +130,19 @@ async function identity() {
     ...(observeNativeBounds ? ['apps/desktop/scripts/browser-native-bounds-observer.mjs'] : []),
     ...(observeRestartLifecycle ? ['apps/desktop/scripts/browser-native-restart-lifecycle-observer.mjs'] : []),
     ...(observeStageDelivery ? ['apps/desktop/scripts/browser-stage-delivery-observer.mjs'] : []),
-    ...(demonstrationCase || taskAssetsCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
+    ...(demonstrationCase || taskAssetsCase || taskDownloadCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
       'apps/desktop/src/main/browser-semantic-target.ts','apps/desktop/src/shared/browser-demonstration.ts','apps/desktop/src/main/browser-cdp-session.ts',
       'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx','apps/desktop/scripts/browser-demonstration-probe-scenario.mjs',
       'apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs',
       'apps/desktop/scripts/verify-browser-demonstration.mjs'] : []),
-    ...(taskAssetsCase ? ['apps/desktop/src/main/browser-task-assets.ts','apps/desktop/src/main/browser-replay-compiler.ts',
+    ...(taskAssetsCase || taskDownloadCase ? ['apps/desktop/src/main/browser-task-assets.ts','apps/desktop/src/main/browser-replay-compiler.ts',
       'apps/desktop/src/shared/browser-task-assets.ts','apps/desktop/src/renderer/src/components/BrowserTaskAssetEditor.tsx',
       'apps/desktop/src/renderer/src/styles/browser-task-assets.css','apps/desktop/scripts/browser-task-assets-probe-scenario.mjs',
-      'apps/desktop/scripts/verify-browser-task-assets.mjs'] : []),
+      'apps/desktop/scripts/verify-browser-task-assets.mjs','apps/desktop/src/main/browser-outcome-criteria.ts',
+      'apps/desktop/src/shared/browser-outcome-criteria.ts','apps/desktop/src/main/browser-completion-control.ts',
+      'apps/desktop/src/main/browser-page-dispatch.ts','apps/desktop/src/main/browser-downloads.ts',
+      'apps/desktop/src/shared/browser-download.ts','apps/desktop/src/main/workspace-files.ts'] : []),
+    ...(taskDownloadCase ? ['apps/desktop/scripts/browser-task-download-outcome-probe-scenario.mjs'] : []),
     ...(overlayCase ? ['apps/desktop/src/main/native-overlay-surfaces.ts','apps/desktop/src/shared/native-overlay.ts',
       'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts','apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts',
       'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
@@ -734,16 +740,32 @@ try {
   const demonstration = demonstrationCase || taskAssetsCase ? await import('./browser-demonstration-probe-scenario.mjs') : null
   const overlay = overlayCase ? await import('./browser-overlay-probe-scenario.mjs') : null
   const taskAssets = taskAssetsCase ? await import('./browser-task-assets-probe-scenario.mjs') : null
+  const taskDownload = taskDownloadCase ? await import('./browser-task-download-outcome-probe-scenario.mjs') : null
   const browserTools = browserToolsCase ? await import('./browser-tools-probe-scenario.mjs') : null
   const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
   const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
   const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
     requestControl:fields=>requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),...fields},join(runtimeDirectory,'control.sock')),
     diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
-    capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,repositoryRoot})
+    capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase||taskDownloadCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,workspacePath,repositoryRoot})
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
+    if(taskDownload && request.url==='/task-completion.bin'){
+      receipt.taskDownload??={requests:[]}
+      // Observe actual durable owner facts at the real HTTP producer; never seed or edit them.
+      void Promise.all(['browser-operation-journal.json','browser-task-assets.json'].map(name=>readFile(join(userData,name),'utf8').then(JSON.parse))).then(([journal,tasks])=>{
+        const operation=journal.operations.find(item=>item.phase==='running'&&item.outcome?.registration.criteria.some(condition=>condition.kind==='download-readable'))
+        assert.ok(operation,'The actual declaration must be durable before its transfer starts')
+        const tuple=operation.outcome.registration.assetRun,run=tasks.runs.find(item=>item.id===tuple.runId)
+        assert.ok(run&&run.operationIds.includes(operation.id)&&run.assetId===tuple.assetId&&run.version===tuple.version)
+        assert.ok(tasks.selectedRuns.some(item=>item.browserId===run.browserId&&item.runId===run.id))
+        receipt.taskDownload.requests.push({path:request.url,operationId:operation.id,assetRun:tuple,registeredBeforeProducer:true})
+        response.writeHead(200,{'content-type':'application/octet-stream','content-length':taskDownload.taskDownloadPayload.length,'content-disposition':'attachment; filename="artifact.bin"'})
+        response.end(taskDownload.taskDownloadPayload)
+      }).catch(error=>{receipt.taskDownload.producerObservationFailure=error.message;response.writeHead(500);response.end('Producer registration unavailable')})
+      return
+    }
     if(uploadCase&&request.url==='/upload-frame'){
       response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><input type="file" aria-label="Frame file">');return
     }
@@ -756,7 +778,7 @@ try {
       response.end(downloadPayload);return
     }
     response.writeHead(200,{'content-type':'text/html'});response.end('<!doctype html><html><head><title>Private Browser '+request.url+'</title></head><body><h1>Private recovery '+request.url.slice(1)+'</h1>'+
-      (downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':uploadCase?'<input type="file" aria-label="Single file"><input type="file" multiple aria-label="Multiple files"><iframe title="Upload frame" src="/upload-frame"></iframe>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):outcome?outcome.outcomeFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
+      (taskDownload?taskDownload.taskDownloadFixture:downloadCase?'<a download="attribute.bin" href="/attribute.bin">Download attribute</a><a href="/attachment.bin">Navigation attachment</a><a href="/unfinished.bin">Unfinished attachment</a>':uploadCase?'<input type="file" aria-label="Single file"><input type="file" multiple aria-label="Multiple files"><iframe title="Upload frame" src="/upload-frame"></iframe>':overlay?overlay.overlayFixture:browserTools?browserTools.browserToolsFixture:structured?structured.structuredFixture(request.url):outcome?outcome.outcomeFixture(request.url):demonstration?demonstration.demonstrationFixture:'')+'</body></html>')
   })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
@@ -779,6 +801,7 @@ try {
   receipt.visual.beforeOperation=await first.main.evaluate(`(() => {const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const win=BrowserWindow.getAllWindows()[0];return {window:{visible:win.isVisible(),minimized:win.isMinimized(),bounds:win.getBounds()},views:win.contentView.children.filter(v=>v.webContents).map(v=>({url:v.webContents.getURL(),visible:v.getVisible(),bounds:v.getBounds(),loading:v.webContents.isLoading()}))};})()`)
   phase = `first-process-${receipt.case ?? 'operation'}-scenario`
   if(downloadCase)await reviewDownloads(first,initial.surface.browserId)
+  else if(taskDownload)await taskDownload.reviewTaskDownloadOutcome(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(uploadCase)await reviewUploads(first,initial.surface.browserId,urls[0])
   else if(browserTools)await browserTools.reviewBrowserTools(scenarioContext(first,initial.surface.browserId,urls[0]))
   else if(structured)await structured.reviewStructuredOutput(scenarioContext(first,initial.surface.browserId,urls[0]))
@@ -812,6 +835,7 @@ try {
   if(uploadCase)await recoverUploads(second,expected.regions[0].browserId,urls[0])
   if(demonstrationCase)await demonstration.recoverDemonstration(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(taskAssets)await taskAssets.recoverTaskAssets(scenarioContext(second,expected.regions[0].browserId,urls[0]))
+  if(taskDownload)await taskDownload.recoverTaskDownloadOutcome(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(browserTools)await browserTools.recoverBrowserTools(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(structured)await structured.recoverStructuredOutput(scenarioContext(second,expected.regions[0].browserId,urls[0]))
   if(outcome)await outcome.recoverBrowserOutcome(scenarioContext(second,expected.regions[0].browserId,urls[0]))
@@ -837,6 +861,6 @@ try {
 }
 receipt.passed=!failure&&receipt.completeGate;receipt.failure=failure??null
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
-await writeFile(join(repositoryRoot,'.tmp',downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
+await writeFile(join(repositoryRoot,'.tmp',taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json'),JSON.stringify(receipt,null,2)+'\n')
 process.stdout.write(JSON.stringify({passed:receipt.passed,completeGate:receipt.completeGate,failure:receipt.failure,cleanup:receipt.cleanup})+'\n')
 process.exitCode=receipt.passed?0:1

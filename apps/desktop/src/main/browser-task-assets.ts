@@ -8,9 +8,10 @@ import type { BrowserScriptRunReport } from '../shared/contracts.js'
 import type {
   BrowserTaskAsset, BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskAssetRunInput,
   BrowserTaskAssetState, BrowserTaskContent, BrowserTaskParameter, BrowserTaskStep, BrowserTaskVersion,
-  BrowserTaskHumanCheckpoint, BrowserTaskHumanCheckpointRead, BrowserTaskHumanCheckpointSaved, BrowserTaskRunIdentity
+  BrowserTaskHumanCheckpoint, BrowserTaskHumanCheckpointRead, BrowserTaskHumanCheckpointSaved, BrowserTaskRunIdentity, BrowserTaskStepExecution
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
+import { parseBrowserOutcomeCriteriaRequest } from '../shared/browser-outcome-criteria.js'
 
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 const MAX_ASSETS = 32
@@ -50,7 +51,7 @@ export class BrowserTaskAssetFileStore implements BrowserTaskAssetStore {
 export interface BrowserTaskAssetHost {
   /** Bind the actual cursor before its first durable/public projection. */
   onRunPrepared(runId: string): void
-  runScript(browserId: string, script: string): Promise<BrowserScriptRunReport>
+  runScript(browserId: string, script: string, execution: BrowserTaskStepExecution): Promise<BrowserScriptRunReport>
   yieldControl(browserId: string): void
   control(browserId: string): 'human' | 'agent'
 }
@@ -84,6 +85,41 @@ export class BrowserTaskAssets {
   }
   async get(assetId: string): Promise<BrowserTaskAsset | null> {
     await this.ready(); return copy(this.document.assets.find(asset => asset.id === assetId) ?? null)
+  }
+
+  /** The actual run chosen by the execution owner, including an explicitly resumed earlier cursor. */
+  async currentRun(browserId: string): Promise<BrowserTaskAssetRun | null> {
+    await this.ready()
+    if (this.loadUnavailable) throw new Error('The selected asset execution is unavailable.')
+    const selected = this.document.selectedRuns?.find(item => item.browserId === browserId)
+    const run = selected && this.document.runs.find(item => item.id === selected.runId && item.browserId === browserId)
+    return run ? copy(this.projectRun(run)) : null
+  }
+
+  /** Main supplies the real journal id before any page call, against the actual immutable cursor. */
+  async bindOperation(execution: BrowserTaskStepExecution, operationId: string): Promise<boolean> {
+    return this.change(async () => {
+      const bound = this.exactRun(execution)
+      if (!bound || bound.run.status !== 'running' || bound.version.steps[bound.run.nextStep]?.id !== execution.stepId) return false
+      if (!bound.run.operationIds.includes(operationId)) bound.run.operationIds.push(identity(operationId))
+      try { await this.updateRun(bound.run); return true }
+      catch { return false } // Optional completion recording cannot block the healthy page action.
+    })
+  }
+
+  async executionVersion(execution: BrowserTaskStepExecution): Promise<BrowserTaskVersion | null> {
+    await this.ready()
+    const bound = this.exactRun(execution)
+    return bound && bound.run.status === 'running' && bound.version.steps[bound.run.nextStep]?.id === execution.stepId ? copy(bound.version) : null
+  }
+
+  async markCompletionUnavailable(tuple: BrowserTaskRunIdentity): Promise<void> {
+    await this.change(async () => {
+      const bound = this.exactRun(tuple)
+      if (!bound) return
+      bound.run.completionWarning = 'Completion recording is unavailable for this run. Browser and Agent work remains; restore its recorded facts before verifying again.'
+      try { await this.updateRun(bound.run) } catch { /* Keep the live notice when its optional save also fails. */ }
+    })
   }
 
   /** Main-only: the trusted Continue/control owner supplies these actual facts before returning control. */
@@ -231,6 +267,7 @@ export class BrowserTaskAssets {
           this.document.runs.push(next)
         }
         host.onRunPrepared(next.id)
+        this.document.selectedRuns = [...(this.document.selectedRuns ?? []).filter(item => item.browserId !== browserId), { browserId, runId: next.id }]
         delete next.pendingCheckpointId; delete next.warning
         next.status = 'ready'
         await this.persist(next.browserId)
@@ -252,7 +289,8 @@ export class BrowserTaskAssets {
           })
           return copy(this.projectRun(run))
         }
-        const script = compileAssetStep(step, parameters)
+        const download = version.completion?.criteria.find(item => item.kind === 'download-readable' && item.stepId === step.id)
+        const script = compileAssetStep(step, parameters, download?.kind === 'download-readable' ? download.path : undefined)
         // Write-ahead cursor: restart during a call is uncertain, so no automatic replay is offered.
         const started = await this.change(async () => {
           if (run!.status === 'stopped') return false
@@ -262,7 +300,7 @@ export class BrowserTaskAssets {
         // A listener can stop the cursor across the await; discard the earlier loop narrowing.
         if (!started || (run as BrowserTaskAssetRun).status === 'stopped') break
         let report: BrowserScriptRunReport
-        try { report = await host.runScript(browserId, script) }
+        try { report = await host.runScript(browserId, script, { browserId, runId: run.id, assetId: run.assetId, version: run.version, stepId: step.id }) }
         catch {
           await this.change(async () => {
             if (run!.status !== 'stopped') {
@@ -278,7 +316,7 @@ export class BrowserTaskAssets {
           if (!report.runOperation.id || report.runOperation.browserId !== browserId) {
             run!.status = 'interrupted'; run!.warning = 'The Browser operation identity could not be confirmed. Inspect the page before continuing.'
           } else {
-            run!.operationIds.push(identity(report.runOperation.id))
+            if (!run!.operationIds.includes(report.runOperation.id)) run!.operationIds.push(identity(report.runOperation.id))
             if (report.outcome.kind === 'completed') run!.nextStep += 1
             else {
               run!.status = report.outcome.kind === 'stopped' ? 'stopped' : report.outcome.kind === 'script-failed' ? 'failed' : 'interrupted'
@@ -368,15 +406,15 @@ export async function runBrowserTaskAsset(assets: BrowserTaskAssets, input: Brow
   return await assets.run(input, host)
 }
 
-function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>): string {
+function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>, downloadPath?: string): string {
   if (!step.reviewed) throw new Error('Review the demonstrated step before executing it.')
   if (step.kind !== 'navigate' && (!step.target || step.target.count !== 1 || step.target.ordinal !== 1)) {
     throw new Error('The task target is unknown or ambiguous. Locate the actual page target before executing it.')
   }
   const replay: BrowserReplayStep = {
-    method: step.kind === 'fill' ? 'fillInput' : step.kind === 'navigate' ? 'gotoUrl' : 'click',
+    method: downloadPath ? 'download' : step.kind === 'fill' ? 'fillInput' : step.kind === 'navigate' ? 'gotoUrl' : 'click',
     url: step.url, ...(step.target ? { target: step.target } : {}),
-    args: step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'navigate' ? [step.url] : []
+    args: downloadPath ? [{ path: downloadPath }] : step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'navigate' ? [step.url] : []
   }
   if (!step.url) throw new Error('The reviewed page identity is unavailable. Locate the intended page before executing this step.')
   return `${compileBrowserSteps({ url: step.kind === 'navigate' ? 'about:blank' : step.url, steps: [replay] })}\nreturn { taskStepId: ${JSON.stringify(step.id)} }`
@@ -436,7 +474,30 @@ function content(raw: BrowserTaskContent): BrowserTaskContent {
   })
   if (new Set(steps.map(step => step.id)).size !== steps.length) throw new Error('Duplicate task step identity')
   for (const step of steps) if (step.kind === 'fill' && !parameters.some(parameter => parameter.key === step.parameterKey)) throw new Error('Task fill parameter is not defined')
-  return { name: text(raw.name), url: safeUrl(raw.url), steps, parameters }
+  let completion = raw.completion
+  if (completion !== undefined) {
+    if (!completion || typeof completion !== 'object' || Object.keys(completion).some(key => key !== 'criteria') || !Array.isArray(completion.criteria)) throw new Error('Invalid completion declaration')
+    const criteria = completion.criteria
+    for (const item of criteria) {
+      if (item?.kind === 'download-readable' && Object.keys(item).some(key => !['kind', 'stepId', 'path'].includes(key))) throw new Error('Unknown download completion field')
+    }
+    parseBrowserOutcomeCriteriaRequest({ criteria: criteria.map(item => item.kind === 'download-readable'
+      ? { kind: item.kind, path: item.path } : item) })
+    const downloads = criteria.filter(item => item.kind === 'download-readable')
+    if (downloads.length > 1) throw new Error('Declare one download producer per version; checkpoints may accompany it.')
+    const producer = downloads[0]?.stepId ?? steps.find(step => step.kind !== 'checkpoint')?.id
+    const producerIndex = steps.findIndex(step => step.id === producer)
+    if (producerIndex < 0 || steps[producerIndex]?.kind === 'checkpoint') throw new Error('Completion needs a real page producer before its checkpoint.')
+    for (const item of criteria) {
+      if (item.kind === 'download-readable' && (steps[producerIndex]?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
+      if (item.kind === 'human-checkpoint' && !steps.some((step, index) => step.kind === 'checkpoint' && step.id === item.checkpointId && index > producerIndex)) throw new Error('Declare the checkpoint after its real producer.')
+    }
+    if (new Set(criteria.map(item => item.kind === 'download-readable' ? item.stepId : item.checkpointId)).size !== criteria.length) throw new Error('Duplicate completion condition')
+    completion = { criteria: criteria.map(item => item.kind === 'download-readable'
+      ? { kind: item.kind, stepId: identity(item.stepId), path: item.path }
+      : { kind: item.kind, checkpointId: identity(item.checkpointId) }) }
+  }
+  return { name: text(raw.name), url: safeUrl(raw.url), steps, parameters, ...(completion ? { completion: copy(completion) } : {}) }
 }
 function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
   const raw = value as BrowserTaskAssetDocument
@@ -462,10 +523,15 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
     return { id: identity(run.id), assetId: asset.id, version: version.version, browserId: asset.browserId, nextStep: run.nextStep, status: run.status,
       operationIds: run.operationIds.map(identity), ...(run.pendingCheckpointId ? { pendingCheckpointId: identity(run.pendingCheckpointId) } : {}),
       ...(humanCheckpoints !== undefined ? { humanCheckpoints } : {}),
+      ...(run.completionWarning ? { completionWarning: text(run.completionWarning) } : {}),
       ...(run.warning ? { warning: text(run.warning) } : {}), startedAt: run.startedAt, updatedAt: run.updatedAt }
   })
   if (new Set(runs.map(run => run.id)).size !== runs.length) throw new Error('Duplicate task run identity')
-  return { version: 1, assets, runs }
+  const selectedRuns = Array.isArray(raw.selectedRuns) && raw.selectedRuns.length <= MAX_RUNS &&
+    new Set(raw.selectedRuns.map(item => item?.browserId)).size === raw.selectedRuns.length &&
+    raw.selectedRuns.every(item => item && runs.some(run => run.id === item.runId && run.browserId === item.browserId))
+    ? raw.selectedRuns.map(item => ({ browserId: identity(item.browserId), runId: identity(item.runId) })) : undefined
+  return { version: 1, assets, runs, ...(selectedRuns ? { selectedRuns } : {}) }
 }
 
 /** Damaged/missing optional facts do not damage valid asset progress or manufacture an empty history. */

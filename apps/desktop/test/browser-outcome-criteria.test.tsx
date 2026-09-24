@@ -238,7 +238,7 @@ describe('finite conditions joined to actual Main producers', () => {
     f.host.getDownloads = async () => [{ ...receipt, operationId: 'old-operation', reference: { ...reference, operationId: 'old-operation' } }]
     expect((await evaluateBrowserOutcomeCriteria(registration, f.host)).status).toBe('unavailable')
     f.host.getDownloads = async () => [{ ...receipt, status: 'waiting' }]
-    expect((await evaluateBrowserOutcomeCriteria(registration, f.host)).status).toBe('not-met')
+    expect((await evaluateBrowserOutcomeCriteria(registration, f.host)).status).toBe('unavailable')
     f.host.getDownloads = async () => [receipt]
     f.host.readDownload = async () => { throw new Error('File replaced or unavailable') }
     expect((await evaluateBrowserOutcomeCriteria(registration, f.host)).status).toBe('unavailable')

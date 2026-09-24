@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { reviewDemonstration } from './browser-demonstration-probe-scenario.mjs'
+import { publicFacts } from './browser-outcome-probe-scenario.mjs'
 
 // Product scenario only. The existing recovery harness owns launch, workspace, native views and cleanup.
 const taskSurface = '[aria-label="Editable Browser task asset"]'
@@ -19,6 +20,20 @@ async function type(ctx, label, value) {
 }
 async function asset(ctx) { return (await current(ctx)).assets.find(item => item.id === ctx.receipt.taskAssets.assetId) }
 async function run(ctx) { return (await current(ctx)).runs.find(item => item.id === ctx.receipt.taskAssets.runId) }
+async function verifyTaskEvidence(ctx, expected) {
+  const before = await run(ctx)
+  assert.ok(before.operationIds.length > 0, 'Completion consumes a nonempty actual producer identity')
+  await ctx.click(ctx.probe.cdp, button(ctx, 'Verify task evidence'))
+  await ctx.waitFor('actual task completion projection', () => ctx.probe.cdp.evaluate(`document.querySelector('[data-task-completion]')?.dataset.taskCompletion===${quoted(expected)}`))
+  const document = JSON.parse(await readFile(join(ctx.userData, 'browser-operation-journal.json'), 'utf8'))
+  const original = document.operations.find(item => item.id === before.operationIds[0])
+  assert.equal(original.outcome.evaluation.status, expected)
+  assert.deepEqual(original.outcome.registration.assetRun, { runId: before.id, assetId: before.assetId, version: before.version })
+  assert.deepEqual(original.outcome.evaluation.conditions.map(item => item.status), [expected])
+  const facts = await publicFacts(ctx, original)
+  assert.deepEqual(await run(ctx), before, 'Read-only verification cannot advance or replay the task')
+  ;(ctx.receipt.taskAssets.completionChecks ??= []).push({ expected, operationId: original.id, evaluation: original.outcome.evaluation, public: facts })
+}
 async function selectVersion(ctx, version) {
   const selector = taskSurface + ' [aria-label="Task asset version"]'
   const read = () => ctx.probe.cdp.evaluate(`(()=>{const select=document.querySelector(${quoted(selector)});if(!select)throw new Error('The actual task version control is missing');const events=globalThis.__privateTaskVersionEvents??[];return {value:select.value,focused:document.activeElement===select,documentFocused:document.hasFocus(),options:Array.from(select.options).map(option=>({value:option.value,label:option.label.trimStart(),disabled:option.disabled})),events,changes:events.filter(event=>event.type==='change')}})()`)
@@ -132,6 +147,9 @@ export async function reviewTaskAssets(ctx) {
   await type(ctx, 'Task asset name', 'Reviewed native demonstration')
   await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label="Insert checkpoint after task step 1"]`))
   await type(ctx, 'Checkpoint 2 label', 'Inspect the page before the fresh input')
+  await ctx.click(probe.cdp, `${ctx.selectors(taskSurface + ' summary')}.filter(e=>e.textContent.startsWith('Completion conditions'))`)
+  await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label^="Require checkpoint "]`))
+  await ctx.click(probe.cdp, `${ctx.selectors(taskSurface + ' summary')}.filter(e=>e.textContent.startsWith('Completion conditions'))`)
   await ctx.click(probe.cdp, `${ctx.selectors(taskSurface + ' summary')}.filter(e=>e.textContent.startsWith('Parameter definitions'))`)
   await type(ctx, 'Parameter 1 key', 'freshName')
   await type(ctx, 'Parameter 1 label', 'Fresh name')
@@ -157,6 +175,8 @@ export async function reviewTaskAssets(ctx) {
   assert.equal(waiting.version, 1); assert.equal(waiting.nextStep, 2); assert.equal(waiting.operationIds.length, 1)
   assert.equal(await pageCount(ctx), 1)
   receipt.taskAssets.runId = waiting.id; receipt.taskAssets.version = version; receipt.taskAssets.waiting = waiting
+  assert.deepEqual(version.completion.criteria, [{ kind: 'human-checkpoint', checkpointId: version.steps[1].id }])
+  await verifyTaskEvidence(ctx, 'not-met')
   receipt.taskAssets.singleStep = singleStep
   receipt.taskAssets.syntheticRunRejected = true
   for (const [label, width, height] of [['normal',1440,900],['narrow',1000,720],['short',1000,660]]) {
@@ -168,6 +188,10 @@ export async function reviewTaskAssets(ctx) {
   await ctx.resize(probe,1440,900)
   // Deleting and saving a later draft is a real UI edit. It cannot alter the version already running.
   await type(ctx, 'Task asset name', 'Later draft with the first step deleted')
+  // Editing a later version explicitly removes its condition; the executing v1 keeps its declaration.
+  await ctx.click(probe.cdp, `${ctx.selectors(taskSurface + ' summary')}.filter(e=>e.textContent.startsWith('Completion conditions'))`)
+  await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label^="Require checkpoint "]`))
+  await ctx.click(probe.cdp, `${ctx.selectors(taskSurface + ' summary')}.filter(e=>e.textContent.startsWith('Completion conditions'))`)
   await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label="Delete task step 1"]`))
   await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} .browser-task-asset__parameters input[type="checkbox"]`))
   await ctx.click(probe.cdp, button(ctx, 'Save version'))
@@ -200,6 +224,7 @@ export async function recoverTaskAssets(ctx) {
   await ctx.click(probe.cdp, ctx.selectors('[aria-label="Open human demonstration draft"]'))
   receipt.taskAssets.restoredWaitingProjection=await observeWaiting(ctx,receipt.taskAssets.waiting,2)
   await selectVersion(ctx, 1)
+  await verifyTaskEvidence(ctx, 'not-met')
   assert.equal(await probe.cdp.evaluate(`document.querySelector(${quoted(taskSurface + ' [aria-label="Task parameter Fresh name"]')}).value`), '')
   const secret = 'fresh-native-asset-"one-use\\value'
   await type(ctx, 'Task parameter Fresh name', secret)
@@ -215,6 +240,7 @@ export async function recoverTaskAssets(ctx) {
   assert.equal(await ctx.nativePageScript(probe, 'document.querySelector("#demo-input").value'), secret)
   receipt.taskAssets.syntheticContinueRejected = true
   receipt.taskAssets.completed = completed
+  await verifyTaskEvidence(ctx, 'passed')
   ctx.setPhase('task-assets-temporary-secret-disposal')
   try {
     const hidden = await waitFor('completed version projects its first segment without the later parameter', () => probe.cdp.evaluate(`(()=>{const surface=document.querySelector(${quoted(taskSurface)}),progress=surface?.querySelector('.browser-task-asset__progress');if(progress?.dataset.runStatus!=='completed')return null;return{sameEditorSurface:surface===globalThis.__privateTaskCleanupSurface,assetId:surface.dataset.taskAssetId,selectedVersion:surface.querySelector('[aria-label="Task asset version"]')?.value,inputPresent:!!surface.querySelector('[aria-label="Task parameter Fresh name"]')}})()`))

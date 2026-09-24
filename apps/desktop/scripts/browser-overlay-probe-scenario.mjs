@@ -9,6 +9,8 @@ export const overlayFixture = '<style>body{font:18px system-ui;background:#f5fff
 
 const activitySelector='[aria-label="Open browser activity timeline"]'
 const electron = ctx => `process.getBuiltinModule('module').createRequire(${JSON.stringify(join(ctx.desktopRoot,'package.json'))})('electron')`
+const originalSurfaces = ctx => `Array.from(document.querySelectorAll('.browser-surface')).filter(surface=>surface.querySelector('[aria-label="Browser address"]')?.value.split('#')[0]===${JSON.stringify(ctx.pageUrl)})`
+const originalControls = (ctx, selector) => `(${ctx.selectors(selector)}).filter(element=>(${originalSurfaces(ctx)}).includes(element.closest('.browser-surface')))`
 
 async function owners(ctx) {
   return ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=${electron(ctx)};const window=BrowserWindow.getAllWindows()[0];return window.contentView.children.filter(view=>view.webContents&&!view.webContents.isDestroyed()).map(view=>({id:view.webContents.id,url:view.webContents.getURL(),visible:view.getVisible(),bounds:view.getBounds()}))})()`)
@@ -33,14 +35,14 @@ async function pageInput(ctx) {
   assert.ok(result.bounds.width > 0 && result.bounds.height > 0)
   return {...result,floatingBefore,inputFocus}
 }
-async function hover(ctx, selector) {
-  const point = await ctx.probe.cdp.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)throw new Error('Actual hover target unavailable');const r=element.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+async function hover(ctx, selector, expression) {
+  const point = await ctx.probe.cdp.evaluate(`(()=>{const element=${expression ? `(()=>{const matches=${expression};if(matches.length!==1)throw new Error('Original Browser hover target must be unique');return matches[0]})()` : `document.querySelector(${JSON.stringify(selector)})`};if(!element)throw new Error('Actual hover target unavailable');const r=element.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
   await ctx.probe.cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',...point})
 }
 async function close(ctx) {
   await ctx.probe.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
   await ctx.probe.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
-  await hover(ctx,'[aria-label="Browser address"]')
+  await hover(ctx,'[aria-label="Browser address"]',originalControls(ctx,'[aria-label="Browser address"]'))
   await ctx.waitFor('closed actual floating panel',async()=>!(await ctx.probe.cdp.evaluate('Array.from(document.querySelectorAll("[role=menu],[role=tooltip]")).some(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=="hidden")')))
   await ctx.waitFor('native Chrome released after close',async()=>chromeOwners(await owners(ctx)).length===0)
 }
@@ -148,13 +150,14 @@ async function menuGeometry(ctx) {
   return ctx.probe.cdp.evaluate(`(()=>{
     const rect=element=>{if(!element)return null;const r=element.getBoundingClientRect(),style=getComputedStyle(element);return{x:r.x,y:r.y,width:r.width,height:r.height,visible:!!element.getClientRects().length&&style.visibility!=='hidden',opacity:style.opacity}};
     const item=document.querySelector(${JSON.stringify(activitySelector)}),menu=item?.closest('[role="menu"]');
-    const surface=item&&document.querySelector('.browser-surface');
+    const surfaces=${originalSurfaces(ctx)};if(surfaces.length!==1)throw new Error('Original Browser menu surface must be unique');const surface=surfaces[0];
     return{menu:rect(menu),item:rect(item),stage:rect(surface?.querySelector('[data-native-browser-stage]')),zoom:window.agentmux.ui.getZoomFactor()};
   })()`)
 }
 async function menu(ctx,label) {
-  await hover(ctx,'[aria-label="Browser address"]')
-  await ctx.probe.cdp.evaluate('document.querySelector(".browser-operation-status__trigger").focus()')
+  await hover(ctx,'[aria-label="Browser address"]',originalControls(ctx,'[aria-label="Browser address"]'))
+  const trigger=originalControls(ctx,'.browser-operation-status__trigger')
+  await ctx.probe.cdp.evaluate(`(()=>{const matches=${trigger};if(matches.length!==1)throw new Error('Original Browser operation trigger must be unique');matches[0].focus()})()`)
   for(const type of ['keyDown','keyUp'])await ctx.probe.cdp.call('Input.dispatchKeyEvent',{type,key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40})
   await ctx.waitFor('actual Browser operation popover',()=>ctx.probe.cdp.evaluate(`document.querySelector(${JSON.stringify(activitySelector)})?.getClientRects().length`))
   const observe = process.env.AGENTMUX_OBSERVE_OVERLAY_MENU_READINESS === '1'
@@ -192,7 +195,7 @@ async function menu(ctx,label) {
   const stillOpen = await ctx.probe.cdp.evaluate(`!!document.querySelector(${JSON.stringify(activitySelector)})?.getClientRects().length`)
   assert.equal(stillOpen,false,'Keyboard-opened menu must dismiss on the real native page click')
   await ctx.waitFor('outside-dismissed Chrome released',async()=>chromeOwners(await owners(ctx)).length===0)
-  await ctx.click(ctx.probe.cdp,ctx.selectors('.browser-operation-status__trigger'))
+  await ctx.click(ctx.probe.cdp,trigger)
   await ctx.waitFor('actual menu reopened for native selection',async()=>chromeOwners(await owners(ctx)).length>0)
   await captureOsWindow(ctx,label)
   const chrome = await captureChrome(ctx,label)
@@ -201,7 +204,7 @@ async function menu(ctx,label) {
   const point = await ctx.probe.cdp.evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(activitySelector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
   // Actual native pointer input is forwarded into the original mounted menu, not a duplicate UI.
   const input = await ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=${electron(ctx)};const window=BrowserWindow.getAllWindows()[0],zoom=window.webContents.getZoomFactor(),point={x:${point.x}*zoom,y:${point.y}*zoom};const candidates=window.contentView.children.filter(view=>view.webContents&&!view.webContents.isDestroyed()&&view.webContents.getURL().startsWith('data:text/html,')&&view.webContents.getURL().includes('Content-Security-Policy'));const view=candidates.find(view=>{const b=view.getBounds();return point.x>=b.x&&point.x<b.x+b.width&&point.y>=b.y&&point.y<b.y+b.height});if(!view)throw new Error('The real menu point is not in projected native Chrome');const bounds=view.getBounds(),local={x:Math.round(point.x-bounds.x),y:Math.round(point.y-bounds.y)};view.webContents.sendInputEvent({type:'mouseDown',...local,button:'left',clickCount:1});view.webContents.sendInputEvent({type:'mouseUp',...local,button:'left',clickCount:1});return{id:view.webContents.id,point,bounds,zoom}})()`)
-  await ctx.waitFor('native click reaches original product Activity action',()=>ctx.probe.cdp.evaluate('!!document.querySelector(".browser-trace-rail")&&document.querySelector(".browser-trace-rail").getClientRects().length>0'))
+  await ctx.waitFor('native click reaches original product Activity action',()=>ctx.probe.cdp.evaluate(`(${originalControls(ctx,'.browser-trace-rail')}).length===1`))
   await close(ctx)
   return {pages,chrome,input,whileOpen,pageInput:await pageInput(ctx)}
 }
@@ -265,6 +268,41 @@ async function screenshotEditor(ctx, label) {
   return {label,geometry,drawn,originalOwnerId:before[0].id,pageAfterCancel:await pageInput(ctx),copyBoundary:'The original Copy PNG action is loaded and enabled. This native scenario does not write the shared system clipboard.'}
 }
 
+async function siblingOverlayWork(ctx) {
+  const key = '__privateBrowserOverlaySiblingWork'
+  const before = await ctx.probe.main.evaluate(`(async()=>{
+    if(process.pid!==${ctx.probe.child.pid})throw new Error('Only the owned private Main is observed');
+    const {BrowserWindow}=${electron(ctx)},window=BrowserWindow.getAllWindows()[0];
+    const siblings=window.contentView.children.filter(view=>view.webContents&&!view.webContents.isDestroyed()&&${JSON.stringify(ctx.urls)}.includes(view.webContents.getURL().split('#')[0])&&view.webContents.getURL().split('#')[0]!==${JSON.stringify(ctx.pageUrl)});
+    if(siblings.length!==1)throw new Error('The original unrelated Browser owner must be unique');
+    if(globalThis[${JSON.stringify(key)}])throw new Error('The private sibling observer is already installed');
+    const view=siblings[0],contents=view.webContents,events=[],saved=[];let dropped=0;
+    const snapshot=()=>({id:contents.id,url:contents.getURL(),bounds:view.getBounds(),visible:view.getVisible(),destroyed:contents.isDestroyed()});
+    const record=method=>{if(events.length<128)events.push({method});else dropped++};
+    const wrap=(owner,name)=>{const descriptor=Object.getOwnPropertyDescriptor(owner,name),original=owner[name];if(typeof original!=='function')throw new Error('Original sibling method unavailable: '+name);function observed(...args){record(name);return Reflect.apply(original,this,args)}Object.defineProperty(owner,name,{configurable:true,writable:true,value:observed});saved.push(()=>{if(Object.getOwnPropertyDescriptor(owner,name)?.value!==observed)throw new Error('Sibling method changed during observation: '+name);if(descriptor)Object.defineProperty(owner,name,descriptor);else delete owner[name]})};
+    const destroyed=()=>record('destroyed');contents.on('destroyed',destroyed);
+    try {for(const name of ['setBounds','setVisible'])wrap(view,name);for(const name of ['loadURL','reload','setBackgroundThrottling','capturePage','sendInputEvent'])wrap(contents,name)}
+    catch(error){contents.removeListener('destroyed',destroyed);for(const restore of saved.reverse())restore();throw error}
+    globalThis[${JSON.stringify(key)}]={restore:()=>{contents.removeListener('destroyed',destroyed);for(const restore of saved.reverse())restore();return {before:initial,after:snapshot(),events,dropped}}};
+    const initial={...snapshot(),document:await contents.executeJavaScript('({timeOrigin:performance.timeOrigin,title:document.title})')};
+    return initial;
+  })()`)
+  let observation
+  try {
+    const menuResult = await menu(ctx, 'restarted-sibling-cost-browser-popover')
+    assert.ok(menuResult.chrome.length > 0, 'Related native Chrome work is nonempty during the cost observation')
+    ctx.receipt.overlay.siblingCostMenu = menuResult
+  } finally {
+    observation = await ctx.probe.main.evaluate(`(()=>{const key=${JSON.stringify(key)},observer=globalThis[key];try{return observer.restore()}finally{delete globalThis[key]}})()`)
+    ctx.receipt.overlay.siblingWork = { boundary: 'Private unrelated original Browser method counters only, installed after the default unobserved restart/paint/input gate; original receivers, arguments, returns and outcomes preserved', ...observation }
+  }
+  assert.equal(before.destroyed, false)
+  assert.ok(before.bounds.width > 0 && before.bounds.height > 0)
+  assert.equal(observation.dropped, 0)
+  assert.deepEqual(observation.events, [], 'Popover churn must do zero unrelated Browser mutation, capture or input work')
+  assert.deepEqual(observation.after, { id: before.id, url: before.url, bounds: before.bounds, visible: before.visible, destroyed: false })
+}
+
 export async function reviewOverlay(ctx) {
   for(const selector of ['[aria-label="Hide Space tools"]','[aria-label="Hide projects sidebar"]'])if(await ctx.probe.cdp.evaluate(`!!document.querySelector(${JSON.stringify(selector)})`))await ctx.click(ctx.probe.cdp,ctx.selectors(selector))
   const start = pageOwner(ctx,await owners(ctx));assert.equal(start.length,1)
@@ -322,5 +360,6 @@ export async function recoverOverlay(ctx) {
   }
   ctx.receipt.overlay.inputAfterRestart=await pageInput(ctx)
   ctx.receipt.screenshotEditor.push(await screenshotEditor(ctx,'restarted'))
+  await siblingOverlayWork(ctx)
   ctx.receipt.overlay.complete=true
 }
