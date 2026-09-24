@@ -159,12 +159,30 @@ describe('Cursor provider', () => {
   })
 
   describe('stop 是唯一的收尾；两个门是「在等用户」而不是「在干活」', () => {
-    it('stop 判 done 并归入 turn-end，三种非正常收尾同样是收尾', () => {
-      for (const status of ['completed', 'aborted', 'cancelled', 'error']) {
-        const event = hook('stop', { status, loop_count: 3, input_tokens: 120, output_tokens: 45 })
-        expect<AgentSemanticState>(event.semanticState).toBe('done')
-        expect(event.lifecycleEvent).toBe('turn-end')
-      }
+    it('stop 按 status 区分成败：仅 completed 判 done，error 诚实判 error，取消判 unknown；未知 status 不猜 turn-end', () => {
+      const completed = hook('stop', { status: 'completed', loop_count: 3, input_tokens: 120, output_tokens: 45 })
+      expect<AgentSemanticState>(completed.semanticState).toBe('done')
+      expect(completed.lifecycleEvent).toBe('turn-end')
+
+      const error = hook('stop', { status: 'error', loop_count: 3 })
+      expect<AgentSemanticState>(error.semanticState).toBe('error')
+      expect(error.lifecycleEvent).toBe('turn-end')
+
+      const aborted = hook('stop', { status: 'aborted', loop_count: 3 })
+      expect<AgentSemanticState>(aborted.semanticState).toBe('unknown')
+      expect(aborted.lifecycleEvent).toBe('turn-end')
+
+      const cancelled = hook('stop', { status: 'cancelled', loop_count: 3 })
+      expect<AgentSemanticState>(cancelled.semanticState).toBe('unknown')
+      expect(cancelled.lifecycleEvent).toBeNull()
+
+      const unknownStatus = hook('stop', { status: 'unrecognized_status' })
+      expect<AgentSemanticState>(unknownStatus.semanticState).toBe('unknown')
+      expect(unknownStatus.lifecycleEvent).toBeNull()
+
+      const missingStatus = hook('stop', {})
+      expect<AgentSemanticState>(missingStatus.semanticState).toBe('unknown')
+      expect(missingStatus.lifecycleEvent).toBeNull()
     })
 
     it('shell/MCP 门判 waiting：Cursor 正把这次执行按住等一个决定', () => {
@@ -190,10 +208,32 @@ describe('Cursor provider', () => {
       expect(event.status.detail).toBe('afterAgentThought')
     })
 
-    it('不声明 nativeHandle：conversation_id 不是 --resume 吃的 chat id', () => {
-      // 拿 conversation_id 当 handle 存下来，会让 UI 显示一个恢复必失败的 Resume。
-      expect(hook('stop', { status: 'completed' }).nativeHandle).toBeUndefined()
-      expect(hook('preToolUse', { tool_name: 'Read', tool_use_id: 'x' }).nativeHandle).toBeUndefined()
+    it('声明 nativeHandle 并从 conversation_id 提取 session ID，同时隔离 subagent', () => {
+      // conversation_id 是 Cursor 运行时的原生会话 UUID，与 --resume 消费的 chat ID 严格一致。
+      const event = hook('stop', { status: 'completed', conversation_id: 'conv-1' })
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'cursor',
+        sessionId: 'conv-1'
+      })
+      const withPath = hook('preToolUse', {
+        tool_name: 'Read',
+        tool_use_id: 'x',
+        conversation_id: 'conv-1',
+        transcript_path: '/path/to/transcript.jsonl'
+      })
+      expect(withPath.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'cursor',
+        sessionId: 'conv-1',
+        transcriptPath: '/path/to/transcript.jsonl'
+      })
+      // 子代理事件被隔离，绝不晋升为主会话的 nativeHandle
+      const subagent = hook('subagentStart', {
+        subagent_id: 'sub-77',
+        conversation_id: 'sub-conv'
+      })
+      expect(subagent.nativeHandle).toBeUndefined()
     })
   })
 

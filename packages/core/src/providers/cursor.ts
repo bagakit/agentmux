@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { CURSOR_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -38,49 +38,55 @@ export const CURSOR_HOOK_EVENTS = [
  * 事件名是 camelCase，负载键却是 Claude 同族的 snake_case（`tool_name`/`tool_input`/`tool_output`/
  * `tool_use_id`）——normalizer 的既有读取顺序已覆盖这些键，所以时间轴不需要 Cursor 专属分支。
  *
- * `stop` 判 done 是安全的：与 grok 不同，Cursor **不**用另一个事件取代 `stop`，中断/取消/报错都
- * 走同一个 `stop`，只是负载里的 `status` 从 `"completed"` 变成 `"aborted"`/`"cancelled"`/`"error"`。
- * 也就是说这里不需要第二条 done 规则；那几种收尾同样是收尾。
+ * `stop` 状态按 status 诚实区分：
+ * 官方 2026.10.01-e373342 实测，Cursor 在 stop 负载里传递 status（"completed" / "aborted" / "error"）。
+ * 只有已证明成功的 "completed" 赋予 state: 'done' 与 successful completion 身份（放行 automatic 进度）；
+ * 实际 "error" 诚实映射为 state: 'error'，lifecycleEvent: 'turn-end'（放行 manual 下一轮，automatic 零写拒绝）；
+ * "aborted" 取消收尾使用已有诚实语义 state: 'unknown'，lifecycleEvent: 'turn-end'（无 completion 身份）；
+ * 未知或缺席的 status 不得猜成功亦不能断定已结束，映射为 state: 'unknown'，lifecycleEvent: null。
  *
  * 两个授权门判 waiting 而非 working：它们触发的时刻，Cursor 正把这次执行按住等一个决定。我们不回
  * 决定（见 catalog 的 permission: 'observe'），于是它会落到 Cursor 自己的 TUI 提示上等用户——
  * 那正是 waiting 的定义。判成 working 会让「等我点一下」和「正在干活」在界面上长得一模一样。
  *
- * 没有 `nativeHandle`：Cursor 的负载给的是 `conversation_id`，而 `--resume` 吃的是 **chat id**
- * （`~/.cursor/chats/<32 hex>`）。两者不是一回事，拿 conversation_id 去 resume 会失败。Cursor 的
- * 会话 id 由 AgentMux 在启动时用 `--new-session-id <uuid>` 自己指定（见 buildArgs 的说明），
- * 不靠 hook 上报——所以这里如实不声明，避免把一个恢复不了的 handle 存成「可恢复」。
+ * nativeHandle 与 subagent 隔离：
+ * Cursor 运行时的会话标识统一为 UUID（执行循环中的 `Mt`），它同时用作 `conversationId` 和 chat 目录名；
+ * `~/.cursor/chats/<32 hex>` 的 32 hex 仅是 `md5(resolve(cwd))` 的工作区目录桶，其下的子目录与 transcript
+ * 路径均直接使用完整 UUID。`--resume <chatId>` 消费的正是该 UUID。Hook 负载通过 `conversation_id`（并带
+ * `transcript_path`）送达，故声明 nativeHandle 解析主会话恢复句柄与定位器；同时声明 subagentTracking
+ * 隔离子代理事件（`subagentStart`/`subagentStop` 携带 `subagent_id`），防止子代理覆盖主会话句柄。
  */
 export const CURSOR_HOOKS: AgentNativeHookSpecification = {
-  // 事件名靠 `--event` 旗标送达：Cursor 的负载里没有 `hook_event_name`（本机 bundle 实测，见
-  // createCursorManagedHookPlan）。少了它每条事件到 Core 都是 'unknown'。
+  // 固定第一方版本同时提供 hook_event_name；托管配置继续显式用 --event 传递事件名。
   eventNameSource: { kind: 'flag' },
   rules: [
     // 授权门：Cursor 正等一个决定。
     { events: ['beforeShellExecution', 'beforeMCPExecution'], state: 'waiting' },
-    { events: ['stop'], state: 'done' },
+    { events: ['stop'], matches: payload => payload.status === 'completed', state: 'done' },
+    { events: ['stop'], matches: payload => payload.status === 'error', state: 'error', lifecycleEvent: 'turn-end' },
+    { events: ['stop'], matches: payload => payload.status === 'aborted', state: 'unknown', lifecycleEvent: 'turn-end' },
+    { events: ['stop'], state: 'unknown', lifecycleEvent: null },
     {
       events: [
         'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'afterAgentResponse'
       ],
       state: 'working'
     }
-  ]
+  ],
+  subagentTracking: {
+    startEvents: ['subagentStart'], stopEvents: ['subagentStop'], mainStopEvents: ['stop'], idKeys: ['subagent_id']
+  },
+  nativeHandle: { sessionIdKeys: ['conversation_id'], transcriptPathKeys: ['transcript_path'] }
 }
 
-/**
- * Cursor 的数据根目录。
- *
- * `CURSOR_DATA_DIR` 是 Cursor 自己认的覆盖（bundle 实测：它先读该变量，空白才回落 `~/.cursor`）。
- * 忽略它会让设了该变量的用户拿到一份 Cursor 永远不读的配置与 marker——两者都会静默失效，
- * 表现出来是「hooks 装了但没有任何事件」加「第一句话被 trust 提示吃掉」。
- *
- * 单独一个函数是因为它有**两个**消费者（hooks.json 与 trust marker），而它们必须落在同一个根下。
- * 让其中一处内联推导，就是把同一个事实写两遍——那两份终会 drift，且 drift 时没有任何测试会红。
- */
-function cursorDataRoot(env?: Readonly<Record<string, string>>): string {
-  const dataDirectory = env?.CURSOR_DATA_DIR?.trim()
-  return dataDirectory ? resolve(dataDirectory) : join(homedir(), '.cursor')
+/** Cursor preserves a nonblank native override and resolves relative paths at its launch workspace. */
+function cursorDataRoot(workspacePath: string, env?: Readonly<Record<string, string>>): string {
+  const value = env?.CURSOR_DATA_DIR
+  return value !== undefined && value.trim() ? resolve(workspacePath, value) : join(homedir(), '.cursor')
+}
+
+function cursorWorkspaceSlug(workspacePath: string): string {
+  return workspacePath.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 /**
@@ -95,11 +101,7 @@ export function cursorTrustMarkerPath(
   workspacePath: string,
   env?: Readonly<Record<string, string>>
 ): string {
-  const slug = resolve(workspacePath)
-    .replace(/[^a-zA-Z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return join(cursorDataRoot(env), 'projects', slug, '.workspace-trusted')
+  return join(cursorDataRoot(workspacePath, env), 'projects', cursorWorkspaceSlug(workspacePath), '.workspace-trusted')
 }
 
 /**
@@ -127,15 +129,14 @@ export function createCursorManagedHookPlan(
 ): AgentManagedHookPlan {
   const command = managedHookCommand('cursor')
   const hooks = Object.fromEntries(CURSOR_HOOK_EVENTS.map((eventName) => [eventName, [
-    // 事件名必须靠 `--event` 传：Cursor 的负载里**没有** `hook_event_name`（本机 bundle 实测——
-    // 那个键只出现在它自己的遥测标签里）。少了这个旗标，每条事件到 Core 都是 'unknown'。
+    // 托管脚本的事件名来源保持显式 --event，不猜负载别名。
     { command: `${command} --event ${eventName}`, ...hookCommandTimeout('cursor') }
   ]]))
   return {
     providerId: 'cursor',
     mutations: [
       {
-        path: join(cursorDataRoot(env), 'hooks.json'),
+        path: join(cursorDataRoot(workspacePath, env), 'hooks.json'),
         content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
         mode: 0o600,
         merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
@@ -170,7 +171,8 @@ function cursorTrustStamp(workspacePath: string): string {
 }
 
 export function createCursorProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
+  const { subagentTracking: _tracking, nativeHandle: _identity, ...observationOnly } = CURSOR_HOOKS
+  const provider = defineAgentProvider({
     planManagedHooks: ({ workspacePath, env }) => createCursorManagedHookPlan(workspacePath, env),
     catalog: catalog({
       id: 'cursor', label: 'Cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',
@@ -178,7 +180,7 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
       // `--resume [chatId]` 直传 chat id（bundle 实测：`else fe=o.resume`，无 UUID 校验、无序号
       // 解释；只有 `-1` 与 `-<n>` 两种**负数**形式才被当成「第 n 近」）。chat id 是
-      // `~/.cursor/chats/<32 hex>` 的目录名，跨会话稳定。
+      // `<configRoot>/chats/<workspaceBucket>/<chatId>` 的原生会话 UUID，跨会话稳定。
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
@@ -202,4 +204,29 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
   })
+  return {
+    ...provider,
+    normalizeHook(envelope, context) {
+      const payload = envelope.payload ?? {}
+      const sessionId = typeof payload.conversation_id === 'string' && payload.conversation_id.trim()
+        ? payload.conversation_id.trim() : undefined
+      const known = context.nativeHandle
+      const foreign = known !== undefined && sessionId !== undefined && sessionId !== known.sessionId
+      // A foreign receipt must not mutate this Run's existing child roster before
+      // its return value is fenced. It contributes only the authenticated raw observation.
+      const normalized = foreign ? normalizeNativeHook({ ...observationOnly, rules: [] }, envelope)
+        : provider.normalizeHook(envelope, context)
+      if (!foreign) {
+        // An authenticated first-party receipt establishes birth. A later receipt cannot
+        // replace the durable locator for the same main native Session. Known child
+        // settlement retains the shared roster's proven parent completion contribution.
+        return known && normalized.nativeHandle ? { ...normalized, nativeHandle: known } : normalized
+      }
+      const { nativeHandle: _handle, turnUsage: _usage, interaction: _interaction,
+        interactionCompletion: _completion, ...neutral } = normalized
+      return { ...neutral, lifecycleEvent: null, semanticState: 'unknown',
+        status: { ...normalized.status, state: 'running' }, timeline: [] }
+    }
+  }
+
 }
