@@ -96,6 +96,27 @@
   .recent-focus__time-scale time:nth-of-type(3) { display: none; }
 }
 .recent-focus__track { height: 24px; }
+.recent-focus__project { position: relative; }
+.recent-focus__project-heading { display: grid; grid-template-columns: 112px minmax(0, 1fr); width: 100%; height: 24px; padding: 0; border: 0; background: var(--surface-1); color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.recent-focus__project-heading .recent-focus__gutter { gap: 3px; color: var(--text-2); }
+.recent-focus__project-heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.recent-focus__project-heading small { margin-left: auto; color: var(--text-3); font-size: 9px; font-variant-numeric: tabular-nums; }
+.recent-focus__project-heading .project-rail-row__icon { flex: none; width: 14px; height: 14px; font-size: 9px; }
+.recent-focus__project-heading .project-rail-row__icon img { width: 14px; height: 14px; }
+.recent-focus__project-heading:hover, .recent-focus__project-heading:focus-visible { background: var(--surface-2); outline: 1px solid var(--line); outline-offset: -1px; }
+.recent-focus__project-summary { min-width: 0; margin: 0 8px; border-bottom: 1px solid var(--line); }
+.recent-focus__track .recent-focus__gutter > span { flex: 1; }
+.recent-focus__track .recent-focus__gutter small { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: 9px; line-height: 10px; }
+.recent-focus__track[data-history-only='true'] .recent-focus__gutter { color: var(--text-3); }
+.recent-focus__project-tracks[data-collapsed='true'] { height: 0; pointer-events: none; }
+.recent-focus__project-tracks[data-collapsed='true'] .recent-focus__track { height: 0; }
+.recent-focus__project-tracks[data-collapsed='true'] .recent-focus__gutter { display: none; }
+.recent-focus__project-tracks[data-collapsed='true'] .recent-focus__lane { position: absolute; top: 0; left: 112px; right: 0; height: 24px; border: 0; background: transparent; }
+.recent-focus__project-tracks[data-collapsed='true'] .recent-focus__lane > * { pointer-events: none; }
+.recent-focus__observation dl { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px var(--sp-2); font-size: var(--fs-micro); }
+.recent-focus__observation dt { color: var(--text-3); }
+.recent-focus__observation dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text-2); }
+.recent-focus__observation > p { color: var(--text-3); font-size: var(--fs-micro); }
 .recent-focus__lane { position: relative; min-width: 0; margin: 0 8px; border-bottom: 1px solid var(--line-soft); background: repeating-linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 1px, transparent 1px, transparent 25%); }
 .recent-focus__segment { position: absolute; top: 18px; bottom: 2px; min-width: 8px; padding: 0; overflow: hidden; border: 0; border-radius: 1px; background: var(--text-3); color: var(--text-3); font: inherit; font-size: 9px; text-align: left; white-space: nowrap; cursor: pointer; }
 .recent-focus__segment span { visibility: hidden; }
