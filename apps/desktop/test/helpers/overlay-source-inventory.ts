@@ -136,22 +136,32 @@ export function deriveOverlayInventoryFromSource(rendererSrcDir: string): Source
               && ref.initializer.expression && ts.isIdentifier(ref.initializer.expression) && ref.initializer.expression.text === name
               && enclosingReturn(ref) === enclosingReturn(call)) ? [name] : []
           }))
-          return calls.some(append => {
-            if (!ts.isPropertyAccessExpression(append.expression) || append.expression.name.text !== 'append'
-              || !ts.isIdentifier(append.expression.expression) || append.arguments.length !== 1
-              || !ts.isIdentifier(append.arguments[0]!) || append.arguments[0]!.getText(sf) !== target.text) return false
-            const receiver = append.expression.expression.text
-            const destination = declarations.find(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === receiver)?.initializer
+          const appends = calls.filter(append => ts.isPropertyAccessExpression(append.expression)
+            && append.expression.name.text === 'append' && append.arguments.some(argument => ts.isIdentifier(argument) && argument.text === target.text))
+          if (appends.length === 0) return false
+          const isLocalRef = (expression: ts.Expression): boolean => ts.isPropertyAccessExpression(expression)
+            && expression.name.text === 'current' && ts.isIdentifier(expression.expression) && localRefs.has(expression.expression.text)
+          const initializerFor = (name: string): ts.Expression | undefined => declarations.find(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === name)?.initializer
+          function isIdLookup(expression: ts.Expression | undefined): boolean {
+            if (expression && ts.isConditionalExpression(expression) && expression.whenFalse.kind === ts.SyntaxKind.NullKeyword) expression = expression.whenTrue
+            return Boolean(expression && ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression)
+              && ts.isIdentifier(expression.expression.expression) && expression.expression.expression.text === 'document'
+              && expression.expression.name.text === 'getElementById')
+          }
+          let attachesLocally = false
+          const allDestinationsOwned = appends.every(append => {
+            if (!ts.isPropertyAccessExpression(append.expression) || append.arguments.length !== 1) return false
+            const receiver = append.expression.expression
+            if (isLocalRef(receiver)) { attachesLocally = true; return true }
+            if (!ts.isIdentifier(receiver)) return false
+            const destination = initializerFor(receiver.text)
+            if (isIdLookup(destination)) return true
             if (!destination || !ts.isBinaryExpression(destination) || destination.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken
-              || !ts.isIdentifier(destination.left) || !ts.isPropertyAccessExpression(destination.right)
-              || destination.right.name.text !== 'current' || !ts.isIdentifier(destination.right.expression)
-              || !localRefs.has(destination.right.expression.text)) return false
-            const explicit = declarations.find(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === destination.left.getText(sf))?.initializer
-            return Boolean(explicit && ts.isConditionalExpression(explicit) && explicit.whenFalse.kind === ts.SyntaxKind.NullKeyword
-              && ts.isCallExpression(explicit.whenTrue) && ts.isPropertyAccessExpression(explicit.whenTrue.expression)
-              && ts.isIdentifier(explicit.whenTrue.expression.expression) && explicit.whenTrue.expression.expression.text === 'document'
-              && explicit.whenTrue.expression.name.text === 'getElementById')
+              || !ts.isIdentifier(destination.left) || !isLocalRef(destination.right)) return false
+            attachesLocally = true
+            return isIdLookup(initializerFor(destination.left.text))
           })
+          return allDestinationsOwned && attachesLocally
         }
 
         function visit(node: ts.Node): void {
