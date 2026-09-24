@@ -49,14 +49,21 @@ try {
   await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(privateRoot, 'fake-codex-cli.mjs'))
   await fs.writeFile(path.join(privateRoot, 'producer.cjs'), `const fs=require('node:fs');for(let n=0;n<100;n++)process.stdout.write('Retained work '+n+'\\r\\n');setInterval(()=>process.stdout.write('Live private work\\r\\n'),1000);let pending='';process.stdin.on('data',data=>{pending+=data.toString();if(/[\\r\\n]/.test(pending)){fs.appendFileSync(${JSON.stringify(path.join(privateRoot, 'input.log'))},pending);process.stdout.write('ACK:'+pending+'\\r\\n');pending='';}});`)
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
-    plugins: mutation ? [{ name: 'focus-history-loaded-readability-counterexample', enforce: 'pre', transform(source, id) {
-      if (!id.split('?')[0].endsWith('/styles/focus.css')) return
-      const rule = source.match(/\.confirmation-dialog\.recent-focus__observation > p \{[^}]*\}/)?.[0]
-      assert.ok(rule?.includes('white-space: normal;'), 'The actual production observation rule must be loaded')
-      const changed = source.replace(rule, rule.replace('white-space: normal;', 'white-space: nowrap;'))
-      receipt.loadedMutation = { variant: mutation, module: path.relative(root, id.split('?')[0]), originalSha256: hash(source), transformedSha256: hash(changed) }
-      return changed
-    } }] : [],
+    css: mutation ? { postcss: { plugins: [{ postcssPlugin: 'focus-history-loaded-readability-counterexample', Once(sheet) {
+      // Vite resolves @import through PostCSS. Mutate the actual imported rule,
+      // rather than pretending its stylesheet is a separately transformed module.
+      sheet.walkRules(rule => {
+        if (rule.selector !== '.confirmation-dialog.recent-focus__observation > p') return
+        const input = rule.source?.input
+        assert.ok(input?.file?.endsWith('/styles/focus.css'), 'The compiled rule must retain its actual production stylesheet source')
+        const declarations = []; rule.walkDecls('white-space', declaration => declarations.push(declaration))
+        assert.equal(declarations.length, 1, 'The actually consumed wrapping declaration must be nonempty and unique')
+        assert.equal(declarations[0].value, 'normal')
+        const original = rule.toString()
+        declarations[0].value = 'nowrap'
+        receipt.loadedMutation = { variant: mutation, module: path.relative(root, input.file), originalSourceSha256: hash(input.css), originalRuleSha256: hash(original), transformedRuleSha256: hash(rule.toString()) }
+      })
+    } }] } } : undefined,
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
   if (mutation) assert.ok(receipt.loadedMutation, 'The actual production stylesheet mutation cannot be a no-op')
