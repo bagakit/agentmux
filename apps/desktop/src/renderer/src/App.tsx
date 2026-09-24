@@ -1,6 +1,6 @@
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation } from './components/SettingsNavigation'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useSidebarResize } from './hooks/useSidebarResize'
@@ -28,7 +28,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../shared/scratch-t
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
-import { WorkspaceWorkbench } from './components/WorkspaceWorkbench'
+import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
 import { tabForFocusedSession } from './lib/focus-tab-projection'
 import { layoutForActiveTopic } from './lib/scratch-topic-layout'
@@ -43,6 +43,8 @@ import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 import { beginRendererStartup, startupProgressDetail } from './lib/startup-progress'
 
+const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
+
 export function App() {
   const workflowComponentGallery = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-component-gallery') === '1'
@@ -52,7 +54,8 @@ export function App() {
 
 function DesktopApp() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsPageId; executorId?: string | undefined } | null>(null)
-  const openSettings = (section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId })
+  const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId }), [])
+  const settingsNavigation = useMemo(() => ({ open: openSettings }), [openSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
@@ -246,7 +249,7 @@ function DesktopApp() {
   }
 
   return (
-    <SettingsNavigation.Provider value={{ open: openSettings }}>
+    <SettingsNavigation.Provider value={settingsNavigation}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
       <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} measurementActive={terminalParkingMeasurement}>
       <div

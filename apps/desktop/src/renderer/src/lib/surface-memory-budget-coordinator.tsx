@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { shallow } from 'zustand/shallow'
 import { useAppStore } from '../store'
 import {
   collectSurfaceMemoryCandidates,
@@ -36,8 +37,11 @@ export function SurfaceMemoryBudgetProvider({
   state: SurfaceMemoryBudgetState
   children: ReactNode
 }) {
+  const previousState = useRef(state)
+  if (!shallow(previousState.current.monacoRegionIds, state.monacoRegionIds) ||
+      !shallow(previousState.current.browserRegionIds, state.browserRegionIds)) previousState.current = state
   return (
-    <SurfaceMemoryBudgetContext.Provider value={state}>
+    <SurfaceMemoryBudgetContext.Provider value={previousState.current}>
       {children}
     </SurfaceMemoryBudgetContext.Provider>
   )
