@@ -1,5 +1,5 @@
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -8,11 +8,12 @@ vi.hoisted(() => {
 import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxControlRequest,
-  type AgentMuxExecutorProbeOutcome
+  type AgentMuxExecutorProbeResult
 } from '@agentmux/core'
 import type { AgentMuxMessageEnvelope } from '@agentmux/core'
 import { BUILT_IN_AGENT_LABELS, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ExecutorDetection, ExecutorDetectionInput, SessionSnapshot } from '../src/shared/contracts.js'
+import { directoryIdentity } from '../src/shared/space-addresses.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import {
@@ -53,6 +54,7 @@ function agent(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
     label: id,
     createdAt: 1,
     updatedAt: 1,
+    agentSessionUpdatedAt: 1,
     processState: 'running',
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     latestOutputBytes: 0,
@@ -77,6 +79,18 @@ function terminal(id: string): Extract<SessionSnapshot, { kind: 'terminal' }> {
   }
 }
 
+function detectionInput(hostId: string, executorId: string, settings = useAppStore.getState().config!): ExecutorDetectionInput {
+  const executor = settings.executors[executorId]!
+  return { executorId, providerId: executor.providerId, command: executor.command,
+    host: settings.hosts.find(host => host.id === hostId)! }
+}
+function probe(hostId: string, executorId: string, availability: AgentMuxExecutorProbeResult['availability']): ExecutorDetection {
+  const input = detectionInput(hostId, executorId)
+  return availability === 'check-failed'
+    ? { input, availability, executable: input.command, cause: { code: 'PROBE_FAILED', message: 'PATH degraded' } }
+    : { input, availability, executable: input.command }
+}
+
 function fixture(extraSessions: SessionSnapshot[] = []): WorkbenchTab {
   const caller = agent('caller')
   const tab = createWorkbenchTab('tab-caller', {
@@ -94,10 +108,13 @@ function fixture(extraSessions: SessionSnapshot[] = []): WorkbenchTab {
     tabs: { [tab.id]: tab },
     layouts: { workspace: createWorkspaceLayout('group', [tab.id]) },
     pendingAgentLaunches: {},
+    spaceZoneBindings: {},
+    spatialRequests: {},
     executorDetections: {
       [executorDetectionKey('local', 'codex')]: {
         state: 'ready',
-        result: { executorId: 'codex', providerId: 'codex', hostId: 'local', availability: 'available' }
+        input: detectionInput('local', 'codex', config),
+        result: { input: detectionInput('local', 'codex', config), availability: 'available', executable: 'codex' }
       }
     },
     error: null
@@ -116,9 +133,18 @@ function request<T extends AgentMuxControlRequest>(value: DistributiveOmit<T, 's
   } as T
 }
 
-function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentLaunchResult {
-  return { created: agentCreationFixture(session), projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
+function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>, input: AgentLaunchInput): AgentLaunchResult {
+  const creation: NonNullable<AgentLaunchResult['creation']> = {
+    createOperationId: input.createOperationId!,
+    initialPrompt: input.prompt === undefined ? 'not-requested' : 'confirmed'
+  }
+  return { created: { ...agentCreationFixture(session), creation }, creation,
+    projectionFailures: [], session, timeline: { agentSessionId: session.id, revision: 0, items: [] } }
 }
+
+let disposeBootstrap: (() => void) | undefined
+beforeAll(async () => { disposeBootstrap = await useAppStore.getState().initialize() })
+afterAll(() => disposeBootstrap?.())
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -222,16 +248,19 @@ describe('Desktop Control owner', () => {
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
     await useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', caller: { agentSessionId: 'caller' }
+      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', caller: { agentSessionId: 'caller' },
+      promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
     }))
-    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, 'continue', expect.any(String), 'caller', { allowUncertainTurn: true })
+    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, 'continue', expect.any(String),
+      { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, 'caller', { allowUncertainTurn: true })
 
     tab = addWorkbenchRegion(tab, 'region-caller-2', 'down', {
       regionId: 'region-reviewer', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'reviewer'
     })
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
     await expect(useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue'
+      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue',
+      promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
     }))).rejects.toMatchObject({
       code: 'MESSAGE_TARGET_NOT_UNIQUE',
       candidates: [
@@ -255,9 +284,11 @@ describe('Desktop Control owner', () => {
     }
     await useAppStore.getState().executeControl({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-request-1', operation: 'send',
-      target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller' }, message
+      target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller' }, message,
+      promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
     })
-    expect(submit).toHaveBeenCalledWith(agent('caller').control, '[Message from Agent caller]\nkeep this exact body', 'message-envelope-1', 'caller', { allowUncertainTurn: true })
+    expect(submit).toHaveBeenCalledWith(agent('caller').control, '[Message from Agent caller]\nkeep this exact body', 'message-envelope-1',
+      { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, 'caller', { allowUncertainTurn: true })
     expect(submit.mock.calls[0]?.[1]).toContain('keep this exact body')
   })
 
@@ -270,42 +301,45 @@ describe('Desktop Control owner', () => {
       ...config,
       executors: { codex: { ...config.executors.codex!, env: { CODEX_TOKEN: 'sk-region-secret' } } }
     } })
-    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!), input))
 
     const opened = await useAppStore.getState().executeControl(request({
-      operation: 'open.agent', caller: { agentSessionId: 'caller' },
+      operation: 'agent.open', caller: { agentSessionId: 'caller' },
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
     }))
     expect(api.sessions.launchAgent).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'write', authorAgentSessionId: 'caller' }))
-    if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
+    if (opened.operation !== 'agent.open') throw new Error('Unexpected result')
+    expect(opened.outcome).toBe('opened')
+    expect(opened.issues).toEqual([])
+    expect(opened.agent?.initialPrompt).toBe('confirmed')
 
     // Region 带着连接键：agentSessionId 连到 Session，workspaceId 连到 destination 的 Workspace。
-    const sessionId = opened.region.agentSessionId
+    const sessionId = opened.agent!.agentSessionId
     const session = useAppStore.getState().sessions.find((s) => s.id === sessionId)
     expect(session?.kind).toBe('agent')
-    expect(opened.region.workspaceId).toBe('workspace')
+    expect(opened.to?.workspaceId).toBe('workspace')
     // Run 身份经同一个 agentSessionId 连到 Session 的 control.run。
     expect(session?.control.run.runId).toBe(`run-${sessionId}`)
 
     // inspect.region 用 Region 自己交出的 regionId 回读，拿到同一格——闭环。
     const inspected = await useAppStore.getState().executeControl(request({
-      operation: 'inspect.region', target: { kind: 'region', regionId: opened.region.regionId }
+      operation: 'inspect.region', target: { kind: 'region', regionId: opened.to!.regionId }
     }))
     if (inspected.operation !== 'inspect.region') throw new Error('Unexpected result')
     expect(inspected.region.kind === 'agent' && inspected.region.agentSessionId).toBe(sessionId)
 
     // 两个发现面（open 回执、inspect 回读）都不含环境变量的值。
-    expect(JSON.stringify(opened.region)).not.toContain('sk-region-secret')
+    expect(JSON.stringify(opened)).not.toContain('sk-region-secret')
     expect(JSON.stringify(inspected.region)).not.toContain('sk-region-secret')
     // Region 不内联 capabilities——能力经 providerId 派生，Region 上只有 providerId 这个连接键。
-    expect(opened.region).not.toHaveProperty('capabilities')
-    expect(opened.region.providerId).toBe('codex')
+    expect(opened.agent).not.toHaveProperty('capabilities')
+    expect(opened.agent?.providerId).toBe('codex')
   })
 
   it('opens Agent, Terminal, and Browser through their owners with exact creation payloads', async () => {
     fixture()
-    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!), input))
     const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(terminal('terminal-created'))
     const createBrowser = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => ({
       id, url, title: '', canGoBack: false, canGoForward: false, loading: false, profileId: 'default',
@@ -314,11 +348,11 @@ describe('Desktop Control owner', () => {
     }))
 
     const openedAgent = await useAppStore.getState().executeControl(request({
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
     }))
-    expect(openedAgent.operation).toBe('open.agent')
+    expect(openedAgent).toMatchObject({ operation: 'agent.open', outcome: 'opened', issues: [] })
 
     const openedTerminal = await useAppStore.getState().executeControl(request({
       operation: 'open.terminal',
@@ -337,7 +371,7 @@ describe('Desktop Control owner', () => {
     expect(openedBrowser.operation).toBe('open.browser')
     if (openedBrowser.operation !== 'open.browser') throw new Error('Unexpected result')
     expect(openedBrowser.region.browserId).not.toBe(openedBrowser.region.regionId)
-    expect(createBrowser).toHaveBeenCalledWith(openedBrowser.region.browserId, 'https://example.com')
+    expect(createBrowser).toHaveBeenCalledWith(openedBrowser.region.browserId, 'https://example.com', 'workspace')
     expect(openedTerminal.operation).toBe('open.terminal')
   })
 
@@ -368,16 +402,19 @@ describe('Desktop Control owner', () => {
           { id: 'w3', name: 'P3', hostId: 'h-missing', path: '/r3', kind: 'folder' },
           { id: 'w4', name: 'P4', hostId: 'h-available', path: '/r4', kind: 'folder' }
         ]
-      },
+      }
+    })
+    useAppStore.setState({
       executorDetections: {
         // h-unknown: 正在查（checking）→ unknown。用 checking 而不是「键缺席」，以钉住
         // 「正在查」也必须归 unknown、绝不提前显示成 available/missing。
-        [executorDetectionKey('h-unknown', 'e-unknown')]: { state: 'checking' },
-        [executorDetectionKey('h-checkfailed', 'e-checkfailed')]: { state: 'error', detail: 'PATH degraded' },
-        [executorDetectionKey('h-missing', 'e-missing')]: { state: 'missing' },
+        [executorDetectionKey('h-unknown', 'e-unknown')]: { state: 'checking', input: detectionInput('h-unknown', 'e-unknown') },
+        [executorDetectionKey('h-checkfailed', 'e-checkfailed')]: { state: 'error', detail: 'PATH degraded', input: detectionInput('h-checkfailed', 'e-checkfailed') },
+        [executorDetectionKey('h-missing', 'e-missing')]: { state: 'missing', input: detectionInput('h-missing', 'e-missing') },
         [executorDetectionKey('h-available', 'e-available')]: {
           state: 'ready',
-          result: { executorId: 'e-available', providerId: 'grok', hostId: 'h-available', availability: 'available' }
+          input: detectionInput('h-available', 'e-available'),
+          result: probe('h-available', 'e-available', 'available')
         }
       }
     })
@@ -419,18 +456,21 @@ describe('Desktop Control owner', () => {
           { id: 'w1', name: 'P1', hostId: 'h1', path: '/r1', kind: 'folder' },
           { id: 'w2', name: 'P2', hostId: 'h2', path: '/r2', kind: 'folder' }
         ]
-      },
+      }
+    })
+    useAppStore.setState({
       executorDetections: {
         // e-up：h1 缺失、h2 就绪 → 归并到 available（有一台装了就算可用）。
-        [executorDetectionKey('h1', 'e-up')]: { state: 'missing' },
+        [executorDetectionKey('h1', 'e-up')]: { state: 'missing', input: detectionInput('h1', 'e-up') },
         [executorDetectionKey('h2', 'e-up')]: {
           state: 'ready',
-          result: { executorId: 'e-up', providerId: 'codex', hostId: 'h2', availability: 'available' }
+          input: detectionInput('h2', 'e-up'),
+          result: probe('h2', 'e-up', 'available')
         },
         // e-blind：h1 没查成（error）、h2 正在查（checking）→ 都不是「确定没装」，归并到最有信息量的
         // check-failed，绝不能塌成 missing。
-        [executorDetectionKey('h1', 'e-blind')]: { state: 'error', detail: 'PATH degraded' },
-        [executorDetectionKey('h2', 'e-blind')]: { state: 'checking' }
+        [executorDetectionKey('h1', 'e-blind')]: { state: 'error', detail: 'PATH degraded', input: detectionInput('h1', 'e-blind') },
+        [executorDetectionKey('h2', 'e-blind')]: { state: 'checking', input: detectionInput('h2', 'e-blind') }
       }
     })
 
@@ -448,7 +488,7 @@ describe('Desktop Control owner', () => {
   // 任何把二者折成一处的改动必须在这里红。
   it('detectExecutors maps each probe outcome to its own check state, keeping check-failed off missing', async () => {
     fixture()
-    const outcomes: Record<string, AgentMuxExecutorProbeOutcome> = {
+    const outcomes: Record<string, AgentMuxExecutorProbeResult['availability']> = {
       'e-available': 'available',
       'e-missing': 'missing',
       'e-blind': 'check-failed'
@@ -465,9 +505,7 @@ describe('Desktop Control owner', () => {
       // 承重而不敢动。
       executorDetections: {}
     })
-    vi.spyOn(api.executors, 'detect').mockImplementation(async (executorId, hostId) => ({
-      executorId, providerId: 'codex', hostId, availability: outcomes[executorId]!
-    }))
+    vi.spyOn(api.executors, 'detect').mockImplementation(async (executorId, hostId) => probe(hostId, executorId, outcomes[executorId]!))
 
     await useAppStore.getState().detectExecutors('local')
 
@@ -523,21 +561,23 @@ describe('Desktop Control owner', () => {
   // 同一件事的 agent 那一半。589ab7bf 修的正是这条（回执从 plan.tabId 改成实际落点），但它当时**没有
   // 留下任何判据**——那个提交里唯一的新用例讲的是「重名 Executor 要在启动前拒掉」，与落点无关。我实测
   // 过：把 agent 这条路改回 `plan.tabId`，在补这条用例之前 22 条全绿。修复入库、守卫留在工作树之外，
-  // 是本仓反复出现的一族（memory fix-committed-guard-left-behind）。两条路现在共用 resolveSpatialCommit，
-  // 判据也就该两条都有。
-  it('open.agent reports the Region current Tab when the user moves it mid-launch', async () => {
+  // 是本仓反复出现的一族（memory fix-committed-guard-left-behind）。新 agent.open 仍需按实际落点回执，
+  // terminal 路径的判据也保留。
+  it('agent.open reports the Region current Tab when the user moves it mid-launch', async () => {
     const tab = fixture()
     let release!: (value: AgentLaunchResult) => void
     let launchedAgentSessionId = ''
+    let launchedInput!: AgentLaunchInput
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation((input) => {
       launchedAgentSessionId = input.agentSessionId!
+      launchedInput = input
       return new Promise((resolve) => { release = resolve })
     })
 
     const opening = useAppStore.getState().executeControl(request({
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
     }))
     await vi.waitFor(() => { if (!launchedAgentSessionId) throw new Error('not launched yet') })
     const movedRegionId = workbenchSurfaces(useAppStore.getState().tabs[tab.id]!)
@@ -547,11 +587,12 @@ describe('Desktop Control owner', () => {
       .find((candidate) => workbenchSurfaces(candidate).some((surface) => surface.regionId === movedRegionId))!.id
     expect(promotedTabId).not.toBe(tab.id)
 
-    release(launch(agent(launchedAgentSessionId)))
+    release(launch(agent(launchedAgentSessionId), launchedInput))
     const opened = await opening
-    if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
-    expect(opened.region.tabId).toBe(promotedTabId)
-    expect(opened.region.regionId).toBe(movedRegionId)
+    if (opened.operation !== 'agent.open') throw new Error('Unexpected result')
+    expect(opened.outcome).toBe('opened')
+    expect(opened.to?.tabId).toBe(promotedTabId)
+    expect(opened.to?.regionId).toBe(movedRegionId)
   })
 
   // T-002 不暴露环境值：list.agents 的元信息里不许出现任何环境变量的值。
@@ -569,7 +610,7 @@ describe('Desktop Control owner', () => {
     expect(JSON.stringify(result)).not.toContain('sk-list-secret')
   })
 
-  it('rejects ambiguous custom Executor labels before launching or changing layout', async () => {
+  it('rejects custom Executor labels before launching or changing layout', async () => {
     const tab = fixture()
     useAppStore.setState({ config: {
       ...config,
@@ -579,17 +620,17 @@ describe('Desktop Control owner', () => {
       }
     } })
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
-    await expect(useAppStore.getState().executeControl(request({
-      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'Custom' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
-    }))).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'agent.open', content: { kind: 'new-agent', executorId: 'Custom' },
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
+    }))
+    expect(result).toMatchObject({ operation: 'agent.open', outcome: 'unknown',
+      to: null, agent: null, issues: [{ code: 'AGENT_EXECUTOR_NOT_CONFIGURED' }] })
     expect(launchAgent).not.toHaveBeenCalled()
     expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
   })
 
-  // T-001 (a) 稳定 ID：executorId 恰好是 config.executors 的键，直接按键启动那一个。
-  // 关键在**优先级**：让 requested 同时是 executor A 的键、又是 executor B 的唯一名称——精确键必须赢，
-  // 否则会解析成 B。这样破坏「精确键优先于名称」时本条才会红（否则 return requested 与键匹配同解，测不出）。
+  // Executor 只认精确配置 ID；与其他 Executor 的展示名碰撞，也不改变身份。
   it('launches a custom Executor by its stable id, and the id wins over a colliding name', async () => {
     fixture()
     useAppStore.setState({ config: {
@@ -602,19 +643,19 @@ describe('Desktop Control owner', () => {
       }
     } })
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
-      .mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
+      .mockImplementation(async (input) => launch(agent(input.agentSessionId!), input))
 
     await useAppStore.getState().executeControl(request({
-      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'reviewer-1' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+      operation: 'agent.open', content: { kind: 'new-agent', executorId: 'reviewer-1' },
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
     }))
     // 单断言：启动的是键 A，不是同名的 B。破坏精确键优先级 → 解析成 'other'，本条红。
     expect(launchAgent).toHaveBeenCalledWith(expect.objectContaining({ executorId: 'reviewer-1' }))
   })
 
-  // T-001 (a) 唯一名称：executorId 是一个 label（不等于任何键）且全局唯一 → 解析成它的键再启动。
-  it('launches a custom Executor by a unique name that is not its id', async () => {
-    fixture()
+  // 唯一展示名也不是配置身份；发现结果中的精确 ID 才能再次输入。
+  it('rejects a unique Executor name that is not its exact configured id', async () => {
+    const tab = fixture()
     useAppStore.setState({ config: {
       ...config,
       executors: {
@@ -622,20 +663,20 @@ describe('Desktop Control owner', () => {
       }
     } })
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
-      .mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
 
-    await useAppStore.getState().executeControl(request({
-      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'Code Reviewer' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'agent.open', content: { kind: 'new-agent', executorId: 'Code Reviewer' },
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
     }))
-    // 单断言：名称被解析成键 'exec-7' 后启动。破坏 resolveExecutorId 的 label 分支（原样返回 requested），
-    // 下游 config.executors['Code Reviewer'] 缺失 → 抛 AGENT_EXECUTOR_NOT_CONFIGURED，本条红。
-    expect(launchAgent).toHaveBeenCalledWith(expect.objectContaining({ executorId: 'exec-7' }))
+    expect(result).toMatchObject({ operation: 'agent.open', outcome: 'unknown',
+      to: null, agent: null, issues: [{ code: 'AGENT_EXECUTOR_NOT_CONFIGURED' }] })
+    expect(launchAgent).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
   })
 
   // T-001 (c) 不替换默认 Provider：请求指名一个**内置 providerId 字符串**（它不是任何 executor 键、
-  // 也匹配不到任何 executor 的名称）→ 必须拒绝启动，即使有 executor 恰好 backing 着这个内置 Provider。
-  // 解析只按「键」或「名称」，绝不按 providerId 猜。Provider id/label 从 SSOT 取，不手写字面量：
+  // 也不是配置 ID）→ 必须拒绝启动，即使有 executor 恰好 backing 着这个内置 Provider。
+  // 解析只按精确配置键，绝不按 providerId 猜。Provider id/label 从 SSOT 取，不手写字面量：
   // 某家被改名/删除时这条守卫不会 asserting 陈旧的名字。
   it('never lets a bare built-in Provider id shadow a configured Executor', async () => {
     const requestedProviderId = BUILT_IN_AGENT_PROVIDER_IDS[0]
@@ -653,14 +694,14 @@ describe('Desktop Control owner', () => {
     } })
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
 
-    // 请求 providerId 本身（非 executor 键，也非任何 label）：既非稳定 ID、也匹配不到唯一名称，
-    // resolveExecutorId 原样回传，随后 config.executors[providerId] 缺失 → 拒绝。
-    await expect(useAppStore.getState().executeControl(request({
-      operation: 'open.agent', content: { kind: 'new-agent', executorId: requestedProviderId },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
-    }))).rejects.toMatchObject({ code: 'AGENT_EXECUTOR_NOT_CONFIGURED' })
+    const result = await useAppStore.getState().executeControl(request({
+      operation: 'agent.open', content: { kind: 'new-agent', executorId: requestedProviderId },
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
+    }))
+    expect(result).toMatchObject({ operation: 'agent.open', outcome: 'unknown',
+      to: null, agent: null, issues: [{ code: 'AGENT_EXECUTOR_NOT_CONFIGURED' }] })
     // 一个 Provider 字符串匹配不能凭空启动，布局也不能动。破坏点：若 resolveExecutorId 退化成把
-    // requested 当 providerId 猜一个 executor，或 open.agent 少了 configured-guard，这里会启动/改布局。
+    // requested 当 providerId 猜一个 executor，或 agent.open 少了 configured-guard，这里会启动/改布局。
     expect(launchAgent).not.toHaveBeenCalled()
     expect(useAppStore.getState().tabs).toEqual({ [tab.id]: tab })
   })
@@ -711,7 +752,7 @@ describe('Desktop Control owner', () => {
     expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
   })
 
-  it('creates requested presets atomically and inserts a new Tab immediately after its anchor', async () => {
+  it('creates requested presets atomically and opens an existing Agent Session in its Zone', async () => {
     const tab = fixture([agent('target')])
     const arranged = await useAppStore.getState().executeControl(request({
       operation: 'arrange', target: { kind: 'tab', tabId: tab.id }, mode: { kind: 'preset', preset: 'grid-4' }
@@ -721,13 +762,15 @@ describe('Desktop Control owner', () => {
     expect(arranged.tab.regions).toHaveLength(4)
 
     const opened = await useAppStore.getState().executeControl(request({
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'agent-session', agentSessionId: 'target' },
-      destination: { kind: 'new-tab', after: { kind: 'tab', tabId: tab.id } }
+      destination: { spaceId: directoryIdentity('local', '/repo'), newTab: true }, focus: false
     }))
-    expect(opened.operation).toBe('open.agent')
-    if (opened.operation !== 'open.agent') throw new Error('Unexpected result')
-    expect(useAppStore.getState().layouts.workspace?.groups[0]?.tabOrder.slice(0, 2)).toEqual([tab.id, opened.region.tabId])
+    expect(opened.operation).toBe('agent.open')
+    if (opened.operation !== 'agent.open') throw new Error('Unexpected result')
+    expect(opened.outcome).toBe('opened')
+    expect(opened.agent?.agentSessionId).toBe('target')
+    expect(useAppStore.getState().layouts.workspace?.groups[0]?.tabOrder.slice(0, 2)).toEqual([tab.id, opened.to!.tabId])
   })
 
   // T-004 验收：搬动保持 Region/Session/Run 身份，源删除、目标唯一，且**不调用任何 Runtime lifecycle**。

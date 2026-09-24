@@ -2,7 +2,7 @@
 
 AgentMux 把本地 Coding Agent 的 Provider、Agent Session、Hook、Permission、ACP 与 Client 投影收口成一个可嵌入的 TypeScript Core；Desktop 是它的第一方 Client。
 
-产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址2026-10-03)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。下文 CLI 示例描述当前源码；新 `agentmux agent open` / `agentmux space mv` 合同正在[本轮实施](docs/plans/pmo-cross-workspace-worktree-cli-design-2026-10-03.md)，不能从合同推定命令已经可用。
+产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址2026-10-03)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。Agent-first 空间 CLI 的命令、失败保留与查询合同见[空间 CLI 设计](docs/plans/pmo-cross-workspace-worktree-cli-design-2026-10-03.md)。
 
 Run 层只有一个 Owner：`ctxmux`。AgentMux 不持有 PTY、子进程、Replay、Socket wire 或进程树，也没有 Backend Selector、兼容层和 fallback。
 
@@ -62,8 +62,8 @@ lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 - checkout-external packed consumer 已证明 Codex create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 失败关闭和 Stop；
 - `agentmux inspect --session|--run|--*-native`、`list sessions` 与 `output` 由短命 CLI 直接读取 Core；Session 操作使用 `agentSessionId`，Run 操作使用 ctxmux `runId`，`output --follow` 输出 JSON Lines；
 - Core 的 `RuntimeProjection` 只投影 Run 与 Agent Session，不表示界面。Desktop 只用 Tab、Region 与 Surface 表达展示；
-- `inspect --tab|--region`、`list agents` 与 `open/send/focus/arrange/interrupt/resume/stop` 通过一个版本化 Control Host 进入各自 Owner。Renderer 是 Tab/Region Layout SSOT，Desktop Main 持有长期 RuntimeController 与 Browser owner，`ctxmuxd` 仍只持有最终产生的 Run、PTY 与 Replay；
-- Agent、Terminal 与 Browser 共用 `--left-of/--right-of/--above/--below/--new-tab-after/--in-region` 这组精确 destination，不读取 UI 焦点，也不猜最近 Region。
+- `agent open`、`space ls/inspect/mv` 与既有 Control 命令通过版本化 Control Host 进入各自 Owner。Renderer 的既有 Workbench 持有 Space/Zone 绑定与 Tab/Region 布局，Desktop Main 持有配置、Git worktree、长期 RuntimeController 与 Browser owner；
+- `agent open` 按 Space/Zone/Tab/Region 精确寻址，可以在另一个 Space 新建 worktree Zone、第一张 Tab 与指定 Executor 的 Agent，并投递第一句任务；`space mv` 只移动指定 Region 的展示位置。Terminal 与 Browser 继续使用精确 Region 方位或 `--tab <id> --new-tab`。
 
 Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 与 Codex 共享同一
 Provider/Agent Session 合同，当前真实端到端覆盖以 Codex 为代表。
@@ -102,8 +102,13 @@ Provider 与 Executor 的职责、投递 admission 和 typed 交互见 [Core 接
 agentmux list agents
 agentmux list sessions
 agentmux inspect --session <agent-session-id>
-agentmux open agent --agent codex --prompt "Inspect the failing tests" \
-  --right-of <region-id>
+agentmux space ls
+agentmux space ls --space <space-id>
+agentmux agent open --executor <executor-id> --zone <zone-id> \
+  --prompt "Inspect the failing tests" --request-id <request-id>
+agentmux space inspect --request <request-id>
+agentmux space mv --from-region <region-id> --expect-session <agent-session-id> \
+  --zone <target-zone-id> --new-tab
 agentmux send --to-session <agent-session-id> --text "Run the focused tests"
 agentmux output --session <agent-session-id> --follow
 agentmux interrupt --session <agent-session-id>
@@ -114,6 +119,20 @@ agentmux inspect --tab <tab-id>
 agentmux focus --region <region-id>
 agentmux arrange --tab <tab-id> --preset columns-3
 ```
+
+PMO 可以从任何 Space 一次创建 Git worktree Zone、第一张 Tab 和 Agent：
+
+```bash
+agentmux agent open --executor <executor-id> --space <space-id> \
+  --new-zone --worktree --new-branch feat/task --path /absolute/worktree \
+  --prompt "Implement this task and verify it" --request-id <request-id>
+```
+
+`--executor` 使用 `list agents` 返回的确切 Executor ID；Space/Zone ID 从 `space ls` 读取，包含 JSON 目录键时按原字符串引用。已有目录用 `--new-zone --directory /absolute/directory`，已有 Git 分支用 `--branch`。一个 Space 含多个 Zone 时返回候选，调用方必须选定目标。
+
+打开与移动默认在后台，`--focus` 才导航到结果。已有 Session 可用 `agent open --session <id>` 增加投影；`space mv` 则保留原 Region/Session/Run、执行 Host 与 cwd，其他投影继续存在。
+
+最终 JSON 的 `result.agent.agentSessionId` 可交给后续 `send --to-session`；`result.to` 是实际空间地址。`initialPrompt=confirmed` 只证明本次创建的投递协议完成。失败可能留下已创建 worktree、健康 Agent 或待确认的布局；`partial/unknown` 仍返回报告并以非零退出。丢回执时用预先指定的 `--request-id` 查询 `space inspect --request`，查询不会重做 Git、启动或发任务。保存报告区分 localStorage 写入、flush 请求和 `diskDurability=unconfirmed`。
 
 `self` 只接受受管 Agent 注入的 `AGENTMUX_ENV=1` 与 `AGENTMUX_AGENT_SESSION_ID`。
 `inspect --tab self` 或方位 destination 不能唯一解析时会失败关闭，调用方必须改用 receipt

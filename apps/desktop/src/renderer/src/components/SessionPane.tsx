@@ -98,6 +98,13 @@ export function SessionPane({
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
   const appendAgentComposerDraft = useAppStore((state) => state.appendAgentComposerDraft)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
+  const autoFocus = useAppStore(state => {
+    if (!visible || readOnly || state.retainedSpatialFocus || state.mainSurface !== 'workbench' ||
+      state.activeWorkspaceId !== linkOrigin.workspaceId || !linkOrigin.tabId || !linkOrigin.regionId) return false
+    const layout = state.layouts[linkOrigin.workspaceId]
+    const group = layout?.groups.find(one => one.id === layout.activeGroupId)
+    return group?.activeTabId === linkOrigin.tabId && state.tabs[linkOrigin.tabId]?.layout.activeRegionId === linkOrigin.regionId
+  })
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
@@ -435,6 +442,7 @@ export function SessionPane({
             ) : (
               <TerminalView
                 session={session}
+                autoFocus={autoFocus}
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
                 interactiveResize={projectionPolicy.interactiveResize && interactiveResize}

@@ -236,8 +236,8 @@ async function splitAndGroup(cdp,opened) {
   const live=await control('inspect.tab',{kind:'tab',tabId:opened.tab.id})
   assert.equal(live.result.tab.regions.length,2)
   const launcher=live.result.tab.regions.find(region=>region.kind==='launcher');assert.ok(launcher)
-  const openedAgent=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'open.agent',content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{kind:'launcher',regionId:launcher.regionId}},join(runtimeDirectory,'control.sock'))
-  assert.equal(openedAgent.result.region.agentSessionId,session.agentSessionId)
+  const openedAgent=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'agent.open',content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{regionId:launcher.regionId},focus:true},join(runtimeDirectory,'control.sock'))
+  assert.equal(openedAgent.result.outcome,'opened');assert.ok(openedAgent.result.to);assert.equal(openedAgent.result.agent.agentSessionId,session.agentSessionId)
   const mixed=await control('inspect.tab',{kind:'tab',tabId:opened.tab.id});assert.deepEqual(mixed.result.tab.regions.map(region=>region.kind),['view','agent'])
   receipt.mixedViewAgent=mixed.result.tab
   await waitFor('real split topology',async()=>{const s=await state(cdp);const tab=s?.workbench.tabs[opened.tab.id];return tab?.layout.root.type==='split'&&Object.keys(tab.regions).length===2?tab:null})

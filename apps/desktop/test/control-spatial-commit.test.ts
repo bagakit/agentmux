@@ -14,7 +14,7 @@ import {
 import { classifyServiceNotice, serviceNoticeToRender } from '../src/renderer/src/lib/service-window-notice'
 import type { SessionSnapshot } from '../src/shared/contracts'
 
-// T-005 「异步创建回执与实际布局一致」的纯判定层。异步 open.agent/open.terminal 完成时，回执的落点必须
+// T-005 「异步创建回执与实际布局一致」的纯判定层。异步 agent.open/open.terminal 完成时，回执的落点必须
 // 对**当前**布局重新解析，绝不回放 plan 里的坐标；已健康启动却错位的 Agent 仍可发现、且带一条持续告示。
 // 这一层被单测直接钉住；store.ts 里只剩一层薄调用（受争用，交由集成方接线）。
 

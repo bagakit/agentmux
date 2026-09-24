@@ -22,7 +22,7 @@ import { isSessionSurface } from './workbench-surface-kinds'
 import { nextAttentionSessionId } from './agent-attention'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
-import type { RegionFocusCause } from './region-focus'
+import { logicalRegionId, layoutForLogicalRegionFocus, type RegionFocusCause } from './region-focus'
 
 /**
  * 一次按键解析出的命令——已经定到「哪个动作、往哪个方向、第几张」，但**落点（哪个 Workspace/Tab/
@@ -179,6 +179,7 @@ export function adjacentRegionId(
 
 /** 落点解析 + 转发所需的最小 store 切片。App 直接把 store 快照传进来（它是这个类型的超集）。 */
 export type WorkbenchShortcutStore = {
+  retainedSpatialFocus?: { regionId: string; tabId: string; workspaceId: string; topicId?: string } | null
   mainSurface: string
   activeWorkspaceId: string | null
   layouts: Readonly<Record<string, WorkspaceLayout>>
@@ -238,11 +239,11 @@ export function dispatchWorkbenchCommand(
   const storedLayout = workspaceId ? store.layouts[workspaceId] : undefined
   if (!workspaceId || !storedLayout) return false
   // 投影出与 Workbench 渲染相同的 Topic 过滤后 layout，让序号与活动组/Tab 恰好对上用户所见。
-  const layout = layoutForActiveTopic(
+  const layout = layoutForLogicalRegionFocus(layoutForActiveTopic(
     storedLayout,
     store.tabs,
-    activeTopicIdFromLayout(storedLayout, store.tabs)
-  )
+    store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
+  ), store.tabs, store.retainedSpatialFocus)
   const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
   if (!group) return false
 
@@ -278,7 +279,8 @@ export function dispatchWorkbenchCommand(
   const tabId = group.activeTabId
   const tab = tabId ? store.tabs[tabId] : undefined
   if (!tabId || !tab) return false
-  const activeRegionId = tab.layout.activeRegionId
+  const activeRegionId = logicalRegionId(tab, store.retainedSpatialFocus?.regionId)
+  if (!activeRegionId) return false
 
   if (command.kind === 'close-tab') {
     // 无论单格还是分屏都关整张 Tab——这正是与 close-region 的区别：close-region 只在单格时才回退到关 Tab，
@@ -309,7 +311,7 @@ export function dispatchWorkbenchCommand(
   }
   // focus 与 swap 共用这一次邻格解析，这是刻意的：两者都在回答「这个方向上是哪一格」，各算一次就会漂移成
   // 「按方向键走到 A、按 Shift+方向键把内容换给 B」。到边（该方向没有邻格）时两者都不吃这个键，原样放行。
-  const neighbourRegionId = adjacentRegionId(tab.layout, command.direction)
+  const neighbourRegionId = adjacentRegionId({ ...tab.layout, activeRegionId }, command.direction)
   if (!neighbourRegionId) return false
   if (command.kind === 'swap-region') {
     // 换位后焦点仍在同一格（内容跟着 id 走，焦点指针不动），于是连按四下方向键就是把这一格一路搬过去——
@@ -342,15 +344,17 @@ export function focusedSessionId(store: WorkbenchShortcutStore): string | null {
   const workspaceId = store.activeWorkspaceId
   const storedLayout = workspaceId ? store.layouts[workspaceId] : undefined
   if (!workspaceId || !storedLayout) return null
-  const layout = layoutForActiveTopic(
+  const layout = layoutForLogicalRegionFocus(layoutForActiveTopic(
     storedLayout,
     store.tabs,
-    activeTopicIdFromLayout(storedLayout, store.tabs)
-  )
+    store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
+  ), store.tabs, store.retainedSpatialFocus)
   const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
   const tab = group?.activeTabId ? store.tabs[group.activeTabId] : undefined
   if (!tab) return null
-  const surface = activeWorkbenchSurface(tab)
+  const regionId = logicalRegionId(tab, store.retainedSpatialFocus?.regionId)
+  if (!regionId) return null
+  const surface = tab.regions[regionId]!
   return isSessionSurface(surface) ? surface.sessionId : null
 }
 

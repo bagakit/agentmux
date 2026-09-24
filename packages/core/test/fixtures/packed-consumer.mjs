@@ -653,6 +653,8 @@ const agentRegion = {
   executorId: 'codex',
   workspaceId: 'packed-workspace'
 }
+const packedSpaceId = JSON.stringify(['local', codex.workspacePath])
+const packedZoneId = JSON.stringify([packedSpaceId, 'workspace', agentRegion.workspaceId])
 const terminalRegion = {
   tabId: 'packed-agent-tab',
   regionId: 'packed-terminal-region',
@@ -684,14 +686,25 @@ const controlServer = new AgentMuxControlServer({
         ...(request.target.kind === 'region' ? { regionId: request.target.regionId } : {})
       }
     }
-    if (request.operation === 'open.agent') {
+    if (request.operation === 'agent.open') {
+      const existing = request.content.kind === 'agent-session'
       return {
         operation: request.operation,
-        region: {
-          ...agentRegion,
-          regionId: request.content.kind === 'agent-session' ? 'packed-opened-region' : 'packed-launched-region',
-          agentSessionId: request.content.kind === 'agent-session' ? request.content.agentSessionId : 'packed-launched-session'
-        }
+        requestId: request.requestId,
+        outcome: 'opened',
+        from: null,
+        to: { spaceId: packedSpaceId, zoneId: packedZoneId,
+          workspaceId: agentRegion.workspaceId,
+          tabId: request.destination.newTab ? 'packed-agent-new-tab' : agentRegion.tabId,
+          regionId: existing ? 'packed-opened-region' : 'packed-launched-region' },
+        agent: { agentSessionId: existing ? request.content.agentSessionId : 'packed-launched-session',
+          runId: existing ? codex.run.runId : 'packed-launched-run', providerId: 'codex', executorId: 'codex',
+          hostId: 'local', cwd: codex.workspacePath, createOperationId: existing ? null : request.requestId,
+          initialPrompt: existing ? 'not-requested' : 'confirmed' },
+        resource: null,
+        save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true,
+          diskDurability: 'unconfirmed', reason: null },
+        issues: []
       }
     }
     if (request.operation === 'open.terminal') {
@@ -780,22 +793,29 @@ const cliContext = JSON.parse((await cli(['inspect', '--tab', 'self'], managedEn
 assert.equal(cliContext.operation, 'inspect.tab')
 assert.equal(cliContext.result.tab.regions[0].regionId, agentRegion.regionId)
 const launchedRegion = JSON.parse((await cli([
-  'open', 'agent', '--agent', 'codex', '--prompt', '--help', '--right-of', 'self'
+  'agent', 'open', '--executor', 'codex', '--prompt', '--help', '--region', agentRegion.regionId, '--split', 'right'
 ], managedEnv)).stdout)
-assert.equal(launchedRegion.operation, 'open.agent')
-assert.equal(launchedRegion.result.region.regionId, 'packed-launched-region')
+assert.equal(launchedRegion.operation, 'agent.open')
+assert.equal(launchedRegion.result.to.regionId, 'packed-launched-region')
+assert.equal(launchedRegion.result.agent.agentSessionId, 'packed-launched-session')
+assert.equal(launchedRegion.result.agent.initialPrompt, 'confirmed')
+assert.equal(launchedRegion.result.agent.createOperationId, launchedRegion.requestId)
+assert.equal(launchedRegion.result.save.diskDurability, 'unconfirmed')
 const openedRegion = JSON.parse((await cli([
-  'open', 'agent', '--session', codex.agentSessionId, '--new-tab-after', agentRegion.tabId
+  'agent', 'open', '--session', codex.agentSessionId, '--zone', packedZoneId, '--new-tab'
 ], managedEnv)).stdout)
-assert.equal(openedRegion.operation, 'open.agent')
-assert.equal(openedRegion.result.region.regionId, 'packed-opened-region')
+assert.equal(openedRegion.operation, 'agent.open')
+assert.equal(openedRegion.result.to.regionId, 'packed-opened-region')
+assert.equal(openedRegion.result.to.tabId, 'packed-agent-new-tab')
+assert.equal(openedRegion.result.agent.agentSessionId, codex.agentSessionId)
+assert.equal(openedRegion.result.agent.runId, codex.run.runId)
 const openedTerminal = JSON.parse((await cli([
   'open', 'terminal', '--command', 'printf packed', '--below', agentRegion.regionId
 ])).stdout)
 assert.equal(openedTerminal.operation, 'open.terminal')
 assert.equal(openedTerminal.result.region.runId, 'packed-created-terminal')
 const openedBrowser = JSON.parse((await cli([
-  'open', 'browser', '--url', 'http://localhost:5173', '--new-tab-after', agentRegion.tabId
+  'open', 'browser', '--url', 'http://localhost:5173', '--tab', agentRegion.tabId, '--new-tab'
 ])).stdout)
 assert.equal(openedBrowser.operation, 'open.browser')
 assert.equal(openedBrowser.result.region.browserId, 'packed-browser')
@@ -810,10 +830,14 @@ const focusedRegion = JSON.parse((await cli([
 assert.equal(focusedRegion.operation, 'focus')
 assert.equal(focusedRegion.result.regionId, terminalRegion.regionId)
 assert.deepEqual(controlRequests.map((request) => request.operation), [
-  'list.agents', 'inspect.tab', 'open.agent', 'open.agent', 'open.terminal', 'open.browser', 'arrange', 'focus'
+  'list.agents', 'inspect.tab', 'agent.open', 'agent.open', 'open.terminal', 'open.browser', 'arrange', 'focus'
 ])
 assert.equal(controlRequests[2].content.executorId, 'codex')
 assert.equal(controlRequests[2].content.prompt, '--help')
+assert.deepEqual(controlRequests[2].destination, { regionId: agentRegion.regionId, split: 'right' })
+assert.equal(controlRequests[2].focus, false)
+assert.deepEqual(controlRequests[3].destination, { zoneId: packedZoneId, newTab: true })
+assert.equal(controlRequests[3].focus, false)
 await assert.rejects(
   cli(['send', `--to-tab=${agentRegion.tabId}`, '--text', 'review']),
   (error) => {
@@ -1600,8 +1624,7 @@ const afterCursor = await afterCursorClient.createAgent({
   commandOverride: fakeCodex,
   env: { AGENTMUX_FAKE_READY_MODE: 'after' }
 })
-const afterCursorAttachment = await afterCursorClient.reattachAgent(afterCursor.agentSessionId, 0)
-const afterCursorReplay = afterCursorAttachment.attachment.replay.map((event) => event.data).join('')
+await reattachAgentWithReplay(afterCursorClient, afterCursor.agentSessionId, afterCursorEvents)
 const pendingAfterCursor = await waitFor('native Stop boundary before composer frame', () => (
   afterCursorClient.agentSession(afterCursor.agentSessionId).terminalPromptReadiness?.source === 'native-stop'
     ? afterCursorClient.agentSession(afterCursor.agentSessionId).terminalPromptReadiness
@@ -1610,7 +1633,7 @@ const pendingAfterCursor = await waitFor('native Stop boundary before composer f
 assert.equal(pendingAfterCursor.source, 'native-stop')
 assert.equal(pendingAfterCursor.readyThroughByte, undefined)
 await waitFor('after-cursor fake control readiness', () => (
-  `${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`
+  output(afterCursorEvents, afterCursor.run.runId)
     .includes('codex-controlled-ready-pending')
 ))
 await afterCursorClient.writeAgent({ agentSessionId: afterCursor.agentSessionId, expectedRun: afterCursorClient.agentSession(afterCursor.agentSessionId).run, data: '\u001d', source: 'user' })
@@ -1646,9 +1669,9 @@ assert.equal(nativeStopConcurrentAfter.run.runId, nativeStopConcurrentBefore.run
 assert.equal(nativeStopConcurrentAfter.run.state, 'running')
 assert.equal(nativeStopConcurrentAfter.run.acceptedInputBytes, nativeStopConcurrentBefore.run.acceptedInputBytes + Buffer.byteLength(nativeStopWinner) + 1)
 await waitFor('exactly one native Stop concurrent prompt delivered', () => (
-  `${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`.includes(`codex-submit:${nativeStopWinner}:accepted`)
+  output(afterCursorEvents, afterCursor.run.runId).includes(`codex-submit:${nativeStopWinner}:accepted`)
 ))
-assert.equal((`${afterCursorReplay}${output(afterCursorEvents, afterCursor.run.runId)}`.match(/codex-submit:native-stop-(?:owner|contender):accepted/gu) ?? []).length, 1)
+assert.equal((output(afterCursorEvents, afterCursor.run.runId).match(/codex-submit:native-stop-(?:owner|contender):accepted/gu) ?? []).length, 1)
 await waitFor('new native Stop after concurrent prompt', () => {
   const readiness = afterCursorClient.agentSession(afterCursor.agentSessionId).terminalPromptReadiness
   return readiness?.source === 'native-stop' && readiness.id !== readyAfterCursor.id &&

@@ -51,7 +51,9 @@ Intents:
   diagnostics Inspect the Desktop crash log or explicitly request it in the file manager.
   pmo         Give PMO Teams a bounded global snapshot and precise drill-downs.
   demand      List and update Board Demands and their explicit Session links.
-  open        Open typed content at one exact spatial destination.
+  agent       Open a new Agent or an additional view of an existing Session.
+  space       Discover, inspect, or move exact Space/Zone/Tab/Region presentations.
+  open        Open a Terminal or Browser at one exact spatial destination.
   browser     Drive an already-open Browser by running a program in it.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
   deliveries  Explicitly check and acknowledge your durable incoming message batch.
@@ -75,7 +77,8 @@ Output:
 
 Learn:
   agentmux <intent> --help
-  agentmux open agent --help
+  agentmux agent open --help
+  agentmux space --help
   agentmux --skill
 
 Options:
@@ -322,7 +325,8 @@ Usage:
   agentmux list active-agents
   agentmux list sessions
 
-Agents are Desktop-configured executors with availability. Projects are configured workspaces.
+Agents are Desktop-configured executors with availability. Projects group resources by Host
+and repository root (or directory root); Project IDs are not Workspace IDs.
 Active Agents are live Session projections grouped by Project. Sessions are Core-owned live
 or historical Agent Session status entries. Never infer a target from order.`],
   ['pmo', `Read the global PMO Teams observation surface
@@ -361,6 +365,93 @@ Usage: agentmux deliveries ack --generation <generation> --reader-run <Run from 
 The capability, current Session binding and stored readerRun/generation must match.
 Returns exact acknowledged IDs and the next generation. Wrong/empty/stale batches fail;
 no message body, delivery fact, other recipient cursor or Agent lifecycle is changed.`],
+  ['agent', `Open an Agent through its exact Executor or Session identity
+
+Usage: agentmux agent open --help
+
+Use agent open to create an Agent in a Zone or add a presentation of an existing Session.
+Discover exact Executor IDs with agentmux list agents and destinations with agentmux space ls.`],
+  ['agent.open', `Open a new Agent or an additional presentation of an existing Session
+
+Usage:
+  agentmux agent open --executor <exact-executor-id> [--prompt <text>] <destination>
+  agentmux agent open --session <exact-session-id> <destination>
+
+Destination selectors:
+  --space <space-id>  --zone <zone-id>  --tab <tab-id>  --region <region-id>
+  --new-tab          --split <left|right|above|below>
+
+A Region implies its parents; --split adds a neighbor. Without split it must be empty.
+A Tab requires exactly one empty Region. Space/Zone without Tab/Region creates a new Tab,
+including the first Tab. A Space with multiple Zones returns exact candidates; no default
+Zone is guessed. All supplied parents must agree. A target is required; run agentmux space ls.
+
+Create a Zone in an exact Space:
+  --space <id> --new-zone --worktree --path <absolute-path> --new-branch <branch>
+  --space <id> --new-zone --worktree --path <absolute-path> --branch <existing-branch>
+  --space <id> --new-zone --directory <existing-absolute-directory>
+
+Git options create or use a branch from the existing Git owner's HEAD contract. No reset,
+force, automatic naming, or cleanup is performed. The directory form does not run Git.
+Existing --session accepts neither --prompt nor --new-zone and preserves the original view,
+execution Host and cwd. Later tasks use send --to-session; initial prompt is delivered only
+by the same Core creation operation. confirmed proves that protocol, not task acceptance.
+
+All opens run in the background by default; --focus explicitly navigates to the result.
+--request-id <id> supplies a caller-known identity; otherwise the CLI generates one. Exactly
+one final JSON receipt reports the IDs, outcome, retained resources, initialPrompt and save
+facts. partial/unknown exits nonzero while retaining the typed report and healthy Agent.
+A flush request has no disk ACK: diskDurability remains unconfirmed. After a lost receipt,
+use agentmux space inspect --request <request-id>, without blind spawn or resend.`],
+  ['space', `Discover and manipulate client-owned spatial presentations
+
+Usage:
+  agentmux space ls [--space <space-id>|--zone <zone-id>]
+  agentmux space inspect --space <id>|--zone <id>|--tab <id>|--region <id>
+  agentmux space inspect --request <request-id>
+  agentmux space mv --from-region <id> --expect-session <id> <destination>
+
+Space, Zone, Tab and Region IDs are opaque exact strings, including JSON directory keys.
+Space is the working surface owner; Project is a separate repository/directory grouping.
+Zone is a general execution resource, which may be a worktree, directory or Topic/Mote home.
+Discovery does not focus, read terminal bodies or probe every Session's readiness.
+Run each subcommand with --help for its exact grammar.`],
+  ['space.ls', `Discover exact spatial IDs without changing focus
+
+Usage:
+  agentmux space ls
+  agentmux space ls --space <space-id>
+  agentmux space ls --zone <zone-id>
+
+No filter returns all Space summaries; a Space returns its Zones; a Zone returns its
+Tab/Region metadata. IDs can be copied unchanged into agent open, space inspect or space mv.
+This read does not enumerate terminal bodies, timelines or readiness probes.`],
+  ['space.inspect', `Inspect one exact spatial object or reconcile a Request
+
+Usage:
+  agentmux space inspect --space <id>|--zone <id>|--tab <id>|--region <id>
+  agentmux space inspect --request <request-id>
+
+Exactly one selector is required. --request cannot be combined with another selector.
+Request inspection returns known/report facts from the existing owners; it never repeats
+Git creation, Agent spawn, initial prompt delivery, movement or navigation. Unknown Requests
+and reports with partial/unknown outcomes retain their single JSON receipt and exit nonzero.`],
+  ['space.mv', `Move one exact Agent presentation without changing its execution context
+
+Usage:
+  agentmux space mv --from-region <source-id> --expect-session <session-id> <destination>
+
+Destination: --space <id>, --zone <id>, --tab <id>, or --region <id> with optional consistent
+parents. Space/Zone creates a new Tab, optionally explicit --new-tab. --region with --split
+<left|right|above|below> creates a neighbor; without split it must be empty. No new Zone is
+created. Exact source Region and expected Session are required even with multiple views.
+
+The same Region/Session/Run and original execution Host/cwd are retained. Other views are
+not merged or removed. Self move is unchanged. No stop, resume, spawn or send is performed.
+Background is the default; --focus explicitly navigates. --request-id <id> is optional.
+The single final JSON receipt reports from/to, partial/unknown and separate save facts;
+partial/unknown exits nonzero. diskDurability remains unconfirmed after a void flush request.
+After a lost reply, use space inspect --request; do not repeat the move blindly.`],
   ['dispatch', `Supervise an already recorded Agent message
 
 Usage:
@@ -399,34 +490,19 @@ Usage: agentmux dispatch show --source-message <message-id>
 Either currently authorized participant can inspect the durable open time, actual reply
 IDs and waiting fact. Missing referenced messages or historical identity produce an explicit
 unavailable error; this never affects ordinary Agent input or other recipients' messages.`],
-  ['open', `Open typed content at one exact destination
+  ['open', `Open a Terminal or Browser at one exact destination
 
 Usage:
-  agentmux open agent [options]
   agentmux open terminal [--command <shell-command>] <destination>
   agentmux open browser --url <url> <destination>
 
 Exactly one destination is required:
   --left-of <region-id|self>      --right-of <region-id|self>
   --above <region-id|self>        --below <region-id|self>
-  --new-tab-after <tab-id|self>   --in-region <launcher-region-id>
+  --tab <tab-id|self> --new-tab   --in-region <launcher-region-id>
 
-Agent prompt, Terminal shell command, and Browser URL are delivered once to their
-respective owner. Every form requires exactly one destination.`],
-  ['open.agent', `Open a new or existing Agent Session
-
-Usage:
-  agentmux open agent --agent <executor-id> [--prompt <text>] <destination>
-  agentmux open agent --session <session-id> <destination>
-
-Exactly one destination is required:
-  --left-of <region-id|self>      --right-of <region-id|self>
-  --above <region-id|self>        --below <region-id|self>
-  --new-tab-after <tab-id|self>   --in-region <launcher-region-id>
-
-The token after --prompt is data, including literal --help. Agent creation remains
-owned by the long-lived Desktop RuntimeController. Lifecycle or layout failure rolls
-back this open transaction.`],
+Terminal shell command and Browser URL are delivered once to their respective owner.
+Agent creation uses agentmux agent open and its Space/Zone destination grammar.`],
   ['open.terminal', `Open a Terminal
 
 Usage: agentmux open terminal [--command <shell-command>] <destination>
@@ -827,39 +903,57 @@ Session inspection reads only Core Session/Run truth. Tab inspection reads the D
 Control Host's current Region map and normalized bounds. Parse receipts; never infer from
 titles, UI focus, terminal output, or list order.
 
-## Open an Agent
+## Open an Agent in a Space
+
+\`Space\` owns working surfaces, \`Zone\` binds their execution resource, \`Tab\` is a work
+surface and \`Region\` is one leaf. Project groups code resources and is not a Space alias.
 
 \`\`\`bash
-agentmux open agent --agent codex --prompt "Implement the change" --right-of self
-agentmux open agent --agent claude --prompt "Review the writer" --below <region-id>
-agentmux open agent --agent codex --prompt "Work on the left" --left-of <region-id>
-agentmux open agent --agent claude --prompt "Review above" --above <region-id>
-agentmux open agent --session <session-id> --new-tab-after self
-agentmux open agent --session <session-id> --in-region <launcher-region-id>
+agentmux list agents
+agentmux space ls
+agentmux space ls --space <space-id>
+agentmux agent open --executor <exact-executor-id> --zone <zone-id> --new-tab --prompt "Implement the change"
+agentmux agent open --executor <exact-executor-id> --region <region-id> --split right --prompt "Review the writer"
+agentmux agent open --session <exact-session-id> --zone <zone-id> --new-tab
+agentmux agent open --executor <exact-executor-id> --space <space-id> --new-zone --worktree --new-branch feat/task --path /absolute/worktree --prompt "Work on this branch"
 \`\`\`
 
-Use a directional destination for the same task. Use \`--new-tab-after\` only when the
-user explicitly requests a new Tab. For a non-trivial Tab, inspect its bounds and choose
-the exact Region whose split produces the requested whole-Tab layout.
+Discover exact IDs before acting. Space/Zone can open their first Tab without an existing
+Tab anchor. A Space with several Zones returns candidates and requires a choice. Extra
+parents must agree. A Region target must be empty unless --split creates a neighbor.
+Open preserves current focus by default; --focus explicitly navigates. Existing --session
+adds a view without changing the original Run/cwd and cannot take a prompt or new Zone.
+A non-Git Zone uses --new-zone --directory <existing-absolute-directory> in an exact Space.
 
-Before opening a custom Agent, use \`agentmux list agents\` to resolve its configured
-Executor id and availability. For spatial placement, prefer a visible empty Region; when
-none exists, split the adjacent Region that preserves the clearest readable layout, then
-inspect the result. Do not infer space from titles or Tab order.
+## Move one Agent presentation
+
+\`\`\`bash
+agentmux space mv --from-region <source-region-id> --expect-session <session-id> --zone <zone-id> --new-tab
+agentmux space mv --from-region <source-region-id> --expect-session <session-id> --region <empty-region-id>
+agentmux space inspect --request <request-id>
+\`\`\`
+
+Move one exact source projection, preserving its Region/Session/Run, original Host/cwd and
+other views. It never resumes, stops, spawns or sends. Both open and mv accept --request-id;
+without it the final single JSON receipt supplies a generated ID. partial/unknown exits
+nonzero and retains real owner facts. A missing reply does not mean no operation happened:
+inspect --request before choosing any recovery. Initial prompt confirmed proves the same
+Core creation protocol, not Agent task acceptance. Chromium flush is only a request;
+diskDurability remains unconfirmed until actual restart/readback evidence exists.
 
 ## Open a Terminal or Browser
 
 \`\`\`bash
 agentmux open terminal --command "pnpm test:fast" --below <region-id>
-agentmux open browser --url "http://localhost:5173" --new-tab-after self
+agentmux open terminal --in-region <launcher-region-id>
+agentmux open browser --url "http://localhost:5173" --tab self --new-tab
 \`\`\`
 
 Terminal commands execute once at creation through the host shell. Browser URLs go to
-the Main Browser owner. Do not deliver either payload by typing it — no keystroke
-synthesis into a terminal, no typing a URL into the Browser chrome. Pass it as the flag.
-
+the Main Browser owner. Pass them as flags; never synthesize terminal keystrokes or type
+into Browser chrome. Inspect the resulting Tab/Region to confirm where it landed.
 (This is about how the payload is delivered, not about driving the page afterwards.
-\`agentmux browser run\` is the supported way to drive an open Browser — see below.)
+Use agentmux browser run to drive an already-open Browser.)
 
 ## Drive an open Browser
 
@@ -973,7 +1067,8 @@ agentmux send --to-tab <tab-id> --text "Continue"
 Tab send succeeds only for one distinct Agent Session. If candidates are returned, inspect
 the Tab and select an exact Session. Send never broadcasts and never resumes.
 
-Agent-addressed Session commands accept a full canonical ID or a currently unique prefix.
+Session send/inspect/runtime commands accept a full canonical ID or a currently unique prefix.
+Agent open and space mv require exact Session IDs.
 Full IDs win exact matches. Ambiguous prefixes require more characters; unknown prefixes
 never select an Agent. New canonical IDs use 16 base64url characters, an alphanumeric first
 character, and over 95 bits of effective entropy.

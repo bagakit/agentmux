@@ -1,4 +1,6 @@
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -107,6 +109,7 @@ function mountScratch(
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useAppStore.setState(initialState, true)
 })
 
@@ -157,15 +160,22 @@ describe('T-001 explicit Topic on Agent launch', () => {
 
   it('opens a new-agent Control into a fresh Tab with no Topic, minting none from the Tab', async () => {
     mountScratch([scratchTopicTab('launcher:anchor')])
+    await initializeSpatialControlFixture()
+    const inspected = await useAppStore.getState().executeControl({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'unbound-zone',
+      operation: 'space.inspect', target: { tabId: 'launcher:anchor' }
+    })
+    if (inspected.operation !== 'space.inspect') throw new Error('Expected spatial inspection')
+    expect(inspected.catalog.zones).toHaveLength(1)
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
       .mockImplementation(async (input) => launch(agent(input.agentSessionId!)))
 
     await useAppStore.getState().executeControl({
-      schemaVersion: 1,
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'request-open-agent',
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
-      destination: { kind: 'new-tab', after: { kind: 'tab', tabId: 'launcher:anchor' } }
+      destination: { zoneId: inspected.catalog.zones[0]!.zoneId, newTab: true }, focus: false
     })
 
     expect(launchAgent).toHaveBeenCalledTimes(1)

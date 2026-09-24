@@ -227,11 +227,12 @@ it('session observation failure is unknown rather than a perpetual launch and Ch
   expect(stop).not.toHaveBeenCalled(); expect(starts).toHaveLength(1)
 })
 it('a Renderer overflow snapshot rejection never rolls back the accepted healthy Run', async () => {
-  const create = core.createAgent.bind(core)
-  vi.spyOn(core, 'createAgent').mockImplementation(async input => {
+  const create = core.createAgentWithDelivery.bind(core)
+  vi.spyOn(core, 'createAgentWithDelivery').mockImplementation(async input => {
     const result = await create(input)
+    const id = result.session.agentSessionId
     useAppStore.setState(state => ({ pendingAgentLaunches: { ...state.pendingAgentLaunches,
-      [result.agentSessionId]: { ...state.pendingAgentLaunches[result.agentSessionId]!, overflowed: true } } }))
+      [id]: { ...state.pendingAgentLaunches[id]!, overflowed: true } } }))
     return result
   })
   vi.spyOn(api.sessions, 'snapshot').mockRejectedValue(new Error('canonical display unavailable'))
@@ -373,21 +374,24 @@ it('sender disappearance keeps the existing explicit cancellation boundary using
 })
 
 it('Control opening retains its exact new Region when canonical re-reading fails', async () => {
-  const create = core.createAgent.bind(core)
-  vi.spyOn(core, 'createAgent').mockImplementation(async input => {
+  const create = core.createAgentWithDelivery.bind(core)
+  vi.spyOn(core, 'createAgentWithDelivery').mockImplementation(async input => {
     const result = await create(input)
+    const id = result.session.agentSessionId
     useAppStore.setState(state => ({ pendingAgentLaunches: { ...state.pendingAgentLaunches,
-      [result.agentSessionId]: { ...state.pendingAgentLaunches[result.agentSessionId]!, overflowed: true } } }))
+      [id]: { ...state.pendingAgentLaunches[id]!, overflowed: true } } }))
     return result
   })
   vi.spyOn(api.sessions, 'snapshot').mockRejectedValue(new Error('Control display re-read unavailable'))
   const stop = vi.spyOn(core, 'stopAgent')
   const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-    requestId: 'private-open-projection', operation: 'open.agent', content: { kind: 'new-agent', executorId: 'fixture' },
-    destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId } } })
-  if (result.operation !== 'open.agent') throw new Error('Unexpected Control operation')
-  const id = result.region.agentSessionId
-  expect(useAppStore.getState().tabs[result.region.tabId]?.regions[result.region.regionId]).toMatchObject({
+    requestId: 'private-open-projection', operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' },
+    destination: { regionId, split: 'right' }, focus: false })
+  if (result.operation !== 'agent.open') throw new Error('Unexpected Control operation')
+  expect(result.to).not.toBeNull()
+  expect(result.agent).not.toBeNull()
+  const id = result.agent!.agentSessionId
+  expect(useAppStore.getState().tabs[result.to!.tabId]?.regions[result.to!.regionId]).toMatchObject({
     kind: 'agent', phase: 'attached', sessionId: id })
   expect(useAppStore.getState().pendingAgentLaunches[id]?.projectionFailures).toEqual([
     { step: 'session', message: 'Launch display re-read failed: Control display re-read unavailable' } ])

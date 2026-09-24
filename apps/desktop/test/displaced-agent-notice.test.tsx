@@ -1,8 +1,9 @@
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 // @vitest-environment happy-dom
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // The App mounts SessionPane→TerminalView for placed sessions; a displaced Agent has no Region so it
 // never renders one, but the mount case seeds an empty snapshot and no placed Region either. Stub the
@@ -39,7 +40,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 // sessions+tabs 重判，所以点「找回」后自愈消失也一并验。
 // ---------------------------------------------------------------------------
 
-vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+beforeEach(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true))
 const initialState = useAppStore.getState()
 
 const config: AppConfig = {
@@ -87,6 +88,7 @@ afterEach(async () => {
     element.remove()
   }
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useAppStore.setState(initialState, true)
 })
 
@@ -100,11 +102,12 @@ async function mount(node: ReactElement): Promise<HTMLElement> {
 }
 
 /**
- * 把一次真实错位从 executeControl open.agent 跑出来：launch 在途时关掉那格 pending Region，再放行 launch。
+ * 把一次真实错位从 executeControl agent.open 跑出来：launch 在途时关掉那格 pending Region，再放行 launch。
  * 返回启动出来的 agentSessionId。
  */
 async function driveDisplacementThroughStore(): Promise<string> {
   const tab = fixture()
+  await initializeSpatialControlFixture()
   let release!: (value: AgentLaunchResult) => void
   let launchedId = ''
   vi.spyOn(api.sessions, 'launchAgent').mockImplementation((input) => {
@@ -114,9 +117,9 @@ async function driveDisplacementThroughStore(): Promise<string> {
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
 
   const opening = useAppStore.getState().executeControl(request({
-    operation: 'open.agent',
+    operation: 'agent.open',
     content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
-    destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
+    destination: { regionId: 'region-caller', split: 'right' }, focus: false
   }))
   await vi.waitFor(() => { if (!launchedId) throw new Error('launchAgent not called yet') })
 
@@ -127,8 +130,12 @@ async function driveDisplacementThroughStore(): Promise<string> {
   useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: detached } }))
 
   release(launch(agent(launchedId, 'Builder')))
-  // 落点没了：回执必须失败（没有可交回的落点），但 Run 不停。
-  await expect(opening).rejects.toMatchObject({ code: 'CONTROL_OWNER_LOST' })
+  // 落点没了：报告明确保留健康 Agent、标明投影未确认，不能伪造成功落点。
+  const receipt = await opening
+  expect(receipt).toMatchObject({ operation: 'agent.open', outcome: 'partial', to: null,
+    agent: { agentSessionId: launchedId }, issues: expect.arrayContaining([
+      expect.objectContaining({ step: 'layout', code: 'SPACE_PLACEMENT_UNKNOWN' })
+    ]) })
   return launchedId
 }
 

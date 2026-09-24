@@ -7,6 +7,7 @@ import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/cont
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { joinWorkspacePath } from './workspace-paths'
 import type { WorkspaceProject } from './workspace-projects'
+import { directoryIdentity } from '../../../shared/space-addresses'
 
 /** One bounded, named source for the picker, renderer and persisted-value validation. */
 export const SPACE_ICON_CATALOG = {
@@ -47,8 +48,7 @@ function absoluteDirectory(path: string): boolean {
 
 /** Host and durable directory, never a display name, classification, Session or worktree id. */
 export function spaceObjectIdentityKey(hostId: string, directoryPath: string): string {
-  if (!hostId || !absoluteDirectory(directoryPath)) throw new Error('Space icon identity requires a host and absolute directory.')
-  return JSON.stringify([hostId, directoryPath])
+  return directoryIdentity(hostId, directoryPath)
 }
 
 function isSpaceObjectIdentityKey(key: string): boolean {

@@ -241,8 +241,8 @@ try {
   const opened=await waitFor('real Activity navigation opens exact Session',async()=>{const value=await durableLayout(first.cdp);return Object.values(value?.workbench?.tabs??{}).flatMap(t=>Object.values(t.regions)).find(r=>r.kind==='agent'&&r.sessionId===known.agentSessionId)})
   const inspected=await control('inspect.region',{target:{kind:'region',regionId:opened.regionId}})
   const region=inspected.result.region;assert.equal(region.agentSessionId,known.agentSessionId)
-  const split=await control('open.agent',{content:{kind:'agent-session',agentSessionId:unknown.agentSessionId},destination:{kind:'split',region:{kind:'region',regionId:region.regionId},direction:'right'}})
-  assert.equal(split.result.region.agentSessionId,unknown.agentSessionId)
+  const split=await control('agent.open',{content:{kind:'agent-session',agentSessionId:unknown.agentSessionId},destination:{regionId:region.regionId,split:'right'},focus:true})
+  assert.equal(split.result.outcome,'opened');assert.ok(split.result.to);assert.equal(split.result.agent.agentSessionId,unknown.agentSessionId)
   await control('focus',{target:{kind:'region',regionId:region.regionId}})
   const working=await post('Known clock','UserPromptSubmit');assert.ok(Number.isSafeInteger(working.stateEnteredAt))
   await waitFor('native working reaches actual snapshot',async()=>{const s=await sameRuns(first.cdp);return s.sessions.find(s=>s.id===known.agentSessionId)?.semanticStatus?.observedAt===working.observedAt})
@@ -285,7 +285,7 @@ try {
   assert.deepEqual(activeRegions,[region.regionId],'Actual UI focus must restore before any focus operation')
   const restoredTab=await control('inspect.tab',{target:{kind:'tab',tabId:Object.values(layout.workbench.tabs)[0].id}})
   assert.deepEqual(restoredTab.result.tab.regions.map(r=>({id:r.regionId,kind:r.kind,session:r.agentSessionId})).sort((a,b)=>a.id.localeCompare(b.id)),
-    [{id:region.regionId,kind:'agent',session:known.agentSessionId},{id:split.result.region.regionId,kind:'agent',session:unknown.agentSessionId}].sort((a,b)=>a.id.localeCompare(b.id)))
+    [{id:region.regionId,kind:'agent',session:known.agentSessionId},{id:split.result.to.regionId,kind:'agent',session:unknown.agentSessionId}].sort((a,b)=>a.id.localeCompare(b.id)))
   const restartUi=await openActivity(second.cdp);verifyAge(restartUi,'Known clock','waiting',waiting.stateEnteredAt)
   assert.equal(restartUi.rows.find(r=>r.label.startsWith('Unknown clock'))?.meta,'start time unknown')
   receipt.secondUi={persisted,restoredGeometry,activeRegions,restoredTab:restoredTab.result.tab,restartUi,sessionFacts:snapshot.sessions.map(s=>({id:s.id,processState:s.processState,control:s.control,semanticStatus:s.semanticStatus}))}

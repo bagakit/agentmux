@@ -1,4 +1,5 @@
 import { isFolderWorkspace, isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
+import { directoryIdentity } from '../../../shared/space-addresses'
 
 export type WorkspaceProject = {
   id: string
@@ -10,7 +11,7 @@ export type WorkspaceProject = {
 }
 
 export function workspaceProjectId(workspace: WorkspaceRecord): string {
-  return JSON.stringify([workspace.hostId, workspace.repoPath ?? workspace.path])
+  return directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
 }
 
 /** Remove every registered Workspace that makes up one Project Rail view. */
@@ -185,7 +186,7 @@ export function projectRailTree(projects: readonly WorkspaceProject[]): ProjectR
  * 折叠把成员藏起来，于是分组头必须自己答出"这是磁盘上哪儿"——展开时那几行项目名就是答案，
  * 折叠后就只剩这一行了（用户：「后退的时候，是不是应该显示它的地址之类的元信息呀」）。
  *
- * 从**末尾**保留而不是从开头：路径越靠后越能区分身份。`/Users/someone/proj/priv/kit` 与
+ * 从**末尾**保留而不是从开头：路径越靠后越能区分身份。`home//proj/priv/kit` 与
  * 同一台机器上的任何别的路径，前三段大概都一样；分辨力全在尾部。这也是不能用 CSS
  * `text-overflow: ellipsis` 的原因——它只砍尾巴，砍掉的正好是唯一有信息的那一头。
  *

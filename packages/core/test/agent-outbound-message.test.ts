@@ -81,7 +81,7 @@ describe('启动提示路径经同一出口', () => {
     // 这条负向断言此前在旧 agent-launch-prompt.test.ts 里，随模块删除一并搬来。
     const guide = composeAgentLaunchPrompt('do the work', true)
     for (const direction of ['left', 'right', 'above', 'below']) expect(guide).toContain(direction)
-    for (const flag of ['--left-of', '--right-of', '--above', '--below', 'open terminal', 'open agent']) {
+    for (const flag of ['--left-of', '--right-of', '--above', '--below', 'open terminal', 'agent open', 'space mv']) {
       expect(guide).not.toContain(flag)
     }
   })

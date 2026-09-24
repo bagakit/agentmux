@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
@@ -16,7 +17,8 @@ const config: AppConfig = {
 function agent(runId = 'healthy-run', processState: 'running' | 'exited' = 'running'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
     id: sessionId, kind: 'agent', providerId: 'codex', executorId: 'probe', hostId: 'local',
-    workspacePath: '/private/storage-commit', label: 'Private Agent', createdAt: 1, updatedAt: 1, processState,
+    workspacePath: '/private/storage-commit', label: 'Private Agent', createdAt: 1, updatedAt: 1,
+    agentSessionUpdatedAt: 1, promptSubmissionPredecessor: null, processState,
     status: { state: 'working', source: 'native-hook', observedAt: 1 }, latestOutputBytes: 0,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: sessionId, run: { runId } }
@@ -41,7 +43,8 @@ beforeEach(async () => {
     setItem: (name, value) => { backing.set(name, value); trace.push({ kind: 'write', at: Date.now() }) },
     removeItem: name => { backing.delete(name); trace.push({ kind: 'remove', at: Date.now() }) }
   }
-  vi.stubGlobal('window', { localStorage: storage, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  vi.spyOn(window, 'localStorage', 'get').mockReturnValue(storage as Storage)
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   store = (await import('../src/renderer/src/store')).useAppStore
   api = (await import('../src/renderer/src/lib/api')).api
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
@@ -53,6 +56,7 @@ beforeEach(async () => {
     return () => { runtimeEvent = undefined }
   })
   vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => agent(control.run.runId))
   vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
     trace.push({ kind: 'commit', at: Date.now() })
   })
@@ -147,18 +151,26 @@ describe('actual workbench writes request native storage commit', () => {
     vi.mocked(api.ui.requestStorageFlush).mockRejectedValueOnce(new Error('Private native commit rejection'))
     store.getState().setAgentComposerDraft(sessionId, 'Kept unsent draft')
     await vi.advanceTimersByTimeAsync(400)
-    const notice = store.getState().error
-    expect(notice).toContain('Saving the workbench is unconfirmed')
-    expect(store.getState().errorDismissed).toBe(false)
-    const [{ createElement }, { renderToStaticMarkup }, { TransientErrorNotice }] = await Promise.all([
-      import('react'), import('react-dom/server'), import('../src/renderer/src/components/TransientErrorNotice')
+    expect(store.getState().workbenchSaveWarning).toBe('Private native commit rejection')
+    expect(store.getState().error).toBeNull()
+    const [{ createElement, act }, { createRoot }, { GlobalSystemNotices }] = await Promise.all([
+      import('react'), import('react-dom/client'), import('../src/renderer/src/components/GlobalSystemNotices')
     ])
-    const html = renderToStaticMarkup(createElement(TransientErrorNotice, {
-      error: notice, dismissed: store.getState().errorDismissed, lastError: store.getState().lastError,
-      onDismiss: store.getState().dismissError, onReopen: store.getState().reopenError
-    }))
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    let html: string
+    try {
+      await act(async () => root.render(createElement(GlobalSystemNotices)))
+      html = container.innerHTML
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
     expect(html).toContain('role="status"')
     expect(html).toContain('Saving the workbench is unconfirmed')
+    expect(html).toContain('Private native commit rejection')
+    expect(html).toContain('Retry saving')
     expect(store.getState().sessions).toEqual([healthy])
     expect(store.getState().agentComposerDrafts).toEqual({ [sessionId]: 'Kept unsent draft' })
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'Kept unsent draft' })
@@ -171,11 +183,16 @@ describe('actual workbench writes request native storage commit', () => {
       ['healthy-run', 'Healthy Agent can still work']
     ])
     expect(store.getState().sessions).toEqual([healthy])
+    // Sending has its own durable outbox writes. Measure the next actual draft change separately.
+    await vi.advanceTimersByTimeAsync(400)
+    trace.length = 0
+    vi.mocked(api.ui.requestStorageFlush).mockClear()
     store.getState().setAgentComposerDraft(sessionId, 'Next real draft change')
     await vi.advanceTimersByTimeAsync(400)
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'Next real draft change' })
-    expect(trace.map(item => item.kind)).toEqual(['write', 'write', 'commit'])
-    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2)
+    expect(trace.map(item => item.kind)).toEqual(['write', 'commit'])
+    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(1)
+    expect(store.getState().workbenchSaveWarning).toBeNull()
   })
 
   it('commits a real clear once and never requests commit for an absent record', async () => {

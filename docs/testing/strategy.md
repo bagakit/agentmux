@@ -2,7 +2,7 @@
 
 ## 权威边界
 
-AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Desktop Control 的完整命令与 selector 合同只由 `docs/plans/agentmux-ai-native-desktop-composition-cli.md` 定义；本文只拥有验证分层和公开 oracle。
+AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Agent-first 空间命令与 selector 合同见 `docs/plans/pmo-cross-workspace-worktree-cli-design.md`；其它 Control 的来源见 `docs/plans/agentmux-ai-native-desktop-composition-cli.md`。本文只拥有验证分层和公开 oracle。
 
 Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Tool、Permission、Reply 或 Worker Done 证据。
 
@@ -74,9 +74,10 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 - ready receipt 确认 `packaged: true`；caller Agent Session 由 `.app` 内随包 Core/ctxmux artifact
   创建，packaged Desktop 从同一 Store 建立其唯一 Tab/Region 投影；
-- 受管 caller 执行 `agentmux inspect --tab self`，再用 `agentmux open agent --agent codex
-  --right-of self`；receipt 返回新的 Agent Session、Tab 与 Region identity，新 Run 的 public status
-  为 `running`；
+- 受管 caller 执行 `agentmux inspect --tab self`，读取确切 Region ID，再用
+  `agentmux agent open --executor <executor-id> --region <region-id> --split right`；
+  receipt 的 `result.agent` 返回新 Agent Session/Run，`result.to` 返回实际空间地址，
+  新 Run 的 public status 为 `running`；
 - launch 前后 `owner.json.daemonInstanceId` 与 exact `ctxmuxd` PID 均不变；同一份受信 Core artifact
   从 checkout 搬到 packaged App 后可以继续使用原 daemon，receipt 中的启动路径只作诊断，不参与身份判断；
 - owner 身份继续精确绑定 source commit/tree、manifest/daemon hash、runtime endpoint 和 daemon instance；
@@ -87,6 +88,12 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 空间方向的非视觉合同由 Desktop Control/Layout 测试对真实 Layout Store/reducer
 自动化锁定；此 mixed smoke 证明 packaged 跨进程 CLI → Desktop → Core → ctxmux 纵切。它不外推
 多 Desktop、Remote/SSH 或 headless Control Host。
+
+## Agent-first Space CLI 的私有纵切
+
+`node apps/desktop/scripts/verify-space-agent-cli.mjs` 使用实际 CLI、Control socket、Desktop IPC、Main Git/config owner、Renderer Workbench 与公开 Core，创建独立目录、用户配置、Session Store 和 Native Runtime。五个普通 Electron 进程依次覆盖跨 Space 新 worktree/首 Tab/第一句任务、精确 Region 移动、后续 send、丢回执查询、durable 恢复、空首快照与仅意图已保存时的退出。
+
+验收核对原 Session/Run/PID/native handle/cwd、完整 Tab/Group/Region/焦点、真实终端正文与 Chromium 键入；查询和重复 request 不执行第二次 Git、启动或投递。私有 Provider fixture 不证明上游 CLI 版本；普通 Electron 不代替已安装 App，flush 请求也不宣称 disk ACK。原始回执、变异与独立看图意见保存到本轮 Feature 的 acceptance 证据中。
 
 ## POSIX signal 安全语义
 

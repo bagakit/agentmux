@@ -350,19 +350,52 @@ export function TerminalView({
   function consumeCaretFocus(): void {
     const request = useAppStore.getState().regionCaretFocus
     if (!regionCaretFocusTargets(request, linkOriginRef.current.regionId)) return
-    if (!visibleRef.current) {
-      clearRegionCaretFocus(request.nonce)
-      return
-    }
+    if (!visibleRef.current) return
     const target = searchInputRef.current ?? terminalRef.current
     if (!target) return
+    const element = searchInputRef.current ?? terminalRef.current?.element
+    if (!element?.isConnected || element.closest('[inert]')) return
     target.focus()
-    clearRegionCaretFocus(request.nonce)
+    // A retained View can still be in its private parking host when this child mounts.
+    // focus() is a request, not confirmation; preserve the same intent until its actual
+    // visible host can receive the caret. A later navigation replaces/clears the nonce.
+    if (element.contains(document.activeElement)) clearRegionCaretFocus(request.nonce)
   }
 
   useEffect(() => {
-    consumeCaretFocus()
-  }, [regionCaretFocus, visible, searchOpen])
+    if (!regionCaretFocus || !visible) return
+    const nonce = regionCaretFocus.nonce
+    let observer: MutationObserver | undefined
+    let frame: number | undefined
+    const dispose = (): void => {
+      observer?.disconnect()
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    }
+    const attempt = (): void => {
+      // An old effect must neither focus nor consume a later navigation's request.
+      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return dispose()
+      consumeCaretFocus()
+      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) dispose()
+    }
+    attempt()
+    if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
+    // Only this exact pending consumer observes body attachment/inert changes, until
+    // its request succeeds or is replaced. Ordinary terminals have no observer here.
+    observer = new MutationObserver(attempt)
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
+    frame = requestAnimationFrame(attempt)
+    return dispose
+  }, [regionCaretFocus, visible, searchOpen, hydrating])
+
+  useLayoutEffect(() => {
+    // reveal() schedules a commit. Before this commit, the actual xterm host is
+    // still visibility:hidden and cannot receive the caret after a split remount.
+    const terminal = terminalRef.current
+    const element = terminal?.element
+    if (!terminal || hydrating || !autoFocusRef.current || !visibleRef.current ||
+      !element?.isConnected || element.closest('[inert]')) return
+    terminal.focus()
+  }, [hydrating])
 
   useLayoutEffect(() => {
     viewportRef.current?.setInteractiveResize(interactiveResize)
@@ -1229,7 +1262,6 @@ export function TerminalView({
         // api.sessions.resize 与 attach 争用同一把按 Run 串行的锁，排在揭示之前时，该 Run 上
         // 任一不 settle 的操作都会让一个健康的终端被永久藏起来。
         reveal()
-        if (autoFocusRef.current) terminal.focus()
         await finishTerminalReplayRecovery({
           gap: !restored && (Boolean(result.gap) || (hasReplay && result.currentSize === null)),
           canControlRun: canControlRunRef.current,
@@ -1301,7 +1333,10 @@ export function TerminalView({
     onObservationRefreshRef.current?.(refreshObservation)
 
     viewport.observeViewport()
-    if (autoFocusRef.current) requestAnimationFrame(() => terminal.focus())
+    requestAnimationFrame(() => {
+      if (!disposed && autoFocusRef.current && visibleRef.current && terminal.element?.isConnected &&
+        !terminal.element.closest('[inert]')) terminal.focus()
+    })
     return () => {
       disposed = true
       if (refreshObservationRef.current === refreshObservation) {

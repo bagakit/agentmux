@@ -232,6 +232,29 @@ describe('store.focusRegion：键盘投 caret 意图，指针不投，清除只�
     expect(useAppStore.getState().regionCaretFocus).toBeNull()
   })
 
+  it.each(['workspace', 'workspace-selection', 'tab-group', 'tab', 'launcher', 'main-surface'] as const)(
+    '%s navigation cancels an unconsumed request before a late terminal mount', async destination => {
+      const { tabId, rootRegionId } = twoRegionFixture()
+      useAppStore.setState({ activeWorkspaceId: 'workspace' })
+      useAppStore.getState().focusRegion('workspace', tabId, rootRegionId, 'keyboard')
+      const pending = useAppStore.getState().regionCaretFocus
+      expect(pending).toMatchObject({ regionId: rootRegionId })
+      const state = useAppStore.getState()
+      if (destination === 'workspace') await state.selectWorkspace('other-workspace')
+      else if (destination === 'workspace-selection') state.activateWorkspaceSelection({
+        workspace: { id: 'other-workspace', hostId: 'local', name: 'Other', path: '/other', kind: 'folder' },
+        config: { version: 9, workspaces: [], hosts: [], executors: {}, appearance: { terminalTheme: 'graphite' } }, changed: true
+      })
+      else if (destination === 'tab-group') state.focusTabGroup('workspace', 'group-one')
+      else if (destination === 'tab') state.activateTab('workspace', 'group-one', tabId)
+      else if (destination === 'launcher') state.openLauncher('group-one')
+      else state.setMainSurface('board')
+      expect(useAppStore.getState().regionCaretFocus).toBeNull()
+      state.clearRegionCaretFocus(pending!.nonce)
+      expect(useAppStore.getState().regionCaretFocus).toBeNull()
+    }
+  )
+
   it('clearRegionCaretFocus 只清自己那条 nonce', () => {
     const { tabId, rootRegionId, addedRegionId } = twoRegionFixture()
     useAppStore.getState().focusRegion('workspace', tabId, rootRegionId, 'keyboard')

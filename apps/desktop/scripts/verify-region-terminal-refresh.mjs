@@ -392,11 +392,11 @@ try {
  await click(first.cdp,'button[aria-label="Space: show terminal and file workbench"]')
  await click(first.cdp,'button[title="New tab"]')
  const launcher=await waitFor('actual launcher',()=>first.cdp.evaluate("document.querySelector('[data-workbench-region-id]:has(.launch-surface)')?.dataset.workbenchRegionId ?? null"))
- const captured=await captureDesktopCore(first,()=>control('open.agent',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{kind:'launcher',regionId:launcher}}))
- const left=(await captured.request).region;assert.equal(left.agentSessionId,session.agentSessionId)
+ const captured=await captureDesktopCore(first,()=>control('agent.open',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{regionId:launcher},focus:true}))
+ const leftReport=await captured.request;assert.equal(leftReport.outcome,'opened');assert.equal(leftReport.agent.agentSessionId,session.agentSessionId);const left=leftReport.to;assert.ok(left)
  await waitFor('first live attachment',async()=> (await inspected(left.regionId)).terminalView?.liveReady)
- const right=(await control('open.agent',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},
-  destination:{kind:'split',region:{kind:'region',regionId:left.regionId},direction:'right'}})).region
+ const rightReport=await control('agent.open',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},
+  destination:{regionId:left.regionId,split:'right'},focus:false});assert.equal(rightReport.outcome,'opened');const right=rightReport.to;assert.ok(right)
  await waitFor('second shared Region',async()=> (await inspected(right.regionId)).terminalView?.liveReady)
  await control('focus',{target:{kind:'region',regionId:left.regionId}})
  const draft='Unsent exact Region draft survives failed observation and two restarts'

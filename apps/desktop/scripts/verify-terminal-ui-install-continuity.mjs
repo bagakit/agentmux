@@ -246,8 +246,8 @@ try {
   await active.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...button});await active.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...button})
   const initial=await waitFor('UI-created Browser descriptor',async()=>{const observation=await observeUiClient(destination);return observation.workbench.tabs.flatMap(tab=>tab.regions).find(region=>region.kind==='browser')})
   await active.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.browserId)},${JSON.stringify(pageUrl)})`)
-  const opened=await control('open.agent',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{kind:'split',direction:'right',region:{kind:'region',regionId:initial.regionId}}})
-  const command=`/bin/cat`;const openedTerminal=await control('open.terminal',{shellCommand:command,destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.result.region.regionId}}})
+  const opened=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:initial.regionId,split:'right'},focus:true});assert.equal(opened.result.outcome,'opened');assert.ok(opened.result.to)
+  const command=`/bin/cat`;const openedTerminal=await control('open.terminal',{shellCommand:command,destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.result.to.regionId}}})
   terminal=openedTerminal.result.region;let terminalRun=await sdk.status(terminal.runId);owners.set(terminalRun.pid,await identity(terminalRun.pid));receipt.terminal={run:terminal.runId,pid:terminalRun.pid}
   // A real user resize supplies the durable ratio through the existing committer.
   // The earlier programmatic nested-split/defaultSize mismatch is retained separately.

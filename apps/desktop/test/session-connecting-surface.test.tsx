@@ -1,3 +1,4 @@
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { readFileSync } from 'node:fs'
@@ -44,16 +45,17 @@ it.each(['launcher', 'control'] as const)('captures the exact %s request before 
   pendingFixture()
   const launcher = createWorkbenchTab('view', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' })
   useAppStore.setState({ tabs: { view: launcher }, pendingAgentLaunches: {} })
+  if (entry === 'control') await initializeSpatialControlFixture()
   const native = deferred<Awaited<ReturnType<typeof api.sessions.launchAgent>>>()
   const launch = vi.spyOn(api.sessions, 'launchAgent').mockReturnValue(native.promise)
   const operation = entry === 'launcher'
     ? useAppStore.getState().launchAgent('reviewer', prompt, 'pane', { tabId: 'view', regionId: 'region' })
     : useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'loading-proof',
-      operation: 'open.agent', content: { kind: 'new-agent', executorId: 'reviewer', prompt },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region' } } })
+      operation: 'agent.open', content: { kind: 'new-agent', executorId: 'reviewer', prompt },
+      destination: { regionId: 'region', split: 'right' }, focus: false })
   const settled = operation.catch(() => undefined)
   try {
-    expect(launch).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
     const submitted = launch.mock.calls[0]![0]
     expect(submitted.prompt).toBe(prompt)
     const id = submitted.agentSessionId!

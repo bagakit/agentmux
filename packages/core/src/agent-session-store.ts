@@ -1069,6 +1069,14 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.launchOptions === undefined
       ? {}
       : { launchOptions: launchOptionSelection(source.launchOptions) }),
+    ...(source.creation === undefined ? {} : { creation: (() => {
+      const creation = record(source.creation, 'creation')
+      const initialPrompt = creation.initialPrompt
+      if (initialPrompt !== 'not-requested' && initialPrompt !== 'confirmed' && initialPrompt !== 'unconfirmed' && initialPrompt !== 'unknown') {
+        throw new AgentMuxError('Invalid initial creation delivery fact.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt }
+    })() }),
     ...(source.terminalHandshake === undefined
       ? {}
       : { terminalHandshake: terminalHandshake(source.terminalHandshake, currentRun) }),

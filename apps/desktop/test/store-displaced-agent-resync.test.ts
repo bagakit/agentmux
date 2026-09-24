@@ -1,3 +1,4 @@
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -107,12 +108,14 @@ function request<T extends AgentMuxControlRequest>(value: DistributiveOmit<T, 's
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useAppStore.setState(initialState, true)
 })
 
 describe('displaced-agent 启动竞态：带缺口的缓冲事件必须触发 resyncTimeline (store.ts:2485)', () => {
   it('Region 中途消失 + 缓冲里有 gapped 事件 -> resyncTimeline 以该 sessionId 被调用一次', async () => {
     fixture()
+    await initializeSpatialControlFixture()
 
     // 只观测 2485 这行的效果，不真的去 api.sessions.timeline 往返。
     const resync = vi.spyOn(useAppStore.getState(), 'resyncTimeline').mockResolvedValue(undefined)
@@ -132,13 +135,17 @@ describe('displaced-agent 启动竞态：带缺口的缓冲事件必须触发 re
       return { created: agentCreationFixture(launchedAgent(agentSessionId)), projectionFailures: [], session: launchedAgent(agentSessionId), timeline: { agentSessionId, revision: 0, items: [] } }
     })
 
-    // displaced 路以 CONTROL_OWNER_LOST 拒回执（Run 仍在跑）——这条 reject 同时自证我们真的进了被测分支，
-    // 而不是落到 landed 那半。
-    await expect(useAppStore.getState().executeControl(request({
-      operation: 'open.agent',
+    const receipt = await useAppStore.getState().executeControl(request({
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'region-caller' } }
-    }))).rejects.toThrow()
+      destination: { regionId: 'region-caller', split: 'right' }, focus: false
+    }))
+    // typed partial + 空落点证明真正进入 displaced 路，健康 Session 仍可发现。
+    expect(receipt).toMatchObject({ operation: 'agent.open', outcome: 'partial', to: null,
+      agent: { agentSessionId }, issues: expect.arrayContaining([
+        expect.objectContaining({ code: 'SPACE_PLACEMENT_UNKNOWN' })
+      ]) })
+    expect(useAppStore.getState().sessions.map(session => session.id)).toContain(agentSessionId)
 
     // 核心判据：删掉 store.ts:2485 那行 `void get().resyncTimeline(...)`，这一句会红。
     expect(resync).toHaveBeenCalledTimes(1)

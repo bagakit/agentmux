@@ -218,6 +218,7 @@
 /* 一个 pane 里所有 Tab 的内容都在这儿，彼此叠放，只有活动的那层可见。
    这是"切回终端不再重放"的结构前提：隐藏的 Tab 仍在 DOM 里，xterm 实例因此活着。 */
 .pane-body { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.pane-group:has(> [data-workbench-moved-focus]) { grid-template-rows: var(--pane-tabbar-height) auto minmax(0, 1fr); }
 .pane-body__region { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* 隐藏用 visibility 而非 display:none：display:none 的子树量不到尺寸，切回时终端得先
    重新 fit 一次才显示对的行列数，那正是我们要消掉的那一帧。visibility:hidden 保留几何，

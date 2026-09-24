@@ -2,7 +2,7 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址2026-10-03)：Space/Zone/Tab/Region 属于 client 空间，Project/Workspace 是来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run。公开 Control 可以表达空间目标和回执，Core 不拥有 UI 空间生命周期。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。新空间 CLI 的具体能力按[实施合同](../../docs/plans/pmo-cross-workspace-worktree-cli-design-2026-10-03.md)验收后才报告可用。
+产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址2026-10-03)：Space/Zone/Tab/Region 属于 client 空间，Project/Workspace 是来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run。公开 Control 可以表达空间目标和回执，Core 不拥有 UI 空间生命周期。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[实施合同](../../docs/plans/pmo-cross-workspace-worktree-cli-design-2026-10-03.md)。Desktop Client 组合自己的配置、Git 与持久布局 owner，Core 只传输类型化空间协议并执行公开 Agent API。
 
 当前 Local Run 只由随包 [manifest](vendor/ctxmux/darwin-arm64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
@@ -92,6 +92,23 @@ const byNative = client.resolveAgentSession({
   sessionId: nativeHandle.sessionId
 })
 ```
+
+需要报告首次 Prompt 的投递事实时，用同一次创建的公开 API：
+
+```ts
+const { session, creation } = await client.createAgentWithDelivery({
+  providerId: 'codex',
+  executorId: 'codex-full-auto',
+  workspacePath: process.cwd(),
+  createOperationId: crypto.randomUUID(),
+  prompt: 'Inspect the failing test'
+})
+console.log(session.agentSessionId, creation.initialPrompt)
+```
+
+`createAgent` 仍返回同一次创建的 Session；`createAgentWithDelivery` 同时返回 `promptConfirmed` 和 `creation`。`creation.createOperationId` 是关联标识，不能据此盲重试创建。`initialPrompt` 分别表达 `not-requested/confirmed/unconfirmed/unknown`，不证明任务被接受或执行。Agent 已启动而保存投递事实失败时，当前调用返回实际回执、发出明确提醒并保留健康 Run；后续持久查询仍如实保留 unknown，不能据此自动重发。
+
+空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的生命周期与持久布局由 Client 持有，实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
 
 Packed consumer 已覆盖 Core API 与 `agentmux list/status/send/interrupt/attach/resume/stop` 的真实 Codex 生命周期。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
 

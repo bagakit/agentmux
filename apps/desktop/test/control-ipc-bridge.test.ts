@@ -27,10 +27,11 @@ function openRequest(requestId: string): AgentMuxControlRequest {
   return {
     schemaVersion: AGMUX_CONTROL_SCHEMA_VERSION,
     requestId,
-    operation: 'open.agent',
+    operation: 'agent.open',
     caller: { agentSessionId: 'caller' },
     content: { kind: 'new-agent', executorId: 'codex' },
-    destination: { kind: 'new-tab', after: { kind: 'self' } }
+    destination: { zoneId: 'caller-zone', newTab: true },
+    focus: false
   }
 }
 
@@ -78,7 +79,7 @@ describe('Desktop Control IPC bridge', () => {
     expect(sent).toHaveLength(1)
     // 不硬写 60_000：那会是这个预算的第三份手抄（core 两条路各一份 + 测试一份），于是把其中一处
     // 改掉时测试照旧绿。这里问的是「这条路等的就是 core 说的那个数」。
-    await vi.advanceTimersByTimeAsync(agentMuxControlTimeoutMs('open.agent'))
+    await vi.advanceTimersByTimeAsync(agentMuxControlTimeoutMs('agent.open'))
 
     await rejected
     expect(cancellations).toEqual([{
@@ -90,16 +91,17 @@ describe('Desktop Control IPC bridge', () => {
       requestId: 'open-timeout',
       ok: true,
       result: {
-        operation: 'open.agent',
-        region: {
-          kind: 'agent',
-          tabId: 'late-tab',
-          regionId: 'late-region',
-          workspaceId: 'workspace',
-          agentSessionId: 'late',
-          providerId: 'codex',
-          executorId: 'codex'
-        }
+        operation: 'agent.open',
+        requestId: 'open-timeout', outcome: 'opened', from: null,
+        to: { spaceId: 'space', zoneId: 'caller-zone', tabId: 'late-tab',
+          regionId: 'late-region', workspaceId: 'workspace' },
+        agent: { agentSessionId: 'late', runId: 'late-run', providerId: 'codex',
+          executorId: 'codex', hostId: 'local', cwd: '/repo',
+          createOperationId: 'open-timeout', initialPrompt: 'not-requested' },
+        resource: null,
+        save: { layoutApplied: true, localStorageWritten: true,
+          storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null },
+        issues: []
       }
     })).toBe(false)
   })
@@ -124,14 +126,14 @@ describe('Desktop Control IPC bridge', () => {
 /**
  * 等待预算是**一处**，两条到达路共用。
  *
- * 同一条 `amux open.agent` 有两条到达执行方的路，各有一个等待方：CLI→daemon 的 socket
+ * 同一条 `agentmux agent.open` 有两条到达执行方的路，各有一个等待方：CLI→daemon 的 socket
  * （core 的 control-host），以及 Renderer 拥有屏幕时 main→Renderer 的这条 IPC 桥。此前两侧各手抄
  * `2_000` / `60_000`，而**「哪些操作算慢」在 core 是命名函数、在桥这边被内联展开成同样的四项析取**。
  * 后果：加一个慢操作（将来的 `open.file` 等磁盘、`arrange` 等布局落定）时，只改 core 那个函数的人
  * 会得到一个全绿的仓库，而这条路静默给它 2 秒——用户看到的是「同一个命令有时能开出来、有时报
  * CONTROL_TIMEOUT」，差别只在当时是谁拥有屏幕。取值手抄会漂移，判据手抄同样会且更难看出来。
  *
- * 上面那条行为测试已经用 `agentMuxControlTimeoutMs('open.agent')` 推进定时器，所以桥**取的数**有人守。
+ * 上面那条行为测试已经用 `agentMuxControlTimeoutMs('agent.open')` 推进定时器，所以桥**取的数**有人守。
  * 下面补的是它守不住的那一层：桥有没有真的**从那一处取**，还是自己又算了一遍恰好相等的数。
  */
 describe('Control 等待预算只有一处', () => {
@@ -141,7 +143,7 @@ describe('Control 等待预算只有一处', () => {
   )
 
   it('长操作等长预算、短操作等短预算——取值本身', () => {
-    expect(agentMuxControlTimeoutMs('open.agent')).toBe(AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS)
+    expect(agentMuxControlTimeoutMs('agent.open')).toBe(AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS)
     expect(agentMuxControlTimeoutMs('inspect.tab')).toBe(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
     // 自检：两个预算相等时上面两条恒真，整族退化成装饰。
     expect(
@@ -153,7 +155,7 @@ describe('Control 等待预算只有一处', () => {
   it('慢的是「要等外面」的那些，快的是只读/只动本地状态的', () => {
     // 等进程、composer、Provider 或进程收尾用长档；只读、布局和信号用短档。
     // 到期说明未及时得到完整回复，不证明 owner 已坏。
-    for (const operation of ['open.agent', 'open.terminal', 'open.browser', 'send', 'resume', 'stop'] as const) {
+    for (const operation of ['agent.open', 'open.terminal', 'open.browser', 'send', 'resume', 'stop'] as const) {
       expect(isLongAgentMuxControlOperation(operation), `${operation} 要等外面，必须走长预算`).toBe(true)
     }
     for (const operation of ['inspect.tab', 'inspect.region', 'focus', 'arrange', 'list.agents'] as const) {

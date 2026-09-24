@@ -186,18 +186,18 @@ describe('Control protocol', () => {
     expect(parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'open-right',
-      operation: 'open.agent',
+      operation: 'agent.open',
       caller: { agentSessionId: 'semantic-1' },
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'Review' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'self' } }
-    })).toMatchObject({ operation: 'open.agent', destination: { kind: 'split', direction: 'right' } })
+      destination: { regionId: 'agent-left', split: 'right' }, focus: false
+    })).toMatchObject({ operation: 'agent.open', destination: { regionId: 'agent-left', split: 'right' } })
     expect(() => parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'invalid-destination',
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex' },
       destination: { kind: 'recent' }
-    })).toThrow('destination')
+    })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
     expect(parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'terminal-below',
@@ -831,7 +831,10 @@ describe('external Control control', () => {
           }
         }
         if (request.operation === 'list.agents') return { operation: request.operation, agents: [{ executorId: 'codex', providerId: 'codex', label: 'Codex', availability: 'available' }] }
-        if (request.operation === 'open.agent') return { operation: request.operation, region: agentRegion }
+        if (request.operation === 'agent.open') return { operation: request.operation, requestId: request.requestId,
+          outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', tabId: 'tab-main', regionId: 'agent-left' },
+          agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: '/repo', createOperationId: 'creation', initialPrompt: 'not-requested' },
+          resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
         if (request.operation === 'open.terminal') return { operation: request.operation, region: terminalRegion }
         if (request.operation === 'open.browser') return { operation: request.operation, region: browserRegion }
         if (request.operation === 'send') {
@@ -870,10 +873,10 @@ describe('external Control control', () => {
     await expect(requestAgentMuxControl({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'open-agent',
-      operation: 'open.agent',
+      operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'codex' },
-      destination: { kind: 'split', direction: 'right', region: { kind: 'region', regionId: 'agent-left' } }
-    }, path)).resolves.toMatchObject({ operation: 'open.agent', result: { region: { tabId: 'tab-main' } } })
+      destination: { regionId: 'agent-left', split: 'right' }, focus: false
+    }, path)).resolves.toMatchObject({ operation: 'agent.open', result: { to: { tabId: 'tab-main' }, outcome: 'opened' } })
     await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'send',
@@ -888,7 +891,7 @@ describe('external Control control', () => {
       target: { kind: 'tab', tabId: 'tab-main' },
       text: 'invalid candidates'
     }, path)).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
-    expect(seen).toEqual(['inspect.tab', 'open.agent', 'send', 'send'])
+    expect(seen).toEqual(['inspect.tab', 'agent.open', 'send', 'send'])
     await server.stop()
   })
 
@@ -951,7 +954,7 @@ describe('external Control control', () => {
 /**
  * 等待预算与「哪些操作算慢」都只有一处。
  *
- * 同一条 `amux open.agent` 有两条到达执行方的路，各有一个等待方：这里的 CLI→daemon socket，以及
+ * 同一条 `agentmux agent open` 有两条到达执行方的路，各有一个等待方：这里的 CLI→daemon socket，以及
  * Renderer 拥有屏幕时 main→Renderer 的 IPC 桥（apps/desktop 的 control-ipc-bridge）。此前两侧各手抄
  * `2_000` / `60_000`，而**「哪些操作算慢」在这边是命名函数 `longOperation`、在桥那边被内联展开成同样
  * 的四项析取**。后果：加一个慢操作时只改一侧的人会得到一个全绿的仓库，而另一条路静默给它 2 秒——
@@ -963,7 +966,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
   const hostSource = readFileSync(new URL('../src/control-host.ts', import.meta.url), 'utf8')
 
   it('长操作等长预算、短操作等短预算', () => {
-    expect(agentMuxControlTimeoutMs('open.agent')).toBe(AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS)
+    expect(agentMuxControlTimeoutMs('agent.open')).toBe(AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS)
     expect(agentMuxControlTimeoutMs('inspect.tab')).toBe(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
     // 自检：两个预算相等时上面两条恒真，整族退化成装饰。
     expect(
@@ -988,7 +991,10 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 这条守判据侧的表不许漏人。
     const EXPECTED_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
       // 要等外面的。
-      'open.agent': 'long',
+      'agent.open': 'long',
+      'space.mv': 'long',
+      'space.ls': 'short',
+      'space.inspect': 'short',
       'open.terminal': 'long',
       'open.browser': 'long',
       // Refresh checks the saved executable on the selected host; it waits for that probe.
@@ -1127,7 +1133,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 为什么必须分站点：此前这里是一张两个名字的白名单，对所有站点一视同仁，于是
     // `AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS` 在**每一处**都合法。把服务端读到请求后重排的那处与
     // 客户端发起的那处（两处都是 `agentMuxControlTimeoutMs(request.operation)`）换成那个短常量，
-    // 长操作全部退化成 2 秒（`amux open.agent` 起一个 Agent 必然超时），而这一族全绿——
+    // 长操作全部退化成 2 秒（`agentmux agent open` 起一个 Agent 必然超时），而这一族全绿——
     // 我实测过两次，都存活。短常量只在**读到请求之前**那一处才是对的。
     // 刻意不写行号：行号会随上游漂。这段注释上一版举的那两个号码写下时就已失准，其中一个指的恰恰是
     // 短常量那一处——与本段论述正好相反。按「哪一处、用的哪个表达式」来指认，读者 grep 得到，也不会过期。

@@ -65,10 +65,10 @@ it('real CLI send retains managed authors for every target without inventing an 
       kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } }
     } }
     if (request.operation === 'inspect.tab') return { operation: 'inspect.tab', tab: { tabId: 'tab', workspaceId: 'workspace', regions: [{ kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } } }] } }
-    if (request.operation === 'open.agent') return { operation: 'open.agent', region: {
-      kind: 'agent', regionId: 'new-region', tabId: 'tab', workspaceId: 'workspace',
-      agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex'
-    } }
+    if (request.operation === 'agent.open') return { operation: 'agent.open', requestId: request.requestId,
+      outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', tabId: 'tab', regionId: 'new-region' },
+      agent: { agentSessionId: 'recipient', runId: 'run-recipient', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: '/repo', createOperationId: 'creation', initialPrompt: 'confirmed' },
+      resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
     if (request.operation === 'send') delivered.push(request.message ? renderAgentMuxMessageEnvelope(request.message) : request.text)
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
@@ -103,14 +103,14 @@ it('real CLI send retains managed authors for every target without inventing an 
     await expect(exec(cli, ['send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests.filter((request) => request.operation === 'send')).toHaveLength(4)
-    const open = ['open', 'agent', '--agent', 'codex', '--right-of', 'region', '--prompt', 'first mail']
+    const open = ['agent', 'open', '--executor', 'codex', '--region', 'region', '--split', 'right', '--prompt', 'first mail']
     await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender' } })
-    expect(requests.filter((request) => request.operation === 'open.agent')[0]).toMatchObject({ operation: 'open.agent', caller: { agentSessionId: 'sender' },
+    expect(requests.filter((request) => request.operation === 'agent.open')[0]).toMatchObject({ operation: 'agent.open', caller: { agentSessionId: 'sender' },
       content: { kind: 'new-agent', prompt: 'first mail' } })
     await exec(cli, open, { timeout: 5000, env: humanEnv })
-    expect(requests.filter((request) => request.operation === 'open.agent')[1]).toMatchObject({ operation: 'open.agent', content: { kind: 'new-agent', prompt: 'first mail' } })
-    expect(requests.filter((request) => request.operation === 'open.agent')[1]).not.toHaveProperty('caller')
-    expect(requests.filter((request) => request.operation === 'open.agent')).toHaveLength(2)
+    expect(requests.filter((request) => request.operation === 'agent.open')[1]).toMatchObject({ operation: 'agent.open', content: { kind: 'new-agent', prompt: 'first mail' } })
+    expect(requests.filter((request) => request.operation === 'agent.open')[1]).not.toHaveProperty('caller')
+    expect(requests.filter((request) => request.operation === 'agent.open')).toHaveLength(2)
   } finally {
     await server.stop()
     await stopPrivateRuntime(runtime)
@@ -282,7 +282,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     const prefix = compactId.slice(0, 8)
     const routedCommands = [
       ['interrupt', '--session', prefix], ['resume', '--session', prefix, '--text', 'continue'], ['stop', '--session', prefix],
-      ['open', 'agent', '--session', prefix, '--right-of', 'region'],
+      ['agent', 'open', '--session', compactId, '--region', 'region', '--split', 'right'],
       ['demand', 'start', '--demand', 'demand', '--session', prefix],
     ]
     for (const args of routedCommands) {
@@ -292,7 +292,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
       { operation: 'interrupt', target: { agentSessionId: compactId } },
       { operation: 'resume', target: { agentSessionId: compactId } },
       { operation: 'stop', target: { agentSessionId: compactId } },
-      { operation: 'open.agent', content: { agentSessionId: compactId } },
+      { operation: 'agent.open', content: { agentSessionId: compactId } },
       { operation: 'demand.start', sessionId: compactId },
     ])
     // A new durable identity shares the previously usable prefix. Subsequent processes must refuse.
@@ -300,7 +300,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     await seedSessions(sessionStorePath, [collisionId])
     const before = requests.length
     const refusing = [
-      ...routedCommands, ['send', '--to-session', prefix, '--text', 'must not append'],
+      ...routedCommands.filter(args => args[0] !== 'agent'), ['send', '--to-session', prefix, '--text', 'must not append'],
       ['output', '--session', prefix], ['inspect', '--session', prefix],
       ['pmo', 'agents', '--session', prefix], ['pmo', 'sessions', '--session', prefix], ['pmo', 'agents', '--agent', prefix]
     ]
