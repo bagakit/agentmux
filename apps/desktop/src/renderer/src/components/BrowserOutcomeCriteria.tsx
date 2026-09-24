@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useId, useState, type MouseEvent } from 'react'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from '../../../shared/browser-outcome-criteria'
 
 type Props = {
@@ -16,6 +16,7 @@ export function BrowserOutcomeCriteria({ evaluation, busy = false, historical = 
   const [key, setKey] = useState('result')
   const [selector, setSelector] = useState('')
   const [type, setType] = useState<'string' | 'number' | 'boolean'>('string')
+  const typeName = useId()
   const [expected, setExpected] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -40,9 +41,13 @@ export function BrowserOutcomeCriteria({ evaluation, busy = false, historical = 
     <summary>{historical ? 'Recorded check' : 'Completion condition'}{evaluation ? ` · ${labels[evaluation.status]}` : ''}</summary>
     <label className="browser-task-asset__field">Field key<input value={key} maxLength={128} onChange={event => setKey(event.target.value)} /></label>
     <label className="browser-task-asset__field">CSS selector<input value={selector} maxLength={512} onChange={event => setSelector(event.target.value)} /></label>
-    <label className="browser-task-asset__field">Value type<select value={type} onChange={event => setType(event.target.value as typeof type)}>
-      <option value="string">Text</option><option value="number">Number</option><option value="boolean">Checked</option>
-    </select></label>
+    <fieldset className="browser-outcome-criteria__types">
+      <legend>Value type</legend>
+      <div>{(['string', 'number', 'boolean'] as const).map(value => <label key={value}>
+        <input type="radio" name={typeName} value={value} checked={type === value} onChange={() => setType(value)} />
+        {{ string: 'Text', number: 'Number', boolean: 'Checked' }[value]}
+      </label>)}</div>
+    </fieldset>
     <label className="browser-task-asset__field">Equals<input value={expected} maxLength={16384} onChange={event => setExpected(event.target.value)} /></label>
     <div className="browser-task-asset__run-actions"><button className="browser-rsi-replay__run" disabled={busy || pending} onClick={event => { void run(event) }}>
       {pending || busy ? 'Checking…' : 'Check current field'}

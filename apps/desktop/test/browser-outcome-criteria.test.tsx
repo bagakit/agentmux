@@ -269,7 +269,7 @@ describe('local Browser outcome editor', () => {
     const onRun = vi.fn(async (_input: BrowserOutcomeFieldRunInput, _event: MouseEvent<HTMLButtonElement>) => {})
     try {
       await act(async () => root.render(createElement(BrowserOutcomeCriteria, { onRun })))
-      const inputs = [...host.querySelectorAll<HTMLInputElement>('input')]
+      const inputs = [...host.querySelectorAll<HTMLInputElement>('input:not([type="radio"])')]
       expect(inputs).toHaveLength(3)
       await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(inputs[1], '#result')
@@ -293,7 +293,8 @@ describe('local Browser outcome editor', () => {
       for (const status of ['passed', 'not-met', 'unavailable'] as const) {
         await act(async () => root.render(createElement(BrowserOutcomeCriteria, { evaluation: { ...evaluation, status }, onRun })))
         expect(host.querySelectorAll('details')).toHaveLength(1)
-        expect(host.querySelectorAll('label')).toHaveLength(4)
+        expect(host.querySelectorAll('label')).toHaveLength(6)
+        expect(host.querySelector('fieldset legend')?.textContent).toBe('Value type')
         expect(host.querySelectorAll('[role=status]')).toHaveLength(1)
         expect(host.querySelector('[role=status]')?.textContent).toContain(evaluation.conditions[0]!.reason)
       }

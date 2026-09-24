@@ -47,13 +47,15 @@ import type { BrowserPageSnapshot } from '../shared/contracts.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
 import type { BrowserResultContext, BrowserResultReadOptions, BrowserResultArtifactChunk } from '../shared/browser-result-artifact.js'
 import type { BrowserStructuredOutputReceipt } from '../shared/browser-structured-output.js'
+import type { BrowserScopedSnapshot } from '../shared/browser-snapshot-query.js'
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
 import type { BrowserUploads } from './browser-uploads.js'
 import type { BrowserDownloads } from './browser-downloads.js'
 import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js'
-import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from '../shared/browser-task-assets.js'
+import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskStepExecution, BrowserTaskStep } from '../shared/browser-task-assets.js'
+import { recoverBrowserTaskStep, runBrowserTaskNavigation } from './browser-local-recovery.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
   BROWSER_SELECTION_WORLD_ID,
@@ -100,6 +102,7 @@ type BrowserEntry = {
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
 type BrowserTakeover = { at: number | null; kind: string }
+type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep }
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 
@@ -507,18 +510,25 @@ export class BrowserViewManager {
 
   async navigate(id: string, rawUrl: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    void this.startNavigation(entry, rawUrl).catch(() => {})
+    return this.snapshot(entry)
+  }
+
+  /** One navigation owner; page programs await the actual load promise, UI returns its projection. */
+  private startNavigation(entry: BrowserEntry, rawUrl: string): Promise<void> {
     const url = normalizeBrowserUrl(rawUrl)
     this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
     const view = entry.view
     entry.requestedUrl = url
     entry.error = null
     this.emit(entry)
-    void view.webContents.loadURL(url).catch((error) => {
-      if (!this.owns(entry, view)) return
-      entry.error = error instanceof Error ? error.message : String(error)
-      this.emit(entry)
+    return view.webContents.loadURL(url).catch((error) => {
+      if (this.owns(entry, view)) {
+        entry.error = error instanceof Error ? error.message : String(error)
+        this.emit(entry)
+      }
+      throw error
     })
-    return this.snapshot(entry)
   }
 
   async back(id: string): Promise<BrowserSnapshot> {
@@ -685,7 +695,7 @@ export class BrowserViewManager {
    *   这里绝不再补一个 `randomUUID()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
-  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false): Promise<BrowserScriptRunReport> {
+  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false, taskPage?: BrowserTaskPageExecution): Promise<BrowserScriptRunReport> {
     const entry = this.require(id)
     // Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.
     void this.releaseDemonstrationCapture(entry)
@@ -806,7 +816,7 @@ export class BrowserViewManager {
         navigationId: resultNavigationId
       }
       const run = await runBrowserScript({ code, signal: stopController.signal,
-        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters, stopController.signal),
+        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters, stopController.signal, taskPage),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
           await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
       })
@@ -1402,10 +1412,13 @@ export class BrowserViewManager {
         runScript: async (id, code, cursor) => {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
           if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
+          const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor } }
           try {
             return await this.runScript(id, code, undefined, undefined, undefined, async operation => {
               execution.operationId = operation.id
               const version = await this.taskAssets!.executionVersion(cursor)
+              const immutableStep = version?.steps.find(step => step.id === cursor.stepId)
+              if (immutableStep) taskPage.step = structuredClone(immutableStep)
               const bound = await this.taskAssets!.bindOperation(cursor, operation.id)
               const declaration = version?.completion
               const download = declaration?.criteria.find(item => item.kind === 'download-readable')
@@ -1428,7 +1441,7 @@ export class BrowserViewManager {
               // Preparation can finish after the person stopped this exact cursor.
               // Hand that intent to the existing operation cancellation owner before any page work.
               if (execution.stopRequested) void this.stopOperationById(operation.id)
-            }, privateTaskParameters)
+            }, privateTaskParameters, taskPage)
           } finally { execution.operationId = undefined }
         }
       })
@@ -1489,12 +1502,14 @@ export class BrowserViewManager {
     takeover: BrowserTakeover,
     operation: BrowserOperation,
     privateTaskParameters = false,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    taskPage?: BrowserTaskPageExecution
   ): (name: string, args: unknown[]) => Promise<unknown> {
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
     let beforeWaiting: { phase: BrowserOperation['phase']; summary: string } | null = null
     const observingView = entry.view
+    let activeRecoveryMayDispatch: (() => boolean) | undefined
     const requireLive = (): WebContentsView => {
       const view = entry.view
       if (this.entries.get(entry.id) !== entry || view.webContents.isDestroyed()) {
@@ -1502,8 +1517,18 @@ export class BrowserViewManager {
       }
       return view
     }
+    const beforeAction = (): void => {
+      if (requireLive() !== observingView || entry.activeRun?.operationId !== operation.id) throw new Error('The original Browser operation changed before dispatch.')
+      // elementContext also resolves a handle; observation remains available after human takeover.
+      if (!activeStep || !BROWSER_ACTION_PAGE_CALLS.has(activeStep.method)) return
+      if (signal?.aborted) throw new Error('This Browser operation stopped before dispatch.')
+      if (takeover.at !== null || entry.humanControl) throw new Error(takeoverMessage(takeover))
+      if (activeRecoveryMayDispatch && !activeRecoveryMayDispatch()) throw new Error('This recovery attempt no longer has dispatch authority.')
+      if (taskPage && !this.taskAssets?.isExecutionCurrent(taskPage.cursor, operation.id)) throw new Error('The original task cursor changed before dispatch.')
+    }
     const dispatch = createBrowserPageDispatch({
       session,
+      beforeAction,
       ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
         const view = requireLive()
         if (view !== observingView) throw new Error('The Browser view changed before download.')
@@ -1540,7 +1565,8 @@ export class BrowserViewManager {
         }
       },
       gotoUrl: async (url) => {
-        await this.navigate(entry.id, url)
+        beforeAction()
+        await runBrowserTaskNavigation(() => this.startNavigation(entry, url))
       },
       captureScreenshot: async () => await this.captureScreenshot(entry.id),
       readLedger: async () => await this.refLedgers.read(entry.id),
@@ -1597,24 +1623,54 @@ export class BrowserViewManager {
         void this.operationJournal?.setPhase(operation.id, 'waiting', { summary: operation.summary })
         this.emit(entry)
       }
-      const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string): Promise<void> => {
-        if (!this.stepEvidence) return
+      const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string, first = false): Promise<boolean> => {
+        if (!this.stepEvidence) return false
         if ((content.kind === 'page' || content.kind === 'structured-output') && privateTaskParameters) {
           step.evidenceWarning = 'Automatic page observations were not retained because this task uses private invocation parameters. Inspect the live page for its current state.'
-          return
+          return false
         }
         try {
           const reference = await recordBrowserStepEvidence(this.stepEvidence, {
             operationId: operation.id, sequence: step.sequence, browserId: entry.id, navigationId
           }, content)
-          step.evidence = [...(step.evidence ?? []), reference]
+          step.evidence = first ? [reference, ...(step.evidence ?? [])] : [...(step.evidence ?? []), reference]
+          return true
         } catch {
           step.evidenceWarning = 'Step evidence could not be saved. The action result is retained; inspect the page and check local storage before recording again.'
           operation.warning ??= step.evidenceWarning
+          return false
         }
       }
       try {
-        const value = await dispatch(name, args)
+        let value: unknown
+        try { value = await dispatch(name, args) }
+        catch (error) {
+          if (!taskPage?.step || !operation.outcome || !signal) throw error
+          const recovered = await recoverBrowserTaskStep({ identity: { ...taskPage.cursor, operationId: operation.id, sequence: step.sequence },
+            step: taskPage.step, method: name, args, failure: error }, {
+            signal,
+            isCurrent: () => this.entries.get(entry.id) === entry && entry.view === observingView && !observingView.webContents.isDestroyed() &&
+              entry.activeRun?.operationId === operation.id && this.taskAssets?.isExecutionCurrent(taskPage.cursor, operation.id) === true,
+            control: () => takeover.at !== null || entry.humanControl ? 'human' : 'agent',
+            observe: async () => {
+              if (entry.error) throw new Error('The original page reports a navigation or renderer error.')
+              return await dispatch('snapshot', [{ maxNodes: 1000 }]) as BrowserScopedSnapshot
+            },
+            dispatch: async (method, callArgs, mayDispatch) => {
+              activeRecoveryMayDispatch = mayDispatch
+              try { return await dispatch(method, callArgs) } finally { activeRecoveryMayDispatch = undefined }
+            },
+            verify: () => this.verifyOutcome(entry.id, operation.id),
+            record: report => saveEvidence({ kind: 'diagnostic', code: 'page-call-failed',
+              message: `Local recovery for ${report.goal.kind} in saved version ${report.identity.version}: ${report.status}. Goal: ${report.goal.target ? `${report.goal.target.role} "${report.goal.target.name.slice(0, 256)}" (${report.goal.target.ordinal}/${report.goal.target.count})` : 'navigation'}; page: ${report.goal.page?.slice(0, 512) ?? 'unknown'}. Failure: ${report.failure.kind}; effects: ${report.failure.effects}. ${report.attempts.length}/${report.budget.attempts} attempts, ${report.elapsedMs}/${report.budget.timeMs} ms, ${report.outputBytes}/${report.budget.outputBytes} bytes. ${report.attempts.map(attempt => `Attempt ${attempt.number}: ${attempt.mode}, ${attempt.status}.`).join(' ')} Outcome evidence: ${report.outcome?.status ?? 'unavailable'}.`,
+              nextAction: report.notice }, entry.navigationId, true)
+          })
+          // A proven pre-dispatch recovery keeps its explicit notice without relabeling
+          // it as appearance-based historical ref healing in the script outcome owner.
+          operation.warning = [operation.warning, recovered.report.notice].filter(Boolean).join('\n')
+          if (recovered.status !== 'action-completed' && recovered.status !== 'observed') throw error
+          value = recovered.value
+        }
         step.status = 'completed'
         step.finishedAt = Date.now()
         step.summary = summarizeBrowserValue(value)

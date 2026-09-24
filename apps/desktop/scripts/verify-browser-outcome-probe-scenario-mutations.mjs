@@ -6,6 +6,7 @@ await verifyRendererSourceMutations({
   name: 'browser-outcome-probe-scenario-source-mutations',
   tests: ['apps/desktop/test/browser-outcome-probe-scenario.test.ts'],
   sources: [file, 'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs',
+    'apps/desktop/src/renderer/src/components/BrowserOutcomeCriteria.tsx',
     'apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs',
     'apps/desktop/scripts/verify-browser-outcome-probe-scenario-mutations.mjs',
     'apps/desktop/scripts/lib/verify-renderer-source-mutations.mjs',
@@ -13,8 +14,8 @@ await verifyRendererSourceMutations({
     'packages/core/src/control-host.ts', 'packages/core/src/browser-completion-facts.ts',
     'packages/core/dist/index.js', 'packages/core/dist/browser-completion-facts.js'],
   mutations: [
-    { label: 'pending-native-select-never-committed', file,
-      before: "  if (before !== 'number') await key(ctx, 'Enter', 'Enter', 13)\n", after: '' },
+    { label: 'native-number-radio-never-selected', file,
+      before: "  else if (before === 'string') await key(ctx, 'ArrowRight', 'ArrowRight', 39)\n", after: "  else if (before === 'string') {}\n" },
     { label: 'empty-producer-steps-accepted', file,
       before: "  assert.deepEqual(value.steps.map(step => [step.sequence, step.method, step.status]), [[1, 'extractStructured', 'completed']])\n", after: '' },
     { label: 'foreign-registered-producer-accepted', file,

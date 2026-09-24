@@ -183,6 +183,7 @@
 .browser-trace-rail .browser-rsi-timeline { flex: 1 1 auto; min-height: 0; }
 /* Keep edge actions clear of the overlay scrollbar at their full hit size. */
 .browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }
+.browser-demonstration__steps .browser-rsi-timeline__empty { display: block; }
 
 @container browser-pane (max-width: 380px) {
   .browser-body { flex-direction: column; }
