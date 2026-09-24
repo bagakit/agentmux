@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { DatabaseSync } from 'node:sqlite'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
@@ -411,6 +410,8 @@ export async function readHermesSessionHistoryPage(
   context.signal.throwIfAborted()
 
   // 4. Open read-only SQLite database connection in consistent read transaction
+  const { DatabaseSync } = await import('node:sqlite')
+  context.signal.throwIfAborted()
   const db = new DatabaseSync(dbPath, { readOnly: true })
   try {
     context.signal.throwIfAborted()
