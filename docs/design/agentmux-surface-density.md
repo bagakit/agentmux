@@ -14,7 +14,7 @@ Focus 消息预览的完整表面不能被活跃 Region 的焦点描边穿过；
 
 - 用户反馈：「status bar 高度不应改变，太不精致了」。窗口状态栏固定为原有 **32px**，不因入口、切换工作面、设置或窄窗增高。
 - PMO 独立于工作面与设置组，只有这一枚圆角头像按钮可以略高出底栏；它局部锚在窗口左下，不占用额外整行高度，也不覆盖相邻入口或其命中区。
-- Space、Focus、Goals、Survey 与设置使用同一条紧凑图标基线和完整命中区。四个工作面共用单一选中 Surface；设置是打开现有设置面的动作，不冒充第五个工作面。PMO 的展开状态也不冒充工作面选中状态。
+- Space、Focus、Goals、Search 与设置使用同一条紧凑图标基线和完整命中区。四个工作面共用单一选中 Surface；设置是打开现有设置面的动作，不冒充第五个工作面。PMO 的展开状态也不冒充工作面选中状态。
 - 左下工作面与设置组保持低强调，使用底栏原有表面、克制的选中填充和间距，不叠加深色胶囊外框、浮起阴影、鲜亮色块或图标弹跳。PMO 的独立轮廓和头像承担局部强调。
 - 快捷键帮助和状态摘要位于右侧；响应式先收紧间距与次级状态文字，入口、键盘焦点与需要处理的状态保持可达。PMO 可以调整局部尺寸，整条底栏仍保持32px。
 
@@ -360,7 +360,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 - Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
 - Session 顶层 Tabbar 是最上方的工作面平面：单 Pane 时与窗口顶行合并为 36px；分屏时由左上方首个 Pane 的 Tabbar 承载一次必要的窗口 chrome，其余 Pane 直接从同一顶边开始使用 31px Tabbar，不再给没有 Tab 的全局 chrome 行预留 36px。
 - Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
-- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches`、`Agents` 或 `Browser Tools` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 与 Browser Tools 使用可读 `+` 和各自的可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。正文不重复栏头创建动作，也不以装饰图标、眉题、大标题与介绍占用一整块：Browser Tools 让人一眼可开网页，配置、Profiles 与 annotations 以平坦紧凑的 section/list 呈现、设置按需展开，少用线框与层层卡片；删除 Main-owned、Universal Pane 等对用户无决策价值的 Runtime 实现文案，保留忙碌与错误告知。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。创建作用域与失败恢复合同引用 interaction《顶部与项目栏》。
+- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches` 或 `Agents` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 使用可读 `+` 和完整可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。Browser 管理密度统一见《Search 的查找与 Browser 管理密度》，不在 Space 工具栏留一份重复入口。创建作用域与失败恢复合同引用 interaction《顶部与项目栏》。
 - Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
 - Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)。
 - 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park；跨 Workspace 隐藏的 Workbench 仍保持 warm，避免项目切换制造二次 replay。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](./agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。
@@ -1112,6 +1112,15 @@ PMO Teams 展开使用短促的位移、缩放与淡入，起点对齐触发头�
 ### Space 与 Focus 全局工作面
 
 顶级入口的名称和职责见交互合同《左下角导航、Space 与 Goals》。Space 表达工作现场，不把 Session 生命周期误当作顶级导航。Focus 和 Goals 都是全局表面，打开后 Project Rail 不占空间；Project 归属在内容中以紧凑元数据表达。Agents 引力图的具体布局属于独立 Feature，当前表面先保持可扫描和可恢复。
+
+### Search 的查找与 Browser 管理密度
+
+用户希望 Browser 相关入口「移到 Search 里面去刚刚好」，减少两处割裂。行为、职责、上下文和保留边界只见交互 SSOT《Search、Browser 入口与知识库定位》。沿用现有 Graphite / Mint、Surface、文字、间距和焦点语言，Search 以实际查找动作和可扫描 Browser 管理为主，不用知识库占位或介绍性大屏撑出空层级。
+
+- 搜索词/地址输入是直接可见的首要动作，当前 Workspace 是紧凑上下文；新建空 Browser 是一个明确次级动作。正常、窄窗与短窗都能找到输入、唯一新建入口和返回已有页面的路径，不靠缩小正文或增高全局底栏解决布局。
+- Browser bar、Profiles 与元素标注复用现有控件，以平坦 section/list 呈现。配置按需展开，低频属性不制造首屏字段墙；不重复工具名称、装饰图标、眉题、大标题和介绍，不层层套卡。长名称和路径能省略但完整信息与可访问名可达；上下文、选中和键盘焦点有独立且清楚的表达。
+- 保存中、未保存、创建失败、标注过期、无可用 Agent 和 Profile 删除确认沿原紧凑状态语言呈现；重要失败说明持续可读，具体作用域和危险动作不因收紧密度消失。运行事实与恢复说明只消费原 owner，不加常驻 Runtime 实现文字或版本条。
+- 实际验收必须包含非空 Profile 与标注内容、配置展开和正常/窄/短窗口；独立 Agent 实际看完整截图并修正复验。截图不能代签真实 Browser 输入、权限或重启恢复，后者继续沿交互合同与独立行为证据。
 
 ### Goals 的目标正文与对齐密度
 

@@ -10,23 +10,22 @@ import {
 
 export const TOOL_DOCK_DEFAULT_WIDTH = 300
 export const TOOL_DOCK_MIN_WIDTH = 236
-// 180px compact window chrome + 4px grid gap + three 28px workspace-tool
-// buttons + two 1px button gaps + 4px end padding.
+// 180px compact window chrome + 4px grid gap + two 28px workspace-tool
+// buttons and the Agent create action + two 1px gaps + 4px end padding.
 export const TOOL_DOCK_COLLAPSED_RAIL_MIN_WIDTH = 274
 export const TOOL_DOCK_MAX_WIDTH = 440
 
 export const WORKSPACE_TOOL_IDS = [
   'files-branches',
-  'agents',
-  'browser-tools'
+  'agents'
 ] as const
 
 export type WorkspaceTool = (typeof WORKSPACE_TOOL_IDS)[number]
 
 /**
  * Which workspace tools the dock offers, and which one is effectively active, for a given
- * workspace. Every workspace — Scratch included — gets the same three role slots (content /
- * Agents / Browser); the stored `workspaceTool` is shared across workspaces, so we never mutate
+ * workspace. Every workspace — Scratch included — gets the same content / Agents slots;
+ * the stored `workspaceTool` is shared across workspaces, so we never mutate
  * it here. Scratch is NOT a hidden empty folder: it is a wiki-first workspace whose content slot
  * holds real topic / outcome / refs / .agents content, so the file view is meaningful and Scratch
  * lands on the content slot by default (the store default is already `files-branches`). What

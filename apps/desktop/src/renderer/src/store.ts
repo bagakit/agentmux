@@ -279,7 +279,7 @@ export type EditorRegionDiffState = {
   diff: GitFileDiff | null
   error: string | null
 }
-export type MainSurface = 'survey' | 'agents' | 'workbench' | 'board'
+export type MainSurface = 'search' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
@@ -2014,7 +2014,7 @@ async function ensurePersistHydrated(): Promise<unknown | null> {
 }
 
 function restoredMainSurface(candidate: unknown): MainSurface {
-  if (candidate === 'survey') return 'survey'
+  if (candidate === 'search') return 'search'
   if (candidate === 'agents') return 'agents'
   return candidate === 'board' ? 'board' : 'workbench'
 }

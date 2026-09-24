@@ -93,15 +93,15 @@ function productionDeleteHandler(dependencies: {
   const callbacks: ts.Node[] = []
   function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'handleWithEvent' &&
-      ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'browser:deleteProfile') {
-      callbacks.push(node.arguments[1])
+      node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'browser:deleteProfile') {
+      callbacks.push(node.arguments[1]!)
     }
     ts.forEachChild(node, visit)
   }
   visit(parsed)
   expect(callbacks).toHaveLength(1)
-  expect(ts.isArrowFunction(callbacks[0])).toBe(true)
-  const compiled = ts.transpileModule(`const handler = ${callbacks[0].getText(parsed)}; return handler;`, {
+  expect(ts.isArrowFunction(callbacks[0]!)).toBe(true)
+  const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 }
   }).outputText
   return new Function('requireTrustedSender', 'browsers', 'browserProfiles', compiled)(

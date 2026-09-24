@@ -1,0 +1,26 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../../src/**/*.ts",
+    "../../../src/**/*.tsx",
+    "../../../*.ts",
+    "../../../test/search-surface.test.tsx",
+    "../../../test/browser-tools-density.test.tsx",
+    "../../../test/surface-tool-dock.test.ts",
+    "../../../test/main-surface-persistence.test.ts",
+    "../../../test/surface-selection-contract.test.ts",
+    "../../../test/space-tool-actions.test.tsx",
+    "../../../test/browser-toolbar.test.tsx",
+    "../../../test/browser-toolbar-overflow.test.tsx",
+    "../../../test/settings-preferences-draft.test.tsx",
+    "../../../test/agents-session-board-navigation.test.tsx",
+    "../../../test/browser-profiles-panel.test.tsx",
+    "../../../test/browser-profile-delete-approval.test.tsx",
+    "../../../test/browser-annotation-owner-recovery.test.tsx",
+    "../../../test/sliced-scan-surface-not-empty.test.ts",
+    "../../../test/vacuous-on-empty-predicate.test.ts",
+    "../../../test/overlay-native-adoption.test.tsx",
+    "../../../test/window-overlay-layer-contract.test.tsx",
+    "../../../test/settings-workbench.test.tsx"
+  ]
+}

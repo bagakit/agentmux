@@ -104,7 +104,8 @@ export function BrowserPane({
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const executeControl = useAppStore((state) => state.executeControl)
   const reportError = useAppStore((state) => state.reportError)
-  const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
+  const selectWorkspace = useAppStore((state) => state.selectWorkspace)
+  const setMainSurface = useAppStore((state) => state.setMainSurface)
   const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
   const openFile = useAppStore((state) => state.openFile)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
@@ -825,8 +826,11 @@ export function BrowserPane({
                   <FileCode2 size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
-                <DropdownMenu.Item className="browser-menu__item" onSelect={() => setWorkspaceTool('browser-tools')}>
-                  <SlidersHorizontal size={12} /><span>Customize toolbar…</span>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools in Search" onSelect={() => {
+                  void selectWorkspace(tab.workspaceId)
+                  setMainSurface('search')
+                }}>
+                  <SlidersHorizontal size={12} /><span>Browser tools in Search…</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>

@@ -26,7 +26,7 @@ export function TopRowLeadingChrome() {
     && toolsOpen
     && mainSurface === 'workbench' && Boolean(workspace)
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
-  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey') && chromeOwnedOutsideMain
+  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'search') && chromeOwnedOutsideMain
   return (
     <div
       className={`top-row-leading-chrome ${chromeOwnedOutsideMain ? '' : 'top-row-leading-chrome--compact'}${globalSurfaceNeedsTrafficLightInset ? ' top-row-leading-chrome--global-inset' : ''}`}
@@ -98,8 +98,8 @@ export function TopBreadcrumb() {
   if (mainSurface === 'agents') {
     return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
   }
-  if (mainSurface === 'survey') {
-    return <div className="breadcrumbs"><strong>Survey</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Browse and verify</span></div>
+  if (mainSurface === 'search') {
+    return <div className="breadcrumbs"><strong>Search</strong></div>
   }
   if (mainSurface === 'board') {
     return <div className="breadcrumbs"><strong>Goals</strong></div>

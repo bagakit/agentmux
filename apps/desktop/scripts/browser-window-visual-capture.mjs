@@ -40,8 +40,15 @@ export async function captureOsWindow(ctx, label) {
   assert.equal(window.isOffscreen, false)
   const before = await owners(ctx)
   assert.ok(before.length > 0, 'The original product must expose nonempty native owners')
-  assert.ok(before.some(owner => /^https?:/.test(owner.url) && owner.visible && owner.bounds.width > 0 && owner.bounds.height > 0),
-    'This private fixture must contain a real visible, positive-geometry native page')
+  const pages = before.filter(owner => /^https?:/.test(owner.url))
+  assert.ok(pages.length > 0, 'The original native page owners must remain present')
+  if (ctx.nativePageParked) {
+    assert.ok(pages.every(owner => !owner.visible || owner.bounds.width === 0 || owner.bounds.height === 0),
+      'The original native pages are parked while the Search control surface is visible')
+  } else {
+    assert.ok(pages.some(owner => owner.visible && owner.bounds.width > 0 && owner.bounds.height > 0),
+      'This private fixture must contain a real visible, positive-geometry native page')
+  }
   assert.equal(process.platform, 'darwin', 'This explicitly selected OS review uses macOS window capture')
   const file = join(ctx.receipt.visual.captureDirectory, `${label}-os-compositor.png`)
   const stateFile = join(ctx.receipt.visual.captureDirectory, `${label}-os-state.json`)
