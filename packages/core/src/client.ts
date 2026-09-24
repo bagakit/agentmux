@@ -1983,17 +1983,19 @@ export class AgentMuxClient {
     return (await this.createAgentWithDelivery(input)).session
   }
 
-  private async createAgentWithDelivery(input: AgentMuxAgentCreateInput): Promise<{
-    session: AgentMuxAgentSession; promptConfirmed: boolean
+  async createAgentWithDelivery(input: AgentMuxAgentCreateInput): Promise<{
+    session: AgentMuxAgentSession; promptConfirmed: boolean;
+    creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
     this.requireConnected()
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt.trim())
     const agentSessionId = safeId(input.agentSessionId ?? mintAgentSessionId(), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
+    const createOperationId = input.createOperationId ?? randomUUID()
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'create',
       agentSessionId,
-      input.createOperationId ?? randomUUID()
+      createOperationId
     )
     const reservation = await this.registry.reserveNew(agentSessionId, lifecycleOperationId)
     let hookBinding: AgentHookBinding | null = null
@@ -2077,6 +2079,7 @@ export class AgentMuxClient {
         capabilityHash: hashAgentCapability(invocationCapability),
         createdAt: now,
         updatedAt: now,
+        creation: { createOperationId, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested' },
         ...(launchOptions ? { launchOptions } : {})
       }
       if (
@@ -2146,7 +2149,23 @@ export class AgentMuxClient {
             ...(input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {}) }
         )
       }
-      return { session: cloneSession(readySession), promptConfirmed }
+      const creation: NonNullable<AgentMuxAgentSession['creation']> = {
+        createOperationId,
+        initialPrompt: input.prompt?.trim() ? (promptConfirmed ? 'confirmed' : 'unconfirmed') : 'not-requested'
+      }
+      // Input has already happened. A save observation failure cannot revoke a healthy Run or
+      // authorize sending again. Return the actual receipt; a later read keeps the durable unknown.
+      try {
+        readySession = await this.updateExactAgentSession(agentSessionId, session.run,
+          current => ({ ...current, creation, updatedAt: Date.now() }))
+        this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
+      } catch {
+        try { this.publisher.publish({ type: 'agent-error', agentSessionId,
+          code: 'AGENT_CREATION_RECEIPT_UNCONFIRMED',
+          message: 'Agent started, but saving its initial delivery receipt is unconfirmed. Read its response before submitting again.',
+          evidence: { source: 'user', observedAt: Date.now(), run: session.run } }) } catch { /* Run remains usable. */ }
+      }
+      return { session: cloneSession(readySession), promptConfirmed, creation }
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])

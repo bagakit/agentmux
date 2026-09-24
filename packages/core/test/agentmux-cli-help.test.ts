@@ -151,9 +151,9 @@ describe('agentmux CLI discovery', () => {
     expect(open).toContain('--right-of <region-id|self>')
     expect(open).toContain('--above <region-id|self>')
     expect(open).toContain('--below <region-id|self>')
-    expect(open).toContain('--new-tab-after <tab-id|self>')
+    expect(open).toContain('--tab <tab-id|self> --new-tab')
     expect(open).toContain('--in-region <launcher-region-id>')
-    expect(await run(['open', 'agent', '--help'])).toContain('--right-of <region-id|self>')
+    expect(await run(['agent', 'open', '--help'])).toContain('--executor <exact-executor-id>')
     expect(await run(['open', 'terminal', '--help'])).toContain('--command <shell-command>')
     expect(await run(['open', 'browser', '--help'])).toContain('--url <url>')
     expect(await run(['arrange', '--help'])).toContain('grid-9')
@@ -165,7 +165,7 @@ describe('agentmux CLI discovery', () => {
   it('prints bounded Agent instructions for inspect, open, and send', async () => {
     const skill = await run(['--skill'])
     expect(skill).toContain('agentmux inspect --tab self')
-    expect(skill).toContain('agentmux open agent --agent codex')
+    expect(skill).toContain('agentmux agent open --executor <exact-executor-id>')
     expect(skill).toContain('agentmux send --to-tab <tab-id>')
     expect(skill).toContain('agentmux open terminal --command')
     expect(skill).toContain('agentmux open browser --url')
@@ -176,8 +176,8 @@ describe('agentmux CLI discovery', () => {
     expect(skill).toContain('agentmux arrange --tab self --preset columns-3')
     expect(skill).toContain('agentmux arrange --tab self --preset grid-4')
     expect(skill).toContain('agentmux arrange --tab self --preset grid-9')
-    expect(skill).toContain('--left-of <region-id>')
-    expect(skill).toContain('--above <region-id>')
+    expect(skill).toContain('--split right')
+    expect(skill).toContain('agentmux space mv')
     expect(skill).toContain('--in-region <launcher-region-id>')
     expect(skill).toContain('deduplicating every caller Region')
     expect(skill).toContain('schemaVersion')
@@ -345,7 +345,11 @@ describe('agentmux CLI discovery', () => {
         })
         .map((match) => match[3]!)
 
-    const modules = ['agentmux', ...new Set(valueImports(cliSource))]
+    // Command-scoped dynamic imports are still real runtime edges; lazy Provider loading must
+    // not reduce this scan's reachability coverage.
+    const dynamicValueImports = [...cliSource.matchAll(/\bimport\('\.\/([a-z0-9-]+)\.js'\)/g)].map(match => match[1]!)
+    expect(dynamicValueImports).toContain('runtime-client')
+    const modules = ['agentmux', ...new Set([...valueImports(cliSource), ...dynamicValueImports])]
     // 深一层：`client` 的码经 daemon 往返、由控制码表定型，但它**进程内**调到的模块不是。CLI 拿到的是
     // 一个本地 `new AgentMuxClient`（connectLocalAgentMux），`client.resolveAgentSession` 转手就调
     // `registry.resolve` —— 那些 throw 一路冒到同一条顶层 catch，与 agent-role-directory 完全同形。
@@ -670,8 +674,11 @@ describe('agentmux CLI discovery', () => {
     const help = await run(['--help'])
     expect(help).toContain('dispatch')
     for (const verb of ['open', 'report', 'show']) {
+      const topic = agentMuxCommandHelp(`dispatch.${verb}`)
+      expect(topic).toBeTruthy()
       const specific = await run(['dispatch', verb, '--help'])
       expect(specific).toContain(`agentmux dispatch ${verb} --source-message`)
+      expect(specific).toBe(`${topic}\n`)
     }
     const specific = await run(['dispatch', '--help'])
     expect(specific).toContain('Only worker_done settles communication waiting')

@@ -1,3 +1,6 @@
+import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
+import { executeSpatialControl } from './lib/space-agent-control'
+import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -22,7 +25,8 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxExecutorAvailability,
-  type AgentMuxRegion
+  type AgentMuxRegion,
+  type AgentMuxSpaceAddress
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
@@ -349,6 +353,10 @@ type AppState = {
    */
   displacedAgentSessionIds: string[]
   restoredWorkbench: PersistedWorkbench | null
+  spaceZoneBindings: SpaceZoneBindings
+  spatialRequests: Record<string, SpatialRequestBinding>
+  /** Exact logical focus retained when a background move removes the active leaf. */
+  retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
   sessions: SessionSnapshot[]
@@ -868,8 +876,10 @@ function focusSessionContext(
   sessionId: string | null,
   observedSession?: SessionSnapshot
 ): AgentFocusContext {
+  if (sessionId === null) return focusExecution(state.agentFocus, null)
   const session = observedSession ?? state.sessions.find((candidate) => candidate.id === sessionId)
-  return session && focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo'
+  if (!session) return state.agentFocus
+  return focusLaneForSession(topicIdForSession(state.config, session), PMO_TEAMS_TOPIC_ID) === 'pmo'
     ? focusPmo(state.agentFocus, sessionId)
     : focusExecution(state.agentFocus, sessionId, Date.now(), session
       ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id])
@@ -1688,6 +1698,10 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
 }
 
 type PersistedAppState = {
+  spaceZoneBindings: SpaceZoneBindings
+  spatialRequests: Record<string, SpatialRequestBinding>
+  /** Exact logical focus retained when a background move removes the active leaf. */
+  retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   agentComposerDrafts?: Record<string, string>
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
@@ -1832,6 +1846,9 @@ export function restorePersistedUiState(
 // references, so they can reuse the projection without visiting unrelated workbench / file content.
 function selectPersistedInputs(state: AppState) {
   return {
+    spaceZoneBindings: state.spaceZoneBindings,
+    spatialRequests: state.spatialRequests,
+    retainedSpatialFocus: state.retainedSpatialFocus,
     agentComposerDrafts: state.agentComposerDrafts,
     // 排着的消息是用户亲手敲下的字，和草稿同一档事实——草稿重启后还在、排队的却没了，是把第 12 条
     // 反过来做。恢复后可投递性照旧在消费点按 runId 判（steerEntryTargetsRun）：对不上当前 run 的
@@ -2171,6 +2188,9 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
+  spaceZoneBindings: {},
+  spatialRequests: {},
+  retainedSpatialFocus: null,
   config: null,
   providerCatalog: [],
   sessions: [],
@@ -2347,8 +2367,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? initialSnapshotResult.value
         : emptyRuntimeSnapshot()
       let snapshotVerified = initialSnapshotResult.status === 'fulfilled'
-      let retainUnknownSessionViews = !snapshotVerified
-      let recoveryWorkflowFailed = false
       if (initialSnapshotResult.status === 'rejected') {
         startupWarnings.push(startupWorkflowWarning(
           'Runtime Session snapshot',
@@ -2379,11 +2397,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         try {
           const next = await api.sessions.snapshot()
           snapshotVerified = true
-          retainUnknownSessionViews = recoveryWorkflowFailed
           return next
         } catch (error) {
           snapshotVerified = false
-          retainUnknownSessionViews = true
           startupWarnings.push(startupWorkflowWarning(
             step,
             error,
@@ -2406,7 +2422,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         snapshot.sessions.length === 0 &&
         snapshot.recoveryCandidates.length === 0
       ) {
-        retainUnknownSessionViews = true
         snapshotVerified = false
         startupWarnings.push(
           'Runtime Session snapshot returned no Session facts. The saved Session Regions remain visible until a canonical snapshot confirms their identity.'
@@ -2469,8 +2484,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // not invent a continuity reason; retain its persisted Region through the unverified
           // projection path and leave the exact cause in the service-window notice.
           snapshotVerified = false
-          retainUnknownSessionViews = true
-          recoveryWorkflowFailed = true
           if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, {
             kind: 'pending', detail: 'Automatic recovery did not complete. Existing history and your draft are kept; retry Resume.'
           }))
@@ -2512,15 +2525,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         sessions: visibleSessions,
         persisted: persistedState.restoredWorkbench,
         createTabGroupId: newTabGroupId,
-        preserveUnknownSessionViews: retainUnknownSessionViews
+        retiredSessionIds: retiredAgentIds
       })
+      const observedSessionIds = new Set(visibleSessions.map(session => session.id))
+      const unobservedSavedSessions = [...persistedSessionIds].filter(id => !retiredAgentIds.has(id) && !observedSessionIds.has(id))
+      if (snapshotVerified && unobservedSavedSessions.length > 0) startupWarnings.push(
+        `${unobservedSavedSessions.length} saved Session reference(s) have no current Runtime facts. Their Regions remain visible; retry recovery when the Runtime can confirm them.`
+      )
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
         (session) => focusLaneForSession(topicIdForSession(config, session), PMO_TEAMS_TOPIC_ID),
-        retainUnknownSessionViews ? new Set([...persistedSessionIds].filter((id) => (
+        new Set([...persistedSessionIds].filter((id) => (
           !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
-        ))) : undefined
+        )))
       )
       // 抢救过的持久化 Tab 必须响亮：静默修好等于用户下次发现某一格不见了却无从查证。
       const repairNotice = describePersistedTabRepairs(workbench.repairs)
@@ -2657,7 +2675,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async selectWorkspace(id) {
-    set({ activeWorkspaceId: id, mainSurface: 'workbench', error: null, errorDismissed: true })
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+    set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })
     const state = get()
     if (!state.layouts[id]) {
       set((current) => ({
@@ -2666,6 +2685,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   activateWorkspaceSelection(result) {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const workspace = result.workspace
     set((state) => {
       const existingLayout = state.layouts[workspace.id]
@@ -2673,6 +2693,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config: result.config,
         activeWorkspaceId: workspace.id,
         mainSurface: 'workbench',
+        regionCaretFocus: null,
         error: null,
         errorDismissed: true,
         layouts: existingLayout
@@ -2818,13 +2839,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return outcome
   },
   focusTabGroup(workspaceId, tabGroupId) {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const layout = get().layouts[workspaceId]
     if (!layout || !findGroup(layout, tabGroupId)) return
     set((state) => ({
+      regionCaretFocus: null,
       layouts: { ...state.layouts, [workspaceId]: focusGroup(layout, tabGroupId) }
     }))
   },
   activateTab(workspaceId, tabGroupId, tabId) {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const layout = get().layouts[workspaceId]
     if (!layout) return
     const tab = get().tabs[tabId]
@@ -2832,6 +2856,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const activeRegion = tab?.regions[tab.layout.activeRegionId]
     const focusedSessionId = activeRegion && isSessionSurface(activeRegion) ? activeRegion.sessionId : null
     set((state) => ({
+      regionCaretFocus: null,
       layouts: {
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout, tabGroupId, tabId)
@@ -2855,6 +2880,76 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
+    }
+    if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv') {
+      return await executeSpatialControl({
+        get,
+        patch: patch => set(patch),
+        topics: async () => get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+          ? await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) : [],
+        createResource: input => api.workspaces.createZoneResource(input),
+        launch: input => {
+          set(current => ({ pendingAgentLaunches: { ...current.pendingAgentLaunches,
+            [input.agentSessionId]: { ...current.pendingAgentLaunches[input.agentSessionId],
+              events: current.pendingAgentLaunches[input.agentSessionId]?.events ?? [],
+              overflowed: current.pendingAgentLaunches[input.agentSessionId]?.overflowed ?? false,
+              request: { executorId: input.executorId, ...(input.prompt === undefined ? {} : { prompt: input.prompt }) } }
+          } }))
+          return api.sessions.launchAgent(input)
+        },
+        creation: (hostId, sessionId) => api.sessions.creation(hostId, sessionId),
+        attach: async (regionId, result) => {
+          const canonical = await get().canonicalizeAgentLaunch(result) ?? result
+          let gap: string | undefined
+          set(current => {
+            const owner = findWorkbenchRegion(current.tabs, regionId)
+            const attached = ownsSessionLaunch(owner?.surface, 'agent', result.created.agentSessionId)
+              ? reduceAgentSessionLaunchAttached(current, regionId, canonical)
+              : reduceDetachedAgentLaunch(current, canonical)
+            gap = attached.timelineGapSessionId
+            const landing = resolveSpatialCommit(attached.state.tabs, regionId, { kind: 'agent', sessionId: result.created.agentSessionId })
+            return { ...attached.state, ...(landing.kind === 'displaced' ? { displacedAgentSessionIds: [...new Set([...current.displacedAgentSessionIds, result.created.agentSessionId])] } : {}) }
+          })
+          if (gap) void get().resyncTimeline(gap)
+        },
+        save: async layoutApplied => {
+          let localStorageWritten = false
+          let storageFlushRequested = false
+          let reason: string | null = null
+          try {
+            if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
+            persistentWorkbenchStorage.flush()
+            localStorageWritten = true
+            await requestWorkbenchStorageFlush()
+            storageFlushRequested = true
+          } catch (error) { reason = presentError(error); get().reportWorkbenchSaveFailure(error) }
+          return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: 'unconfirmed', reason }
+        },
+        preserveMovedFocus: from => {
+          const state = get(), tab = state.tabs[from.tabId], layout = state.layouts[from.workspaceId]
+          const group = layout && findGroupForTab(layout, from.tabId)
+          if (state.activeWorkspaceId === from.workspaceId && layout?.activeGroupId === group?.id &&
+            group?.activeTabId === from.tabId && tab?.layout.activeRegionId === from.regionId) set({ regionCaretFocus: null,
+              retainedSpatialFocus: { ...from, ...(tab.topicId ? { topicId: tab.topicId } : {}) } })
+        },
+        focus: (tabId, regionId) => {
+          const tab = get().tabs[tabId], layout = tab && get().layouts[tab.workspaceId]
+          const group = layout && findGroupForTab(layout, tabId)
+          if (!tab || !group) return
+          void get().selectWorkspace(tab.workspaceId)
+          get().activateTab(tab.workspaceId, group.id, tabId)
+          get().focusRegion(tab.workspaceId, tabId, regionId, 'keyboard')
+        },
+        isFocused: (tabId, regionId) => {
+          const state = get(), tab = state.tabs[tabId], layout = tab && state.layouts[tab.workspaceId]
+          const group = layout && findGroupForTab(layout, tabId)
+          return Boolean(tab && state.mainSurface === 'workbench' && state.retainedSpatialFocus === null &&
+            state.activeWorkspaceId === tab.workspaceId && layout?.activeGroupId === group?.id &&
+            group?.activeTabId === tabId && tab.layout.activeRegionId === regionId)
+        },
+        notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)),
+        closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId)
+      }, request, signal)
     }
     const input = () => {
       const state = get()
@@ -2895,6 +2990,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const group = layout && findGroupForTab(layout, tabId)
       if (!tab || !layout || !group) throw controlFailure('TAB_NOT_OPEN', 'Tab target is not open.')
       set({
+        retainedSpatialFocus: null,
         activeWorkspaceId: tab.workspaceId,
         mainSurface: 'workbench',
         tabs: region ? { ...state.tabs, [tab.id]: focusWorkbenchTabRegion(tab, region.regionId) } : state.tabs,
@@ -2996,7 +3092,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'list.projects' || request.operation === 'list.active-agents') {
       const state = get()
       const workspaces = state.config?.workspaces ?? []
-      const projectForSession = (workspacePath: string) => workspaces.find((workspace) => workspace.path === workspacePath || workspace.repoPath === workspacePath)
+      const projects = projectWorkspaces(workspaces.filter(workspace => !isScratchWorkspaceId(workspace.id)))
+      const projectForSession = (session: SessionSnapshot) => {
+        const workspace = workspaces.find(workspace => workspace.hostId === session.hostId && !isScratchWorkspaceId(workspace.id) && workspaceOwnsSessionPath(workspace, session))
+        return workspace ? projects.find(project => project.id === workspaceProjectId(workspace)) : undefined
+      }
       let observed = state.sessions
       if (request.operation === 'list.active-agents' && request.agentSessionId !== undefined) {
         const target = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
@@ -3004,7 +3104,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         observed = [await api.sessions.refresh(target.control)]
       }
       const activeAgents = observed.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent').map((session) => {
-        const project = projectForSession(session.workspacePath)
+        const project = projectForSession(session)
         return {
           agentSessionId: session.id,
           ...(session.promptSubmissionPredecessor === undefined ? {} : { promptCondition: {
@@ -3022,18 +3122,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (request.operation === 'list.active-agents') return { operation: request.operation, agents: activeAgents }
       return {
         operation: request.operation,
-        projects: workspaces.map((workspace) => ({
-          projectId: workspace.id,
-          name: workspace.name,
-          hostId: workspace.hostId,
-          path: workspace.path,
-          kind: workspace.kind,
-          repoPath: workspace.repoPath ?? null,
-          branch: workspace.branch ?? null,
-          activeAgentSessionIds: activeAgents.filter((agent) => agent.projectId === workspace.id && agent.status === 'active').map((agent) => agent.agentSessionId)
-        }))
+        projects: projects.map(project => {
+          const workspace = project.workspaces.find(workspace => workspace.id === project.preferredWorkspaceId)!
+          return { projectId: project.id, name: project.name, hostId: project.hostId,
+            path: project.repoPath, kind: workspace.kind, repoPath: workspace.repoPath ?? null, branch: workspace.branch ?? null,
+            activeAgentSessionIds: activeAgents.filter(agent => agent.projectId === project.id && agent.status === 'active').map(agent => agent.agentSessionId) }
+        })
       }
     }
+    const controlProject = (id: string) => projectWorkspaces((get().config?.workspaces ?? []).filter(workspace => !isScratchWorkspaceId(workspace.id))).find(project => project.id === id)
     const demandRecord = (id: string): DemandRecord => {
       const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
       if (!demand) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
@@ -3055,7 +3152,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demand: record }
     }
     if (request.operation === 'demand.create') {
-      const project = request.projectId ? get().config?.workspaces.find((workspace) => workspace.id === request.projectId) : undefined
+      const project = request.projectId ? controlProject(request.projectId) : undefined
       if (request.projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
       const policy = demandWriteDecision({
         mode: 'risk-confirm',
@@ -3080,7 +3177,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'demand.update') {
       const current = demandRecord(request.demandId)
       const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
-      const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
+      const project = projectId ? controlProject(projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
       await get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
       const demand = demandRecord(request.demandId)
@@ -3105,7 +3202,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!current.projectId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to a Project before starting.')
         if (!current.assigneeExecutorId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to an Agent before starting.')
         const before = new Set(get().sessions.map((candidate) => candidate.id))
-        await get().launchBoardAgent(current.projectId, current.assigneeExecutorId, current.description.trim() || current.title)
+        await get().launchBoardAgent(controlProject(current.projectId)?.preferredWorkspaceId ?? current.projectId, current.assigneeExecutorId, current.description.trim() || current.title)
         const created = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && !before.has(candidate.id) && candidate.executorId === current.assigneeExecutorId).at(-1)
         attachedSessionId = created?.id ?? null
         if (attachedSessionId) await get().updateDemand(demandId, { sessionIds: [...current.sessionIds, attachedSessionId] })
@@ -3117,7 +3214,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'demand.assign') {
       const current = demandRecord(request.demandId)
       const projectId = request.projectId === undefined ? current.projectId : request.projectId
-      const project = projectId ? get().config?.workspaces.find((workspace) => workspace.id === projectId) : undefined
+      const project = projectId ? controlProject(projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
       await get().updateDemand(request.demandId, { projectId, projectName: project?.name ?? null, assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId })
       await appendDemandActivity(request.demandId, request.start ? 'Assigned and start requested.' : 'Assigned without starting execution.')
@@ -3154,7 +3251,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, sessionId: request.sessionId } }
     }
     if (request.operation === 'demand.link-project') {
-      const project = get().config?.workspaces.find((workspace) => workspace.id === request.projectId)
+      const project = controlProject(request.projectId)
       if (!project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
       await get().updateDemand(request.demandId, { projectId: project.id, projectName: project.name })
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, projectId: project.id } }
@@ -3205,6 +3302,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : controlFailure('CONTROL_FAILED', 'Region cannot be promoted to a new Tab.')
       }
       set({
+        retainedSpatialFocus: null,
         activeWorkspaceId: result.target.workspaceId,
         mainSurface: 'workbench',
         tabs: result.tabs,
@@ -3407,144 +3505,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
     }
 
-    if (request.operation === 'open.agent' && request.content.kind === 'agent-session') {
-      const session = agentSession({ kind: 'agent-session', agentSessionId: request.content.agentSessionId })
-      if (!workspaceOwnsSessionPath(workspace, session)) {
-        throw controlFailure('REGION_WORKSPACE_MISMATCH', 'Agent Session and destination belong to different Workspaces.')
-      }
-      const topicId = topicIdForSession(state.config, session)
-      if (isScratchWorkspaceId(workspace.id)) {
-        if (!topicId) throw controlFailure('REGION_TOPIC_MISMATCH', 'Agent Session has no matching Scratch Topic.')
-        if (plan.kind === 'tab') plan.tabs[plan.tabId] = { ...plan.tabs[plan.tabId]!, topicId }
-        else if (plan.tabs[plan.tabId]?.topicId !== topicId) {
-          throw controlFailure('REGION_TOPIC_MISMATCH', 'Agent Session and destination belong to different Scratch Topics.')
-        }
-      }
-      const surface: AgentWorkbenchSurface = {
-        regionId: plan.regionId, kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id
-      }
-      plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, surface)
-      set({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
-      return {
-        operation: request.operation,
-        region: {
-          tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
-          agentSessionId: session.id, providerId: session.providerId, executorId: session.executorId
-        }
-      }
-    }
-
-    if (request.operation === 'open.agent') {
-      const content = request.content
-      if (content.kind !== 'new-agent') {
-        throw controlFailure('INVALID_CONTROL_REQUEST', 'Agent open content is invalid.')
-      }
-      const executorId = resolveExecutorId(content.executorId)
-      if (!state.config?.executors[executorId]) {
-        throw controlFailure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Agent Executor is not configured.')
-      }
-      const agentSessionId = mintAgentSessionId()
-      // The target Topic is carried explicitly by the destination View's binding. A brand-new
-      // Tab has no binding and therefore no Topic — we never mint one from the Tab identity.
-      const scratchTopicId = isScratchWorkspaceId(workspace.id)
-        ? plan.tabs[plan.tabId]?.topicId
-        : undefined
-      if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
-        throw controlFailure('REGION_TOPIC_MISMATCH', 'Control destination has an invalid Scratch Topic.')
-      }
-      const pending: AgentWorkbenchSurface = {
-        regionId: plan.regionId, kind: 'agent', phase: 'launching', workspaceId: workspace.id, sessionId: agentSessionId
-      }
-      plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, pending)
-      set((current) => ({
-        activeWorkspaceId: workspace.id,
-        mainSurface: 'workbench',
-        tabs: plan.tabs,
-        layouts: plan.layouts,
-        pendingAgentLaunches: { ...current.pendingAgentLaunches, [agentSessionId]: { events: [], overflowed: false, request: { executorId, ...(content.prompt === undefined ? {} : { prompt: content.prompt }) } } }
-      }))
-      const cancel = (): void => rollback(pending)
-      signal?.addEventListener('abort', cancel, { once: true })
-      let launched: AgentLaunchResult | null = null
-      const cleanup = async (primary: Error): Promise<never> => {
-        if (launched) {
-          try { await api.sessions.stop({ kind: 'agent', hostId: launched.created.hostId, agentSessionId: launched.created.agentSessionId, run: launched.created.run }) }
-          catch (cleanupError) {
-            set((current) => reduceDetachedAgentLaunch(current, launched!).state)
-            throw controlFailure('LAUNCH_CLEANUP_FAILED', `${primary.message} Cleanup failed: ${presentError(cleanupError)}`, {
-              cause: new AggregateError([primary, cleanupError])
-            })
-          }
-        }
-        throw primary
-      }
-      try {
-        launched = await api.sessions.launchAgent({
-          executorId,
-          hostId: workspace.hostId,
-          workspacePath: workspace.path,
-          ...(scratchTopicId ? { scratchTopicId } : {}),
-          agentSessionId,
-          createOperationId: request.requestId,
-          ...(content.prompt === undefined ? {} : { prompt: content.prompt }),
-          ...(request.caller ? { authorAgentSessionId: request.caller.agentSessionId } : {})
-        })
-        if (launched.created.agentSessionId !== agentSessionId) {
-          await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Session identity.'))
-        }
-        const canonical = await get().canonicalizeAgentLaunch(launched)
-        if (!canonical) return await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Agent launch owner disappeared during creation.'))
-        const committed: AgentLaunchResult = canonical
-        launched = committed
-        if (signal?.aborted) await cleanup(controlCancellation(signal))
-        const owner = findWorkbenchRegion(get().tabs, plan.regionId)
-        if (!ownsSessionLaunch(owner?.surface, 'agent', agentSessionId)) {
-          // T-005: the Region vanished mid-launch — closed, or its id recycled by another launch —
-          // but the Agent itself started healthy. Do NOT stop it (the old `cleanup` here killed a
-          // perfectly good Run): keep it in the session list so it stays discoverable, and record the
-          // displacement so a persistent, layout-anchored notice can offer to give it a place again.
-          // The receipt still fails (there is no valid landing to hand back), but the Run keeps running.
-          // `reduceDetachedAgentLaunch` adds the Session unconditionally (its Region is gone) and clears
-          // the pending-launch bookkeeping; the outer catch's rollback/discard then no-op.
-          let timelineGapSessionId: string | undefined
-          set((current) => {
-            const detached = reduceDetachedAgentLaunch(current, committed)
-            timelineGapSessionId = detached.timelineGapSessionId
-            return {
-              ...detached.state,
-              displacedAgentSessionIds: [...current.displacedAgentSessionIds, agentSessionId]
-            }
-          })
-          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-          throw controlFailure('CONTROL_OWNER_LOST', 'Agent launched successfully but its Region disappeared during launch.')
-        }
-        if (!workspaceOwnsSessionPath(workspace, committed.created)) {
-          await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Agent launch returned another Workspace.'))
-        }
-        set((current) => reduceAgentSessionLaunchAttached(current, plan.regionId, committed).state)
-        const landing = resolveSpatialCommit(get().tabs, plan.regionId, { kind: 'agent', sessionId: agentSessionId })
-        if (landing.kind !== 'landed') {
-          // The Agent is healthy; only the Desktop projection moved while launch was in flight.
-          // Keep the Session available and report the layout race without stopping its Run.
-          get().reportError(new Error('Agent launched successfully, but its Region moved before the layout receipt was read.'))
-          throw controlFailure('CONTROL_OWNER_LOST', 'Agent launched successfully but its Region owner moved during launch.')
-        }
-        return {
-          operation: request.operation,
-          region: {
-            tabId: landing.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'agent',
-            agentSessionId, providerId: committed.created.providerId, executorId: committed.created.executorId
-          }
-        }
-      } catch (error) {
-        rollback(pending)
-        set((current) => discardPendingAgentLaunch(current, agentSessionId))
-        throw error
-      } finally {
-        signal?.removeEventListener('abort', cancel)
-      }
-    }
-
     if (request.operation === 'open.terminal') {
       const pendingId = `terminal-launch:${crypto.randomUUID()}`
       const pending: TerminalWorkbenchSurface = {
@@ -3666,10 +3626,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   selectSession(id, preferredTabGroupId) {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return
-    const session = get().sessions.find((candidate) => candidate.id === id)
-    const workspace = session ? workspaceForSession(get().config, session) : null
-    if (!session || !workspace) return
     const existing = Object.values(get().tabs).flatMap((tab) => (
       workbenchSurfaces(tab).flatMap((surface) => (
         isSessionSurface(surface) && surface.sessionId === id
@@ -3677,11 +3635,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : []
       ))
     ))[0]
-    const tabId = existing?.tab.id ?? sessionTabId(id)
+    if (existing) {
+      // A projection's durable placement owns navigation. Its Session's cwd owns execution,
+      // and can differ after a spatial move; rebuilding this Tab from cwd would move its other
+      // Regions too and leave the same Tab in two Workspace layouts. Recovery may also retain
+      // this projection before a fresh Session snapshot arrives.
+      const workspaceId = existing.tab.workspaceId
+      const layout = get().layouts[workspaceId]
+      if (!layout || !tabGroupForTab(layout, existing.tab.id)) {
+        get().reportError(new Error('The Tab Group is no longer available'))
+        return
+      }
+      set((state) => ({
+        activeWorkspaceId: workspaceId,
+        mainSurface: 'workbench',
+        displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
+      }))
+      get().focusRegion(workspaceId, existing.tab.id, existing.surface.regionId)
+      return
+    }
+    const session = get().sessions.find((candidate) => candidate.id === id)
+    const workspace = session ? workspaceForSession(get().config, session) : null
+    if (!session || !workspace) return
+    const tabId = sessionTabId(id)
     const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
     const existingTabGroupId = tabGroupForTab(layout, tabId)
     const targetTabGroupId = existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
-    const regionId = existing?.surface.regionId ?? initialWorkbenchRegionId(tabId)
+    const regionId = initialWorkbenchRegionId(tabId)
     const surface: AgentWorkbenchSurface | TerminalWorkbenchSurface = {
       regionId,
       kind: session.kind,
@@ -3689,9 +3669,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       workspaceId: workspace.id,
       sessionId: id
     }
-    const createdTab = existing
-      ? replaceWorkbenchRegion(existing.tab, regionId, surface)
-      : createWorkbenchTab(tabId, surface)
+    const createdTab = createWorkbenchTab(tabId, surface)
     const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
     const focusLane = focusLaneForSession(sessionTopicId, PMO_TEAMS_TOPIC_ID)
     const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
@@ -3710,6 +3688,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
+      regionCaretFocus: null,
       agentFocus: focusLane === 'pmo'
         ? focusPmo(state.agentFocus, id)
         : focusSessionContext(state, id),
@@ -3718,9 +3697,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
       displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
-    if (existing) get().focusRegion(workspace.id, tabId, regionId)
   },
   openLauncher(tabGroupId) {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const state = get()
     const workspaceId = state.activeWorkspaceId
     const layout = workspaceId ? state.layouts[workspaceId] : undefined
@@ -3737,6 +3716,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     set((state) => ({
       mainSurface: 'workbench',
+      regionCaretFocus: null,
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspaceId]: nextLayout }
     }))
@@ -3891,6 +3871,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   focusRegion(workspaceId, tabId, regionId, cause = 'pointer') {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const tab = get().tabs[tabId]
     const layout = get().layouts[workspaceId]
     const tabGroupId = layout ? tabGroupForTab(layout, tabId) : null
@@ -3945,6 +3926,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // One atomic layout replacement, then navigate with the same focus path selectSession uses —
     // no second navigation route, no fabricated cwd.
     set({
+      retainedSpatialFocus: null,
       activeWorkspaceId: result.target.workspaceId,
       mainSurface: 'workbench',
       tabs: result.tabs,
@@ -4022,6 +4004,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // these values, since the Region was right-clicked in the visible workbench, but setting them makes
     // "show the new Tab" true regardless of how the action was reached — e.g. a future command palette.)
     set({
+      retainedSpatialFocus: null,
       activeWorkspaceId: result.target.workspaceId,
       mainSurface: 'workbench',
       tabs: result.tabs,
@@ -4214,6 +4197,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setMainSurface(mainSurface) {
+    if (get().regionCaretFocus) set({ regionCaretFocus: null })
     const selectedSessionId = executionFocusSessionId(get().agentFocus)
     const selectedSession = selectedSessionId
       ? get().sessions.find((session) => session.id === selectedSessionId)
@@ -4234,7 +4218,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ mainSurface })
   },
   focusExecutionSession(id) {
-    set((state) => ({ agentFocus: focusSessionContext(state, id) }))
+    set((state) => ({ agentFocus: id !== null && !state.sessions.some((session) => session.id === id)
+      ? focusExecution(state.agentFocus, id)
+      : focusSessionContext(state, id) }))
   },
   focusPmoSession(id) {
     set((state) => {
@@ -4557,6 +4543,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async openFile(path, tabGroupId, location, requestedWorkspaceId, openAsText) {
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     // 显式 workspace 优先于活动 workspace。异步动作（建文件、切 diff）必须能把**自己开头那次**
     // 解析结果传进来：否则调用方解析一次、这里再解析一次，两次之间用户切了侧栏就漂移，
     // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
@@ -4829,6 +4816,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
     )
     const reveal = options?.reveal ?? true
+    if (reveal && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')

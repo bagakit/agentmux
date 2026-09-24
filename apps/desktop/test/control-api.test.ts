@@ -1,3 +1,4 @@
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
 import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -16,25 +17,46 @@ function request(): AgentMuxControlRequest {
   return {
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     requestId: 'open-claude-right',
-    operation: 'open.agent',
+    operation: 'agent.open',
     caller: { agentSessionId: 'caller' },
     content: { kind: 'new-agent', executorId: 'claude-review' },
-    destination: { kind: 'split', direction: 'right', region: { kind: 'self' } }
+    destination: { regionId: 'caller-region', split: 'right' },
+    focus: false
   }
 }
 
 function result(): AgentMuxControlResult {
   return {
-    operation: 'open.agent',
-    region: {
-      kind: 'agent',
+    operation: 'agent.open',
+    requestId: 'open-claude-right',
+    outcome: 'opened',
+    from: null,
+    to: {
+      spaceId: 'space',
+      zoneId: 'zone',
       tabId: 'tab',
       regionId: 'region',
-      workspaceId: 'workspace',
+      workspaceId: 'workspace'
+    },
+    agent: {
       agentSessionId: 'caller',
+      runId: 'run-caller',
       providerId: 'codex',
-      executorId: 'codex'
-    }
+      executorId: 'codex',
+      hostId: 'local',
+      cwd: _hygiene_fixturePath("repo"),
+      createOperationId: 'open-claude-right',
+      initialPrompt: 'not-requested'
+    },
+    resource: null,
+    save: {
+      layoutApplied: true,
+      localStorageWritten: true,
+      storageFlushRequested: true,
+      diskDurability: 'unconfirmed',
+      reason: null
+    },
+    issues: []
   }
 }
 

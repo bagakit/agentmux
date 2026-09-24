@@ -5,6 +5,8 @@ import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
+import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
+export type * from './space-control.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -209,9 +211,6 @@ export type AgentMuxOpenDestination =
   | { kind: 'split'; region: AgentMuxRegionAnchor; direction: 'left' | 'right' | 'up' | 'down' }
   | { kind: 'new-tab'; after: AgentMuxTabAnchor }
   | { kind: 'launcher'; regionId: string }
-export type AgentMuxOpenAgentContent =
-  | { kind: 'new-agent'; executorId: AgentExecutorId; prompt?: string }
-  | { kind: 'agent-session'; agentSessionId: string }
 export type AgentMuxArrangeMode =
   | { kind: 'preset'; preset: WorkbenchLayoutPreset }
   | { kind: 'balance' }
@@ -225,9 +224,6 @@ export type AgentMuxControlInspectTabRequest = RequestBase & {
 }
 export type AgentMuxControlInspectRegionRequest = RequestBase & {
   operation: 'inspect.region'; target: AgentMuxRegionAnchor; caller?: AgentMuxControlCaller
-}
-export type AgentMuxControlOpenAgentRequest = RequestBase & {
-  operation: 'open.agent'; content: AgentMuxOpenAgentContent; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlOpenTerminalRequest = RequestBase & {
   operation: 'open.terminal'; shellCommand?: string; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
@@ -544,10 +540,10 @@ export type AgentMuxControlCrashLogResult =
   | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
 
 export type AgentMuxControlRequest =
+  | AgentMuxSpaceControlRequest
   | AgentMuxControlInspectClientRequest
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
-  | AgentMuxControlOpenAgentRequest
   | AgentMuxControlOpenTerminalRequest
   | AgentMuxControlOpenBrowserRequest
   | AgentMuxControlSendRequest
@@ -636,10 +632,10 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
-  | { operation: 'open.agent'; region: AgentMuxAgentRegion }
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
   | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
   | { operation: 'send'; agentSessionId: string }
@@ -818,7 +814,7 @@ export function resolveAgentMuxRegion(regions: readonly AgentMuxRegion[], target
  * 请求走两条不同的路到达执行方，两条各自有一个等待方：
  *   - CLI → daemon 的 socket（control-host.ts 的 `socket.setTimeout`）
  *   - Renderer 拥有屏幕时，main 经 IPC 转给 Renderer（DesktopControlIpcBridge 的 `setTimeout`）
- * 两条都必须用同一个预算：同一条 `amux open.agent`，若一条等 60 秒另一条等 2 秒，用户看到的就是
+ * 两条都必须用同一个预算：同一条 `agentmux agent open`，若一条等 60 秒另一条等 2 秒，用户看到的就是
  * 「同一个命令有时能开出来、有时报 CONTROL_TIMEOUT」，而差别只在当时是谁拥有屏幕。
  *
  * **为什么连 {@link isLongAgentMuxControlOperation} 也必须在这里而不是各写一遍：**
@@ -854,7 +850,10 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'inspect.client': 'short',
   'inspect.tab': 'short',
   'inspect.region': 'short',
-  'open.agent': 'long',
+  'agent.open': 'long',
+  'space.ls': 'short',
+  'space.inspect': 'short',
+  'space.mv': 'long',
   'open.terminal': 'long',
   'open.browser': 'long',
   send: 'long',

@@ -1,3 +1,5 @@
+import type { WorkspaceLayout } from '@agentmux/layout'
+import type { WorkbenchTab } from './workbench-tabs'
 /**
  * 「这一格是不是当前聚焦的那一格」——**一个决定，两个消费者。**
  *
@@ -136,4 +138,17 @@ export function regionCaretFocusTargets(
   regionId: string | null | undefined
 ): request is { regionId: string; nonce: number } {
   return request != null && regionId != null && request.regionId === regionId
+}
+
+/** Keep surviving source leaves readable without selecting a replacement Agent. */
+export function layoutForLogicalRegionFocus(layout: WorkspaceLayout, tabs: Record<string, WorkbenchTab>, retained?: { regionId: string; tabId: string } | null): WorkspaceLayout {
+  if (!retained) return layout
+  const source = tabs[retained.tabId]
+  const sourceGroup = source && layout.groups.find(group => group.tabOrder.includes(source.id))
+  if (sourceGroup) return { ...layout, activeGroupId: sourceGroup.id,
+    groups: layout.groups.map(group => group.id === sourceGroup.id ? { ...group, activeTabId: source!.id } : group) }
+  return { ...layout, groups: layout.groups.map(group => group.id === layout.activeGroupId ? { ...group, activeTabId: null } : group) }
+}
+export function logicalRegionId(tab: WorkbenchTab, retainedRegionId?: string | null): string | null {
+  return retainedRegionId ? tab.regions[retainedRegionId] ? retainedRegionId : null : tab.layout.activeRegionId
 }

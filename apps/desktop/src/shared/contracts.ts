@@ -910,6 +910,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
+      creation?: NonNullable<AgentMuxAgentSession['creation']>
       /** Core-owned admission identity. null is confirmed empty; undefined is unknown. */
       promptSubmissionPredecessor?: string | null | undefined
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
@@ -978,6 +979,7 @@ export type AgentSessionRecoveryCandidate = {
 export type AgentLaunchResult = {
   /** One public Core creation receipt; missing display reads never revoke it. */
   created: AgentMuxAgentSession
+  creation?: NonNullable<AgentMuxAgentSession['creation']>
   session?: Extract<SessionSnapshot, { kind: 'agent' }>
   timeline?: AgentTimelineSnapshot
   projectionFailures: Array<{ step: 'session' | 'timeline'; message: string }>
@@ -1322,6 +1324,7 @@ export type AgentMuxDesktopApi = {
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
     createWorktreeForBranch(input: CreateWorktreeForBranchInput): Promise<WorkspaceSelectionResult>
+    createZoneResource(input: import('./space-addresses').SpaceZoneResourceInput): Promise<import('./space-addresses').SpaceZoneResourceResult>
     removeWorktree(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>
     /**
      * What this worktree's branch would keep if the checkout went away. Asked BEFORE the confirm dialog
@@ -1446,6 +1449,7 @@ export type AgentMuxDesktopApi = {
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
+    creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentSession>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     timeline(session: AgentSessionControl): Promise<AgentTimelineSnapshot>
     historyPage(session: AgentSessionControl, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>

@@ -96,6 +96,8 @@ export type WorkbenchTab = {
   id: string
   workspaceId: string
   topicId?: string
+  /** Display placement; intentionally independent of a Session's execution directory. */
+  space?: { spaceId: string; zoneId: string }
   titleRegionId: string
   layout: WorkbenchViewLayout
   regions: Record<string, WorkbenchSurface>

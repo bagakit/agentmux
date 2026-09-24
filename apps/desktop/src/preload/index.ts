@@ -83,6 +83,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('workspaces:openBranch', workspaceId, branch),
     createWorktreeForBranch: (input: CreateWorktreeForBranchInput) =>
       ipcRenderer.invoke('workspaces:createWorktreeForBranch', input),
+    createZoneResource: (input: import('../shared/space-addresses').SpaceZoneResourceInput) =>
+      ipcRenderer.invoke('workspaces:createZoneResource', input),
     removeWorktree: (input: RemoveWorktreeInput) =>
       ipcRenderer.invoke('workspaces:removeWorktree', input),
     worktreeRemovalNotice: (workspaceId: string) =>
@@ -243,6 +245,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   sessions: {
+    creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),

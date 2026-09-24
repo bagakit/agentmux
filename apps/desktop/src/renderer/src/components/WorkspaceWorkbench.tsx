@@ -1,3 +1,5 @@
+import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
   DndContext,
   DragOverlay,
@@ -616,6 +618,7 @@ function WorkbenchRegionLeaf({
   headerPortalTargetId: string | null
 }) {
   const focusRegion = useAppStore((state) => state.focusRegion)
+  const retainedSpatialFocus = useAppStore((state) => state.retainedSpatialFocus)
   const closeRegion = useAppStore((state) => state.closeRegion)
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
@@ -632,7 +635,7 @@ function WorkbenchRegionLeaf({
   // 否则窗口级层把环的三边物理盖掉）。见 region-focus.ts——分开各算一次时未聚焦的 browser 区
   // 也内缩，露出底下深色成了一圈无环的黑边。
   // 候选数一起喂进去：只有一格时环不表达任何选择，画出来就是整个界面镶一圈绿边。
-  const focus = regionFocusExpression(tab.layout.activeRegionId, node.regionId, regionCount)
+  const focus = regionFocusExpression(retainedSpatialFocus?.regionId ?? tab.layout.activeRegionId, node.regionId, regionCount)
   const canClose = regionCount > 1
   const dirty = surface?.kind === 'file' && Boolean(
     dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
@@ -911,6 +914,9 @@ function PaneGroup({
     tabsById[id] ? [tabsById[id]] : []
   ))
   const activeTab = tabs.find((tab) => tab.id === group.activeTabId) ?? null
+  const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
+  const focusMoved = retainedSpatialFocus?.workspaceId === workspaceId && layout.activeGroupId === group.id &&
+    (!activeTab || !activeTab.regions[retainedSpatialFocus.regionId])
   // Pane 组的焦点环同样只在「有得选」时才有内容：不分屏时唯一那组铺满整个工作区且恒等于
   // activeGroupId，画出来就是整个界面镶一圈绿边（用户原话：「整个界面也有」）。
   //
@@ -922,7 +928,8 @@ function PaneGroup({
     group.id,
     groupIds(layout.root).length
   )
-  const activeSurface = activeTab ? activeWorkbenchSurface(activeTab) : null
+  const activeRegionId = activeTab ? logicalRegionId(activeTab, retainedSpatialFocus?.regionId) : null
+  const activeSurface = activeTab && activeRegionId ? activeTab.regions[activeRegionId] : null
   // Route through isSessionSurface (SSOT in workbench-surface-kinds.ts). This site was invisible
   // to the exhaustiveness guard for months because it read `.kind` off a nullable receiver
   // (`WorkbenchSurface | null` from the ternary above) — the assignability check the guard used
@@ -986,7 +993,7 @@ function PaneGroup({
             </button>
           ) : null}
           <PaneSplitMenu
-                disabled={!activeTab || !activeSurface}
+            disabled={!activeTab || !activeSurface}
             regionCount={activeTab ? Object.keys(activeTab.regions).length : 0}
             onSplit={(direction) => {
               if (activeTab && activeSurface) {
@@ -1007,6 +1014,13 @@ function PaneGroup({
           </button>
         </div>
       </header>
+      {focusMoved ? <div data-workbench-moved-focus>
+        <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+          step: 'Focused Agent moved in the background',
+          mode: 'The remaining Regions stay visible; no replacement Agent is selected.',
+          restore: 'Choose a Region, a Tab, or a new Tab to change focus.'
+        } }} />
+      </div> : null}
       <div className="pane-body">
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
             此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
@@ -1026,9 +1040,9 @@ function PaneGroup({
           >
             <div id={`${viewHostPrefix}:${tab.id}`} data-workbench-tab-id={tab.id} className="workbench-tab-slot" />
           </div>
-        )) : (
+        )) : !focusMoved ? (
           <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
-        )}
+        ) : null}
       </div>
       <ConfirmationDialog
         open={pendingStopSessionId !== null}
@@ -1269,11 +1283,12 @@ export function WorkspaceWorkbench({
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const focusTab = focusTabId ? tabs[focusTabId] : null
+  const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const layout = useMemo(
     () => residentLayout
-      ? layoutForActiveTopic(residentLayout, tabs, topicId ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId)
+      ? layoutForLogicalRegionFocus(layoutForActiveTopic(residentLayout, tabs, topicId ?? (retainedSpatialFocus?.workspaceId === workspaceId ? retainedSpatialFocus.topicId : undefined) ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId), tabs, retainedSpatialFocus?.workspaceId === workspaceId ? retainedSpatialFocus : null)
       : residentLayout,
-    [residentLayout, tabs, topicId, topicIsolation, projectionTabId]
+    [residentLayout, tabs, topicId, topicIsolation, projectionTabId, retainedSpatialFocus, workspaceId]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)

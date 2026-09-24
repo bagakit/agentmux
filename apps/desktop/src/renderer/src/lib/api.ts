@@ -371,6 +371,7 @@ const mockApi: AgentMuxDesktopApi = {
     decision: async (id, input: Omit<DemandDecision, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.decision })
   },
   workspaces: {
+    createZoneResource: async () => { throw new Error('Zone resource creation requires the Desktop host.') },
     appearance: async () => ({ kind: 'directory', icon: null }),
     chooseLocalFolder: async () => null,
     rebindLocalFolder: async () => null,
@@ -761,6 +762,7 @@ const mockApi: AgentMuxDesktopApi = {
     onChanged: () => () => {}
   },
   sessions: {
+    creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]

@@ -625,6 +625,8 @@ export type AgentMuxAgentSession = {
   retiredRuns: AgentMuxRunRef[]
   createdAt: number
   updatedAt: number
+  /** Same creation's correlation and protocol delivery fact; never task acceptance or execution. */
+  creation?: AgentMuxAgentCreationFact
   /**
    * The chosen launch-option ids that fixed this Agent's security posture at spawn (sandbox, approval,
    * permission-mode — see agent-launch-option.ts). Persisted so a stop/resume re-resolves the SAME argv
@@ -668,6 +670,11 @@ export type AgentMuxAgentSession = {
    * 两者在 UI 上都不显示 0。
    */
   turnUsage?: AgentTurnUsage
+}
+
+export type AgentMuxAgentCreationFact = {
+  createOperationId: string
+  initialPrompt: 'not-requested' | 'confirmed' | 'unconfirmed' | 'unknown'
 }
 
 export type AgentTerminalHandshakeState = {
