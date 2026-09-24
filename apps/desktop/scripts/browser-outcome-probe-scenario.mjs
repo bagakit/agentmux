@@ -52,23 +52,25 @@ async function type(ctx, label, value) {
 
 export async function numberCondition(ctx) {
   await type(ctx, 'CSS selector', '#verified-number')
-  // Native menus may keep the highlighted choice pending until Enter. Use one
-  // arrow and one explicit commit; never assign its value/focus or retry senders.
+  // Native HTML radio selection is visible in place. One standard tab/arrow
+  // path changes the checked choice; the probe never assigns it or retries.
   await key(ctx, 'Tab', 'Tab', 9)
-  const expression = labelControl(ctx, 'Value type')
-  const read = () => ctx.probe.cdp.evaluate(`(()=>{const controls=${expression};if(controls.length!==1)throw new Error('The actual type selector is missing');const target=controls[0];return {value:target.value,focused:document.activeElement===target,optionCount:target.options.length,selected:Array.from(target.selectedOptions).map(option=>option.value)}})()`)
+  const expression = within(ctx, '.browser-outcome-criteria__types input[type="radio"]')
+  const read = () => ctx.probe.cdp.evaluate(`(()=>{const controls=${expression};if(controls.length!==3)throw new Error('The actual type radios are missing');const selected=controls.filter(target=>target.checked);if(selected.length!==1)throw new Error('Exactly one actual type must be checked');return {value:selected[0].value,focused:document.activeElement===selected[0],optionCount:controls.length,values:controls.map(target=>target.value),names:[...new Set(controls.map(target=>target.name))],selected:selected.map(target=>target.value)}})()`)
   const observed = { before: await read() }
   ;(ctx.receipt.browserOutcome.numberSelections ??= []).push(observed)
   assert.equal(observed.before.focused, true)
   assert.equal(observed.before.optionCount, 3)
+  assert.deepEqual(observed.before.values, ['string', 'number', 'boolean'])
+  assert.equal(observed.before.names.length, 1); assert.ok(observed.before.names[0])
   const before = observed.before.value
-  if (before === 'boolean') await key(ctx, 'ArrowUp', 'ArrowUp', 38)
-  else if (before === 'string') await key(ctx, 'ArrowDown', 'ArrowDown', 40)
+  if (before === 'boolean') await key(ctx, 'ArrowLeft', 'ArrowLeft', 37)
+  else if (before === 'string') await key(ctx, 'ArrowRight', 'ArrowRight', 39)
   else assert.equal(before, 'number')
   observed.afterArrow = await read()
-  if (before !== 'number') await key(ctx, 'Enter', 'Enter', 13)
   observed.afterCommit = await read()
-  assert.equal(observed.afterCommit.value, 'number', 'Actual keyboard input commits the numeric type')
+  assert.equal(observed.afterCommit.value, 'number', 'Actual keyboard input selects the numeric radio')
+  assert.deepEqual(observed.afterCommit.selected, ['number']); assert.equal(observed.afterCommit.focused, true)
   await type(ctx, 'Equals', '0')
 }
 
@@ -194,6 +196,10 @@ export async function reviewBrowserOutcome(ctx) {
     scope: 'Trusted Renderer UI → original Main declaration/extraction/Journal/T003 bytes → public Core completion; no Store seed or API replacement' }
   await open(ctx)
   assert.equal(await ctx.probe.cdp.evaluate(`(${owned(ctx, surface)})[0].querySelector(':scope > summary').textContent`), 'Completion condition')
+  await ctx.waitFor('the original history settled as a unique empty trace before any producer', () => ctx.probe.cdp.evaluate(`(()=>{const histories=${owned(ctx, '[aria-label="Browser operation history"]')};return histories.length===1&&histories[0].querySelectorAll('.browser-rsi-history__empty').length===1&&(${owned(ctx, '.browser-rsi-timeline')}).length===0})()`))
+  await ctx.resize(ctx.probe, 1000, 660)
+  await ctx.capture(ctx.probe, 'short-browser-trace-empty-before-producer', 'empty-operations')
+  await ctx.resize(ctx.probe, 1440, 900)
   const fixture = await ctx.nativePageScript(ctx.probe, '({url:location.href,identity:globalThis.outcomeDocumentIdentity,number:document.querySelector("#verified-number").textContent,flag:document.querySelector("#verified-boolean").checked,text:document.querySelector("#verified-text").textContent,actions:globalThis.outcomePageActions})')
   assert.ok(typeof fixture.identity === 'string' && fixture.identity.length > 0)
   const { identity, ...values } = fixture

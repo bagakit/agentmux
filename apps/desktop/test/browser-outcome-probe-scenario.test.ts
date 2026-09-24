@@ -3,11 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runInNewContext } from 'node:vm'
-import { Window, type HTMLButtonElement, type HTMLInputElement, type HTMLSelectElement } from 'happy-dom'
+import { Window, type HTMLButtonElement, type HTMLInputElement } from 'happy-dom'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxControlServer, requestAgentMuxControl } from '../../../packages/core/src/control-host'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest, type AgentMuxControlSuccessReceipt } from '../../../packages/core/src/control'
 import { projectBrowserControlResult } from '../src/main/browser-completion-control'
+import { BrowserOutcomeCriteria } from '../src/renderer/src/components/BrowserOutcomeCriteria'
 import { auditFieldOperation, auditPublicCompletion, numberCondition, outcomeFixture, publicFacts, readRecordedOutcome } from '../scripts/browser-outcome-probe-scenario.mjs'
 
 // Source tests of the scenario's actual emitted reads and rejection oracles.
@@ -66,20 +69,17 @@ function replaceCompleteDocument(data: ReturnType<typeof sample>, document: Retu
   data.chunk.reference.byteLength = bytes.length
 }
 
-// A Source-only keyboard model: arrows highlight a pending choice and Enter commits.
-// It runs the actual emitted readonly expressions; it cannot prove macOS native input.
+// Source-only standard radio keyboard model, using production rendered markup.
+// It executes the emitted readonly reads, and cannot prove Native input defaults.
 function keyboardTransport(initial: 'string' | 'number' | 'boolean', commit = true) {
   const window = new Window({ url: pageUrl })
   window.document.body.innerHTML = `<section class="browser-surface"><input aria-label="Browser address" value="${pageUrl}">
-    <details class="browser-outcome-criteria"><label>CSS selector<input></label>
-    <label>Value type<select><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option></select></label>
-    <label>Equals<input></label></details></section>`
-  const select = window.document.querySelector('select') as HTMLSelectElement
-  select.value = initial // Model setup only; the scenario never assigns the select.
+    ${renderToStaticMarkup(createElement(BrowserOutcomeCriteria, { onRun: async () => {} }))}</section>`
+  const radios = [...window.document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+  for (const radio of radios) radio.checked = radio.value === initial // Model setup only, outside the scenario.
   const sends: Array<{ type: string; key: string | undefined }> = []
   const reads: string[] = []
   const selections: Array<{ before: { value: string }; afterArrow: { value: string }; afterCommit: { value: string } }> = []
-  let pending: string | undefined
   const ctx = { pageUrl, receipt: { browserOutcome: { numberSelections: selections } },
     selectors: (selector: string) => `Array.from(document.querySelectorAll(${JSON.stringify(selector)}))`,
     click: async (_cdp: unknown, expression: string) => {
@@ -89,20 +89,22 @@ function keyboardTransport(initial: 'string' | 'number' | 'boolean', commit = tr
       targets[0]!.focus() // Simulate the existing input sender, not a probe actuator.
     },
     probe: { cdp: {
-      evaluate: async (expression: string) => { reads.push(expression); return window.eval(expression) },
+      evaluate: async (expression: string) => { reads.push(expression); return JSON.parse(JSON.stringify(window.eval(expression))) },
       call: async (method: string, input: { type?: string; key?: string; text?: string }) => {
         if (method === 'Input.insertText') (window.document.activeElement as HTMLInputElement).value = input.text!
         else {
           expect(method).toBe('Input.dispatchKeyEvent')
           sends.push({ type: input.type!, key: input.key })
-          if (input.type === 'keyDown' && input.key === 'Tab') select.focus()
-          if (input.type === 'keyDown' && (input.key === 'ArrowDown' || input.key === 'ArrowUp')) pending = 'number'
-          if (input.type === 'keyDown' && input.key === 'Enter' && pending && commit) select.value = pending
+          if (input.type === 'keyDown' && input.key === 'Tab') radios.find(radio => radio.checked)!.focus()
+          if (input.type === 'keyDown' && (input.key === 'ArrowRight' || input.key === 'ArrowLeft') && commit) {
+            const number = radios.find(radio => radio.value === 'number')!
+            number.click(); number.focus()
+          }
         }
       }
     } }
   }
-  return { ctx, select, sends, reads, close: () => window.happyDOM.cancelAsync() }
+  return { ctx, window, radios, sends, reads, close: () => window.happyDOM.cancelAsync() }
 }
 
 describe('completion scenario source oracles, without launching a Desktop', () => {
@@ -138,29 +140,29 @@ describe('completion scenario source oracles, without launching a Desktop', () =
     const model = keyboardTransport(initial)
     try {
       await numberCondition(model.ctx)
-      const arrow = initial === 'string' ? 'ArrowDown' : 'ArrowUp'
-      const choiceKeys = model.sends.filter(send => ['Tab', 'ArrowUp', 'ArrowDown', 'Enter'].includes(send.key!))
+      const arrow = initial === 'string' ? 'ArrowRight' : 'ArrowLeft'
+      const choiceKeys = model.sends.filter(send => ['Tab', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(send.key!))
       expect(choiceKeys).toEqual(initial === 'number'
         ? [{ type: 'keyDown', key: 'Tab' }, { type: 'keyUp', key: 'Tab' }]
-        : ['Tab', arrow, 'Enter'].flatMap(key => [{ type: 'keyDown', key }, { type: 'keyUp', key }]))
+        : ['Tab', arrow].flatMap(key => [{ type: 'keyDown', key }, { type: 'keyUp', key }]))
       expect(model.ctx.receipt.browserOutcome.numberSelections).toHaveLength(1)
       expect(model.ctx.receipt.browserOutcome.numberSelections[0]).toMatchObject({
-        before: { value: initial }, afterArrow: { value: initial }, afterCommit: { value: 'number' }
+        before: { value: initial }, afterArrow: { value: 'number' }, afterCommit: { value: 'number' }
       })
-      expect(model.select.value).toBe('number')
+      expect(model.radios.filter(radio => radio.checked).map(radio => radio.value)).toEqual(['number'])
+      expect([...model.window.document.querySelectorAll('label')].find(label => label.firstChild?.textContent?.trim() === 'Equals')?.querySelector('input')?.value).toBe('0')
+      expect([...model.window.document.querySelectorAll('label')].find(label => label.firstChild?.textContent?.trim() === 'CSS selector')?.querySelector('input')?.value).toBe('#verified-number')
       expect(model.reads.length).toBeGreaterThan(0)
-      expect(model.reads.join('\n')).not.toMatch(/\.(?:value|selectedIndex)\s*=|\.focus\(/)
+      expect(model.reads.join('\n')).not.toMatch(/\.(?:value|checked|selectedIndex)\s*=|\.focus\(/)
     } finally { model.close() }
   })
 
   it('preserves the original numeric gate when the real commit has not changed its value', async () => {
     const model = keyboardTransport('string', false)
     try {
-      await expect(numberCondition(model.ctx)).rejects.toThrow('Actual keyboard input commits the numeric type')
-      expect(model.select.value).toBe('string')
-      expect(model.sends.filter(send => send.key === 'Enter')).toEqual([
-        { type: 'keyDown', key: 'Enter' }, { type: 'keyUp', key: 'Enter' }
-      ])
+      await expect(numberCondition(model.ctx)).rejects.toThrow('Actual keyboard input selects the numeric radio')
+      expect(model.radios.filter(radio => radio.checked).map(radio => radio.value)).toEqual(['string'])
+      expect(model.sends.filter(send => send.key === 'Enter')).toEqual([])
       expect(model.ctx.receipt.browserOutcome.numberSelections).toHaveLength(1)
       expect(model.ctx.receipt.browserOutcome.numberSelections[0]?.afterCommit.value).toBe('string')
     } finally { model.close() }
