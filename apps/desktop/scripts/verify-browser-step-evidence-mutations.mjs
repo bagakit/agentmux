@@ -10,7 +10,7 @@ await verifyRendererSourceMutations({
   mutations: [
     { label: 'first-use-falsely-damaged', file: 'apps/desktop/src/main/browser-operation-journal.ts',
       before: "if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyDocument()", after: "if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null" },
-    { label: 'journal-evidence-disconnected', file: main, before: 'step.evidence = [...(step.evidence ?? []), reference]', after: 'step.evidence = []' },
+    { label: 'journal-evidence-disconnected', file: main, before: 'step.evidence = first ? [reference, ...(step.evidence ?? [])] : [...(step.evidence ?? []), reference]', after: 'step.evidence = []' },
     { label: 'foreign-step-identity-accepted', file: store, before: '!sameIdentity(value.reference, reference)', after: 'false' },
     { label: 'late-selection-overwrites-evidence', file: component, before: 'return () => { current = false }', after: 'return () => { current = true }' },
     { label: 'storage-failure-rejects-completed-action', file: main,
