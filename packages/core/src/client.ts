@@ -22,7 +22,7 @@ import {
   type AgentProviderHookNormalizationContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { nativeHookHasSubagentSubject, releaseSubagentRoster } from './hook-normalizer.js'
+import { releaseSubagentRoster } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -4482,9 +4482,7 @@ export class AgentMuxClient {
         // 3) 无 usage 且是 mid-turn 事件 → 保留上一 turn 的值：迟到的不带 usage 事件不该抹掉刚采到的那一 turn。
         ...(normalized.turnUsage
           ? { turnUsage: normalized.turnUsage }
-          : normalized.lifecycleEvent === 'turn-end' && !nativeHookHasSubagentSubject(
-              provider.hook, normalized.eventName, envelope.payload ?? {}
-            )
+          : normalized.lifecycleEvent === 'turn-end' && normalized.mainSubject
             ? {}
             : current.turnUsage
               ? { turnUsage: current.turnUsage }

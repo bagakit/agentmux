@@ -1,3 +1,4 @@
+import type { AgentProviderHookNormalizationContext } from './agent-provider.js'
 import type {
   AgentTimelineItem,
   AgentTimelineItemKind,
@@ -55,6 +56,12 @@ export type AgentNativeSubagentTracking = {
 
 export type AgentNativeHookSpecification = {
   rules: readonly AgentNativeHookStateRule[]
+  /** Pure native Session membership/transition evidence; false preserves only observation. */
+  matchesNativeSession?: (
+    eventName: string,
+    payload: Readonly<Record<string, unknown>>,
+    context: AgentProviderHookNormalizationContext
+  ) => boolean
   /** Native child subject evidence, independent of start/stop events or a live roster. */
   subagentSubject?: (payload: Readonly<Record<string, unknown>>) => boolean
   subagentTracking?: AgentNativeSubagentTracking
@@ -282,14 +289,10 @@ function toolAwaitsUser(specification: AgentNativeHookSpecification, toolName: s
 function nativeHandle(
   providerId: AgentProviderId,
   specification: AgentNativeHookSpecification,
-  eventName: string,
   payload: Record<string, unknown>
 ): AgentNativeSessionHandle | undefined {
   const definition = specification.nativeHandle
   if (!definition) return undefined
-  // Hook 的 Run 绑定属于主 Session，但子主体可共用主 native ID、携带自己的记录路径。
-  // 子事件照常处理；只禁止把其 locator 晋升成主 Session 的恢复身份。
-  if (nativeHookHasSubagentSubject(specification, eventName, payload)) return undefined
   const sessionId = sessionIdField(payload, definition.sessionIdKeys)
   if (!sessionId) return undefined
   const transcriptPath = definition.transcriptPathKeys
@@ -363,7 +366,8 @@ function buildTimeline(
   eventName: string,
   lifecycleEvent: AgentHookLifecycleEvent | undefined,
   payload: Record<string, unknown>,
-  observedAt: number
+  observedAt: number,
+  nativeSessionMatches: boolean
 ): AgentTimelineMutation[] {
   const assistant = stringField(
     payload,
@@ -403,7 +407,7 @@ function buildTimeline(
     const toolCallId = nativeHookToolCallId(payload)
     // 结果只有事后才知道，所以只在事后事件上采集——事前那一行谈不上成败，给它盖任何结论都是编造。
     const outcome = isToolResult ? hookToolOutcome(payload) : undefined
-    if (toolCallId && kind === 'tool_call') {
+    if (nativeSessionMatches && toolCallId && kind === 'tool_call') {
       // Provider 给了关联 id：把一次调用的入参与结果收敛到**同一条 item**。
       // id 从 receiptId（Pre/Post 各不相同）改绑 toolCallId（同一次调用两端一致），于是
       // 时间轴上一次调用就是一条，而不是两条。receiptId 方案在这里被彻底取代——不是两套并存。
@@ -481,31 +485,37 @@ function flattenNestedPayload(payload: Record<string, unknown>): Record<string, 
 
 export function normalizeNativeHook(
   specification: AgentNativeHookSpecification,
-  envelope: NativeHookEnvelope
+  envelope: NativeHookEnvelope,
+  context: AgentProviderHookNormalizationContext
 ): NormalizedHookEvent {
-  const payload = flattenNestedPayload(envelope.payload ?? {})
+  const rawPayload = envelope.payload ?? {}
+  const payload = flattenNestedPayload(rawPayload)
   // 事件名优先读取信封显式名，其次按该 Provider 声明的精确来源（仅当 payload 声明时读指定键，
   // 缺席/空白/非字符串时不读其他合法键；flag/generated-code 不借 payload 补名）。读不出时如实记为 'unknown'。
   // 来源声明读取原始负载，与 Hook 子进程一致；展开的 extra 只供事件规则和内容读取。
-  const eventName = resolveHookEventName(envelope.eventName, envelope.payload ?? {}, specification.eventNameSource ?? null) ?? 'unknown'
+  const eventName = resolveHookEventName(envelope.eventName, rawPayload, specification.eventNameSource ?? null) ?? 'unknown'
   const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
   const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent)
+  const nativeSessionMatches = specification.matchesNativeSession?.(eventName, rawPayload, context) ?? true
   const childSubject = nativeHookHasSubagentSubject(specification, eventName, payload)
+  const mainSubject = nativeSessionMatches && !childSubject
   // Main contributions share the same subject boundary as locator and interaction promotion.
   // Native lifecycle is retained separately for child tool results and trace; it cannot open or
   // end the main turn. The existing roster can settle only an observed pending parent end.
-  const { semanticState, lifecycleEvent } = applySubagentTracking(
-    specification,
-    envelope,
-    eventName,
-    payload,
-    {
-      semanticState: childSubject ? 'unknown' : rule?.state ?? 'unknown',
-      lifecycleEvent: childSubject || rule?.lifecycleEvent === null ? null : nativeLifecycleEvent
-    }
-  )
+  const { semanticState, lifecycleEvent } = nativeSessionMatches
+    ? applySubagentTracking(
+        specification,
+        envelope,
+        eventName,
+        payload,
+        {
+          semanticState: mainSubject ? rule?.state ?? 'unknown' : 'unknown',
+          lifecycleEvent: mainSubject && rule?.lifecycleEvent !== null ? nativeLifecycleEvent : null
+        }
+      )
+    : { semanticState: 'unknown' as const, lifecycleEvent: null }
   const observedAt = Date.now()
   const status: AgentStatus = {
     // 语义态 → 显示态经 agentDisplayState 一处决定（见 agent-status-freshness.ts 那段注释：
@@ -516,10 +526,10 @@ export function normalizeNativeHook(
     // 诊断带的是**原始**事件名：一条 Core 没认出来的事件，唯一有用的线索就是 Provider 到底叫它什么。
     detail: eventName
   }
-  const handle = nativeHandle(envelope.providerId, specification, eventName, payload)
+  const handle = mainSubject ? nativeHandle(envelope.providerId, specification, payload) : undefined
   // usage 由 hook 命令进程读 transcript 后并进 payload；normalizer 只把它校验回结构化用量，绝不自己读文件。
   // 缺席（Provider 不报 usage、非收尾事件、读失败）时它就是 undefined，一路缺席到 UI。
-  const turnUsage = childSubject ? undefined : parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined
+  const turnUsage = mainSubject ? parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined : undefined
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -527,10 +537,11 @@ export function normalizeNativeHook(
     },
     providerId: envelope.providerId,
     eventName,
+    mainSubject,
     ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt),
+    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, nativeSessionMatches),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }

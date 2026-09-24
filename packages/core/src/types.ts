@@ -1264,6 +1264,8 @@ export type NormalizedHookEvent = {
    * 什么。归一化的结果放在 `lifecycleEvent`，两者并存——原始名负责可诊断，canonical 值负责可判断。
    */
   eventName: string
+  /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
+  mainSubject: boolean
   /**
    * 这条事件归一化后的 Core canonical 生命周期事件，**认不出时缺席**。
    *

@@ -170,7 +170,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
     const normalize = (eventName: string, payload: Record<string, unknown> = {}) => normalizeNativeHook(specification, {
       receiptId: randomUUID(), agentSessionId: 'synthetic-session', runId, providerId: 'codex', eventName,
       payload: { native_id: mainNativeId, record_path: mainPath, ...payload }
-    })
+    }, {})
     try {
       expect(normalize('Work', { worker_key: 'worker-1', record_path: childPath }).nativeHandle).toBeUndefined()
       expect(normalize('ChildBorn', { record_path: childPath }).nativeHandle).toBeUndefined()
@@ -198,7 +198,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
       subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'], mainStopEvents: ['Stop'] }
     }
     const provider: AgentProvider = { ...base, hook: specification,
-      normalizeHook: (envelope) => normalizeNativeHook(specification, envelope) }
+      normalizeHook: (envelope) => normalizeNativeHook(specification, envelope, {}) }
     await withSession('codex', false, async ({ feed, stored, reopened, events }) => {
       await feed('PreToolUse', { [idKey]: 'child-native-id', transcript_path: childPath })
       expect((await stored()).nativeHandle).toBeUndefined()

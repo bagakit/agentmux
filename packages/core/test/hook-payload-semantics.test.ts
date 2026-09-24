@@ -182,13 +182,13 @@ async function harness(profile: Profile) {
 describe('payload-dependent Hook contributions', () => {
   it.each(profiles)('$id matches state and lifecycle together, leaving ordinary and unknown payloads neutral', profile => {
     const spec = specification(profile)
-    expect(normalizeNativeHook(spec, envelope(profile, profile.cancellation)))
+    expect(normalizeNativeHook(spec, envelope(profile, profile.cancellation), {}))
       .toMatchObject({ eventName: profile.eventName, semanticState: 'unknown', lifecycleEvent: 'turn-end' })
-    const waiting = normalizeNativeHook(spec, envelope(profile, profile.waiting))
+    const waiting = normalizeNativeHook(spec, envelope(profile, profile.waiting), {})
     expect(waiting.semanticState).toBe('waiting')
     expect(waiting.lifecycleEvent).toBeUndefined()
     for (const payload of [profile.ordinary, {}, { tool_input: profile.cancellation }]) {
-      const unknown = normalizeNativeHook(spec, envelope(profile, payload))
+      const unknown = normalizeNativeHook(spec, envelope(profile, payload), {})
       expect(unknown.semanticState).toBe('unknown')
       expect(unknown.lifecycleEvent).toBeUndefined()
     }
@@ -201,12 +201,12 @@ describe('payload-dependent Hook contributions', () => {
       { events: ['signal'], state: 'waiting' }
     ] }
     const profile = profiles[1]!
-    expect(normalizeNativeHook(spec, envelope(profile, { tool_name: 'SHELL', extra: { reason: 'halt' } })))
+    expect(normalizeNativeHook(spec, envelope(profile, { tool_name: 'SHELL', extra: { reason: 'halt' } }), {}))
       .toMatchObject({ semanticState: 'unknown', lifecycleEvent: 'turn-end' })
     expect(matches).toHaveBeenCalledOnce()
-    expect(normalizeNativeHook(spec, envelope(profile, { tool_name: 'other', reason: 'halt' })).semanticState).toBe('waiting')
+    expect(normalizeNativeHook(spec, envelope(profile, { tool_name: 'other', reason: 'halt' }), {}).semanticState).toBe('waiting')
     expect(matches).toHaveBeenCalledOnce()
-    const topLevelWins = normalizeNativeHook(spec, envelope(profile, { tool_name: 'shell', reason: 'update', extra: { reason: 'halt' } }))
+    const topLevelWins = normalizeNativeHook(spec, envelope(profile, { tool_name: 'shell', reason: 'update', extra: { reason: 'halt' } }), {})
     expect(topLevelWins.semanticState).toBe('waiting')
     expect(topLevelWins.lifecycleEvent).toBeUndefined()
   })

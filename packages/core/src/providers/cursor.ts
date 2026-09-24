@@ -205,7 +205,7 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
       const foreign = known !== undefined && sessionId !== undefined && sessionId !== known.sessionId
       // A foreign receipt must not mutate this Run's existing child roster before
       // its return value is fenced. It contributes only the authenticated raw observation.
-      const normalized = foreign ? normalizeNativeHook({ ...observationOnly, rules: [] }, envelope)
+      const normalized = foreign ? normalizeNativeHook({ ...observationOnly, rules: [] }, envelope, context)
         : provider.normalizeHook(envelope, context)
       if (!foreign) {
         // An authenticated first-party receipt establishes birth. A later receipt cannot
@@ -215,7 +215,7 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
       }
       const { nativeHandle: _handle, turnUsage: _usage, interaction: _interaction,
         interactionCompletion: _completion, ...neutral } = normalized
-      return { ...neutral, lifecycleEvent: null, semanticState: 'unknown',
+      return { ...neutral, mainSubject: false, lifecycleEvent: null, semanticState: 'unknown',
         status: { ...normalized.status, state: 'running' }, timeline: [] }
     }
   }
