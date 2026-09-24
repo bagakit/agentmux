@@ -449,6 +449,77 @@ export async function readHermesSessionHistoryPage(
 
       context.signal.throwIfAborted()
 
+      // Discover authoritative compression continuation chain starting from context.source.nativeSessionId
+      const lineageSessionIds: string[] = [context.source.nativeSessionId]
+      let currentSessionId = context.source.nativeSessionId
+      const visited = new Set<string>([currentSessionId])
+
+      const continuationStmt = db.prepare(`
+        SELECT child.id, child.cwd
+        FROM sessions parent
+        JOIN sessions child ON child.parent_session_id = parent.id
+        WHERE parent.id = ?
+          AND parent.end_reason = 'compression'
+          AND json_extract(COALESCE(child.model_config, '{}'), '$._branched_from') IS NULL
+          AND json_extract(COALESCE(child.model_config, '{}'), '$._delegate_from') IS NULL
+          AND COALESCE(child.source, '') != 'tool'
+        LIMIT 2
+      `)
+
+      for (let depth = 0; depth <= 100; depth++) {
+        context.signal.throwIfAborted()
+        const children = continuationStmt.all(currentSessionId) as Array<{
+          id: unknown
+          cwd: string | null
+        }>
+
+        if (children.length === 0) {
+          break
+        }
+
+        if (children.length > 1) {
+          throw new AgentMuxError(
+            'Hermes compression continuation is ambiguous: multiple eligible continuation children found.',
+            'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+          )
+        }
+
+        const child = children[0]!
+
+        if (typeof child.id !== 'string' || !child.id.trim()) {
+          throw new AgentMuxError('Hermes continuation session ID is malformed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        }
+
+        if (visited.has(child.id)) {
+          throw new AgentMuxError('Hermes continuation session cycle detected.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        }
+
+        if (child.cwd) {
+          const actualChildCwd = await resolveRequiredWorkspacePath(child.cwd, 'Hermes continuation session cwd')
+          if (expectedCwd !== actualChildCwd) {
+            throw new AgentMuxError(
+              `Hermes native session workspace mismatch: session in ${child.cwd}, requested in ${context.workspacePath}`,
+              'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+            )
+          }
+        }
+
+        if (depth === 100) {
+          throw new AgentMuxError(
+            'Hermes compression continuation chain exceeds maximum depth budget.',
+            'AGENT_SESSION_HISTORY_TOO_LARGE'
+          )
+        }
+
+        visited.add(child.id)
+        lineageSessionIds.push(child.id)
+        currentSessionId = child.id
+      }
+
+      const lineagePlaceholders = lineageSessionIds.map(() => '?').join(', ')
+
+      context.signal.throwIfAborted()
+
       // 6. Verify native session snapshot and cursor anchor integrity
       let consumedAnchorBytes = 0
       if (cursor !== undefined) {
@@ -470,8 +541,8 @@ export async function readHermesSessionHistoryPage(
                             COALESCE(LENGTH(CAST(tool_name AS BLOB)), 0) +
                             COALESCE(LENGTH(CAST(tool_call_id AS BLOB)), 0) +
                             COALESCE(LENGTH(CAST(finish_reason AS BLOB)), 0)) AS anchor_bytes
-                    FROM messages WHERE id = ? AND session_id = ?`)
-          .get(cursor.beforeId, context.source.nativeSessionId) as {
+                    FROM messages WHERE id = ? AND session_id IN (${lineagePlaceholders})`)
+          .get(cursor.beforeId, ...lineageSessionIds) as {
             id: number
             role: string
             timestamp: number
@@ -515,8 +586,8 @@ export async function readHermesSessionHistoryPage(
                            ${reasoningDetailsCol},
                            CAST(tool_calls AS BLOB) AS tool_calls_blob,
                            CAST(finish_reason AS BLOB) AS finish_reason_blob
-                    FROM messages WHERE id = ? AND session_id = ?`)
-          .get(cursor.beforeId, context.source.nativeSessionId) as {
+                    FROM messages WHERE id = ? AND session_id IN (${lineagePlaceholders})`)
+          .get(cursor.beforeId, ...lineageSessionIds) as {
             id: number
             role: string
             timestamp: number
@@ -574,7 +645,7 @@ export async function readHermesSessionHistoryPage(
               COALESCE(LENGTH(CAST(tool_call_id AS BLOB)), 0) +
               COALESCE(LENGTH(CAST(finish_reason AS BLOB)), 0) + 256) AS estimated_bytes
            FROM messages
-           WHERE session_id = ? AND active = 1 AND id < ?
+           WHERE session_id IN (${lineagePlaceholders}) AND active = 1 AND id < ?
            ORDER BY id DESC
            LIMIT ?`
         : `SELECT id, role, timestamp,
@@ -587,13 +658,13 @@ export async function readHermesSessionHistoryPage(
               COALESCE(LENGTH(CAST(tool_call_id AS BLOB)), 0) +
               COALESCE(LENGTH(CAST(finish_reason AS BLOB)), 0) + 256) AS estimated_bytes
            FROM messages
-           WHERE session_id = ? AND active = 1
+           WHERE session_id IN (${lineagePlaceholders}) AND active = 1
            ORDER BY id DESC
            LIMIT ?`
 
       const candParams = beforeId !== undefined
-        ? [context.source.nativeSessionId, beforeId, context.limit]
-        : [context.source.nativeSessionId, context.limit]
+        ? [...lineageSessionIds, beforeId, context.limit]
+        : [...lineageSessionIds, context.limit]
 
       const candidates = db.prepare(candQuery).all(...candParams) as Array<{
         id: number
@@ -636,10 +707,10 @@ export async function readHermesSessionHistoryPage(
                  ${reasoningDetailsCol},
                  tool_call_id, tool_calls, tool_name
           FROM messages
-          WHERE session_id = ? AND active = 1 AND id >= ? AND id <= ?
+          WHERE session_id IN (${lineagePlaceholders}) AND active = 1 AND id >= ? AND id <= ?
           ORDER BY id DESC
         `
-        rows = db.prepare(payloadQuery).all(context.source.nativeSessionId, minId, maxId) as MessageRow[]
+        rows = db.prepare(payloadQuery).all(...lineageSessionIds, minId, maxId) as MessageRow[]
       }
 
       context.signal.throwIfAborted()
@@ -649,8 +720,8 @@ export async function readHermesSessionHistoryPage(
       if (rows.length > 0) {
         const oldestRow = rows[rows.length - 1]!
         const olderRow = db
-          .prepare('SELECT id FROM messages WHERE session_id = ? AND active = 1 AND id < ? ORDER BY id DESC LIMIT 1')
-          .get(context.source.nativeSessionId, oldestRow.id) as { id: number } | undefined
+          .prepare(`SELECT id FROM messages WHERE session_id IN (${lineagePlaceholders}) AND active = 1 AND id < ? ORDER BY id DESC LIMIT 1`)
+          .get(...lineageSessionIds, oldestRow.id) as { id: number } | undefined
 
         if (olderRow) {
           const anchorDigest = computeAnchorDigest(
