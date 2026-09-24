@@ -13,6 +13,7 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses.js'
 
 // ---------------------------------------------------------------------------
 // Workbench 持久化记录跨版本升级：bump 一下版本号不得清空用户的东西。
@@ -60,6 +61,9 @@ afterEach(() => {
  * 人往 `partialize` 里加字段时静默落后，而那正是这次的失败方式。
  */
 const PERSISTED_TAB_ID = fileTabId('workspace-alpha', 'notes/kept.md')
+const PERSISTED_REGION_ID = initialWorkbenchRegionId(PERSISTED_TAB_ID)
+const PERSISTED_SPACE_ID = directoryIdentity('local', '/workspace-alpha')
+const PERSISTED_ZONE_ID = workspaceZoneId(PERSISTED_SPACE_ID, 'workspace-alpha')
 
 /** 一个真实形状的 file tab + 布局。file 面是唯一必须活过重启的持久面（见 workbench-persistence.ts:49）。 */
 const PERSISTED_WORKBENCH = projectPersistedWorkbench({
@@ -77,6 +81,22 @@ const PERSISTED_WORKBENCH = projectPersistedWorkbench({
 const PERSISTED_PREFERENCES = {
   // 第一组：Workbench 拓扑与启动期取值。这五项是这次补上的——它们此前一个都不在记录里。
   restoredWorkbench: PERSISTED_WORKBENCH,
+  // 已有 durable 字段取非默认的真实地址/相关请求，空映射无法证明恢复。
+  retainedSpatialFocus: {
+    spaceId: PERSISTED_SPACE_ID, zoneId: PERSISTED_ZONE_ID, workspaceId: 'workspace-alpha',
+    tabId: PERSISTED_TAB_ID, regionId: PERSISTED_REGION_ID
+  },
+  spaceZoneBindings: {
+    [PERSISTED_ZONE_ID]: { spaceId: PERSISTED_SPACE_ID, workspaceId: 'workspace-alpha' }
+  },
+  spatialRequests: {
+    'request:kept': {
+      requestId: 'request:kept', inputDigest: 'ab'.repeat(32), operation: 'agent.open',
+      tabId: 'view:reserved-agent', regionId: 'region:reserved-agent',
+      agentSessionId: 'sess-reserved', createAgent: true, executionHostId: 'local',
+      target: { spaceId: PERSISTED_SPACE_ID, zoneId: PERSISTED_ZONE_ID }
+    }
+  },
   unclaimedTerminalSessionIds: ['orphan-terminal-1', 'orphan-terminal-2'],
   activeWorkspaceId: 'workspace-alpha',
   mainSurface: 'board',
@@ -90,6 +110,8 @@ const PERSISTED_PREFERENCES = {
   workspaceTool: 'agents',
   // 第二组：表面偏好。
   toolDockWidth: 421,
+  focusTimelineHeight: 173, // 非默认 96，且在现 owner 的 [72,480] 范围内。
+  spaceObjectIcons: { [PERSISTED_SPACE_ID]: 'compass' },
   editorWordWrap: true,
   projectRailOpen: false,
   projectRailWidth: 317, // 非默认（默认 210）且落在 clamp 区间 [180,420] 内，见 store.ts:1516
@@ -191,6 +213,11 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.projectRailWidth, '项目栏宽度被重置了').toBe(PERSISTED_PREFERENCES.projectRailWidth)
     expect(state.toolsOpen, '工具面板开合被重置了').toBe(PERSISTED_PREFERENCES.toolsOpen)
     expect(state.agentFocus, 'Agent focus context was reset').toEqual(PERSISTED_PREFERENCES.agentFocus)
+    expect(state.focusTimelineHeight, 'Focus 高度丢了').toBe(PERSISTED_PREFERENCES.focusTimelineHeight)
+    expect(state.retainedSpatialFocus, '原精确空间焦点丢了').toEqual(PERSISTED_PREFERENCES.retainedSpatialFocus)
+    expect(state.spaceObjectIcons, '原 Space 图标选择丢了').toEqual(PERSISTED_PREFERENCES.spaceObjectIcons)
+    expect(state.spaceZoneBindings, '原 Zone 关联丢了').toEqual(PERSISTED_PREFERENCES.spaceZoneBindings)
+    expect(state.spatialRequests, '原空间请求关联丢了').toEqual(PERSISTED_PREFERENCES.spatialRequests)
     expect(state.selectedDemandId).toBe(PERSISTED_PREFERENCES.selectedDemandId)
     expect(state.demandArrangement).toBe(PERSISTED_PREFERENCES.demandArrangement)
     expect(state.demandPmoTabIds).toEqual(PERSISTED_PREFERENCES.demandPmoTabIds)
@@ -270,7 +297,7 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     )
   })
 
-  it('前提自检：这五项的 fixture 值都与默认不同', () => {
+  it('前提自检：工作面与补齐字段的 fixture 值都与默认不同', () => {
     // 上面四条若哪天 fixture 漂到默认值上，它们会在实现被改坏时照旧全绿。
     // 判据落在**初始 state**（即默认）上，与 fixture 逐项对比。
     const defaults = initialState as unknown as Record<string, unknown>
@@ -279,7 +306,12 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
       'unclaimedTerminalSessionIds',
       'activeWorkspaceId',
       'mainSurface',
-      'workspaceTool'
+      'workspaceTool',
+      'focusTimelineHeight',
+      'retainedSpatialFocus',
+      'spaceObjectIcons',
+      'spaceZoneBindings',
+      'spatialRequests'
     ] as const) {
       expect(
         JSON.stringify(PERSISTED_PREFERENCES[key]),
@@ -327,5 +359,11 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
 
     expect(useAppStore.getState().toolDockWidth).toBe(PERSISTED_PREFERENCES.toolDockWidth)
     expect(useAppStore.getState().agentNames).toEqual(PERSISTED_PREFERENCES.agentNames)
+    const state = useAppStore.getState()
+    expect(state.focusTimelineHeight).toBe(PERSISTED_PREFERENCES.focusTimelineHeight)
+    expect(state.retainedSpatialFocus).toEqual(PERSISTED_PREFERENCES.retainedSpatialFocus)
+    expect(state.spaceObjectIcons).toEqual(PERSISTED_PREFERENCES.spaceObjectIcons)
+    expect(state.spaceZoneBindings).toEqual(PERSISTED_PREFERENCES.spaceZoneBindings)
+    expect(state.spatialRequests).toEqual(PERSISTED_PREFERENCES.spatialRequests)
   })
 })
