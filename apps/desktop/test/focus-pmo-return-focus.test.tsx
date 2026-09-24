@@ -193,7 +193,7 @@ it('the optional return callback remains transient and is used only after the fi
   const fallback = vi.fn(), laterFallback = vi.fn()
   expect(trigger).toBeTruthy(); expect(panel).toBeTruthy(); trigger.focus()
   await act(async () => requestPmoTeamsTopicFloatingOpen({ onReturnFocus: fallback }))
-  expect(container.querySelector<HTMLElement>('output')!.dataset.stateKeys!.split(',')).toEqual(['maximized', 'open', 'pendingPrompt', 'position', 'size', 'targetTabId'])
+  expect(container.querySelector<HTMLElement>('output')!.dataset.stateKeys!.split(',')).toEqual(['maximized', 'open', 'position', 'size'])
   expect(Object.keys(JSON.parse(window.localStorage.getItem('agentmux.leader-topic-floating.v1')!)).sort()).toEqual(['maximized', 'open', 'position', 'size'])
   await act(async () => requestPmoTeamsTopicFloatingOpen({ onReturnFocus: laterFallback }))
   expect(document.activeElement).toBe(panel)

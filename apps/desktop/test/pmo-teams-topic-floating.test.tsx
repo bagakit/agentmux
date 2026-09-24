@@ -14,7 +14,7 @@ function Harness() {
   return createElement('div', null,
     createElement('button', { id: 'trigger' }, 'trigger'),
     createElement('div', { id: 'floating-panel', 'data-pmo-teams-topic-floating': true, tabIndex: -1 }),
-    createElement('output', { 'data-open': String(state.open), 'data-left': String(state.position.left), 'data-top': String(state.position.top), 'data-target': state.targetTabId ?? '', 'data-pending': state.pendingPrompt?.text ?? '' })
+    createElement('output', { 'data-open': String(state.open), 'data-left': String(state.position.left), 'data-top': String(state.position.top), 'data-target': state.targetTabId ?? '' })
   )
 }
 
@@ -74,17 +74,25 @@ describe('PMO teams topic floating workspace state', () => {
     expect(container.querySelector('output')?.dataset.top).toBe('148')
   })
 
-  it('keeps an explicit target until close and clears it for untargeted opens', async () => {
+  it('keeps its target across closing and untargeted opens while explicit context choices replace it', async () => {
     await act(async () => root.render(createElement(Harness)))
-    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-one', prompt: 'route this demand' }))
+    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-one' }))
     expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-one')
-    expect(container.querySelector('output')?.dataset.pending).toBe('route this demand')
     await act(async () => requestPmoTeamsTopicFloatingOpen())
-    expect(container.querySelector('output')?.dataset.target).toBe('')
-    expect(container.querySelector('output')?.dataset.pending).toBe('')
+    expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-one')
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: 'pmo-demand-two' }))
     expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-two')
     await act(async () => requestPmoTeamsTopicFloatingClose())
-    expect(container.querySelector('output')?.dataset.target).toBe('')
+    expect(container.querySelector('output')?.dataset.target).toBe('pmo-demand-two')
+  })
+
+  it('restores the selected target and geometry', async () => {
+    window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true, targetTabId: 'pmo-demand-one',
+      position: { left: 212, top: 148 }, size: { width: 640, height: 420 } }))
+    await act(async () => root.render(createElement(Harness)))
+    const output = container.querySelector('output')!
+    expect(output.dataset.target).toBe('pmo-demand-one')
+    expect(output.dataset.left).toBe('212')
+    expect(output.dataset.top).toBe('148')
   })
 })

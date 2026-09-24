@@ -768,7 +768,7 @@ describe('who reads WorkbenchSurface.kind is exhaustiveness-checked', () => {
     const enumeratorNames = new Set(enumerators.map((r) => `${r.file}::${r.fn}`))
     expect(enumeratorNames.has('lib/surface-memory-budget-candidates.ts::candidateForSurface')).toBe(true)
     expect(enumeratorNames.has('lib/workbench-persistence.ts::persistedSurfaceSurvives')).toBe(true)
-    expect(enumeratorNames.has('components/WorkspaceWorkbench.tsx::tabSurfaceFallback')).toBe(true)
+    expect(enumeratorNames.has('lib/workbench-tab-presentation.ts::tabSurfaceFallback')).toBe(true)
     expect(enumerators.length).toBeGreaterThanOrEqual(6)
 
     // The actual guard: no enumerating consumer may lack an SSOT anchor.

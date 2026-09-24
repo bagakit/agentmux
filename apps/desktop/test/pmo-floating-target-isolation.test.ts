@@ -1,22 +1,13 @@
-import { readFileSync } from 'node:fs'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { expect, it } from 'vitest'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { pmoTeamsTopicFloatingTargetTabId } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 
-it('keeps an explicit PMO target authoritative while the target Agent attaches', () => {
-  const panel = readFileSync(new URL('../src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', import.meta.url), 'utf8')
-  const floating = readFileSync(new URL('../src/renderer/src/lib/pmo-teams-topic-floating.ts', import.meta.url), 'utf8')
-  expect(panel.length).toBeGreaterThan(0)
-  expect(floating.length).toBeGreaterThan(0)
-  expect(panel).toContain('const targetSession = targetSurface?.kind === \'agent\'')
-  expect(panel).toContain('const targetTabId = useMemo(() => pmoTeamsTopicFloatingTargetTabId(')
-  expect(panel).toContain('const pmoTeamsSession = targetTabId')
-  expect(panel).not.toContain('const pmoTeamsSession = sessions.find((session): session is Extract<typeof session, { kind: \'agent\' }> => session.kind === \'agent\' && session.id === targetSessionId)\n      ?? sessions.find')
-  expect(panel).toContain('const pmoTeamsTab = targetTabId')
-  expect(panel).not.toContain('pendingPrompt: undefined, targetTabId: undefined')
-  const ensureStart = panel.indexOf('api.scratch.ensureTopic(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)')
-  const ensureEnd = panel.indexOf('}, [floating.open, floating.pendingPrompt, targetTabId', ensureStart)
-  expect(ensureStart).toBeGreaterThan(-1)
-  expect(ensureEnd).toBeGreaterThan(ensureStart)
-  expect(panel.slice(ensureStart, ensureEnd)).not.toContain('setFloating({ targetTabId: undefined })')
-  expect(floating).toContain('targetTabId,')
-  expect(floating).toContain('targetTabId: undefined')
+it('keeps the saved target authoritative over a different focus, order or delayed Tab restoration', () => {
+  const other = { ...createWorkbenchTab('other-tab', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID,
+    regionId: 'other-region', sessionId: 'other-agent' }), topicId: PMO_TEAMS_TOPIC_ID }
+  const saved = { open: false, maximized: false, position: { left: 80, top: 72 }, size: { width: 720, height: 520 }, targetTabId: 'saved-tab' }
+  expect(pmoTeamsTopicFloatingTargetTabId(saved, { [other.id]: other }, createWorkspaceLayout('group', [other.id]), 'other-agent')).toBe('saved-tab')
+  expect(pmoTeamsTopicFloatingTargetTabId(saved, {}, undefined, null)).toBe('saved-tab')
 })

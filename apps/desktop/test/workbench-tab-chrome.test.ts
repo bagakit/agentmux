@@ -14,7 +14,7 @@ it('lets Session tabs own the first row when panes are parallel', () => {
   expect(splitTree).toContain('showWindowChrome?: boolean')
   expect(splitTree).toContain('showWindowChrome={showWindowChrome}')
   expect(workbench).toContain('showWindowChrome={false}')
-  expect(workbench).toContain('showWindowChrome={!rootIsLeaf}')
+  expect(workbench).toContain("showWindowChrome={viewOwnership === 'owner'}")
   expect(workbench).toContain('pane-tabbar--chrome-owner')
   expect(workbench).not.toContain('workbench-chromeline')
   expect(styles).toContain('.pane-tabbar--chrome-owner')

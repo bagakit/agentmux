@@ -283,6 +283,8 @@ export type MainSurface = 'search' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
+  /** Cancels this caller's late navigation, without cancelling metadata or a Session. */
+  signal?: AbortSignal
   /** When supplied, focus this exact bound Tab instead of selecting the first Tab for the Topic. */
   tabId?: string
 }
@@ -4837,17 +4839,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // preparation step, not permission to hide the workbench: if the read is slow or fails, the
     // user must still see the Scratch work surface and its error/retry path instead of an empty
     // right side. Background preparation explicitly keeps the current surface untouched.
-    if (reveal) {
-      set((current) => ({
-        activeWorkspaceId: workspace.id,
-        mainSurface: 'workbench',
-        layouts: current.layouts[workspace.id]
-          ? current.layouts
-          : { ...current.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
-      }))
+    let revealedTabId: string | undefined
+    if (reveal && !options?.signal?.aborted) {
+      set((current) => {
+        const layout = current.layouts[workspace.id]
+        const requestedTab = options?.tabId ? current.tabs[options.tabId] : undefined
+        const groupId = layout && requestedTab?.workspaceId === workspace.id && requestedTab.topicId === topicId
+          ? tabGroupForTab(layout, requestedTab.id) : null
+        // A durable exact target is navigation truth already. Reveal it now;
+        // a delayed metadata read must not repeat this choice over a later Tab click.
+        if (requestedTab && groupId) revealedTabId = requestedTab.id
+        return {
+          activeWorkspaceId: workspace.id,
+          mainSurface: 'workbench',
+          layouts: layout
+            ? requestedTab && groupId
+              ? { ...current.layouts, [workspace.id]: activateLayoutTab(layout, groupId, requestedTab.id) }
+              : current.layouts
+            : { ...current.layouts, [workspace.id]: createWorkspaceLayout(newTabGroupId()) }
+        }
+      })
     }
     const snapshot = await api.scratch.readTopic(workspace.id, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
+    const mayReveal = reveal && !options?.signal?.aborted
     let createdLauncher: WorkbenchTab | undefined
     let placementFailed = false
     set((current) => {
@@ -4867,10 +4882,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return current
       }
       if (boundTab) {
-        if (!reveal) return current
+        if (!mayReveal || boundTab.id === revealedTabId) return current
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
-          ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
+          ...(mayReveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
           // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout——激活该 Topic 的
           // Tab 就够了，当前 Topic 由活动 Tab 派生（scratch-topic-layout.ts），不另存一份。
           layouts: {
@@ -4888,7 +4903,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       createdLauncher = tab
       // Background preparation adds a retained owner without selecting it behind the float.
       // The floating chrome derives its bound-only layout from these same Tabs.
-      const placedLayout = reveal ? nextLayout : {
+      const placedLayout = mayReveal ? nextLayout : {
         ...nextLayout, activeGroupId: layout.activeGroupId,
         groups: nextLayout.groups.map(group => {
           const original = layout.groups.find(candidate => candidate.id === group.id)
@@ -4896,7 +4911,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
       }
       return {
-        ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
+        ...(mayReveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
         tabs: { ...current.tabs, [tab.id]: tab },
         layouts: { ...current.layouts, [workspace.id]: placedLayout }
       }
@@ -4908,7 +4923,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // fixed PMO Teams Topic) deliberately stops at the launcher so it cannot steal the user's focus
     // or start a duplicate terminal.
     const liveLayout = get().layouts[workspace.id]
-    if (createdLauncher && reveal && liveLayout && !snapshot.soul) {
+    if (createdLauncher && mayReveal && liveLayout && !snapshot.soul) {
       await get().promoteWarmTerminal(tabGroupForTab(liveLayout, createdLauncher.id)!, {
         tabId: createdLauncher.id,
         regionId: createdLauncher.layout.activeRegionId

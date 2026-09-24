@@ -21,7 +21,7 @@ function session(id: string, workspacePath: string): SessionSnapshot {
   return {
     id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
-    label: id, createdAt: 1, updatedAt: 2, processState: 'running',
+    label: id, createdAt: 1, updatedAt: 2, agentSessionUpdatedAt: 2, processState: 'running',
     status: { state: 'working', source: 'run-process', observedAt: 2 }, latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
   }
@@ -46,7 +46,8 @@ describe('PMO focus isolation', () => {
     useAppStore.getState().selectSession(pmo.id, 'scratch-group')
     const afterPmo = useAppStore.getState().agentFocus
 
-    expect(beforePmo.execution).toEqual({ sessionId: execution.id, history: [{ sessionId: execution.id, focusedAt: expect.any(Number) }] })
+    expect(beforePmo.execution).toEqual({ sessionId: execution.id,
+      history: [expect.objectContaining({ sessionId: execution.id, focusedAt: expect.any(Number) })] })
     expect(afterPmo.execution).toEqual(beforePmo.execution)
     expect(afterPmo.pmo.sessionId).toBe(pmo.id)
   })
