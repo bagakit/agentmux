@@ -127,6 +127,9 @@ async function main() {
     report = null
   }
 
+  if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_CANCEL_TRACE === '1') {
+    process.stdout.write('file_editing_diagnostic_report=' + JSON.stringify(report) + '\n')
+  }
   await rm(temporaryRoot, { recursive: true, force: true })
 
   if (report?.ok === true && exitCode === 0 && !timedOut && !interruption) {

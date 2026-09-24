@@ -6,9 +6,12 @@ import {
   pointerWithin,
   useDraggable,
   useDroppable,
+  useDndMonitor,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
+  type DragCancelEvent,
   type DragOverEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
@@ -100,6 +103,30 @@ export type FileExplorerRevealRequest = {
   workspaceId: string
   path: string
   requestId: number
+}
+
+// A probe-only observer of the existing DndContext; it never dispatches drag state.
+function FileExplorerCancelTraceObserver({ workspaceId }: { workspaceId: string | null | undefined }) {
+  function observe(kind: string, event: DragStartEvent | DragMoveEvent | DragOverEvent | DragCancelEvent | DragEndEvent): void {
+    const sink = (window as Window & {
+      __agentmuxFileEditingCancelTrace?: { observeDnd(event: Record<string, unknown>): void }
+    }).__agentmuxFileEditingCancelTrace
+    if (!sink) return
+    const over = 'over' in event ? event.over : undefined
+    sink.observeDnd({ kind, workspaceId, activeId: event.active.id,
+      activePath: event.active.data.current?.path ?? null,
+      activeEnded: kind === 'cancel' || kind === 'end',
+      overCollected: 'over' in event, overId: over?.id ?? null,
+      overDirectory: over?.data.current?.directoryPath ?? null })
+  }
+  useDndMonitor({
+    onDragStart: (event) => observe('start', event),
+    onDragMove: (event) => observe('move', event),
+    onDragOver: (event) => observe('over', event),
+    onDragCancel: (event) => observe('cancel', event),
+    onDragEnd: (event) => observe('end', event)
+  })
+  return null
 }
 
 function joinPath(parent: string, name: string): string {
@@ -878,6 +905,8 @@ export function FileExplorer({
         onDragCancel={() => { clearHoverExpand(); setActiveDrag(null) }}
         onDragEnd={(event) => void handleDragEnd(event)}
       >
+        {new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
+          ? <FileExplorerCancelTraceObserver workspaceId={workspaceId} /> : null}
         <div
           className="file-tree"
           ref={treeRootRef}
