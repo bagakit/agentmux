@@ -10,6 +10,8 @@ vi.mock('electron', async () => {
     navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     getURL() { return this.url } getTitle() { return 'Current native document' }
     isLoading() { return false } isDestroyed() { return this.destroyed }
+    getBackgroundThrottling() { return true }
+    setBackgroundThrottling = vi.fn()
     setWindowOpenHandler() {} setZoomFactor() {}
     async executeJavaScriptInIsolatedWorld() {}
     async loadURL(url: string) { this.url = url }
@@ -35,6 +37,7 @@ it('native input comes only from the currently visible physical Browser owner an
     expect(pointer).not.toHaveBeenCalled()
     const bounds = { x: 100, y: 70, width: 400, height: 300 }
     manager.setBounds('page', bounds)
+    expect(first.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
     first.webContents.emit('input-event', {}, input)
     expect(pointer.mock.calls).toEqual([[bounds, input]])
     manager.setBounds('page', null)

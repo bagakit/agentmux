@@ -31,6 +31,7 @@ assert.equal(receipt.taskAssets.editingV2WhileWaitingV1.version, '1')
 assert.equal(receipt.taskAssets.editingV2WhileWaitingV1.selectedVersion, '2')
 assert.equal(receipt.taskAssets.restoredWaitingProjection.phase, 'human')
 assert.equal(receipt.taskAssets.viewOnlyCheckpointEntry, true)
+assert.deepEqual(receipt.taskAssets.completionChecks.map(item => item.expected), ['not-met', 'not-met', 'passed'])
 assert.ok(receipt.taskAssets.version.steps.length > 0)
 assert.ok(receipt.taskAssets.secretAbsentFrom.length > 0)
 assert.deepEqual(receipt.identityBefore, receipt.identityAfter)
@@ -45,3 +46,30 @@ if (publishIndex >= 0) {
   await cp(evidence, published, { force: false, errorOnExist: true })
 }
 console.log(JSON.stringify({ passed: true, evidence, aestheticReview: 'not-performed', physicalDeviceTested: false }))
+
+// Consume both real completion owners through the existing launch/ordinary-restart harness.
+const downloadResult = await new Promise((done, fail) => {
+  const child = spawn(process.execPath, [join(import.meta.dirname, 'verify-browser-recovery-restart.mjs'), '--case-task-outcome-download'], { cwd: root, stdio: 'inherit' })
+  child.once('error', fail); child.once('exit', (code, signal) => done({ code, signal }))
+})
+const downloadReceipt = JSON.parse(await readFile(join(root, '.tmp/browser-task-outcome-download-last.json'), 'utf8'))
+const downloadEvidence = await mkdtemp(join(root, '.tmp/browser-task-outcome-download-proof-'))
+await writeFile(join(downloadEvidence, 'receipt.json'), JSON.stringify(downloadReceipt, null, 2) + '\n')
+for (const frame of downloadReceipt.visual?.frames ?? []) {
+  await copyFile(frame.file, join(downloadEvidence, frame.label + '.png'))
+  await copyFile(frame.nativePage.file, join(downloadEvidence, frame.label + '-native-page.png'))
+}
+for (const frame of downloadReceipt.visual?.osFrames ?? []) {
+  await copyFile(frame.file, join(downloadEvidence, frame.label + '-os-compositor.png'))
+  await copyFile(frame.stateFile, join(downloadEvidence, frame.label + '-os-state.json'))
+}
+assert.equal(downloadResult.code, 0, JSON.stringify(downloadReceipt.failure)); assert.equal(downloadResult.signal, null)
+assert.equal(downloadReceipt.case, 'task-outcome-download'); assert.equal(downloadReceipt.completeGate, true)
+assert.equal(downloadReceipt.taskDownload?.complete, true)
+assert.equal(downloadReceipt.taskDownload.requests.length, 1)
+assert.equal(downloadReceipt.taskDownload.requests[0].registeredBeforeProducer, true)
+assert.equal(downloadReceipt.taskDownload.checks.length, 5)
+for (const check of downloadReceipt.taskDownload.checks) assert.equal(check.evaluation.status, 'passed')
+assert.deepEqual(downloadReceipt.identityBefore, downloadReceipt.identityAfter)
+assert.equal(downloadReceipt.cleanup.privateProcessesReaped, true)
+console.log(JSON.stringify({ passed: true, downloadEvidence, aestheticReview: 'not-performed', physicalDeviceTested: false }))
