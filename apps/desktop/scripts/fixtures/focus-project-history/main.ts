@@ -81,7 +81,7 @@ app.whenReady().then(async () => {
     assert.equal(result.state.tabs['keep-tab'], undefined)
     assert.equal(result.state.tabs['archive-tab'], undefined)
     assert.equal(result.state.tabs['original-tab'].layout.root.ratio, 0.61)
-    assert.equal(result.state.drafts['untouched-draft'], 'A real unsent draft remains')
+    assert.equal(result.state.drafts[ids.keep], 'A real unsent draft remains')
     assert.equal(result.state.error, null)
     assert.deepEqual(result.state.focus.execution.history.slice(0, 3).map((entry: any) => [entry.sessionId, entry.identity.project.id]), [[ids.original, 'alpha'], [ids.archive, 'beta'], [ids.keep, 'alpha']])
     assert.equal(calls.filter(call => ['launch', 'launch-agent'].includes(call.operation)).length, launchesBefore)
