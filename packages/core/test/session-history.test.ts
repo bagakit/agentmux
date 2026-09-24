@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -19,11 +19,11 @@ afterEach(async () => { vi.useRealTimers(); await Promise.all(clients.splice(0).
 async function harness(reader?: AgentProvider['readSessionHistoryPage'], hasHandle = true) {
   const store = new AgentMuxMemoryAgentSessionStore()
   const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'main-session', providerId: 'codex',
-    executorId: 'codex', hostId: 'local', workspacePath: upstreamFixturePath("synthetic"), run: { runId: 'same-live-run' },
+    executorId: 'codex', hostId: 'local', workspacePath: fixturePath("synthetic"), run: { runId: 'same-live-run' },
     retiredRuns: [], hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
     createdAt: 1, updatedAt: 1, ...(hasHandle ? {
       nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: source.nativeSessionId,
-        transcriptPath: upstreamFixturePath("synthetic/ignored-fork-locator.jsonl") }
+        transcriptPath: fixturePath("synthetic/ignored-fork-locator.jsonl") }
     } : {}) }
   await store.compareAndSwap(null, session)
   const { readSessionHistoryPage: _builtin, ...base } = new AgentProviderRegistry().get('codex')
@@ -49,7 +49,7 @@ describe('public native Session history pages', () => {
     const result: AgentProviderSessionHistoryPage = { source, nextCursor: 'opaque-main-next', items: [{
       id: 'user-1', turnId: 'turn-1', kind: 'user-message', contentParts: [
         { kind: 'text', text: '\n  exact 中 text\n' },
-        { kind: 'resource', resourceType: 'image', reference: upstreamFixturePath("synthetic/image.png") },
+        { kind: 'resource', resourceType: 'image', reference: fixturePath("synthetic/image.png") },
         { kind: 'text', text: 'after image ' },
         { kind: 'resource', resourceType: 'audio', reference: 'native-file-id', label: 'sound' }
       ] }] }
@@ -68,15 +68,39 @@ describe('public native Session history pages', () => {
     const reader = vi.fn(async (_context: AgentProviderSessionHistoryContext) => page())
     const { client } = await harness(reader)
     await client.sessionHistoryPage('main-session', {
-      commandOverride: ("  " + (upstreamFixturePath("synthetic/configured-codex")) + "  "), args: ['--config', 'model="synthetic"'],
-      env: { CODEX_HOME: upstreamFixturePath("synthetic/executor-home"), REMOVE_ME: undefined }
+      commandOverride: ("  " + (fixturePath("synthetic/configured-codex")) + "  "), args: ['--config', 'model="synthetic"'],
+      env: { CODEX_HOME: fixturePath("synthetic/executor-home"), REMOVE_ME: undefined }
     })
     expect(reader.mock.calls).toHaveLength(1)
-    expect(reader.mock.calls[0]![0]).toMatchObject({ command: upstreamFixturePath("synthetic/configured-codex"),
-      args: ['--config', 'model="synthetic"'], env: { CODEX_HOME: upstreamFixturePath("synthetic/executor-home"), REMOVE_ME: undefined },
-      workspacePath: upstreamFixturePath("synthetic"), source, limit: 30 })
+    expect(reader.mock.calls[0]![0]).toMatchObject({ command: fixturePath("synthetic/configured-codex"),
+      args: ['--config', 'model="synthetic"'], env: { CODEX_HOME: fixturePath("synthetic/executor-home"), REMOVE_ME: undefined },
+      workspacePath: fixturePath("synthetic"), source, limit: 30 })
     await client.sessionHistoryPage('main-session')
-    expect(reader.mock.calls[1]![0]).toMatchObject({ command: 'codex', args: [], env: {}, workspacePath: upstreamFixturePath("synthetic") })
+    expect(reader.mock.calls[1]![0]).toMatchObject({ command: 'codex', args: [], env: {}, workspacePath: fixturePath("synthetic") })
+  })
+
+  it('preserves reasoning part with optional signature, redacted flag, and legal empty text', async () => {
+    const reasoningPage: AgentProviderSessionHistoryPage = {
+      source,
+      nextCursor: null,
+      items: [{
+        id: 'msg-reasoning',
+        kind: 'assistant-message',
+        contentParts: [
+          { kind: 'reasoning', text: 'detailed thought', signature: 'opaque-sig', redacted: false },
+          { kind: 'reasoning', text: '', signature: 'empty-thought-sig', redacted: true },
+          { kind: 'reasoning', text: 'standard thought' }
+        ]
+      }]
+    }
+    const reader = vi.fn(async () => reasoningPage)
+    const { client } = await harness(reader)
+    const result = await client.sessionHistoryPage('main-session')
+    expect(result.items[0]!.contentParts).toEqual([
+      { kind: 'reasoning', text: 'detailed thought', signature: 'opaque-sig', redacted: false },
+      { kind: 'reasoning', text: '', signature: 'empty-thought-sig', redacted: true },
+      { kind: 'reasoning', text: 'standard thought' }
+    ])
   })
 
   it('keeps an empty page continuation opaque and lets the next page continue', async () => {
@@ -226,7 +250,7 @@ describe('public native Session history pages', () => {
   })
 
   it('reads a reopened durable FileStore before Runtime connection and fences later durable identity changes', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amxhs-"))
+    const root = await mkdtemp(fixturePath("tmp/amxhs-"))
     try {
       const { session } = await harness()
       const path = join(root, 'agent-sessions.json')
