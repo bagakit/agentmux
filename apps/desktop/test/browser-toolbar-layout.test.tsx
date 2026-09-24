@@ -130,7 +130,8 @@ app.whenReady().then(async()=>{
         [r.x+r.width/2,r.y+r.height/2],[r.x+1,r.y+r.height/2],[r.right-1,r.y+r.height/2],
         [r.x+r.width/2,r.y+1],[r.x+r.width/2,r.bottom-1]
       ].map(([x,y])=>document.elementFromPoint(x,y)?.closest('button')===element)}
-      const trace=rail?{bounds:rect(rail),steps:rail.querySelectorAll('[data-sequence]').length,stop:{bounds:rect(stop),disabled:stop.disabled,hitSamples:hitSamples(stop),fontSize:getComputedStyle(stop).fontSize},closeBeforeScroll:rect(closeTrace),closeCount:rail.querySelectorAll('[aria-label="Close browser activity timeline"]').length}:null
+      const origin=rail?.querySelector('.browser-rsi-replay__origin'),range=origin&&document.createRange();if(range)range.selectNodeContents(origin)
+      const trace=rail?{bounds:rect(rail),steps:rail.querySelectorAll('[data-sequence]').length,origin:{text:origin.textContent,lines:range.getClientRects().length},stop:{bounds:rect(stop),disabled:stop.disabled,hitSamples:hitSamples(stop),fontSize:getComputedStyle(stop).fontSize},closeBeforeScroll:rect(closeTrace),closeCount:rail.querySelectorAll('[aria-label="Close browser activity timeline"]').length}:null
       // The existing rail scroll keeps later actions reachable in a short pane. Record is checked
       // before scrolling; Close is checked after the user's normal scroll-to-action geometry.
       if(closeTrace){closeTrace.scrollIntoView({block:'nearest'});await new Promise(done=>requestAnimationFrame(done));const r=closeTrace.getBoundingClientRect();const rightHit=document.elementFromPoint(r.right-1,r.y+r.height/2);trace.close={bounds:rect(closeTrace),hitSamples:hitSamples(closeTrace),rightHit:{tag:rightHit?.tagName,ariaLabel:rightHit?.getAttribute('aria-label'),className:rightHit?.className},railClientWidth:rail.clientWidth,railScrollWidth:rail.scrollWidth,railScrollLeft:rail.scrollLeft}}
@@ -176,8 +177,19 @@ app.whenReady().then(async()=>{
       if (result.hasTrace) {
         expect(result.trace, context).not.toBeNull()
         expect(result.trace.steps, context).toBe(0)
-        expect(result.trace.bounds.width, context).toBeLessThanOrEqual(result.pane.width / 2)
-        expect(result.stage.x + result.stage.width, context).toBeLessThanOrEqual(result.trace.bounds.x)
+        if (result.width <= 380) {
+          expect(result.trace.bounds.width, context).toBe(result.pane.width)
+          expect(result.stage.width, context).toBe(result.pane.width)
+          expect(result.trace.bounds.height, context).toBeLessThanOrEqual((result.pane.height - result.toolbar.height) * 0.44 + 1)
+          expect(result.stage.height, context).toBeGreaterThanOrEqual((result.pane.height - result.toolbar.height) * 0.56 - 1)
+          expect(result.stage.y + result.stage.height, context).toBeLessThanOrEqual(result.trace.bounds.y)
+          expect(result.trace.origin.text, context).toBe('Recording human input · main document')
+          expect(result.trace.origin.lines, context).toBeGreaterThan(0)
+          expect(result.trace.origin.lines, context).toBeLessThanOrEqual(2)
+        } else {
+          expect(result.trace.bounds.width, context).toBeLessThanOrEqual(result.pane.width / 2)
+          expect(result.stage.x + result.stage.width, context).toBeLessThanOrEqual(result.trace.bounds.x)
+        }
         expect(result.trace.stop.disabled, context).toBe(false)
         expect(result.trace.stop.bounds.height, context).toBeGreaterThanOrEqual(25)
         expect(result.trace.stop.fontSize, context).toBe('10px')
