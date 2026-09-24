@@ -60,10 +60,18 @@ export function parseTraceDisclosureKey(key: string): [messageId: string, partKe
 }
 
 function partText(part: AgentSessionHistoryContentPart): string {
-  if (part.kind === 'text' || part.kind === 'reasoning') return part.text
+  if (part.kind === 'text') return part.text
+  if (part.kind === 'reasoning') return part.redacted ? '' : part.text
   if (part.kind === 'tool-call') return `${part.name}\n${part.input}`
   if (part.kind === 'tool-result') return `${part.name ?? 'Tool result'}\n${part.output}`
   return part.label === undefined ? part.reference : `${part.label}\n${part.reference}`
+}
+
+function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean {
+  if (part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result' || part.kind === 'resource') {
+    return true
+  }
+  return part.text.length > 0
 }
 
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
@@ -76,7 +84,8 @@ export function ConversationMessage({
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
     ? [{ kind: 'text', text: content }]
     : content
-  const hasContent = parts.some((part) => partText(part).length > 0)
+  const hasContent = parts.some(partHasRenderableContent)
+  const hasCopyContent = parts.some((part) => partText(part).length > 0)
   const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker?.role === 'unknown' ? 'Input' : speaker ? 'Assistant' : 'Activity')
   // Native parts have no annotation offset contract. Live string annotations retain their original
   // quote and note; read-only callers do not collect selection state.
@@ -115,7 +124,8 @@ export function ConversationMessage({
       window.clearTimeout(copyTimerRef.current)
       copyTimerRef.current = null
     }
-    const text = parts.map(partText).join('\n')
+    const text = parts.map(partText).filter((t) => t.length > 0).join('\n')
+    if (!text) return
     const accepted = await copyTextToClipboard(text, () => {
       if (activeCopyActionRef.current === actionId) {
         setCopyState('failed')
@@ -178,7 +188,7 @@ export function ConversationMessage({
           ? formatClock(createdAt) : `${formatClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {formatClock(createdAt)}
         </span>}
-        {hasContent ? <span className="log-turn__actions" data-copy-state={copyState}>
+        {hasCopyContent ? <span className="log-turn__actions" data-copy-state={copyState}>
           {copyState === 'failed' ? (
             <span className="log-turn__copy-error" role="alert">Copy failed</span>
           ) : null}
@@ -210,7 +220,7 @@ export function ConversationMessage({
                 open={expandedTraces ? expandedTraces.has(traceDisclosureKey(messageId, key)) : undefined}
                 onToggle={onToggleTrace ? (event) => onToggleTrace(traceDisclosureKey(messageId, key), event.currentTarget.open) : undefined}>
                 <summary>Reasoning</summary>
-                <pre>{part.text}</pre>
+                <pre>{part.redacted ? 'Reasoning content redacted.' : part.text}</pre>
               </details>
             ) : <div key={key} className="log-turn__resource">
               <span>{part.label ?? `${part.resourceType} resource`}</span>

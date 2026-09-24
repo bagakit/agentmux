@@ -55,7 +55,16 @@ export function normalizeSessionHistoryPage(
     const contentParts: AgentSessionHistoryContentPart[] = item.contentParts.map((value: unknown) => {
       const part = object(value)
       if (part.kind === 'text' && typeof part.text === 'string') return { kind: 'text', text: part.text }
-      if (part.kind === 'reasoning' && typeof part.text === 'string') return { kind: 'reasoning', text: part.text }
+      if (part.kind === 'reasoning' && typeof part.text === 'string') {
+        if (part.signature !== undefined && typeof part.signature !== 'string') return invalid()
+        if (part.redacted !== undefined && typeof part.redacted !== 'boolean') return invalid()
+        return {
+          kind: 'reasoning',
+          text: part.text,
+          ...(part.signature !== undefined ? { signature: part.signature } : {}),
+          ...(part.redacted !== undefined ? { redacted: part.redacted } : {})
+        }
+      }
       if (part.kind === 'tool-call' || part.kind === 'tool-result') {
         const callId = part.callId === undefined ? {} : { callId: nonempty(part.callId) }
         if (part.kind === 'tool-call') {
