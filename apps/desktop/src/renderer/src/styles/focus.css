@@ -116,7 +116,7 @@
 .recent-focus__observation dl { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px var(--sp-2); font-size: var(--fs-micro); }
 .recent-focus__observation dt { color: var(--text-3); }
 .recent-focus__observation dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text-2); }
-.recent-focus__observation > p { color: var(--text-3); font-size: var(--fs-micro); }
+.recent-focus__observation > p { padding: 0; border: 0; background: none; color: var(--text-3); font-family: var(--font-sans); font-size: var(--fs-micro); line-height: 1.5; white-space: normal; overflow: visible; text-overflow: clip; }
 .recent-focus__lane { position: relative; min-width: 0; margin: 0 8px; border-bottom: 1px solid var(--line-soft); background: repeating-linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 1px, transparent 1px, transparent 25%); }
 .recent-focus__segment { position: absolute; top: 18px; bottom: 2px; min-width: 8px; padding: 0; overflow: hidden; border: 0; border-radius: 1px; background: var(--text-3); color: var(--text-3); font: inherit; font-size: 9px; text-align: left; white-space: nowrap; cursor: pointer; }
 .recent-focus__segment span { visibility: hidden; }

@@ -22,6 +22,8 @@ const inputs = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/p
   ...await files(path.join(root, 'packages/demand/src')), ...await files(path.join(root, 'packages/demand/dist')),
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
+const mutation = process.env.AGENTMUX_FOCUS_HISTORY_GUI_MUTATION
+if (mutation && mutation !== 'observation-readability') throw new Error('Select the one known loaded GUI mutation.')
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 const receipt = { schema: 'agentmux.focus-project-history-gui.v1', passed: false, sourceRoot: root, candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], inputs: null, inputsAfter: null, cleanup: null,
   boundary: 'Complete Main source input with production App, Store, Focus, split Workbench and real xterm. Two ordinary private Electron processes share exact public Core Agent/Terminal Runs. The Agent CLI is a repository fixture. Controlled Focus visit timestamps are not real execution duration. Terminal archive does not qualify native Agent messages. No user App/Run, installation, physical input device or independent aesthetic pass is claimed.',
@@ -47,8 +49,17 @@ try {
   await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(privateRoot, 'fake-codex-cli.mjs'))
   await fs.writeFile(path.join(privateRoot, 'producer.cjs'), `const fs=require('node:fs');for(let n=0;n<100;n++)process.stdout.write('Retained work '+n+'\\r\\n');setInterval(()=>process.stdout.write('Live private work\\r\\n'),1000);let pending='';process.stdin.on('data',data=>{pending+=data.toString();if(/[\\r\\n]/.test(pending)){fs.appendFileSync(${JSON.stringify(path.join(privateRoot, 'input.log'))},pending);process.stdout.write('ACK:'+pending+'\\r\\n');pending='';}});`)
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
+    plugins: mutation ? [{ name: 'focus-history-loaded-readability-counterexample', enforce: 'pre', transform(source, id) {
+      if (!id.split('?')[0].endsWith('/styles/focus.css')) return
+      const rule = source.match(/\.recent-focus__observation > p \{[^}]*\}/)?.[0]
+      assert.ok(rule?.includes('white-space: normal;'), 'The actual production observation rule must be loaded')
+      const changed = source.replace(rule, rule.replace('white-space: normal;', 'white-space: nowrap;'))
+      receipt.loadedMutation = { variant: mutation, module: path.relative(root, id.split('?')[0]), originalSha256: hash(source), transformedSha256: hash(changed) }
+      return changed
+    } }] : [],
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
+  if (mutation) assert.ok(receipt.loadedMutation, 'The actual production stylesheet mutation cannot be a no-op')
   await build({ configFile: false, root: fixture, logLevel: 'error', build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
     rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
   receipt.compiled = Object.fromEntries(await Promise.all([...await files(path.join(privateRoot, 'renderer')), ...await files(path.join(privateRoot, 'main'))].map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
