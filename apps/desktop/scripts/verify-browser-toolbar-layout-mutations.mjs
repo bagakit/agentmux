@@ -20,6 +20,12 @@ await verifyRendererSourceMutations({
     'apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx',
     'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx'],
   mutations: [
+    { label: 'narrow-trace-horizontal-again', file: css,
+      before: '.browser-body { flex-direction: column; }', after: '.browser-body { flex-direction: row; }' },
+    { label: 'narrow-trace-consumes-page', file: css,
+      before: 'flex: 0 1 min(44%, 240px); max-height: 44%;', after: 'flex: 0 0 100%; max-height: 100%;' },
+    { label: 'narrow-trace-half-width-again', file: css,
+      before: 'max-height: 44%; width: 100%; border-left: 0;', after: 'max-height: 44%; width: 50%; border-left: 0;' },
     {
       label: 'close-clearance', file: css,
       before: '{ padding-right: var(--region-close-clearance); }',
@@ -41,19 +47,9 @@ await verifyRendererSourceMutations({
       after: 'flex: 0 0 clamp(248px, 26%, 340px);'
     },
     {
-      label: 'minimum-trace-close-hit-area', file: css,
-      before: '.browser-trace-rail .browser-rsi-history__actions { flex: none; }',
-      after: '.browser-trace-rail .browser-rsi-history__actions { flex: 0 1 auto; }'
-    },
-    {
       label: 'trace-scrollbar-action-clearance', file: css,
       before: '.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }',
       after: '.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-3); }'
-    },
-    {
-      label: 'minimum-trace-entry-horizontal-overflow', file: css,
-      before: '.browser-trace-rail :is(.browser-demonstration-entry, .browser-task-asset-entry) > .browser-rsi-button { max-width: 100%; white-space: normal; }',
-      after: ''
     },
     {
       label: 'required-overflow', file: css,
