@@ -74,6 +74,62 @@ export async function numberCondition(ctx) {
   await type(ctx, 'Equals', '0')
 }
 
+export function auditMinimumRadioGeometry(value) {
+  assert.equal(value.region.width, 234.5, 'The real supported minimum two-Region Browser must be measured')
+  assert.ok(value.stage.width > 0 && value.stage.height > 0, 'The actual page retains positive area')
+  assert.ok(value.stage.y + value.stage.height <= value.trace.y, 'Minimum details occupy separate space below the actual page')
+  assert.deepEqual(value.radios.map(item => item.value), ['string', 'number', 'boolean'])
+  assert.deepEqual(value.radios.filter(item => item.checked).map(item => item.value), ['number'])
+  assert.equal(value.names.length, 1); assert.ok(value.names[0])
+  for (const radio of value.radios) {
+    assert.ok(radio.label.trim(), 'Every finite choice retains its actual label')
+    assert.ok(radio.textLines > 0 && radio.textLines <= 2, 'Actual choice text remains readable')
+    assert.ok(radio.bounds.width > 0 && radio.bounds.height > 0 && radio.labelBounds.width > 0 && radio.labelBounds.height > 0)
+    assert.ok(radio.labelBounds.x >= value.trace.x && radio.labelBounds.x + radio.labelBounds.width <= value.trace.x + value.trace.width)
+    assert.ok(radio.labelBounds.y >= value.trace.y && radio.labelBounds.y + radio.labelBounds.height <= value.trace.y + value.trace.height)
+    assert.deepEqual(radio.points.map(point => point.owned), [true, true, true, true, true], 'Every actual label owns its center and four edge points')
+    for (const point of radio.points) assert.ok(point.stack.length > 0, 'Hit observations must contain their original element stacks')
+  }
+  assert.equal(value.radios.find(item => item.checked).focused, true, 'A real single Tab reaches the checked radio')
+}
+
+export async function readMinimumRadioGeometry(ctx) {
+  return ctx.probe.cdp.evaluate(`(()=>{
+    const roots=${owned(ctx, surface)};if(roots.length!==1)throw new Error('The original completion surface must be unique');
+    const root=roots[0],region=root.closest('[data-workbench-region-id]'),pane=root.closest('.browser-surface'),trace=root.closest('.browser-trace-rail');
+    if(!region||!pane||!trace)throw new Error('The original two-Region trace must exist');
+    const rect=element=>{const r=element.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
+    const inputs=Array.from(root.querySelectorAll('.browser-outcome-criteria__types input[type="radio"]'));
+    const radios=inputs.map(input=>{
+      const label=input.closest('label');if(!label)throw new Error('Every actual radio requires its visible label');
+      const r=label.getBoundingClientRect(),walker=document.createTreeWalker(label,NodeFilter.SHOW_TEXT),textRects=[];
+      while(walker.nextNode()){if(!walker.currentNode.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(walker.currentNode);textRects.push(...Array.from(range.getClientRects()).map(r=>({x:r.x,y:r.y,width:r.width,height:r.height})));}
+      const points=[[r.x+r.width/2,r.y+r.height/2],[r.x+1,r.y+r.height/2],[r.right-1,r.y+r.height/2],[r.x+r.width/2,r.y+1],[r.x+r.width/2,r.bottom-1]].map(([x,y])=>{
+        const stack=document.elementsFromPoint(x,y);return{x,y,owned:label.contains(stack[0]),stack:stack.slice(0,8).map(element=>({tag:element.tagName,aria:element.getAttribute('aria-label'),value:element.getAttribute('value'),classes:typeof element.className==='string'?element.className:null}))};
+      });
+      return{value:input.value,checked:input.checked,focused:document.activeElement===input,label:label.textContent.trim(),bounds:rect(input),labelBounds:rect(label),textRects,textLines:new Set(textRects.map(r=>r.y)).size,points};
+    });
+    return{region:rect(region),regionId:region.dataset.workbenchRegionId,stage:rect(pane.querySelector('.browser-stage')),trace:rect(trace),names:[...new Set(inputs.map(input=>input.name))],radios};
+  })()`)
+}
+
+// The canonical already creates the real sibling Split and owns the ordinary restart.
+// This hook only consumes that original Region's minimum geometry and normal input path.
+export async function observeMinimumBrowserOutcome(ctx) {
+  const before = await ids(ctx)
+  const size = await ctx.probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${quoted(join(ctx.desktopRoot, 'package.json'))})('electron');return BrowserWindow.getAllWindows()[0].getMinimumSize()})()`)
+  assert.equal(size.length, 2); assert.ok(size[0] > 0 && size[1] > 0)
+  await ctx.resize(ctx.probe, ...size)
+  await ctx.click(ctx.probe.cdp, labelControl(ctx, 'CSS selector'))
+  await key(ctx, 'Tab', 'Tab', 9)
+  const observation = await readMinimumRadioGeometry(ctx)
+  auditMinimumRadioGeometry(observation)
+  assert.deepEqual(await ids(ctx), before, 'Minimum geometry and radio focus cannot start another producer')
+  ctx.receipt.browserOutcome.minimumRadio = observation
+  await ctx.capture(ctx.probe, 'minimum-split-browser-completion-radios', 'operations')
+  await ctx.resize(ctx.probe, 1440, 900)
+}
+
 async function syntheticClick(ctx, label) {
   const observation = await ctx.probe.cdp.evaluate(`(async()=>{const matches=${button(ctx, label)};if(matches.length!==1)throw new Error('The actual verification action is missing');const target=matches[0];if(target.disabled)throw new Error('A disabled action cannot prove its trust guard');let trusted=null;const listener=event=>{trusted=event.isTrusted};target.addEventListener('click',listener,{once:true});try{target.click();await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));return {label:${quoted(label)},trusted,disabled:target.disabled}}finally{target.removeEventListener('click',listener)}})()`)
   assert.equal(observation.trusted, false, 'The counterexample must really be an untrusted DOM click')
@@ -150,7 +206,7 @@ export async function readRecordedOutcome(ctx, actual) {
     assert.equal(chunk.returnedBytes, bytes.length); assert.ok(bytes.length > 0 && bytes.length <= 65_536)
     assert.equal(bytes.toString('base64'), chunk.data); assert.ok(end <= artifact.byteLength)
     assert.equal(chunk.nextOffset, end === artifact.byteLength ? null : end)
-    parts.push(bytes); chunks.push({ offset, returnedBytes: bytes.length, nextOffset: chunk.nextOffset }); offset = end
+    parts.push(bytes); chunks.push({ offset, returnedBytes: bytes.length, nextOffset: chunk.nextOffset, readCost: chunk.readCost }); offset = end
   }
   assert.ok(parts.length > 0)
   const bytes = Buffer.concat(parts), document = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))

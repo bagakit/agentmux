@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
-import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const root = path.resolve(desktop, '../..')
@@ -88,13 +88,68 @@ lines.on('line', line => {
 })
 lines.on('close',()=>{record({kind:'eof'});process.exit(0)})
 `
+// The original child can exit before its reader/helper descendants. Only this
+// invocation's root authorizes cleanup, including after an old PID/PGID is reused.
+async function cleanupOwnedProbes(temporaryRoot) {
+  const errors = []
+  for (const name of ['SIGTERM', 'SIGKILL']) {
+    try {
+      for (const pid of await listProbeProcesses(0, temporaryRoot)) {
+        try {
+          assert.ok(Number.isSafeInteger(pid) && pid > 1, 'Private cleanup requires a positive PID')
+          await signalOwnedProbeProcess(pid, temporaryRoot, name)
+        } catch (error) { errors.push(error.message) }
+      }
+      const cleanupDeadline = Date.now() + 2_000
+      while (Date.now() < cleanupDeadline) {
+        if (!(await listProbeProcesses(0, temporaryRoot)).length) break
+        await new Promise(done => setTimeout(done, 60))
+      }
+    } catch (error) { errors.push(error.message) }
+  }
+  let remaining
+  try { remaining = await listProbeProcesses(0, temporaryRoot); assert.deepEqual(remaining, []) }
+  catch (error) { errors.push(error.message) }
+  return { remaining: remaining ?? null, errors }
+}
+// Preserve generated probe inputs as bytes before deleting their private owner.
+// Original distribution/nativeFixture hash keys remain the actual producer paths.
+async function preserveGeneratedArtifacts(temporaryRoot, directory, observed) {
+  assert.ok(observed.distributionArtifacts && Object.keys(observed.distributionArtifacts).length > 0)
+  assert.ok(observed.nativeFixture && Object.keys(observed.nativeFixture).length > 0)
+  const destination = path.join(directory, 'generated-inputs')
+  const within = (base, file) => {
+    const relative = path.relative(base, file)
+    assert.ok(relative && !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`), 'Generated artifact must stay within its private owner')
+    return relative
+  }
+  const save = async (originalPath, relative, expected) => {
+    const bytes = await fs.readFile(originalPath)
+    assert.ok(bytes.length > 0, 'Preserved generated input must be nonempty')
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    if (expected !== undefined) assert.equal(sha256, expected, 'Generated Native input changed before preservation')
+    const file = path.join(destination, relative)
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, bytes)
+    assert.equal(createHash('sha256').update(await fs.readFile(file)).digest('hex'), sha256)
+    return { originalPath, path: file, sha256, byteLength: bytes.length }
+  }
+  const result = { schema: 'agentmux.terminal-live-scroll-preserved-artifacts.v1', distributionArtifacts: [], nativeFixture: [], nativeReaderTrace: null }
+  for (const [file, expected] of Object.entries(observed.distributionArtifacts)) {
+    result.distributionArtifacts.push(await save(file, path.join('renderer', within(path.join(temporaryRoot, 'renderer'), file)), expected))
+  }
+  for (const [file, expected] of Object.entries(observed.nativeFixture)) {
+    result.nativeFixture.push(await save(file, path.join('native-fixture', within(temporaryRoot, file)), expected))
+  }
+  result.nativeReaderTrace = await save(path.join(temporaryRoot, 'reader.ndjson'), 'reader.ndjson')
+  return result
+}
 const result = { schema: 'agentmux.terminal-live-scroll-delivery.v1', passed: false,
   sourceAndPackageBefore: null, sourceAndPackageAfter: null, distributionArtifacts: null,
   nativeFixture: null, browser: null, exit: null, processRuns: [], captureDirectory, captureOnly: true, aestheticReview: 'not-performed',
   cleanup: { remaining: null, rootRemoved: false, errors: [] }, physicalDeviceTested: false, userRunTouched: false,
   boundary: 'Two private actual Electron processes with CDP trusted input, product Store durable workbench initialization, SessionPane/preload/xterm and Core Provider reading over a synthetic native protocol. No Core connect/create, Agent Run, model or user home access; active missing VT state is not restored.' }
 let child, timer
-const childPids = []
 try {
   result.sourceAndPackageBefore = await hashes(critical)
   await fs.mkdir(path.join(privateRoot, 'codex-home'), { mode: 0o700 })
@@ -135,7 +190,7 @@ try {
   for (const phase of ['capture', 'restore']) {
     child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, core, productPreload, phase, captureDirectory],
       { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
-    result.pid = child.pid; childPids.push(child.pid)
+    result.pid = child.pid
     child.stderr.on('data', () => {})
     const exited = new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({ code, signal })) })
     result.exit = await Promise.race([exited, new Promise((_, reject) => {
@@ -147,8 +202,10 @@ try {
     result.processRuns.push({ phase, pid: child.pid, exit: result.exit, browser })
     assert.equal(result.exit.code, 0, browser.failure)
     assert.equal(browser.passed, true, browser.failure)
-    await stopProbeProcesses(child.pid, privateRoot)
-    assert.deepEqual(await listProbeProcesses(child.pid, privateRoot), [], 'Private process must exit before the next process starts')
+    const cleaned = await cleanupOwnedProbes(privateRoot)
+    result.cleanup.errors.push(...cleaned.errors)
+    assert.deepEqual(cleaned.errors, [], 'Private cleanup errors must remain visible before another process starts')
+    assert.deepEqual(cleaned.remaining, [], 'Private processes must exit before the next process starts')
   }
   const trace = (await fs.readFile(path.join(privateRoot, 'reader.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   assert.equal(trace.filter(entry => entry.kind === 'start').length, 2)
@@ -169,11 +226,15 @@ try {
 }
 finally {
   clearTimeout(timer)
-  for (const pid of childPids) {
-    try { await stopProbeProcesses(pid, privateRoot) } catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }
+  const cleaned = await cleanupOwnedProbes(privateRoot)
+  result.cleanup.remaining = cleaned.remaining
+  result.cleanup.errors.push(...cleaned.errors)
+  try { result.preservedGeneratedArtifacts = await preserveGeneratedArtifacts(privateRoot, captureDirectory, result) }
+  catch (error) {
+    result.artifactPreservationFailure = error.stack
+    result.cleanup.errors.push(`Generated artifact preservation failed: ${error.message}`)
+    result.passed = false
   }
-  try { result.cleanup.remaining = await listProbeProcesses(-1, privateRoot) }
-  catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }
   if (result.cleanup.remaining?.length === 0 && result.cleanup.errors.length === 0) {
     try { await fs.rm(privateRoot, { recursive: true, force: true }); result.cleanup.rootRemoved = true }
     catch (error) { result.cleanup.errors.push(String(error)); result.passed = false }

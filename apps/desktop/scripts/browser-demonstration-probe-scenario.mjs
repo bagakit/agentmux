@@ -106,7 +106,7 @@ async function verifyCloseSplit(ctx) {
   const original = before.find(page=>page.url===ctx.pageUrl), sibling = before.find(page=>page.url!==ctx.pageUrl)
   assert.ok(original && sibling)
   await ctx.click(ctx.probe.cdp, `${ctx.selectors('.workbench-region__close')}.filter(element=>element.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId===${JSON.stringify(toolbar.regionId)})`)
-  const after = await ctx.waitFor('the intended Close split releases only its actual Browser', async()=>{const pages=await pageOwners();return pages.length===1&&pages[0].id===sibling.id?pages:null})
+  const after = await ctx.waitFor('the intended Close split releases only its actual Browser and keeps the sibling visible', async()=>{const pages=await pageOwners();return pages.length===1&&pages[0].id===sibling.id&&pages[0].visible&&pages[0].bounds.width>0&&pages[0].bounds.height>0?pages:null})
   assert.equal(after[0].url, sibling.url)
   assert.equal(after[0].visible, true)
   assert.ok(after[0].bounds.width > 0 && after[0].bounds.height > 0)

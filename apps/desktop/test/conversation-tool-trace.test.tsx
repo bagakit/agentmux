@@ -75,4 +75,30 @@ describe('conversation tool trace in the production message', () => {
       expect(host.querySelector('pre')!.textContent).toBe('undetermined')
     } finally { await act(async () => root.unmount()) }
   })
+
+  it('keeps disclosure on its observed call when reordered, without cross-expanding the result sharing its callId', async () => {
+    const callA: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'shell', input: 'command A', callId: 'a' }
+    const callB: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'shell', input: 'command B', callId: 'b' }
+    const resultA: AgentSessionHistoryContentPart = { kind: 'tool-result', name: 'shell', output: 'result A', callId: 'a' }
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    try {
+      await act(async () => root.render(createElement(ConversationMessage, { content: [callA, resultA, callB] })))
+      expect([...host.querySelectorAll<HTMLElement>('.conversation-tool-trace')].map(row => [row.dataset.traceKind, row.dataset.callId])).toEqual([
+        ['tool-call', 'a'], ['tool-result', 'a'], ['tool-call', 'b']
+      ])
+      await act(async () => host.querySelector<HTMLButtonElement>('[data-trace-kind="tool-call"][data-call-id="a"] button')!.click())
+      await act(async () => root.render(createElement(ConversationMessage, { content: [{ ...callB }, { ...callA }, { ...resultA }] })))
+      expect([...host.querySelectorAll<HTMLElement>('.conversation-tool-trace')].map(row => [row.dataset.traceKind, row.dataset.callId])).toEqual([
+        ['tool-call', 'b'], ['tool-call', 'a'], ['tool-result', 'a']
+      ])
+      const expanded = [...host.querySelectorAll<HTMLElement>('.conversation-tool-trace')].filter(row => row.querySelector('button')!.getAttribute('aria-expanded') === 'true')
+      expect(expanded).toHaveLength(1)
+      expect(expanded[0]!.dataset.callId).toBe('a')
+      expect(expanded[0]!.querySelector('pre')!.textContent).toBe('command A')
+      expect(host.querySelector('[data-trace-kind="tool-result"] button')!.getAttribute('aria-expanded')).toBe('false')
+      await act(async () => host.querySelector<HTMLButtonElement>('[data-trace-kind="tool-result"] button')!.click())
+      expect([...host.querySelectorAll('pre')].map(item => item.textContent)).toEqual(['command A', 'result A'])
+    } finally { await act(async () => root.unmount()); host.remove() }
+  })
 })

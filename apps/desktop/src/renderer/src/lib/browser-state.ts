@@ -29,21 +29,20 @@ export function reduceBrowserEvent(
     return tabs === state.tabs ? state : { ...state, tabs }
   }
   if (event.type === 'updated') {
-    return {
-      ...state,
-      tabs: Object.fromEntries(Object.entries(state.tabs).map(([id, tab]) => [
-        id,
-        {
-          ...tab,
-          regions: Object.fromEntries(Object.entries(tab.regions).map(([regionId, surface]) => [
-            regionId,
-            surface.kind === 'browser' && surface.browserId === event.browser.id
-              ? { ...surface, ...event.browser, regionId: surface.regionId }
-              : surface
-          ]))
-        }
-      ]))
+    let tabs = state.tabs
+    for (const [tabId, tab] of Object.entries(state.tabs)) {
+      let regions = tab.regions
+      for (const surface of Object.values(tab.regions)) {
+        if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
+        if (Object.entries(event.browser).every(([key, value]) => Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
+        if (regions === tab.regions) regions = { ...regions }
+        regions[surface.regionId] = { ...surface, ...event.browser, regionId: surface.regionId }
+      }
+      if (regions === tab.regions) continue
+      if (tabs === state.tabs) tabs = { ...tabs }
+      tabs[tabId] = { ...tab, regions }
     }
+    return tabs === state.tabs ? state : { ...state, tabs }
   }
   let changed = false
   const tabs = { ...state.tabs }

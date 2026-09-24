@@ -193,7 +193,7 @@ export async function reviewTaskAssets(ctx) {
   await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label^="Require checkpoint "]`))
   await ctx.click(probe.cdp, `${ctx.selectors(taskSurface + ' summary')}.filter(e=>e.textContent.startsWith('Completion conditions'))`)
   await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} [aria-label="Delete task step 1"]`))
-  await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} .browser-task-asset__parameters input[type="checkbox"]`))
+  await ctx.click(probe.cdp, ctx.selectors(`${taskSurface} .browser-task-asset__parameter input[type="checkbox"]`))
   await ctx.click(probe.cdp, button(ctx, 'Save version'))
   const edited = await waitFor('second immutable version after the UI deletion', async () => { const item = await asset(ctx); return item?.versions.length === 2 ? item : null })
   assert.deepEqual(edited.versions[0], version)
