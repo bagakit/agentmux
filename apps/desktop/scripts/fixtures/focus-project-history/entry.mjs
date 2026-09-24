@@ -58,7 +58,7 @@ if (setup.phase === 'seed') {
   localStorage.setItem(name, JSON.stringify({ version, state: {
     restoredWorkbench: projectPersistedWorkbench({ tabs: { [keepTab.id]: keepTab, [archiveTab.id]: archiveTab, [originalTab.id]: originalTab }, layouts: { [alpha.id]: alphaLayout, [beta.id]: betaLayout } }),
     activeWorkspaceId: alpha.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
-    focusTimelineHeight: 208, agentComposerDrafts: { 'untouched-draft': 'A real unsent draft remains' }
+    focusTimelineHeight: 208, agentComposerDrafts: { [keep.id]: 'A real unsent draft remains' }
   } }))
   ids = { keep: keep.id, keepRun: keep.control.run.runId, archive: archive.id, original: original.id, companion: companion.id, originalRun: original.control.run.runId }
   await request('save-ids', ids)
