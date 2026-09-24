@@ -136,4 +136,28 @@ describe('output gap diagnostics and Run state have separate owners', () => {
     expect(diagnostic?.message).toContain('current Session could not be confirmed')
     expect(diagnostic?.message).not.toContain('Run \"run-1\"')
   })
+
+  it.each([0, 42, null])('discloses the actual live cursor %s without converting it to delivery', cursor => {
+    const event = gapError()
+    if (event.event.type !== 'agent-error') throw new Error('Expected diagnostic')
+    event.event.evidence.outputGap = { kind: 'live-stream', latestOutputBytes: 99,
+      publishedThroughByte: cursor, representation: cursor === null ? null : 'raw' }
+    const diagnostic = runtimeDiagnosticNotice({ sessions: [SESSION] }, event)
+    expect(diagnostic?.subject).toBe(SESSION.control)
+    expect(diagnostic?.message).toContain('Observed at (Unix ms): 100. Gap phase: live-stream. Cause: unknown.')
+    expect(diagnostic?.message).toContain(`Gap latest output byte: 99. Core published-through byte: ${cursor ?? 'unknown'}.`)
+    expect(diagnostic?.message).toContain('The publication boundary is not a Renderer parsing or Input acknowledgement.')
+    expect(diagnostic?.message).not.toContain('Replay requested')
+  })
+
+  it('discloses only the actual replay request and snapshot retention facts', () => {
+    const event = gapError()
+    if (event.event.type !== 'agent-error') throw new Error('Expected diagnostic')
+    event.event.evidence.outputGap = { kind: 'replay', latestOutputBytes: 99, requestedAfterByte: 4, firstAvailableByte: 20 }
+    const diagnostic = runtimeDiagnosticNotice({ sessions: [SESSION] }, event)
+    expect(diagnostic?.message).toContain('Gap phase: replay. Cause: unknown.')
+    expect(diagnostic?.message).toContain('Replay requested after byte: 4. First available byte: 20. Snapshot latest output byte: 99.')
+    expect(diagnostic?.message).not.toContain('Core published-through')
+    expect(diagnostic?.message).toContain('does not establish complete history or confirm input delivery')
+  })
 })

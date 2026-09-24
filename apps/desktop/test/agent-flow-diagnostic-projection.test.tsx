@@ -355,6 +355,61 @@ it.each(['before', 'after'])('shows a real output gap %s a Run observation witho
   expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })
 
+it('transports a live Gap observation to the mounted notice and preserves dismissal of the same cause', async () => {
+  await mount()
+  const face = workface()
+  const originalSessions = useAppStore.getState().sessions
+  vi.spyOn(kernel, 'hasAttachment').mockReturnValue(true)
+  vi.spyOn(kernel, 'continuationByte').mockReturnValue(4)
+  vi.spyOn(kernel, 'continuationView').mockReturnValue('terminal')
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 27 }))
+  await settle()
+  const gap = events.filter(event => event.type === 'agent-error' && event.code === 'OUTPUT_GAP')
+  expect(gap).toHaveLength(1)
+  expect(gap[0]).toMatchObject({ evidence: { outputGap: {
+    kind: 'live-stream', latestOutputBytes: 27, publishedThroughByte: 4, representation: 'terminal'
+  } } })
+  expect(wire.filter(event => event.event === gap[0])).toHaveLength(1)
+  const details = notice()?.querySelector<HTMLDetailsElement>('details')
+  expect(details).not.toBeNull()
+  expect(details?.open).toBe(false)
+  expect(notice()?.querySelector('.error-notice__summary')?.textContent).toContain('OUTPUT_GAP: This Attachment did not receive a continuous output stream.')
+  expect(notice()?.querySelector('.error-notice__summary')?.textContent).not.toContain('Observed at')
+  expect(notice()?.querySelector('.error-notice__original')?.textContent).toBe(useAppStore.getState().error)
+  await act(async () => details!.querySelector('summary')!.click())
+  expect(details?.open).toBe(true)
+  expect(notice()?.textContent).toContain('Gap phase: live-stream. Cause: unknown.')
+  expect(notice()?.textContent).toContain('Gap latest output byte: 27. Core published-through byte: 4. Representation: terminal.')
+  expect(notice()?.textContent).toContain('not a Renderer parsing or Input acknowledgement')
+  await act(async () => notice()!.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click())
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 40 }))
+  await settle()
+  expect(events.filter(event => event.type === 'agent-error' && event.code === 'OUTPUT_GAP')).toHaveLength(2)
+  expect(useAppStore.getState().errorDismissed).toBe(true)
+  await act(async () => element.querySelector<HTMLButtonElement>('.error-notice__reopen')!.click())
+  expect(notice()?.querySelector<HTMLDetailsElement>('details')?.open).toBe(false)
+  expect(notice()?.textContent).toContain('Gap latest output byte: 27.')
+  expect(notice()?.textContent).not.toContain('Gap latest output byte: 40.')
+  expect(workface()).toEqual(face)
+  expect(useAppStore.getState().sessions).toBe(originalSessions)
+  expect(writes).toEqual([])
+  expect(stop).not.toHaveBeenCalled()
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('does not parse an ordinary error into diagnostic disclosure', async () => {
+  await mount()
+  const face = workface()
+  const error = 'Opaque ordinary failure. Diagnostic: this is part of the original message.'
+  await act(async () => useAppStore.getState().reportError(error))
+  expect(notice()?.querySelector('details')).toBeNull()
+  expect(notice()?.textContent).toContain(error)
+  expect(workface()).toEqual(face)
+  expect(writes).toEqual([])
+  expect(stop).not.toHaveBeenCalled()
+  expect(recover).not.toHaveBeenCalled()
+})
+
 it('locates a real Core Gap for an ordinary Terminal without changing the workface or input intent', async () => {
   await mount()
   const terminal = {
