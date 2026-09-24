@@ -12,7 +12,24 @@ const fixture = join(desktop, 'scripts/fixtures/mote-shortcut'), require = creat
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-shortcut-'))
 const evidence = join(repository, '.tmp/mote-shortcut', `attempt-${Date.now()}`)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const inputs = new Map(), styles = new Set()
+const inputs = new Map(), styles = new Set(), watchedStyles = new Set()
+const localStylesheet = file => file?.startsWith(repository + '/') && file.endsWith('.css') && !file.includes('/node_modules/')
+// PostCSS retains the exact input of each imported stylesheet. Observe those consumed bytes,
+// rather than reading a hand-written list or hashing imports only after compilation has ended.
+const stylesheetBinding = { postcssPlugin: 'bind-mote-proof-consumed-stylesheets', async Once(root) {
+  const consumed = new Map()
+  const remember = node => {
+    const input = node.source?.input
+    if (localStylesheet(input?.file)) consumed.set(input.file, input.css)
+  }
+  remember(root); root.walk(remember)
+  for (const [file, css] of consumed) {
+    const digest = hash(css)
+    assert.equal(hash(await readFile(file)), digest, `Consumed stylesheet changed during compilation: ${relative(repository, file)}`)
+    if (inputs.has(file)) assert.equal(inputs.get(file), digest, 'Stylesheet input agrees with the original loader bytes')
+    inputs.set(file, digest); styles.add(file)
+  }
+} }
 let controlledApiTransforms = 0
 const binding = {
   name: 'bind-mote-proof-source', enforce: 'pre', async load(id) {
@@ -21,7 +38,12 @@ const binding = {
     if (file.startsWith(repository + '/') && !file.includes('/node_modules/') && !inputs.has(file)) inputs.set(file, hash(await readFile(file)))
     return null
   }, buildEnd() {
-    for (const file of this.getModuleIds()) if (file.startsWith(repository + '/') && file.endsWith('.css')) styles.add(file)
+    // Vite records transitive PostCSS @import dependencies as watched files, even when they are
+    // absent from the JavaScript module graph. Every local stylesheet must have consumed bytes.
+    for (const file of this.getWatchFiles()) if (localStylesheet(file)) {
+      watchedStyles.add(file)
+      assert.ok(styles.has(file), `Missing consumed stylesheet input: ${relative(repository, file)}`)
+    }
   }
 }
 const result = { schema: 'agentmux.mote-shortcut-proof.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false,
@@ -42,6 +64,7 @@ try {
   const nativeBundle = join(nativeDir, 'native.mjs')
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
+    css: { postcss: { plugins: [stylesheetBinding] } },
     plugins: [binding, { name: 'private-mote-public-api-boundary', enforce: 'pre', transform(code, id) {
       if (id.split('?')[0] !== join(desktop, 'src/renderer/src/lib/api.ts')) return null
       const anchor = 'export const api = __AGENTMUX_WEB_PREVIEW__ ? mockApi : requireDesktopApi()'
@@ -50,7 +73,10 @@ try {
       return { code: code.replace(anchor, 'export const api = mockApi'), map: null }
     } }], build: { target: 'esnext', outDir, emptyOutDir: true } })
   assert.equal(controlledApiTransforms, 1)
-  for (const file of styles) if (!inputs.has(file)) inputs.set(file, hash(await readFile(file)))
+  assert.ok(styles.size > 1, 'The actual application imports a nonempty stylesheet dependency set')
+  assert.ok(watchedStyles.size > 1, 'Vite reports a nonempty actual stylesheet dependency set')
+  assert.deepEqual([...watchedStyles].sort(), [...styles].sort(), 'Consumed stylesheet bytes cover the complete actual Vite dependency set')
+  assert.ok(styles.has(join(desktop, 'src/renderer/src/styles/pmo-teams-topic.css')), 'The consumed Mote stylesheet is bound')
   assert.ok([...inputs.keys()].some(file => file.endsWith('/PmoTeamsTopicEntry.tsx')), 'The actual production entry is compiled')
   assert.ok([...inputs.keys()].some(file => file.endsWith('/App.tsx')), 'The complete production App is compiled')
   for (const owner of ['BrowserPane.tsx', 'browser-view-manager.ts', 'native-overlay-surfaces.ts', 'native-overlay-regions.ts']) assert.ok([...inputs.keys()].some(file => file.endsWith('/' + owner)), 'Actual native owner is compiled: ' + owner)
@@ -62,6 +88,8 @@ try {
   compiled['native/native.mjs'] = hash(await readFile(nativeBundle))
   result.controlledApiTransforms = controlledApiTransforms
   result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
+  result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
+  result.stylesheetDependencies = [...watchedStyles].sort().map(file => relative(repository, file))
   result.compiled = compiled
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['seed', 'restore']) {

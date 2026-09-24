@@ -17,7 +17,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 全局导航以窗口左下角为稳定锚点。入口顺序、Space/Goals 命名、PMO 浮窗和焦点语义只定义在交互 SSOT《左下角导航、Space 与 Goals》。
 
 - 用户反馈：「status bar 高度不应改变，太不精致了」。窗口状态栏固定为原有 **32px**，不因入口、切换工作面、设置或窄窗增高。
-- PMO 独立于工作面与设置组，只有这一枚圆角头像按钮可以略高出底栏；它局部锚在窗口左下，不占用额外整行高度，也不覆盖相邻入口或其命中区。
+- PMO 独立于工作面与设置组，圆角头像按钮、状态点和完整命中轮廓均留在原32px底栏内；它局部锚在窗口左下，以独立轮廓保持可辨，不伸入原生 Browser 工作面的绘制区域，不覆盖相邻入口或其命中区。
 - Space、Focus、Goals、Search 与设置使用同一条紧凑图标基线和完整命中区。四个工作面共用单一选中 Surface；设置是打开现有设置面的动作，不冒充第五个工作面。PMO 的展开状态也不冒充工作面选中状态。
 - 左下工作面与设置组保持低强调，使用底栏原有表面、克制的选中填充和间距，不叠加深色胶囊外框、浮起阴影、鲜亮色块或图标弹跳。PMO 的独立轮廓和头像承担局部强调。
 - 快捷键帮助和状态摘要位于右侧；响应式先收紧间距与次级状态文字，入口、键盘焦点与需要处理的状态保持可达。PMO 可以调整局部尺寸，整条底栏仍保持32px。
@@ -505,6 +505,7 @@ styles/
   workbench.css   Pane、Region、分屏、拖放
   terminal.css    终端表面与它的状态覆盖层
   surfaces.css    Settings、New Tab、Launch、Welcome
+  settings-overview.css  Settings overview 的实际分区与紧凑身份行
   board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
   goals.css       现有 Agent Goal 与任务约束表面

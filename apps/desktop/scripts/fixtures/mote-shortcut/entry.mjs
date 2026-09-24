@@ -184,6 +184,8 @@ function facts() {
       panelTarget: panel?.getAttribute('data-mote-target-tab'), panelTopic: panel?.getAttribute('data-mote-target-topic'), panelSession: panel?.getAttribute('data-mote-target-session'), panelStatus: panel?.getAttribute('data-mote-status'),
       panelVisible: !!panel && panel.matches(':popover-open'), panelRect: rect(panel), panelText: panel?.textContent, titleRows: panel?.querySelectorAll('.pmo-teams-topic-floating__titlebar').length,
       globalChrome: panel?.querySelectorAll('.top-row-leading-chrome').length, footerHeight: document.querySelector('.window-status-bar')?.getBoundingClientRect().height,
+      footerRect: rect(document.querySelector('.window-status-bar')), entryAvatarRect: rect(entry?.querySelector('img')),
+      entryStatusRect: rect(entry?.querySelector('.pmo-teams-topic-compact-launcher__status')),
       activeElement: { tag: active?.tagName, id: active?.id, label: active?.getAttribute('aria-label'), editable: active?.isContentEditable, text: active?.isContentEditable ? active?.textContent : undefined, value: active?.value, start: active?.selectionStart, end: active?.selectionEnd,
         selection: { anchorOffset: window.getSelection()?.anchorOffset, focusOffset: window.getSelection()?.focusOffset, anchorText: window.getSelection()?.anchorNode?.textContent, focusText: window.getSelection()?.focusNode?.textContent } },
       choices: [...(panel?.querySelectorAll('[data-mote-topic-id]') ?? [])].map(one => ({ topicId: one.dataset.moteTopicId, text: one.textContent, selected: one.getAttribute('aria-pressed'), rect: rect(one) })),
