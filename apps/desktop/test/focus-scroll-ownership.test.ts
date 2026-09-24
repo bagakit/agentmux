@@ -3,17 +3,23 @@ import { createRequire } from 'node:module'
 import { allStyleRules } from './helpers/styles'
 
 const require = createRequire(import.meta.url)
-const postcss = createRequire(require.resolve('vite'))('postcss') as { parse(css: string): { walkRules(fn: (rule: { selectors: string[]; walkDecls(fn: (declaration: { prop: string; value: string }) => void): void }) => void): void } }
+type StyleParent = { name?: string; params?: string; parent?: StyleParent }
+const postcss = createRequire(require.resolve('vite'))('postcss') as { parse(css: string): { walkRules(fn: (rule: { selectors: string[]; parent?: StyleParent; walkDecls(fn: (declaration: { prop: string; value: string }) => void): void }) => void): void } }
 const rules = postcss.parse(allStyleRules())
-function declarations(selector: string): Record<string, string> {
+function declarations(selector: string, container?: string): Record<string, string> {
   const result: Record<string, string> = {}
   let found = 0
   rules.walkRules(rule => {
     if (!rule.selectors.includes(selector)) return
+    if (container) {
+      let parent = rule.parent
+      while (parent && !(parent.name === 'container' && parent.params === container)) parent = parent.parent
+      if (!parent) return
+    }
     found++
     rule.walkDecls(declaration => { result[declaration.prop] = declaration.value })
   })
-  expect(found, `A stylesheet must actually define ${selector}`).toBeGreaterThan(0)
+  expect(found, `A stylesheet must actually define ${selector}${container ? ` inside @container ${container}` : ''}`).toBeGreaterThan(0)
   return result
 }
 
@@ -26,8 +32,9 @@ describe('Focus scroll and right workspace geometry ownership', () => {
 
   it('allows the complete status matrix to be reached at narrow widths', () => {
     expect(declarations('.focus-project-lanes__track')).toMatchObject({ overflow: 'hidden' })
-    expect(declarations('.focus-context-group')['flex-basis']).toBe('100%')
-    expect(declarations('.focus-project-lanes__row')['grid-template-columns']).toBe('minmax(0, 1fr)')
+    expect(declarations('.focus-context-group')).toMatchObject({ 'min-width': '0' })
+    expect(declarations('.focus-project-lanes__groups', '(max-width: 680px)')).toMatchObject({ display: 'flex', 'flex-direction': 'column' })
+    expect(declarations('.focus-project-lanes__row', '(max-width: 680px)')['grid-template-columns']).toBe('minmax(0, 1fr)')
   })
 
   it('keeps empty portal registry shells outside the input hit tree', () => {

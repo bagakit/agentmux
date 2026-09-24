@@ -63,8 +63,13 @@ describe('Recent Focus timeline', () => {
     const markers = [...container.querySelectorAll<HTMLButtonElement>('.recent-focus__message')]
     expect(markers.map(marker => [marker.dataset.messageId, marker.closest<HTMLElement>('.recent-focus__track')!.dataset.focusTimelineId, marker.style.left])).toEqual([['captured:first', 'one', '50%'], ['captured:second', 'two', '62.5%']])
     await act(async () => markers[0]!.click())
-    expect(container.querySelector('[role="dialog"]')!.textContent).toContain('Original message first'); expect(onSelect).not.toHaveBeenCalled()
-    await act(async () => container.querySelector<HTMLButtonElement>('[role="dialog"] > button')!.click()); expect(onSelect).toHaveBeenCalledWith('one'); expect(container.querySelector('[role="dialog"]')).toBeNull()
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Message"]')
+    expect(dialog).not.toBeNull()
+    expect(container.contains(dialog)).toBe(false)
+    expect(dialog!.textContent).toContain('Original message first'); expect(onSelect).not.toHaveBeenCalled()
+    const returnButton = [...dialog!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to Context')
+    expect(returnButton).toBeDefined()
+    await act(async () => returnButton!.click()); expect(onSelect).toHaveBeenCalledWith('one'); expect(document.querySelector('[role="dialog"][aria-label="Message"]')).toBeNull()
     const before = markers[1]
     await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [message('unrelated', 'unrelated')] } } })))
     expect(container.querySelector('[data-message-id="captured:second"]')).toBe(before)
