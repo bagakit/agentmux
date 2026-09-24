@@ -150,7 +150,7 @@ if(checkIndex>=0) {
   await validateEvidence(receipt,evidence)
   if(publishIndex>=0) {
     const published=resolve(root,args[publishIndex+1])
-    await mkdir(resolve(published,'..'),{recursive:true});await mkdir(published)
+    await mkdir(resolve(published,'..'),{recursive:true})
     await cp(evidence,published,{recursive:true,force:false,errorOnExist:true})
   }
   console.log(JSON.stringify({passed:true,evidence,aestheticReview:'not-performed',physicalDeviceTested:false}))
