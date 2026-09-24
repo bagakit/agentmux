@@ -1,4 +1,4 @@
-import { fixtureEpoch as upstreamFixtureEpoch, fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixtureEpoch, fixturePath } from '../helpers/fixture-values.js'
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -56,13 +56,13 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
     // step.begin / step.end: uuid
     // origin: { kind: 'user' }, { kind: 'system_trigger', name: 'stop_hook' }, { kind: 'injection', variant: '...' }
     const defaultLines = [
-      { type: 'metadata', protocol_version: '1.4', created_at: upstreamFixtureEpoch(1, 26359, 132) },
-      { type: 'config.update', profileName: 'agent', modelAlias: 'kimi-k2', thinkingLevel: 'high', time: upstreamFixtureEpoch(1, 26359, 132) },
+      { type: 'metadata', protocol_version: '1.4', created_at: fixtureEpoch(1, 26359, 132) },
+      { type: 'config.update', profileName: 'agent', modelAlias: 'kimi-k2', thinkingLevel: 'high', time: fixtureEpoch(1, 26359, 132) },
       {
         type: 'turn.prompt',
         input: [{ type: 'text', text: 'Can you analyze the system?' }],
         origin: { kind: 'user' },
-        time: upstreamFixtureEpoch(1, 26359, 160)
+        time: fixtureEpoch(1, 26359, 160)
       },
       {
         type: 'context.append_message',
@@ -71,7 +71,7 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           content: [{ type: 'text', text: 'Can you analyze the system?' }],
           origin: { kind: 'user' }
         },
-        time: upstreamFixtureEpoch(1, 26359, 164)
+        time: fixtureEpoch(1, 26359, 164)
       },
       {
         type: 'context.append_message',
@@ -80,7 +80,7 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           content: [{ type: 'text', text: 'Stop-hook auto continuation instruction' }],
           origin: { kind: 'system_trigger', name: 'stop_hook' }
         },
-        time: upstreamFixtureEpoch(1, 26359, 165)
+        time: fixtureEpoch(1, 26359, 165)
       },
       {
         type: 'context.append_message',
@@ -89,12 +89,12 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           content: [{ type: 'text', text: '<system-reminder>\nAuto permission mode is active.\n</system-reminder>' }],
           origin: { kind: 'injection', variant: 'permission_mode' }
         },
-        time: upstreamFixtureEpoch(1, 26359, 166)
+        time: fixtureEpoch(1, 26359, 166)
       },
       {
         type: 'context.append_loop_event',
         event: { type: 'step.begin', uuid: 'native-step-uuid-1' },
-        time: upstreamFixtureEpoch(1, 26359, 170)
+        time: fixtureEpoch(1, 26359, 170)
       },
       {
         type: 'context.append_loop_event',
@@ -102,7 +102,7 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           type: 'content.part',
           part: { type: 'think', think: 'Analyzing repository structure first.' }
         },
-        time: upstreamFixtureEpoch(1, 26359, 180)
+        time: fixtureEpoch(1, 26359, 180)
       },
       {
         type: 'context.append_loop_event',
@@ -110,7 +110,7 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           type: 'content.part',
           part: { type: 'text', text: 'I am inspecting ' }
         },
-        time: upstreamFixtureEpoch(1, 26359, 190)
+        time: fixtureEpoch(1, 26359, 190)
       },
       {
         type: 'context.append_loop_event',
@@ -118,7 +118,7 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           type: 'content.part',
           part: { type: 'text', text: 'the codebase.' }
         },
-        time: upstreamFixtureEpoch(1, 26359, 195)
+        time: fixtureEpoch(1, 26359, 195)
       },
       {
         type: 'context.append_loop_event',
@@ -129,7 +129,7 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           name: 'bash',
           args: '{"command":"ls -la"}'
         },
-        time: upstreamFixtureEpoch(1, 26359, 200)
+        time: fixtureEpoch(1, 26359, 200)
       },
       {
         type: 'context.append_loop_event',
@@ -138,19 +138,19 @@ async function createKimiFixture(options: KimiFixtureOptions = {}) {
           toolCallId: 'call_cmd1',
           result: { output: 'total 0\n-rw-r--r-- 1 root root 0', isError: false }
         },
-        time: upstreamFixtureEpoch(1, 26359, 210)
+        time: fixtureEpoch(1, 26359, 210)
       },
       {
         type: 'context.append_loop_event',
         event: { type: 'step.end', uuid: 'native-step-uuid-1', finishReason: 'end_turn' },
-        time: upstreamFixtureEpoch(1, 26359, 220)
+        time: fixtureEpoch(1, 26359, 220)
       },
       {
         type: 'usage.record',
         model: 'kimi-k2',
         usage: { inputOther: 20, output: 40, inputCacheRead: 0, inputCacheCreation: 0 },
         usageScope: 'turn',
-        time: upstreamFixtureEpoch(1, 26359, 225)
+        time: fixtureEpoch(1, 26359, 225)
       }
     ]
     await writeFile(wirePath, defaultLines.map((l) => JSON.stringify(l)).join('\n') + '\n')
@@ -255,7 +255,7 @@ describe('Kimi session analysis, trace completeness and production path', () => 
     // 1. Authentic User item verification (only proven origin.kind === 'user' gets user speaker)
     expect(userItem.kind).toBe('user-message')
     expect(userItem.contentParts).toEqual([{ kind: 'text', text: 'Can you analyze the system?' }])
-    expect(userItem.startedAt).toBe(upstreamFixtureEpoch(1, 26359, 164))
+    expect(userItem.startedAt).toBe(fixtureEpoch(1, 26359, 164))
 
     // 2. System trigger (stop_hook continuation) is neutral activity, NOT user speaker
     expect(triggerItem.kind).toBe('activity')
@@ -276,8 +276,8 @@ describe('Kimi session analysis, trace completeness and production path', () => 
     // 4. Assistant mixed trace: streaming chunks collapsed, think and tool events preserved in native order
     expect(assistantItem.kind).toBe('assistant-message')
     expect(assistantItem.id).toBe('native-step-uuid-1')
-    expect(assistantItem.startedAt).toBe(upstreamFixtureEpoch(1, 26359, 170))
-    expect(assistantItem.completedAt).toBe(upstreamFixtureEpoch(1, 26359, 220))
+    expect(assistantItem.startedAt).toBe(fixtureEpoch(1, 26359, 170))
+    expect(assistantItem.completedAt).toBe(fixtureEpoch(1, 26359, 220))
     expect(assistantItem.contentParts).toEqual([
       { kind: 'reasoning', text: 'Analyzing repository structure first.' },
       { kind: 'text', text: 'I am inspecting the codebase.' },
@@ -503,8 +503,8 @@ describe('Kimi session analysis, trace completeness and production path', () => 
     // specifically positioned to cross the 64KB reverse block boundary
     const paddingLine = JSON.stringify({
       sessionId: 'dummy-pad-session',
-      sessionDir: upstreamFixturePath("tmp/pad"),
-      workDir: upstreamFixturePath("tmp/测试工作区-中文路径-") + '字'.repeat(100)
+      sessionDir: fixturePath("tmp/pad"),
+      workDir: fixturePath("tmp/测试工作区-中文路径-") + '字'.repeat(100)
     }) + '\n'
 
     // Repeat enough to exceed 70KB
@@ -532,8 +532,8 @@ describe('Kimi session analysis, trace completeness and production path', () => 
 
     const staleEntry = JSON.stringify({
       sessionId: f.session.nativeHandle!.sessionId,
-      sessionDir: upstreamFixturePath("tmp/stale-old-dir"),
-      workDir: upstreamFixturePath("tmp/stale-old-work")
+      sessionDir: fixturePath("tmp/stale-old-dir"),
+      workDir: fixturePath("tmp/stale-old-work")
     }) + '\n'
 
     const latestEntry = JSON.stringify({
@@ -564,8 +564,8 @@ describe('Kimi session analysis, trace completeness and production path', () => 
 
     const paddingLine = JSON.stringify({
       sessionId: 'other-session-pad-id',
-      sessionDir: upstreamFixturePath("tmp/pad-dir"),
-      workDir: upstreamFixturePath("tmp/pad-work")
+      sessionDir: fixturePath("tmp/pad-dir"),
+      workDir: fixturePath("tmp/pad-work")
     }) + '\n'
 
     // 25,000 lines of ~88 bytes = ~2.2 MB padding
@@ -1065,5 +1065,104 @@ describe('Kimi session analysis, trace completeness and production path', () => 
         throw new Error('MUTATION_FAILED: collection was empty')
       }
     }).toThrow('MUTATION_FAILED')
+  })
+
+  it('proves hook and client invariants: Stop does not complete accepted turn, Error/Interrupt do not guess success, control counts non-empty and zero, identity frozen', async () => {
+    const f = await createKimiFixture()
+    const provider = new AgentProviderRegistry().get('kimi')
+
+    // 1. Controls are non-empty and zero calls
+    expect(f.controls.length).toBeGreaterThan(0)
+    for (const ctrl of f.controls) {
+      expect(ctrl).not.toHaveBeenCalled()
+    }
+
+    // 2. Stop arriving does NOT complete the accepted turn (semanticState working, lifecycleEvent null)
+    const stopHook = provider.normalizeHook({
+      receiptId: 'rcpt-stop',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'Stop',
+      payload: {
+        hook_event_name: 'Stop',
+        session_id: f.session.nativeHandle!.sessionId,
+        stop_hook_active: false
+      }
+    }, {})
+    expect(stopHook.semanticState).toBe('working')
+    expect(stopHook.lifecycleEvent).toBeNull()
+
+    // 3. Error and Interrupt do NOT guess success (done)
+    const failHook = provider.normalizeHook({
+      receiptId: 'rcpt-fail',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'StopFailure',
+      payload: {
+        hook_event_name: 'StopFailure',
+        session_id: f.session.nativeHandle!.sessionId,
+        error_type: 'TimeoutError',
+        error_message: 'Step timed out'
+      }
+    }, {})
+    expect(failHook.semanticState).toBe('unknown')
+    expect(failHook.lifecycleEvent).toBeNull()
+    expect(failHook.semanticState).not.toBe('done')
+
+    const interruptHook = provider.normalizeHook({
+      receiptId: 'rcpt-int',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'Interrupt',
+      payload: {
+        hook_event_name: 'Interrupt',
+        session_id: f.session.nativeHandle!.sessionId,
+        turn_id: 1,
+        reason: 'cancelled'
+      }
+    }, {})
+    expect(interruptHook.semanticState).toBe('unknown')
+    expect(interruptHook.lifecycleEvent).toBeNull()
+    expect(interruptHook.semanticState).not.toBe('done')
+
+    // 4. Session identity strictly frozen with no transcriptPath
+    expect(stopHook.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'kimi',
+      sessionId: f.session.nativeHandle!.sessionId
+    })
+    expect(stopHook.nativeHandle).not.toHaveProperty('transcriptPath')
+    expect(failHook.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'kimi',
+      sessionId: f.session.nativeHandle!.sessionId
+    })
+    expect(failHook.nativeHandle).not.toHaveProperty('transcriptPath')
+
+    // 5. Unverified extra data (e.g. agent_name: 'unknown-display-name') does NOT wipe nativeHandle
+    const extraHook = provider.normalizeHook({
+      receiptId: 'rcpt-extra',
+      agentSessionId: f.session.agentSessionId,
+      runId: f.session.run.runId,
+      providerId: 'kimi',
+      eventName: 'StopFailure',
+      payload: {
+        hook_event_name: 'StopFailure',
+        session_id: f.session.nativeHandle!.sessionId,
+        agent_name: 'unknown-display-name',
+        error_type: 'TimeoutError',
+        error_message: 'Step timed out'
+      }
+    }, {})
+    expect(extraHook.nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'kimi',
+      sessionId: f.session.nativeHandle!.sessionId
+    })
+    expect(extraHook.semanticState).toBe('unknown')
+    expect(extraHook.lifecycleEvent).toBeNull()
   })
 })
