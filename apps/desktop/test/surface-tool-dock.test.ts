@@ -291,6 +291,8 @@ function session(input: {
         ...common,
         kind: 'agent',
         providerId: 'codex',
+        agentSessionUpdatedAt: 1,
+        capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
         executorId: 'codex',
         control: {} as Extract<SessionSnapshot, { kind: 'agent' }>['control']
       }
@@ -303,8 +305,8 @@ function session(input: {
 }
 
 describe('shared surface tool dock resize', () => {
-  it('keeps Files, Agents and Browser as the three distinct Workspace tools', () => {
-    expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents', 'browser-tools'])
+  it('keeps Files and Agents as the Workspace tools', () => {
+    expect(WORKSPACE_TOOL_IDS).toEqual(['files-branches', 'agents'])
   })
 
   it('keeps every tool for Scratch and lands on the content slot (wiki-first, not Agents)', () => {
@@ -316,9 +318,9 @@ describe('shared surface tool dock resize', () => {
   })
 
   it('keeps a Scratch selection that is still valid instead of forcing the content slot', () => {
-    const scratch = resolveWorkspaceTools({ workspaceTool: 'browser-tools', isScratch: true })
+    const scratch = resolveWorkspaceTools({ workspaceTool: 'agents', isScratch: true })
     expect(scratch.tools).toEqual(WORKSPACE_TOOL_IDS)
-    expect(scratch.effective).toBe('browser-tools')
+    expect(scratch.effective).toBe('agents')
   })
 
   it('leaves a real project with every tool and its stored selection intact', () => {

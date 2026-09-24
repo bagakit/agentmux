@@ -4,7 +4,7 @@ import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { NotificationSettingsPane } from '../src/renderer/src/components/settings/NotificationSettingsPane'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
-import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
+import { SearchBrowserTools } from '../src/renderer/src/components/SearchBrowserTools'
 import { NOTIFICATION_TIERS, type NotificationModeId } from '../src/shared/notification-presentation'
 import { BROWSER_TOOLBAR_ITEM_ORDER } from '../src/shared/browser-toolbar'
 import { BROWSER_TOOLBAR_ITEM_LABELS } from '../src/renderer/src/lib/browser-toolbar'
@@ -40,7 +40,7 @@ async function ownerConsumer(overrides: Parameters<typeof configOwnerFixture>[0]
     publish(config)
     useAppStore.getState().setConfig(config)
   })
-  useAppStore.setState({ config: fixture.owner.current, workspaceTool: 'browser-tools', tabs: {}, browserAnnotationsByBrowserId: {} })
+  useAppStore.setState({ config: fixture.owner.current, tabs: {}, browserAnnotationsByBrowserId: {} })
   const save = vi.spyOn(api.config, 'save').mockImplementation((next, expected) => fixture.owner.edit(expected, next))
   return { ...fixture, uiSave: save }
 }
@@ -70,7 +70,7 @@ describe('ordinary preference drafts on actual consumers', () => {
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('notifications.mode')
     expect(modeValue()).toBe(NOTIFICATION_TIERS.findIndex((tier) => tier.id === 'brief'))
     expect(notificationSave().disabled).toBe(false)
-    expect(f.uiSave.mock.calls[0][1].notifications).toEqual({ mode: 'standard', sound: true })
+    expect(f.uiSave.mock.calls[0]![1]!.notifications).toEqual({ mode: 'standard', sound: true })
     expect(await f.bytes()).toBe(bytes)
     expect(f.publish).toHaveBeenCalledTimes(publications)
   })
@@ -110,9 +110,9 @@ describe('ordinary preference drafts on actual consumers', () => {
     expect(notificationSave().disabled).toBe(true)
   })
 
-  it('saves only authored toolbar fields through SurfaceToolDock while preserving external fields and remembered scheme answers', async () => {
+  it('saves only authored toolbar fields through SearchBrowserTools while preserving external fields and remembered scheme answers', async () => {
     const f = await ownerConsumer({ workspaces: [{ id: 'w', name: 'Private project', hostId: 'local', path: '/private', kind: 'folder' }] })
-    await dom.render(<SurfaceToolDock workspace={f.owner.current.workspaces[0]} />)
+    await dom.render(<SearchBrowserTools workspace={f.owner.current.workspaces[0]!} />)
     expect(BROWSER_TOOLBAR_ITEM_ORDER.length).toBeGreaterThan(1)
     const [first, second] = BROWSER_TOOLBAR_ITEM_ORDER
     await act(async () => toolbarInput(first).click())
@@ -124,8 +124,8 @@ describe('ordinary preference drafts on actual consumers', () => {
     expect(toolbarInput(second).checked).toBe(false)
     await dom.click('.browser-tools-preferences button')
     await committedSave(f)
-    expect(f.uiSave.mock.calls[0][1].browser.toolbar[first]).toBe(true)
-    expect(f.uiSave.mock.calls[0][1].browser.toolbar[second]).toBe(false)
+    expect(f.uiSave.mock.calls[0]![1]!.browser.toolbar[first]).toBe(true)
+    expect(f.uiSave.mock.calls[0]![1]!.browser.toolbar[second]).toBe(false)
     expect(f.owner.current.browser.appLinkSchemes).toEqual({ privateapp: 'deny' })
     expect(f.owner.current.browser.agentAutomation).toBe(false)
     expect((await f.disk()).browser).toEqual(f.owner.current.browser)
@@ -134,7 +134,7 @@ describe('ordinary preference drafts on actual consumers', () => {
 
   it('keeps a matching external toolbar value dirty until explicit Save acknowledges it without another commit', async () => {
     const f = await ownerConsumer({ workspaces: [{ id: 'w', name: 'Private project', hostId: 'local', path: '/private', kind: 'folder' }] })
-    await dom.render(<SurfaceToolDock workspace={f.owner.current.workspaces[0]} />)
+    await dom.render(<SearchBrowserTools workspace={f.owner.current.workspaces[0]!} />)
     const item = BROWSER_TOOLBAR_ITEM_ORDER[0]
     await act(async () => toolbarInput(item).click())
     await act(async () => { await f.owner.update((config) => ({ ...config, browser: { ...config.browser, toolbar: { ...config.browser.toolbar, [item]: false } } })) })
@@ -142,7 +142,7 @@ describe('ordinary preference drafts on actual consumers', () => {
     const bytes = await f.bytes(), publications = f.publish.mock.calls.length
     await dom.click('.browser-tools-preferences button')
     await committedSave(f)
-    expect(f.uiSave.mock.calls[0][1].browser.toolbar[item]).toBe(true)
+    expect(f.uiSave.mock.calls[0]![1]!.browser.toolbar[item]).toBe(true)
     expect(await f.bytes()).toBe(bytes)
     expect(f.publish).toHaveBeenCalledTimes(publications)
     expect(toolbarSave().disabled).toBe(true)
@@ -150,7 +150,7 @@ describe('ordinary preference drafts on actual consumers', () => {
 
   it('reports a failed toolbar save locally and keeps the original draft and expected fields for retry', async () => {
     const f = await ownerConsumer({ workspaces: [{ id: 'w', name: 'Private project', hostId: 'local', path: '/private', kind: 'folder' }] })
-    await dom.render(<SurfaceToolDock workspace={f.owner.current.workspaces[0]} />)
+    await dom.render(<SearchBrowserTools workspace={f.owner.current.workspaces[0]!} />)
     const item = BROWSER_TOOLBAR_ITEM_ORDER[0]
     await act(async () => toolbarInput(item).click())
     f.save.mockRejectedValueOnce(new Error('disk full'))

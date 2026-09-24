@@ -156,7 +156,13 @@ async function identity() {
       'apps/desktop/src/main/workspace-files.ts','apps/desktop/src/main/browser-page-dispatch.ts',
       'apps/desktop/src/shared/workspace-file-bytes.ts','packages/core/src/browser-page-capability.ts',
       'packages/core/src/control-host.ts','apps/desktop/scripts/verify-browser-files.mjs'] : []),
-    ...(browserToolsCase ? ['apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx',
+    ...(browserToolsCase ? ['apps/desktop/src/renderer/src/App.tsx',
+      'apps/desktop/src/renderer/src/components/GlobalSearchSurface.tsx','apps/desktop/src/renderer/src/components/SearchBrowserTools.tsx',
+      'apps/desktop/src/renderer/src/components/BrowserToolbarPreferences.tsx','apps/desktop/src/renderer/src/components/BrowserAnnotationsPanel.tsx',
+      'apps/desktop/src/renderer/src/components/SurfaceNavigation.tsx','apps/desktop/src/renderer/src/components/TopRowChrome.tsx',
+      'apps/desktop/src/renderer/src/lib/surface-tool-dock.ts','apps/desktop/src/shared/client-observation.ts',
+      'apps/desktop/src/renderer/src/styles/agent.css','apps/desktop/src/renderer/src/styles/browser.css','apps/desktop/src/renderer/src/styles/dock.css',
+      'apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx',
       'apps/desktop/src/renderer/src/components/BrowserProfilesPanel.tsx','apps/desktop/src/renderer/src/lib/browser-annotations.ts',
       'apps/desktop/src/main/browser-profile-store.ts','apps/desktop/src/main/browser-profile-manager.ts',
       'apps/desktop/src/main/config-owner.ts','apps/desktop/src/main/config-store.ts',
@@ -444,6 +450,7 @@ async function capture(probe, label, content = 'operations', pageUrl) {
         fields:Array.from(surface.querySelectorAll('.browser-structured-fields__values > div')).map(field=>({key:field.querySelector('dt')?.textContent,status:field.dataset.fieldStatus,text:field.querySelector('dd')?.textContent})),
         rawRange:surface.querySelector('.browser-structured-fields__range')?.textContent,rawCharacters:surface.querySelector('pre')?.textContent.length??0};})(),
       floatingContent:Array.from(document.body.children).filter(node=>node.id!=='root').flatMap(node=>[node,...node.querySelectorAll('[data-state="open"],[role="tooltip"],[role="dialog"],[role="menu"]')]).filter(visible).map(node=>({role:node.getAttribute('role'),state:node.getAttribute('data-state'),bounds:rect(node)})),
+      searchTools:(()=>{const search=Array.from(document.querySelectorAll('.global-search-surface')).find(visible);return search&&{bounds:rect(search),context:search.querySelector('.global-search-context > span')?.textContent,profiles:search.querySelectorAll('.browser-profiles__catalog article').length,annotations:search.querySelectorAll('.browser-annotations__list article').length};})(),
       focus:document.activeElement?.getAttribute('aria-label'),focusVisible:document.activeElement?.matches(':focus-visible')??false};
   })()`)
   observation.uiZoomFactor=await probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return BrowserWindow.getAllWindows()[0].webContents.getZoomFactor()})()`)
@@ -454,18 +461,32 @@ async function capture(probe, label, content = 'operations', pageUrl) {
   else if(content==='task-assets')assert.ok(observation.taskAsset?.id&&observation.taskAsset.steps.length>0&&Number(observation.taskAsset.version)>0,'Asset review must contain a real editable draft and saved version')
   else if(content==='structured-output')assert.ok(observation.rows.length>0&&observation.structured?.fields.length>0,'Structured review contains the actual selected operation and nonempty retained fields')
   else if(content==='operations')assert.ok(observation.rows.length>0,'Visual review must contain real operation steps')
+  let nativeBounds
+  if(content==='search-tools') {
+    assert.ok(observation.searchTools?.bounds.width>0&&observation.searchTools.bounds.height>0,'The real Search control surface has positive geometry')
+    assert.ok(observation.searchTools.profiles>0&&observation.searchTools.annotations>0,'Search review contains real nonempty data')
+    assert.equal(observation.stage,undefined,'The native Browser stage is parked while Search is visible')
+    nativeBounds=await waitFor('original native Browser owner parked during Search',()=>probe.main.evaluate(`(() => {
+      const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+      const views=BrowserWindow.getAllWindows()[0].contentView.children.filter(view=>view.webContents&&!view.webContents.isDestroyed()&&view.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)});
+      if(views.length!==1)return null;const view=views[0],bounds=view.getBounds();
+      return !view.getVisible()||bounds.width===0||bounds.height===0?[{browserUrl:view.webContents.getURL(),visible:view.getVisible(),bounds,webContentsId:view.webContents.id,parked:true}]:null;
+    })()`))
+    assert.equal(nativeBounds.length,1,'Search preserves the original unique native owner')
+  } else {
   assert.ok(observation.stage.width>0&&observation.stage.height>0,'The actual page keeps positive visible geometry')
   if(observation.trace)assert.ok(observation.stage.x+observation.stage.width<=observation.trace.x+1,'Trace does not overlay the native stage')
   else assert.ok(content==='overlay'||content==='page','Operation and demonstration review requires its actual details surface')
-  const nativeBounds=await waitFor('native page bounds inside the actual stage',async()=>{
+    nativeBounds=await waitFor('native page bounds inside the actual stage',async()=>{
     const bounds=await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
       return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&${pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"}).map(v=>v.getBounds()); })()`)
     const factor=observation.uiZoomFactor,s={x:observation.stage.x*factor,y:observation.stage.y*factor,width:observation.stage.width*factor,height:observation.stage.height*factor}
     return bounds.length===1&&bounds[0].width>0&&bounds[0].height>0&&bounds[0].x>=s.x-1&&bounds[0].y>=s.y-1&&
       bounds[0].x+bounds[0].width<=s.x+s.width+1&&bounds[0].y+bounds[0].height<=s.y+s.height+1?bounds:null
   })
+  }
   if (!receipt.visual.osFrames?.some(frame => frame.label === label)) {
-    await captureOsWindow({probe,desktopRoot,receipt},label)
+    await captureOsWindow({probe,desktopRoot,receipt,nativePageParked:content==='search-tools'},label)
   }
   const file=join(captureDirectory,`${label}.png`)
   const frame=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
@@ -473,12 +494,12 @@ async function capture(probe, label, content = 'operations', pageUrl) {
     const png=image.toPNG();process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(file)},png);
     return {captureSource:'renderer-webcontents',size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   const pageFile=join(captureDirectory,`${label}-native-page.png`)
-  const nativePage=await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+  const nativePage=content==='search-tools'?{captureSource:'native-browser-parked',owners:nativeBounds}:await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
     const view=BrowserWindow.getAllWindows()[0].contentView.children.find(v=>v.webContents&&!v.webContents.isDestroyed()&&${pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"});
     const image=await view.webContents.capturePage();if(image.isEmpty())throw new Error('Empty native page frame');const png=image.toPNG();
     process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {captureSource:'native-browser-webcontents',file:${JSON.stringify(pageFile)},bounds:view.getBounds(),size:image.getSize(),
       sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
-  receipt.visual.frames.push({label,file,...frame,observation,nativeBounds,nativePage})
+  receipt.visual.frames.push({label,content,file,...frame,observation,nativeBounds,nativePage})
 }
 async function openActivityTimeline(probe) {
   await click(probe.cdp,selectors('.browser-operation-status__trigger'))
@@ -742,10 +763,16 @@ try {
   await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
   first=await launch('first');phase='create-actual-browser-split'
   await click(first.cdp,selectors(`.project-rail-row[data-workspace-id="${workspaceId}"]`))
-  await click(first.cdp,selectors('[aria-label="Browser Tools"]'))
-  await click(first.cdp,selectors('[aria-label="New Browser"]'))
+  await click(first.cdp,selectors('[aria-label="Search: search and manage browsers"]'))
+  if(browserTools) {
+    await click(first.cdp,selectors('[aria-label="Search or enter a web address"]'))
+    await first.cdp.call('Input.insertText',{text:urls[0]})
+    await click(first.cdp,selectors('[aria-label="Search or open page"]'))
+    receipt.browserTools={queryOpenedInCurrentWorkspace:true}
+  } else await click(first.cdp,selectors('[aria-label="New Browser"]'))
   const initial=await waitFor('actual UI-created Browser Region',async()=>{const s=await state(first.cdp);if(!s)return null;return Object.values(s.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='browser'&&x.surface.workspaceId===workspaceId)})
-  await first.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.surface.browserId)},${JSON.stringify(urls[0])})`)
+  if(browserTools)assert.equal(initial.surface.url,urls[0],'Search creates the observed URL in the explicit current Workspace')
+  else await first.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.surface.browserId)},${JSON.stringify(urls[0])})`)
   await waitFor('actual first page before visual operation',()=>nativePages(first,[urls[0]]))
   // Observe genuine readiness; do not override the product's overlay/focus visibility decisions.
   await observeNativeFrameReady(first,urls[0])
@@ -771,8 +798,10 @@ try {
   if(downloadCase)await startUnfinishedDownload(first,initial.surface.browserId)
   if(demonstrationCase)await demonstration.startInterruptedDemonstration(scenarioContext(first,initial.surface.browserId,urls[0]))
   // The ordinary product quit path itself is the acceptance boundary. No manual flush or seed.
+  if(browserTools)await browserTools.prepareSearchRestart(scenarioContext(first,initial.surface.browserId,urls[0]))
   receipt.firstUi={expected,pages,...before};receipt.firstExit=await normalQuit(first)
   second=await launch('second');phase='actual-second-process-recovery'
+  if(browserTools)await browserTools.restoreSearchRestart(scenarioContext(second,initial.surface.browserId,urls[0]))
   const after=await actualWorkbench(second,expected), restoredPages=await nativePages(second,urls)
   assert.deepEqual(after.restored,before.restored)
   const ensure=await second.cdp.evaluate(`window.agentmux.browser.create(${JSON.stringify(expected.regions[0].browserId)},'http://127.0.0.1:1/stale')`)

@@ -5,7 +5,7 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-.browser-tools-panel { display: flex; flex-direction: column; gap:var(--sp-5); padding:var(--sp-3) var(--sp-4); }
+.browser-tools-panel { min-width: 0; display: flex; flex-direction: column; gap:var(--sp-5); padding:var(--sp-3) 0; }
 .browser-tools-panel > * { flex: none; }
 .browser-tools-panel > section + section { padding-top:var(--sp-5); border-top: 1px solid var(--line-soft); }
 .browser-tools-preferences { width: 100%; display: grid; gap:var(--sp-3); }

@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Globe2, LayoutDashboard, SquareTerminal, Users } from 'lucide-react'
+import { Search, LayoutDashboard, SquareTerminal, Users } from 'lucide-react'
 import { PmoTeamsTopicEntry } from './PmoTeamsTopicEntry'
 import type { MainSurface } from '../store'
 import { MOTE_TYPE_NAME } from '../../../shared/scratch-topics'
 
 export type SurfaceNavigationPlugin =
   | {
-      id: 'survey' | 'space' | 'focus' | 'goals'
+      id: 'search' | 'space' | 'focus' | 'goals'
       kind: 'surface'
       label: string
       ariaLabel: string
@@ -72,13 +72,13 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     surface: 'board'
   },
   {
-    id: 'survey',
+    id: 'search',
     kind: 'surface',
-    label: 'Survey',
-    ariaLabel: 'Survey: browse and verify information',
-    title: 'Survey — browse and verify information',
-    tooltip: 'Browse and verify information',
-    icon: Globe2,
-    surface: 'survey'
+    label: 'Search',
+    ariaLabel: 'Search: search and manage browsers',
+    title: 'Search — search and manage browsers',
+    tooltip: 'Search the web and manage browsers',
+    icon: Search,
+    surface: 'search'
   }
 ]

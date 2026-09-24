@@ -10,6 +10,7 @@ import { withBrowserToolbarItem } from '../src/renderer/src/lib/browser-toolbar.
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   return {
     state: {
       applyBrowserEvent: vi.fn(),
@@ -44,8 +45,8 @@ import {
   BrowserPane
 } from '../src/renderer/src/components/BrowserPane.js'
 import { api } from '../src/renderer/src/lib/api.js'
-import { BrowserToolbarPreferences } from '../src/renderer/src/components/SurfaceToolDock.js'
-import { BrowserAnnotationsPanel } from '../src/renderer/src/components/SurfaceToolDock.js'
+import { BrowserToolbarPreferences } from '../src/renderer/src/components/BrowserToolbarPreferences.js'
+import { BrowserAnnotationsPanel } from '../src/renderer/src/components/BrowserAnnotationsPanel.js'
 
 const config: AppConfig = {
   version: 9,
@@ -144,6 +145,15 @@ beforeEach(() => {
   fixture.state.config = structuredClone(config)
 })
 
+async function openActivityMenu(container: HTMLElement): Promise<HTMLElement> {
+  const trigger = container.querySelector<HTMLButtonElement>('.browser-operation-status__trigger')!
+  expect(trigger).not.toBeNull()
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  const menu = document.querySelector<HTMLElement>('.browser-operation-menu')!
+  expect(menu).not.toBeNull()
+  return menu
+}
+
 describe('Browser bar contract', () => {
   it('rejects a capture returned for a Browser identity that is no longer current', () => {
     expect(browserCaptureMatchesIdentity(
@@ -214,7 +224,7 @@ describe('Browser bar contract', () => {
     const markup = renderToStaticMarkup(<BrowserPane tab={{ ...tab, driving: true }} visible />)
     expect(markup).toContain('Agent control active')
     expect(markup).toContain('Activity details are loading')
-    expect(markup).toContain('role="status"')
+    expect(markup).toContain('aria-label="Browser activity: Agent control active · Activity details are loading"')
     expect(markup).not.toContain('browser-control-status')
     expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent control active')
   })
@@ -251,11 +261,13 @@ describe('Browser bar contract', () => {
     document.body.appendChild(container)
     const root = createRoot(container)
     await act(async () => root.render(<BrowserPane tab={activeTab} visible />))
-    expect(container.textContent).toContain('Take control')
-    const takeControlButton = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Take control'))
+    let menu = await openActivityMenu(container)
+    expect(menu.textContent).toContain('Take control')
+    const takeControlButton = [...menu.querySelectorAll('[role="menuitem"]')].find((button) => button.textContent?.includes('Take control'))
     expect(takeControlButton).not.toBeUndefined()
     await act(async () => takeControlButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    const stop = container.querySelector('button[aria-label="Stop browser operation"]')
+    menu = await openActivityMenu(container)
+    const stop = menu.querySelector('[aria-label="Stop browser operation"]')
     expect(stop).not.toBeNull()
     await act(async () => stop!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     // 两次点击（Take control 与 Stop）各发一条协议请求，且都按 operationId。钉死整份参数而不是
@@ -277,7 +289,8 @@ describe('Browser bar contract', () => {
     document.body.appendChild(container)
     const root = createRoot(container)
     await act(async () => root.render(<BrowserPane tab={tab} visible />))
-    const openHistory = container.querySelector('button[aria-label="Open browser activity timeline"]')
+    const menu = await openActivityMenu(container)
+    const openHistory = menu.querySelector('[aria-label="Open browser activity timeline"]')
     expect(openHistory).not.toBeNull()
     await act(async () => openHistory!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(fixture.state.executeControl.mock.calls.map(([request]) => (request as Record<string, unknown>).operation),
@@ -336,7 +349,8 @@ describe('Browser bar contract', () => {
     expect(markup).toContain('Check this control')
     expect(markup).toContain('Page changed · annotation is stale')
     expect(markup).toContain('value="ready-agent"')
-    expect(markup).not.toContain('value="offline-agent"')
+    // An offline Agent remains a recoverable Composer destination (AGENTS.md principle 11).
+    expect(markup).toContain('value="offline-agent"')
     expect(markup).toContain('Add to Composer')
   })
 

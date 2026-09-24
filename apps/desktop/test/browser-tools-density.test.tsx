@@ -12,20 +12,20 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   return { state: {
-    workspaceTool: 'browser-tools', projectRailOpen: true, toolsOpen: true, mainSurface: 'workbench',
+    projectRailOpen: true, toolsOpen: true, mainSurface: 'search',
     activeWorkspaceId: 'workspace-tools', toggleProjectRail: vi.fn(), toggleTools: vi.fn(),
     layouts: {} as Record<string, { activeGroupId?: string }>, config: null as AppConfig | null,
     sessions: [] as SessionSnapshot[], tabs: {} as Record<string, WorkbenchTab>,
     browserAnnotationsByBrowserId: {} as Record<string, BrowserAnnotation[]>,
-    setWorkspaceTool: vi.fn(), createBrowser: vi.fn(async (_groupId: string) => {}), selectSession: vi.fn(),
+    selectWorkspace: vi.fn(async (_workspaceId: string) => {}), createBrowser: vi.fn(async (_groupId: string, _launcher?: unknown, _url?: string) => {}), selectSession: vi.fn(),
     deleteBrowserAnnotation: vi.fn(), clearBrowserAnnotations: vi.fn(), appendAgentComposerDraft: vi.fn()
   } }
 })
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state })
+    { getState: () => fixture.state, getInitialState: () => fixture.state, subscribe: () => () => {} })
 }))
-import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock.js'
+import { GlobalSearchSurface } from '../src/renderer/src/components/GlobalSearchSurface.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
@@ -74,7 +74,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
-async function mount() { await act(async () => root.render(<SurfaceToolDock workspace={workspace} />)) }
+async function mount() { await act(async () => root.render(<GlobalSearchSurface />)) }
 async function click(element: Element | null) {
   expect(element).not.toBeNull(); await act(async () => (element as HTMLElement).click())
 }
@@ -88,12 +88,12 @@ async function input(element: HTMLInputElement, value: string) {
   })
 }
 
-it('mounts one creation entry in existing chrome and nonempty flat sections without an introduction or cards', async () => {
+it('mounts one creation entry beside the current Workspace and nonempty flat sections without an introduction or cards', async () => {
   await mount()
   const content = container.querySelector('.browser-tools-panel')!
   expect(content).not.toBeNull()
   expect(container.querySelectorAll('[aria-label="New Browser"]')).toHaveLength(1)
-  expect(container.querySelector('[aria-label="New Browser"]')?.closest('.surface-tool-activitybar')).not.toBeNull()
+  expect(container.querySelector('[aria-label="New Browser"]')?.closest('.global-search-context')).not.toBeNull()
   expect(content.querySelector('h2')).toBeNull()
   expect(content.textContent).not.toContain('Open a browser tab')
   expect(content.textContent).not.toContain('Main-owned')
@@ -125,13 +125,13 @@ it('creates in the focused pane once, preserves busy state, and shows a persiste
   await mount()
   const create = container.querySelector<HTMLButtonElement>('[aria-label="New Browser"]')!
   await click(create)
-  expect(fixture.state.createBrowser).toHaveBeenCalledExactlyOnceWith('pane-tools')
+  expect(fixture.state.createBrowser).toHaveBeenCalledExactlyOnceWith('pane-tools', undefined, 'about:blank')
   expect(create.disabled).toBe(true)
   await act(async () => release())
   expect(create.disabled).toBe(false)
   fixture.state.createBrowser.mockRejectedValueOnce(new Error('Browser could not open; retry here'))
   await click(create)
-  expect(container.querySelector('.browser-tools-panel > [role="alert"]')?.textContent).toContain('Browser could not open; retry here')
+  expect(container.querySelector('.global-search-error[role="alert"]')?.textContent).toContain('Browser could not open; retry here')
 })
 
 it('keeps explicit save and its CAS expectation; failure and dirty draft remain visible when settings collapse', async () => {
@@ -198,4 +198,20 @@ it('shows real unavailable import and Agent states without hiding notes or faili
   await click(container.querySelector('.browser-profiles__import-open'))
   expect(container.querySelector('[aria-label="Import Browser Profile"]')?.textContent).toContain('No supported Browser Profiles were detected')
   expect(container.querySelector('[aria-label="Import Browser Profile"] .primary-button')).toBeNull()
+})
+
+
+it('scopes notes and Profile switches to the current Workspace and keeps global Profile usage protection', async () => {
+  const elsewhere = { ...browser, id: 'browser-elsewhere', browserId: 'browser-elsewhere', regionId: 'region-elsewhere', workspaceId: 'elsewhere', profileId: 'work', title: 'Other workspace page' }
+  fixture.state.tabs.elsewhere = createWorkbenchTab('tab-elsewhere', elsewhere)
+  fixture.state.browserAnnotationsByBrowserId.elsewhere = [{ ...annotation, id: 'elsewhere-note', workspaceId: 'elsewhere', note: 'Not this Workspace' }]
+  fixture.state.sessions.push({ ...agent('agent-elsewhere'), workspacePath: '/elsewhere' })
+  await mount()
+  expect([...container.querySelectorAll('.browser-profiles__browsers label strong')].map(node => node.textContent)).toEqual(['Current page'])
+  expect(container.querySelector<HTMLButtonElement>('[aria-label="Delete Work"]')?.disabled).toBe(true)
+  expect([...container.querySelectorAll('.browser-annotations__list article')].map(node => ({ stale: node.classList.contains('stale'), text: node.querySelector('small')?.textContent }))).toEqual([
+    { stale: false, text: 'Current page note' }, { stale: true, text: 'Page changed · annotation is stale' }
+  ])
+  expect([...container.querySelectorAll('.browser-annotations select option')].map(node => node.getAttribute('value'))).toEqual(['', 'agent-1', 'agent-2'])
+  expect(container.textContent).not.toContain('Not this Workspace')
 })

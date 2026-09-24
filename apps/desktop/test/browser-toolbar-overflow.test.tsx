@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   return { state: {
-    applyBrowserEvent: vi.fn(), reportError: vi.fn(), setWorkspaceTool: vi.fn(),
+    applyBrowserEvent: vi.fn(), reportError: vi.fn(), selectWorkspace: vi.fn(async () => {}), setMainSurface: vi.fn(),
     executeControl: vi.fn(async (_request: { operation: string; browserId?: string }) => ({ operation: 'browser.history', operations: [] })),
     saveBrowserBookmark: vi.fn(async () => 'Page.webloc'), openFile: vi.fn(async () => {}),
     browserAnnotationsByBrowserId: {}, addBrowserAnnotation: vi.fn(), toolsOpen: false,
@@ -130,4 +130,24 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
   expect(source).toContain('flex: 0 0 min(clamp(248px, 26%, 340px), 50%);')
   expect(source).toContain('.browser-trace-rail .browser-rsi-history__actions { flex: none; }')
   expect(source).toContain('.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }')
+})
+
+
+it('routes the real More management action to Search in its Browser Workspace without creating a new owner', async () => {
+  const create = vi.spyOn(api.browser, 'create')
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<BrowserPane tab={tab} visible />))
+    const menu = await openMore(container)
+    const entry = menu.querySelector('[aria-label="Browser tools in Search"]')!
+    expect(entry).not.toBeNull()
+    expect(entry.textContent).toBe('Browser tools in Search…')
+    await act(async () => entry.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(fixture.state.selectWorkspace).toHaveBeenCalledExactlyOnceWith(tab.workspaceId)
+    expect(fixture.state.setMainSurface).toHaveBeenCalledExactlyOnceWith('search')
+    expect(fixture.state.selectWorkspace.mock.invocationCallOrder[0]).toBeLessThan(fixture.state.setMainSurface.mock.invocationCallOrder[0]!)
+    expect(create).not.toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
 })
