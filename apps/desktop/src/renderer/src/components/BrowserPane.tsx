@@ -837,9 +837,8 @@ export function BrowserPane({
           </DropdownMenu.Root>
       </form>
       <BrowserOperationWarning activity={browserActivity} />
-      {/* 页面与轨迹是左右两块，不是上下两块。原生 WebContentsView 的矩形取自 `.browser-stage`
-          的 getBoundingClientRect（见上面那个 ResizeObserver），所以轨迹 rail 作为 flex 兄弟把
-          stage 挤窄时，原生视图会跟着收——轨迹不是盖在页面上，是页面真的让出了那条竖带。 */}
+      {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。
+          原生 WebContentsView 跟随 stage 的真实矩形，详情不覆盖页面。 */}
       {annotationSync.notice ? <div>
         <ServiceWindowNotice notice={annotationSync.notice} />
         {annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null}

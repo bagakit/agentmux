@@ -173,20 +173,20 @@
 .browser-app-link-prompt__remember { display: flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .browser-app-link-prompt__actions { display: flex; gap:var(--sp-3); margin-top:var(--sp-1); }
 
-/* 轨迹占页面右侧一条竖带（见 surface-density「Browser RSI 操作表面」）。堆在页面下方时它与
-   页面抢同一条纵轴：页面被往上挤，轨迹自己只剩一条窄缝，读不成一条轨迹。这里让出的是横向
-   空间，而 `.browser-stage` 的矩形就是原生 WebContentsView 的矩形——rail 挤窄 stage，原生
-   视图跟着收，页面不是被盖住，是真的让出了这条带。 */
+/* 正常轨迹占页面一侧；极窄 Pane 的显式详情沿 SSOT 下方阅读区例外。
+   两种布局都由真实 stage 矩形让出空间，原生页面不被详情覆盖。 */
 .browser-trace-rail { flex: 0 0 min(clamp(248px, 26%, 340px), 50%); min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; border-left: 1px solid var(--line); background: var(--surface-0); }
 /* rail 里这三块是同一条轨迹的三段，不是三张卡片：去掉各自的外框与圆角，只留一条分界发丝线，
    竖读下来是一条连续的脊，而不是三个盒子摞在一起。 */
 .browser-trace-rail > * { flex: none; border: 0; border-radius: 0; background: transparent; }
 .browser-trace-rail > * + * { border-top: 1px solid var(--line-soft); }
 .browser-trace-rail .browser-rsi-timeline { flex: 1 1 auto; min-height: 0; }
-.browser-trace-rail .browser-rsi-history__actions { flex: none; }
-.browser-trace-rail :is(.browser-demonstration-entry, .browser-task-asset-entry) > .browser-rsi-button { max-width: 100%; white-space: normal; }
 /* Keep edge actions clear of the overlay scrollbar at their full hit size. */
 .browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }
 
+@container browser-pane (max-width: 380px) {
+  .browser-body { flex-direction: column; }
+  .browser-trace-rail { flex: 0 1 min(44%, 240px); max-height: 44%; width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+}
 
 .browser-surface > .browser-toolbar { flex: 0 0 38px; }
