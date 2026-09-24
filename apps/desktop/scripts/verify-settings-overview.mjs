@@ -79,11 +79,17 @@ async function run(id, mutant=null, mode='full') {
   const directory=path.join(evidence,id), output=path.join(privateRoot,id)
   await fs.mkdir(directory)
   let consumed=0
-  const privateCSS = mutant?.file===cssFile ? path.join(privateRoot,id+'-source','settings-overview.css') : null
-  if (privateCSS) { await fs.mkdir(path.dirname(privateCSS),{recursive:true}); await fs.writeFile(privateCSS,mutant.mutated) }
+  let privateCSS = mutant?.file===cssFile ? path.join(privateRoot,id+'-source','settings-overview.css') : null
+  if (privateCSS) {
+    await fs.mkdir(path.dirname(privateCSS),{recursive:true})
+    await fs.writeFile(privateCSS,mutant.mutated)
+    // PostCSS reports canonical paths; macOS /var and /private/var identify the same file.
+    privateCSS = await fs.realpath(privateCSS)
+  }
   const aliases=Array.isArray(config.resolve.alias)?config.resolve.alias:Object.entries(config.resolve.alias).map(([find,replacement])=>({find,replacement}))
   const resolve={...config.resolve,alias:privateCSS?[{find:'./settings-overview.css',replacement:privateCSS},...aliases]:aliases}
   let owningCSSLoads=0
+  const loadedCSSFiles=new Set()
   await build({ configFile:false, root:fixture, base:'./', logLevel:'error',
     resolve, define:{ __AGENTMUX_WEB_PREVIEW__:'true' },
     css:{postcss:{plugins:[{postcssPlugin:'actual-overview-css-source-binding',async OnceExit(cssTree) {
@@ -91,6 +97,7 @@ async function run(id, mutant=null, mode='full') {
       cssTree.walk(n=>{const input=n.source?.input;if(input?.file)loaded.set(input.file,input.css)})
       assert.ok(loaded.size>0,'Actual stylesheet import scan is nonempty')
       for (const [filename,source] of loaded) {
+        loadedCSSFiles.add(filename)
         await bind(filename)
         if (filename===(privateCSS??cssFile)) {
           assert.equal(source,privateCSS?mutant.mutated:css,'Actual owning stylesheet bytes were loaded')
@@ -112,6 +119,7 @@ async function run(id, mutant=null, mode='full') {
     }}],
     build:{ outDir:output,emptyOutDir:true,minify:false,target:'esnext' }
   })
+  await fs.writeFile(path.join(directory,'loaded-css-sources.json'),JSON.stringify({privateCSS,owningCSSLoads,consumed,files:[...loadedCSSFiles]},null,2))
   assert.equal(owningCSSLoads,1,'One actual Overview stylesheet import')
   if (mutant) assert.equal(consumed,1,'Actual owning mutation loaded exactly once')
   const compiled=await files(output)
