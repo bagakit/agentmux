@@ -20,7 +20,7 @@ const q = JSON.stringify
 const surface = '[aria-label="Editable Browser task asset"]'
 const state = ctx => ctx.probe.cdp.evaluate(`window.agentmux.browser.getTaskAssets(${q(ctx.browserId)})`)
 const buttons = (ctx, label) => `${ctx.selectors(surface + ' button')}.filter(element=>element.textContent.trim()===${q(label)})`
-const browser = ctx => `.browser-surface:has(.browser-operation-status[data-task-run-id="${ctx.receipt.localRecovery.run.id}"])`
+const browser = ctx => `.browser-surface:has([data-native-browser-stage=${q(ctx.browserId)}])`
 
 async function operation(ctx, id) {
   const document = JSON.parse(await readFile(join(ctx.userData, 'browser-operation-journal.json'), 'utf8'))
@@ -105,23 +105,33 @@ async function currentNativeOwner(ctx) {
 }
 
 async function showDiagnostic(ctx, actual, diagnostic, label) {
-  const owned = selector => `${ctx.selectors(selector)}.filter(element=>element.closest('.browser-surface')?.querySelector('.browser-operation-status')?.dataset.taskRunId===${q(ctx.receipt.localRecovery.run.id)})`
+  const owned = selector => ctx.selectors(browser(ctx) + ' ' + selector)
+  const timeline = `${browser(ctx)} .browser-rsi-timeline[data-operation-id=${q(actual.id)}]`
   if (!await ctx.probe.cdp.evaluate(`(${owned('[aria-label="Browser operation history"]')}).length===1`)) {
     await ctx.click(ctx.probe.cdp, owned('.browser-operation-status__trigger'))
-    await ctx.click(ctx.probe.cdp, ctx.selectors('[aria-label="Open browser activity timeline"]'))
+    const menuId = await ctx.waitFor('the original Browser activity trigger owns its actual portal', () => ctx.probe.cdp.evaluate(`(()=>{
+      const triggers=${owned('.browser-operation-status__trigger')};if(triggers.length!==1)return null;
+      const trigger=triggers[0],id=trigger.getAttribute('aria-controls');if(!trigger.id||!id)return null;
+      const menus=Array.from(document.querySelectorAll('[id]')).filter(menu=>menu.id===id&&menu.getAttribute('aria-labelledby')===trigger.id);
+      return menus.length===1?id:null;
+    })()`))
+    await ctx.click(ctx.probe.cdp, ctx.selectors(`[id=${q(menuId)}] [aria-label="Open browser activity timeline"]`))
   }
   const timestamp = new Date(actual.startedAt).toISOString()
   await ctx.click(ctx.probe.cdp, `${owned('.browser-rsi-history__item')}.filter(element=>element.querySelector('time')?.dateTime===${q(timestamp)})`)
-  await ctx.waitFor('original native failure selected in the existing activity timeline', () => ctx.probe.cdp.evaluate(`Boolean(document.querySelector('.browser-rsi-timeline[data-operation-id="${actual.id}"]'))`))
-  await ctx.click(ctx.probe.cdp, ctx.selectors(`.browser-rsi-timeline[data-operation-id="${actual.id}"] [data-sequence="${diagnostic.step.sequence}"] .browser-rsi-timeline__step-button`))
+  await ctx.waitFor('original native failure selected in the existing activity timeline', () => ctx.probe.cdp.evaluate(`Boolean(document.querySelector(${q(timeline)}))`))
+  await ctx.click(ctx.probe.cdp, ctx.selectors(`${timeline} [data-sequence="${diagnostic.step.sequence}"] .browser-rsi-timeline__step-button`))
   const ui = await ctx.waitFor('final recovery goal and budget readable in the real evidence UI', () => ctx.probe.cdp.evaluate(`(()=>{
-    const root=document.querySelector(${q(browser(ctx) + ' .browser-step-evidence')}),paragraphs=Array.from(root?.querySelectorAll('p')??[]),message=paragraphs.find(item=>item.textContent===${q(diagnostic.item.content.message)});
+    const root=document.querySelector(${q(browser(ctx) + ' .browser-step-evidence')}),paragraphs=Array.from(root?.querySelectorAll('p')??[]),message=paragraphs.find(item=>item.textContent===${q(diagnostic.item.content.message)}),nextAction=paragraphs.find(item=>item.textContent===${q(diagnostic.item.content.nextAction)});
     if(!message||!message.getClientRects().length||getComputedStyle(message).visibility==='hidden')return null;
+    if(!nextAction||!nextAction.getClientRects().length||getComputedStyle(nextAction).visibility==='hidden')return null;
     message.scrollIntoView({block:'nearest'});
     const rect=message.getBoundingClientRect(),rail=message.closest('.browser-trace-rail');if(!rail)return null;
     const r=rail.getBoundingClientRect(),left=Math.max(rect.x,r.x,0),top=Math.max(rect.y,r.y,0),right=Math.min(rect.right,r.right,innerWidth),bottom=Math.min(rect.bottom,r.bottom,innerHeight);
     if(right<=left||bottom<=top)return null;
-    return {intersection:{x:left,y:top,width:right-left,height:bottom-top},text:message.textContent,nextAction:paragraphs.find(item=>item.textContent===${q(diagnostic.item.content.nextAction)})?.textContent,bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},operationId:document.querySelector('.browser-rsi-timeline')?.dataset.operationId};
+    const nextRect=nextAction.getBoundingClientRect(),nextLeft=Math.max(nextRect.x,r.x,0),nextTop=Math.max(nextRect.y,r.y,0),nextRight=Math.min(nextRect.right,r.right,innerWidth),nextBottom=Math.min(nextRect.bottom,r.bottom,innerHeight);
+    if(nextRight<=nextLeft||nextBottom<=nextTop)return null;
+    return {intersection:{x:left,y:top,width:right-left,height:bottom-top},text:message.textContent,nextAction:nextAction.textContent,nextActionIntersection:{x:nextLeft,y:nextTop,width:nextRight-nextLeft,height:nextBottom-nextTop},nextActionBounds:{x:nextRect.x,y:nextRect.y,width:nextRect.width,height:nextRect.height},bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},operationId:document.querySelector(${q(browser(ctx) + ' .browser-rsi-timeline')})?.dataset.operationId};
   })()`))
   assert.equal(ui.operationId, actual.id); assert.equal(ui.nextAction, diagnostic.item.content.nextAction)
   assert.ok(ui.bounds.width > 0 && ui.bounds.height > 0)
@@ -172,7 +182,22 @@ export async function reviewLocalRecovery(ctx) {
   } finally { observed.observation = await finishObservation(ctx) }
   assert.equal(observed.observation.destroyed, false)
   assert.equal(observed.run.operationIds.length, 1)
-  assert.equal(observed.run.nextStep, kind === 'locator' ? 1 : 0)
+  const versions = saved.versions.filter(version => version.version === observed.run.version)
+  assert.equal(versions.length, 1, 'The actual run must select one saved version')
+  const version = versions[0]
+  assert.equal(observed.run.assetId, saved.id)
+  assert.equal(observed.run.browserId, saved.browserId)
+  assert.deepEqual(version.steps.map(step => step.kind), [kind === 'locator' ? 'click' : 'navigate', 'checkpoint'])
+  assert.equal(observed.run.status, kind === 'locator' ? 'waiting-human' : 'failed')
+  if (kind === 'locator') {
+    assert.equal(observed.run.nextStep, version.steps.length, 'The saved checkpoint has already consumed its step')
+    const consumed = version.steps[observed.run.nextStep - 1]
+    assert.equal(consumed.kind, 'checkpoint')
+    assert.equal(observed.run.pendingCheckpointId, consumed.id, 'Pending checkpoint must bind the consumed saved step')
+  } else {
+    assert.equal(observed.run.nextStep, 0, 'Failed navigation must retain its original cursor')
+    assert.equal(observed.run.pendingCheckpointId, undefined, 'Failed navigation cannot consume its checkpoint')
+  }
   const actual = await operation(ctx, observed.run.operationIds[0])
   assert.deepEqual(actual.outcome.registration.assetRun, { runId: observed.run.id, assetId: saved.id, version: 1 })
   observed.operationId = actual.id
