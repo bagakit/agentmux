@@ -1,5 +1,5 @@
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
-import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_POINTER_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
+import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
@@ -235,9 +235,9 @@ export async function registerIpc(args: {
   const warnNativeChrome = (warning: string): void => {
     if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, warning)
   }
-  const nativeChrome = new NativeOverlaySurfaces(args.window, () => browsers.visibleNativeBounds(), warnNativeChrome,
-    point => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_POINTER_CHANNEL, point) })
-  browsers.onNativePointer = (bounds, input) => nativeChrome.forwardBrowserPointer(bounds, input)
+  const nativeChrome = new NativeOverlaySurfaces(args.window, browsers, warnNativeChrome,
+    input => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input) })
+  browsers.onNativeInput = (owner, input) => nativeChrome.forwardBrowserInput(owner, input)
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     processOwners: () => ({
@@ -1064,7 +1064,7 @@ export async function registerIpc(args: {
         releaseResourceObservation()
       },
       () => notifier.dispose(),
-      () => { browsers.onNativePointer = undefined; nativeChrome.dispose() },
+      () => { browsers.onNativeInput = undefined; nativeChrome.dispose() },
       () => browsers.dispose(),
       async () => await browserProfiles.dispose(),
       async () => await fileObservations.dispose(),

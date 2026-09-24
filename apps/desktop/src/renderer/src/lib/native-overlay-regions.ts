@@ -1,4 +1,4 @@
-import type { NativeBrowserPointer, NativeOverlayRegion } from '../../../shared/native-overlay'
+import type { NativeBrowserInput, NativeOverlayRegion } from '../../../shared/native-overlay'
 import { NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT } from '../../../shared/native-overlay'
 import { rendererCssBoundsToWindowDip } from './browser-bounds-sync'
 
@@ -9,12 +9,15 @@ export function observeNativeOverlayRegions(
   body: HTMLElement,
   zoomFactor: () => number,
   publish: (regions: NativeOverlayRegion[], warning?: string) => void
-): { dispose(): void; dismissAtPoint(point: NativeBrowserPointer): void } {
+): { dispose(): void; handleNativeInput(input: NativeBrowserInput): void } {
   const ids = new WeakMap<Element, string>()
   let nextId = 0
   let disposed = false
   let frame = 0
   let watched: Element[] = []
+  let geometry: Element[] = []
+  let hoveredStage: Element | undefined
+  let hoveredFloat: Element | undefined
   const topLayers = new Set<Element>()
   const topLayerSources = new WeakMap<Element, Element>()
   const win = body.ownerDocument.defaultView!
@@ -41,6 +44,7 @@ export function observeNativeOverlayRegions(
     const floats = candidates.filter(node => !candidates.some(parent => parent !== node && parent.contains(node)))
     const regions: NativeOverlayRegion[] = []
     const activeFloats: Element[] = []
+    const stages: Element[] = []
     let pixels = 0
     let warning: string | undefined
     for (const node of floats) {
@@ -73,13 +77,23 @@ export function observeNativeOverlayRegions(
       pixels += cost
       let id = ids.get(node)
       if (!id) { id = `chrome-${++nextId}`; ids.set(node, id) }
-      regions.push({ id, bounds, radius: (Number.parseFloat(style.borderTopLeftRadius) || 0) * zoomFactor(), ...(emptyScrim ? { scrim: style.backgroundColor } : {}) })
+      const browserStages = Array.from(node.querySelectorAll('[data-native-browser-stage]')).flatMap(stage => {
+        const browserId = stage.getAttribute('data-native-browser-stage'), box = stage.getBoundingClientRect()
+        if (!browserId || box.width <= 0 || box.height <= 0) return []
+        stages.push(stage)
+        return [{ browserId, bounds: rendererCssBoundsToWindowDip(box, zoomFactor()) }]
+      })
+      regions.push({ id, bounds, radius: (Number.parseFloat(style.borderTopLeftRadius) || 0) * zoomFactor(),
+        ...(emptyScrim ? { scrim: style.backgroundColor } : {}), ...(browserStages.length ? { browserStages } : {}) })
     }
-    if (watched.length !== activeFloats.length || watched.some((node, index) => node !== activeFloats[index])) {
+    const observed = [...activeFloats, ...stages]
+    if (geometry.length !== observed.length || geometry.some((node, index) => node !== observed[index])) {
       resize.disconnect()
-      for (const node of activeFloats) resize.observe(node)
-      watched = activeFloats
+      for (const node of observed) resize.observe(node)
+      geometry = observed
     }
+    watched = activeFloats
+    if (hoveredFloat && !watched.includes(hoveredFloat)) { hoveredFloat = undefined; hoveredStage = undefined }
     publish(regions, warning)
   }
   const schedule = (): void => {
@@ -94,14 +108,23 @@ export function observeNativeOverlayRegions(
     observer.observe(body, { childList: true })
     for (const portal of portals()) observer.observe(portal, {
       subtree: true, childList: true, characterData: true, attributes: true,
-      attributeFilter: ['data-state', 'style', 'class', 'aria-expanded', 'aria-disabled']
+      attributeFilter: ['data-state', 'style', 'class', 'aria-expanded', 'aria-disabled', 'data-native-browser-stage']
     })
     // HTML popovers live in the native DOM top layer, often inside #root. Observe only the opened
     // target named by the toggle event, never terminal/editor content or a whole-document scan.
     for (const node of topLayers) if (node.isConnected) observer.observe(node, {
       subtree: true, childList: true, characterData: true, attributes: true,
-      attributeFilter: ['data-state', 'style', 'class', 'aria-expanded', 'aria-disabled']
+      attributeFilter: ['data-state', 'style', 'class', 'aria-expanded', 'aria-disabled', 'data-native-browser-stage']
     })
+  }
+  // The same mounted float can close and reopen between capture frames. Its original
+  // DOM leave/close is authoritative even while its sibling native page still has input.
+  const clearHover = (): void => { hoveredFloat = undefined; hoveredStage = undefined }
+  const onPointerLeave = (event: Event): void => {
+    if (event.target === hoveredFloat || event.target === hoveredStage) clearHover()
+  }
+  const onBeforeToggle = (event: Event): void => {
+    if ((event as ToggleEvent).newState === 'closed' && event.target === hoveredFloat) clearHover()
   }
   const onToggle = (event: Event): void => {
     const target = event.target
@@ -115,6 +138,7 @@ export function observeNativeOverlayRegions(
     } else {
       topLayers.delete(target)
       topLayerSources.delete(target)
+      if (target === hoveredFloat) clearHover()
     }
     bind()
     schedule()
@@ -131,29 +155,77 @@ export function observeNativeOverlayRegions(
   win.addEventListener('resize', schedule)
   win.addEventListener('scroll', onScroll, true)
   body.addEventListener('toggle', onToggle, true)
+  body.addEventListener('beforetoggle', onBeforeToggle, true)
+  body.addEventListener('pointerleave', onPointerLeave, true)
   body.ownerDocument.fonts?.addEventListener('loadingdone', schedule)
-  return { dismissAtPoint(point) {
-    if (disposed || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
-    const target = body.ownerDocument.elementFromPoint(point.x, point.y)
-    // A moved/closed page cannot turn a stale point into a click on another piece of Chrome.
-    if (!target?.closest('[data-native-browser-stage]')) return
-    target.dispatchEvent(new win.PointerEvent('pointerdown', {
-      bubbles: true, composed: true, clientX: point.x, clientY: point.y,
-      button: point.button, pointerType: 'mouse', isPrimary: true
-    }))
+  return { handleNativeInput(input) {
+    if (disposed) return
+    const float = input.overlayId ? watched.find(node => ids.get(node) === input.overlayId && node.isConnected && (!node.hasAttribute('popover') || topLayers.has(node)) && node.getAttribute('data-state') !== 'closed' &&
+      win.getComputedStyle(node).display !== 'none' && win.getComputedStyle(node).visibility !== 'hidden') : undefined
+    const ownedStage = float ? Array.from(float.querySelectorAll('[data-native-browser-stage]')).find(stage =>
+      stage.getAttribute('data-native-browser-stage') === input.browserId) : undefined
+    if (input.overlayId && !ownedStage) return
+    if (input.type === 'escape') {
+      if (!float || !ownedStage) return
+      const event = new win.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })
+      ownedStage.dispatchEvent(event)
+      if (!event.defaultPrevented && float instanceof win.HTMLElement && (float.popover === 'auto' || float.popover === 'hint') && float.matches(':popover-open')) float.hidePopover()
+      return
+    }
+    if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return
+    const hit = body.ownerDocument.elementFromPoint(input.x, input.y)
+    const target = hit?.closest('[data-native-browser-stage]')
+    const stage = ownedStage ?? target
+    if (!stage || stage.getAttribute('data-native-browser-stage') !== input.browserId) return
+    const pointer = (type: string, relatedTarget: EventTarget | null = null): PointerEvent => new win.PointerEvent(type, {
+      bubbles: true, composed: true, clientX: input.x, clientY: input.y, relatedTarget,
+      button: input.button, pointerType: 'mouse', isPrimary: true
+    })
+    const floatPointer = (node: Element, type: 'pointerenter' | 'pointerleave', relatedTarget: EventTarget | null): void => {
+      node.dispatchEvent(new win.PointerEvent(type, { bubbles: false, clientX: input.x, clientY: input.y,
+        relatedTarget, pointerType: 'mouse', isPrimary: true }))
+    }
+    if (input.type === 'pointerLeave') {
+      if (hit && stage.contains(hit)) return
+      stage.dispatchEvent(pointer('pointerout', hit))
+      if (float && (!hit || !float.contains(hit))) { floatPointer(float, 'pointerleave', hit); if (hoveredFloat === float) hoveredFloat = undefined }
+      if (hoveredStage === stage) hoveredStage = undefined
+      return
+    }
+    // A moved/closed original stage cannot route input into a different Chrome control.
+    if (target !== stage) return
+    // Raw DOM panel owners listen to non-bubbling enter/leave. pointerover/out alone does
+    // not make the UA synthesize those events for a notice from a sibling native page.
+    if (hoveredFloat !== float) {
+      if (hoveredFloat) floatPointer(hoveredFloat, 'pointerleave', stage)
+      if (float) floatPointer(float, 'pointerenter', hoveredStage ?? null)
+      hoveredFloat = float
+    }
+    if (hoveredStage !== stage) {
+      const previous = hoveredStage
+      previous?.dispatchEvent(pointer('pointerout', stage))
+      stage.dispatchEvent(pointer('pointerover', previous ?? null))
+      hoveredStage = stage
+    }
+    stage.dispatchEvent(pointer(input.type === 'pointerDown' ? 'pointerdown' : 'pointermove'))
+    if (input.type !== 'pointerDown') return
     for (const node of topLayers) {
       if (!(node instanceof win.HTMLElement) || (node.popover !== 'auto' && node.popover !== 'hint') || !node.matches(':popover-open')) continue
       const rect = node.getBoundingClientRect()
-      if (point.x < rect.left || point.x >= rect.right || point.y < rect.top || point.y >= rect.bottom) node.hidePopover()
+      if (input.x < rect.left || input.x >= rect.right || input.y < rect.top || input.y >= rect.bottom) node.hidePopover()
     }
   }, dispose() {
     disposed = true
+    hoveredStage = undefined
+    hoveredFloat = undefined
     win.cancelAnimationFrame(frame)
     observer.disconnect()
     resize.disconnect()
     win.removeEventListener('resize', schedule)
     win.removeEventListener('scroll', onScroll, true)
     body.removeEventListener('toggle', onToggle, true)
+    body.removeEventListener('beforetoggle', onBeforeToggle, true)
+    body.removeEventListener('pointerleave', onPointerLeave, true)
     body.ownerDocument.fonts?.removeEventListener('loadingdone', schedule)
     publish([])
   } }

@@ -844,7 +844,7 @@ export function BrowserPane({
         {annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null}
       </div> : null}
       <div className="browser-body">
-      <div className="browser-stage" data-native-browser-stage ref={stageRef}>
+      <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>
         {screenshot ? (
           visible && !released && !restoring ?
           <ScreenshotEditor

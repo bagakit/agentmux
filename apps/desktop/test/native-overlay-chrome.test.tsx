@@ -15,13 +15,13 @@ const signals = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { ui: {
   publishNativeOverlays: signals.publish, getZoomFactor: () => 1,
   onNativeOverlayWarning(listener: (warning: string) => void) { signals.warning = listener; return signals.warningUnsubscribe },
-  onNativeBrowserPointer(listener: unknown) { expect(listener).toBe(signals.dismiss); return signals.pointerUnsubscribe }
+  onNativeBrowserInput(listener: unknown) { expect(listener).toBe(signals.dismiss); return signals.pointerUnsubscribe }
 } } }))
 vi.mock('../src/renderer/src/lib/native-overlay-regions', () => ({
   observeNativeOverlayRegions(body: HTMLElement, _zoom: unknown, collect: typeof signals.collect) {
     expect(body).toBe(document.body)
     signals.collect = collect
-    return { dispose: signals.dispose, dismissAtPoint: signals.dismiss }
+    return { dispose: signals.dispose, handleNativeInput: signals.dismiss }
   }
 }))
 

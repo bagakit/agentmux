@@ -684,7 +684,7 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   ui: {
-    onNativeBrowserPointer: () => () => {},
+    onNativeBrowserInput: () => () => {},
     publishNativeOverlays: async () => ({ projected: 0, capturedPixels: 0 }),
     onNativeOverlayWarning: () => () => {},
     requestStorageFlush: async () => {},

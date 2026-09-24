@@ -1,12 +1,14 @@
 import type { BrowserBounds } from './contracts'
 
-/** Chrome geometry only. No page DOM, payload, credentials or executable content crosses this boundary. */
+/** Chrome and contained stage geometry only; never page DOM, payload or executable content. */
 export interface NativeOverlayRegion {
   id: string
   bounds: BrowserBounds
   radius: number
   /** An empty modal scrim is a colour plane, never a screenshot of the covered Browser. */
   scrim?: string
+  /** Original BrowserPane stages physically contained by this open float. Main verifies owners. */
+  browserStages?: { browserId: string; bounds: BrowserBounds }[]
 }
 
 export interface NativeOverlayReceipt {
@@ -15,12 +17,15 @@ export interface NativeOverlayReceipt {
   warning?: string
 }
 
-/** A native page's ordinary outside pointer; never a click, approval or keyboard input. */
-export interface NativeBrowserPointer {
+/** Native page notices for its original DOM float; never duplicate page clicks, text or focus. */
+export type NativeBrowserInput = {
+  type: 'pointerDown' | 'pointerMove' | 'pointerLeave'
+  browserId: string
+  overlayId?: string
   x: number
   y: number
   button: number
-}
+} | { type: 'escape'; browserId: string; overlayId: string }
 
 export const NATIVE_OVERLAY_LIMIT = 8
 export const NATIVE_OVERLAY_PIXEL_LIMIT = 2_000_000
