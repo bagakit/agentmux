@@ -29,9 +29,9 @@
 @import './browser-structured-fields.css';
 @import './browser-task-assets.css';
 @import './agent.css';
-@import './status-prompts.css';
 @import './result-review.css';
 @import './service-notice.css';
+@import './status-prompts.css';
 @import './agent-region-header.css';
 @import './session-connecting.css';
 @import './composer.css';

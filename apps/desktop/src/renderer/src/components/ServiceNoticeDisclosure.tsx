@@ -104,8 +104,10 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, visi
         <button type="button" className="service-disclosure__close" aria-label={`Collapse service details: ${heading}`}
           title="Collapse service details" onClick={collapse}><X size={14} /></button>
       </div>
-      {children}
-      {actions ? <div className="service-disclosure__actions">{actions}</div> : null}
+      <div className="service-disclosure__content">
+        {children}
+        {actions ? <div className="service-disclosure__actions">{actions}</div> : null}
+      </div>
     </div>
   </div>
 }
