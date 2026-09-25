@@ -26,7 +26,10 @@ const receiptPath = process.argv.find(value => value.startsWith('--receipt-path=
 const root = await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-')
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
+const goalsEntryProof = process.argv.includes('--goals-entry')
+const inheritedCallerNames = goalsEntryProof ? Object.keys(process.env).filter(name =>
+  /^AGENTMUX_(?:ENV|CLI|AGENT_SESSION(?:_.*)?|AGENT_CAPABILITY|HOOK(?:_.*)?|PROVIDER_ID|EXECUTOR_ID|LIFECYCLE_OPERATION_ID|USAGE_TRANSCRIPT_FORMAT)$/.test(name)) : []
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME', ...inheritedCallerNames].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const children = new Set()
@@ -35,7 +38,6 @@ const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
 const goalsAlignmentProof = process.argv.includes('--goals-alignment')
-const goalsEntryProof = process.argv.includes('--goals-entry')
 const regionCloseProof = process.argv.includes('--close-region')
 const identityMenuProof = process.argv.includes('--identity-menu')
 const swapNameProof = process.argv.includes('--swap-names')
@@ -221,6 +223,10 @@ async function compiledRendererIdentity() {
 }
 
 try {
+  // The harness is itself launched by an Agent. Only this Goals-entry case removes that caller's
+  // management context before parent Core and every private Electron child derive their env.
+  // Core injects new private Session/Hook/capability facts only at the actual Run launch boundary.
+  for (const name of inheritedCallerNames) delete process.env[name]
   const rendererIdentity = await compiledRendererIdentity()
   // Provider Hook installation occurs even for a synthetic command. Parent Core setup and every
   // Electron child must share this private home rather than touching the user's native CLI config.
@@ -438,7 +444,7 @@ try {
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsEntryProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: Math.max(...gaps), successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
@@ -535,6 +541,8 @@ try {
   })
   await attempt(async () => {
     if (goalsEntryFixture) cleanup.goalsEntryRuns = await cleanupGoalsEntryRuns(goalsEntryFixture)
+  })
+  await attempt(async () => {
     if (swapNameProof) cleanup.swapPeerRuns = await cleanupSwapPeers(root, swapPeers)
     await stopProbeProcesses(process.pid + 1_000_000_000, root)
     assert.deepEqual(await listProbeProcesses(process.pid + 1_000_000_000, root), [])
