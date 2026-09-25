@@ -27,6 +27,7 @@ export type AgentComposerProps = {
   activeFile?: string
   contextUsage?: ReactNode
   mailbox?: ReactNode
+  resultReview?: ReactNode
   identity?: ReactNode
   onActivateSemanticReference?: (reference: ComposerSemanticReference) => void
   tools?: ReactNode
@@ -68,6 +69,7 @@ export function AgentComposer({
   tools,
   contextUsage,
   mailbox,
+  resultReview,
   identity,
   onActivateSemanticReference,
   commands = [],
@@ -239,6 +241,7 @@ export function AgentComposer({
                 : <ArrowUp size={15} aria-hidden="true" />}
             </button>
             {mailbox}
+            {resultReview}
             {identity}
           </div>
         </div>
