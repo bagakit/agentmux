@@ -467,6 +467,7 @@ export type ComposerShortcut = {
   label: string
   body: string
   providerId?: AgentProviderId
+  states?: AgentDisplayState[]
 }
 
 export type AppConfig = {

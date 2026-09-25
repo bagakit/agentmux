@@ -1,4 +1,10 @@
 import type { ComposerShortcut } from './contracts'
+import type { AgentDisplayState } from '@agentmux/core'
+
+/** The display states a user can bind to the same durable Prompt resource. */
+export const COMPOSER_PROMPT_STATES = [
+  'starting', 'running', 'disconnected', 'working', 'waiting', 'blocked', 'done', 'exited', 'error'
+] as const satisfies readonly AgentDisplayState[]
 
 /**
  * 缺席时返回的那一份空列表——**共享冻结**的同一个引用，不是每次新建一个 `[]`。

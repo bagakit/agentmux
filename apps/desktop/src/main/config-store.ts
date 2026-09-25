@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
+import { COMPOSER_PROMPT_STATES } from '../shared/composer-shortcut-library.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import {
   APP_APPEARANCE_IDS,
@@ -168,7 +169,8 @@ export const composerShortcutSchema = z
     keyword: z.string().min(1),
     label: z.string().min(1),
     body: z.string().min(1),
-    providerId: z.string().min(1).optional()
+    providerId: z.string().min(1).optional(),
+    states: z.array(z.enum(COMPOSER_PROMPT_STATES)).optional()
   })
   .strict()
 

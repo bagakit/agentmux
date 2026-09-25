@@ -5,7 +5,7 @@ import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 // vitest 与 tsc 都不会报——只有真正打 renderer 的那一步会。同文件的 SettingsPanel.tsx 取同一个符号也走这条。
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
-import { resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
+import { COMPOSER_PROMPT_STATES, resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
@@ -80,7 +80,7 @@ export function ShortcutSettingsPane({ config, onSave }: {
 
   return (
     <div className="settings-pane-stack">
-      <p className="settings-lead">Type <code>/</code> to choose one in the composer, or use its keyword in your draft. You decide what to send.</p>
+      <p className="settings-lead">Bind states to show one-click buttons that send the prompt. Type <code>/</code> or its keyword to add it to your draft instead.</p>
       <div className="settings-pane-toolbar">
         <button className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
       </div>
@@ -109,6 +109,21 @@ export function ShortcutSettingsPane({ config, onSave }: {
                 <small>Leave this on Every Agent unless the wording only makes sense for one of them.</small>
               </label>
               <label><span>Prompt</span><ComposerTextarea value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain this like I am five, then name what the simplification leaves out." rows={5} /></label>
+              <fieldset className="prompt-state-settings">
+                <legend>Show a button when</legend>
+                <div className="prompt-state-settings__choices">
+                  {COMPOSER_PROMPT_STATES.map((state) => (
+                    <label key={state}>
+                      <input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false}
+                        onChange={(event) => update(prompt.id, { states: event.target.checked
+                          ? [...(prompt.states ?? []), state]
+                          : (prompt.states ?? []).filter((candidate) => candidate !== state) })} />
+                      <span>{state.charAt(0).toUpperCase() + state.slice(1)}</span>
+                    </label>
+                  ))}
+                </div>
+                <small>Select any states. Leave all unchecked to keep this prompt in the draft shortcuts only.</small>
+              </fieldset>
               <button type="button" className="small-button" onClick={() => setDrafts((current) => current.filter((candidate) => candidate.id !== prompt.id))}><Trash2 size={13} /> Delete prompt</button>
             </div>
           </details>
