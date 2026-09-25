@@ -23,7 +23,7 @@ export function FocusDisconnectedProjects({ lanes, contexts, selectedId, project
     {showing ? <FocusProjectLanes lanes={lanes} selectedWorkspaceId={projectId} onSelect={onProject} renderLane={(lane, heading) => <>
       {heading}<div className="focus-disconnected-projects__cards">{lane.contextIds.flatMap(id => {
         const context = contexts.get(id)
-        return context ? [<FocusContextRow key={id} context={context} selected={id === selectedId} onSelect={onSelect} />] : []
+        return context ? [<FocusContextRow key={id} context={context} compact selected={id === selectedId} onSelect={onSelect} />] : []
       })}</div>
     </>} /> : null}
   </section>
