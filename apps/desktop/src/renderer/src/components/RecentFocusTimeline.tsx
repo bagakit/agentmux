@@ -1,19 +1,21 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, MessageSquare, SquareTerminal } from 'lucide-react'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
-import type { AgentSessionControl } from '../../../shared/contracts'
+import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentSessionControl, SessionHistoryReference } from '../../../shared/contracts'
 import type { AgentFocusHistoryEntry } from '../lib/agent-focus'
 import type { FocusContext } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { FOCUS_TIMELINE_HEIGHT_MAX, FOCUS_TIMELINE_HEIGHT_MIN } from '../lib/focus-timeline-height'
 import { AgentAvatar } from './AgentAvatar'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { groupFocusTimeline, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
 import { useSessionUserMessages } from '../lib/session-user-messages'
+import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
@@ -42,11 +44,11 @@ const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pi
   useLayoutEffect(() => { onChange({ messages, loading: latest.loading, error: latest.error, refresh: latest.refresh }) }, [messages, latest.loading, latest.error, latest.refresh, onChange])
   return null
 })
-type NativeWindow = { page: AgentSessionHistoryPage | null; loading: boolean; error: string | null; rotated: boolean }
-const EMPTY_NATIVE_WINDOW: NativeWindow = { page: null, loading: false, error: null, rotated: false }
+type NativeWindow = { scope: string; page: AgentSessionHistoryPage | null; timeline: AgentTimelineSnapshot | undefined; loading: boolean; error: string | null; capturedError: string | null; rotated: boolean }
+const EMPTY_NATIVE_WINDOW: NativeWindow = { scope: '', page: null, timeline: undefined, loading: false, error: null, capturedError: null, rotated: false }
 
 /** One Focus reading intent, over the existing public page API. No Session cache or polling. */
-function useFocusInputWindow(control: AgentSessionControl | undefined, scope: string, enabled: boolean, pinned: AgentSessionUserMessage | undefined) {
+function useFocusInputWindow(control: SessionHistoryReference | undefined, scope: string, enabled: boolean, pinned: AgentSessionUserMessage | undefined, includeCaptured: boolean) {
   const [reading, setReading] = useState<NativeWindow>(EMPTY_NATIVE_WINDOW)
   const readingRef = useRef(reading); readingRef.current = reading
   const pinnedRef = useRef(pinned); pinnedRef.current = pinned
@@ -55,14 +57,28 @@ function useFocusInputWindow(control: AgentSessionControl | undefined, scope: st
   const enabledRef = useRef(enabled); enabledRef.current = enabled
   const readBatch = useCallback(async (refresh = false) => {
     if (!enabledRef.current || !control || pending.current) return
-    const before = readingRef.current
+    const before = readingRef.current.scope === scope ? readingRef.current : EMPTY_NATIVE_WINDOW
     if (!refresh && before.page && before.page.nextCursor === null) return
     const request = lifetime.current
     pending.current = true
-    setReading(current => ({ ...current, loading: true, error: null }))
+    readingRef.current = { ...before, scope, loading: true, error: null }
+    setReading(readingRef.current)
     let accepted = refresh ? null : before.page
     let rotated = refresh ? false : before.rotated
     try {
+      if (includeCaptured && (refresh || !before.timeline)) {
+        try {
+          const timeline = await api.sessions.timeline(control)
+          if (!enabledRef.current || request !== lifetime.current) return
+          if (timeline.agentSessionId !== control.agentSessionId) throw new Error('Captured records belong to another Context.')
+          readingRef.current = { ...readingRef.current, scope, timeline, capturedError: null }
+          setReading(readingRef.current)
+        } catch (cause) {
+          if (request !== lifetime.current || !enabledRef.current) return
+          readingRef.current = { ...readingRef.current, scope, capturedError: presentError(cause) }
+          setReading(readingRef.current)
+        }
+      }
       for (let index = 0; index < MAX_BATCH_PAGES; index++) {
         if (!enabledRef.current || request !== lifetime.current) return
         const cursor = accepted?.nextCursor ?? undefined
@@ -82,7 +98,7 @@ function useFocusInputWindow(control: AgentSessionControl | undefined, scope: st
         const items = combined.length <= capacity ? combined : protectedRecord ? [...combined.filter(item => item !== protectedRecord).slice(0, MAX_NATIVE_RECORDS - 1), protectedRecord] : combined.slice(0, capacity)
         rotated ||= combined.length > capacity
         accepted = { ...page, items }
-        const next = { page: accepted, loading: true, error: null, rotated }
+        const next = { ...readingRef.current, scope, page: accepted, loading: true, error: null, rotated }
         readingRef.current = next; setReading(next)
         if (page.nextCursor === null) break
       }
@@ -91,14 +107,14 @@ function useFocusInputWindow(control: AgentSessionControl | undefined, scope: st
     } finally {
       if (request === lifetime.current) { pending.current = false; setReading(current => ({ ...current, loading: false })) }
     }
-  }, [control?.hostId, control?.agentSessionId, control?.run.runId, scope])
+  }, [control?.hostId, control?.agentSessionId, scope, includeCaptured])
   useEffect(() => {
     ++lifetime.current; pending.current = false
     readingRef.current = EMPTY_NATIVE_WINDOW; setReading(EMPTY_NATIVE_WINDOW)
     if (enabled) void readBatch(true)
     return () => { ++lifetime.current; pending.current = false }
   }, [enabled, scope, readBatch])
-  return { ...reading, continueReading: () => void readBatch(), refresh: () => void readBatch(true) }
+  return { ...(reading.scope === scope ? reading : EMPTY_NATIVE_WINDOW), continueReading: () => void readBatch(), refresh: () => void readBatch(true) }
 }
 
 const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, window, now, onSelect, onPreview, onDismiss, onInspect, onPresence }: {
@@ -125,7 +141,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   return <div className="recent-focus__track" data-focus-timeline-id={sessionId} data-history-only={!context ? 'true' : undefined}>
     <span className="recent-focus__gutter" title={`${name} · ${identity?.workspacePath ?? context?.workspacePath ?? 'Historical identity not recorded'}${path ? ` · ${path}` : ''}`}>
       {context?.kind === 'agent' ? <AgentAvatar sessionId={sessionId} label={name} providerId={context.providerId ?? undefined} state={context.state} size={14} /> : identity?.kind === 'terminal' || context?.kind === 'terminal' ? <SquareTerminal size={13} /> : <History size={13} />}
-      <span>{name}{path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label="Retained focus observation" /> : null}</span>
+      <span>{name}{path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}</span>
     <div className="recent-focus__lane">
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
       {work && context ? <button type="button" className="recent-focus__working" data-working-entered-at={work.enteredAt} data-working-through={Math.min(now, window.end)} data-run-id={context.runId}
@@ -152,8 +168,9 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   </div>
 })
 
-const FocusTimeProject = memo(function FocusTimeProject({ project, registered, currentSessionId, inputContextId, nativeMessages, window, now, onSelect, onPreview, onDismiss, onInspect }: {
+const FocusTimeProject = memo(function FocusTimeProject({ project, registered, currentSessionId, inputContextId, inputTrackKey, nativeMessages, window, now, onSelect, onPreview, onDismiss, onInspect }: {
   project: FocusTimelineProject; registered: boolean; currentSessionId: string | null; inputContextId: string | undefined
+  inputTrackKey?: string | undefined
   nativeMessages: readonly AgentSessionUserMessage[]; window: FocusTimeWindow; now: number
   onSelect(id: string): void; onPreview(message: AgentSessionUserMessage, target: HTMLElement, interactive: boolean): void
   onDismiss(id: string): void; onInspect(segment: FocusTimeSegment, anchor: HTMLElement): void
@@ -173,7 +190,7 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
     <div className="recent-focus__project-tracks" data-collapsed={collapsed} inert={collapsed} aria-hidden={collapsed || undefined}>
-      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentSessionId} nativeMessages={track.current && track.sessionId === inputContextId ? nativeMessages : undefined} window={window} now={now} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onPresence={observePresence} />)}
+      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentSessionId} nativeMessages={(inputTrackKey ? track.key === inputTrackKey : track.current && track.sessionId === inputContextId) ? nativeMessages : undefined} window={window} now={now} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onPresence={observePresence} />)}
     </div>
   </section>
 })
@@ -224,29 +241,50 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const saveHeight = useAppStore(state => state.setFocusTimelineHeight)
   const timelineRef = useRef<HTMLElement>(null)
   const headerRef = useRef<HTMLElement>(null)
-  const closePreview = useCallback(() => { setPreview(null); setReaderOpen(false); setReadingContextId(null); setEarlier(false) }, [])
+  const closePreview = useCallback(() => { setPreview(null); setReaderOpen(false) }, [])
   const inspectMessage = useCallback((message: AgentSessionUserMessage, target: HTMLElement, interactive: boolean) => {
     setPreview(current => !interactive && current?.interactive ? current : { message, interactive, anchor: target })
   }, [])
   const dismissMessage = useCallback((messageId: string) => setPreview(current => current?.message?.id === messageId && !current.interactive ? null : current), [])
+  const catalogue = useFocusHistorySources(mode !== 'collapsed' && documentVisible)
+  const [sourceLimit, setSourceLimit] = useState(30)
+  const inputSources = useMemo(() => {
+    const observations = new Map<string, AgentFocusHistoryEntry['identity']>()
+    for (const entry of entries) if (!observations.has(entry.sessionId)) observations.set(entry.sessionId, entry.identity)
+    const available = new Map(contexts.filter(context => context.kind === 'agent').map(context => [context.id, {
+      id: context.id, name: context.name, workspaceName: context.workspaceName,
+      reference: { hostId: context.hostId, agentSessionId: context.id } satisfies SessionHistoryReference,
+      workspacePath: context.workspacePath, details: `Session: ${context.id}\nCurrent workspace: ${context.workspacePath}`
+    }]))
+    for (const source of catalogue.sources) if (!available.has(source.agentSessionId)) {
+      const observation = observations.get(source.agentSessionId)
+      available.set(source.agentSessionId, { id: source.agentSessionId, name: observation?.name ?? `${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'} · ${source.agentSessionId.length <= 12 ? source.agentSessionId : `${source.agentSessionId.slice(0, 8)}…${source.agentSessionId.slice(-4)}`}`,
+        workspaceName: `${observation?.project?.name ?? 'Project not recorded'} · ${source.state === 'retired' ? 'Archived' : 'Stored source'}`,
+        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ?? 'Not recorded'}` })
+    }
+    return [...available.values()]
+  }, [contexts, entries, catalogue.sources])
   const inputContextId = readingContextId ?? currentSessionId
   const inputContext = contexts.find(context => context.id === inputContextId && context.kind === 'agent')
+  const inputSource = inputSources.find(source => source.id === inputContextId)
   const inputControl = useAppStore(state => {
     const session = state.sessions.find(item => item.id === inputContext?.id)
     return session?.kind === 'agent' ? session.control : undefined
   })
   const inputTimeline = useAppStore(state => inputContext ? state.timelines[inputContext.id] : undefined)
-  const readingEnabled = mode !== 'collapsed' && documentVisible && !!inputContext
-  const historical = anchor !== null || earlier
+  const inputReference = inputSource?.reference
+  const readonlyReading = !!inputReference && !inputControl
+  const readingEnabled = mode !== 'collapsed' && documentVisible && !!inputReference
+  const historical = anchor !== null || earlier || readonlyReading
   const [latest, setLatest] = useState<LatestInputs>(EMPTY_LATEST_INPUTS)
-  const readingScope = JSON.stringify([inputControl?.hostId, inputControl?.agentSessionId, inputControl?.run.runId, anchor, hours])
-  const nativeWindow = useFocusInputWindow(inputControl, readingScope, readingEnabled && historical, preview?.message)
-  const projected = useMemo(() => inputContext ? historical
-    ? projectSessionUserMessages({ agentSessionId: inputContext.id, timeline: inputTimeline, historyPage: nativeWindow.page ?? undefined })
-    : inputControl && readingEnabled ? latest.messages : projectSessionUserMessages({ agentSessionId: inputContext.id, timeline: inputTimeline }) : [], [inputContext?.id, inputControl, readingEnabled, historical, inputTimeline, nativeWindow.page, latest.messages])
+  const readingScope = JSON.stringify([inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId, anchor, hours])
+  const nativeWindow = useFocusInputWindow(inputReference, readingScope, readingEnabled && historical, preview?.message, readonlyReading)
+  const projected = useMemo(() => inputReference ? historical
+    ? projectSessionUserMessages({ agentSessionId: inputReference.agentSessionId, timeline: readonlyReading ? nativeWindow.timeline : inputTimeline, historyPage: nativeWindow.page ?? undefined })
+    : inputControl && readingEnabled ? latest.messages : projectSessionUserMessages({ agentSessionId: inputReference.agentSessionId, timeline: inputTimeline }) : [], [inputReference?.agentSessionId, inputControl, readingEnabled, historical, readonlyReading, inputTimeline, nativeWindow.page, nativeWindow.timeline, latest.messages])
   // A changed reading Context never briefly presents the previous leaf's data.
   // Latest is bounded by its leaf; the historical window bounds raw records.
-  const inputMessages = useMemo(() => projected.filter(item => item.agentSessionId === inputContext?.id), [projected, inputContext?.id])
+  const inputMessages = useMemo(() => projected.filter(item => item.agentSessionId === inputReference?.agentSessionId), [projected, inputReference?.agentSessionId])
   const nativeMessages = useMemo(() => inputMessages.filter(item => item.source.kind === 'native'), [inputMessages])
   useEffect(() => {
     if (!documentVisible || mode === 'collapsed') { setPreview(null); setObservation(null); setReaderOpen(false); setReadingContextId(null); setEarlier(false) }
@@ -294,30 +332,32 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const effectiveAnchor = anchor ?? now
   const range = useMemo(() => focusTimeWindow(effectiveAnchor, hours), [effectiveAnchor, hours])
   const tracks = useMemo(() => focusTimeSegments(entries, range, now), [entries, range, now])
-  const projects = useMemo(() => groupFocusTimeline(contexts, lanes ?? [], tracks), [contexts, lanes, tracks])
+  const readonlyInputTrackId = readonlyReading && inputMessages.some(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt) && message.recordedAt >= range.start && message.recordedAt <= Math.min(now, range.end)) ? inputReference?.agentSessionId : undefined
+  const inputTrackKey = readonlyInputTrackId ? JSON.stringify(['unknown-project', readonlyInputTrackId]) : undefined
+  const projects = useMemo(() => groupFocusTimeline(contexts, lanes ?? [], tracks, readonlyInputTrackId), [contexts, lanes, tracks, readonlyInputTrackId])
   const tickTimes = Array.from({ length: 5 }, (_, i) => range.start + (range.end - range.start) * i / 4)
   const position = focusTimePosition(now, range)
   const previewContext = preview?.message ? contexts.find(context => context.id === preview.message!.agentSessionId) : inputContext
   const senderId = preview?.message?.author.kind === 'agent' ? preview.message.author.agentSessionId : undefined
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
-  const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null); closePreview() }
+  const inspectWindow = (next: number | null) => { setAnchor(next); setEarlier(false); setObservation(null); closePreview() }
   const openInputRecords = (target: HTMLElement) => {
     setReaderOpen(true); setPreview({ message: undefined, interactive: true, anchor: target })
   }
-  const inputCoverage = historical ? nativeWindow.page
+  const inputCoverage = !inputReference ? 'Choose a Context to read its inputs.' : historical ? nativeWindow.page
     ? `${nativeWindow.page.items.length} native records retained${nativeWindow.rotated ? ' · Newer records are outside this reading window' : ''}. ${nativeWindow.page.nextCursor === null ? 'Beginning of this available snapshot reached.' : 'Coverage incomplete. Earlier records can still be read.'}`
     : 'Native history has not been read for this window. Coverage unknown.'
     : 'Latest input view. Earlier coverage is unknown; read earlier records to inspect the native snapshot.'
   return <section ref={timelineRef} style={{ height: mode === 'collapsed' ? 28 : height } as CSSProperties} className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-window-start={range.start} data-window-end={range.end}>
-    <FocusLatestInputs control={inputControl} enabled={readingEnabled && !historical} pinned={preview?.message} onChange={setLatest} />
+    <FocusLatestInputs control={inputControl} enabled={readingEnabled && !historical} pinned={historical ? undefined : preview?.message} onChange={setLatest} />
     {mode !== 'collapsed' ? <div className="recent-focus__resize" role="separator" tabIndex={0} aria-label="Resize Focus timeline" aria-orientation="horizontal" aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={height}
       onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); drag.current = { y: event.clientY, height, next: height }; document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none' }}
       onKeyDown={event => { const next = event.key === 'ArrowUp' ? height + 16 : event.key === 'ArrowDown' ? height - 16 : event.key === 'Home' ? minimum : event.key === 'End' ? maximum : null; if (next !== null) { event.preventDefault(); saveHeight(Math.min(maximum, Math.max(minimum, next))) } }} /> : null}
     <header ref={headerRef} className="recent-focus__header">
       <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Work bands show proven working states; Now marks live Runs; thin clips show focus visits. Run start times are unknown. Input markers use recorded times from Core. Unknown-time inputs and incomplete native coverage are available through Input records. Shows up to 2000 retained focus switches within 512 KiB of serialized UTF-16 history; older observations may be outside retention.">{dateClock(range.start)} — {dateClock(range.end)}</span></span>
       <span className="recent-focus__controls">
-        {mode !== 'collapsed' ? <><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} disabled={!contexts.some(context => context.kind === 'agent')} title="Input records, including inputs without a recorded time" onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" value={localDateTime(anchor ?? now)} onChange={event => { const next = new Date(event.target.value).getTime(); if (Number.isFinite(next)) inspectWindow(next) }} />
+        {mode !== 'collapsed' ? <><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} title={`Input records${inputSource ? ` · ${inputSource.name}` : ''}, including inputs without a recorded time`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" value={localDateTime(anchor ?? now)} onChange={event => { const next = new Date(event.target.value).getTime(); if (Number.isFinite(next)) inspectWindow(next) }} />
         <button type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ChevronLeft size={12} /></button>
         <select aria-label="Focus window size" value={hours} onChange={event => { setHours(Number(event.target.value)); closePreview() }}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{size}h</option>)}</select>
         <button type="button" className="icon-button" aria-label="Next focus window" onClick={() => inspectWindow((anchor ?? now) + hours * HOUR_MS)}><ChevronRight size={12} /></button>
@@ -330,19 +370,22 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       <div className="recent-focus__canvas">
         <div className="recent-focus__ruler" aria-label="Focus time ruler"><span className="recent-focus__gutter">Context</span><div className="recent-focus__time-scale">{tickTimes.map((time, i) => <time key={i} style={{ left: `${focusTimePosition(time, range)}%` }}>{clock(time)}</time>)}{position >= 0 && position <= 100 ? <span className="recent-focus__playhead recent-focus__playhead--ruler" data-now={now} style={{ left: `${position}%` }} aria-label={`Current time ${clock(now)}`} /> : null}</div></div>
         <div className="recent-focus__tracks">
-          {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentSessionId={currentSessionId} inputContextId={inputContext?.id} nativeMessages={nativeMessages} window={range} now={now} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} />)}
+          {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentSessionId={currentSessionId} inputContextId={inputReference?.agentSessionId} inputTrackKey={inputTrackKey} nativeMessages={readonlyReading ? inputMessages : nativeMessages} window={range} now={now} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} />)}
         </div>
         <p className="recent-focus__empty">No read records in this window. Native coverage may be incomplete; use Input records.</p>
       </div>
     </div> : null}
     {observation ? <FocusHistoryObservation segment={observation.segment} anchor={observation.anchor} onClose={() => setObservation(null)} /> : null}
-    {preview ? <FocusMessagePreview message={preview.message} recipient={previewContext} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview}
+    {preview ? <FocusMessagePreview message={preview.message} recipient={previewContext} recipientName={inputSource?.name} workspaceRoot={inputSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview}
       {...(readerOpen ? { reader: {
-        contexts: contexts.filter(context => context.kind === 'agent'), contextId: inputContext?.id ?? null, messages: inputMessages,
+        contexts: inputSources.slice(0, sourceLimit), contextId: inputReference?.agentSessionId ?? null, messages: inputMessages,
+        sourceCoverage: catalogue.loading ? 'Discovering retained input sources…' : `${Math.min(sourceLimit, inputSources.length)} of ${inputSources.length} sources listed. Other sources have not been read for this window.`,
+        sourceError: catalogue.error, onRefreshSources: catalogue.refresh,
+        onMoreSources: sourceLimit < inputSources.length ? () => setSourceLimit(value => Math.min(inputSources.length, value + 30)) : undefined,
         loading: historical ? nativeWindow.loading : latest.loading, coverage: inputCoverage,
-        error: !inputControl ? 'The native Session control is unavailable.' : historical ? nativeWindow.error : latest.error ? presentError(latest.error) : null,
-        canContinue: !!inputControl && (!historical || nativeWindow.page?.nextCursor !== null),
-        onContext: (id: string) => { setReadingContextId(id); setPreview(current => current ? { ...current, message: undefined } : current) },
+        error: !inputReference ? null : historical ? [nativeWindow.error, nativeWindow.capturedError].filter(Boolean).join(' ') || null : latest.error ? presentError(latest.error) : null,
+        canContinue: !!inputReference && (!historical || nativeWindow.page?.nextCursor !== null),
+        onContext: (id: string) => { setReadingContextId(id); setEarlier(false); setPreview(current => current ? { ...current, message: undefined } : current) },
         onMessage: (message: AgentSessionUserMessage) => setPreview(current => current ? { ...current, message } : current),
         onContinue: () => { if (!historical) setEarlier(true); else nativeWindow.continueReading() },
         onRefresh: () => { setPreview(current => current ? { ...current, message: undefined } : current); if (historical) nativeWindow.refresh(); else void latest.refresh() }
