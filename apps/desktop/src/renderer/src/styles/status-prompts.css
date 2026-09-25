@@ -1,0 +1,7 @@
+/* User-authored Prompt bindings and the stable Composer action rail. */
+.prompt-state-settings { min-width: 0; margin: 0; padding: 0; border: 0; }
+.prompt-state-settings legend { padding: 0; margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.prompt-state-settings__choices { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.agent-settings-fields .prompt-state-settings__choices label { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-6); cursor: pointer; }
+.agent-settings-fields .prompt-state-settings__choices input { flex: none; width: var(--sp-4); height: var(--sp-4); margin: 0; padding: 0; accent-color: var(--green); }
+.prompt-state-settings > small { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
