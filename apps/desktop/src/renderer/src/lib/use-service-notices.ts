@@ -5,6 +5,8 @@ import type { RenderableServiceNotice } from './service-window-notice'
 export type ServiceNoticeItem = {
   id: string
   occurrence?: string
+  /** Stable semantic cause from the fact owner; diagnostic metadata is not an occurrence. */
+  cause?: string
   /** Display metadata from this notice's owner; never part of its read identity. */
   observedAt?: number
   notice: RenderableServiceNotice
@@ -12,8 +14,8 @@ export type ServiceNoticeItem = {
 }
 
 const EMPTY_RECEIPTS: Readonly<Record<string, string>> = Object.freeze({})
-function fingerprint(item: ServiceNoticeItem): string {
-  return JSON.stringify([item.occurrence, item.notice.kind, item.notice.notice])
+export function serviceNoticeFingerprint(item: ServiceNoticeItem): string {
+  return JSON.stringify([item.occurrence, item.notice.kind, item.cause ?? item.notice.notice])
 }
 
 /** Only acknowledgement is persisted. Current problems remain projections of their owners. */
@@ -34,6 +36,7 @@ export function useReadReceipts(scope: string, current: Readonly<Record<string, 
     })
   }, [scope, signature, available])
   function acknowledge(ids: readonly string[]) {
+    if (!ids.length) return
     useAppStore.setState((state) => ({ noticeReadReceipts: {
       ...state.noticeReadReceipts,
       [scope]: { ...state.noticeReadReceipts[scope], ...Object.fromEntries(ids.map((id) => [id, current[id]!])) }
@@ -44,7 +47,7 @@ export function useReadReceipts(scope: string, current: Readonly<Record<string, 
 
 
 export function useServiceNotices(scope: string, notices: readonly ServiceNoticeItem[], available = true) {
-  const current = Object.fromEntries(notices.map((item) => [item.id, fingerprint(item)]))
+  const current = Object.fromEntries(notices.map((item) => [item.id, serviceNoticeFingerprint(item)]))
   const receipts = useReadReceipts(scope, current, available)
   return { available, notices, unread: notices.filter((item) => receipts.unread.includes(item.id)),
     acknowledge: (items: readonly ServiceNoticeItem[]) => receipts.acknowledge(items.map((item) => item.id)) }

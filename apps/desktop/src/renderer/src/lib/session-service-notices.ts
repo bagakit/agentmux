@@ -20,6 +20,7 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
   const identity = [session.hostId, session.id, session.control.run.runId]
   if (lifecycleError?.message && lifecycleError.failure && lifecycleFailureBelongsTo(lifecycleError.failure, { subject: session.control })) {
     notices.push({ id: 'recovery', occurrence: JSON.stringify(identity),
+      cause: JSON.stringify([lifecycleError.failure.step, errorIdentity(lifecycleError.message)]),
       notice: agentLifecycleFailureNotice(lifecycleError.failure, lifecycleError.message) })
   }
   const connectionTime = session.terminalCapability?.reason === 'handshake-timeout' ? session.terminalCapability.observedAt

@@ -1,24 +1,33 @@
 import { useState } from 'react'
-import { History, LoaderCircle, RefreshCw } from 'lucide-react'
+import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { presentError } from '../lib/error-presentation'
+import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
+import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
-export function TerminalReplayGapNotice({ canRedraw, onRedraw, compact = false }: {
+export const TERMINAL_GAP_NOTICE: RenderableServiceNotice = { kind: 'process-degraded', notice: {
+  step: 'Earlier scrollback is unavailable',
+  mode: 'Earlier Runtime output is no longer retained or the source reported a byte gap.',
+  restore: 'Redraw requests a repaint of the current screen; it cannot restore missing history.'
+} }
+
+/** The gap fact remains owned by TerminalView; requesting a repaint never resolves that fact. */
+export function TerminalReplayGapNotice({ scope, visible = true, canRedraw, onRedraw, embedded = false }: {
+  scope: string
+  visible?: boolean
   canRedraw: boolean
-  compact?: boolean
+  /** Complete content within the Terminal service disclosure, without a nested popover. */
+  embedded?: boolean
   onRedraw(): Promise<boolean>
 }) {
   const [redrawing, setRedrawing] = useState(false)
   const [requested, setRequested] = useState(false)
   const [error, setError] = useState('')
-  const explanation = 'Earlier Runtime output is no longer retained or the source reported a byte gap. Redraw requests a repaint of the current screen; it cannot restore missing history.'
-  const detail = `${requested ? 'Screen redraw requested.' : 'History gap.'} ${explanation}`
-  if (requested || compact) return <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={detail} aria-label={detail}>
-    <History size={12} aria-hidden="true" />
-  </div>
-  return <div className="terminal-replay-gap" role="status">
-    <History size={12} aria-hidden="true" />
-    <span title={explanation}>{error || 'Earlier scrollback is unavailable'}</span>
-    {canRedraw ? <button type="button" disabled={redrawing}
+  const content = <div className="terminal-gap-details">
+    <ServiceWindowNotice notice={TERMINAL_GAP_NOTICE} />
+    {requested ? <p role="status">Screen redraw requested. Missing history remains unavailable.</p> : null}
+    {error ? <p role="status">{error}</p> : null}
+    {canRedraw ? <button type="button" className="small-button" disabled={redrawing}
       title="Redraw current screen; missing history cannot be restored"
       aria-label="Redraw current terminal screen" onClick={() => {
         setRedrawing(true); setError('')
@@ -28,8 +37,13 @@ export function TerminalReplayGapNotice({ canRedraw, onRedraw, compact = false }
         }).catch((cause) => setError(`Screen redraw failed: ${presentError(cause)}`))
           .finally(() => setRedrawing(false))
       }}>
-      {redrawing ? <LoaderCircle className="spin" size={11} /> : <RefreshCw size={11} />}
+      {redrawing ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />}
       {redrawing ? 'Requesting…' : 'Redraw'}
     </button> : null}
   </div>
+  if (embedded) return content
+  return <ServiceNoticeDisclosure scope={scope} visible={visible}
+    notices={[{ id: 'history-gap', cause: 'retained-output-gap', notice: TERMINAL_GAP_NOTICE }]}>
+    {content}
+  </ServiceNoticeDisclosure>
 }

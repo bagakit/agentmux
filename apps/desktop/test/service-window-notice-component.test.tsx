@@ -1,12 +1,17 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { ServiceWindowNotice } from '../src/renderer/src/components/ServiceWindowNotice.js'
 import type { RenderableServiceNotice } from '../src/renderer/src/lib/service-window-notice.js'
+import { useAppStore } from '../src/renderer/src/store'
+import { createJSONStorage } from 'zustand/middleware'
 
 /**
  * 服务窗的展示层。组件是纯展示——所有判定在 lib，这里只证明它把三段文案画出来、且形态对：
- * 停在旁边不消失（`role="status"`，不是 dialog、不是 toast），不给关闭键（随条件消失而非随用户点关闭）。
+ * 完整内容保持三事实与 status 语义；局部的收起与复查由公共 disclosure owner 管理，inbox 不嵌套关闭键。
  */
 
 const DEGRADED: RenderableServiceNotice = {
@@ -30,13 +35,13 @@ describe('ServiceWindowNotice', () => {
     expect(markup).toContain('Resume the session to reattach')
   })
 
-  it('是告示不是弹窗：role=status、随条件消失，因此不含关闭键', () => {
+  it('完整内容是 status 告示，关闭由外层 owner 统一管理', () => {
     const markup = renderToStaticMarkup(createElement(ServiceWindowNotice, { notice: DEGRADED }))
     expect(markup).toContain('role="status"')
     expect(markup).toContain('aria-live="polite"')
     // dialog 会抢焦点、挡路；服务窗不是那个。
     expect(markup).not.toContain('role="dialog"')
-    // 它随条件解除而消失，而非随用户点关闭——所以没有关闭键（那会让用户误以为能永久打发它）。
+    // Global/Mailbox 已有关闭；完整内容不再叠一个关闭 owner。
     expect(markup.toLowerCase()).not.toContain('dismiss')
     expect(markup).not.toContain('aria-label="Close"')
   })
@@ -63,4 +68,53 @@ describe('ServiceWindowNotice', () => {
       expect(markup).not.toContain('aria-live="assertive"')
     }
   })
+})
+
+it('local receipt survives diagnostics, unavailable projection, remount and durable hydration; real causes, Runs and recurrence remain discoverable', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const initial = useAppStore.getState(), storage = useAppStore.persist.getOptions().storage
+  let durable = ''
+  useAppStore.persist.setOptions({ storage: createJSONStorage(() => ({ getItem: () => durable || null,
+    setItem: (_key, value) => { durable = value }, removeItem: () => { durable = '' } })) })
+  const container = document.createElement('div'); document.body.append(container)
+  const input = document.createElement('textarea'); document.body.append(input); input.focus()
+  let root = createRoot(container)
+  async function show(notice: RenderableServiceNotice | null = DEGRADED, cause = 'transport-disconnected', run = 'run-a', available = true) {
+    await act(async () => root.render(<ServiceWindowNotice notice={notice} disclosure={{
+      scope: `local:private-host:private-session:${run}`, id: 'transport', cause, available }} />))
+  }
+  const unread = () => container.querySelector('.service-disclosure')?.getAttribute('data-unread')
+  async function toggle(newState: 'open' | 'closed') {
+    const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: newState })
+    await act(async () => container.querySelector('.service-disclosure__details')!.dispatchEvent(event))
+  }
+  try {
+    useAppStore.setState({ noticeReadReceipts: {} })
+    await show(); expect(unread()).toBe('true'); expect(document.activeElement).toBe(input)
+    expect(container.querySelector('.service-disclosure__details')!.getAttribute('popover')).toBe('auto')
+    expect(container.querySelector('.service-disclosure__details')!.textContent).toContain(DEGRADED.notice.restore)
+    await act(async () => container.querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
+    expect(unread()).toBe('false')
+    const receipt = useAppStore.getState().noticeReadReceipts
+    expect(Object.keys(receipt)).toEqual(['local:private-host:private-session:run-a'])
+    await show({ ...DEGRADED, notice: { ...DEGRADED.notice, mode: 'Diagnostic metadata changed: cursor 999' } })
+    expect(unread()).toBe('false'); expect(useAppStore.getState().noticeReadReceipts).toEqual(receipt)
+    await show(null, 'transport-disconnected', 'run-a', false)
+    expect(container.innerHTML).toBe(''); expect(useAppStore.getState().noticeReadReceipts).toEqual(receipt)
+    await act(async () => root.unmount()); root = createRoot(container)
+    const saved = durable
+    useAppStore.setState({ noticeReadReceipts: {} }); durable = saved
+    await useAppStore.persist.rehydrate(); await show(); expect(unread()).toBe('false')
+    await toggle('open')
+    await show(DEGRADED, 'permission-denied'); await toggle('closed'); expect(unread()).toBe('true')
+    await toggle('open')
+    await show(DEGRADED, 'transport-disconnected', 'run-b'); await toggle('closed'); expect(unread()).toBe('true')
+    await show(); expect(unread()).toBe('true')
+    await act(async () => container.querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
+    await show(null); expect(container.innerHTML).toBe('')
+    await show(); expect(unread()).toBe('true')
+  } finally {
+    await act(async () => root.unmount()); container.remove(); input.remove()
+    useAppStore.persist.setOptions({ storage }); useAppStore.setState(initial, true); vi.unstubAllGlobals()
+  }
 })
