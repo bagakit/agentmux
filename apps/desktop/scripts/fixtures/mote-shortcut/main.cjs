@@ -8,6 +8,13 @@ app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, pid: process.pid, phase, frames: [], userRunTouched: false,
   boundary: 'Complete desktop production App and ordinary persistence/initialize in one isolated profile. Public Session snapshots/attachment/recovery are controlled facts; original Main Browser and Chrome owners are real and separately verified. No actual Core/ctxmux Run survival claim.' }
+// Publish the private phase result before exiting, even if its sole window is lost.
+// Explicit app.quit / OS termination remains outside this window-closure observation.
+app.on('window-all-closed', () => {
+  result.passed = false
+  result.unexpectedWindowClosure = { observedAt: Date.now(), step: result.step }
+  process.stderr.write('Private proof window closed: ' + JSON.stringify(result.unexpectedWindowClosure) + '\n')
+})
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 let win, native
 const bounded = async (work, label, budget = 12000) => {
@@ -341,6 +348,7 @@ app.whenReady().then(async () => {
     result.durable = await read('JSON.parse(localStorage.getItem("agentmux-workbench-v1"))')
     result.surfaceEvents = await read('window.moteProof.surfaceEvents()')
     result.native = native.receipt
+    assert.equal(result.unexpectedWindowClosure, undefined, 'The original private workface remains until phase publication')
     result.passed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
