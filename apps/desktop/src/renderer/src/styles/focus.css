@@ -66,12 +66,13 @@
 /* One scroll canvas keeps ruler, clip lanes and fixed identity gutters aligned. */
 .recent-focus { position: relative; flex: none; height: 96px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface-1); }
 .recent-focus[data-mode='collapsed'] { height: 28px; }
-.recent-focus__header { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--sp-2); min-height: 28px; padding: 0 var(--sp-2); }
+.recent-focus__header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 0 var(--sp-2); min-height: 28px; padding: 0 var(--sp-2); }
 .recent-focus__title, .recent-focus__controls { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.recent-focus__title { min-width: 0; }
+.recent-focus__title { flex: 1; min-width: 0; overflow: hidden; }
 .recent-focus__title strong { font-weight: 500; color: var(--text-2); white-space: nowrap; }
 .recent-focus__range { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.recent-focus__controls { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; justify-content: flex-end; gap: 2px; }
+.recent-focus__controls { flex: 0 1 auto; min-width: 0; justify-content: flex-start; gap: 2px; overflow-x: auto; }
+.recent-focus__controls > * { flex: none; }
 .recent-focus__controls .icon-button { width: 22px; height: 22px; }
 .recent-focus__controls button:disabled { opacity: .35; cursor: default; }
 .recent-focus__controls input, .recent-focus__controls select, .recent-focus__now { min-width: 0; height: 22px; padding: 0 3px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-1); color: var(--text-2); font: inherit; font-variant-numeric: tabular-nums; }

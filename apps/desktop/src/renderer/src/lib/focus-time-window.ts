@@ -10,6 +10,15 @@ export function focusTimeWindow(anchor: number, hours: number): FocusTimeWindow 
   return { start: anchor - hours * HOUR_MS * 3 / 4, end: anchor + hours * HOUR_MS / 4 }
 }
 
+/** Native horizontal wheel distance in the actual time ruler, excluding its identity gutter. */
+export function focusWheelTimeDelta(event: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode' | 'shiftKey' | 'ctrlKey' | 'metaKey'>, width: number, hours: number): number {
+  if (event.ctrlKey || event.metaKey || width <= 0 || !Number.isFinite(width)) return 0
+  const delta = event.shiftKey ? event.deltaX || event.deltaY : Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : 0
+  if (!Number.isFinite(delta)) return 0
+  const pixels = delta * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? width : 1)
+  return pixels / width * hours * HOUR_MS
+}
+
 export function focusTimePosition(time: number, window: FocusTimeWindow): number {
   return (time - window.start) / (window.end - window.start) * 100
 }
