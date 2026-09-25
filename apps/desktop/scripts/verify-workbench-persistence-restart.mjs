@@ -155,6 +155,19 @@ async function seedWorkbench(seed) {
     seedDiagnostic = { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode,
       processIdentity: child.pid ? await runProcessIdentity(child.pid) : null, stderr: diagnostics,
       ready: await readPrivateReport(join(root, 'seed-ready.json')), report: await readPrivateReport(reportPath) }
+    if (seedDiagnostic.processIdentity && child.exitCode === null && child.signalCode === null) {
+      try {
+        assert.equal(seedDiagnostic.processIdentity.group, child.pid, 'Only this detached private seed permits startup sampling')
+        seedDiagnostic.processState = (await exec('/bin/ps', ['-p', String(child.pid), '-o', 'stat=,%cpu=,etime=,comm='], { timeout: 5000 })).stdout.trim()
+        assert.deepEqual(await runProcessIdentity(child.pid), seedDiagnostic.processIdentity)
+        const samplePath = join(root, 'seed-thread-sample.txt')
+        await exec('/usr/bin/sample', [String(child.pid), '1', '1', '-file', samplePath], { timeout: 5000, maxBuffer: 1024 * 1024 })
+        const bytes = await readFile(samplePath)
+        const retainedPath = receiptPath ? `${receiptPath}.seed-sample.txt` : join(repositoryRoot, '.tmp', `seed-sample-${child.pid}.txt`)
+        await writeFile(retainedPath, bytes)
+        seedDiagnostic.threadSample = { path: retainedPath, sha256: hash(bytes) }
+      } catch (cause) { seedDiagnostic.sampleError = cause.message }
+    }
     throw new Error(`${error.message}; private seed stderr: ${diagnostics}`)
   }
   const target = await waitFor('seed renderer', async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
