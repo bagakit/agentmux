@@ -1,49 +1,46 @@
+import type { ReactNode } from 'react'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
+import type { ServiceNoticeItem } from '../lib/use-service-notices'
+import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 /** Only this Terminal's existing facts. No classifier, subscription, recovery action or error owner. */
-export function TerminalServiceNotices({ reveal, replayGeometry, viewportSync, continuation, duringReconnect = false,
-  attachment, sessionObservation, refreshingObservation = false, onRefreshObservation }: {
+export function TerminalServiceNotices({ scope, visible = true, available = true,
+  reveal, replayGeometry, viewportSync, continuation,
+  attachment, sessionObservation, causes = {}, historyNotice, historyContent,
+  refreshingObservation = false, onRefreshObservation }: {
+  scope: string
+  visible?: boolean
+  available?: boolean
   reveal: RenderableServiceNotice | null
   replayGeometry: RenderableServiceNotice | null
   viewportSync: RenderableServiceNotice | null
   continuation: RenderableServiceNotice | null
-  duringReconnect?: boolean
   attachment?: RenderableServiceNotice | null
   sessionObservation?: RenderableServiceNotice | null
+  causes?: Partial<Record<'attachment' | 'sessionObservation' | 'reveal' | 'replayGeometry' | 'viewportSync' | 'continuation', string>>
+  historyNotice?: ServiceNoticeItem | null
+  historyContent?: ReactNode
   refreshingObservation?: boolean
   onRefreshObservation?(): void
 }) {
-  if (!attachment && !sessionObservation && !reveal && !replayGeometry && !viewportSync && !continuation) return null
-  return <div className="terminal-service-window" aria-label="Terminal service notices" tabIndex={0}>
-    {attachment ? <ServiceWindowNotice notice={attachment} summary={{
-      step: attachment.notice.step,
-      mode: 'Run availability and input delivery unconfirmed; Session, history and draft retained.',
-      restore: attachment.notice.restore
-    }} /> : null}
+  const notices: ServiceNoticeItem[] = (Object.entries({ attachment, sessionObservation, reveal, replayGeometry, viewportSync, continuation }) as
+    [keyof typeof causes, RenderableServiceNotice | null | undefined][]).flatMap(([id, notice]) => notice
+      ? [{ id, notice, ...(causes[id] ? { cause: causes[id] } : {}) }] : [])
+  if (historyNotice) notices.push(historyNotice)
+  // Keep the public receipt owner mounted even with no current notices: confirmed recovery clears
+  // acknowledgements, while an unavailable observation retains them. No empty track is rendered.
+  return <ServiceNoticeDisclosure scope={scope} visible={visible} available={available} notices={notices}
+    className="terminal-service-window"
+    title={notices.length === 1 ? (continuation ? 'Terminal state unconfirmed' : notices[0]!.notice.notice.step) : 'Terminal service notices'}
+    actions={onRefreshObservation && notices.length ? <button type="button" className="small-button" disabled={refreshingObservation}
+      onClick={onRefreshObservation}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</button> : null}>
+    <ServiceWindowNotice notice={attachment ?? null} />
     <ServiceWindowNotice notice={sessionObservation ?? null} />
-    {reveal ? <ServiceWindowNotice notice={reveal} summary={{
-      step: 'Terminal restoration unconfirmed', mode: reveal.notice.mode,
-      restore: 'Reopen or resume to retry replay.'
-    }} /> : null}
-    {replayGeometry ? <ServiceWindowNotice notice={replayGeometry} summary={{
-      step: 'Replay layout unconfirmed',
-      mode: replayGeometry.kind === 'indeterminate' ? replayGeometry.notice.mode : 'Terminal available; retained layout size is unknown.',
-      restore: 'Resize to retry; historical layout remains unconfirmed.'
-    }} /> : null}
-    {viewportSync ? <ServiceWindowNotice notice={viewportSync} summary={{
-      step: 'Terminal size unconfirmed',
-      mode: viewportSync.kind === 'indeterminate' ? viewportSync.notice.mode : 'Terminal available; requested size is unconfirmed.',
-      restore: 'Resize or return to this tab to retry.'
-    }} /> : null}
-    {continuation ? <ServiceWindowNotice notice={continuation} summary={{
-      step: 'Terminal state unconfirmed',
-      mode: continuation.kind === 'indeterminate' ? continuation.notice.mode : duringReconnect
-        ? 'Terminal display may be incomplete; live input remains available while the Run is healthy.'
-        : 'History and input modes are unconfirmed; live input remains available while the Run is healthy.',
-      restore: 'Reopen to retry the checkpoint. Missing origin or evicted bytes cannot be recovered.'
-    }} /> : null}
-    {onRefreshObservation ? <button type="button" className="small-button" disabled={refreshingObservation}
-      onClick={onRefreshObservation}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</button> : null}
-  </div>
+    <ServiceWindowNotice notice={reveal} />
+    <ServiceWindowNotice notice={replayGeometry} />
+    <ServiceWindowNotice notice={viewportSync} />
+    <ServiceWindowNotice notice={continuation} />
+    {historyContent}
+  </ServiceNoticeDisclosure>
 }

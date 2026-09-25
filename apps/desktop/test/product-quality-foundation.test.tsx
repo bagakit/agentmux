@@ -87,22 +87,27 @@ it('keeps each original Terminal capability distinct, unknown honest and complet
   const unknown: RenderableServiceNotice = { kind: 'indeterminate', notice: {
     step: 'Original size failure', mode: 'We cannot confirm whether the Agent itself is affected.', restore: 'Original resize path FINAL UNKNOWN ACTION'
   } }
-  await act(async () => root.render(<TerminalServiceNotices reveal={notice} replayGeometry={unknown}
+  await act(async () => root.render(<TerminalServiceNotices scope="terminal:quality:run" reveal={notice} replayGeometry={unknown}
     viewportSync={notice} continuation={notice} />))
   const notices = [...container.querySelectorAll('.service-window')]
   expect(notices).toHaveLength(4)
   expect(notices.map(n => n.querySelector('.service-window__step')!.textContent)).toEqual([
-    'Terminal restoration unconfirmed', 'Replay layout unconfirmed', 'Terminal size unconfirmed', 'Terminal state unconfirmed'
+    notice.notice.step, unknown.notice.step, notice.notice.step, notice.notice.step
   ])
   expect(notices[1]!.querySelector('.service-window__mode')!.textContent).toBe(unknown.notice.mode)
-  expect(notices[1]!.querySelector('.service-window__details')!.textContent).toContain('FINAL UNKNOWN ACTION')
+  expect(notices[1]!.querySelector('.service-window__restore')!.textContent).toContain('FINAL UNKNOWN ACTION')
   expect(notices.map(n => n.getAttribute('role'))).toEqual(['status', 'status', 'status', 'status'])
-  expect(container.querySelectorAll('button')).toHaveLength(0)
-  expect(container.querySelectorAll('.service-window__details')).toHaveLength(4)
+  expect(container.querySelectorAll('.service-disclosure__trigger')).toHaveLength(1)
+  expect(container.querySelectorAll('.service-disclosure__close')).toHaveLength(2)
+  expect(container.querySelectorAll('.service-window__details')).toHaveLength(0)
+  await act(async () => container.querySelector<HTMLButtonElement>('.service-disclosure > .service-disclosure__close')!.click())
+  expect(container.querySelector('.service-disclosure__summary')).toBeNull()
+  expect(container.querySelector('.service-disclosure__trigger')).not.toBeNull()
+  expect(container.querySelectorAll('.service-window')).toHaveLength(4)
 })
 
 it('allocates no notice track when all existing facts are healthy', async () => {
-  await act(async () => root.render(<TerminalServiceNotices reveal={null} replayGeometry={null} viewportSync={null} continuation={null} />))
+  await act(async () => root.render(<TerminalServiceNotices scope="terminal:quality:run" reveal={null} replayGeometry={null} viewportSync={null} continuation={null} />))
   expect(container.innerHTML).toBe('')
 })
 
@@ -149,9 +154,9 @@ it('global and lifecycle consumers retain their complete three facts, polite ARI
   const expected = agentLifecycleFailureNotice(failure, 'Original lifecycle cause')
   const local = container.querySelector('.service-window')!
   expect(local.querySelector('.service-window__step')!.textContent).toBe(expected.notice.step)
-  expect(local.querySelector('.service-window__mode')!.textContent).toContain('availability unconfirmed')
+  expect(local.querySelector('.service-window__mode')!.textContent).toContain('current availability is not confirmed')
   expect(local.querySelector('.service-window__mode')!.textContent).toContain('last observed running')
-  const original = local.querySelector('.service-window__original')!
+  const original = local.querySelector('.service-window__body')!
   expect(original.textContent).toContain(expected.notice.step)
   expect(original.textContent).toContain(expected.notice.mode)
   expect(original.textContent).toContain(expected.notice.restore)

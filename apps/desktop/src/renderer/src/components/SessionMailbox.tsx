@@ -9,6 +9,7 @@ import { useReadReceipts, type useServiceNotices } from '../lib/use-service-noti
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import type { AgentSessionControl } from '../../../shared/contracts'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 type Folder = 'inbox' | 'outbox' | 'system' | 'progress'
 const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'system']
@@ -315,7 +316,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
         {notices.length ? notices.map((item) => <div key={item.id} className="composer-notice" data-kind={item.notice.kind}>
           <div className="composer-notice__body">
-            <strong>{item.notice.notice.step}</strong><span>{item.notice.notice.mode}</span><span>{item.notice.notice.restore}</span>
+            <ServiceWindowNotice notice={item.notice} />
             {item.observedAt === undefined ? <small>Time not recorded.</small>
               : <time dateTime={new Date(item.observedAt).toISOString()}>{new Date(item.observedAt).toLocaleString()}</time>}
             {item.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => setFolder('outbox')}>View outbox</button> : null}

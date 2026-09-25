@@ -80,7 +80,7 @@ async function ready(current: SessionSnapshot = session, readOnly = false) {
   expect(fixture.terminals).toHaveLength(1)
   const terminal = fixture.terminals[0]!
   expect(terminal.textarea).toBeInstanceOf(HTMLTextAreaElement)
-  const notice = container.querySelector('.terminal-replay-gap')
+  const notice = container.querySelector('.terminal-service-window')
   expect(notice).toBeInstanceOf(HTMLElement)
   expect(notice!.getAttribute('title') ?? notice!.textContent).toContain('Earlier')
   return terminal

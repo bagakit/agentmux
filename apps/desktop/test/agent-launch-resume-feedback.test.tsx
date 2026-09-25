@@ -173,9 +173,23 @@ async function click(label: string, parent: ParentNode = container) {
   expect(matches, `actual button ${label}`).toHaveLength(1)
   await act(async () => matches[0]!.click())
 }
+async function collapseFailure(parent: ParentNode = container) {
+  const button = parent.querySelector<HTMLButtonElement>('.service-disclosure > .service-disclosure__close')
+  expect(button).not.toBeNull()
+  await act(async () => button!.click())
+  expect(parent.querySelector('.service-disclosure')?.getAttribute('data-unread')).toBe('false')
+}
+async function viewFailure(parent: ParentNode = container) {
+  const button = parent.querySelector<HTMLButtonElement>('.service-disclosure__trigger')
+  expect(button).not.toBeNull()
+  await act(async () => button!.click())
+  expect(parent.querySelector('.service-disclosure__details')?.getAttribute('popover')).toBe('auto')
+}
 async function launcher() {
   const capability = await core.probeAgent('projection-fixture')
   useAppStore.setState({ executorDetections: { [executorDetectionKey('local', 'fixture')]: { state: 'ready',
+    input: { executorId: 'fixture', providerId: config.executors.fixture!.providerId, command: config.executors.fixture!.command,
+      host: config.hosts.find(host => host.id === 'local')! },
     result: { ...capability, executorId: 'fixture' } as never } } })
   await act(async () => root.render(<><NewTabSurface tabGroupId="projection-group" tabId={launcherId} regionId={regionId} visible={false} />
     <GlobalSystemNotices /></>))
@@ -207,6 +221,7 @@ it.each([
   await launcher()
   const stop = vi.spyOn(core, 'stopAgent')
   await click('Launch agent')
+  await vi.waitFor(() => expect(container.querySelector('.launch-surface .agent-launch-notice')).not.toBeNull())
   const notice = failureWindow(container.querySelector('.launch-surface')!)
   expect(notice.querySelector('.service-window__step')?.textContent).toBe('Starting this Agent did not complete')
   expect(notice.querySelector('.service-window__mode')?.textContent).toContain(message)
@@ -221,12 +236,13 @@ it.each([
   expect(useAppStore.getState().sessions).toEqual([sibling.session])
   await api.sessions.write(sibling.session!.control, 'healthy input', 'user')
   expect(writes).toEqual(['healthy input']); expect(stop).not.toHaveBeenCalled()
-  await click('Dismiss', container.querySelector('.agent-launch-notice')!)
-  expect(container.querySelector('.launch-surface .service-window')).toBeNull()
+  await collapseFailure(container.querySelector('.agent-launch-notice')!)
+  expect(container.querySelector('.launch-surface .service-disclosure__summary')).toBeNull()
   expect(container.querySelector('.global-system-notices__item')?.textContent).toContain(message)
+  const receipts = useAppStore.getState().noticeReadReceipts
   await act(async () => useAppStore.getState().reportError(new Error(message), useAppStore.getState().errorNoticeContext!))
-  expect(useAppStore.getState().errorDismissed).toBe(true)
-  await click('Show recovery error')
+  expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
+  await viewFailure(container.querySelector('.agent-launch-notice')!)
   expect(failureWindow(container.querySelector('.launch-surface')!).textContent).toContain(message)
   // The draft edited after failure, rather than a captured old prompt, is the retry payload.
   await act(async () => useAppStore.getState().setAgentComposerDraft(regionId, 'latest draft'))
@@ -245,12 +261,13 @@ it('retry start keeps the current cause until it succeeds, and a foreign launche
   const originalStart = kernel.start
   kernel.start = async () => { throw new AgentMuxError('private failure', 'CTXMUX_persistence') }
   await launcher(); await click('Launch agent')
+  await vi.waitFor(() => expect(container.querySelector('.launch-surface .agent-launch-notice')).not.toBeNull())
   let resolve!: (value: unknown) => void
   kernel.start = (input: unknown) => new Promise(yes => { resolve = async () => yes(await originalStart(input)) })
   await click('Retry Start agent', container.querySelector('.agent-launch-notice')!)
   expect(useAppStore.getState().error).toBe('private failure')
   expect(failureWindow(container.querySelector('.launch-surface')!).textContent).toContain('private failure')
-  expect(container.querySelector<HTMLButtonElement>('.agent-launch-notice button')!.disabled).toBe(true)
+  expect([...container.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')].find(button => button.textContent === 'Retry Start agent')!.disabled).toBe(true)
   await act(async () => root.render(<NewTabSurface tabGroupId="projection-group" tabId="foreign" regionId="foreign-region" visible={false} />))
   expect(container.querySelector('.agent-launch-notice')).toBeNull()
   await act(async () => resolve(undefined))
@@ -280,10 +297,10 @@ it('actual Resume failure reaches this same Session service window and inbox wit
   expect(core.agentSession(id).nativeHandle).toMatchObject({ sessionId: 'private-native-handle' })
   expect(useAppStore.getState().agentComposerDrafts[id]).toBe('Session draft')
   expect(container.querySelector('.composer-mailbox [role="tabpanel"][id$="-system"]')?.textContent).toContain('private resume write failure')
-  await click('Dismiss', container.querySelector('.agent-launch-notice')!)
-  expect(container.querySelector('.agent-launch-notice .service-window')).toBeNull()
+  await collapseFailure(container.querySelector('.agent-launch-notice')!)
+  expect(container.querySelector('.agent-launch-notice .service-disclosure__summary')).toBeNull()
   expect(container.querySelector('.composer-mailbox [role="tabpanel"][id$="-system"]')?.textContent).toContain('private resume write failure')
-  await click('Show recovery error')
+  await viewFailure(container.querySelector('.agent-launch-notice')!)
   kernel.start = originalStart
   await click('Retry Resume', container.querySelector('.agent-launch-notice')!)
   expect(useAppStore.getState().sessions[0]).toMatchObject({ id, processState: 'running' })

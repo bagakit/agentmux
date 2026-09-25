@@ -21,6 +21,7 @@ import { AgentSessionComposer } from './AgentSessionComposer'
 import type { ConversationAnnotation } from './ConversationMessage'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { errorIdentity } from '../lib/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import { ActivityView } from './ActivityView'
@@ -316,9 +317,12 @@ export function SessionPane({
   const acceptedLaunch = pendingLaunch?.created && (!session || session.control.run.runId === pendingLaunch.created.run.runId)
     ? pendingLaunch.created : undefined
   const launchFailures = pendingLaunch?.projectionFailures ?? []
-  const launchNotice = acceptedLaunch && launchFailures.length > 0 ? (
-    <div className="agent-launch-notice">
-      <ServiceWindowNotice notice={{
+  const launchNotice = (
+    <div className={acceptedLaunch && launchFailures.length > 0 ? 'agent-launch-notice' : 'service-disclosure-home'}>
+      <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['local:projection', acceptedLaunch?.hostId ?? session?.hostId,
+        sessionId, acceptedLaunch?.run.runId ?? session?.control.run.runId]),
+        id: 'projection', cause: JSON.stringify(launchFailures.map(failure => [failure.step, errorIdentity(failure.message)])),
+        available: Boolean(pendingLaunch || session) && !pendingAgentRestore, visible }} notice={acceptedLaunch && launchFailures.length > 0 ? {
         kind: session?.processState === 'running' ? 'process-degraded' : 'indeterminate',
         notice: {
           step: `Agent created; ${launchFailures.map(failure => `${failure.step}: ${failure.message}`).join('; ')}`,
@@ -327,16 +331,15 @@ export function SessionPane({
             : 'Creation is confirmed. Process observation and input availability are not yet confirmed.',
           restore: 'Check again to re-read this same Session and Timeline. No new Agent will be created.'
         }
-      }} summary={{
+      } : null} summary={{
         step: 'Agent created; projection unconfirmed',
         mode: session?.processState === 'running' ? 'Confirmed Session running; input remains available.'
           : 'Creation confirmed; process and input unconfirmed.',
         restore: 'Check again for this same Session and Timeline.'
-      }} />
-      {!readOnly ? <button type="button" className="small-button" disabled={refreshing}
-        onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null}
+      }} actions={!readOnly ? <button type="button" className="small-button" disabled={refreshing}
+        onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null} />
     </div>
-  ) : null
+  )
   if (!session && acceptedLaunch) {
     return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
       <div className="agent-body">{launchNotice}<p>Agent created · {acceptedLaunch.agentSessionId}</p></div>
@@ -430,7 +433,7 @@ export function SessionPane({
         resultReview={hasAgentComposer ? null : resultReview}
       /> : null}
       {launchNotice}
-      {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }}
+      {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }} visible={visible}
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       <div className="agent-body" style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>

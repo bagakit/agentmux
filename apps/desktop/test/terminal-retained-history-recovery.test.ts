@@ -114,11 +114,15 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
 vi.mock('../src/renderer/src/store', () => {
   const state = {
     config: null, regionCaretFocus: null,
+    noticeReadReceipts: {}, acquireNativeSurfaceOverlay: vi.fn(), releaseNativeSurfaceOverlay: vi.fn(),
     clearRegionCaretFocus: vi.fn(), recoverSession: vi.fn(),
     openHttpLink: vi.fn(), openFile: vi.fn(), reportError: vi.fn()
   }
   return { useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
-    getState: () => state
+    getState: () => state,
+    setState: (update: Partial<typeof state> | ((value: typeof state) => Partial<typeof state>)) => {
+      Object.assign(state, typeof update === 'function' ? update(state) : update)
+    }
   }) }
 })
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
@@ -364,9 +368,9 @@ it('keeps a genuine Runtime gap visible after successful current-screen repaint'
   await act(async () => burst(tail,initial.length))
   await waitParsed(initial+tail.slice(tail.indexOf('live-20')))
   expect(terminal.written.join('')).toBe(initial+tail.slice(tail.indexOf('live-20')))
-  const fact=document.querySelector('.terminal-replay-gap--compact')
+  const fact=document.querySelector('.terminal-service-window .terminal-gap-details')
   expect(fact).not.toBeNull()
-  expect(fact?.getAttribute('title')).toContain('no longer retained')
+  expect(fact?.textContent).toContain('no longer retained')
   expect(document.body.textContent).not.toContain('could not be read')
 })
 

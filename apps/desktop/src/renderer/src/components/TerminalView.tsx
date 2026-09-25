@@ -87,12 +87,14 @@ import {
 import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
   OpenDestinationPopover,
   type OpenDestinationRequest
 } from './OpenDestinationBar'
 import { TerminalContextMenu } from './TerminalContextMenu'
-import { TerminalReplayGapNotice } from './TerminalReplayGapNotice'
+import { TerminalReplayGapNotice, TERMINAL_GAP_NOTICE } from './TerminalReplayGapNotice'
+import { errorIdentity } from '../lib/error-presentation'
 import { terminalIdentityMenuActions } from '../lib/terminal-identity-menu'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
@@ -1543,6 +1545,17 @@ export function TerminalView({
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}; current availability and input delivery are unconfirmed. Your Session, history and draft are kept.`,
     restore: 'Refresh observation to re-read this Session and reopen its output connection. Unknown Input is never replayed.'
   } } : null
+  const noticeScope = JSON.stringify(['terminal', session.hostId, session.id, session.control.run])
+  const historyNotice = hydrating ? null : historyReadFailure ? {
+    id: 'history-read', cause: runtimeHistoryGap ? 'read-failed-after-runtime-gap' : 'retained-history-read-failed',
+    notice: { kind: 'indeterminate' as const, notice: {
+      step: 'Retained history read unconfirmed',
+      mode: `${runtimeHistoryGap ? 'Runtime reported a history gap. A later retained-history read failed.' : 'Retained history could not be read; earlier Runtime bytes may still exist.'} ${!readOnly && terminalAcceptsInput({ canControlRun, acceptsInput, liveReady: liveOutputReady }) ? 'Live input remains available.' : 'This terminal is not currently accepting input.'}`,
+      restore: 'Reopen this session to replay retained output.'
+    } }
+  } : replayGap || runtimeHistoryGap ? {
+    id: 'history-gap', cause: replayGap ? 'attachment-replay-gap' : 'runtime-retained-history-gap', notice: TERMINAL_GAP_NOTICE
+  } : null
 
   return (
     <Fragment>
@@ -1651,23 +1664,24 @@ export function TerminalView({
               哪一步没走通、终端此刻可用、怎么恢复完整滚动历史。判据是这个 Run 还能不能干活，
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
-          <TerminalServiceNotices reveal={revealNotice} replayGeometry={replayGeometryNotice}
+          <TerminalServiceNotices scope={noticeScope} visible={visible} available={!hydrating}
+            reveal={revealNotice} replayGeometry={replayGeometryNotice}
             viewportSync={viewportSyncNotice} continuation={continuationNotice}
-            duringReconnect={continuationAbsence?.duringReconnect ?? false}
+            causes={{
+              attachment: JSON.stringify([attachmentFailure?.step, attachmentFailure ? errorIdentity(attachmentFailure.message) : null]),
+              sessionObservation: JSON.stringify([session.kind === 'agent' ? session.terminalCapability?.reason : null,
+                session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
+                session.status.state === 'disconnected' ? session.status.detail : null]),
+              reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
+              continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
+            }}
             attachment={attachmentNotice} sessionObservation={sessionObservationNotice}
             refreshingObservation={refreshingObservation}
-            onRefreshObservation={() => void refreshObservationRef.current?.()} />
-          {!hydrating && !historyReadFailure && (replayGap || runtimeHistoryGap) ? (
-            <TerminalReplayGapNotice
-              compact={!replayGap}
-              canRedraw={canControlRun}
-              onRedraw={redrawCurrentScreen}
-            />
-          ) : null}
-          {!hydrating && historyReadFailure ? <div className="terminal-replay-gap" role="status" title={historyBoundary ?? undefined}>
-            <History size={12} aria-hidden="true" />
-            <span>{runtimeHistoryGap ? 'Runtime reported a history gap. A later retained-history read failed.' : 'Retained history could not be read; earlier Runtime bytes may still exist.'} {!readOnly && terminalAcceptsInput({ canControlRun, acceptsInput, liveReady: liveOutputReady }) ? 'Live input remains available.' : 'This terminal is not currently accepting input.'} Reopen this session to replay retained output.</span>
-          </div> : null}
+            onRefreshObservation={() => void refreshObservationRef.current?.()}
+            historyNotice={historyNotice}
+            historyContent={historyNotice?.id === 'history-gap' ? <TerminalReplayGapNotice
+              scope={noticeScope} visible={visible} embedded canRedraw={canControlRun && !readOnly}
+              onRedraw={redrawCurrentScreen} /> : historyNotice ? <ServiceWindowNotice notice={historyNotice.notice} /> : null} />
           {!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap && historyBoundary ? <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={historyBoundary} aria-label={historyBoundary}>
             <History size={12} aria-hidden="true" /><span>{historyBoundary.startsWith('The full-screen') ? 'Full-screen history' : 'History line limit'}</span>
           </div> : null}

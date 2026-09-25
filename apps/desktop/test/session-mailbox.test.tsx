@@ -200,7 +200,7 @@ it('uses the selected System owner time, keeps unknown times last, and never mak
     ['connection', 20], ['delivery', 30], ['queue', undefined]])
   await act(async () => useAppStore.setState({ sessions: [current], agentSteerQueues: { 'agent-1': queue } }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  const steps = () => [...mailbox().querySelectorAll('.composer-notice__body > strong')].map(el => el.textContent)
+  const steps = () => [...mailbox().querySelectorAll('.composer-notice .service-window__step')].map(el => el.textContent)
   expect(steps()).toEqual(['Screen confirmation from retained terminal output didn’t complete', 'Checking terminal capabilities didn’t complete', 'A queued message has not been sent'])
   expect([...mailbox().querySelectorAll('.composer-notice__body time')].map(el => el.getAttribute('datetime'))).toEqual([
     new Date(30).toISOString(), new Date(20).toISOString()])

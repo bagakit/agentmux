@@ -32,7 +32,7 @@ const fixture = vi.hoisted(() => ({
   nativeFocusAllowed: true,
   releaseWrite: null as (() => void) | null,
   reveal: null as (() => void) | null,
-  state: {sessions: [] as SessionSnapshot[],config:{appearance:{terminalTheme:'graphite'},executors:{},workspaces:[]},pendingAgentLaunches:{},recoveryCandidates:[],timelines:{},agentNames:{},viewModes:{},regionCaretFocus:null,clearRegionCaretFocus:vi.fn(),focusRegion:vi.fn(),appendAgentComposerDraft:vi.fn(),refreshSession:vi.fn(),recoverSession:vi.fn(),respondInteraction:vi.fn(),openFile:vi.fn(),reportError:vi.fn(),openHttpLink:vi.fn()}
+  state: {noticeReadReceipts:{},acquireNativeSurfaceOverlay:vi.fn(),releaseNativeSurfaceOverlay:vi.fn(),sessions: [] as SessionSnapshot[],config:{appearance:{terminalTheme:'graphite'},executors:{},workspaces:[]},pendingAgentLaunches:{},recoveryCandidates:[],timelines:{},agentNames:{},viewModes:{},regionCaretFocus:null,clearRegionCaretFocus:vi.fn(),focusRegion:vi.fn(),appendAgentComposerDraft:vi.fn(),refreshSession:vi.fn(),recoverSession:vi.fn(),respondInteraction:vi.fn(),openFile:vi.fn(),reportError:vi.fn(),openHttpLink:vi.fn()}
 }))
 
 vi.mock('@xterm/xterm', async () => {
@@ -109,7 +109,7 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   }
 } } }))
 vi.mock('../src/renderer/src/store', () => ({useAppStore: Object.assign(
-  (select: (state: typeof fixture.state) => unknown) => select(fixture.state), {getState:()=>fixture.state}
+  (select: (state: typeof fixture.state) => unknown) => select(fixture.state), {getState:()=>fixture.state,setState:(update:Partial<typeof fixture.state>|((value:typeof fixture.state)=>Partial<typeof fixture.state>))=>Object.assign(fixture.state,typeof update==='function'?update(fixture.state):update)}
 )}))
 vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({AgentSessionComposer:()=> <textarea aria-label="Original Agent composer"/>}))
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({SessionResultReview:()=>null}))
@@ -204,13 +204,13 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
       expect(terminal.buffer.active.length).toBe(terminal.rows + terminal.options.scrollback!)
       expect(document.querySelector('.terminal-replay-gap--compact')?.textContent).toContain('History line limit')
     } else if (state === 'Runtime gap') {
-      expect(document.querySelector('.terminal-replay-gap')?.textContent).toContain('Earlier scrollback is unavailable')
+      expect(document.querySelector('.terminal-service-window')?.textContent).toContain('Earlier scrollback is unavailable')
       const redraw = document.querySelector<HTMLButtonElement>('[aria-label="Redraw current terminal screen"]')
       expect(redraw).not.toBeNull()
       const before = fixture.redraw.mock.calls.length
       await act(async () => redraw!.click())
       expect(fixture.redraw).toHaveBeenCalledTimes(before + 1)
-      expect(document.querySelector('.terminal-replay-gap')?.getAttribute('title')).toContain('missing history')
+      expect(document.querySelector('.terminal-service-window')?.textContent).toContain('missing history')
     } else {
       expect(document.querySelector('.terminal-replay-gap')).toBeNull()
     }
