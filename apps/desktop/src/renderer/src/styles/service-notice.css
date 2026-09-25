@@ -14,7 +14,7 @@
 .service-disclosure__trigger:hover, .service-disclosure__close:hover { color: var(--text); background: var(--surface-2); }
 .service-disclosure__trigger:focus-visible, .service-disclosure__close:focus-visible { outline: var(--focus-line) solid 1px; outline-offset: 1px; }
 .service-disclosure__details { position: fixed; inset: auto; box-sizing: border-box; width: min(440px, calc(100vw - 2 * var(--sp-3))); max-height: min(70vh, 36rem); overflow-y: auto; margin: 0; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
-.service-disclosure__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.service-disclosure__heading { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); background: var(--surface-2); }
 .service-disclosure__heading > strong { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .service-disclosure__details .service-window { margin: 0; padding: var(--sp-3) 0; background: transparent; }
 .service-disclosure__details .service-window + .service-window { border-top: 1px solid var(--line-soft); }

@@ -97,7 +97,10 @@ export class Terminal extends xterm.Terminal { constructor(...args) { super(...a
         root.walkDecls('width', declaration => {
           if (declaration.source?.input.file === file && declaration.parent.selector === '.session-result-review__popover') original.push(declaration)
         })
-        require('postcss').parse(changed, { from: file }).walkDecls('width', declaration => {
+        // Vite also processes unrelated imported sheets. The build-level record count below
+        // proves the intended production file was actually found and transformed once.
+        if (!original.length) return
+        createRequire(require.resolve('vite'))('postcss').parse(changed, { from: file }).walkDecls('width', declaration => {
           if (declaration.parent.selector === '.session-result-review__popover') replacement.push(declaration)
         })
         assert.equal(original.length, 1, 'The imported production CSS has one actual width declaration')
