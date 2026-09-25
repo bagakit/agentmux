@@ -172,8 +172,23 @@ export async function observeApplicationProcesses(bundle, previousOwners = [],
   { processSnapshot = osProcessSnapshot, modes = electronNodeModes } = {}) {
   const first = processRows(await processSnapshot())
   const candidates = first.filter(row => row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `))
-  const nodeModes = await modes(candidates.map(row => row.pid))
-  const scope = snapshotApplicationProcesses(await processSnapshot(), bundle, { nodeModes, previousOwners })
+  let nodeModes = await modes(candidates.map(row => row.pid))
+  let current = await processSnapshot()
+  const original = new Map(candidates.map(row => [row.pid, row]))
+  const additional = processRows(current).filter(row => {
+    if (row.command !== bundle.executable && !row.command.startsWith(`${bundle.executable} `)) return false
+    const before = original.get(row.pid)
+    return !before || before.uid !== row.uid || before.birth !== row.birth || before.ppid !== row.ppid
+  })
+  // One reconciliation round covers new identities without chasing process churn.
+  // Any later or unreadable candidate stays protected by the existing classifier.
+  if (additional.length) {
+    const additionalModes = await modes(additional.map(row => row.pid))
+    const replaced = new Set(additional.map(row => row.pid))
+    nodeModes = [...nodeModes.filter(row => !replaced.has(row.pid)), ...additionalModes]
+    current = await processSnapshot()
+  }
+  const scope = snapshotApplicationProcesses(current, bundle, { nodeModes, previousOwners })
   return { ...scope, nodeModes: nodeModes.filter(mode => scope.processes.some(row =>
     row.pid === mode.pid && row.birth === mode.birth && row.ppid === mode.ppid)) }
 }
