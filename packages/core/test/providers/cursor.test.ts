@@ -1,5 +1,5 @@
-const upstreamFixtureSlugRoot = upstreamFixturePath('').split(/[^A-Za-z0-9]+/u).filter(Boolean).join('-')
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
+import { join, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import {
@@ -111,23 +111,24 @@ describe('Cursor provider', () => {
   })
 
   describe('一次工具调用在时间轴上收敛成一条，且失败与成功分得开', () => {
-    const call = { tool_name: 'Shell', tool_input: { command: 'npm test' }, tool_use_id: 'tu-77', cwd: upstreamFixturePath("repo") }
+    const call = { tool_name: 'Shell', tool_input: { command: 'npm test' }, tool_use_id: 'tu-77', cwd: fixturePath("repo") }
 
     it('preToolUse 落在途态并按 tool_use_id 关联', () => {
       const pre = toolMutation(hook('preToolUse', call))
       expect(pre.type).toBe('append')
       expect(pre.item.status).toBe('streaming')
-      expect(pre.item.id).toBe('run-cursor:tool:tu-77')
+      expect(pre.item.id).not.toContain('r-preToolUse')
       expect(pre.item.toolName).toBe('Shell')
       expect(hook('preToolUse', call).semanticState).toBe('working')
     })
 
     it('postToolUse 用同一个 id upsert 成 complete 并带上 tool_output', () => {
+      const pre = toolMutation(hook('preToolUse', call))
       const post = toolMutation(hook('postToolUse', {
         ...call, tool_output: 'ok, 12 passed', duration: 1200
       }))
       expect(post.type).toBe('upsert')
-      expect(post.item.id).toBe('run-cursor:tool:tu-77')
+      expect(post.item.id).toBe(pre.item.id)
       expect(post.item.status).toBe('complete')
       expect(post.item.toolOutput).toBe('ok, 12 passed')
     })
@@ -136,6 +137,7 @@ describe('Cursor provider', () => {
       // 这是本 task 最要紧的一条。Cursor 的失败负载**只**有 error_message/failure_type/is_interrupt：
       // 既没有 tool_output、也没有 is_error/exit_code/status。少了对这几个键的判据，一次失败的调用
       // 会被收敛成 complete，和成功的长得一模一样——那正是验收明令禁止的「失败画成成功」。
+      const pre = toolMutation(hook('preToolUse', call))
       const failure = toolMutation(hook('postToolUseFailure', {
         tool_name: 'Shell',
         tool_input: { command: 'npm test' },
@@ -146,7 +148,7 @@ describe('Cursor provider', () => {
         duration: 900
       }))
       expect(failure.type).toBe('upsert')
-      expect(failure.item.id).toBe('run-cursor:tool:tu-77')
+      expect(failure.item.id).toBe(pre.item.id)
       expect(failure.item.status).toBe('failed')
       // 红标记之外还得看得见原因，否则用户只知道「炸了」不知道炸在哪。
       expect(failure.item.toolOutput).toBe('exit status 1: 3 tests failed')
@@ -222,13 +224,13 @@ describe('Cursor provider', () => {
         tool_name: 'Read',
         tool_use_id: 'x',
         conversation_id: 'conv-1',
-        transcript_path: upstreamFixturePath("path/to/transcript.jsonl")
+        transcript_path: fixturePath("path/to/transcript.jsonl")
       })
       expect(withPath.nativeHandle).toEqual({
         kind: 'provider',
         providerId: 'cursor',
         sessionId: 'conv-1',
-        transcriptPath: upstreamFixturePath("path/to/transcript.jsonl")
+        transcriptPath: fixturePath("path/to/transcript.jsonl")
       })
       // 子代理事件被隔离，绝不晋升为主会话的 nativeHandle
       const subagent = hook('subagentStart', {
@@ -251,14 +253,15 @@ describe('Cursor provider', () => {
   })
 
   describe('装到 user 层的 hooks.json，并预置 workspace trust marker', () => {
-    const plan = (new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+    const fixtureSlugPrefix = fixturePath('').split(/[^A-Za-z0-9]+/u).filter(Boolean).join('-') + '-'
+    const plan = (new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
 
     it('两个 mutation 同时下发：hooks 配置 + trust marker', () => {
       // 缺了 marker，Cursor 会用一个交互式 trust 提示吃掉第一个 prompt——用户看到的是
       // 「AgentMux 把我的第一句话弄丢了」。两者必须在同一时刻成立。
       expect(plan?.mutations).toHaveLength(2)
-      expect(plan!.mutations[0]!.path.endsWith('/.cursor/hooks.json')).toBe(true)
-      expect(plan!.mutations[1]!.path.endsWith('/.workspace-trusted')).toBe(true)
+      expect(plan!.mutations[0]!.path.endsWith(sep + join('.cursor', 'hooks.json'))).toBe(true)
+      expect(plan!.mutations[1]!.path.endsWith(sep + '.workspace-trusted')).toBe(true)
     })
 
     it('计划真的能被启动路径那道门取到，而不只是一个导出的函数', () => {
@@ -266,17 +269,17 @@ describe('Cursor provider', () => {
       // 再调 Provider.planManagedHooks。两者少任何一半，安装器就永远拿不到 cursor 的计划——那时
       // 上面所有断言依然全绿，因为它们直接调的是工厂函数。这条把接线本身钉住。
       expect(cursor.catalog.hookStrategy).toEqual({ kind: 'native', installation: 'explicit-managed' })
-      expect((new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)).not.toBeNull()
+      expect((new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)).not.toBeNull()
       // env 也必须真的一路穿到解析器，否则 CURSOR_DATA_DIR 只在直调工厂时生效、在启动路径上失效。
-      expect((new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app"), env: { CURSOR_DATA_DIR: upstreamFixturePath("tmp/cd") } }) ?? null)!.mutations[0]!.path)
-        .toBe(upstreamFixturePath("tmp/cd/hooks.json"))
+      expect((new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: fixturePath("repo/app"), env: { CURSOR_DATA_DIR: fixturePath("tmp/cd") } }) ?? null)!.mutations[0]!.path)
+        .toBe(fixturePath("tmp/cd/hooks.json"))
     })
 
     it('绝不写 project 层的 .cursor/hooks.json，也不碰 Cursor 兼容读取的 ~/.claude/settings.json', () => {
       // project 层会被提交进用户仓库；~/.claude/settings.json 是用户为 Claude 维护的配置
       // （Cursor 为兼容也读它）。两处都不是 AgentMux 该写的地方。
       for (const mutation of plan!.mutations) {
-        expect(mutation.path.startsWith(upstreamFixturePath("repo/app"))).toBe(false)
+        expect(mutation.path.startsWith(fixturePath("repo/app"))).toBe(false)
         expect(mutation.path).not.toContain('/.claude/')
       }
     })
@@ -298,33 +301,33 @@ describe('Cursor provider', () => {
 
     it('trust marker 路径按 workspace 派生，slug 与 Cursor 的三步变换逐字一致', () => {
       // 差一步就写到另一个目录，marker 形同不存在。
-      expect(cursorTrustMarkerPath('home//proj/priv/my-app', {}))
-        .toContain(`/projects/${upstreamFixtureSlugRoot}-Users-me-proj-priv-my-app/.workspace-trusted`)
+      expect(cursorTrustMarkerPath(fixturePath('home//proj/priv/my-app'), {}))
+        .toContain(join('projects', fixtureSlugPrefix + 'home-proj-priv-my-app', '.workspace-trusted'))
       // 连续的非字母数字折叠成一个 `-`，首尾的 `-` 去掉。
-      expect(cursorTrustMarkerPath(upstreamFixturePath("a//b__c.d/"), {}))
-        .toContain(`/projects/${upstreamFixtureSlugRoot}-a-b-c-d/.workspace-trusted`)
+      expect(cursorTrustMarkerPath(fixturePath('a//b__c.d/'), {}))
+        .toContain(join('projects', fixtureSlugPrefix + 'a-b-c-d', '.workspace-trusted'))
     })
 
     it('CURSOR_DATA_DIR 覆盖被尊重——忽略它会写出一个 Cursor 永远不读的 marker', () => {
-      const overridden = createCursorManagedHookPlan(upstreamFixturePath("repo/app"), { CURSOR_DATA_DIR: upstreamFixturePath("tmp/cursor-data") })
-      expect(overridden.mutations[0]!.path).toBe(upstreamFixturePath("tmp/cursor-data/hooks.json"))
-      expect(overridden.mutations[1]!.path).toBe(upstreamFixturePath('tmp/cursor-data') + `/projects/${upstreamFixtureSlugRoot}-repo-app/.workspace-trusted`)
+      const overridden = createCursorManagedHookPlan(fixturePath("repo/app"), { CURSOR_DATA_DIR: fixturePath("tmp/cursor-data") })
+      expect(overridden.mutations[0]!.path).toBe(fixturePath("tmp/cursor-data/hooks.json"))
+      expect(overridden.mutations[1]!.path).toBe(join(fixturePath('tmp/cursor-data'), 'projects', fixtureSlugPrefix + 'repo-app', '.workspace-trusted'))
     })
 
     it('marker 内容对同一个 workspace 恒定——真实时钟会让每次启动都重写它', () => {
       // installer 靠「内容 hash 未变」判定无需重写；`new Date()` 会让 preview 与 install 两次渲染
       // 结果不同，直接撞上 HOOK_TARGET_CHANGED。
-      const once = createCursorManagedHookPlan(upstreamFixturePath("repo/app"), {}).mutations[1]!.content
-      const twice = createCursorManagedHookPlan(upstreamFixturePath("repo/app"), {}).mutations[1]!.content
+      const once = createCursorManagedHookPlan(fixturePath("repo/app"), {}).mutations[1]!.content
+      const twice = createCursorManagedHookPlan(fixturePath("repo/app"), {}).mutations[1]!.content
       expect(twice).toBe(once)
       const marker = JSON.parse(once) as { trustedAt: string; workspacePath: string }
-      expect(marker.workspacePath).toBe(upstreamFixturePath("repo/app"))
+      expect(marker.workspacePath).toBe(fixturePath("repo/app"))
       // 是一个真实可解析的 ISO 时间戳，而不是占位字符串。
       expect(Number.isFinite(Date.parse(marker.trustedAt))).toBe(true)
       // 不冒用 Cursor 自己那两种来源标签（cli-flag / inherited）——AgentMux 走的是第三条路。
       expect(Object.keys(marker).sort()).toEqual(['trustedAt', 'workspacePath'])
       // 不同 workspace 得到不同的值，否则这个字段就只是个常量。
-      const other = JSON.parse(createCursorManagedHookPlan(upstreamFixturePath("repo/other"), {}).mutations[1]!.content) as {
+      const other = JSON.parse(createCursorManagedHookPlan(fixturePath("repo/other"), {}).mutations[1]!.content) as {
         trustedAt: string
       }
       expect(other.trustedAt).not.toBe(marker.trustedAt)
@@ -336,8 +339,8 @@ describe('Cursor provider', () => {
       const existing = JSON.stringify({
         version: 1,
         hooks: {
-          stop: [{ command: upstreamFixturePath("usr/local/bin/my-own-notify.sh"), timeout: 5 }],
-          afterFileEdit: [{ command: upstreamFixturePath("usr/local/bin/format.sh") }]
+          stop: [{ command: fixturePath("usr/local/bin/my-own-notify.sh"), timeout: 5 }],
+          afterFileEdit: [{ command: fixturePath("usr/local/bin/format.sh") }]
         }
       })
       const merged = JSON.parse(renderMergedHookContent(
@@ -348,10 +351,10 @@ describe('Cursor provider', () => {
 
       expect(merged.version).toBe(1)
       // 用户自己在同一事件上的 hook 留着，且排在我们前面。
-      expect(merged.hooks.stop![0]!.command).toBe(upstreamFixturePath("usr/local/bin/my-own-notify.sh"))
+      expect(merged.hooks.stop![0]!.command).toBe(fixturePath("usr/local/bin/my-own-notify.sh"))
       expect(merged.hooks.stop!.some((entry) => entry.command.includes('agentmux-hook.js'))).toBe(true)
       // 我们没接的事件桶原样保留。
-      expect(merged.hooks.afterFileEdit![0]!.command).toBe(upstreamFixturePath("usr/local/bin/format.sh"))
+      expect(merged.hooks.afterFileEdit![0]!.command).toBe(fixturePath("usr/local/bin/format.sh"))
     })
 
     it('重装不累积：自有条目按 marker 清扫后只剩一份', () => {
@@ -364,13 +367,13 @@ describe('Cursor provider', () => {
   describe('launch 与 resume 的 argv 精确', () => {
     it('prompt 仍是位置参数，排在解析出的旗标之后', () => {
       expect(cursor.buildLaunch({
-        workspacePath: upstreamFixturePath("repo"), prompt: 'review this', args: ['--force'], env: {}
+        workspacePath: fixturePath("repo"), prompt: 'review this', args: ['--force'], env: {}
       })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
     })
 
     it('argv 恰为 cursor-agent --resume <chat-id>，prompt 仍在位置上', () => {
       expect(cursor.buildResumeLaunch({
-        workspacePath: upstreamFixturePath("repo"),
+        workspacePath: fixturePath("repo"),
         nativeHandle: {
           kind: 'provider', providerId: 'cursor', sessionId: '1e4a82bfaa200bac535ca351cd388615'
         },
@@ -388,7 +391,7 @@ describe('Cursor provider', () => {
       let error: AgentMuxError | undefined
       try {
         cursor.buildResumeLaunch({
-          workspacePath: upstreamFixturePath("repo"),
+          workspacePath: fixturePath("repo"),
           nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'not-cursor' },
           args: [], env: {}
         })

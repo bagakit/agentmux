@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,8 +24,7 @@ describe('Pi provider', () => {
   /**
    * 造一条 Pi 形状的信封。
    *
-   * 默认带齐 `session_id` 与 `session_file`——`requireTranscriptPath` 为真，缺 session_file 时整个
-   * handle 会被丢弃，那是另一组用例专门守的事。
+   * 默认带齐 `session_id` 与 `session_file`；另一组用例守 ID-only 身份与可恢复路径的区别。
    */
   function hookIn(runId: string) {
     return (eventName: string, payload: Record<string, unknown> = {}) =>
@@ -35,19 +34,19 @@ describe('Pi provider', () => {
         runId,
         providerId: 'pi',
         eventName,
-        payload: { session_id: 'pi-session-1', session_file: upstreamFixturePath("tmp/pi/session.jsonl"), ...payload }
+        payload: { session_id: 'pi-session-1', session_file: fixturePath("tmp/pi/session.jsonl"), ...payload }
       }, {})
   }
 
   describe('事件名逐字来自上游的 on() 重载', () => {
-    it('订阅的七个都是 snake_case 真名，没有一个别家的拼法', () => {
+    it('订阅的八个都是 snake_case 真名，没有一个别家的拼法', () => {
       // 上游的事件名形如 `agent_settled`（`extensions/types.ts:1282-1298` 的 on() 重载签名）。
       for (const name of PI_HOOK_EVENTS) {
         expect(name).toMatch(/^[a-z]+(_[a-z]+)*$/)
       }
-      expect([...PI_HOOK_EVENTS]).toEqual([
-        'before_agent_start', 'agent_start', 'tool_call', 'tool_execution_start',
-        'tool_execution_end', 'message_end', 'agent_settled'
+      expect([...PI_HOOK_EVENTS].sort()).toEqual([
+        'agent_settled', 'agent_start', 'before_agent_start', 'message_end',
+        'session_start', 'tool_call', 'tool_execution_end', 'tool_execution_start'
       ])
     })
 
@@ -65,12 +64,11 @@ describe('Pi provider', () => {
   /**
    * 这一组是本轮读第一方源码翻出来的实锤，也是这个 Provider 最容易被改回去的地方。
    */
-  describe('agent_settled 是唯一的 done——agent_end 不是', () => {
-    it('agent_settled 判 done', () => {
-      // 上游只在 `_handlePostAgentRun` 的 while 循环整个跑完后、在 finally 里发一次
-      // （`agent-session.ts:1109-1117`）。它自己的 RPC 客户端也是等这一条才认为调用结束
-      // （`modes/rpc/rpc-client.ts:462`）。
-      expect(hookIn('run-settled')('agent_settled').semanticState).toBe<AgentSemanticState>('done')
+  describe('agent_settled 是唯一的 done 来源——需要 stopReason 为 stop', () => {
+    it('agent_settled 在带 stop 时判 done，无原因保持 unknown', () => {
+      // 只有最后一轮 assistant 正常 stop 时判定为 done
+      expect(hookIn('run-settled')('agent_settled', { stopReason: 'stop' }).semanticState).toBe<AgentSemanticState>('done')
+      expect(hookIn('run-settled-bare')('agent_settled').semanticState).toBe<AgentSemanticState>('unknown')
     })
 
     it('agent_end 绝不判 done——它之后还有 retry / compaction / queued 三条续跑路径', () => {
@@ -127,21 +125,18 @@ describe('Pi provider', () => {
     })
   })
 
-  describe('native handle：session_file 缺席时整个 handle 不成立', () => {
+  describe('native handle：session_id 存在时提取 handle', () => {
     it('两个字段齐全时给出带 transcriptPath 的 handle', () => {
       const event = hookIn('run-handle')('agent_start')
       expect(event.nativeHandle).toEqual({
         kind: 'provider',
         providerId: 'pi',
         sessionId: 'pi-session-1',
-        transcriptPath: upstreamFixturePath("tmp/pi/session.jsonl")
+        transcriptPath: fixturePath("tmp/pi/session.jsonl")
       })
     })
 
-    it('只有 session_id 时 handle 整个缺席——不给一个 resume 用不了的半成品', () => {
-      // `requireTranscriptPath: true`。这与扩展侧「transcript 真落盘后才报 session_file」是同一个
-      // 约束的两端：上游在会话创建时就返回路径（`session-manager.ts:954`），但文件要等第一条
-      // assistant 消息才创建（`:1031` 的 `openSync(..., "wx")`）。
+    it('只有 session_id 时给出诚实的 ID-only handle', () => {
       const event = pi.normalizeHook({
         receiptId: 'r-no-file',
         agentSessionId: 's-pi',
@@ -150,7 +145,11 @@ describe('Pi provider', () => {
         eventName: 'agent_start',
         payload: { session_id: 'pi-session-1' }
       }, {})
-      expect(event.nativeHandle).toBeUndefined()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'pi',
+        sessionId: 'pi-session-1'
+      })
     })
   })
 
@@ -158,18 +157,18 @@ describe('Pi provider', () => {
     it('拿到 transcriptPath 时组出 --session 加那个路径', () => {
       // `cli/args.ts:123-124` 解析 `--session <value>`，`main.ts:385-391` 把它当路径解析后打开。
       const launch = pi.buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/ws"),
+        workspacePath: fixturePath("tmp/ws"),
         nativeHandle: {
           kind: 'provider',
           providerId: 'pi',
           sessionId: 'pi-session-1',
-          transcriptPath: upstreamFixturePath("tmp/pi/session.jsonl")
+          transcriptPath: fixturePath("tmp/pi/session.jsonl")
         },
         args: [],
         env: {}
       })
       expect(launch.command).toBe('pi')
-      expect(launch.args).toEqual(['--session', upstreamFixturePath("tmp/pi/session.jsonl")])
+      expect(launch.args).toEqual(['--session', fixturePath("tmp/pi/session.jsonl")])
       // **不是** `--session-id`：那个是给会话取 id（`cli/args.ts:125-126`），不是恢复。
       expect(launch.args).not.toContain('--session-id')
       expect(launch.args).not.toContain('--resume')
@@ -179,7 +178,7 @@ describe('Pi provider', () => {
       let thrown: unknown
       try {
         pi.buildResumeLaunch({
-          workspacePath: upstreamFixturePath("tmp/ws"),
+          workspacePath: fixturePath("tmp/ws"),
           nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: 'pi-session-1' },
           args: [],
           env: {}
@@ -198,7 +197,7 @@ describe('Pi provider', () => {
    * 装载合同。每一条猜错都是静默失败：Pi 不会因为扩展形状不对而报错，只会跳过它。
    */
   describe('managed 扩展的安装合同', () => {
-    const plan = createPiManagedHookPlan({ PI_CODING_AGENT_DIR: upstreamFixturePath("tmp/pi-agent-dir") })
+    const plan = createPiManagedHookPlan({ PI_CODING_AGENT_DIR: fixturePath("tmp/pi-agent-dir") })
     const mutation = plan.mutations[0]!
 
     it('装到 <agent-dir>/extensions/ 下的一个 .js 文件', () => {
@@ -206,7 +205,7 @@ describe('Pi provider', () => {
       // 收 `.ts` 与 `.js`，一层目录直接命中（`:735-737`）。
       expect(plan.providerId).toBe('pi')
       expect(plan.mutations).toHaveLength(1)
-      expect(mutation.path).toBe(upstreamFixturePath("tmp/pi-agent-dir/extensions/agentmux.js"))
+      expect(mutation.path).toBe(fixturePath("tmp/pi-agent-dir/extensions/agentmux.js"))
     })
 
     it('尊重 PI_CODING_AGENT_DIR，缺席时落到 ~/.pi/agent/extensions', () => {
@@ -214,7 +213,7 @@ describe('Pi provider', () => {
       // 而 `CONFIG_DIR_NAME` 缺省 `.pi`（`config.ts:500`）。
       const fallback = createPiManagedHookPlan({})
       expect(fallback.mutations[0]!.path).toMatch(/\/\.pi\/agent\/extensions\/agentmux\.js$/)
-      expect(fallback.mutations[0]!.path).not.toContain(upstreamFixturePath("tmp/pi-agent-dir"))
+      expect(fallback.mutations[0]!.path).not.toContain(fixturePath("tmp/pi-agent-dir"))
     })
 
     it('绝不跨家兜底——同族其它 agent 的目录变量对 Pi 完全无效', () => {
@@ -226,11 +225,11 @@ describe('Pi provider', () => {
       // 实测过：给 `piFamilyExtensionDir` 加一句 `?? env?.OMP_CODING_AGENT_DIR?.trim()`，
       // 35 条断言一条都不红。所以这条必须显式钉住——只认自己那一个变量名。
       const crossFamily = createPiManagedHookPlan({
-        OMP_CODING_AGENT_DIR: upstreamFixturePath("tmp/omp-agent-dir"),
-        PRIME_AGENT_CODING_AGENT_DIR: upstreamFixturePath("tmp/prime-agent-dir")
+        OMP_CODING_AGENT_DIR: fixturePath("tmp/omp-agent-dir"),
+        PRIME_AGENT_CODING_AGENT_DIR: fixturePath("tmp/prime-agent-dir")
       })
-      expect(crossFamily.mutations[0]!.path).not.toContain(upstreamFixturePath("tmp/omp-agent-dir"))
-      expect(crossFamily.mutations[0]!.path).not.toContain(upstreamFixturePath("tmp/prime-agent-dir"))
+      expect(crossFamily.mutations[0]!.path).not.toContain(fixturePath("tmp/omp-agent-dir"))
+      expect(crossFamily.mutations[0]!.path).not.toContain(fixturePath("tmp/prime-agent-dir"))
       // 自己的变量缺席时走自己的默认值，而不是借用别家的。
       expect(crossFamily.mutations[0]!.path).toMatch(/\/\.pi\/agent\/extensions\/agentmux\.js$/)
     })
@@ -249,8 +248,9 @@ describe('Pi provider', () => {
       expect(mutation.content).toContain("pi.on('agent_settled'")
     })
 
-    it('七个订阅的事件名逐个出现在源码里，一个不少', () => {
+    it('八个订阅的事件名逐个出现在源码里，一个不少', () => {
       // 守的是「声明的清单」与「真写进文件的注册」不漂移——两份东西分居两处，改一处忘另一处不会红。
+      expect([...PI_HOOK_EVENTS]).toHaveLength(8)
       for (const name of PI_HOOK_EVENTS) {
         expect(mutation.content).toContain(`pi.on('${name}'`)
       }
@@ -331,7 +331,7 @@ describe('Pi provider', () => {
       posts: Captured[]
       flush: () => Promise<void>
     }> {
-      const source = createPiManagedHookPlan({ PI_CODING_AGENT_DIR: upstreamFixturePath("tmp/pi-run") }).mutations[0]!.content
+      const source = createPiManagedHookPlan({ PI_CODING_AGENT_DIR: fixturePath("tmp/pi-run") }).mutations[0]!.content
       const module = await import(
         /* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`
       )
@@ -415,10 +415,11 @@ describe('Pi provider', () => {
       expect(payload.session_file).toBe(presentTranscript)
     })
 
-    it('注册的正好是声明的那七个事件，agent_end 不在其中', async () => {
+    it('注册的正好是声明的那八个事件，agent_end 不在其中', async () => {
       const ext = await loadExtension({ env: hookEnv, sessionFile: presentTranscript })
       await ext.flush()
       expect([...ext.handlers.keys()].sort()).toEqual([...PI_HOOK_EVENTS].sort())
+      expect([...ext.handlers.keys()]).toHaveLength(8)
       expect(ext.handlers.has('agent_end')).toBe(false)
     })
 
@@ -464,13 +465,13 @@ describe('Pi provider', () => {
       // 而两个事件的**工具名**字段恰好同名（toolName），所以只看工具名的断言抓不到这个错。
       const ext = await loadExtension({ env: hookEnv, sessionFile: presentTranscript })
       ext.handlers.get('tool_call')!({ toolName: 'bash', input: { command: 'ls' } }, sessionCtx)
-      ext.handlers.get('tool_execution_start')!({ toolName: 'read', args: { path: upstreamFixturePath("tmp/x") } }, sessionCtx)
+      ext.handlers.get('tool_execution_start')!({ toolName: 'read', args: { path: fixturePath("tmp/x") } }, sessionCtx)
       await ext.flush()
 
       const first = JSON.parse(ext.posts[0]!.init.body).payload
       expect(first).toMatchObject({ tool_name: 'bash', tool_input: { command: 'ls' } })
       const second = JSON.parse(ext.posts[1]!.init.body).payload
-      expect(second).toMatchObject({ tool_name: 'read', tool_input: { path: upstreamFixturePath("tmp/x") } })
+      expect(second).toMatchObject({ tool_name: 'read', tool_input: { path: fixturePath("tmp/x") } })
     })
 
     it('sessionManager 缺席时不抛，只是不带 session 字段', async () => {
@@ -487,9 +488,9 @@ describe('Pi provider', () => {
     it('Provider.planManagedHooks 按 id 找得到它，且不需要 endpoint', () => {
       // 与 opencode 相反：那家没有 endpoint 就必须弃权（返回 null），Pi 在修复路径（没有 Binding）
       // 也照常产出一份完全有效的 plan——因为内容在运行时才取 endpoint。
-      const resolved = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/ws"), env: { PI_CODING_AGENT_DIR: upstreamFixturePath("tmp/pi-agent-dir") } }) ?? null)
+      const resolved = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: fixturePath("tmp/ws"), env: { PI_CODING_AGENT_DIR: fixturePath("tmp/pi-agent-dir") } }) ?? null)
       expect(resolved?.providerId).toBe('pi')
-      expect(resolved?.mutations[0]!.path).toBe(upstreamFixturePath("tmp/pi-agent-dir/extensions/agentmux.js"))
+      expect(resolved?.mutations[0]!.path).toBe(fixturePath("tmp/pi-agent-dir/extensions/agentmux.js"))
     })
 
     it('catalog 声明 explicit-managed——不再是 unmanaged', () => {

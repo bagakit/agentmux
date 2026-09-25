@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { HERMES_HOOK_EVENTS, HERMES_HOOKS, createHermesManagedHookPlan } from '../../src/providers/hermes.js'
@@ -39,7 +39,7 @@ describe('Hermes provider', () => {
         tool_name: null,
         tool_input: null,
         session_id: 'sess-h',
-        cwd: upstreamFixturePath("repo"),
+        cwd: fixturePath("repo"),
         ...top,
         extra
       }
@@ -66,22 +66,26 @@ describe('Hermes provider', () => {
         error_message: 'exit 1', duration_ms: 900, tool_call_id: 'tc-5'
       }, { tool_name: 'terminal', tool_input: { command: 'npm test' } }))
       expect(failure.item.status).toBe('failed')
-      expect(failure.item.id).toBe('run-hermes:tool:tc-5')
+      expect(failure.type).toBe('append')
+      expect(failure.item.id).toBe('run-hermes:r-post_tool_call:0')
       expect(failure.item.toolOutput).toBe('FAILED 3 tests')
       expect(failure.item.toolName).toBe('terminal')
     })
 
-    it('pre_tool_call 与 post_tool_call 收敛成同一条，而不是并排两行', () => {
+    it('缺少声明的原生主体资格时，pre/post 保留各自回执与结果', () => {
       const pre = toolMutation(hook('pre_tool_call',
         { tool_call_id: 'tc-7', turn_id: 't-1' },
         { tool_name: 'terminal', tool_input: { command: 'ls' } }
       ))
-      expect(pre.item.status).toBe('streaming')
+      expect(pre.type).toBe('append')
+      expect(pre.item.id).toBe('run-hermes:r-pre_tool_call:0')
       const post = toolMutation(hook('post_tool_call',
         { tool_call_id: 'tc-7', status: 'ok', result: 'a\nb' },
         { tool_name: 'terminal', tool_input: { command: 'ls' } }
       ))
-      expect(post.item.id).toBe(pre.item.id)
+      expect(post.type).toBe('append')
+      expect(post.item.id).toBe('run-hermes:r-post_tool_call:0')
+      expect(post.item.id).not.toBe(pre.item.id)
       expect(post.item.status).toBe('complete')
       expect(post.item.toolOutput).toBe('a\nb')
     })
@@ -154,7 +158,7 @@ describe('Hermes provider', () => {
       // 上面两条行为断言直接调 normalizeHook，绕过了「这个事件会不会到达」。撤掉安装后它们照旧
       // 全绿（实测确认过）——所以必须单独钉住接线：config.yaml 让 Hermes 触发它，allowlist 让这次
       // 触发不卡在同意提示上。少任何一份，上面验的行为在产品里永远走不到。
-      const plan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as {
         hooks: Record<string, Array<{ command: string }>>
       }
@@ -259,7 +263,7 @@ describe('Hermes provider', () => {
     it('两个 mutation 的事件集都恰好等于声明的清单', () => {
       // config.yaml 装事件，allowlist 授权同一批 (event, command) 对。两份少任何一边，
       // 事件要么不触发、要么触发时卡在一个交互式同意提示上（非 TTY 下直接注册失败）。
-      const plan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: upstreamFixturePath("repo/app") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
       const config = JSON.parse(plan!.mutations[0]!.content) as { hooks: Record<string, unknown> }
       expect(Object.keys(config.hooks).sort()).toEqual([...HERMES_HOOK_EVENTS].sort())
       const allowlist = JSON.parse(plan!.mutations[1]!.content) as {
@@ -285,9 +289,9 @@ describe('Hermes provider', () => {
     })
 
     it('HERMES_HOME 覆盖被尊重——忽略它会写出一份 Hermes 永远不读的配置', () => {
-      const overridden = createHermesManagedHookPlan({ HERMES_HOME: upstreamFixturePath("tmp/hh") })
+      const overridden = createHermesManagedHookPlan({ HERMES_HOME: fixturePath("tmp/hh") })
       expect(overridden.mutations.map((mutation) => mutation.path))
-        .toEqual([upstreamFixturePath("tmp/hh/config.yaml"), upstreamFixturePath("tmp/hh/shell-hooks-allowlist.json")])
+        .toEqual([fixturePath("tmp/hh/config.yaml"), fixturePath("tmp/hh/shell-hooks-allowlist.json")])
     })
   })
 
