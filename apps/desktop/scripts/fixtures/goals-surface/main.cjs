@@ -50,7 +50,18 @@ app.whenReady().then(async()=>{
         await click('document.querySelector("[data-demand-id]")'); await waitFor('Boolean(document.querySelector("[data-goal-acknowledgement-failure]"))'); await capture('620-receipt-failure-reopened',620); await size(1280)
       }
     }
-    assert.equal(result.frames.length,38); assert.deepEqual(result.consoleErrors,[]); result.passed=true
+    assert.equal(result.frames.length,38)
+    for (const mode of ['empty','one','many','current','recent']) {
+      await evaluate(`goalsVisual.seed(${JSON.stringify(mode)})`)
+      for (const width of [1280,620]) {
+        await size(width); await waitFor('Boolean(document.querySelector("[data-goals-entry-action=understand]"))')
+        const count=await evaluate('document.querySelectorAll("[data-goals-entry-action]").length')
+        assert.equal(count, ['current','recent'].includes(mode) ? 3 : 2, 'Only reliable project context adds the third request')
+        if(mode==='current') assert.equal(await evaluate('document.querySelector("[data-goals-entry-action=next]").textContent.includes("根据当前项目")'),true)
+        await capture(`${width}-entry-${mode}`,width)
+      }
+    }
+    assert.equal(result.frames.length,48); assert.deepEqual(result.consoleErrors,[]); result.passed=true
   } catch(error) { result.failure={name:error.name,message:error.message,stack:error.stack} }
   finally { await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2)); win?.destroy(); app.exit(result.passed?0:1) }
 })

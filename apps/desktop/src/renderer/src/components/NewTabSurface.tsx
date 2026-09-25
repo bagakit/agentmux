@@ -31,6 +31,7 @@ import { ComposerReferenceTool } from './ComposerReferenceTool'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { lifecycleFailureBelongsTo } from '../lib/agent-lifecycle-feedback'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 export function NewTabSurface({
   tabGroupId,
@@ -96,6 +97,7 @@ export function NewTabSurface({
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
+  const topicPreparation = useAppStore(state => tabId ? state.tabs[tabId]?.topicPreparation : undefined)
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
@@ -272,6 +274,12 @@ export function NewTabSurface({
           {detecting ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
         </button>
       </div>
+
+      {topicPreparation || (executors.length === 0 && prompt) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: topicPreparation ? 'Mote Topic preparation is unconfirmed' : 'No Agent Executor is configured',
+        mode: `${executors.length === 0 ? 'No Agent Executor is configured. ' : ''}Your request has not been sent. ${topicPreparation ? 'The same Topic, Region and complete draft are kept.' : 'The same Region and complete draft are kept.'}`,
+        restore: executors.length === 0 ? 'Add an Agent in Settings, then Launch agent here with the preserved request.' : 'Launch agent here to retry preparation for this same Topic, then send the preserved request.'
+      } }} /> : null}
 
       <div className="agent-catalog" aria-label="Agent executors">
         <div className="agent-catalog__group">

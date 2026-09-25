@@ -9,6 +9,7 @@ import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, requestAgentMuxCon
 import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace } from './goals-alignment-restart-proof.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
+import { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns } from './goals-entry-restart-proof.mjs'
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
 // source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
@@ -34,11 +35,13 @@ const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
 const goalsAlignmentProof = process.argv.includes('--goals-alignment')
+const goalsEntryProof = process.argv.includes('--goals-entry')
 const regionCloseProof = process.argv.includes('--close-region')
 const identityMenuProof = process.argv.includes('--identity-menu')
 const swapNameProof = process.argv.includes('--swap-names')
 assert.ok(!swapNameProof || (identityMenuProof && !regionCloseProof), 'Three-Agent Swap is a separate identity case, never the original close case')
 assert.ok(!goalsAlignmentProof || (!regionCloseProof && !identityMenuProof && !swapNameProof), 'Goals is a separate original-workspace recovery case')
+assert.ok(!goalsEntryProof || (!goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Actual Goals CTA entry is a separate original-workspace recovery case')
 const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
@@ -46,6 +49,7 @@ if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's fi
 let client, session, producer, failure, result, ownedRunProcess, seedReport
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
+let goalsEntryFixture, goalsEntryRestored
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function waitFor(label, read, budget = 20_000) {
@@ -99,6 +103,12 @@ async function launch(label) {
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   try {
+  if (goalsEntryProof && label === 'second') {
+    goalsEntryRestored = await restoreGoalsEntryBeforeSpace({ cdp, fixture: goalsEntryFixture, activateButton, waitFor,
+      focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: randomUUID(), operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
+        assert.equal(reply.ok, true, JSON.stringify(reply)) } })
+  }
   if (goalsAlignmentProof && label === 'second') {
     goalsRestored = await restoreGoalsBeforeSpace({ cdp, fixture: goalsFixture, accepted: goalsAccepted,
       expectedWorkbench: goalsExpectedWorkbench, expectedFocus: goalsExpectedFocus, waitFor,
@@ -219,6 +229,7 @@ try {
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
   await mkdir(topicsPath, { recursive: true })
   await mkdir(codexHome, { recursive: true, mode: 0o700 })
+  if (goalsEntryProof) goalsEntryFixture = await createGoalsEntryFixture({ root, topicsPath, desktopRoot })
   const executable = join(workspacePath, 'private-cat.sh'), bindingPath = join(root, 'private-hook-binding.json')
   // Generated identifiers/URL/token contain only the Core-defined safe ASCII alphabet. Never print
   // the binding or put it in argv; it belongs to this one temporary private Run only.
@@ -244,7 +255,7 @@ try {
   await waitFor('private inherited Hook binding', async () => { try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); return value.agentSessionId === session.agentSessionId ? value : null } catch { return null } })
   await writeFile(join(workspacePath, 'split.txt'), 'Other Region stays present\n')
   await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private crash fixture' }],
-    executors: { probe: { label: 'Private cat', providerId: 'codex', command: executable, args: [], env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false } },
+    executors: { probe: { label: 'Private cat', providerId: 'codex', command: goalsEntryFixture?.executable ?? executable, args: [], env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false } },
     workspaces: [{ id: '__scratch__', name: 'Private Topics', hostId: 'local', path: topicsPath, kind: 'folder' },
       { id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }))
@@ -337,7 +348,7 @@ try {
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
   await waitFor('actual file Region focus changed', async () => { const s = await surface(first.cdp); return s.activeRegions.length === 1 && s.activeRegions[0] === fileRegionId })
   let lastEditAt = Date.now()
-  const expectedWorkbench = structuredClone(before.workbench)
+  let expectedWorkbench = structuredClone(before.workbench)
   expectedWorkbench.tabs[tabId].layout.root.ratio = 0.6
   expectedWorkbench.tabs[tabId].layout.activeRegionId = fileRegionId
   if (swapNameProof) {
@@ -380,6 +391,13 @@ try {
     goalsExpectedWorkbench = expectedWorkbench; goalsExpectedFocus = before.focus
     lastEditAt = Date.now()
   }
+  if (goalsEntryProof) {
+    const entry = await clickGoalsEntryInActualUI({ cdp: first.cdp, fixture: goalsEntryFixture, activateButton, waitFor,
+      expectedOriginalWorkbench: expectedWorkbench, expectedOriginalFocus: before.focus })
+    expectedWorkbench = entry.workbench
+    await assertPrivateRunOutsideElectronGroup(first.child.pid, goalsEntryFixture.normal.process.pid)
+    lastEditAt = Date.now()
+  }
   await assertPrivateRunOutsideElectronGroup(first.child.pid, originalRun.pid)
   await delay(Math.max(0, lastEditAt + 2_000 - Date.now()))
   const immediatelyBeforeCrash = await surface(first.cdp)
@@ -392,11 +410,11 @@ try {
   assert.equal(producer.exitCode, null); assert.equal(producer.signalCode, null)
   assert.equal(acknowledgements.at(-1)?.status, 204); assert.ok(crashAt-acknowledgements.at(-1).at < 400)
   assert.deepEqual(observer.unloads, [])
-  if (!goalsAlignmentProof) { assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60) }
+  if (!goalsAlignmentProof && !goalsEntryProof) { assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60) }
   assert.equal(immediatelyBeforeCrash.draft, newDraft)
   assert.deepEqual(immediatelyBeforeCrash.queued, expectedQueue, 'Actual queue order and its recorded or unknown times must be written before the abrupt crash')
   // The sole surviving Region stays active in durable layout; its ring has no competing choice.
-  if (!goalsAlignmentProof) assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
+  if (!goalsAlignmentProof && !goalsEntryProof) assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
   first.cdp.close()
   process.kill(-first.child.pid, 'SIGKILL') // Exact detached private Electron group; the Run is outside it.
   await waitFor('first abrupt exit', () => first.child.signalCode !== null || first.child.exitCode !== null, 5_000)
@@ -404,11 +422,19 @@ try {
   process.kill(-producer.pid, 'SIGTERM')
   await waitFor('producer exit after crash', () => producer.signalCode !== null || producer.exitCode !== null, 3_000)
   children.delete(producer)
+  if (goalsEntryProof) {
+    client = await connectLocalAgentMux({ store })
+    await readGoalsEntryNativeBaseline({ client, fixture: goalsEntryFixture })
+    await client.dispose(); client = null
+  }
   const second = await launch('second')
+  const restoredExpectedWorkbench = goalsEntryProof ? goalsEntryFixture.expectedWorkbench : expectedWorkbench
+  const restoredExpectedFocus = goalsEntryProof ? goalsEntryFixture.expectedFocus : swapNameProof ? immediatelyBeforeCrash.focus : before.focus
+  if (goalsEntryProof) await assertPrivateRunOutsideElectronGroup(second.child.pid, goalsEntryFixture.retry.process.pid)
   assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   const restored = await surface(second.cdp)
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
-    regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null,
+    regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null, goalsEntry: goalsEntryRestored ?? null,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
@@ -419,8 +445,8 @@ try {
       newLayoutWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.workbench) === JSON.stringify(expectedWorkbench),
       movedQueueWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.queued) === JSON.stringify(expectedQueue) },
     second: { pid: second.child.pid, workbenchDigest: hash(JSON.stringify(restored.workbench)), draftDigest: hash(restored.draft ?? ''),
-      exactDraftRestored: restored.draft === newDraft, exactWorkbenchRestored: JSON.stringify(restored.workbench) === JSON.stringify(expectedWorkbench),
-      exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(swapNameProof ? immediatelyBeforeCrash.focus : before.focus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
+      exactDraftRestored: restored.draft === newDraft, exactWorkbenchRestored: JSON.stringify(restored.workbench) === JSON.stringify(restoredExpectedWorkbench),
+      exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(restoredExpectedFocus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
     limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
       'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
@@ -429,10 +455,10 @@ try {
       'Source hashes are reference observations; compiled Main/Renderer identities and the separate build receipt bind executed code.',
       'Same Run process survival and input acceptance are checked separately from durable UI state.'] }
   assert.notEqual(first.child.pid, second.child.pid)
-  assert.deepEqual(restored.workbench, expectedWorkbench, 'The exact edited workbench must survive sudden process termination while Agent events are active')
+  assert.deepEqual(restored.workbench, restoredExpectedWorkbench, 'The exact edited workbench and any explicit same-owner recovery must retain the original work')
   assert.equal(restored.draft, newDraft, 'The unsent edited draft must survive without an unload flush')
   assert.deepEqual(restored.queued, expectedQueue, 'Moved pending order, immutable admission time and historical execution pause must survive the second process')
-  assert.deepEqual(restored.focus, swapNameProof ? immediatelyBeforeCrash.focus : before.focus); assert.deepEqual(restored.regions, regionCloseProof ? [agentRegionId] : (swapNameProof ? swapFixture.ids : [agentRegionId, fileRegionId]).slice().sort()); assert.deepEqual(restored.activeRegions, regionCloseProof ? [] : [fileRegionId])
+  assert.deepEqual(restored.focus, restoredExpectedFocus); assert.deepEqual(restored.regions, regionCloseProof ? [agentRegionId] : (swapNameProof ? swapFixture.ids : [agentRegionId, fileRegionId]).slice().sort()); assert.deepEqual(restored.activeRegions, regionCloseProof ? [] : [fileRegionId])
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
   assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
@@ -465,6 +491,11 @@ try {
   const run = (await client.listRuns()).find(value => value.runId === session.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, originalRun.pid)
   assert.equal(run.acceptedInputBytes, originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write any input to this private Run')
+  if (goalsEntryProof) {
+    await finishGoalsEntryNativeProof({ client, fixture: goalsEntryFixture, result: result.goalsEntry })
+    assert.deepEqual(await runProcessIdentity(originalRun.pid), ownedRunProcess, 'The original healthy Run retains its exact process birth')
+    result.goalsEntry.originalRun = { ...ownedRunProcess, inputBefore: originalRun.acceptedInputBytes, inputAfter: run.acceptedInputBytes }
+  }
   if (swapNameProof) {
     const runs = await client.listRuns()
     result.swapNames.peers = await Promise.all(swapPeers.map(async peer => {
@@ -491,7 +522,7 @@ try {
   })
   await attempt(async () => {
     if (!client && session) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json')) })
-    if (client) { try { for (const agent of [session, ...swapPeers.map(peer => peer.session)]) if (agent) await client.stopAgent(agent.agentSessionId, agent.run) } finally { await client.dispose() } }
+    if (client) { try { for (const agent of [session, ...swapPeers.map(peer => peer.session), ...(goalsEntryFixture?.agents ?? [])]) if (agent) await client.stopAgent(agent.agentSessionId, agent.run) } finally { await client.dispose() } }
   })
   // A Core/transport cleanup failure cannot skip the detached cat whose argv no longer
   // contains its private wrapper path. Birth identity prevents acting on a reused PID.
@@ -503,6 +534,7 @@ try {
     try { process.kill(-actual.group, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
   })
   await attempt(async () => {
+    if (goalsEntryFixture) cleanup.goalsEntryRuns = await cleanupGoalsEntryRuns(goalsEntryFixture)
     if (swapNameProof) cleanup.swapPeerRuns = await cleanupSwapPeers(root, swapPeers)
     await stopProbeProcesses(process.pid + 1_000_000_000, root)
     assert.deepEqual(await listProbeProcesses(process.pid + 1_000_000_000, root), [])

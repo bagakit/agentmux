@@ -201,8 +201,9 @@ it('does not turn Now-window display ticks or unrelated output into metadata, pa
 it('retains previously read bodies with honest unavailable coverage after real Store eviction, without restoring the retired Run', async () => {
   const h = await fixture(); await h.render(); await h.selectSource(); await h.wait(() => expect(h.inputs()).toHaveLength(4))
   await act(async () => h.inputs()[0]!.click()); const body = document.querySelector('[data-input-preview-id]')!
+  expect((await h.client.sessionHistorySources()).map(source => source.agentSessionId)).toEqual(['archived-0'])
   await h.store.retireRuns(Array.from({ length: 256 }, (_, index) => ({ runId: `extra-retired-${index}` })))
-  expect((await h.client.sessionHistorySources()).some(source => source.agentSessionId === 'archived-0')).toBe(false)
+  expect(await h.client.sessionHistorySources()).toEqual([])
   await h.button('Refresh source')
   await h.wait(() => expect(document.querySelector('.recent-focus__input-error')?.textContent).toMatch(/not stored|unknown|unavailable|retained/i))
   expect(h.inputs().filter(item => item.textContent!.includes(BODY))).toHaveLength(3)

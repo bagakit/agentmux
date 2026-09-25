@@ -5,6 +5,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
+import { EMPTY_AGENT_FOCUS } from '../../../src/renderer/src/lib/agent-focus'
 import '../../../src/renderer/src/styles/index.css'
 await useAppStore.getState().initialize()
 const initial = useAppStore.getState()
@@ -35,11 +36,13 @@ const ensureTopic = api.scratch.ensureTopic
 let root: ReturnType<typeof createRoot> | undefined
 
 function seed(mode = 'many') {
-  const scenario = !['many', 'empty', 'one'].includes(mode)
+  const scenario = !['many', 'empty', 'one', 'current', 'recent'].includes(mode)
   const entries = mode === 'empty' ? [] : mode === 'one' ? [goals[0]!] : scenario ? [phase(mode), ...goals.slice(1), finished] : [...goals, finished]
   api.scratch.ensureTopic = mode === 'delivery-failure' ? async () => { throw new Error('The discussion service is unavailable. Your goal and current work are preserved.') } : ensureTopic
   api.demands.confirmAlignment = mode === 'receipt-failure' ? async () => { throw new Error('The current proposal changed in another window. Reload it before confirming.') } : confirm
-  flushSync(() => { useAppStore.setState({ initialize, config: mode === 'delivery-failure' ? { ...initial.config!, workspaces: [...initial.config!.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID), { ...project, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: '/preview/scratch', kind: 'scratch' }] } : initial.config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: null, layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true, leaderTopicVisible: false }); root?.render(<App key={mode} />) })
+  flushSync(() => { useAppStore.setState({ initialize, config: mode === 'delivery-failure' ? { ...initial.config!, workspaces: [...initial.config!.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID), { ...project, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: '/preview/scratch', kind: 'folder' }] } : initial.config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: mode === 'current' ? project.id : null,
+    agentFocus: mode === 'recent' ? { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: 1790960000000, identity: { name: sessions[0]!.label, kind: sessions[0]!.kind, providerId: sessions[0]!.providerId, hostId: project.hostId, workspacePath: project.path, project: { id: project.id, name: project.name } } }] }, pmo: { sessionId: null } } : EMPTY_AGENT_FOCUS,
+    layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true, leaderTopicVisible: false }); root?.render(<App key={mode} />) })
 }
 seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
