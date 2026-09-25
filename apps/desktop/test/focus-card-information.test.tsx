@@ -99,7 +99,7 @@ it('derives only the related Session for detail-only updates at both qualified i
     const config = useAppStore.getState().config!
     const sessions = Array.from({ length: sessionCount }, (_, index) => ({ ...base, id: `a${index}`, status: { ...base.status, state: 'error' as const, detail: 'Original failure' } }))
     const timelines = Object.fromEntries(sessions.map(session => [session.id, new Proxy(timeline(session.id, []), { get(target, key, receiver) { if (key === 'items') reads[session.id] = (reads[session.id] ?? 0) + 1; return Reflect.get(target, key, receiver) } })]))
-    const select = createFocusProjectionSelector(), input = { sessions, timelines, agentNames: {}, config: { ...config, workspaces: Array.from({ length: projectCount }, (_, i) => ({ id: `w${i}`, name: `W${i}`, path: i === 0 ? '/repo' : `/other${i}`, hostId: 'local', kind: 'folder' as const })) } }
+    const select = createFocusProjectionSelector(), input = { sessions, timelines, agentNames: {}, scratchTopicSnapshots: {}, config: { ...config, workspaces: Array.from({ length: projectCount }, (_, i) => ({ id: `w${i}`, name: `W${i}`, path: i === 0 ? '/repo' : `/other${i}`, hostId: 'local', kind: 'folder' as const })) } }
     const before = select(input); expect(before.contexts).toHaveLength(sessionCount); Object.keys(reads).forEach(id => delete reads[id])
     const updated = select({ ...input, sessions: sessions.map((s, i) => i === 0 ? { ...s, status: { ...s.status, detail: 'New failure reason' } } : s) })
     expect(updated.contexts[0]!.detail).toBe('New failure reason'); expect(updated.contexts.slice(1)).toEqual(before.contexts.slice(1)); expect(updated.laneContexts).toBe(before.laneContexts)

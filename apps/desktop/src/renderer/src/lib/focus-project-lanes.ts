@@ -1,6 +1,8 @@
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceBranchesSnapshot } from '../../../shared/contracts'
 import type { WorkbenchTab } from './workbench-tabs'
 import type { FocusContext } from './focus-context'
+import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
+import { topicSpaceIconTarget } from './space-object-appearance'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -26,6 +28,7 @@ export type FocusProjectLane = {
   id: string; workspaceId: string; projectId: string; name: string; path: string
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
   projectWorkspaceId: string | null; summary: string | null
+  objectKind?: 'topic' | 'mote' | 'unknown'; objectIconKey?: string
   activeAgentIds: string[]; contextIds: string[]
 }
 /** Preserve the last observed branch/path association when Git confirms its checkout was removed. */
@@ -37,7 +40,7 @@ export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], sn
   return [...other, ...known.filter(fact => !current.some(item => item.path === fact.path)).map(fact => ({ ...fact, removed: true })), ...current]
 }
 /** Project/checkout/Topic are held ownership facts, never a guess from Agent liveness. */
-export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now()): FocusProjectLane[] {
+export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
   const tabWorkspace = new Map<string, string>()
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
@@ -51,7 +54,8 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     const projectId = project?.id ?? workspace?.id ?? row.workspaceId
     const workspaceId = workspace?.id ?? tabWorkspace.get(row.id) ?? row.workspaceId
     const topicId = row.topicId ?? null
-    const topic = topicId ? facts.topics[workspaceId]?.find(item => item.id === topicId) : undefined
+    const topics = topicSnapshots ? scratchTopicsForWorkspace(topicSnapshots, workspace) : facts.topics[workspaceId]
+    const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
     const labels = [project?.name ?? row.workspaceName]
     const branch = workspace?.branch ?? checkout?.branch
     if (branch) labels.push(branch)
@@ -59,7 +63,10 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     const id = JSON.stringify([workspaceId, row.workspacePath, topicId])
     const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
       name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
-      path: row.workspacePath, topicId, recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
+      path: row.workspacePath, topicId,
+      ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
+        ...(workspace && topic && !topic.readError ? { objectIconKey: topicSpaceIconTarget(workspace, topic).key } : {}) } : {}),
+      recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
     if (row.liveAgent) lane.activeAgentIds.push(row.id)
     lane.contextIds.push(row.id)
     lanes.set(id, lane)
