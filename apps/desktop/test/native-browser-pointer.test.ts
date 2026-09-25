@@ -6,7 +6,7 @@ vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   class Contents extends EventEmitter {
     url = ''; destroyed = false
-    session = { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} }
+    session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} })
     navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     getURL() { return this.url } getTitle() { return 'Current native document' }
     isLoading() { return false } isDestroyed() { return this.destroyed }

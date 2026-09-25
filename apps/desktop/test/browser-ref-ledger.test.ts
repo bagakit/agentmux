@@ -322,7 +322,7 @@ describe('自愈过的运行不许报成干净的成功', () => {
       WebContentsView: class {
         readonly webContents = {
           ...contents,
-          session: { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} },
+          session: { on() { return this }, removeListener() { return this }, setPermissionCheckHandler() {}, setPermissionRequestHandler() {} },
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           on() { return this }, once() { return this }, removeListener() { return this },
           setWindowOpenHandler() {}, setZoomFactor() {}, getZoomFactor: () => 1,

@@ -3,7 +3,7 @@ import { parseBrowserStructuredOutputRequest } from './browser-structured-output
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
+import { WebContentsView, type BrowserWindow, type WebContents, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import {
@@ -25,6 +25,7 @@ import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
+import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
@@ -295,6 +296,7 @@ export class BrowserViewManager {
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   private readonly entries = new Map<string, BrowserEntry>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
+  private readonly webAuthnSessions = new Map<Session, () => void>()
   private demonstrationCapture: { entry: BrowserEntry; view: WebContentsView; contents: WebContents; capture: BrowserDemonstrationCapture } | null = null
 
   private readonly taskExecutions = new Map<string, { entry: BrowserEntry; runId: string | undefined; operationId: string | undefined; stopRequested: boolean }>()
@@ -1940,6 +1942,7 @@ export class BrowserViewManager {
     if (bounds === null) {
       entry.visible = false
       entry.view.setVisible(false)
+      cancelBrowserWebAuthnAccounts(entry.view.webContents)
       return
     }
     // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
@@ -2001,6 +2004,8 @@ export class BrowserViewManager {
 
   dispose(): void {
     this.unsubscribeTaskAssets?.()
+    for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
+    this.webAuthnSessions.clear()
     for (const id of [...this.entries.keys()]) this.destroyOwner(id)
     for (const id of [...this.releasedEntries.keys()]) this.destroyOwner(id)
     void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
@@ -2180,7 +2185,33 @@ export class BrowserViewManager {
     })
     view.webContents.session.setPermissionCheckHandler(() => false)
     view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    const session = view.webContents.session
+    if (!this.webAuthnSessions.has(session)) {
+      this.webAuthnSessions.set(session, registerBrowserWebAuthnAccounts(session, contents => this.webAuthnOwner(contents)))
+    }
     return view
+  }
+
+  private webAuthnOwner(contents: WebContents): BrowserWebAuthnOwner | null {
+    const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === contents)
+    if (!entry) return null
+    const view = entry.view
+    const profileId = entry.profileId
+    const navigationId = entry.navigationId
+    const ownsRequest = (): boolean => this.owns(entry, view) && entry.profileId === profileId && entry.navigationId === navigationId
+    return {
+      window: this.window,
+      bounds: this.nativeOwner(entry.id)?.bounds ?? null,
+      isCurrent: () => ownsRequest() && !contents.isDestroyed() &&
+        this.nativeOwner(entry.id)?.view === view && !this.window.isDestroyed() &&
+        this.window.isVisible() && !this.window.isMinimized(),
+      report: message => {
+        // Hidden original pages keep their notice. Visibility never changes the request's owner.
+        if (!ownsRequest()) return
+        entry.activity = { ...entry.activity, warning: message }
+        this.emit(entry)
+      }
+    }
   }
 
   private resolvePartition(profileId: string): string {

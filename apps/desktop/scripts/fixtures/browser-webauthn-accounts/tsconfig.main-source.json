@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": [
+    "../../../src/main/browser-view-manager.ts",
+    "../../../src/main/browser-webauthn-accounts.ts"
+  ],
+  "compilerOptions": {
+    "paths": {
+      "@agentmux/core": [
+        "../../../../../packages/core/src/index.ts"
+      ],
+      "@agentmux/core/*": [
+        "../../../../../packages/core/src/*"
+      ]
+    }
+  }
+}
