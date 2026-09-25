@@ -2,26 +2,29 @@
 
 ## 左下角导航、Space 与 Goals
 
-用户确认：「把这一排页签切换的按钮改成这个顺序，然后把它们放到最左下角」。窗口只有一组主导航，固定顺序为 **Mote、Space、Focus、Goals、Search**，在所有主工作面及 Project Rail 开合状态下都位于窗口左下角。Search 的职责和 Browser 入口归属见《Search、Browser 入口与知识库定位》。
+用户确认：「把这一排页签切换的按钮改成这个顺序，然后把它们放到最左下角」。窗口只有一组主导航，固定顺序为 **Mote、Space、Focus、Goals、Survey**，在所有主工作面及 Project Rail 开合状态下都位于窗口左下角。Survey 的职责和 Browser 入口归属见《Survey、当前浏览器工作面与知识入口》。
 
 - **Mote** 是固定协调对象的快捷入口：打开或收起同一快捷面，保留当前主工作面的选中状态和执行焦点。Mote 排第一不意味着启动默认进入 Mote；启动仍恢复用户上一次工作面。PMO 是其初始化默认角色之一，产品身份见《Space、Folder 与 Topic》。
 - **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space。Space 作为更外层产品对象及其 Folder/Topic 两类定义见《Space、Folder 与 Topic》；Workspace 继续表达底层工作区对象。
 - **Focus** 查看执行状态、最近上下文与需要用户处理的事项；进入已有 Session 时继续复用原 Tab/Region。
 - **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；提交真实意图后才记录 Goal，待澄清的想法由 Mote 整理目标与完成标准，具体闭环见《Goals 的 Grill 与 Grounding》。Demand 仍是持久化实体与控制协议身份，Goal 状态与执行 Session 状态独立。
-- **Search** 承担搜索、浏览查证与知识库入口；现有 Browser 管理入口统一归于此处，网页仍在 Space 的既有 Tab/Region 中运行。
+- **Survey** 是浏览查证的当前浏览器工作面，网页输入、页面与既有 Browser 管理在同一处可达；使用原 Tab/Region 与 Main owner，后续知识入口见《Survey、当前浏览器工作面与知识入口》。
 
-用户进一步要求：「PMO 和其他的拆开，只有 PMO 自己高点吧；设置干脆放进这组按钮」。PMO 作为独立协调入口，和 Space、Focus、Goals、Search 及设置组分开；设置接在 Search 后，打开既有设置面，不改变当前工作面选中状态和执行焦点。快捷键帮助仍位于窗口右侧，状态摘要位于其前。窄窗口保留全部入口与需要用户处理的状态，长摘要可以收紧，控件不能重叠或被裁掉；这些规则不依赖 Project Rail 是否可见。底栏高度与局部尺寸约束只定义在密度 SSOT《左下角导航与右下角工具组》。
+用户进一步要求：「PMO 和其他的拆开，只有 PMO 自己高点吧；设置干脆放进这组按钮」。PMO 作为独立协调入口，和 Space、Focus、Goals、Survey 及设置组分开；设置接在 Survey 后，打开既有设置面，不改变当前工作面选中状态和执行焦点。快捷键帮助仍位于窗口右侧，状态摘要位于其前。窄窗口保留全部入口与需要用户处理的状态，长摘要可以收紧，控件不能重叠或被裁掉；这些规则不依赖 Project Rail 是否可见。底栏高度与局部尺寸约束只定义在密度 SSOT《左下角导航与右下角工具组》。
 
-### Search、Browser 入口与知识库定位
+### Survey、当前浏览器工作面与知识入口
 
-用户指出：「Space 二级菜单的 browser 相关的东西是不是都可以移到 Search 里面去？」「现在的话有些割裂，移到 Search 里面去刚刚好」，并确认「Search 未来承担的是搜索和知识库的能力」。Search 是统一的信息查找、浏览管理与知识入口；Space 继续承载实际工作现场。名称、可访问名称与当前工作面身份统一使用 Search，不保留一套 Survey 入口。
+用户此前要求 Browser 管理入口统一到 Search，并提出未来承担搜索与知识库；现在进一步明确：「survey 更好」「现在设计太像纯搜索」「最好本身像浏览器，不要搜索时又跳到其他页面」，并确认左侧竖向标签栏。当前入口、可访问名称与工作面身份统一为 Survey；查询是浏览查证的一部分，提交后网页仍在同一 Survey 工作面。后续知识入口定位保留，但资料来源、索引、检索、保存与组织方式尚未确认，不显示假知识库、书签库或全文搜索能力。
 
-- Space 二级工具只保留当前目录/Topic 内容与 Agents；原 Browser Tools 的新建 Browser、Browser bar 配置、Profiles 和元素标注统一从 Search 可达。页面上的 Browser Tools 动作进入同一 Search，并明确定位到被操作 Browser 的 Workspace；返回网页复用原 Tab/Region。页面自身的导航、选择、操作历史和任务工具仍沿《Browser 工作面》合同。
-- Search 必须明确当前 Browser/标注操作所属 Workspace。新建和查询在这个明确上下文的既有工作面落地，不暗中切换到别的 Workspace。非空输入交给 Main 已支持的网页输入解释，与 Browser 地址栏同源；空白不创建 Browser，不因输入不是完整 URL 拒绝已可用的网页搜索。成功后新 Browser 的原 Tab/Region 可见，不因上次选中的 Agent 把用户导回无关工作面；创建失败保留 Search 输入、当前上下文和既有健康工作面，说明失败步骤与可执行恢复动作。
-- 迁移保留现有 Browser bar 的草稿、显式保存、并发校验和失败说明。Profiles 继续使用 Main 的同一目录、导入和切换事实；删除批准及所有已打开 Browser 的占用校验统一引用《破坏性 Browser 操作的作用域与人工批准》，不能因只看当前 Workspace 漏掉其它工作面的占用。
-- 元素标注按明确 Workspace、Browser 与导航身份呈现；旧页面标注如实标明过期，只把当前页面的有效标注交给可接收的 Agent Composer。没有可用 Agent 时保留真实 disabled 与说明；加入草稿不自动发送。删除与清空不跨越所示作用域。
-- 切到 Search、进入或返回 Browser 管理、普通重启与恢复失败都保留原 Tab、Tab Group、Region、焦点、布局、Browser 描述符和健康 Session/Run。Search 只消费原 owner 的事实，不另建 Browser、权限、标注或 Runtime 生命周期；重启仍先恢复 durable 工作面，再尝试同一身份的续接。
-- 本轮闭合已有网页搜索/地址输入与 Browser 管理归属。知识库是已确认的后续职责；资料来源、索引、检索、保存和组织方式尚未确认，不把占位菜单或目前没有的书签库、全文搜索画成已交付能力。视觉与密度只定义在密度 SSOT《Search 的查找与 Browser 管理密度》。
+- **从开始到浏览都在 Survey。** 没有当前页面时提供中央网页输入；非空原输入交给 Main 现有解释，与 Browser 地址栏同源。没有 Browser 时沿原创建 owner 建立一个精确落点；已有当前 Browser 时在同一 Region 导航，不为每次输入另建页面，不自动转 Space。空白不创建或导航；失败保留输入、原页面和健康工作面，明确失败步骤与重试动作。输入解释不另加站点、厂商或搜索引擎分支。
+- **左侧标签指向原页面。** 标签来自当前明确 Workspace 的既有 Browser Regions，每项按原 workspaceId/tabId/regionId 定位，标题、URL 与运行事实来自原 descriptor。选择只保留指向该原落点的 UI 引用，不建立第二份 Tab、页面目录、URL、Profile 或生命周期；同名页和多 Browser Region 不混成一个。Tab Group、混合 Tab 与分割拓扑继续归原 durable owner，Survey 不把 Region 假装成另一个持久 Tab。
+- **只投影选中的 Browser Region。** Survey 使用原同一个 BrowserPane 显示树与 Main-owned 原生页面，不迁移整个混合 Tab，不同时挂载另一份 BrowserPane。其它 Agent/Terminal/File/Browser Region 保留原宿主、几何、草稿与健康 Run；单 Browser 投影不扩大无关 Region 的可见性、保活或资源工作量，既有 Mote/Focus 的 Tab 级投影合同保持。进入、选择和查询不改变 Space 的执行焦点或让无关 Terminal fit/resize。退出后原 Browser 回到其原 Region，网页内容与可操作状态沿原 owner 保留。
+- **创建和关闭各有精确作用域。** 新建沿原 launcher/createBrowser 落点与明确 Workspace，保持原 Space 的活动 Tab/Region 与 Agent 焦点。关闭只关闭被选中的 Browser Region；混合 Tab 的其它 Region 不能被一起删除。目标是最后一个单 Browser Region 时沿原 Tab close owner 消费该 Workspace 内该原 Tab 的全部仍在场 group placements，每次关闭前重核同一 Browser 身份与仍为单 Browser 的事实；目标变为混合 Tab 或身份变化时停止，不把剩余页面伪装成关闭成功。关闭失败保留原页面与可执行说明，关闭最后一页回到同一 Survey 开始面。
+- **页面是主内容，管理按需可达。** 现有地址、Back/Forward/Reload、选择、截图、权限、应用链接、操作历史与任务工具继续沿《Browser 工作面》及其原 Main owner。Browser Tools 就地打开 Survey 中的原管理控件，并定位被操作 Browser 的 Workspace；Space 二级工具不回流一份管理槽。进入工具不是再次跳页，收起后继续同一页面。
+- **保留已交付管理能力。** Browser bar 的草稿、显式保存、并发校验和失败说明保持；Profiles 的目录、导入、切换与删除批准保持，跨所有已打开 Browser 的占用校验统一见《破坏性 Browser 操作的作用域与人工批准》。元素标注仍绑定 Workspace/Browser/navigation，旧页面标注保持过期事实，只把当前有效标注交给可接收 Agent 的 Composer 草稿，不自动发送，删除/清空不越界。管理开合与工作面切换不丢未保存输入或重复执行 owner 动作。
+- **重启先恢复原对象。** Survey 的当前选中只引用原 Browser Region，由原 UI owner 恢复；普通进程重启先恢复原 Tab/Group/Region、URL、布局与焦点，再尝试原身份的页面重建和 Session 续接。原引用暂未恢复时保留其身份与明确恢复说明，不换成别的可用页面或清空健康工作面；运行历史、导航状态、权限与恢复事实以原 owner 的当前结果为准，不复制新 Runtime。
+
+左侧竖向标签、中央开始面和液体玻璃的视觉约束只见密度 SSOT《Survey 的浏览器工作面与液体玻璃》。本批不新增知识索引、搜索引擎配置、收藏管理或新的 Agent/Browser 生命周期。
 
 ### Mote 快捷入口与当前协调上下文
 
@@ -32,7 +35,7 @@
 用户继续要求把窗口内的 Mote 对象放到左侧，避免与 Tab 叠在一起；可以在宽卡片与仅头像两态切换，「类似 Discord」；窗口边缘更明显，与背后工作面区分。对象导航与事情导航分层，仍是原来的同一个可操作快捷面。
 - **同一个当前目标**。左下入口的无障碍描述、快捷面选择、当前状态和「Open Mote Space」都指向同一个已选 Mote、实际 Tab 与当前 Region。Mote 表达持久协调对象，Tab 名表达当前事情，Provider/Executor 和 Session 表达实际执行者，不能相互冒充。Goal 的专属讨论仍是自己的 Tab，入口必须能读出该 Goal 的上下文，不能只用泛称 Mote 掩盖正在打开另一件事。自定义 Mote 的投影、准备与完整 Space 都归它自己的 Topic，不借默认 Mote 的工作面。
 - **可进入的悬停面**。鼠标悬停入口即显示原可操作面，允许越过按钮与面板间的小间隙进入、滚动、选择和输入；未固定时离开两者后自然收起。悬停本身不改变 DOM 焦点、光标或组字，不选择另一个 Mote/Tab/Region，不持久化打开状态、不写视图模式、不启动 Session/Run、不发送或入队输入。键盘与触控有等效的明确打开入口；Escape 收起预览，不抢走输入法或另一块已打开浮层拥有的按键，也不把未移动过的焦点拉回入口。
-- **不同工作面同样可操作**。用户反馈在 Mote 工作面 hover 后可移入操作，切到设置页却只能看到窗口、无法操作。Settings、Space、Focus、Goals、Search 等窗口内容切换不改变同一个 Mote 快捷面的可进入性；面板及原投影不能继承被设置遮住的背景工作面的 inert/隐藏归属。移入、明确固定、选择与输入仍沿原 owner，悬停不关闭设置、不移动原焦点、不写 Agent 模式；被设置遮住的背景继续不接收输入，健康 Run 和原 Tab/Region/草稿保留。
+- **不同工作面同样可操作**。用户反馈在 Mote 工作面 hover 后可移入操作，切到设置页却只能看到窗口、无法操作。Settings、Space、Focus、Goals、Survey 等窗口内容切换不改变同一个 Mote 快捷面的可进入性；面板及原投影不能继承被设置遮住的背景工作面的 inert/隐藏归属。移入、明确固定、选择与输入仍沿原 owner，悬停不关闭设置、不移动原焦点、不写 Agent 模式；被设置遮住的背景继续不接收输入，健康 Run 和原 Tab/Region/草稿保留。
 - **全部 Mote 可选**。快捷面呈现既有默认 Mote 和文件系统已确认含 SOUL 的全部 Mote 对象，每个对象有紧凑可选行、可读身份与它实际目标的状态；多个 Tab 或 Session 不冒充多个 Mote，普通 Topic 不混入名册。超出可用空间时仍能滚动到全部对象，不只取默认或当前一个。目录、快捷选择与焦点分类共享同一份文件快照事实及修订边界，不新增 Mote id 名册、不在 Tab/Session 上复制身份布尔，也不把分类另行持久化；目录读取失败保留已有事实与已选原引用，说明未知和失败步骤。
 - **Mote 与 Tab 分层**。全部对象沿快捷面左侧导航排列，右侧保留所选 Mote 的原 Tab/Region、说明、正文与输入；不再把对象列表叠在 Tab 上方。明确且可访问的开关在宽卡片与仅头像两种呈现间切换，初始为宽态；两态都有同一组对象、同一精确选中与真实状态，完整名称和状态在头像态通过 hover、键盘焦点及无障碍描述可读。对象多时左侧有界纵向滚动，完整 Space、收起与呈现切换合为一处精简控制，不恢复独立 title 行。
 - **导航呈现偏好独立**。宽卡片/仅头像只是快捷面的单一呈现偏好，由原浮层 UI owner 保存，关开与普通 UI 状态恢复后保持；窄窗可收紧宽态名称空间，不能静默替用户改成头像态或让开关语义与实际呈现不一致。从临时面操作开关仍沿既有明确交互固定语义；切换自身不选择别的 Mote/Topic/Tab/Region，不改原 Agent 模式、执行焦点与历史、草稿、消息队列或 Run，不重建右侧原输入和工作面，不增加逐 Mote 偏好账本或另一份目录事实。
@@ -619,7 +622,7 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 - 左侧项目菜单使用较轻字重与明确的层级、状态和图标语义，降低装饰性重复信息；Status Bar 内的 Agent 状态采用低调的语义图标与短标签，不再使用“点+数量”作为唯一表达。
 - **最左侧 Projects 栏支持拖拽调宽**。用户可从项目栏与主工作区的边界拖拽改变宽度，拖拽过程中项目内容即时适配，松开后保留最终宽度；边界提供可发现的 resize affordance、键盘焦点与可访问名称。调宽只影响 Projects 栏，不改变 Workspace Tools 或主工作区布局；收起和恢复沿用同一份宽度状态。
 - **文件树目录是可操作的项目入口**。目录右键菜单提供“作为项目打开”：把该目录注册为新项目并立即切换到该项目；动作只对目录显示，复用既有 Workspace 创建/选择 seam。失败时保留当前项目，并用持续可见的服务窗提示说明恢复动作。
-- 用户对 Space「顶部 icon 有两层、有多余标题、目录和功能区没有 `+`」的反馈同时约束 Workspace tools：工具选择和工具创建必须各有清楚作用域。Agents 的就地 `+` 打开已有 Launcher 让用户选择 Executor；Files 已有 New File、New Folder 和刷新动作继续在文件工具的原上下文生效。不为所有工具发明一个无定义的通用 `+`，不因收敛标题重写文件树，没有可用创建动作的工具不显示假按钮。Browser 的创建、配置、Profiles 与 annotations 入口统一归《Search、Browser 入口与知识库定位》，不在 Space 二级菜单重复保留。工具切换、菜单开合和创建失败保留原工作面与健康 Session。视觉层数和重复标签约束归密度 SSOT《顶行与 Tabbar》。
+- 用户对 Space「顶部 icon 有两层、有多余标题、目录和功能区没有 `+`」的反馈同时约束 Workspace tools：工具选择和工具创建必须各有清楚作用域。Agents 的就地 `+` 打开已有 Launcher 让用户选择 Executor；Files 已有 New File、New Folder 和刷新动作继续在文件工具的原上下文生效。不为所有工具发明一个无定义的通用 `+`，不因收敛标题重写文件树，没有可用创建动作的工具不显示假按钮。Browser 的创建、配置、Profiles 与 annotations 入口统一归《Survey、当前浏览器工作面与知识入口》，不在 Space 二级菜单重复保留。工具切换、菜单开合和创建失败保留原工作面与健康 Session。视觉层数和重复标签约束归密度 SSOT《顶行与 Tabbar》。
 
 - macOS 红绿灯之后固定放 Projects 与 Workspace tools 两个开关，顺序和位置不随面板状态变化。
 - Session 的顶层 Tab 组始终直接占据窗口最上方的 Tabbar。单 Pane 时它与窗口顶行合并；分屏时也不再额外预留一条空的全局 chrome 行，由左上方的首个 Pane 承载一次必要的窗口 chrome，其余 Pane 只保留自己的紧凑 Tabbar。
@@ -793,7 +796,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
   Browser **画得不一样**，且这条差别是标记去重的一部分——两个 Browser Region 一个在被驱动一个没有，
   标签上必须画两个，折成一个就是把"哪一格在被驱动"这条信息折没了。驱动是**瞬时事实**，随运行开始
   和结束，绝不进持久化：重启后复活一个"正在被驱动"的死标记，比不画更糟。
-- Browser Profile 从 Search 的 Browser 管理入口导入，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
+- Browser Profile 从 Survey 的 Browser 管理入口导入，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
 - **应用链接（非 `http(s)` 的 URL scheme，例如自定义应用 scheme 与 `mailto:`）要像一般浏览器那样交给系统，不能当成非法地址挡掉。** 用户原话：「对齐一般浏览器，假定用户会自己把本应用当做浏览器」。这类链接不能被静默吞掉，也不能因为某个站点的按钮形态而增加站点专用分支。约束：
   - **两条路的症状不同，必须分别处理。** 真机探针（Electron 43.3.0，`WebContentsView`，与生产同形：不设 `setWindowOpenHandler`）实测：
     - 页面内导航（`location.href = 'custom-app://…'`）走 `will-navigate`，被 `guardNavigation` 拦下并写进 `entry.error`，URL 不变。这一条**有**错误可显示。
