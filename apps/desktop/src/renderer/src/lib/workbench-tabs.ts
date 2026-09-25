@@ -96,6 +96,8 @@ export type WorkbenchTab = {
   id: string
   workspaceId: string
   topicId?: string
+  /** Unconfirmed preparation intent on this real owner; SOUL on disk remains Mote identity truth. */
+  topicPreparation?: 'mote'
   /** Display placement; intentionally independent of a Session's execution directory. */
   space?: { spaceId: string; zoneId: string }
   titleRegionId: string
