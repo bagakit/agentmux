@@ -65,22 +65,26 @@ describe('Hermes provider', () => {
         error_message: 'exit 1', duration_ms: 900, tool_call_id: 'tc-5'
       }, { tool_name: 'terminal', tool_input: { command: 'npm test' } }))
       expect(failure.item.status).toBe('failed')
-      expect(failure.item.id).toBe('run-hermes:tool:tc-5')
+      expect(failure.type).toBe('append')
+      expect(failure.item.id).toBe('run-hermes:r-post_tool_call:0')
       expect(failure.item.toolOutput).toBe('FAILED 3 tests')
       expect(failure.item.toolName).toBe('terminal')
     })
 
-    it('pre_tool_call 与 post_tool_call 收敛成同一条，而不是并排两行', () => {
+    it('缺少声明的原生主体资格时，pre/post 保留各自回执与结果', () => {
       const pre = toolMutation(hook('pre_tool_call',
         { tool_call_id: 'tc-7', turn_id: 't-1' },
         { tool_name: 'terminal', tool_input: { command: 'ls' } }
       ))
-      expect(pre.item.status).toBe('streaming')
+      expect(pre.type).toBe('append')
+      expect(pre.item.id).toBe('run-hermes:r-pre_tool_call:0')
       const post = toolMutation(hook('post_tool_call',
         { tool_call_id: 'tc-7', status: 'ok', result: 'a\nb' },
         { tool_name: 'terminal', tool_input: { command: 'ls' } }
       ))
-      expect(post.item.id).toBe(pre.item.id)
+      expect(post.type).toBe('append')
+      expect(post.item.id).toBe('run-hermes:r-post_tool_call:0')
+      expect(post.item.id).not.toBe(pre.item.id)
       expect(post.item.status).toBe('complete')
       expect(post.item.toolOutput).toBe('a\nb')
     })

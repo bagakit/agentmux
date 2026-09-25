@@ -75,6 +75,7 @@ describe('built-in Provider conformance', () => {
    * 这里反过来钉住缺席一侧，两条合起来才说明这个维度被真正实现了，而不是被忽略。
    */
   it('endpoint 缺席时，explicit-managed 的每一家要么照常产出 plan、要么如实弃权', () => {
+    let planned = 0
     for (const provider of providers) {
       const { hookStrategy } = provider.catalog
       if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') continue
@@ -83,11 +84,20 @@ describe('built-in Provider conformance', () => {
       // 产出了就必须是完整可装的——不允许「产出一份空 plan」这种中间态。
       expect(withoutEndpoint.providerId).toBe(provider.id)
       expect(withoutEndpoint.mutations.length).toBeGreaterThan(0)
-      // 且绝不能把一个 endpoint 占位符写进内容里：那正是弃权要避免的死 token。
+      planned += 1
+      // 能独立安装的计划在 Binding 有无之间应完全相同，运行时再读取 endpoint。
+      // 整段搜索 "undefined" 会误伤合法 JS；比较两份实际计划才能发现缺 Binding 的占位插值。
+      const withEndpoint = provider.planManagedHooks?.({
+        workspacePath: '/tmp/agentmux-provider-conformance',
+        env: { HERMES_HOME: '/tmp/agentmux-provider-conformance/hermes' },
+        endpoint: { url: 'http://127.0.0.1:59999/v1/events', token: 'conformance-token' }
+      })
+      expect(withoutEndpoint).toEqual(withEndpoint)
       for (const mutation of withoutEndpoint.mutations) {
-        expect(mutation.content).not.toContain('undefined')
+        expect(mutation.content.trim().length).toBeGreaterThan(0)
       }
     }
+    expect(planned).toBeGreaterThan(0)
   })
 
   it('contributes planning exactly for the non-empty registered managed capability set', () => {

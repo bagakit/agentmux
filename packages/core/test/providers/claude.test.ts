@@ -122,7 +122,7 @@ describe('Claude provider', () => {
         error: 'exit status 1: 3 tests failed', is_interrupt: false, duration_ms: 900
       }))
       expect(failure.type).toBe('upsert')
-      expect(failure.item.id).toBe('run-claude:tool:tu-9')
+      expect(failure.item.id).not.toContain('r-PostToolUseFailure')
       expect(failure.item.status).toBe('failed')
       expect(failure.item.toolOutput).toBe('exit status 1: 3 tests failed')
     })

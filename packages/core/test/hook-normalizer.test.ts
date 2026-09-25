@@ -4,6 +4,11 @@ import { releaseSubagentRoster } from '../src/hook-normalizer.js'
 import { applyAgentTimelineMutation } from '../src/session-timeline.js'
 import type { AgentTimelineMutation } from '../src/types.js'
 
+function itemOf(mutation: AgentTimelineMutation | undefined) {
+  if (!mutation || mutation.type === 'update') throw new Error('expected a landed item')
+  return mutation.item
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -61,7 +66,7 @@ describe('native hook normalization', () => {
     expect(event.nativeHandle).toMatchObject({ transcriptPath: '/tmp/pi-session.jsonl' })
   })
 
-  it('does not promote unsafe ids or relative transcript paths to verified handles', () => {
+  it('rejects unsafe ids and preserves valid identity without promoting a relative transcript path', () => {
     const codex = providers.get('codex').normalizeHook({
       receiptId: 'unsafe-id',
       agentSessionId: 'semantic-unsafe',
@@ -83,7 +88,7 @@ describe('native hook normalization', () => {
         session_file: 'sessions/current.jsonl'
       }
     }, {})
-    expect(pi.nativeHandle).toBeUndefined()
+    expect(pi.nativeHandle).toEqual({ kind: 'provider', providerId: 'pi', sessionId: 'pi-native-relative' })
   })
 
   it('treats a Hook retry with only a later observation time as idempotent', () => {
@@ -311,9 +316,9 @@ describe('native hook normalization', () => {
         return mutation.item
       }
 
-      const hermesNested = (eventName: string, extra: Record<string, unknown>) =>
+      const hermesNested = (eventName: string, extra: Record<string, unknown>, receiptId = `receipt-hermes-nested-${eventName}`) =>
         providers.get('hermes').normalizeHook({
-          receiptId: `receipt-hermes-nested-${eventName}`,
+          receiptId,
           agentSessionId: 'semantic-hermes-nested',
           runId: 'run-hermes-nested',
           providerId: 'hermes',
@@ -321,6 +326,7 @@ describe('native hook normalization', () => {
           // 顶层只放 Hermes 真的会放在顶层的那几个键。成败/正文/关联 id 一律只在 extra 里——
           // 任何一个也摊到顶层，这条就退化成上面那几条已有的用例，判不出解包有没有发生。
           payload: {
+            session_id: 'sess-hermes-nested',
             tool_name: 'shell',
             tool_input: { command: 'exit 1' },
             extra
@@ -338,18 +344,20 @@ describe('native hook normalization', () => {
       expect(failedItem.status).toBe('failed')
       // 2. 输出带得出来。不解包时 `tool_response` 也在 extra 里，正文整段丢失。
       expect(failedItem.toolOutput).toBe('boom')
-      // 3. 关联 id 读得出来，于是 Pre/Post 收敛成同一条。不解包时 id 退化成 receiptId 派生的，
-      //    Post 的 upsert 命不中 Pre 落的那条，时间轴上并排两行。
-      expect(failedItem.id).toBe('run-hermes-nested:tool:call_NESTED')
+      // Hermes 尚未声明原生身份资格；调用 ID 不能单独晋升为跨事件关联。
+      expect(failed.timeline[0]!.type).toBe('append')
+      expect(failedItem.id).toBe('run-hermes-nested:receipt-hermes-nested-post_tool_call:0')
 
       // 成功那侧独立承重：只钉失败时，把解包改成「无论如何都判 failed」也能全绿。
       const succeeded = hermesNested('post_tool_call', {
         tool_response: 'ok',
         tool_call_id: 'call_NESTED_OK'
-      })
+      }, 'receipt-hermes-success')
       const okItem = landed(succeeded)
       expect(okItem.status).toBe('complete')
       expect(okItem.toolOutput).toBe('ok')
+      expect(okItem.id).toBe('run-hermes-nested:receipt-hermes-success:0')
+      expect(okItem.id).not.toBe(failedItem.id)
 
       // 顶层优先：`extra` 只补顶层没说的那些，不许反过来盖掉 Hermes 自己声明的固定位。
       const topLevelWins = providers.get('hermes').normalizeHook({
@@ -375,7 +383,7 @@ describe('native hook normalization', () => {
           runId: 'run-pi-tool',
           providerId: 'pi',
           eventName,
-          payload
+          payload: { session_id: 'pi-tool-native', ...payload }
         }, {})
 
       const failed = pi({
@@ -421,7 +429,10 @@ describe('native hook normalization', () => {
         runId: 'run-corr',
         providerId: 'claude',
         eventName,
-        payload
+        payload: {
+          session_id: 'sess-corr',
+          ...payload
+        }
       }, {})
 
     it('PreToolUse 带 tool_use_id 时落在途态，item id 绑调用 id 而不是 receiptId', () => {
@@ -434,13 +445,17 @@ describe('native hook normalization', () => {
       expect(mutation?.type).toBe('append')
       if (mutation?.type !== 'append') throw new Error('expected append')
       // id 必须来自调用 id——绑 receiptId（receipt-pre）就永远关联不上 Post，功能即死。
-      expect(mutation.item.id).toBe('run-corr:tool:toolu_01ABC')
       expect(mutation.item.id).not.toContain('receipt-pre')
       // 在途态：hook 驱动的 Agent 由此第一次点亮 Streaming 徽标。
       expect(mutation.item.status).toBe('streaming')
     })
 
     it('PostToolUse 带同一 tool_use_id 时发 upsert 命中 Pre 那条，不再 append 第二条', () => {
+      const pre = claude(
+        { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_01ABC' },
+        'PreToolUse',
+        'receipt-pre'
+      )
       const event = claude(
         { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'toolu_01ABC', tool_response: 'total 24' },
         'PostToolUse',
@@ -449,7 +464,7 @@ describe('native hook normalization', () => {
       const mutation = event.timeline[0]
       expect(mutation?.type).toBe('upsert')
       if (mutation?.type !== 'upsert') throw new Error('expected upsert')
-      expect(mutation.item.id).toBe('run-corr:tool:toolu_01ABC')
+      expect(mutation.item.id).toBe(itemOf(pre.timeline[0]).id)
       expect(mutation.item.status).toBe('complete')
       expect(mutation.item.toolOutput).toBe('total 24')
     })
@@ -516,11 +531,11 @@ describe('native hook normalization', () => {
       const items = applyAgentTimelineMutation([], mutation!)
       expect(items).toHaveLength(1)
       expect(items[0]).toMatchObject({
-        id: 'run-corr:tool:toolu_LOSTPRE',
         kind: 'tool_call',
         status: 'complete',
         toolOutput: 'recovered'
       })
+      expect(items[0]!.id).not.toContain('receipt-post-only')
     })
 
     it('Pre 被 200 上限逐出：Post 的 upsert 命不中时补落，而不是把子代理场景打成 503', () => {
@@ -532,8 +547,10 @@ describe('native hook normalization', () => {
         'PreToolUse',
         'receipt-parent-pre'
       )
+      const parentId = itemOf(parentPre.timeline[0]).id
       let items = applyAgentTimelineMutation([], parentPre.timeline[0]!)
-      expect(items.some((item) => item.id === 'run-corr:tool:toolu_PARENT')).toBe(true)
+      expect(items).toHaveLength(1)
+      expect(items.some((item) => item.id === parentId)).toBe(true)
       // 子代理灌满 200 条，把父 Pre 挤出去。
       for (let index = 0; index < 200; index += 1) {
         const child = claude(
@@ -543,7 +560,8 @@ describe('native hook normalization', () => {
         )
         items = applyAgentTimelineMutation(items, child.timeline[0]!)
       }
-      expect(items.some((item) => item.id === 'run-corr:tool:toolu_PARENT')).toBe(false)
+      expect(items).toHaveLength(200)
+      expect(items.some((item) => item.id === parentId)).toBe(false)
       // 父 Post 到达：目标已被逐出。upsert 必须补落而不抛。
       const parentPost = claude(
         { tool_name: 'Task', tool_input: { subagent_type: 'Explore' }, tool_use_id: 'toolu_PARENT', tool_response: 'subagent done' },
@@ -552,7 +570,7 @@ describe('native hook normalization', () => {
       )
       expect(() => applyAgentTimelineMutation(items, parentPost.timeline[0]!)).not.toThrow()
       const after = applyAgentTimelineMutation(items, parentPost.timeline[0]!)
-      expect(after.find((item) => item.id === 'run-corr:tool:toolu_PARENT')).toMatchObject({
+      expect(after.find((item) => item.id === parentId)).toMatchObject({
         status: 'complete',
         toolOutput: 'subagent done'
       })

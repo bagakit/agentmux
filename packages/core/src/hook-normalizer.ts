@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import type { AgentProviderHookNormalizationContext } from './agent-provider.js'
 import type {
   AgentTimelineItem,
@@ -273,7 +274,7 @@ function eventRule(
  * askuserquestion / request_user_input / clarify 这类工具在 `PreToolUse` 被规则判成 waiting/blocked，
  * 落的是 append-only 的 permission 行（id 由 receiptId 派生），它等的是用户、不是一次有 Post 收尾的执行。
  * 可这类工具的 `PostToolUse` 语义是 working——若只按**当前事件**的 state 决定 kind，Post 会被判成
- * tool_call，去 upsert 一条 `runId:tool:<toolCallId>`，而 Pre 落的是 permission 行、从没按 tool 关联过：
+ * tool_call，去 upsert 一条关联工具行，而 Pre 落的是 permission 行、从没按 tool 关联过：
  * 这条 upsert 命不中目标，就补落一条 kind=tool_call 的重影行，把一次等待硬生生显示成两条。所以 kind
  * 判定要从 rules 这个 SSOT 认出「这是个等待工具」，让 Pre 与 Post 得到同一个 kind，两端都留在 append-only。
  */
@@ -314,7 +315,7 @@ function timelineItem(
   title: string,
   eventName: string,
   observedAt: number,
-  // `id` 可被覆盖：关联 id 存在时，Pre 落的 item 要用 `runId:tool:<toolCallId>` 而不是 receiptId
+  // `id` 可被覆盖：已核主体与调用身份齐备时，Pre 落的 item 用关联身份而不是 receiptId
   // 派生的默认 id，好让 Post 的 upsert 能命中同一条。`...fields` 排在 `id:` 之后，故覆盖生效。
   fields: Partial<Omit<AgentTimelineItem, 'agentSessionId' | 'kind' | 'source' | 'createdAt' | 'updatedAt' | 'title'>> = {},
   // Pre 用 append（首落）；Post 用 upsert（目标在就替换、丢投/被逐出就补落），绝不因缺目标抛错。
@@ -360,6 +361,56 @@ export function nativeHookToolCallId(payload: Record<string, unknown>): string |
   return stringField(flattenNestedPayload(payload), ...TOOL_CALL_ID_KEYS)
 }
 
+type NativeToolSubject = {
+  kind: 'main' | 'child'
+  nativeSessionId: string
+}
+
+function resolveNativeToolSubject(
+  providerId: AgentProviderId,
+  specification: AgentNativeHookSpecification,
+  payload: Record<string, unknown>,
+  context: AgentProviderHookNormalizationContext,
+  nativeSessionMatches: boolean,
+  childSubject: boolean
+): NativeToolSubject | undefined {
+  if (!nativeSessionMatches) return undefined
+
+  const keys = specification.nativeHandle?.sessionIdKeys ?? []
+  const incomingId = sessionIdField(payload, keys)
+  const current = context.nativeHandle
+  const currentId = current?.kind === 'provider' && current.providerId === providerId
+    ? normalizeNativeSessionId(current.sessionId)
+    : undefined
+
+  // A roster label is not an independent native source; a child never borrows its parent.
+  if (childSubject) {
+    return incomingId && currentId && incomingId !== currentId
+      ? { kind: 'child', nativeSessionId: incomingId }
+      : undefined
+  }
+  if (incomingId) return { kind: 'main', nativeSessionId: incomingId }
+
+  // Invalid reports, including null, are not absence. Only explicit membership can fill absence.
+  const reported = keys.some(key => payload[key] !== undefined)
+  return !reported && specification.matchesNativeSession && currentId
+    ? { kind: 'main', nativeSessionId: currentId }
+    : undefined
+}
+
+function nativeHookToolItemId(
+  runId: string,
+  providerId: AgentProviderId,
+  subjectKind: 'main' | 'child',
+  nativeSessionId: string,
+  toolCallId: string
+): string {
+  const token = Buffer.from(
+    JSON.stringify([runId, providerId, subjectKind, nativeSessionId, toolCallId])
+  ).toString('base64url')
+  return `tool_${token}`
+}
+
 function buildTimeline(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
@@ -367,7 +418,7 @@ function buildTimeline(
   lifecycleEvent: AgentHookLifecycleEvent | undefined,
   payload: Record<string, unknown>,
   observedAt: number,
-  nativeSessionMatches: boolean
+  subject: NativeToolSubject | undefined
 ): AgentTimelineMutation[] {
   const assistant = stringField(
     payload,
@@ -407,11 +458,17 @@ function buildTimeline(
     const toolCallId = nativeHookToolCallId(payload)
     // 结果只有事后才知道，所以只在事后事件上采集——事前那一行谈不上成败，给它盖任何结论都是编造。
     const outcome = isToolResult ? hookToolOutcome(payload) : undefined
-    if (nativeSessionMatches && toolCallId && kind === 'tool_call') {
+    if (subject && toolCallId && kind === 'tool_call') {
       // Provider 给了关联 id：把一次调用的入参与结果收敛到**同一条 item**。
-      // id 从 receiptId（Pre/Post 各不相同）改绑 toolCallId（同一次调用两端一致），于是
-      // 时间轴上一次调用就是一条，而不是两条。receiptId 方案在这里被彻底取代——不是两套并存。
-      const itemId = `${envelope.runId}:tool:${toolCallId}`
+      // id 包含 [run, provider, subject-kind, nativeID, callID] 的 JSON tuple base64url，
+      // 以固定 ASCII 前缀 tool_ 开头，防止不同主体/会话的相同调用 ID 发生碰撞。
+      const itemId = nativeHookToolItemId(
+        envelope.runId,
+        envelope.providerId,
+        subject.kind,
+        subject.nativeSessionId,
+        toolCallId
+      )
       if (isToolResult) {
         // 事后：翻成终态并挂上结果。走 `upsert` 而不是 `update`——正常情况命中 Pre 落的那条替换掉，
         // 但 Pre 可能压根没落库：它的两次 fetch 都失败、或在 Pre/Post 之间被 200 条上限逐出（子代理
@@ -530,6 +587,14 @@ export function normalizeNativeHook(
   // usage 由 hook 命令进程读 transcript 后并进 payload；normalizer 只把它校验回结构化用量，绝不自己读文件。
   // 缺席（Provider 不报 usage、非收尾事件、读失败）时它就是 undefined，一路缺席到 UI。
   const turnUsage = mainSubject ? parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined : undefined
+  const toolSubject = resolveNativeToolSubject(
+    envelope.providerId,
+    specification,
+    payload,
+    context,
+    nativeSessionMatches,
+    childSubject
+  )
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -541,7 +606,7 @@ export function normalizeNativeHook(
     ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, nativeSessionMatches),
+    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }

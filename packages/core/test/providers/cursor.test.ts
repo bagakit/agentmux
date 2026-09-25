@@ -115,17 +115,18 @@ describe('Cursor provider', () => {
       const pre = toolMutation(hook('preToolUse', call))
       expect(pre.type).toBe('append')
       expect(pre.item.status).toBe('streaming')
-      expect(pre.item.id).toBe('run-cursor:tool:tu-77')
+      expect(pre.item.id).not.toContain('r-preToolUse')
       expect(pre.item.toolName).toBe('Shell')
       expect(hook('preToolUse', call).semanticState).toBe('working')
     })
 
     it('postToolUse 用同一个 id upsert 成 complete 并带上 tool_output', () => {
+      const pre = toolMutation(hook('preToolUse', call))
       const post = toolMutation(hook('postToolUse', {
         ...call, tool_output: 'ok, 12 passed', duration: 1200
       }))
       expect(post.type).toBe('upsert')
-      expect(post.item.id).toBe('run-cursor:tool:tu-77')
+      expect(post.item.id).toBe(pre.item.id)
       expect(post.item.status).toBe('complete')
       expect(post.item.toolOutput).toBe('ok, 12 passed')
     })
@@ -134,6 +135,7 @@ describe('Cursor provider', () => {
       // 这是本 task 最要紧的一条。Cursor 的失败负载**只**有 error_message/failure_type/is_interrupt：
       // 既没有 tool_output、也没有 is_error/exit_code/status。少了对这几个键的判据，一次失败的调用
       // 会被收敛成 complete，和成功的长得一模一样——那正是验收明令禁止的「失败画成成功」。
+      const pre = toolMutation(hook('preToolUse', call))
       const failure = toolMutation(hook('postToolUseFailure', {
         tool_name: 'Shell',
         tool_input: { command: 'npm test' },
@@ -144,7 +146,7 @@ describe('Cursor provider', () => {
         duration: 900
       }))
       expect(failure.type).toBe('upsert')
-      expect(failure.item.id).toBe('run-cursor:tool:tu-77')
+      expect(failure.item.id).toBe(pre.item.id)
       expect(failure.item.status).toBe('failed')
       // 红标记之外还得看得见原因，否则用户只知道「炸了」不知道炸在哪。
       expect(failure.item.toolOutput).toBe('exit status 1: 3 tests failed')

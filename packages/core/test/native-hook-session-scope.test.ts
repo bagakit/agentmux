@@ -25,6 +25,11 @@ import {
 import { HOOK_PAYLOAD_USAGE_KEY } from '../src/agent-usage-transcript.js'
 import { createNumberedTerminalInteractionProtocol } from '../src/agent-interaction.js'
 
+function itemOf(mutation: AgentTimelineMutation | undefined) {
+  if (!mutation || mutation.type === 'update') throw new Error('expected a landed item')
+  return mutation.item
+}
+
 const isolation = vi.hoisted(() => ({ homedir: '/synthetic/unset-home' }))
 vi.mock('node:os', async importOriginal => ({
   ...(await importOriginal<typeof import('node:os')>()),
@@ -206,7 +211,8 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
 
     it('positive control: legitimate main scope and child scope retain toolCallId correlation and proper subject identity', () => {
       const spec: AgentNativeHookSpecification = {
-        matchesNativeSession: (_event, payload) => payload.session_id === 'legit-main',
+        matchesNativeSession: (_event, payload) => payload.session_id === 'legit-main' ||
+          (payload.is_child === true && payload.session_id === 'legit-child'),
         subagentSubject: payload => payload.is_child === true,
         rules: [
           { events: ['PreToolUse'], state: 'working', lifecycleEvent: 'tool-use-start' },
@@ -236,23 +242,52 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
       expect(mainPre.nativeHandle).toEqual({ kind: 'provider', providerId: 'codex', sessionId: 'legit-main' })
       expect(mainPre.timeline).toHaveLength(1)
       expect(mainPre.timeline[0]!.type).toBe('append')
-      if (mainPre.timeline[0]!.type === 'append') {
-        expect(mainPre.timeline[0]!.item.id).toBe(`${runId}:tool:call-100`)
-      }
+      const mainToolId = itemOf(mainPre.timeline[0]).id
+      expect(mainToolId).not.toContain('rcpt-m1')
 
-      // 2. Legitimate child tool call
-      const childPre = normalizeNativeHook(spec, {
+      // Main Post correlates to the same tool ID
+      const mainPost = normalizeNativeHook(spec, {
+        receiptId: 'rcpt-m2', agentSessionId, runId, providerId: 'codex', eventName: 'PostToolUse',
+        payload: { session_id: 'legit-main', tool_name: 'shell', tool_use_id: 'call-100', status: 'success' }
+      }, context)
+      expect(mainPost.timeline).toHaveLength(1)
+      expect(mainPost.timeline[0]!.type).toBe('upsert')
+      expect(itemOf(mainPost.timeline[0]).id).toBe(mainToolId)
+
+      // 2. Child tool call without independent child native ID (toy fixture):
+      // Child cannot borrow shared root native ID 'legit-main', falls back to honest receipt observation trace
+      const childToyPre = normalizeNativeHook(spec, {
         receiptId: 'rcpt-c1', agentSessionId, runId, providerId: 'codex', eventName: 'PreToolUse',
         payload: { session_id: 'legit-main', is_child: true, tool_name: 'shell', tool_use_id: 'call-child-200' }
       }, context)
 
+      expect(childToyPre.mainSubject).toBe(false)
+      expect(childToyPre.nativeHandle).toBeUndefined()
+      expect(childToyPre.timeline).toHaveLength(1)
+      expect(childToyPre.timeline[0]!.type).toBe('append')
+      expect(itemOf(childToyPre.timeline[0]).id).toBe(`${runId}:rcpt-c1:0`)
+
+      // 2b. Child tool call with proven independent child native ID:
+      // Correlates with child Post under its own identity, separated from main
+      const childPre = normalizeNativeHook(spec, {
+        receiptId: 'rcpt-c2', agentSessionId, runId, providerId: 'codex', eventName: 'PreToolUse',
+        payload: { session_id: 'legit-child', is_child: true, agent_id: 'child-1', tool_name: 'shell', tool_use_id: 'call-child-200' }
+      }, context)
       expect(childPre.mainSubject).toBe(false)
       expect(childPre.nativeHandle).toBeUndefined()
       expect(childPre.timeline).toHaveLength(1)
       expect(childPre.timeline[0]!.type).toBe('append')
-      if (childPre.timeline[0]!.type === 'append') {
-        expect(childPre.timeline[0]!.item.id).toBe(`${runId}:tool:call-child-200`)
-      }
+      const childToolId = itemOf(childPre.timeline[0]).id
+      expect(childToolId).not.toBe(mainToolId)
+      expect(childToolId).not.toContain('rcpt-c2')
+
+      const childPost = normalizeNativeHook(spec, {
+        receiptId: 'rcpt-c3', agentSessionId, runId, providerId: 'codex', eventName: 'PostToolUse',
+        payload: { session_id: 'legit-child', is_child: true, agent_id: 'child-1', tool_name: 'shell', tool_use_id: 'call-child-200' }
+      }, context)
+      expect(childPost.timeline).toHaveLength(1)
+      expect(childPost.timeline[0]!.type).toBe('upsert')
+      expect(itemOf(childPost.timeline[0]).id).toBe(childToolId)
 
       // 3. Child termination settling parent completion
       // Start child
@@ -323,6 +358,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         rules: [
           { events: ['turn_start'], state: 'working', lifecycleEvent: 'turn-start' },
           { events: ['ask'], state: 'waiting' },
+          { events: ['answer-observed'], state: 'unknown', lifecycleEvent: 'tool-use-end' },
           { events: ['turn_end'], state: 'done', lifecycleEvent: 'turn-end' },
           { events: ['ChildStop'], state: 'unknown' }
         ],
@@ -416,6 +452,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
             payload
           })
         })
+        expect(response.status, await response.text()).toBe(204)
         return response.status
       }
 

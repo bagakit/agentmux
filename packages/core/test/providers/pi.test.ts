@@ -23,8 +23,7 @@ describe('Pi provider', () => {
   /**
    * 造一条 Pi 形状的信封。
    *
-   * 默认带齐 `session_id` 与 `session_file`——`requireTranscriptPath` 为真，缺 session_file 时整个
-   * handle 会被丢弃，那是另一组用例专门守的事。
+   * 默认带齐 `session_id` 与 `session_file`；另一组用例守 ID-only 身份与可恢复路径的区别。
    */
   function hookIn(runId: string) {
     return (eventName: string, payload: Record<string, unknown> = {}) =>
@@ -39,14 +38,14 @@ describe('Pi provider', () => {
   }
 
   describe('事件名逐字来自上游的 on() 重载', () => {
-    it('订阅的七个都是 snake_case 真名，没有一个别家的拼法', () => {
+    it('订阅的八个都是 snake_case 真名，没有一个别家的拼法', () => {
       // 上游的事件名形如 `agent_settled`（`extensions/types.ts:1282-1298` 的 on() 重载签名）。
       for (const name of PI_HOOK_EVENTS) {
         expect(name).toMatch(/^[a-z]+(_[a-z]+)*$/)
       }
-      expect([...PI_HOOK_EVENTS]).toEqual([
-        'before_agent_start', 'agent_start', 'tool_call', 'tool_execution_start',
-        'tool_execution_end', 'message_end', 'agent_settled'
+      expect([...PI_HOOK_EVENTS].sort()).toEqual([
+        'agent_settled', 'agent_start', 'before_agent_start', 'message_end',
+        'session_start', 'tool_call', 'tool_execution_end', 'tool_execution_start'
       ])
     })
 
@@ -64,12 +63,11 @@ describe('Pi provider', () => {
   /**
    * 这一组是本轮读第一方源码翻出来的实锤，也是这个 Provider 最容易被改回去的地方。
    */
-  describe('agent_settled 是唯一的 done——agent_end 不是', () => {
-    it('agent_settled 判 done', () => {
-      // 上游只在 `_handlePostAgentRun` 的 while 循环整个跑完后、在 finally 里发一次
-      // （`agent-session.ts:1109-1117`）。它自己的 RPC 客户端也是等这一条才认为调用结束
-      // （`modes/rpc/rpc-client.ts:462`）。
-      expect(hookIn('run-settled')('agent_settled').semanticState).toBe<AgentSemanticState>('done')
+  describe('agent_settled 是唯一的 done 来源——需要 stopReason 为 stop', () => {
+    it('agent_settled 在带 stop 时判 done，无原因保持 unknown', () => {
+      // 只有最后一轮 assistant 正常 stop 时判定为 done
+      expect(hookIn('run-settled')('agent_settled', { stopReason: 'stop' }).semanticState).toBe<AgentSemanticState>('done')
+      expect(hookIn('run-settled-bare')('agent_settled').semanticState).toBe<AgentSemanticState>('unknown')
     })
 
     it('agent_end 绝不判 done——它之后还有 retry / compaction / queued 三条续跑路径', () => {
@@ -126,7 +124,7 @@ describe('Pi provider', () => {
     })
   })
 
-  describe('native handle：session_file 缺席时整个 handle 不成立', () => {
+  describe('native handle：session_id 存在时提取 handle', () => {
     it('两个字段齐全时给出带 transcriptPath 的 handle', () => {
       const event = hookIn('run-handle')('agent_start')
       expect(event.nativeHandle).toEqual({
@@ -137,10 +135,7 @@ describe('Pi provider', () => {
       })
     })
 
-    it('只有 session_id 时 handle 整个缺席——不给一个 resume 用不了的半成品', () => {
-      // `requireTranscriptPath: true`。这与扩展侧「transcript 真落盘后才报 session_file」是同一个
-      // 约束的两端：上游在会话创建时就返回路径（`session-manager.ts:954`），但文件要等第一条
-      // assistant 消息才创建（`:1031` 的 `openSync(..., "wx")`）。
+    it('只有 session_id 时给出诚实的 ID-only handle', () => {
       const event = pi.normalizeHook({
         receiptId: 'r-no-file',
         agentSessionId: 's-pi',
@@ -149,7 +144,11 @@ describe('Pi provider', () => {
         eventName: 'agent_start',
         payload: { session_id: 'pi-session-1' }
       }, {})
-      expect(event.nativeHandle).toBeUndefined()
+      expect(event.nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'pi',
+        sessionId: 'pi-session-1'
+      })
     })
   })
 
@@ -248,8 +247,9 @@ describe('Pi provider', () => {
       expect(mutation.content).toContain("pi.on('agent_settled'")
     })
 
-    it('七个订阅的事件名逐个出现在源码里，一个不少', () => {
+    it('八个订阅的事件名逐个出现在源码里，一个不少', () => {
       // 守的是「声明的清单」与「真写进文件的注册」不漂移——两份东西分居两处，改一处忘另一处不会红。
+      expect([...PI_HOOK_EVENTS]).toHaveLength(8)
       for (const name of PI_HOOK_EVENTS) {
         expect(mutation.content).toContain(`pi.on('${name}'`)
       }
@@ -414,10 +414,11 @@ describe('Pi provider', () => {
       expect(payload.session_file).toBe(presentTranscript)
     })
 
-    it('注册的正好是声明的那七个事件，agent_end 不在其中', async () => {
+    it('注册的正好是声明的那八个事件，agent_end 不在其中', async () => {
       const ext = await loadExtension({ env: hookEnv, sessionFile: presentTranscript })
       await ext.flush()
       expect([...ext.handlers.keys()].sort()).toEqual([...PI_HOOK_EVENTS].sort())
+      expect([...ext.handlers.keys()]).toHaveLength(8)
       expect(ext.handlers.has('agent_end')).toBe(false)
     })
 

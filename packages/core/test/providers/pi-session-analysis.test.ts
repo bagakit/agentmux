@@ -136,6 +136,7 @@ async function harness() {
       },
       body: JSON.stringify({ receiptId, eventName, payload })
     })
+    expect(response.status, await response.text()).toBe(badToken ? 403 : 204)
     return response.status
   }
 
@@ -147,12 +148,14 @@ async function harness() {
 
   return {
     root,
+    workspacePath,
     store,
     storePath,
     sessionId,
     runId,
     nativeId,
     transcriptPath,
+    token,
     writes,
     start,
     stop,
@@ -182,43 +185,244 @@ async function harness() {
   }
 }
 
+async function loadGeneratedPiExtension(options: {
+  hookUrl: string
+  hookToken: string
+}) {
+  const plan = createPiManagedHookPlan({
+    PI_CODING_AGENT_DIR: '/tmp/pi-gen-test'
+  })
+  const source = plan.mutations[0]!.content
+  const module = await import(
+    /* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`
+  )
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => void>()
+  vi.stubEnv('AGENTMUX_HOOK_URL', options.hookUrl)
+  vi.stubEnv('AGENTMUX_HOOK_TOKEN', options.hookToken)
+  module.default({
+    on: (name: string, handler: (event: unknown, ctx: unknown) => void) => {
+      handlers.set(name, handler)
+    }
+  })
+  return { plan, handlers }
+}
+
 describe('Pi session analysis, native identity and hook settlement', () => {
-  it('acquires main native identity through authenticated ingress, preserves it across child/foreign records and fresh Client', async () => {
+  it('acquires ID-only native identity when transcript is not yet flushed, enriches path on disk header, transitions to B via session_start and protects B against delayed A events', async () => {
     const h = await harness()
     expect(await h.feed('forged', 'agent_start', { session_id: 'forged' }, true)).toBe(403)
     expect((await h.stored()).nativeHandle).toBeUndefined()
 
-    // Missing transcript file on disk -> extension does not report session_file -> handle not acquired (requireTranscriptPath: true)
-    expect(await h.feed('no-file', 'agent_start', { session_id: h.nativeId })).toBe(204)
-    expect((await h.stored()).nativeHandle).toBeUndefined()
+    // 1. Missing transcript file on disk -> honest ID-only nativeHandle (no requireTranscriptPath gate)
+    expect(await h.feed('birth-id-only', 'agent_start', { session_id: h.nativeId })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'pi',
+      sessionId: h.nativeId
+    })
 
-    // Real transcript file present -> acquired
-    expect(await h.feed('birth', 'agent_start', { session_id: h.nativeId, session_file: h.transcriptPath })).toBe(204)
-    const main = (await h.stored()).nativeHandle
-    expect(main).toEqual({
+    // 2. Real transcript file present -> path enriched
+    expect(await h.feed('birth-enriched', 'agent_start', { session_id: h.nativeId, session_file: h.transcriptPath })).toBe(204)
+    const handleA = (await h.stored()).nativeHandle!
+    if (handleA.kind !== 'provider') throw new Error('expected provider handle')
+    expect(handleA).toEqual({
       kind: 'provider',
       providerId: 'pi',
       sessionId: h.nativeId,
       transcriptPath: h.transcriptPath
     })
 
-    // Foreign session event without valid locator does not overwrite main handle
-    expect(await h.feed('foreign', 'agent_start', { session_id: 'other-session' })).toBe(204)
-    expect((await h.stored()).nativeHandle).toEqual(main)
+    // Establish tool execution in Session A
+    expect(await h.feed('a-tool-start', 'tool_execution_start', {
+      session_id: h.nativeId,
+      session_file: h.transcriptPath,
+      tool_name: 'bash',
+      call_id: 'tool-call-shared',
+      tool_input: { command: 'echo A' }
+    })).toBe(204)
+
+    // 3. Negative transition attempts under trusted handleA.transcriptPath
+    // 3a. Different ID with reason: 'startup' or 'reload' cannot transition
+    expect(await h.feed('bad-startup', 'session_start', {
+      session_id: 'foreign-c',
+      reason: 'startup',
+      previousSessionFile: h.transcriptPath
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleA)
+
+    expect(await h.feed('bad-reload', 'session_start', {
+      session_id: 'foreign-c',
+      reason: 'reload',
+      previousSessionFile: h.transcriptPath
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleA)
+
+    // 3b. Different ID with unproved/mismatched previousSessionFile cannot transition
+    expect(await h.feed('bad-prev', 'session_start', {
+      session_id: 'foreign-d',
+      reason: 'new',
+      previousSessionFile: '/wrong/path.jsonl'
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleA)
+
+    // 3c. Extra-only previousSessionFile cannot masquerade as top-level fact
+    expect(await h.feed('bad-extra', 'session_start', {
+      session_id: 'foreign-e',
+      reason: 'new',
+      extra: { previousSessionFile: h.transcriptPath }
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleA)
+
+    // 3d. Alias-only sessionId (instead of session_id) cannot pass membership
+    expect(await h.feed('bad-alias-id', 'session_start', {
+      sessionId: 'foreign-f',
+      reason: 'new',
+      previousSessionFile: h.transcriptPath
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleA)
+
+    // 3e. Alias-only previous_session_file (instead of previousSessionFile) cannot pass membership
+    expect(await h.feed('bad-alias-prev', 'session_start', {
+      session_id: 'foreign-g',
+      reason: 'new',
+      previous_session_file: h.transcriptPath
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleA)
+
+    // 4. Real generated extension load -> real session_start POST -> public Core Ingress
+    const ext = await loadGeneratedPiExtension({
+      hookUrl: `http://127.0.0.1:${defaultAgentMuxHookPort()}/v1/events`,
+      hookToken: h.token
+    })
+
+    const bId = 'native-session-B'
+    const bTranscriptPath = join(h.root, 'transcript-B.jsonl')
+    const ctxB = {
+      sessionManager: {
+        getSessionId: () => bId,
+        getSessionFile: () => bTranscriptPath
+      }
+    }
+
+    // Trigger generated extension handler for session_start (B transcript not yet on disk -> sends ID-only)
+    ext.handlers.get('session_start')!({
+      reason: 'new',
+      previousSessionFile: handleA.transcriptPath
+    }, ctxB)
+
+    await vi.waitFor(async () => {
+      expect((await h.stored()).nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'pi',
+        sessionId: bId
+      })
+    })
+    const handleB = (await h.stored()).nativeHandle!
+    expect(handleB).not.toHaveProperty('transcriptPath')
+
+    // B starts working and runs a tool via real generated extension handlers
+    ext.handlers.get('before_agent_start')!({ prompt: 'B work' }, ctxB)
+    ext.handlers.get('tool_execution_start')!({ toolName: 'bash', args: { command: 'echo B' } }, ctxB)
+    await vi.waitFor(async () => {
+      expect((await h.stored()).semanticStatus?.state).toBe('working')
+    })
+
+    // Controlled public Hook input proves collision fencing independently of the
+    // generated extension, which does not currently report tool-call IDs.
+    expect(await h.feed('b-controlled-tool-start', 'tool_execution_start', {
+      session_id: bId,
+      tool_name: 'bash',
+      call_id: 'tool-call-shared',
+      tool_input: { command: 'echo B controlled' }
+    })).toBe(204)
+    const initialItems = (await h.client.sessionTimeline(h.sessionId)).items
+    const aToolRow = initialItems.find((item) => item.toolName === 'bash' && item.toolInput === '{"command":"echo A"}')
+    expect(aToolRow).toBeDefined()
+    const bToolRow = structuredClone(initialItems.find((item) => item.toolName === 'bash' && item.toolInput === '{"command":"echo B controlled"}'))
+    expect(bToolRow).toBeDefined()
+    expect(bToolRow).toMatchObject({
+      kind: 'tool_call',
+      status: 'streaming',
+      toolInput: '{"command":"echo B controlled"}'
+    })
+    const bToolId = bToolRow!.id
+    expect(bToolId).not.toBe(aToolRow!.id)
+
+    // 5. Delayed POST from old Session A arrives (tool end with same toolCallId, and settled with stop)
+    // matchesNativeSession returns false, protecting Session B: handle, status, and tool row are preserved!
+    expect(await h.feed('a-delayed-end', 'tool_execution_end', {
+      session_id: h.nativeId,
+      tool_name: 'bash',
+      call_id: 'tool-call-shared',
+      tool_output: 'output A'
+    })).toBe(204)
+
+    expect(await h.feed('a-delayed-settle', 'agent_settled', {
+      session_id: h.nativeId,
+      stopReason: 'stop'
+    })).toBe(204)
+
+    // Session B is still working, not falsely completed by A's delayed settled event!
+    expect((await h.stored()).nativeHandle).toEqual(handleB)
+    expect((await h.stored()).semanticStatus?.state).toBe('working')
+    expect(agentTurnCompletionIdentity(await h.stored())).toBeUndefined()
+
+    // B's original tool row is preserved, and A's delayed trace is retained with identifiable receipt
+    const timeline = await h.client.sessionTimeline(h.sessionId)
+    expect(timeline.items.find((item) => item.id === bToolId)).toEqual(bToolRow)
+    expect(timeline.items.find((i) => i.id === aToolRow!.id)).toBeDefined()
+    expect(timeline.items.find((i) => i.toolName === 'bash' && i.toolInput === '{"command":"echo B"}')).toBeDefined()
+    expect(timeline.items.find((i) => i.id.includes('a-delayed-end'))).toBeDefined()
+
+    // 6. When current handle is ID-only (handleB has no transcriptPath), attempting to transition to Session C is rejected!
+    expect(await h.feed('c-switch-on-id-only', 'session_start', {
+      session_id: 'native-session-C',
+      reason: 'new',
+      previousSessionFile: h.transcriptPath
+    })).toBe(204)
+    expect((await h.stored()).nativeHandle).toEqual(handleB)
+
+    // 7. When B's transcript is written to disk, B enriches its own transcriptPath via real extension
+    await writeFile(bTranscriptPath, jsonl([{ type: 'session', version: 3, id: bId, cwd: h.workspacePath, timestamp: '2026-10-01T00:00:00Z' }]))
+    ext.handlers.get('agent_start')!({}, ctxB)
+
+    await vi.waitFor(async () => {
+      expect((await h.stored()).nativeHandle).toEqual({
+        kind: 'provider',
+        providerId: 'pi',
+        sessionId: bId,
+        transcriptPath: bTranscriptPath
+      })
+    })
 
     // Reopen preserves exact identity
     await h.reopen()
-    expect(h.client.agentSession(h.sessionId).nativeHandle).toEqual(main)
+    expect(h.client.agentSession(h.sessionId).nativeHandle).toEqual({
+      kind: 'provider',
+      providerId: 'pi',
+      sessionId: bId,
+      transcriptPath: bTranscriptPath
+    })
 
+    // Resume launch args on enriched handle
     const launch = new AgentProviderRegistry().get('pi').buildResumeLaunch({
       workspacePath: h.client.agentSession(h.sessionId).workspacePath,
-      nativeHandle: main!,
+      nativeHandle: (await h.stored()).nativeHandle!,
       args: [],
       env: {},
       prompt: 'continue'
     })
-    expect(launch).toMatchObject({ command: 'pi', args: ['--session', h.transcriptPath, 'continue'] })
-    expect(h.writes).toEqual([])
+    expect(launch).toMatchObject({ command: 'pi', args: ['--session', bTranscriptPath, 'continue'] })
+
+    // Semantic resume on ID-only handle throws honestly
+    expect(() => new AgentProviderRegistry().get('pi').buildResumeLaunch({
+      workspacePath: h.client.agentSession(h.sessionId).workspacePath,
+      nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: 'id-only' },
+      args: [],
+      env: {},
+      prompt: 'continue'
+    })).toThrowError(/hook-reported session file/)
+
     expect(h.start).not.toHaveBeenCalled()
     expect(h.stop).not.toHaveBeenCalled()
   })
@@ -232,7 +436,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
         runId: 'r-1',
         providerId: 'pi',
         eventName,
-        payload
+        payload: { session_id: 's-pi-native', ...payload }
       }, {})
 
     // Normalizer rule assertions: single clear field `stopReason`, no duplicate aliases

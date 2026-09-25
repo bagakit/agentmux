@@ -4,24 +4,17 @@ import { AgentMuxError } from '../errors.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from '../agent-native-locator.js'
 import { catalog } from './shared.js'
 import { readPiSessionHistoryPage } from './pi-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
 /**
- * Pi 扩展订阅的事件名。
- *
- * 证据是**上游自己的源码**（`home//proj/github/pi`，即 `earendil-works/pi`，本机可读），
- * 不是任何第三方项目的转述：每个名字都是 `ExtensionAPI.on()` 的一个重载签名，逐字取自
- * `packages/coding-agent/src/core/extensions/types.ts:1282-1298`。
- *
- * 只订阅七个。上游的事件全集是 30+ 个（`ExtensionEvent` 联合体，`types.ts:1086-1113`），其余的要么
- * 与「Agent 在干什么」无关（`model_select`/`thinking_level_select`/主题与 UI 那批），要么是需要**返回值**
- * 才有意义的拦截点（`context`/`before_provider_request`/`input`——它们的 handler 返回值会改写 Pi 的行为）。
- * 我们是被动观察者，只订阅纯通知型事件。
+ * Pi 扩展订阅的事件名（共八个真实通知型事件）。
  */
 export const PI_HOOK_EVENTS = [
+  'session_start',
   'before_agent_start', 'agent_start', 'tool_call', 'tool_execution_start',
   'tool_execution_end', 'message_end', 'agent_settled'
 ] as const
@@ -38,7 +31,37 @@ export const PI_HOOK_EVENTS = [
  * - Pi 自身无交互权限事件，catalog.permission 记 `none`；工具与轮次无双向关联，replyCorrelation 记 `none`。
  */
 export const PI_HOOKS: AgentNativeHookSpecification = {
+  matchesNativeSession: (eventName, rawPayload, context) => {
+    const incomingId = normalizeNativeSessionId(rawPayload.session_id)
+    if (!incomingId) return false
+
+    const current = context.nativeHandle
+    if (!current) return true
+
+    if (current.kind !== 'provider' || current.providerId !== 'pi') return false
+
+    if (incomingId === current.sessionId) return true
+
+    if (eventName !== 'session_start') return false
+
+    const reason = typeof rawPayload.reason === 'string' ? rawPayload.reason : undefined
+    if (reason !== 'new' && reason !== 'resume' && reason !== 'fork') return false
+
+    const currentPath = normalizeNativeTranscriptPath(current.transcriptPath)
+    if (!currentPath) return false
+
+    const previousPath = normalizeNativeTranscriptPath(rawPayload.previousSessionFile)
+    if (!previousPath) return false
+
+    return previousPath === currentPath
+  },
   rules: [
+    // session_start 只宣告真实原生 source 变化，不是新 turn/working/end/success，不使提示就绪失效
+    {
+      events: ['session_start'],
+      state: 'unknown',
+      lifecycleEvent: null
+    },
     // stop: 正常成功收尾
     {
       events: ['agent_settled'],
@@ -70,11 +93,7 @@ export const PI_HOOKS: AgentNativeHookSpecification = {
   ],
   nativeHandle: {
     sessionIdKeys: ['session_id'],
-    transcriptPathKeys: ['session_file'],
-    // Pi 的 resume 只认 transcript 路径（见 buildResumeArgs），所以 session_file 缺席时整个 handle
-    // 都不成立——留一个只有 session_id 的 handle 会让 resume 在事后才发现自己没有可用的定位符。
-    // 这一条与扩展侧「文件真存在才上报 session_file」是同一个约束的两端，缺一不可，见下面那段。
-    requireTranscriptPath: true
+    transcriptPathKeys: ['session_file']
   },
   // Pi 的 hook 面是一份 AgentMux 生成的扩展文件，跑在 pi 进程里**自己直接 POST**
   // （见下面 `piExtensionSource` 的 `post()`：body 里 `eventName` 是生成时写死的实参）。
@@ -202,6 +221,12 @@ export default function (pi) {
 
   let lastAssistant = null
 
+  pi.on('session_start', (event, ctx) => {
+    post('session_start', ctx, {
+      reason: event && event.reason,
+      previousSessionFile: event && event.previousSessionFile
+    })
+  })
   pi.on('before_agent_start', (event, ctx) => {
     lastAssistant = null
     post('before_agent_start', ctx, { prompt: (event && event.prompt) || '' })
