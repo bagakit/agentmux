@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   AGENT_COMMAND_GROUP_LABEL,
+  COMPOSER_PROMPT_STATES,
   composerKeywordAtCaret,
   composerKeywordMatches,
   composerShortcutForBareWord,
@@ -15,6 +18,14 @@ const generic: ComposerShortcut = { id: 'p-1', keyword: 'eli5', label: 'Explain 
 const bound: ComposerShortcut = { id: 'p-2', keyword: 'grill_me', label: 'Grill me', body: 'Attack my reasoning.', providerId: 'codex' }
 
 describe('本地 prompt 库的取值层', () => {
+  it('offers every actual Core AgentDisplayState without inventing a second state vocabulary', () => {
+    const source = readFileSync(resolve('packages/core/src/types.ts'), 'utf8')
+    const declaration = source.match(/export type AgentDisplayState =([\s\S]*?)\n\n/)
+    expect(declaration).not.toBeNull()
+    const states = [...declaration![1]!.matchAll(/'([^']+)'/g)].map((match) => match[1])
+    expect(states.length).toBeGreaterThan(0)
+    expect([...COMPOSER_PROMPT_STATES].sort()).toEqual(states.sort())
+  })
   it('缺席与 null 都解析成空列表，不是抛也不是补默认', () => {
     // 缺席即空是这一族的地基：补默认会把用户删掉的 prompt 送回来（见 config-store 那族）。
     expect(resolveComposerShortcuts(undefined)).toEqual([])

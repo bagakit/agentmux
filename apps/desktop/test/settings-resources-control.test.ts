@@ -5,6 +5,8 @@ import { executeSettingsResourcesControl as execute } from '../src/main/settings
 import { composerShortcutSchema, executorSchema } from '../src/main/config-store.js'
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
 import { applyConfigEdit } from '../src/shared/config-edit.js'
+import { COMPOSER_PROMPT_STATES } from '../src/shared/composer-shortcut-library.js'
+import { ConfigStore } from '../src/main/config-store.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import type { AgentMuxControlSettingsResourceRequest, AgentMuxControlSettingsResourceFields } from '@agentmux/core'
 const envelope={schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:'resource-test'}
@@ -18,6 +20,17 @@ const get=async(f:Awaited<ReturnType<typeof configOwnerFixture>>,resource:'promp
  return result.item.value
 }
 describe('typed Settings resources through the sole Main owner',()=>{
+ it('uses the same state schema for resource editing and durable rereads, and rejects unknown states',async()=>{
+  const f=await configOwnerFixture({composerShortcuts:prompts})
+  await execute(request({operation:'settings.resource.update',resource:'prompts',id:'one',changes:{states:[...COMPOSER_PROMPT_STATES]}}),f.owner)
+  expect((await get(f,'prompts','one')).states).toEqual([...COMPOSER_PROMPT_STATES])
+  expect((await new ConfigStore(f.store.filePath).get()).composerShortcuts![0]!.states).toEqual([...COMPOSER_PROMPT_STATES])
+  const bytes=await f.bytes()
+  await expect(execute(request({operation:'settings.resource.update',resource:'prompts',id:'one',changes:{states:['invented']}}),f.owner)).rejects.toMatchObject({code:'INVALID_SETTING_VALUE'})
+  expect(await f.bytes()).toBe(bytes)
+  await execute(request({operation:'settings.resource.update',resource:'prompts',id:'one',changes:{states:[]}}),f.owner)
+  expect((await new ConfigStore(f.store.filePath).get()).composerShortcuts![0]!.states).toEqual([])
+ })
  it('derives nonempty DTO fields from actual persistence schemas, preserves fixed resource identities and literal values',async()=>{
   const f=await configOwnerFixture({executors:{first:template,second:template},composerShortcuts:prompts})
   expect(Object.keys(executorSchema.shape).length).toBeGreaterThan(0)
@@ -25,7 +38,7 @@ describe('typed Settings resources through the sole Main owner',()=>{
   await expect(execute(request({operation:'settings.resource.list',resource:'executors'}),f.owner)).resolves.toEqual({operation:'settings.resource.list',resource:'executors',partial:true,items:[{id:'first',value:template},{id:'second',value:template}]})
   await expect(execute(request({operation:'settings.resource.list',resource:'prompts'}),f.owner)).resolves.toEqual({operation:'settings.resource.list',resource:'prompts',partial:true,items:prompts.map(({id,...value})=>({id,value}))})
   expect(Object.keys(await get(f,'executors','first')).sort()).toEqual(Object.keys(executorSchema.shape).filter(k=>k!=='avatar').sort())
-  expect(Object.keys(await get(f,'prompts','one')).sort()).toEqual(Object.keys(composerShortcutSchema.shape).filter(k=>k!=='id'&&k!=='providerId').sort())
+  expect(Object.keys(await get(f,'prompts','one')).sort()).toEqual(Object.entries(composerShortcutSchema.shape).filter(([key,schema])=>key!=='id'&&!schema.isOptional()).map(([key])=>key).sort())
   const args=['','--help','a b',"a'b",'$TOKEN','src/*.ts','>','C:\\folder\\file']
   const env=JSON.parse('{"__proto__":"own","constructor":"literal","A":"line1\\nB=line2","odd key":"= value"}')
   await execute(request({operation:'settings.resource.update',resource:'executors',id:'first',changes:{args,env,avatar:null}}),f.owner)
