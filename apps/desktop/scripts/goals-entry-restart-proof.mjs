@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { scratchTopicDirectoryName } from '../src/shared/scratch-topics.ts'
 
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
@@ -16,7 +17,8 @@ const sourceFiles = [
   'scripts/goals-entry-restart-proof.mjs', 'scripts/verify-workbench-persistence-restart.mjs',
   'src/renderer/src/components/GlobalBoardSurface.tsx', 'src/renderer/src/components/NewTabSurface.tsx',
   'src/renderer/src/lib/goals-entry-actions.ts', 'src/renderer/src/lib/workbench-tabs.ts',
-  'src/renderer/src/lib/workbench-persistence.ts', 'src/renderer/src/store.ts', 'src/renderer/src/styles/goals.css'
+  'src/renderer/src/lib/workbench-persistence.ts', 'src/renderer/src/store.ts', 'src/renderer/src/styles/goals.css',
+  'src/shared/scratch-topics.ts'
 ]
 
 async function sources(desktopRoot) {
@@ -44,7 +46,7 @@ function parseBirth(text) {
 export async function createGoalsEntryFixture({ root, topicsPath, desktopRoot }) {
   const directory = join(root, 'goals-entry-runs'), executable = join(root, 'goals-entry-cat.sh')
   await mkdir(directory, { mode: 0o700 })
-  await writeFile(executable, `#!/bin/sh\numask 077\nproof_directory=${quote(directory)}\ntest -n "$AGENTMUX_AGENT_SESSION_ID" || exit 64\nLC_ALL=C /bin/ps -p "$$" -o pid=,pgid=,lstart= > "$proof_directory/$AGENTMUX_AGENT_SESSION_ID.birth"\nprintf '%s\\0' "$@" > "$proof_directory/$AGENTMUX_AGENT_SESSION_ID.argv"\nprintf 'Private Goals entry PTY\\n'\nexec /bin/cat\n`, { mode: 0o700 })
+  await writeFile(executable, `#!/bin/sh\numask 077\nproof_directory=${quote(directory)}\ntest -n "$AGENTMUX_AGENT_SESSION_ID" && test -n "$AGENTMUX_AGENT_CAPABILITY" && test -n "$AGENTMUX_LIFECYCLE_OPERATION_ID" || exit 64\nLC_ALL=C /bin/ps -p "$$" -o pid=,pgid=,lstart= > "$proof_directory/$AGENTMUX_AGENT_SESSION_ID.birth"\nprintf '%s\\0' "$@" > "$proof_directory/$AGENTMUX_AGENT_SESSION_ID.argv"\nprintf 'Private Goals entry PTY\\n'\nexec /bin/cat\n`, { mode: 0o700 })
   return { directory, executable, topicsPath, topicsMode: (await stat(topicsPath)).mode & 0o777,
     sourceBefore: await sources(desktopRoot), desktopRoot, agents: [] }
 }
@@ -66,6 +68,12 @@ async function launchEvidence(cdp, fixture, topic, request, waitFor) {
     const reply = await cdp.evaluate('window.agentmux.sessions.snapshot()')
     return reply.sessions.find(session => session.id === topic.region.sessionId && session.processState === 'running')
   })
+  const metadata = await cdp.evaluate(`window.agentmux.scratch.readTopic('__scratch__', ${JSON.stringify(topic.tab.topicId)})`)
+  assert.equal(metadata?.id, topic.tab.topicId)
+  assert.ok(metadata.soul?.content, 'The same real Topic has a prepared Mote SOUL')
+  assert.equal(metadata.directoryPath, scratchTopicDirectoryName(topic.tab.topicId))
+  const directory = await realpath(join(fixture.topicsPath, metadata.directoryPath))
+  assert.equal(snapshot.workspacePath, directory, 'Main launches the CTA Session in its exact real Topic directory')
   const created = await waitFor('Core confirms the provider launch request', async () => {
     const reply = await cdp.evaluate(`window.agentmux.sessions.creation('local', ${JSON.stringify(snapshot.id)})`)
     return reply.creation?.initialPrompt === 'confirmed' ? reply : null
@@ -81,7 +89,8 @@ async function launchEvidence(cdp, fixture, topic, request, waitFor) {
   const process = parseBirth(recordedBirth)
   assert.equal(await birth(process.pid), recordedBirth, 'The actual private cat process is still the recorded birth')
   const agent = { tabId: topic.tab.id, topicId: topic.tab.topicId, regionId: topic.region.regionId,
-    agentSessionId: snapshot.id, run: snapshot.control.run, process, birth: recordedBirth,
+    agentSessionId: snapshot.id, run: snapshot.control.run, workspacePath: directory,
+    soulDigest: digest(metadata.soul.content), process, birth: recordedBirth,
     request, requestDigest: digest(request), inputTransport: 'provider-launch-argv',
     requestOccurrences: 1, initialPrompt: created.creation.initialPrompt }
   fixture.agents.push(agent)
@@ -99,8 +108,6 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
   })
   assert.equal(normal.tab.topicPreparation, undefined)
   assert.notEqual(normal.draft, requests.understand, 'Successful launch clears the original Region request')
-  const metadata = await cdp.evaluate(`window.agentmux.scratch.readTopic('__scratch__', ${JSON.stringify(normal.tab.topicId)})`)
-  assert.equal(metadata?.id, normal.tab.topicId); assert.ok(metadata.soul, 'A real prepared Mote owns this Topic')
   fixture.normal = await launchEvidence(cdp, fixture, normal, requests.understand, waitFor)
   await activateButton(cdp, `document.querySelector('[aria-label="Goals: show goals and progress"]')`)
   await waitFor('real Goals ideas CTA', () => cdp.evaluate(`Boolean(document.querySelector('button[data-goals-entry-action="ideas"]'))`))
@@ -114,8 +121,17 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
       const value = await state(cdp), topic = newTopic(value, Object.keys(beforeFailure.restoredWorkbench.tabs))
       if (topic?.region.kind !== 'launcher' || topic.tab.topicPreparation !== 'mote' || topic.draft !== requests.ideas) return null
       const shown = await cdp.evaluate(`document.querySelector('[data-workbench-region-id="${topic.region.regionId}"]')?.innerText.toLowerCase()`)
-      return shown?.includes('preparation') && shown.includes('not been sent') ? topic : null
+      if (!shown?.includes('preparation') || !shown.includes('not been sent')) return null
+      const directory = join(await realpath(fixture.topicsPath), scratchTopicDirectoryName(topic.tab.topicId))
+      const cause = await cdp.evaluate(`Array.from(document.querySelectorAll('.error-notice__original')).map(node => node.textContent).find(text => text.includes('EACCES') && text.includes('mkdir') && text.includes(${JSON.stringify(directory)}))`)
+      if (!cause) return null
+      fixture.preparationFailure = { code: 'EACCES', operation: 'mkdir', workspacePath: directory }
+      return topic
     })
+    // Expand the actual error details while the filesystem is still unwritable; the initial
+    // preparation marker alone says unknown and cannot establish this failed Main mkdir.
+    await activateButton(cdp, `Array.from(document.querySelectorAll('.error-notice__original')).find(node => node.textContent.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)})).closest('details').querySelector('summary')`)
+    await waitFor('actual preparation cause is visible', () => cdp.evaluate(`Array.from(document.querySelectorAll('.error-notice__original')).some(node => node.textContent.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)}) && node.getClientRects().length > 0)`))
   } finally { await chmod(fixture.topicsPath, fixture.topicsMode) }
   assert.notEqual(fixture.failed.tab.id, fixture.normal.tabId)
   assert.notEqual(fixture.failed.tab.topicId, fixture.normal.topicId)
@@ -134,6 +150,7 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
 export async function readGoalsEntryNativeBaseline({ client, fixture }) {
   const runs = await client.listRuns(), run = runs.find(item => item.runId === fixture.normal.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, fixture.normal.process.pid)
+  assert.equal(run.workspacePath, fixture.normal.workspacePath)
   assert.ok(Number.isFinite(run.acceptedInputBytes) && run.acceptedInputBytes >= 0)
   assert.equal(await birth(run.pid), fixture.normal.birth)
   fixture.normal.inputBeforeRestore = run.acceptedInputBytes
@@ -169,7 +186,7 @@ export async function restoreGoalsEntryBeforeSpace({ cdp, fixture, activateButto
   return { actualMountedClicks: ['understand', 'ideas'], preparedTopic: fixture.normal.topicId,
     retainedFailureTopic: fixture.failed.tab.topicId, retainedFailureTab: fixture.failed.tab.id,
     retainedFailureRegion: fixture.failed.region.regionId, sameOwnerExplicitRetry: true, restartAutomaticallySent: false,
-    sourceBefore: fixture.sourceBefore, agents: fixture.agents,
+    preparationFailure: fixture.preparationFailure, sourceBefore: fixture.sourceBefore, agents: fixture.agents,
     limitations: ['Synthetic private Codex command records actual launch argv and then execs cat; argv receipt is distinct from PTY input and does not prove model understanding.',
       'Only original workbench facts were seeded; both new Topics, Regions and Agent Sessions came from actual mounted product actions.'] }
 }
@@ -179,10 +196,14 @@ export async function finishGoalsEntryNativeProof({ client, fixture, result }) {
   for (const agent of fixture.agents) {
     const run = runs.find(item => item.runId === agent.run.runId)
     assert.equal(run?.state, 'running'); assert.equal(run.pid, agent.process.pid)
+    assert.equal(run.workspacePath, agent.workspacePath, 'The Runtime Run belongs to the same real Topic directory as Main/Core Session')
     assert.equal(await birth(run.pid), agent.birth)
     agent.inputAfterRestore = run.acceptedInputBytes
   }
   assert.equal(fixture.normal.inputAfterRestore, fixture.normal.inputBeforeRestore, 'Ordinary restart must not write duplicate PTY input to the already launched request')
+  const records = await readdir(fixture.directory)
+  assert.deepEqual(records.filter(name => name.endsWith('.argv')).sort(), fixture.agents.map(agent => `${agent.agentSessionId}.argv`).sort(), 'Only real Core-created CTA Sessions have launch argv records')
+  assert.deepEqual(records.filter(name => name.endsWith('.birth')).sort(), fixture.agents.map(agent => `${agent.agentSessionId}.birth`).sort())
   assert.deepEqual(await sources(fixture.desktopRoot), fixture.sourceBefore, 'Executed proof sources must stay exact throughout this candidate')
   result.noDuplicatePtyInput = true
 }
