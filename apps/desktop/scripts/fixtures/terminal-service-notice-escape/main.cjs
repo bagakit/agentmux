@@ -80,6 +80,11 @@ async function scene(width,mode,readonly=false) {
   await open();await paint()
   const originalText=await evaluate(`${panel}.innerText`)
   assert.ok(originalText.length>80,'Original diagnostic and recovery text remain nonempty')
+  const contentGeometry=await evaluate(`(()=>{const c=${panel}.querySelector('.service-disclosure__content'),b=c.getBoundingClientRect(),style=getComputedStyle(c);return {clientWidth:c.clientWidth,scrollWidth:c.scrollWidth,scrollbarGutter:style.scrollbarGutter,textRects:[...c.querySelectorAll('.service-window__step,.service-window__mode,.service-window__restore')].flatMap(e=>{const nodes=document.createTreeWalker(e,NodeFilter.SHOW_TEXT),out=[];while(nodes.nextNode()){const n=nodes.currentNode;for(const m of n.textContent.matchAll(/\\S/g)){const r=document.createRange();r.setStart(n,m.index);r.setEnd(n,m.index+1);out.push(...[...r.getClientRects()].map(x=>({left:x.left,right:x.right})))}}return out}),left:b.left,right:b.left+c.clientWidth-parseFloat(style.paddingRight)}})()`)
+  ;(report.contentGeometries??=[]).push({width,mode,contentGeometry})
+  assert.ok(contentGeometry.textRects.length>0,'Actual original diagnostic text has painted fragments')
+  assert.ok(contentGeometry.scrollWidth<=contentGeometry.clientWidth,'Details wrap without horizontal overflow')
+  assert.ok(contentGeometry.textRects.every(r=>r.left>=contentGeometry.left-1&&r.right<=contentGeometry.right+1),'Every original text fragment stays inside the scroll viewport')
   assert.ok(await evaluate(`${panel}.getBoundingClientRect().height<=innerHeight*.71`),'Details have a bounded actual viewport')
   const bounds = await evaluate(`(()=>{const p=${panel}.getBoundingClientRect(),s=${surface}.getBoundingClientRect(),t=${surface}.querySelector('.terminal-view__xterm').getBoundingClientRect(),c=${surface}.querySelector('.composer')?.getBoundingClientRect();return {panel:{left:p.left,right:p.right,bottom:p.bottom},owner:{left:s.left,right:s.right},terminalBottom:t.bottom,composerTop:c?.top??null}})()`)
   assert.ok(bounds.panel.left>=bounds.owner.left && bounds.panel.right<=bounds.owner.right,'Details stay inside their original Region')
@@ -89,12 +94,12 @@ async function scene(width,mode,readonly=false) {
   if(mode==='all') {
     const point=await evaluate(`(()=>{const p=${panel}.getBoundingClientRect();return{x:p.x+p.width/2,y:p.y+p.height/2}})()`)
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:3000})
-    await wait(`${panel}.scrollTop>0`)
+    await wait(`${panel}.querySelector('.service-disclosure__content').scrollTop>0`)
     await paint()
-    const tail=await evaluate(`(()=>{const p=${panel},e=[...p.querySelectorAll('.service-window__restore')].at(-1),r=e.getBoundingClientRect(),b=p.getBoundingClientRect();return{text:e.textContent,top:r.top,bottom:r.bottom,panelTop:b.top,panelBottom:b.bottom}})()`)
+    const tail=await evaluate(`(()=>{const p=${panel},e=[...p.querySelectorAll('.service-window__restore')].at(-1),r=e.getBoundingClientRect(),b=p.querySelector('.service-disclosure__content').getBoundingClientRect();return{text:e.textContent,top:r.top,bottom:r.bottom,panelTop:b.top,panelBottom:b.bottom}})()`)
     assert.ok(tail.text.length>20,'The final original recovery fact is nonempty')
     assert.ok(tail.top>=tail.panelTop && tail.bottom<=tail.panelBottom,'A real wheel scroll reveals the final original recovery fact')
-    assert.ok(await evaluate(`(()=>{const p=${panel}.getBoundingClientRect(),c=${panel}.querySelector('.service-disclosure__heading .service-disclosure__close').getBoundingClientRect();return c.top>=p.top&&c.bottom<=p.bottom})()`),'The actual close control stays visible at the bottom of long details')
+    assert.ok(await evaluate(`(()=>{const p=${panel}.getBoundingClientRect(),c=${panel}.querySelector('.service-disclosure__heading .service-disclosure__close'),r=c.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return r.top>=p.top&&r.bottom<=p.bottom&&(hit===c||c.contains(hit))})()`),'The actual close control stays visible and hit-testable at the bottom of long details')
     await frame(width,'all-details-tail')
   }
   await click(`${panel}.querySelector('.service-disclosure__close')`);await folded();await paint()
@@ -112,7 +117,7 @@ async function scene(width,mode,readonly=false) {
     const writes=await evaluate('terminalNotice.facts().writes.length');await evaluate(`${textarea}.focus()`);await key('z','z');await paint()
     assert.equal(await evaluate('terminalNotice.facts().writes.length'),writes,'Read-only remains read-only while disclosure is escapable')
   }
-  report.scenarios.push({width,mode,readonly,before,after,completeText:originalText})
+  report.scenarios.push({width,mode,readonly,before,after,completeText:originalText,contentGeometry})
 }
 async function identity() {
   await evaluate("terminalNotice.seed('session')");await wait(`Boolean(${trigger})`);await wait(`!${surface}.querySelector('.terminal-view__xterm--hydrating')`);await paint()
