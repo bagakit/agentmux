@@ -246,7 +246,7 @@ function DesktopApp() {
       >
       <div className="app-shell__workspace" aria-hidden={settingsRoute ? true : undefined} inert={Boolean(settingsRoute)}>
       {!globalSurfaceOwnsProjectRail && projectRailOpen ? (
-        <ProjectRail />
+        <ProjectRail visible={!settingsRoute} />
       ) : globalSurfaceOwnsProjectRail ? null : (
         null
       )}

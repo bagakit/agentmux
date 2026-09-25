@@ -28,6 +28,7 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
 import { activityContextsForWorkspaces } from '../lib/activity-groups'
 import { matchesSpaceQuery, navigateSpaceTree } from '../lib/space-tree-navigation'
+import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
 
 function projectCollapseKey(id: string): string { return `project:${id}` }
 function isPathInside(inner: string, outer: string): boolean {
@@ -35,7 +36,7 @@ function isPathInside(inner: string, outer: string): boolean {
   return inner.startsWith(`${root}/`) || inner.startsWith(`${root}\\`)
 }
 
-export function WorkspaceSidebar() {
+export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -95,6 +96,10 @@ export function WorkspaceSidebar() {
     return new Map(projects.map((project) => [project.id, [...new Map(project.workspaces.flatMap((workspace) =>
       byLocation.get(JSON.stringify([workspace.hostId, workspace.path])) ?? []).map((session) => [session.id, session])).values()]]))
   }, [sessions, projects])
+  const lastActivityByProject = useMemo(() => {
+    const now = Date.now()
+    return new Map([...sessionsByProject].map(([id, owned]) => [id, folderLastActivityAt(owned, now)]))
+  }, [sessionsByProject])
   const folderSessions = useMemo(() => [...new Map([...sessionsByProject.values()].flat().map((session) => [session.id, session])).values()], [sessionsByProject])
   const foldersCollapsed = !filtering && collapsedProjectGroups['space:folders'] === true
 
@@ -201,8 +206,10 @@ export function WorkspaceSidebar() {
 
   function projectRow({ project, depth }: ProjectRailNode) {
     const target = folderSpaceIconTarget(project)
+    const manualIcon = icons[target.key] ?? null
     const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId}
-      manualIcon={icons[target.key] ?? null} />
+      manualIcon={manualIcon} lastActivityAt={manualIcon === null ? lastActivityByProject.get(project.id) ?? null : undefined}
+      visible={manualIcon === null ? visible : undefined} />
     const ancestors = projectRelations.ancestors.get(project.id) ?? []
     if (!filtering && ancestors.some((id) => collapsedProjectGroups[projectCollapseKey(id)] === true)) return null
     const parentKey = ancestors.at(-1) ?? projectRelations.groupKeys.get(project.id) ?? 'space:folders'
