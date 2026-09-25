@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { createRequire, isBuiltin } from 'node:module'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { build } from 'vite'
@@ -12,7 +12,9 @@ const fixture = join(desktop, 'scripts/fixtures/mote-shortcut'), require = creat
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-shortcut-'))
 const evidence = join(repository, '.tmp/mote-shortcut', `attempt-${Date.now()}`)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const inputs = new Map(), styles = new Set(), watchedStyles = new Set()
+const inputs = new Map(), styles = new Set(), watchedStyles = new Set(), compiledSdkInputs = new Map()
+let coreSdkDist
+const compiledCoreSdk = file => file.startsWith(coreSdkDist + '/') && /\.(?:js|json)$/.test(file)
 const localStylesheet = file => file?.startsWith(repository + '/') && file.endsWith('.css') && !file.includes('/node_modules/')
 // PostCSS retains the exact input of each imported stylesheet. Observe those consumed bytes,
 // rather than reading a hand-written list or hashing imports only after compilation has ended.
@@ -34,6 +36,11 @@ let controlledApiTransforms = 0
 const binding = {
   name: 'bind-mote-proof-source', enforce: 'pre', async load(id) {
     const file = id.split('?')[0]
+    if (compiledCoreSdk(file)) {
+      const code = compiledSdkInputs.get(file) ?? await readFile(file, 'utf8')
+      compiledSdkInputs.set(file, code)
+      return code
+    }
     // Bind original bytes before asset loaders or the private API-boundary transform.
     if (file.startsWith(repository + '/') && !file.includes('/node_modules/') && !inputs.has(file)) inputs.set(file, hash(await readFile(file)))
     return null
@@ -52,14 +59,23 @@ await mkdir(evidence, { recursive: true })
 result.limitations.push('The Renderer compiles the actual desktop Browser stage branch. Only the single api.ts export is privately transformed to choose its typed data mock; native Browser and overlay methods use a sandboxed preload and the original Main owners. Renderer capturePage excludes native WebContentsViews. Independent original native-page/Chrome images and actual topmost owner/trusted-input receipts verify their separate scopes; they are not an OS-composited window. Exact-PID OS capture is supplementary and retains provider failures. DevTools input is trusted native input, not physical hardware or OS IME.')
 result.limitations.push('Native Escape verifies the actual non-composing before-input-event. A separate diagnostic found that DevTools imeSetComposition starts trusted DOM composition, but CDP raw Escape still reports native isComposing=false; it cannot certify the composing key path. Source owning tests and effective mutation verify the isComposing guard; native OS IME remains unverified.')
 try {
+  coreSdkDist = join(await realpath(join(desktop, 'node_modules/@agentmux/core')), 'dist')
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), ...['main.cjs', 'preload.cjs', 'browser.html', 'index.html', 'scenario.md'].map(name => join(fixture, name))]) inputs.set(file, hash(await readFile(file)))
   const outDir = join(privateRoot, 'renderer')
   const nativeDir = join(privateRoot, 'native')
-  await build({ configFile: false, root: desktop, logLevel: 'error', plugins: [binding], build: {
+  const nativeBuild = await build({ configFile: false, root: desktop, logLevel: 'error', plugins: [binding], ssr: { noExternal: true }, build: {
     target: 'node22', outDir: nativeDir, emptyOutDir: true, ssr: join(fixture, 'native-browser.ts'),
-    rollupOptions: { external: ['electron', /^node:/, /^@agentmux\/core(?:\/|$)/], output: { format: 'es', entryFileNames: 'native.mjs', inlineDynamicImports: true } }
+    rollupOptions: { external: ['electron', /^node:/], output: { format: 'es', entryFileNames: 'native.mjs', inlineDynamicImports: true } }
   } })
-  // Resolve maintained dependencies without writing into the shared installation.
+  const nativeChunks = (Array.isArray(nativeBuild) ? nativeBuild : [nativeBuild]).flatMap(build => build.output).filter(output => output.type === 'chunk')
+  assert.equal(nativeChunks.length, 1)
+  assert.equal(nativeChunks[0].fileName, 'native.mjs')
+  assert.ok(Object.entries(nativeChunks[0].modules).some(([id, module]) => compiledCoreSdk(id) && module.renderedLength > 0), 'The actual compiled Core SDK is included in the private native bundle')
+  const nativeImports = nativeChunks.flatMap(chunk => [...chunk.imports, ...chunk.dynamicImports])
+  assert.ok(nativeImports.length > 0, 'The actual native chunk retains its Electron and Node imports')
+  assert.ok(nativeImports.every(id => id === 'electron' || isBuiltin(id)), 'The private native bundle loads only Electron and Node builtins outside its bound dependency bytes')
+  result.nativeImports = nativeImports
+  // Vite embeds maintained SDK dependencies; Electron and Node retain their ordinary resolution.
   await symlink(join(desktop, 'node_modules'), join(nativeDir, 'node_modules'), 'dir')
   const nativeBundle = join(nativeDir, 'native.mjs')
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
@@ -91,8 +107,12 @@ try {
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
   result.stylesheetDependencies = [...watchedStyles].sort().map(file => relative(repository, file))
   result.compiled = compiled
+  assert.ok(compiledSdkInputs.size > 0, 'Compiled SDK dependency bytes are actually consumed')
+  result.compiledSdkInputs = Object.fromEntries([...compiledSdkInputs].map(([file, code]) => [relative(repository, file), hash(code)]))
+  result.limitations.push('Actual compiled Core SDK dependency bytes are consumed once and included in the private native bundle. Their hashes describe compiled dependencies, not Core Source or Run survival; the two private processes do not load mutable shared Core dist.')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['seed', 'restore']) {
+    assert.equal(hash(await readFile(nativeBundle)), compiled['native/native.mjs'], 'Each real process receives the same private native bundle')
     const logs = []
     const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, phase, evidence, nativeBundle], {
       temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 180000, onLine: line => logs.push(line) })

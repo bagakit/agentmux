@@ -21,3 +21,5 @@
 样式绑定使用实际 PostCSS AST 的原 Input 字节，覆盖 Vite 记录的本地依赖集合，包含所有实际递归 @import；每份源字节在消费时与磁盘核对，完整回归结束再次核对。依赖与 Mote 样式必须非空，不以 JavaScript 模块图或手写清单代替样式来源。旧第17轮的 compiled CSS 绑定保留，其漏收 transitive CSS 的 Source 范围不改签。
 
 原头像、状态点与按钮几何完整落在32px footer内；背后和面内两种真实 Native 场景都从实际 drawn child owner/bounds 验证原入口未被覆盖，再采 OS 整窗。Renderer 图与几何通过仍须独立亲看 OS 可见完整轮廓和焦点环。
+
+Core SDK 的实际编译依赖由原 Vite loader 消费并绑定编译字节，原 native 构建把它装入私有 native.mjs；两独立进程不在启动时读取可被其他正常构建清空的共享 dist。SDK 哈希只签编译依赖，不签 Core Source、Runtime 或 Run。旧共享目录导入失败的收据保留。
