@@ -315,6 +315,8 @@
 .project-rail-entry { display: flex; align-items: center; min-width: 0; gap: var(--sp-1); }
 .project-rail-entry > .project-rail-row, .project-rail-entry > .project-rail-group__header { flex: 1; min-width: 0; }
 .project-rail-row__icon img { width: 100%; height: 100%; object-fit: contain; filter: saturate(.2); opacity: .85; }
+.project-rail-row__icon img[data-folder-icon-recency="full"] { filter: none; opacity: 1; }
+.project-rail-row__icon img[data-folder-icon-recency="subdued"] { filter: saturate(.65) brightness(.92); opacity: .95; }
 
 .project-activity { flex-shrink: 0; display: inline-flex; align-items: center; border: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 /* Counts share the icon cell as corner badges. Grid retains the intrinsic width of longer

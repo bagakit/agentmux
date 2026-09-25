@@ -12,7 +12,20 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/space-object-appearance')
-const generation = { id: `space-appearance-${Date.now()}`, createdAt: new Date().toISOString() }
+const generatedAt = Date.now()
+const recencyAssets = {
+  signal: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="#49b7f1" d="M1 2h6v12H1z"/><path fill="#ef9865" d="M9 2h6v12H9z"/></svg>',
+  orbit: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle fill="#a78ae8" cx="8" cy="8" r="7"/><circle fill="#72c9a1" cx="8" cy="8" r="3"/></svg>'
+}
+const folderRecency = [
+  { tone: 'full', age: 30 * 60_000, label: '≤1h' }, { tone: 'subdued', age: 6 * 60 * 60_000, label: '1–12h' },
+  { tone: 'quiet', age: 24 * 60 * 60_000, label: '>12h' }, { tone: 'unknown', age: null, label: 'unknown' }
+].flatMap(({ tone, age, label }, index) => Object.keys(recencyAssets).map(asset => ({
+  id: `private-recency-${tone}-${asset}`, name: `${asset === 'signal' ? 'Signal' : 'Orbit'} · ${label}`,
+  directory: `recency/${index + 1}-${tone}-${asset}`, tone, asset,
+  observedAt: age === null ? null : generatedAt - age, source: asset === 'signal' ? 'native-hook' : 'acp'
+})))
+const generation = { id: `space-appearance-${generatedAt}`, createdAt: new Date(generatedAt).toISOString(), folderRecency }
 const output = path.resolve(process.argv[2] ?? path.join(root, '.tmp/space-object-appearance', generation.id))
 const persistenceOnly = process.argv.slice(3).includes('--persistence-only')
 assert.ok(process.argv.slice(3).every(argument => argument === '--persistence-only'), 'Unknown native appearance option')
@@ -75,7 +88,11 @@ try {
   await fs.writeFile(path.join(privateRoot, 'topics/topic--view--original/.agents/codex.private-live-agent.identity.md'), '# Existing private Agent\n')
   await fs.mkdir(path.join(privateRoot, 'folder'), { recursive: true })
   await fs.writeFile(path.join(privateRoot, 'folder/icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="#586a62" d="M2 2h12v12H2z"/></svg>')
-  const durableFiles = [...await files(path.join(privateRoot, 'topics')), ...await files(path.join(privateRoot, 'folder'))]
+  for (const folder of folderRecency) {
+    await fs.mkdir(path.join(privateRoot, folder.directory), { recursive: true })
+    await fs.writeFile(path.join(privateRoot, folder.directory, 'icon.svg'), recencyAssets[folder.asset])
+  }
+  const durableFiles = [...await files(path.join(privateRoot, 'topics')), ...await files(path.join(privateRoot, 'folder')), ...await files(path.join(privateRoot, 'recency'))]
   const durableHashes = async () => Object.fromEntries(await Promise.all(durableFiles.map(async file =>
     [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
   receipt.filesBefore = await durableHashes()
@@ -97,6 +114,15 @@ try {
   assert.equal(new Set(receipt.phases.map(one => one.native.pid)).size, 3, 'Every restore uses a distinct real Electron PID')
   assert.ok(receipt.images.length > 0)
   for (const image of receipt.images) assert.equal(hash(await fs.readFile(path.join(output, image.file))), image.sha256)
+  const recencyImages = receipt.images.filter(image => /^(normal|narrow)-folder-recency$/.test(image.scene))
+  assert.equal(recencyImages.length, 2, 'The same candidate must show all four facts and both assets in normal and narrow native frames')
+  for (const image of recencyImages) {
+    assert.equal(image.ui.rail.width, image.scene === 'normal-folder-recency' ? 240 : 180, 'The actual Sidebar has normal/narrow geometry in the captured frame')
+    const rows = image.ui.targets.filter(target => folderRecency.some(folder => folder.id === target.workspaceId))
+    assert.equal(rows.length, folderRecency.length)
+    assert.equal(new Set(rows.map(row => row.detectedImage)).size, 2, 'The actual filesystem appearance owner must supply both colored assets')
+    for (const folder of folderRecency) assert.equal(rows.find(row => row.workspaceId === folder.id)?.recency, folder.tone)
+  }
   receipt.filesAfter = await durableHashes()
   assert.deepEqual(receipt.filesAfter, receipt.filesBefore, 'Presentation must not change Topic/SOUL/Agent content or detected asset')
   assert.deepEqual(await hashes(), receipt.inputs, 'Source changed during this candidate generation')
