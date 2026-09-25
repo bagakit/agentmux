@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow } from 'electron'
-const [html, privateRoot, evidence, variant = 'known'] = process.argv.slice(2)
+const [html, privateRoot, evidence, variant = 'known', mode = 'navigation'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'profile')); app.setPath('sessionData', path.join(privateRoot, 'session'))
-const actual = { passed: false, pid: process.pid, controls: [], variant, frames: [], boundary: 'Compiled production Timeline/API/Store with isolated typed I/O. No Runtime, public Reader qualification, ordinary App restart or installation.' }
+const actual = { passed: false, pid: process.pid, controls: [], variant, mode, frames: [], boundary: 'Compiled production Timeline/API/Store with isolated typed I/O. No Runtime, public Reader qualification, ordinary App restart or installation.' }
 let win
 // Use the existing Electron fixture lifecycle: do not hold ESM module
 // evaluation open while waiting for the application's ready event.
@@ -30,6 +30,39 @@ try {
   await win.webContents.executeJavaScript(`(()=>{const select=document.querySelector('[aria-label="Input records Context"]');select.value='archive-navigation';select.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
   await until('navigationSceneState().inputs===91')
   actual.initial = await state(); assert.deepEqual(actual.initial.counts, { catalog: 1, page: 3, timeline: 1 })
+  if (mode === 'supplement') {
+    const scroll = async (selector, deltaY) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...await point(selector), deltaX: 0, deltaY })
+    if (variant === 'known') {
+      await click('[data-input-message-id]'); await until('!!document.querySelector("[data-input-preview-id]")')
+      await click('.recent-focus__source-details summary'); await until('document.querySelector(".recent-focus__source-details").open')
+      actual.details = await win.webContents.executeJavaScript(`document.querySelector('.recent-focus__source-details').textContent`)
+      assert.ok(actual.details.includes('Observed Context project: Alpha')); assert.ok(actual.details.includes('Message-time project: Not recorded'))
+      await scroll('.recent-focus__message-preview header', -8000)
+      await until('document.querySelector(".recent-focus__message-preview").scrollTop===0')
+      actual.detailsGeometry = await win.webContents.executeJavaScript(`(()=>{const r=document.querySelector('.recent-focus__source-details p').getBoundingClientRect(),p=document.querySelector('.recent-focus__message-preview').getBoundingClientRect();return{details:r.toJSON(),preview:p.toJSON(),visible:r.top>=p.top&&r.bottom<=p.bottom}})()`)
+      assert.equal(actual.detailsGeometry.visible, true); await shot('source-details')
+      await scroll('.recent-focus__message-preview header', 8000)
+      await until(`(()=>{const body=document.querySelector('[data-input-preview-id]'),r=body.getBoundingClientRect(),p=body.closest('.recent-focus__message-preview').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom})()`)
+      actual.body = await win.webContents.executeJavaScript(`({id:document.querySelector('[data-input-preview-id]').dataset.inputPreviewId,source:document.querySelector('[data-input-preview-id]').dataset.inputSource,text:document.querySelector('[data-input-preview-id]').textContent})`)
+      assert.equal(actual.body.source, 'native'); assert.ok(actual.body.text.includes('Original retained task')); await shot('native-body')
+    } else {
+      for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await until('!document.querySelector(".recent-focus__message-preview")'); win.setContentSize(640, 360); await until('innerWidth===640')
+      await win.webContents.executeJavaScript('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+      actual.scrollBefore = await win.webContents.executeJavaScript(`(()=>{const n=document.querySelector('.recent-focus__viewport'),r=document.querySelector('.recent-focus__time-scale').getBoundingClientRect();return{scrollTop:n.scrollTop,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight,target:r.toJSON(),hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.className}})()`)
+      const scrollPoint = await point('.recent-focus__time-scale'); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollPoint })
+      await scroll('.recent-focus__time-scale', 120)
+      await until('document.querySelector(".recent-focus__viewport").scrollTop>0')
+      actual.scrollAfter = await win.webContents.executeJavaScript(`(()=>{const n=document.querySelector('.recent-focus__viewport');return{scrollTop:n.scrollTop,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight}})()`)
+      await shot('unknown-track')
+      const nativePoint = await win.webContents.executeJavaScript(`(()=>{const group=[...document.querySelectorAll('[data-timeline-project]')].find(n=>n.dataset.timelineProject==='unknown-project');if(!group)throw new Error('Missing true unknown project');const clip=document.querySelector('.recent-focus__viewport').getBoundingClientRect();for(const node of group.querySelectorAll('[data-message-source="native"]')){const r=node.getBoundingClientRect(),x=r.x+1,y=r.y+r.height/2;if(y<clip.top||y>clip.bottom)continue;const hit=document.elementFromPoint(x,y)?.closest('[data-message-source="native"]');if(hit&&group.contains(hit))return{x,y,id:hit.dataset.messageId}}throw new Error('No visible true native marker hit')})()`)
+      for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: nativePoint.x, y: nativePoint.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 })
+      await until('!!document.querySelector("[data-input-preview-id]")')
+      actual.nativeHit = nativePoint; actual.body = await win.webContents.executeJavaScript(`({id:document.querySelector('[data-input-preview-id]').dataset.inputPreviewId,source:document.querySelector('[data-input-preview-id]').dataset.inputSource,text:document.querySelector('[data-input-preview-id]').textContent})`)
+      assert.equal(actual.body.id, nativePoint.id); assert.equal(actual.body.source, 'native'); assert.ok(actual.body.text.includes('Original retained task')); await shot('native-body')
+    }
+    actual.final = await state(); assert.deepEqual(actual.final.counts, actual.initial.counts); assert.deepEqual(actual.final.controls, []); actual.passed = true; return
+  }
   await click('[data-input-message-id]'); await until('!!document.querySelector("[data-input-preview-id]")')
   actual.preview = await win.webContents.executeJavaScript(`(()=>{const node=document.querySelector('[data-input-preview-id]');window.navigationPreview=node;const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while(text=walker.nextNode()){if(text.textContent.includes('Original retained task'))break}if(!text)throw new Error('No real retained task text');const range=document.createRange();range.selectNodeContents(text);window.getSelection().removeAllRanges();window.getSelection().addRange(range);return{selection:window.getSelection().toString()}})()`)
   for (let i = 0; i < 100; i++) { await wheel(i % 2 ? -2 : 2); await click(`[aria-label="Zoom ${i % 2 ? 'in' : 'out'} Focus timeline"]`) }
