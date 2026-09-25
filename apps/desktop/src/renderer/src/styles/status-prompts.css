@@ -2,6 +2,13 @@
 .prompt-state-settings { min-width: 0; margin: 0; padding: 0; border: 0; }
 .prompt-state-settings legend { padding: 0; margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .prompt-state-settings__choices { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
-.agent-settings-fields .prompt-state-settings__choices label { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-6); cursor: pointer; }
-.agent-settings-fields .prompt-state-settings__choices input { flex: none; width: var(--sp-4); height: var(--sp-4); margin: 0; padding: 0; accent-color: var(--green); }
+.agent-settings-fields .prompt-state-settings__choices label { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-7); cursor: pointer; }
+.agent-settings-fields .prompt-state-settings__choices input { flex: none; width: var(--sp-6); height: var(--sp-6); margin: 0; padding: 0; accent-color: var(--green); }
 .prompt-state-settings > small { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.agent-status-prompts { display: flex; align-items: center; gap: var(--sp-2); grid-column: 1 / -1; grid-row: 1; min-width: 0; flex: none; height: var(--sp-7); min-height: var(--sp-7); padding-inline: var(--sp-4); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; white-space: nowrap; }
+.composer:has(.composer-tools[data-mode='collapsed']):has(.agent-status-prompts) :is(.composer__editor, .composer__toolbar > div) { grid-row: 2; }
+.agent-status-prompts__button { flex: none; height: var(--sp-7); max-width: 100%; padding: 0 var(--sp-3); font-weight: 400; color: var(--text-2); background: transparent; box-shadow: none; }
+.agent-status-prompts__button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); box-shadow: none; }
+.agent-status-prompts__button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
+.agent-status-prompts__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-status-prompts__queue { flex: none; color: var(--text-3); }

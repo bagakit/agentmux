@@ -3,7 +3,7 @@ import { useRef, type ReactNode } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '../lib/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
@@ -23,6 +23,7 @@ import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from './AgentComposer'
+import { AgentStatusPromptActions } from './AgentStatusPromptActions'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
@@ -146,6 +147,18 @@ export function AgentSessionComposer({
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
   const submitMode = composerSubmitMode(session, disabled || readOnly)
+  const queueStatusPrompt = submitMode.canType && session?.kind === 'agent' && Boolean(session.pendingInteraction)
+
+  function sendStatusPrompt(prompt: ComposerShortcut): void {
+    if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt)) return
+    // State actions leave the independently authored Composer draft intact.
+    const accepted = queueStatusPrompt
+      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report)
+      : send(sessionId, prompt.body, feedback.report)
+    if (!accepted) return
+    feedback.dismiss()
+    if (queueStatusPrompt) void useAppStore.getState().flushAgentSteerQueue(sessionId)
+  }
 
   function submit(): void {
     if (!submitMode.canSubmit || !text.trim()) return
@@ -242,6 +255,9 @@ export function AgentSessionComposer({
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
       resultReview={resultReview}
+      statusPrompts={session?.kind === 'agent' ? <AgentStatusPromptActions prompts={shortcutsHere}
+        state={session.status.state} disabled={!submitMode.canType || (!submitMode.canSubmit && !queueStatusPrompt)}
+        queue={queueStatusPrompt} onSelect={sendStatusPrompt} /> : null}
       mailbox={<SessionMailbox system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
