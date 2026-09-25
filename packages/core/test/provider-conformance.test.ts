@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -10,12 +10,12 @@ import { BUILT_IN_AGENT_LABELS } from '../src/agent-provider-id.js'
 
 function resumeContext(provider: AgentProvider) {
   return {
-    workspacePath: upstreamFixturePath("tmp/agentmux-provider-conformance"),
+    workspacePath: fixturePath("tmp/agentmux-provider-conformance"),
     nativeHandle: {
       kind: 'provider' as const,
       providerId: provider.id,
       sessionId: `native-${provider.id}`,
-      transcriptPath: `${upstreamFixturePath("tmp/agentmux-provider-conformance/")}${provider.id}.jsonl`
+      transcriptPath: fixturePath(`tmp/agentmux-provider-conformance/${provider.id}.jsonl`)
     },
     args: [] as string[],
     env: {}
@@ -46,7 +46,7 @@ describe('built-in Provider conformance', () => {
       const { capabilities, hookStrategy } = provider.catalog
       // endpoint 一律给足：需要它的 Provider（写投递代码进文件的那类）才产得出 plan，不需要的
       // 会忽略它。缺席行为由下面单独一条守——两侧都要钉，只钉一侧会让「永远不装」也能过。
-      const managedPlan = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/agentmux-provider-conformance"), env: { HERMES_HOME: upstreamFixturePath("tmp/agentmux-provider-conformance/hermes") }, endpoint: endpoint }) ?? null)
+      const managedPlan = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: fixturePath("tmp/agentmux-provider-conformance"), env: { HERMES_HOME: fixturePath("tmp/agentmux-provider-conformance/hermes") }, endpoint: endpoint }) ?? null)
 
       // `hookStrategy.kind` is the SINGLE source of "does this provider emit native hooks". It used to
       // be mirrored by a `capabilities.hookEvents` boolean that nothing read (the real consumers —
@@ -76,19 +76,29 @@ describe('built-in Provider conformance', () => {
    * 这里反过来钉住缺席一侧，两条合起来才说明这个维度被真正实现了，而不是被忽略。
    */
   it('endpoint 缺席时，explicit-managed 的每一家要么照常产出 plan、要么如实弃权', () => {
+    let planned = 0
     for (const provider of providers) {
       const { hookStrategy } = provider.catalog
       if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') continue
-      const withoutEndpoint = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/agentmux-provider-conformance"), env: { HERMES_HOME: upstreamFixturePath("tmp/agentmux-provider-conformance/hermes") } }) ?? null)
+      const withoutEndpoint = (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: fixturePath("tmp/agentmux-provider-conformance"), env: { HERMES_HOME: fixturePath("tmp/agentmux-provider-conformance/hermes") } }) ?? null)
       if (withoutEndpoint === null) continue
       // 产出了就必须是完整可装的——不允许「产出一份空 plan」这种中间态。
       expect(withoutEndpoint.providerId).toBe(provider.id)
       expect(withoutEndpoint.mutations.length).toBeGreaterThan(0)
-      // 且绝不能把一个 endpoint 占位符写进内容里：那正是弃权要避免的死 token。
+      planned += 1
+      // 能独立安装的计划在 Binding 有无之间应完全相同，运行时再读取 endpoint。
+      // 整段搜索 "undefined" 会误伤合法 JS；比较两份实际计划才能发现缺 Binding 的占位插值。
+      const withEndpoint = provider.planManagedHooks?.({
+        workspacePath: fixturePath("tmp/agentmux-provider-conformance"),
+        env: { HERMES_HOME: fixturePath("tmp/agentmux-provider-conformance/hermes") },
+        endpoint: { url: 'http://127.0.0.1:59999/v1/events', token: 'conformance-token' }
+      })
+      expect(withoutEndpoint).toEqual(withEndpoint)
       for (const mutation of withoutEndpoint.mutations) {
-        expect(mutation.content).not.toContain('undefined')
+        expect(mutation.content.trim().length).toBeGreaterThan(0)
       }
     }
+    expect(planned).toBeGreaterThan(0)
   })
 
   it('contributes planning exactly for the non-empty registered managed capability set', () => {
