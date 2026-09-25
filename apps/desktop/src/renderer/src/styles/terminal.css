@@ -122,17 +122,15 @@
 @media (prefers-reduced-motion: reduce) {
   .terminal-agent-startup__content::before { animation: none; }
 }
-/* A local notice track leaves an actual xterm reading/input area, rather than covering its latest line.
-   Existing xterm stays mounted; this frame's facts alone determine whether the track exists. */
+/* One compact track for this Terminal's facts. Details only occupy the top layer after user action;
+   xterm stays mounted with its latest input visible, independent of the number of notices. */
 .terminal-view:has(> .terminal-service-window) { display: flex; flex-direction: column; }
 .terminal-view:has(> .terminal-service-window) > .terminal-view__xterm { flex: 1 1 0; height: auto; }
 .terminal-service-window {
-  flex: 0 1 auto; min-height: 0; max-height: 45%; overflow-y: auto;
-  padding: 0 var(--sp-2) var(--sp-2); background: var(--surface-0);
+  flex: 0 0 auto; padding: 0 var(--sp-2); background: var(--surface-0);
 }
-.terminal-service-window > .service-window { margin: 0; border-radius: 0; }
-.terminal-service-window > .service-window + .service-window { border-top: 1px solid var(--line-soft); }
-.terminal-service-window:focus-visible { outline: var(--focus-line) solid 1px; outline-offset: -1px; }
+.terminal-gap-details > p { margin: var(--sp-3) 0; overflow-wrap: anywhere; }
+.terminal-gap-details > .small-button { min-height: 26px; border: 0; background: transparent; box-shadow: none; }
 .terminal-replay-gap {
   position: absolute;
   z-index: 25;

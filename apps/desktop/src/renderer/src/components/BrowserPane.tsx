@@ -839,10 +839,10 @@ export function BrowserPane({
       <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。
           原生 WebContentsView 跟随 stage 的真实矩形，详情不覆盖页面。 */}
-      {annotationSync.notice ? <div>
-        <ServiceWindowNotice notice={annotationSync.notice} />
-        {annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null}
-      </div> : null}
+      <ServiceWindowNotice notice={annotationSync.notice} title={annotationSync.retryAvailable ? 'Browser annotations unconfirmed' : 'Restoring Browser annotations'} disclosure={{
+        scope: JSON.stringify(['local:browser-annotations', tab.browserId, tab.navigationId]), id: 'annotations',
+        ...(annotationSync.cause ? { cause: annotationSync.cause } : {}), available: annotationSync.available, visible
+      }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
       <div className="browser-body">
       <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>
         {screenshot ? (

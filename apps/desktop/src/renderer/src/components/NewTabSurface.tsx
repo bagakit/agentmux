@@ -477,7 +477,7 @@ export function NewTabSurface({
           </DropdownMenu.Content></DropdownMenu.Portal>
         </DropdownMenu.Root> : null}
       </div>
-      {regionId ? <AgentLifecycleFeedback owner={{ regionId }} busy={busy !== null} retry={launchFromLauncher} /> : null}
+      {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
 
       <div className="launch-surface__alt">

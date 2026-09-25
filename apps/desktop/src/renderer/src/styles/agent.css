@@ -331,7 +331,7 @@
 /* 服务窗（AGENTS.md 原则 11）：像窗口上贴的一条告示。停在旁边，不挡路，也不消失。
    语汇沿用紧邻其下的审批卡片——Surface 填充 + elevation + 一枚 STATUS 图标，不用描边（描边会与
    Composer 争同一条边界），accent 表达状态而非装饰。用琥珀而非红：事实是「能干活，只是少一项能力」，
-   不是「你完了」。它随条件消失而非随用户点关闭，因此不给关闭键。 */
+   不是「你完了」。局部通过 ServiceNoticeDisclosure 收起与复查；inbox 内保留这份完整内容。 */
 .service-window {
   margin:var(--sp-2) var(--sp-3) 0; padding:var(--sp-3);
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap:var(--sp-3); align-items: start;

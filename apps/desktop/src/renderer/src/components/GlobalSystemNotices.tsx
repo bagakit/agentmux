@@ -7,6 +7,7 @@ import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-win
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
+import { errorIdentity } from '../lib/error-presentation'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
@@ -55,6 +56,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } })))
   if (lifecycleMessage && lifecycleFailure?.step === 'launch') sessionNotices.push({
     id: JSON.stringify(['launch', lifecycleFailure.regionId]),
+    cause: JSON.stringify(['launch', errorIdentity(lifecycleMessage)]),
     notice: agentLifecycleFailureNotice(lifecycleFailure, lifecycleMessage)
   })
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)

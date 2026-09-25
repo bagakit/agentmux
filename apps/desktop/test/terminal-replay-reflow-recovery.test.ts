@@ -188,13 +188,16 @@ describe('attachment geometry across asynchronous replay', () => {
     expect(initialAttach).toContain('finishReplay: () => viewport.endReplay(hasReplay)')
     expect(initialAttach.match(/viewport\.endReplay\(/g)).toHaveLength(1)
     expect(source).toContain('terminalReplayGeometryOutcome(replaySizeUnknown, session.processState)')
-    expect(source).toContain('<ServiceWindowNotice notice={replayGeometryNotice} />')
+    const notices = readFileSync(new URL('../src/renderer/src/components/TerminalServiceNotices.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('replayGeometry={replayGeometryNotice}')
+    expect(notices).toContain('<ServiceWindowNotice notice={replayGeometry}')
     expect(source).toContain('if (!disposed) setViewportSyncFailed(true)')
     expect(source).toContain('onResizeSuccess: () => {')
     expect(source).toContain('setViewportSyncFailed(false)')
     expect(source).toContain('setReplayGap(false)')
     expect(source).toContain('terminalViewportSyncOutcome(viewportSyncFailed, session.processState)')
-    expect(source).toContain('<ServiceWindowNotice notice={viewportSyncNotice} />')
+    expect(source).toContain('viewportSync={viewportSyncNotice}')
+    expect(notices).toContain('<ServiceWindowNotice notice={viewportSync}')
   })
 
   it('keeps unknown geometry visible without declaring the healthy Agent broken', () => {

@@ -1019,14 +1019,16 @@ function PaneGroup({
             <Plus size={13} />
           </button>
         </div>
-      </header>
-      {focusMoved ? <div data-workbench-moved-focus>
-        <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      <div className="service-disclosure-home" data-workbench-moved-focus={focusMoved ? '' : undefined}>
+        <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['local:focus-moved', workspaceId, group.id]),
+          id: 'focus-moved', occurrence: JSON.stringify(retainedSpatialFocus), cause: 'focused-region-moved', visible: surfaceVisible }}
+          notice={focusMoved ? { kind: 'indeterminate', notice: {
           step: 'Focused Agent moved in the background',
           mode: 'The remaining Regions stay visible; no replacement Agent is selected.',
           restore: 'Choose a Region, a Tab, or a new Tab to change focus.'
-        } }} />
-      </div> : null}
+        } } : null} />
+      </div>
+      </header>
       <div className="pane-body">
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
             此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
