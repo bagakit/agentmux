@@ -69,9 +69,9 @@ async function scene(width,mode,readonly=false) {
     await wait(`${track}.textContent.includes('Private observation failure')`);await key('Escape');await folded()
   }
   await click(`${surface}.querySelector('.terminal-view__xterm')`);await evaluate(`${textarea}.focus()`);const before=await facts()
+  assert.ok(before.trackHeight<=30,'Six passive facts share one compact track')
   assert.ok(before.height>400,'Compact notice leaves a real Terminal reading/input area')
   assert.ok(before.terminal.rows>15,'Actual xterm still has a nonempty usable grid')
-  assert.ok(before.trackHeight<=30,'Six passive facts share one compact track')
   assert.equal(before.nativeOpen,false,'Passive notices never automatically open their details')
   const expected={continuation:'Restoring terminal state',geometry:'Confirming replay geometry',viewport:'Synchronizing terminal size',session:'Checking terminal capabilities',attachment:'Private observation failure',reveal:'Restoring this terminal',gap:'Earlier scrollback is unavailable',history:'Retained history read unconfirmed',all:'Restoring terminal state'}[mode]
   assert.ok(await evaluate(`${track}.textContent.includes(${JSON.stringify(expected)})`),'Production TerminalView wires the actual '+mode+' fact')
