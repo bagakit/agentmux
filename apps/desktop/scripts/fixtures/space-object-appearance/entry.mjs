@@ -113,10 +113,20 @@ window.spaceAppearanceState = () => {
 window.spaceAppearanceFlush = () => prepareRendererUpdate()
 window.spaceAppearanceUi = () => ({
   regions: [...document.querySelectorAll('[data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId).sort(),
+  rail: (() => {
+    const rail = document.querySelector('[data-space-appearance-rail] .sidebar.project-rail')
+    if (!rail) return null
+    const bounds = rail.getBoundingClientRect()
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+  })(),
   targets: [...document.querySelectorAll('[data-space-icon-target]')].map(node => {
     const icon = node.querySelector('[data-space-icon-source]') ?? node.closest('.project-rail-row-shell')?.querySelector('[data-space-icon-source]')
-    return { key: node.dataset.spaceIconTarget, text: node.textContent, source: icon?.dataset.spaceIconSource,
-      icon: icon?.dataset.spaceIcon, detectedImage: icon?.querySelector('img')?.getAttribute('src') ?? null }
+    const image = icon?.querySelector('img'), style = image ? getComputedStyle(image) : null, bounds = image?.getBoundingClientRect()
+    return { key: node.dataset.spaceIconTarget, workspaceId: node.dataset.workspaceId, text: node.textContent, source: icon?.dataset.spaceIconSource,
+      icon: icon?.dataset.spaceIcon, detectedImage: image?.getAttribute('src') ?? null, recency: image?.dataset.folderIconRecency,
+      filter: style?.filter, opacity: style ? Number(style.opacity) : null, title: icon?.title,
+      imageBounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
+      selected: node.getAttribute('aria-current'), attention: node.closest('[data-space-entry]')?.querySelector('.project-activity')?.getAttribute('aria-label') }
   }),
   dialog: document.querySelector('[role="dialog"]')?.textContent ?? null,
   alerts: [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent),
@@ -126,7 +136,7 @@ window.spaceAppearanceUi = () => ({
 function Fixture() {
   useEffect(() => { window.spaceAppearanceReady = true; return () => dispose?.() }, [])
   return createElement('section', { style: { display: 'flex', width: '100vw', height: '100vh' } },
-    createElement('div', { style: { width: 240, height: '100%' } }, createElement(WorkspaceSidebar)),
+    createElement('div', { 'data-space-appearance-rail': '', style: { width: 240, flexShrink: 0, height: '100%' } }, createElement(WorkspaceSidebar)),
     createElement('main', { style: { flex: 1, minWidth: 0, height: '100%', position: 'relative' } },
       createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: true })),
     createElement('aside', { style: { width: 340, height: '100%', position: 'relative' } },

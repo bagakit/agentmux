@@ -12,9 +12,10 @@ app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const scratch = { id: '__scratch__', hostId: 'local', name: 'Topics', path: path.join(privateRoot, 'topics'), kind: 'folder' as const }
 const folder = { id: 'private-folder', hostId: 'local', name: 'Private project', path: path.join(privateRoot, 'folder'), kind: 'folder' as const }
+const recencyFolders = generation.folderRecency.map((fact: any) => ({ ...fact, hostId: 'local', path: path.join(privateRoot, fact.directory), kind: 'folder' as const }))
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }],
   executors: { probe: { providerId: 'codex', label: 'Private boundary', command: 'unused-fixture', args: [], env: {}, injectAgentMuxGuide: false } },
-  workspaces: [scratch, folder], appearance: { terminalTheme: 'graphite' },
+  workspaces: [scratch, folder, ...recencyFolders], appearance: { terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const topicStore = new ScratchTopics()
 const calls: any[] = []
@@ -31,11 +32,13 @@ function session(id: string, topicId: string) {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'probe',
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     hostId: 'local', workspacePath: path.join(scratch.path, topicId === 'launcher:leader' ? 'topic--launcher--leader' : 'topic--view--original'),
-    label: id, createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+    label: id, createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running', latestOutputBytes: 0,
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `original-run-${id}` } } }
 }
-const sessions = [session('private-live-agent', 'view:original'), session('private-idle-agent', 'view:original'), session('private-mote-agent', 'launcher:leader')]
+const sessions = [session('private-live-agent', 'view:original'), session('private-idle-agent', 'view:original'), session('private-mote-agent', 'launcher:leader'),
+  ...recencyFolders.map((fact: any) => ({ ...session(`agent-${fact.id}`, 'view:original'), workspacePath: fact.path,
+    ...(fact.observedAt === null ? {} : { semanticStatus: { state: 'done', source: fact.source, observedAt: fact.observedAt, stateEnteredAt: fact.observedAt } }) }))]
 ipcMain.handle('space-appearance:request', async (_event, operation, ...args) => {
   const call: any = { operation, args, at: Date.now() }
   calls.push(call)
@@ -52,10 +55,12 @@ ipcMain.handle('space-appearance:request', async (_event, operation, ...args) =>
       const content = await fs.readFile(file, 'utf8')
       return { status: 'read', document: { path: args[1], content, revision: hash(content) } }
     }
-    case 'appearance':
-      assert.equal(args[0], folder.id, 'Only the private registered Folder may be probed')
-      if (holdAppearance) await new Promise<void>(resolve => appearanceWaiters.push(resolve))
-      return projectAppearance(folder.path)
+    case 'appearance': {
+      const registered = config.workspaces.find(one => one.id === args[0])
+      assert.ok(registered && registered.id !== scratch.id, 'Only private registered Folders may be probed')
+      if (holdAppearance && registered.id === folder.id) await new Promise<void>(resolve => appearanceWaiters.push(resolve))
+      return projectAppearance(registered.path)
+    }
     case 'release-appearance':
       holdAppearance = false
       for (const resolve of appearanceWaiters.splice(0)) resolve()
@@ -245,7 +250,7 @@ app.whenReady().then(async () => {
       await capture('overview-saved')
       await fs.writeFile(expectedFile, JSON.stringify(expected))
     } else if (phase === 'manual-restore') {
-      assert.equal(calls.filter(one => one.operation === 'appearance').length, 0, 'Restored manual Folder does not probe the filesystem')
+      assert.equal(calls.filter(one => one.operation === 'appearance' && one.args[0] === folder.id).length, 0, 'The restored manual Folder does not probe its filesystem; unrelated automatic Folders retain their own probes')
       for (const target of expected.targets) await identities(target.key, 'manual', expected.icons[target.key])
       await capture('manual-readback')
       const remaining = { ...expected.icons }
@@ -269,6 +274,38 @@ app.whenReady().then(async () => {
       await until('window.spaceAppearanceUi().targets.some(one=>one.detectedImage?.startsWith("data:image/svg+xml;base64,"))')
       result.operations.push({ input: 'production-initialize-readback', automatic: true, targets: expected.targets })
       await capture('automatic-readback')
+    }
+    if (phase === 'auto-restore') {
+      await until(`window.spaceAppearanceUi().targets.filter(one => ${JSON.stringify(recencyFolders.map((one: any) => one.id))}.includes(one.workspaceId) && one.detectedImage).length === ${recencyFolders.length}`)
+      result.folderRecency = { facts: recencyFolders.map((one: any) => ({ workspaceId: one.id, agentSessionId: `agent-${one.id}`, tone: one.tone, source: one.source, observedAt: one.observedAt })), frames: [] }
+      for (const [scene, width, height, railWidth] of [['normal-folder-recency', 1380, 840, 240], ['narrow-folder-recency', 1000, 720, 180]] as const) {
+        win.setContentSize(width, height)
+        await read(`document.querySelector('[data-space-appearance-rail]').style.width = '${railWidth}px'`)
+        await until(`innerWidth === ${width} && innerHeight === ${height} && window.spaceAppearanceUi().rail?.width === ${railWidth}`)
+        const ui = await read('window.spaceAppearanceUi()')
+        assert.equal(ui.rail.width, railWidth, 'The actual Space Sidebar, not only the window, reaches the intended normal/narrow width')
+        assert.ok(ui.rail.height > 0)
+        const rows = ui.targets.filter((one: any) => recencyFolders.some((folder: any) => folder.id === one.workspaceId))
+        assert.equal(rows.length, 8, 'Both actual image assets expose all four recency facts')
+        assert.equal(new Set(rows.map((one: any) => one.detectedImage)).size, 2)
+        for (const fact of recencyFolders) {
+          const row = rows.find((one: any) => one.workspaceId === fact.id)
+          assert.equal(row.recency, fact.tone)
+          assert.ok(row.imageBounds.width > 0 && row.imageBounds.height > 0)
+          assert.ok(row.imageBounds.x >= ui.rail.x && row.imageBounds.x + row.imageBounds.width <= ui.rail.x + ui.rail.width)
+          assert.ok(row.imageBounds.y >= 0 && row.imageBounds.y + row.imageBounds.height <= height, 'Every recency image is actually inside the captured native viewport')
+          assert.equal(row.opacity, fact.tone === 'full' ? 1 : fact.tone === 'subdued' ? .95 : .85)
+          if (fact.tone === 'full') assert.equal(row.filter, 'none')
+          else assert.match(row.filter, fact.tone === 'subdued' ? /^saturate\(0?\.65\) brightness\(0?\.92\)$/ : /^saturate\(0?\.2\)$/)
+          assert.match(row.title, fact.tone === 'unknown' ? /activity time unknown/ : fact.tone === 'quiet' ? /over 12 hours ago/ : fact.tone === 'full' ? /within 1 hour/ : /1–12 hours ago/)
+          assert.equal(calls.filter(call => call.operation === 'appearance' && call.args[0] === fact.id).length, 1, 'Recency never re-probes appearance')
+        }
+        result.folderRecency.frames.push({ scene, width, height, railWidth, rail: ui.rail, rows })
+        await capture(scene)
+      }
+      win.setContentSize(1380, 840)
+      await read("document.querySelector('[data-space-appearance-rail]').style.width = '240px'")
+      await until('innerWidth === 1380 && innerHeight === 840')
     }
     await read('window.spaceAppearanceFlush()')
     result.final = await read('({state:window.spaceAppearanceState(),ui:window.spaceAppearanceUi()})')

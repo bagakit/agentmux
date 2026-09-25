@@ -3,7 +3,7 @@ import { useAppStore } from '../store'
 import { PROJECT_RAIL_MIN_WIDTH, PROJECT_RAIL_MAX_WIDTH } from '../lib/project-rail-width'
 import { WorkspaceSidebar } from './WorkspaceSidebar'
 
-export function ProjectRail() {
+export function ProjectRail({ visible = true }: { visible?: boolean }) {
   const width = useAppStore((state) => state.projectRailWidth)
   const setWidth = useAppStore((state) => state.setProjectRailWidth)
   const { containerRef, isResizing, onResizeStart } = useSidebarResize<HTMLDivElement>({
@@ -11,7 +11,7 @@ export function ProjectRail() {
     minWidth: PROJECT_RAIL_MIN_WIDTH, maxWidth: PROJECT_RAIL_MAX_WIDTH
   })
   return <div ref={containerRef} className={`project-rail-shell ${isResizing ? 'project-rail-shell--resizing' : ''}`}>
-    <WorkspaceSidebar />
+    <WorkspaceSidebar visible={visible} />
     <div className="project-rail-width-handle" role="separator" tabIndex={0}
       aria-label="Resize Projects" title="Resize Projects" aria-orientation="vertical"
       aria-valuemin={PROJECT_RAIL_MIN_WIDTH} aria-valuemax={PROJECT_RAIL_MAX_WIDTH} aria-valuenow={width}
