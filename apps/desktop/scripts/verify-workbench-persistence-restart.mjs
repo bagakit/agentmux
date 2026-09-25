@@ -48,7 +48,7 @@ const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
-let client, session, producer, failure, result, ownedRunProcess, seedReport
+let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
 let goalsEntryFixture, goalsEntryRestored
@@ -140,7 +140,23 @@ async function seedWorkbench(seed) {
   children.add(child)
   let debuggingUrl, diagnostics = ''
   child.stderr.on('data', value => { diagnostics = (diagnostics + value).slice(-8192); debuggingUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(diagnostics)?.[1] })
-  const endpoint = new URL(await waitFor('seed debugger', () => debuggingUrl))
+  let endpoint
+  try {
+    endpoint = new URL(await waitFor('seed debugger', () => {
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Private seed exited before debugger: ${child.exitCode}/${child.signalCode}`)
+      return debuggingUrl
+    }))
+  } catch (error) {
+    const readPrivateReport = async path => {
+      try { return JSON.parse(await readFile(path, 'utf8')) }
+      catch (cause) { return { readError: cause.code ?? cause.message } }
+    }
+    // Capture only this invocation's private startup facts before the ordinary finally reaps it.
+    seedDiagnostic = { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode,
+      processIdentity: child.pid ? await runProcessIdentity(child.pid) : null, stderr: diagnostics,
+      ready: await readPrivateReport(join(root, 'seed-ready.json')), report: await readPrivateReport(reportPath) }
+    throw new Error(`${error.message}; private seed stderr: ${diagnostics}`)
+  }
   const target = await waitFor('seed renderer', async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   try {
@@ -555,7 +571,7 @@ try {
   if (cleanupErrors.length) { failure ??= cleanupErrors[0]; cleanup.errors = cleanupErrors.map(error => error.message) }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
-const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, passed: !failure,
+const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, passed: !failure,
   failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
 // Task gate captures command output without preserving it on a failed command. Keep the same receipt
 // in the ignored diagnostic directory so an early failure remains inspectable after private cleanup.
