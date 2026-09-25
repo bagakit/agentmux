@@ -166,7 +166,7 @@ async function surface(cdp) {
         datetime: row.querySelector('time')?.getAttribute('datetime') ?? null,
         unknownTime: row.textContent.includes('Queued time unknown') })),
       editorText: editor?.innerText, splitPercent: panel ? Number(panel.getAttribute('data-panel-size')) : null,
-      tabs: visible('[data-workbench-tab-id]').map(el => el.dataset.workbenchTabId).sort(),
+      tabs: visible('button.workbench-tab[data-workbench-tab-id]').map(el => el.dataset.workbenchTabId).sort(),
       regions: visible('[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
       activeRegions: visible('.workbench-region--active[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
       ${identityMenuProof ? `identity: {name:document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header strong')?.textContent,
