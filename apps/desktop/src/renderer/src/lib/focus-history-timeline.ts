@@ -1,4 +1,4 @@
-import type { AgentFocusHistoryIdentity } from './agent-focus'
+import type { AgentFocusHistoryEntry, AgentFocusHistoryIdentity } from './agent-focus'
 import type { FocusContext } from './focus-context'
 import type { FocusProjectLane } from './focus-project-lanes'
 import type { FocusTimeSegment } from './focus-time-window'
@@ -9,6 +9,7 @@ export type FocusTimelineTrack = {
   identity: AgentFocusHistoryIdentity | undefined
   current: FocusContext | undefined
   segments: FocusTimeSegment[]
+  inputProjectObserved?: boolean
 }
 export type FocusTimelineProject = {
   key: string
@@ -20,14 +21,43 @@ const UNKNOWN_PROJECT = 'unknown-project'
 function projectKey(identity: AgentFocusHistoryIdentity | undefined): string {
   return identity?.project ? JSON.stringify([identity.hostId, identity.project.id]) : UNKNOWN_PROJECT
 }
+function trackKey(sessionId: string, identity: AgentFocusHistoryIdentity | undefined): string {
+  return JSON.stringify([projectKey(identity), sessionId])
+}
+export type FocusInputTrack = Pick<FocusTimelineTrack, 'sessionId' | 'key' | 'identity'>
+
+function referenceKey(reference: { hostId: string; agentSessionId: string }): string {
+  return JSON.stringify([reference.hostId, reference.agentSessionId])
+}
+/** One derived view of retained facts, shared by the source chooser and timeline. */
+export function observeFocusInputTracks(entries: readonly AgentFocusHistoryEntry[]): ReadonlyMap<string, FocusInputTrack> {
+  const facts = new Map<string, { sessionId: string; observed: AgentFocusHistoryEntry; conflict: boolean }>()
+  for (const entry of entries) {
+    if (!entry.identity?.project) continue
+    const key = referenceKey({ hostId: entry.identity.hostId, agentSessionId: entry.sessionId })
+    const fact = facts.get(key)
+    if (!fact) { facts.set(key, { sessionId: entry.sessionId, observed: entry, conflict: false }); continue }
+    if (fact.observed.identity!.project!.id !== entry.identity.project.id) fact.conflict = true
+    if (entry.focusedAt > fact.observed.focusedAt) fact.observed = entry
+  }
+  return new Map([...facts].map(([key, fact]) => {
+    const identity = fact.conflict ? undefined : fact.observed.identity
+    return [key, { sessionId: fact.sessionId, identity, key: trackKey(fact.sessionId, identity) }]
+  }))
+}
+/** Context observations organize input; they never prove a message's past project. */
+export function resolveFocusInputTrack(observations: ReadonlyMap<string, FocusInputTrack>, reference: { hostId: string; agentSessionId: string }): FocusInputTrack {
+  const observed = observations.get(referenceKey(reference))
+  return observed ?? { sessionId: reference.agentSessionId, identity: undefined, key: trackKey(reference.agentSessionId, undefined) }
+}
 
 /** Historical segments use their own observation. Current ownership only describes current facts. */
-export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputSessionId?: string): FocusTimelineProject[] {
+export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputTrack?: FocusInputTrack): FocusTimelineProject[] {
   const groups = new Map<string, FocusTimelineProject>()
   const tracks = new Map<string, FocusTimelineTrack>()
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   const ensure = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined) => {
-    const groupKey = projectKey(identity), key = JSON.stringify([groupKey, sessionId])
+    const groupKey = projectKey(identity), key = trackKey(sessionId, identity)
     let track = tracks.get(key)
     if (!track) {
       const group = groups.get(groupKey) ?? { key: groupKey, name: identity?.project?.name ?? 'Project not recorded', workspaceId: identity?.project?.id, tracks: [] }
@@ -54,8 +84,11 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
     // This identity is used only for current-only rows; it cannot fill an old observation.
     if (!track.segments.length) track.identity = identity
   }
-  // Native/captured records do not establish a past project. Only an actually
-  // read, timed input creates this row; metadata discovery never fills a graveyard.
-  if (readonlyInputSessionId) ensure(readonlyInputSessionId, undefined)
+  // Only actually read, timed input occupies a row. Its Context observations
+  // organize the row; message-time ownership remains explicitly unknown.
+  if (readonlyInputTrack) {
+    const track = ensure(readonlyInputTrack.sessionId, readonlyInputTrack.identity)
+    track.inputProjectObserved = !!readonlyInputTrack.identity?.project
+  }
   return [...groups.values()]
 }

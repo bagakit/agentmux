@@ -15,11 +15,12 @@ export default defineConfig({
     transform(code, id) {
       const root = resolve(import.meta.dirname, '../../../../..'), file = id.split('?')[0]!
       if (!file.startsWith(`${root}/apps/desktop/src/renderer/src/`) || !/\.[cm]?[jt]sx?$/u.test(file)) return
-      const originalCode = code, mutation = process.env.AGENTMUX_RETIRED_FOCUS_MUTATION
+      const originalCode = code, mutation = process.env.AGENTMUX_PROJECT_ASSOCIATION_MUTATION
       const changes: Record<string, [string, string, string]> = {
-        'readonly-disconnected': ['components/RecentFocusTimeline.tsx', 'const inputReference = inputSource?.reference', 'const inputReference = inputContext ? inputSource?.reference : undefined'],
-        'current-members-only': ['lib/focus-history-timeline.ts', 'if (readonlyInputTrack) {', 'if (readonlyInputTrack && contexts.some(context => context.id === readonlyInputTrack.sessionId)) {'],
-        'equal-body-merge': ['components/RecentFocusTimeline.tsx', 'projected.filter(item => item.agentSessionId === inputReference?.agentSessionId)', 'projected.filter((item, index) => item.agentSessionId === inputReference?.agentSessionId && projected.findIndex(other => other.content === item.content) === index)']
+        'ignore-conflict': ['lib/focus-history-timeline.ts', 'const identity = fact.conflict ? undefined : fact.observed.identity', 'const identity = fact.observed.identity'],
+        'ignore-host': ['lib/focus-history-timeline.ts', 'const observed = observations.get(referenceKey(reference))', 'const observed = [...observations.values()].find(item => item.sessionId === reference.agentSessionId)'],
+        'invent-project': ['lib/focus-history-timeline.ts', 'identity: undefined, key: trackKey(reference.agentSessionId, undefined)', "identity: { name: reference.agentSessionId, kind: 'agent' as const, providerId: null, hostId: reference.hostId, workspacePath: '', project: { id: 'current-project', name: 'Current Project' } }, key: trackKey(reference.agentSessionId, undefined)"],
+        'metadata-tracks': ['components/RecentFocusTimeline.tsx', 'const readonlyInputTrack = readonlyInputTrackId ? observedInputTrack : undefined', 'const readonlyInputTrack = observedInputTrack']
       }
       if (mutation) {
         const change = changes[mutation]
@@ -29,11 +30,11 @@ export default defineConfig({
           code = code.replace(change[1], change[2])
         }
       }
-      const destination = process.env.AGENTMUX_RETIRED_FOCUS_LOADED_SOURCE
+      const destination = process.env.AGENTMUX_PROJECT_ASSOCIATION_LOADED_SOURCE
       if (destination) appendFileSync(destination, `${JSON.stringify({ path: relative(root, file), originalSHA256: createHash('sha256').update(originalCode).digest('hex'), sha256: createHash('sha256').update(code).digest('hex'), bytes: Buffer.byteLength(code), ...(code !== originalCode ? { mutation } : {}) })}\n`)
       if (code !== originalCode) return { code, map: null }
     }
   }],
-  cacheDir: resolve(import.meta.dirname, '../../../../../.tmp/focus-retired-history-renderer-cache'),
-  test: { ...original.test, include: ['apps/desktop/test/focus-retired-history-renderer.test.tsx'], passWithNoTests: false, fileParallelism: false, testTimeout: 15_000 }
+  cacheDir: resolve(import.meta.dirname, '../../../../../.tmp/focus-history-project-association-cache'),
+  test: { ...original.test, include: ['apps/desktop/test/focus-history-project-association.test.tsx'], passWithNoTests: false, fileParallelism: false, testTimeout: 15_000 }
 })
