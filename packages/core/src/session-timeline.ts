@@ -130,6 +130,10 @@ function normalizeItem(value: unknown): AgentTimelineItem {
   if (updatedAt < createdAt) {
     throw new AgentMuxError('Timeline item update precedes creation.', 'INVALID_AGENT_TIMELINE')
   }
+  if (source.authorHuman !== undefined && typeof source.authorHuman !== 'boolean') {
+    throw new AgentMuxError('Timeline item authorHuman is invalid.', 'INVALID_AGENT_TIMELINE')
+  }
+  const authorAgent = optionalField(source, 'authorAgentSessionId')
   return {
     id: text(source.id, 'Timeline item id'),
     agentSessionId: text(source.agentSessionId, 'Timeline Agent Session id'),
@@ -140,7 +144,8 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     updatedAt,
     title: text(source.title, 'Timeline item title'),
     ...optionalField(source, 'content'),
-    ...optionalField(source, 'authorAgentSessionId'),
+    ...authorAgent,
+    ...(authorAgent.authorAgentSessionId === undefined && source.authorHuman === true ? { authorHuman: true } : {}),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),
     ...optionalField(source, 'toolOutput'),

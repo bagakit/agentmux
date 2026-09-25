@@ -216,6 +216,8 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   operationId: string
   /** Trusted host attribution; authorization stays at the control boundary. */
   authorAgentSessionId?: string
+  /** Explicit manual origin attributed by trusted host; does not override an attributed agent. */
+  authorHuman?: boolean
   prompt: string
 }
 
@@ -2808,7 +2810,11 @@ export class AgentMuxClient {
       outbound,
       Date.now(),
       {
-        ...(input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {})
+        ...(input.authorAgentSessionId
+          ? { authorAgentSessionId: input.authorAgentSessionId }
+          : input.authorAgentSessionId === undefined && input.authorHuman === true
+            ? { authorHuman: true }
+            : {})
       }
     )
   }
@@ -3831,7 +3837,7 @@ export class AgentMuxClient {
     title: string,
     content: string,
     observedAt: number,
-    delivery: { authorAgentSessionId?: string; status?: 'complete' | 'failed' } = {}
+    delivery: { authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -3846,7 +3852,11 @@ export class AgentMuxClient {
         updatedAt: observedAt,
         title,
         content,
-        ...(delivery.authorAgentSessionId ? { authorAgentSessionId: delivery.authorAgentSessionId } : {})
+        ...(delivery.authorAgentSessionId
+          ? { authorAgentSessionId: delivery.authorAgentSessionId }
+          : delivery.authorAgentSessionId === undefined && delivery.authorHuman === true
+            ? { authorHuman: true }
+            : {})
       }
     }
     const evidence = { source: 'user' as const, observedAt, run: { ...session.run } }

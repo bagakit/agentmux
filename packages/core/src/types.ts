@@ -626,6 +626,7 @@ export type AgentSessionUserMessageSource =
   | { kind: 'captured'; submissionId: string }
 
 export type AgentSessionUserMessageAuthor =
+  | { kind: 'human' }
   | { kind: 'agent'; agentSessionId: string }
   | { kind: 'unknown' }
 
@@ -1150,6 +1151,8 @@ export type AgentTimelineItem = {
   title: string
   /** Input supplied by another Agent, attributed by the trusted host (not a credential). */
   authorAgentSessionId?: string
+  /** Explicit manual origin attributed by trusted host. */
+  authorHuman?: boolean
   content?: string
   toolName?: string
   toolInput?: string
