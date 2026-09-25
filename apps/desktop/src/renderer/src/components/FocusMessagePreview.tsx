@@ -6,7 +6,7 @@ import type { FocusContext } from '../lib/focus-context'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { ConversationMessage } from './ConversationMessage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
-import { createSpeakerResolver, speakerOfUserMessage } from '../lib/conversation-speaker'
+import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 
@@ -20,7 +20,8 @@ export type FocusMessageReader = {
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected Core input. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, onSelect, onClose }: {
+export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, onSelect, onClose }: {
+  describeSpeaker: DescribeSpeaker
   message: AgentSessionUserMessage | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
   interactive: boolean; anchor: HTMLElement; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
@@ -32,7 +33,6 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
   const speaker = message ? speakerOfUserMessage(message) : undefined
   const agent = speaker?.role === 'agent'
   const authorId = agent ? speaker.id : undefined
-  const describeSpeaker = createSpeakerResolver({ lookupAgent: id => sender?.id === id ? { label: sender.name, ...(sender.providerId ? { providerId: sender.providerId } : {}) } : undefined })
   const described = speaker ? describeSpeaker(speaker) : undefined
   const topic = sender?.topicId && lane ? hierarchy?.topics[lane.workspaceId]?.find(item => item.id === sender.topicId) : undefined
   const branch = sender?.workspace?.branch ?? hierarchy?.worktrees.find(item => item.hostId === sender?.hostId && item.path === sender.workspacePath)?.branch
