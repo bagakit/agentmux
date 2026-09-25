@@ -18,7 +18,7 @@ export default defineConfig({
       const originalCode = code, mutation = process.env.AGENTMUX_RETIRED_FOCUS_MUTATION
       const changes: Record<string, [string, string, string]> = {
         'readonly-disconnected': ['components/RecentFocusTimeline.tsx', 'const inputReference = inputSource?.reference', 'const inputReference = inputContext ? inputSource?.reference : undefined'],
-        'current-members-only': ['lib/focus-history-timeline.ts', 'if (readonlyInputSessionId) ensure(readonlyInputSessionId, undefined)', 'if (readonlyInputSessionId && contexts.some(context => context.id === readonlyInputSessionId)) ensure(readonlyInputSessionId, undefined)'],
+        'current-members-only': ['lib/focus-history-timeline.ts', 'if (readonlyInputTrack) {', 'if (readonlyInputTrack && contexts.some(context => context.id === readonlyInputTrack.sessionId)) {'],
         'equal-body-merge': ['components/RecentFocusTimeline.tsx', 'projected.filter(item => item.agentSessionId === inputReference?.agentSessionId)', 'projected.filter((item, index) => item.agentSessionId === inputReference?.agentSessionId && projected.findIndex(other => other.content === item.content) === index)']
       }
       if (mutation) {

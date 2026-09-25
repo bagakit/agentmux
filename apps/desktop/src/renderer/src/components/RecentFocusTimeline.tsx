@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, MessageSquare, Minus, Plus, SquareTerminal } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, MessageSquare, Minus, Plus, SquareTerminal } from 'lucide-react'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentSessionControl, SessionHistoryReference } from '../../../shared/contracts'
@@ -8,11 +8,13 @@ import type { FocusContext } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { FOCUS_TIMELINE_HEIGHT_MAX, FOCUS_TIMELINE_HEIGHT_MIN } from '../lib/focus-timeline-height'
 import { AgentAvatar } from './AgentAvatar'
+import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { createSpeakerResolver, speakerOfUserMessage } from '../lib/conversation-speaker'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { groupFocusTimeline, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
+import { groupFocusTimeline, observeFocusInputTracks, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
@@ -20,6 +22,8 @@ import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWorkSegment, localDateTime, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
+
+const describeMessageSpeaker = createSpeakerResolver()
 
 function clock(timestamp: number): string { return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
 function dateClock(timestamp: number): string { return new Date(timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
@@ -158,12 +162,17 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
         title={`${item.identity?.name ?? 'Historical name not recorded'} · ${item.identity?.project?.name ?? 'Project not recorded'} · Focused ${dateClock(item.focusedAt)}${item.end === undefined ? ' · Next focus not recorded' : ''}`}
         onClick={event => context ? onSelect(sessionId) : onInspect(item, event.currentTarget)}><span>{clock(item.focusedAt)}</span></button>)}
-      {messages.map(message => <button key={message.id} type="button" className="recent-focus__message" data-message-id={message.id} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={message.recordedAt} data-message-author={message.author.kind}
-        style={{ left: `${focusTimePosition(message.recordedAt!, window)}%` }} aria-label={message.author.kind === 'unknown' ? `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded` : `Agent message in ${name} at ${clock(message.recordedAt!)}, sender ${message.author.agentSessionId}`}
-        title={`${name} · Record time ${dateClock(message.recordedAt!)} · ${message.author.kind === 'unknown' ? 'Prompt · Sender not recorded' : `Agent message · Sender ${message.author.agentSessionId}`}\n${message.content.slice(0, 160)}`}
-        onMouseEnter={event => onPreview(message, event.currentTarget, false)} onMouseLeave={() => onDismiss(message.id)}
-        onFocus={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false) }} onBlur={() => onDismiss(message.id)}
-        onClick={event => onPreview(message, event.currentTarget, true)}>{message.author.kind === 'unknown' ? <MessageSquare size={10} /> : <Bot size={10} />}</button>)}
+      {messages.map(message => {
+        const speaker = speakerOfUserMessage(message)
+        const described = describeMessageSpeaker(speaker)
+        const authorLabel = speaker.role === 'agent' ? `Agent message · Sender ${speaker.id}` : speaker.role === 'human' ? 'Human message · You' : 'Prompt · Sender not recorded'
+        return <button key={message.id} type="button" className="recent-focus__message" data-message-id={message.id} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={message.recordedAt} data-message-author={speaker.role}
+          style={{ left: `${focusTimePosition(message.recordedAt!, window)}%` }} aria-label={speaker.role === 'agent' ? `Agent message in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
+          title={`${name} · Record time ${dateClock(message.recordedAt!)} · ${authorLabel}\n${message.content.slice(0, 160)}`}
+          onMouseEnter={event => onPreview(message, event.currentTarget, false)} onMouseLeave={() => onDismiss(message.id)}
+          onFocus={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false) }} onBlur={() => onDismiss(message.id)}
+          onClick={event => onPreview(message, event.currentTarget, true)}><ConversationSpeakerAvatar speaker={speaker} name={described.name} size={10} /></button>
+      })}
     </div>
   </div>
 })
@@ -185,7 +194,7 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
   }, [])
   const count = project.tracks.filter(track => present.current.has(track.key)).length
   return <section className="recent-focus__project" data-timeline-project={project.key} hidden={count === 0}>
-    <button type="button" className="recent-focus__project-heading" aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${project.name}`} aria-expanded={!collapsed} title={`${project.name} · ${count} Contexts · Project summary, not Run duration`} onClick={() => setCollapsed(value => !value)}>
+    <button type="button" className="recent-focus__project-heading" aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${project.name}`} aria-expanded={!collapsed} title={`${project.name} · ${count} Contexts · Project summary, not Run duration${project.tracks.some(track => track.inputProjectObserved) ? ' · Observed Context project; message-time project not recorded' : ''}`} onClick={() => setCollapsed(value => !value)}>
       <span className="recent-focus__gutter">{collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}{registered && project.workspaceId ? <ProjectIcon workspaceId={project.workspaceId} name={project.name} /> : <History size={12} />}<strong>{project.name}</strong><small>{count}</small></span>
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
@@ -266,22 +275,21 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const dismissMessage = useCallback((messageId: string) => setPreview(current => current?.message?.id === messageId && !current.interactive ? null : current), [])
   const catalogue = useFocusHistorySources(mode !== 'collapsed' && documentVisible)
   const [sourceLimit, setSourceLimit] = useState(30)
+  const observations = useMemo(() => observeFocusInputTracks(entries), [entries])
   const inputSources = useMemo(() => {
-    const observations = new Map<string, AgentFocusHistoryEntry['identity']>()
-    for (const entry of entries) if (!observations.has(entry.sessionId)) observations.set(entry.sessionId, entry.identity)
     const available = new Map(contexts.filter(context => context.kind === 'agent').map(context => [context.id, {
       id: context.id, name: context.name, workspaceName: context.workspaceName,
       reference: { hostId: context.hostId, agentSessionId: context.id } satisfies SessionHistoryReference,
       workspacePath: context.workspacePath, details: `Session: ${context.id}\nCurrent workspace: ${context.workspacePath}`
     }]))
     for (const source of catalogue.sources) if (!available.has(source.agentSessionId)) {
-      const observation = observations.get(source.agentSessionId)
+      const observation = resolveFocusInputTrack(observations, source).identity
       available.set(source.agentSessionId, { id: source.agentSessionId, name: observation?.name ?? `${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'} · ${source.agentSessionId.length <= 12 ? source.agentSessionId : `${source.agentSessionId.slice(0, 8)}…${source.agentSessionId.slice(-4)}`}`,
-        workspaceName: `${observation?.project?.name ?? 'Project not recorded'} · ${source.state === 'retired' ? 'Archived' : 'Stored source'}`,
-        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ?? 'Not recorded'}` })
+        workspaceName: `${observation?.project ? `${observation.project.name} (observed Context)` : 'Project not recorded'} · ${source.state === 'retired' ? 'Archived' : 'Stored source'}`,
+        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nObserved Context project: ${observation?.project?.name ?? 'Not recorded or conflicting'}\nMessage-time project: Not recorded\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ?? 'Not recorded'}` })
     }
     return [...available.values()]
-  }, [contexts, entries, catalogue.sources])
+  }, [contexts, observations, catalogue.sources])
   const inputContextId = readingContextId ?? currentSessionId
   const inputContext = contexts.find(context => context.id === inputContextId && context.kind === 'agent')
   const inputSource = inputSources.find(source => source.id === inputContextId)
@@ -352,12 +360,15 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const range = useMemo(() => focusTimeWindow(effectiveAnchor, hours), [effectiveAnchor, hours])
   const tracks = useMemo(() => focusTimeSegments(entries, range, now), [entries, range, now])
   const readonlyInputTrackId = readonlyReading && inputMessages.some(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt) && message.recordedAt >= range.start && message.recordedAt <= Math.min(now, range.end)) ? inputReference?.agentSessionId : undefined
-  const inputTrackKey = readonlyInputTrackId ? JSON.stringify(['unknown-project', readonlyInputTrackId]) : undefined
-  const projects = useMemo(() => groupFocusTimeline(contexts, lanes ?? [], tracks, readonlyInputTrackId), [contexts, lanes, tracks, readonlyInputTrackId])
+  const observedInputTrack = useMemo(() => inputReference ? resolveFocusInputTrack(observations, inputReference) : undefined, [observations, inputReference?.hostId, inputReference?.agentSessionId])
+  const readonlyInputTrack = readonlyInputTrackId ? observedInputTrack : undefined
+  const inputTrackKey = readonlyInputTrack?.key
+  const projects = useMemo(() => groupFocusTimeline(contexts, lanes ?? [], tracks, readonlyInputTrack), [contexts, lanes, tracks, readonlyInputTrack])
   const tickTimes = Array.from({ length: 5 }, (_, i) => range.start + (range.end - range.start) * i / 4)
   const position = focusTimePosition(now, range)
   const previewContext = preview?.message ? contexts.find(context => context.id === preview.message!.agentSessionId) : inputContext
-  const senderId = preview?.message?.author.kind === 'agent' ? preview.message.author.agentSessionId : undefined
+  const previewSpeaker = preview?.message ? speakerOfUserMessage(preview.message) : undefined
+  const senderId = previewSpeaker?.role === 'agent' ? previewSpeaker.id : undefined
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null) }
