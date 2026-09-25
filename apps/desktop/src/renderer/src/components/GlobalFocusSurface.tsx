@@ -1,11 +1,11 @@
-import { CheckCircle2, CirclePause, Inbox, PlayCircle, Search, Users } from 'lucide-react'
+import { CheckCircle2, CirclePause, Inbox, PlayCircle, Search, Unplug, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createTerminalFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
+import { createTerminalFocusProjectionSelector, type FocusBucket, type FocusContext } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
-import { FocusRecoveryGroup } from './FocusRecoveryGroup'
+import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
 import { FocusDisconnectedProjects } from './FocusDisconnectedProjects'
 import { deriveFocusProjectLanes } from '../lib/focus-project-lanes'
 import { tabForFocusedSession } from '../lib/focus-tab-projection'
@@ -19,12 +19,31 @@ import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floatin
 import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusSessionId } from '../lib/agent-focus'
 import { sessionPresentationById } from '../lib/session-presentation'
-import { topicIdForSession } from '../lib/workbench-tabs'
+import { topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
+import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { topicSpaceIconTarget } from '../lib/space-object-appearance'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
+
+type FocusColumn = FocusBucket | 'disconnected'
+// Presentation only: an observation connection loss cannot retire a running Run.
+function columnFor(context: FocusContext): FocusColumn {
+  return context.bucket !== 'attention' && context.state === 'disconnected' && context.processState !== 'running'
+    ? 'disconnected' : context.bucket
+}
 
 export function GlobalFocusSurface() {
   const contextSelector = useMemo(createTerminalFocusProjectionSelector, [])
   const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
+  const moteIdentity = useAppStore(useShallow(state => {
+    const session = state.sessions.find(item => item.id === pmoAttention[0])
+    const workspace = session && workspaceForSession(state.config, session)
+    const id = session && topicIdForSession(state.config, session)
+    const topic = id && scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(item => item.id === id)
+    const key = workspace && topic && !topic.readError ? topicSpaceIconTarget(workspace, topic).key : null
+    return { name: topic && !topic.readError ? topic.title || 'Mote' : 'Mote', icon: key ? state.spaceObjectIcons[key] ?? null : null }
+  }))
   const config = useAppStore((state) => state.config)
+  const topicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const tabs = useAppStore((state) => state.tabs)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const selectedTab = useMemo(() => tabForFocusedSession(tabs, selectedId), [selectedId, tabs])
@@ -36,7 +55,7 @@ export function GlobalFocusSurface() {
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
-  const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
+  const [bucketFilter, setBucketFilter] = useState<FocusColumn | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const searchRef = useRef<HTMLInputElement | null>(null)
@@ -65,35 +84,35 @@ export function GlobalFocusSurface() {
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [])
   const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
-  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs), [laneContexts, config, facts, tabs])
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
   const trimmedQuery = query.trim()
   const search = trimmedQuery.toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   const matching = executionRows.filter(row => (project === 'all' || laneByContext.get(row.id)?.projectId === project) &&
     ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
-  const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
+  const filtered = matching.filter(row => bucketFilter === 'all' || columnFor(row) === bucketFilter)
   const selected = executionRows.find(row => row.id === selectedId)
   const filteredIds = new Set(filtered.map(row => row.id))
   const focusProjectLanes = allLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
   const rowsById = new Map(filtered.map(row => [row.id, row]))
   // Qualification uses the original project membership, before state/search filters.
-  const liveProjects = new Set(executionRows.filter(row => row.state !== 'disconnected').map(row => laneByContext.get(row.id)?.projectId))
+  const liveProjects = new Set(executionRows.filter(row => columnFor(row) !== 'disconnected').map(row => laneByContext.get(row.id)?.projectId))
   const disconnectedLanes = focusProjectLanes.filter(lane => !liveProjects.has(lane.projectId))
   const boardLanes = focusProjectLanes.filter(lane => liveProjects.has(lane.projectId))
-  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: 'Idle / Recovery', icon: CirclePause } }
-  const buckets = Object.keys(bucketMeta) as FocusBucket[]
+  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: 'Idle / Recovery', icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
+  const buckets = Object.keys(bucketMeta) as FocusColumn[]
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
     const columnStyle = { '--focus-state-columns': buckets.map(bucket => {
-      const count = rows.filter(row => row.bucket === bucket).length
-      return count ? `minmax(160px, ${Math.min(count, 3)}fr)` : '36px'
+      const count = rows.filter(row => columnFor(row) === bucket).length
+      return count ? bucket === 'disconnected' ? 'minmax(128px, 1fr)' : `minmax(160px, ${Math.min(count, 3)}fr)` : '36px'
     }).join(' ') } as CSSProperties
     return <>{heading}<div className="focus-project-lanes__groups" style={columnStyle}>
       {buckets.map(bucket => {
-        const meta = bucketMeta[bucket], Icon = meta.icon, grouped = rows.filter(row => row.bucket === bucket)
+        const meta = bucketMeta[bucket], Icon = meta.icon, grouped = rows.filter(row => columnFor(row) === bucket)
         return <section className="focus-context-group global-agents-group" aria-label={meta.label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} key={bucket}>
           <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></span></header>
-          <div className="focus-context-group__cards">{bucket === 'idle' ? <FocusRecoveryGroup contexts={grouped} selectedId={selectedId} searching={Boolean(search)} onSelect={focusExecutionSession} /> : grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
+          <div className="focus-context-group__cards">{bucket === 'disconnected' ? <FocusDisconnectedGroup contexts={grouped} selectedId={selectedId} searching={Boolean(search)} onSelect={focusExecutionSession} /> : grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })}
     </div></>
@@ -104,7 +123,7 @@ export function GlobalFocusSurface() {
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label className="global-board-select"><select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All projects</option>{[...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()].map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
-          <label className="global-board-select"><select aria-label="Focus state filter" value={bucketFilter} onChange={event => setBucketFilter(event.target.value as FocusBucket | 'all')}><option value="all">All states</option>{(Object.keys(bucketMeta) as FocusBucket[]).map(bucket => <option key={bucket} value={bucket}>{bucketMeta[bucket].label} · {matching.filter(row => row.bucket === bucket).length}</option>)}</select></label>
+          <label className="global-board-select"><select aria-label="Focus state filter" value={bucketFilter} onChange={event => setBucketFilter(event.target.value as FocusColumn | 'all')}><option value="all">All states</option>{buckets.map(bucket => <option key={bucket} value={bucket}>{bucketMeta[bucket].label} · {matching.filter(row => columnFor(row) === bucket).length}</option>)}</select></label>
         </div>
       </div>
     </FocusToolbar>
@@ -127,7 +146,7 @@ export function GlobalFocusSurface() {
         requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), onReturnFocus: () => {
           if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
         } })
-      }}>Mote · {pmoAttention.length} to review <span>Open context ↗</span></button> : null}
+      }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} /> : null}
