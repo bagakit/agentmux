@@ -86,6 +86,17 @@ async function scene(width,mode,readonly=false) {
   assert.ok(bounds.panel.bottom<=bounds.terminalBottom-28,'Details keep the original Terminal input line visible')
   if(bounds.composerTop!==null) assert.ok(bounds.panel.bottom<=bounds.composerTop,'Details keep the entire unsent Composer draft visible')
   if(mode==='all'||mode==='continuation'||readonly) await frame(width,(readonly?'readonly-':'')+mode+'-details')
+  if(mode==='all') {
+    const point=await evaluate(`(()=>{const p=${panel}.getBoundingClientRect();return{x:p.x+p.width/2,y:p.y+p.height/2}})()`)
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:3000})
+    await wait(`${panel}.scrollTop>0`)
+    await paint()
+    const tail=await evaluate(`(()=>{const p=${panel},e=[...p.querySelectorAll('.service-window__restore')].at(-1),r=e.getBoundingClientRect(),b=p.getBoundingClientRect();return{text:e.textContent,top:r.top,bottom:r.bottom,panelTop:b.top,panelBottom:b.bottom}})()`)
+    assert.ok(tail.text.length>20,'The final original recovery fact is nonempty')
+    assert.ok(tail.top>=tail.panelTop && tail.bottom<=tail.panelBottom,'A real wheel scroll reveals the final original recovery fact')
+    assert.ok(await evaluate(`(()=>{const p=${panel}.getBoundingClientRect(),c=${panel}.querySelector('.service-disclosure__heading .service-disclosure__close').getBoundingClientRect();return c.top>=p.top&&c.bottom<=p.bottom})()`),'The actual close control stays visible at the bottom of long details')
+    await frame(width,'all-details-tail')
+  }
   await click(`${panel}.querySelector('.service-disclosure__close')`);await folded();await paint()
   const after=await facts();retained(before,after)
   assert.equal(after.caption,null,'Collapse acknowledges the problem without deleting its facts')
