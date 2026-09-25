@@ -371,6 +371,10 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const senderId = previewSpeaker?.role === 'agent' ? previewSpeaker.id : undefined
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
+  const describePreviewSpeaker = useMemo(() => createSpeakerResolver({ lookupAgent: id => {
+    const context = contexts.find(item => item.id === id && item.kind === 'agent')
+    return context ? { label: context.name, ...(context.providerId ? { providerId: context.providerId } : {}) } : undefined
+  } }), [contexts])
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null) }
   const zoomIndex = FOCUS_WINDOW_HOURS.findIndex(size => size === hours)
   const openInputRecords = (target: HTMLElement) => {
@@ -416,7 +420,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       </div>
     </div> : null}
     {observation ? <FocusHistoryObservation segment={observation.segment} anchor={observation.anchor} onClose={() => setObservation(null)} /> : null}
-    {preview ? <FocusMessagePreview message={preview.message} recipient={previewContext} recipientName={inputSource?.name} workspaceRoot={inputSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview}
+    {preview ? <FocusMessagePreview describeSpeaker={describePreviewSpeaker} message={preview.message} recipient={previewContext} recipientName={inputSource?.name} workspaceRoot={inputSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview}
       {...(readerOpen ? { reader: {
         contexts: inputSources.slice(0, sourceLimit), contextId: inputReference?.agentSessionId ?? null, messages: inputMessages,
         sourceCoverage: catalogue.loading ? 'Discovering retained input sources…' : `${Math.min(sourceLimit, inputSources.length)} of ${inputSources.length} sources listed. Other sources have not been read for this window.`,
