@@ -736,7 +736,7 @@ type AppState = {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
-  createScratchTopic(preset?: 'mote'): Promise<ScratchTopicSnapshot>
+  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; executorId?: string }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
@@ -4830,7 +4830,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     scratchTopicReads.set(workspaceId, { key, promise: job })
     return job
   },
-  async createScratchTopic(preset) {
+  async createScratchTopic(preset, initialRequest) {
     const state = get()
     const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
     if (!workspace) throw new Error('Topics workspace is unavailable')
@@ -4838,41 +4838,67 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // A Topic owns its directory before any Tab or Session exists. The launcher is a projection,
     // not the identity from which the Topic is derived.
     const topicId = `launcher:${crypto.randomUUID()}`
-    const targetTab = newLauncherTab(workspace.id, topicId)
-    const snapshot = preset === 'mote'
-      ? await api.scratch.ensureMote(workspace.id, topicId)
-      : await api.scratch.ensureTopic(workspace.id, topicId)
-    let placementFailed = false
-    set((current) => {
-      const currentLayout = current.layouts[workspace.id] ?? layout
-      const nextTab = { ...targetTab, topicId }
-      const alreadyOpen = Boolean(current.tabs[targetTab.id])
-      // 已在场只需激活；新建必须真的挂上，挂不上就整笔放弃（见 addTabPlacement）。
-      // 不在 set 回调里抛：抛在 reducer 中间会让「有没有写进去」变得难读，故先记标记后抛。
-      const nextLayout = alreadyOpen
-        ? activateLayoutTab(currentLayout, layout.activeGroupId, nextTab.id)
-        : addTabPlacement(currentLayout, layout.activeGroupId, nextTab.id)
-      if (!nextLayout) {
-        placementFailed = true
-        return current
-      }
-      return {
-        activeWorkspaceId: workspace.id,
-        mainSurface: 'workbench' as const,
-        tabs: { ...current.tabs, [nextTab.id]: nextTab },
-        layouts: { ...current.layouts, [workspace.id]: nextLayout },
-        workspaceFileRevisions: bumpWorkspaceFileRevision(
-          current.workspaceFileRevisions,
-          workspace.id
-        )
-      }
+    const targetTab = { ...newLauncherTab(workspace.id, topicId),
+      ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
+    const regionId = targetTab.layout.activeRegionId
+    const initialSurface = targetTab.regions[regionId]
+    const placeLauncher = (): void => {
+      let placementFailed = false
+      set((current) => {
+        const currentLayout = current.layouts[workspace.id] ?? layout
+        const nextTab = { ...targetTab, topicId }
+        const alreadyOpen = Boolean(current.tabs[targetTab.id])
+        // 已在场只需激活；新建必须真的挂上，挂不上就整笔放弃（见 addTabPlacement）。
+        // 不在 set 回调里抛：抛在 reducer 中间会让「有没有写进去」变得难读，故先记标记后抛。
+        const nextLayout = alreadyOpen
+          ? activateLayoutTab(currentLayout, layout.activeGroupId, nextTab.id)
+          : addTabPlacement(currentLayout, layout.activeGroupId, nextTab.id)
+        if (!nextLayout) {
+          placementFailed = true
+          return current
+        }
+        return {
+          activeWorkspaceId: workspace.id,
+          mainSurface: 'workbench' as const,
+          tabs: { ...current.tabs, [nextTab.id]: nextTab },
+          layouts: { ...current.layouts, [workspace.id]: nextLayout },
+          ...(initialRequest ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: initialRequest.prompt } } : {}),
+          workspaceFileRevisions: bumpWorkspaceFileRevision(
+            current.workspaceFileRevisions,
+            workspace.id
+          )
+        }
+      })
+      if (placementFailed) throw new Error('The Tab Group is no longer available')
+    }
+    // A first request belongs to a real durable Region before metadata can fail or navigation unmounts Goals.
+    if (initialRequest) placeLauncher()
+    let snapshot: ScratchTopicSnapshot
+    try {
+      snapshot = preset === 'mote'
+        ? await api.scratch.ensureMote(workspace.id, topicId)
+        : await api.scratch.ensureTopic(workspace.id, topicId)
+    } catch (cause) {
+      if (initialRequest && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) get().reportError(cause, {
+        kind: 'indeterminate', summary: 'Topic preparation is unconfirmed. Your request has not been sent; the same Topic, Region and draft are kept. Retry Start agent here.'
+      })
+      throw cause
+    }
+    if (!initialRequest) placeLauncher()
+    else set(current => {
+      const tab = current.tabs[targetTab.id]
+      if (tab?.topicId !== topicId || tab.regions[regionId] !== initialSurface || !tab.topicPreparation) return current
+      const { topicPreparation: _prepared, ...preparedTab } = tab
+      return { tabs: { ...current.tabs, [tab.id]: preparedTab }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
     })
-    if (placementFailed) throw new Error('The Tab Group is no longer available')
     // Ordinary Topics open one attached Terminal through the existing Region lifecycle.
     // Mote creation keeps its launcher so selecting a personality does not start a shell.
     const createdLayout = get().layouts[workspace.id]
     const createdGroup = tabGroupForTab(createdLayout, targetTab.id)
-    if (createdGroup && preset !== 'mote' && !snapshot.soul) {
+    if (initialRequest && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) {
+      if (initialRequest.executorId && createdGroup) await get().launchAgent(initialRequest.executorId, initialRequest.prompt, createdGroup, { tabId: targetTab.id, regionId })
+      else if (!initialRequest.executorId) get().reportError(new Error('No Agent Executor is configured. Add an Agent in Settings, then Start agent in this same Region. Your request is kept and has not been sent.'), { kind: 'indeterminate' })
+    } else if (createdGroup && !initialRequest && preset !== 'mote' && !snapshot.soul) {
       await get().promoteWarmTerminal(createdGroup, { tabId: targetTab.id, regionId: targetTab.layout.activeRegionId })
     }
     return snapshot
@@ -5269,6 +5295,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }))
     try {
+      if (scratchTopicId && targetTab.topicPreparation === 'mote') {
+        await api.scratch.ensureMote(workspace.id, scratchTopicId)
+        if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
+          set(current => discardPendingAgentLaunch(current, sessionId))
+          return
+        }
+        set(current => {
+          const tab = current.tabs[tabId]
+          if (tab?.topicId !== scratchTopicId || !ownsSessionLaunch(tab.regions[regionId], 'agent', sessionId) || !tab.topicPreparation) return current
+          const { topicPreparation: _prepared, ...preparedTab } = tab
+          return { tabs: { ...current.tabs, [tab.id]: preparedTab }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
+        })
+      }
       const launched = await api.sessions.launchAgent({
         executorId,
         hostId: workspace.hostId,

@@ -1,5 +1,5 @@
 import { ArrowUpRight, Check, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { goalNextStep } from '../lib/goal-presentation'
@@ -11,6 +11,33 @@ import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floatin
 import { ComposerTextarea } from './ComposerTextarea'
 import { GoalDetail } from './GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
+import { GOAL_EXPLORATION_ACTIONS, goalExplorationNextText, goalExplorationPending, goalExplorationProject, startGoalExploration, subscribeGoalExploration, type GoalExplorationProject } from '../lib/goals-entry-actions'
+
+function GoalsEntryActions() {
+  const config = useAppStore(state => state.config)
+  const focus = useAppStore(state => state.agentFocus)
+  const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
+  const project = useMemo(() => goalExplorationProject(config, focus, activeWorkspaceId), [config, focus, activeWorkspaceId])
+  const pending = useSyncExternalStore(subscribeGoalExploration, goalExplorationPending, goalExplorationPending)
+  const [error, setError] = useState<string | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  function start(text: string, context?: GoalExplorationProject) {
+    setError(null)
+    void startGoalExploration(text, context).catch(cause => {
+      // Bound preparation/launch failures already belong to the visible launcher and original notice owner.
+      if (mounted.current && useAppStore.getState().mainSurface === 'board') setError(cause instanceof Error ? cause.message : String(cause))
+    })
+  }
+  return <section className="goals-entry" aria-label="开始对话">
+    <p className="goals-entry__heading">从这里开始</p>
+    <div className="goals-entry__actions">
+      {GOAL_EXPLORATION_ACTIONS.map(action => <button key={action.id} type="button" data-goals-entry-action={action.id} disabled={pending} onClick={() => start(action.text)}><span>{action.text}</span><ArrowUpRight size={14} /></button>)}
+      {project ? <button type="button" data-goals-entry-action="next" disabled={pending} onClick={() => start(goalExplorationNextText(project), project)}><span>{goalExplorationNextText(project)}<small title={`${project.id} · ${project.hostId} · ${project.path}`}>{project.source === 'recent' ? '最近项目' : '当前项目'} · {project.name}</small></span><ArrowUpRight size={14} /></button> : null}
+    </div>
+    {error ? <p className="goals-service" role="status">对话准备未确认，请求尚未发送。请核对原因后再选择上面的请求。<span>{error}</span></p> : null}
+  </section>
+}
 
 export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
@@ -118,11 +145,12 @@ export function GlobalBoardSurface() {
     else if (selectedDemand && !['INPUT', 'TEXTAREA', 'SELECT'].includes((event.target as HTMLElement).tagName)) closeDetail()
   }}>
     <div className="goals-index">
+      <GoalsEntryActions />
       <header className="goals-toolbar">
         <label className="goals-search"><Search size={14} /><input aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
         <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
         <div className="goals-view-toggle" role="group" aria-label="Goal view"><button type="button" aria-label="List view" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={14} /></button><button type="button" aria-label="Board view" aria-pressed={view === 'board'} onClick={() => setView('board')}><Columns3 size={14} /></button></div>
-        <button ref={newGoalRef} type="button" className="goals-button goals-button--primary" onClick={() => setIntakeOpen(true)}><CirclePlus size={13} />New Goal</button>
+        <button ref={newGoalRef} type="button" className="goals-button" onClick={() => setIntakeOpen(true)}><CirclePlus size={13} />New Goal</button>
       </header>
       {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">
         <label>Work status<select aria-label="Filter work status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">All active</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{GOAL_STATUS_LABELS[status]}</option>)}</select></label>
