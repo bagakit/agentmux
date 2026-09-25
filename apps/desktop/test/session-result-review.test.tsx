@@ -41,7 +41,7 @@ function setGit(state: Partial<typeof gitFixture.state>): void {
   gitFixture.state = { ...gitFixture.state, ...state }
 }
 
-describe('Session result review strip', () => {
+describe('Session result review control', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
@@ -69,8 +69,8 @@ describe('Session result review strip', () => {
     const openFileDiff = vi.fn(() => Promise.resolve())
     useAppStore.setState({ openFileDiff: openFileDiff as never })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: 'src/app.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
-    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Review', 'Close'])
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Review'])
     await expandReview()
     expect(container.textContent).toContain('workspace could not be located')
     expect(container.textContent).toContain('Activity')
@@ -95,7 +95,7 @@ describe('Session result review strip', () => {
       loading: false,
       error: null
     })
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
     await expandReview()
     const diff = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('src/app.ts')) as HTMLButtonElement
     expect(diff).toBeTruthy()
@@ -113,7 +113,7 @@ describe('Session result review strip', () => {
     })
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: 'packages/app/src/app.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
     await expandReview()
     const diff = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Review changes')) as HTMLButtonElement
     expect(diff).toBeTruthy()
@@ -130,8 +130,8 @@ describe('Session result review strip', () => {
     })
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     const items = [{ id: 'tool-1', kind: 'tool_call', title: 'Edit', toolName: 'Edit', toolInput: JSON.stringify({ file_path: '../outside.ts', old_string: 'a', new_string: 'b' }), content: '', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
-    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Review', 'Close'])
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items, origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    expect([...container.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Review'])
     expect(openFileDiff).not.toHaveBeenCalled()
   })
 
@@ -140,41 +140,67 @@ describe('Session result review strip', () => {
 
     setGit({ status: { kind: 'git-repository', hostId: 'local', repoPath: '/repo', repoRelativePrefix: 'packages/app', branch: 'main', changes: [] }, loading: false, error: null })
     useAppStore.setState({ sessions: [nestedSession] })
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
     await expandReview()
     expect(container.textContent).toContain('No Git changes were found')
     expect(container.textContent).not.toContain('not a Git repository')
 
     setGit({ status: { kind: 'not-a-git-repository', hostId: 'local', workspacePath: '/repo/packages/app' }, loading: false, error: null })
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
     expect(container.textContent).toContain('not a Git repository')
     expect(container.textContent).not.toContain('No Git changes were found')
 
     setGit({ status: null, loading: false, error: 'git status failed' })
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
     expect(container.textContent).toContain('Could not read changes for this workspace: git status failed')
   })
 
   it('keeps an explicit unknown-workspace state when no result target is known', async () => {
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
     await expandReview()
     expect(container.textContent).toContain('workspace could not be located')
   })
 
   it('keeps the default surface compact and lets the user close it', async () => {
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: 'agent-result', items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
     expect(container.querySelector('[data-result-review-expanded="false"]')).toBeTruthy()
+    await expandReview()
     const close = [...container.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Dismiss result review') as HTMLButtonElement
     expect(close).toBeTruthy()
     await act(async () => close.click())
     expect(container.querySelector('.session-result-review')).toBeNull()
+    expect(container.querySelector('.session-result-review-slot')).toBeTruthy()
+  })
+
+  it('keeps a dismissed done report closed and discovers the next completed turn', async () => {
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: session.id, items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Dismiss result review"]')!.click())
+    expect(container.querySelector('.session-result-review__trigger')).toBeNull()
+    await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, observedAt: 3 } }] }))
+    expect(container.querySelector('.session-result-review__trigger')).toBeNull()
+    await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, state: 'working', observedAt: 4 } }] }))
+    expect(container.querySelector('.session-result-review-slot')).toBeTruthy()
+    expect(container.querySelector('.session-result-review__trigger')).toBeNull()
+    await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, observedAt: 5 } }] }))
+    expect(container.querySelector('.session-result-review__trigger')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('does not carry a dismissed result across a different Session in the same mounted control', async () => {
+    useAppStore.setState({ sessions: [session, nestedSession] })
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: session.id, items: [], origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await expandReview()
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Dismiss result review"]')!.click())
+    expect(container.querySelector('.session-result-review__trigger')).toBeNull()
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: nestedSession.id, items: [], origin: { workspaceId: 'nested', tabGroupId: 'group' }, visible: true })))
+    expect(container.querySelector('.session-result-review__trigger')?.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('offers each explicitly mentioned HTTP or HTTPS preview and routes to the existing Browser owner', async () => {
     const openHttpLink = vi.fn(() => Promise.resolve())
     useAppStore.setState({ openHttpLink: openHttpLink as never, config: { workspaces: [{ id: 'repo', path: '/repo', name: 'Repo', hostId: 'local', kind: 'folder' }] } as never })
     const items = [{ id: 'assistant-1', kind: 'assistant_message', content: 'Preview http://127.0.0.1:4173 and https://preview.example.test', status: 'completed', source: 'native-hook', createdAt: 1, updatedAt: 2 }] as never
-    await act(async () => root.render(createElement(SessionResultReview, { sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
+    await act(async () => root.render(createElement(SessionResultReview, { surfaceAnchor: '--fixture-result-surface', sessionId: 'agent-result', items, origin: { workspaceId: 'repo', tabGroupId: 'group' }, visible: true })))
     await expandReview()
     const previews = [...container.querySelectorAll('button')].filter((button) => button.textContent?.includes('Preview'))
     expect(previews).toHaveLength(2)

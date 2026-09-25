@@ -1,11 +1,11 @@
 import { History, MoreHorizontal, PanelsTopLeft, RotateCcw } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { RegionMenuEntryView, useRegionMenuEntries } from './RegionContextMenu'
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, readOnly, onHistory, onRefreshObservation, refreshing = false, portalTargetId = null }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, readOnly, onHistory, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview }: {
   name: string
   executorLabel: string
   sessionId: string
@@ -16,6 +16,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, re
   refreshing?: boolean
   /** One precise owner may present its existing controls in the Focus bar. */
   portalTargetId?: string | null
+  resultReview?: ReactNode
 }) {
   const entries = useRegionMenuEntries()
   const home = useRef<HTMLDivElement>(null)
@@ -48,6 +49,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, regionId, re
     aria-label={`Agent ${name}; ${readOnly ? 'Read-only; ' : ''}${executorLabel}; Session ${sessionId}`}>
     {merged ? null : <strong className="agent-region-header__name" title={name}>{name}</strong>}
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
+    {resultReview}
     {onHistory || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Root>
       <DropdownMenu.Trigger className="agent-region-header__more"
         aria-label={`More actions for ${name}`} title={`${merged ? 'Region actions · ' : ''}${name}; ${executorLabel}; Session ${sessionId}`}

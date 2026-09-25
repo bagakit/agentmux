@@ -518,6 +518,9 @@ styles/
   browser-structured-fields.css  Browser 有限结构化字段与来源
   browser-task-assets.css  Browser 版本资产与参数编辑
   agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点
+  result-review.css  Result ready 的紧凑入口、结果详情与复查动作
+  service-notice.css  服务提醒的轻量入口、收起、复查与有界详情
+  status-prompts.css  用户 Prompt 的状态绑定与 Composer 快捷动作
   agent-region-header.css  Agent Region 身份与就地操作
   session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
   composer.css    Composer——Agent 那格底部的输入条
@@ -1024,6 +1027,10 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 - Agent 与 Workspace 的显示名编辑使用紧凑的行内控件：名称文本优先，内部 ID 退到详情/诊断；成功后的新名称在 Tab、Region、Project rail 和 Skill 说明中即时一致。失败只在当前表面留下短服务窗，不撑高导航。
 - 插件目录、Skill 和命令入口沿用现有 Settings/Launcher 密度：清单先显示名称、版本和能力摘要，激活状态用一个小状态点表达；不为每个插件增加独立卡片、颜色或厂商专属控件。
 
+### 服务提醒与结果信息的轻量控件
+
+用户反馈「"result ready" 这类信息条的视觉设计太糟糕了, 缺乏现代感, 按钮也特别厚重, 我觉得应该好好优化」。Result ready 与同类服务信息采用现代、轻量的状态表达：短文字与有含义的状态字形承担首层，必要动作沿既有紧凑控件、命中区与焦点语言，避免厚重按钮、大块背景、重复标题和多行解释堆成长期占用。细节按需展开且高度有界，窄分屏保持文字可读、入口和关闭动作可达，不以缩小文字或点击范围换取轻量。失败、未知与结果就绪清楚可辨，颜色不独自承担含义；关闭较大呈现后仍保留克制、可发现的状态入口。通知逃生、事实归属和复查行为只见交互合同《我们的流程坏了，不等于 Agent 坏了》的“通知必须有逃生通道，并按同一交互治理”。
+
 ### Agents 看板与 Board 需求流转
 
 Agents 直接沿用原 Board 的工具栏、状态列、卡片和右半工作区设计。卡片以 Agent 显示名和 Executor 身份为主，观察与请求处理保留同屏上下文；选中 Needs you 卡片后，详情区的“在这里查看请求”保持一个明确的次级动作位，不能把回答动作藏回旧列表行。没有 typed request 时只显示定位 Session 的动作。Board 卡片先读需求标题、状态、负责人、Project 和优先级，Session 数量和运行状态是次级事实。零 Session 与多 Session 的需求具有相同地位。需求编辑与关联在固定详情区完成；行为约束见 interaction SSOT 同名小节。
@@ -1322,7 +1329,7 @@ Browser 调整窗口或分栏尺寸时优先保持最近一次有效内容，避
 
 ### Result ready 的紧凑层级
 
-小 Region 的完成提示是低占用状态行：一枚完成标记、一句结果摘要、展开入口和关闭入口。展开内容使用有上限的列表或树状分组表达文件与预览链接，名称可截断、完整值在可访问名称中保留；不使用十行平铺按钮，不把解释性长句与每个目标并列占据首层。行为约束见 desktop-interaction 的“Result ready 在小 Region 中的可用性”。
+小 Region 的完成提示采用低占用的紧凑状态表达：完成状态与结果查看入口清楚可辨，结果摘要和关闭入口按需可达。展开内容使用有上限的列表或树状分组表达文件与预览链接，名称可截断、完整值在可访问名称中保留；不使用十行平铺按钮，不把解释性长句与每个目标并列占据首层。信息控件的共同视觉约束见《服务提醒与结果信息的轻量控件》；行为约束见 desktop-interaction 的“Result ready 在小 Region 中的可用性”。
 
 ### Claude Prompt 的提交反馈
 
@@ -1447,3 +1454,10 @@ Region 持续故障告示与手动观察刷新只引用交互合同《Terminal �
 ### Agent-first 的 Space 工作入口
 
 Space / Zone / Tab / Region、Project 与 Workspace 的统一含义只定义在交互 SSOT《统一概念与空间寻址》；`agent open` 与 `space mv` 的行为只定义在《Agent-first 的 Space 工作入口》。工作面、原执行目录与失败说明沿用现有 Tab/Region、服务窗和身份展示语言；本轮统一合同并闭合 CLI，不新增 Renderer 控件或视觉层，不把全仓改名当成概念统一。
+
+
+### 按状态配置 Prompt 按钮
+
+行为、持久化、发送与 Permission / Question 边界统一见交互 SSOT《按状态配置 Prompt 按钮》。用户要求这些状态条更现代、按钮不再厚重：用户自定义 Prompt 沿 Message Tool 与信息条的紧凑、安静控件语言，名称简短可读，正文按需查看；不采用宽大的主按钮、厚重描边、重复装饰图标或另一块常驻卡片。
+
+状态动作沿稳定的单行轻量工具带呈现，默认未配置零占用；状态切换不增减行数。有多个按钮或很长名称时，正常与窄 Region 均须保留可到达的全部动作、可访问名称与键盘焦点，按钮可横向滚动，长名称可截断但完整名称和正文可按需取得；不能挤压 Terminal 输入换取全部同时露出，也不把单击发送藏成常态的二次菜单。设置内的状态选择与正文编辑沿既有 Prompt disclosure 与保存反馈，不另造配置页面。已发送、待发、不可提交和恢复状态的提示使用现有语义；不能只靠颜色表达，也不因按钮出现改变终端几何或抢焦点。

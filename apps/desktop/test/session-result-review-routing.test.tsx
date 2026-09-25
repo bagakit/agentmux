@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
@@ -7,7 +7,7 @@ import type { SessionSnapshot } from '../src/shared/contracts.js'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({ ActivityView: () => null }))
-vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({ AgentSessionComposer: () => null }))
+vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({ AgentSessionComposer: ({ resultReview }: { resultReview: ReactNode }) => createElement('div', { className: 'fixture-composer' }, resultReview) }))
 vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({ AgentInteractionCard: () => null }))
 
 import { SessionPane } from '../src/renderer/src/components/SessionPane.js'
@@ -31,12 +31,20 @@ describe('SessionResultReview production routing', () => {
   })
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true) })
 
-  it('mounts the result review strip through SessionPane', async () => {
+  it('mounts the result control in the existing composer through SessionPane', async () => {
     await act(async () => root.render(createElement(SessionPane, { sessionId: 'mounted-result', surfaceKind: 'agent', interactiveResize: false, visible: true, linkOrigin: { workspaceId: 'repo', tabGroupId: 'group' } })))
     expect(container.querySelector('.session-result-review')).toBeTruthy()
+    expect(container.querySelector('.fixture-composer .session-result-review')).toBeTruthy()
+    expect(container.querySelector('.agent-surface > .session-result-review')).toBeNull()
     const review = container.querySelector('.session-result-review button') as HTMLButtonElement
     expect(review.textContent).toContain('Review')
     await act(async () => review.click())
-    expect([...container.querySelectorAll('.session-result-review button')].some((button) => button.textContent?.includes('Activity'))).toBe(true)
+    expect([...container.querySelectorAll('.session-result-review button')].map((button) => button.textContent?.trim())).toEqual(['Review', 'Collapse', 'Close', 'Activity', 'Continue in Session'])
+  })
+
+  it('keeps a read-only result control in the existing Region header', async () => {
+    await act(async () => root.render(createElement(SessionPane, { sessionId: 'mounted-result', surfaceKind: 'agent', interactiveResize: false, visible: true, readOnly: true, linkOrigin: { workspaceId: 'repo', tabGroupId: 'group' } })))
+    expect(container.querySelector('.agent-region-header .session-result-review__trigger')).toBeTruthy()
+    expect(container.querySelector('.agent-input-stack')).toBeNull()
   })
 })

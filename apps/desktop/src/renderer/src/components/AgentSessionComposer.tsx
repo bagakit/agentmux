@@ -1,5 +1,5 @@
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '../lib/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -58,13 +58,15 @@ export function AgentSessionComposer({
   sessionId,
   disabled = false,
   readOnly = false,
-  tabName
+  tabName,
+  resultReview
 }: {
   sessionId: string
   disabled?: boolean
   readOnly?: boolean
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
+  resultReview?: ReactNode
 }) {
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   const feedback = useComposerFeedback(sessionId)
@@ -239,6 +241,7 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
+      resultReview={resultReview}
       mailbox={<SessionMailbox system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}

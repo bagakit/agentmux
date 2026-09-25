@@ -114,7 +114,7 @@ describe('existing Session projection navigation', () => {
     } else {
       await act(async () => {
         useAppStore.setState({ sessions: before.sessions.map(one => one.id === 'a' ? { ...one, status: { state: 'done', source: 'run-process', observedAt: 2 } } : one) })
-        root.render(<SessionResultReview sessionId="a" items={[]} origin={{ workspaceId: 'repo', tabGroupId: 'source-group' }} visible />)
+        root.render(<SessionResultReview sessionId="a" items={[]} origin={{ workspaceId: 'repo', tabGroupId: 'source-group' }} visible surfaceAnchor="--fixture-result-surface" />)
       })
       await click('Review')
     }

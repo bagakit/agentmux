@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, Fragment } from 'react'
+import { act, createElement, Fragment, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { activateTab as activateLayoutTab, createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
@@ -10,9 +10,17 @@ import type { GitFileDiff, GitStatusResult } from '../src/shared/git-contracts.j
 // These leaves need a terminal/native host or have separate input ownership. The real SessionPane,
 // Result controls, Git-status hook, Store actions and placement reducers remain mounted/consumed.
 // Actual Monaco paint and native Browser visibility are qualified in the private Chromium proof.
+// Use the installed browser panel implementation, whose effects register mounted split panels.
+// The Node export omits that registration; it cannot stand in for the client Workbench tree.
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)(
+    '../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'
+  )
+})
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({ ActivityView: () => null }))
-vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({ AgentSessionComposer: () => null }))
+vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({ AgentSessionComposer: ({ resultReview }: { resultReview: ReactNode }) => resultReview }))
 vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({ AgentInteractionCard: () => null }))
 // Region chrome is real; HappyDOM does not qualify Monaco paint/native geometry.
 vi.mock('../src/renderer/src/components/EditorPane.js', () => ({ EditorPane: () => null }))
@@ -53,7 +61,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
       mainSurface: 'agents', activeWorkspaceId: 'other', sessions: [session], agentFocus: context,
       agentComposerDrafts: { [session.id]: 'original draft' },
       tabs: { [agentTab.id]: agentTab }, layouts: { repo: createWorkspaceLayout('group', [agentTab.id]), other: createWorkspaceLayout('other-group') },
-      config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [{ id: 'repo', path: '/repo', name: 'Repo', hostId: 'local', kind: 'folder' }] } as never,
+      config: { appearance: { terminalTheme: 'graphite' }, executors: {}, hosts: [{ id: 'local', label: 'Local', kind: 'local' }], browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }, workspaces: [{ id: 'repo', path: '/repo', name: 'Repo', hostId: 'local', kind: 'folder' }] } as never,
       timelines: { [session.id]: { agentSessionId: session.id, revision: 1, items: [{ id: 'assistant', kind: 'assistant_message', content: 'Preview https://example.test/result', createdAt: 2 }] } } as never,
       documents: {}, closingWorkbenchViews: {}, editorRegionModes: {}, editorRegionDiffs: {}, error: null
     })
@@ -65,15 +73,15 @@ describe('Focus Result controls activate their exact existing workbench destinat
     else Reflect.deleteProperty(window, 'agentmux')
   })
 
-  async function mountReview(workbench: 'projection' | 'owner' | undefined = undefined, workspaceId = 'repo') {
-    await act(async () => root.render(createElement(Fragment, null, createElement(SessionPane, { sessionId: session.id, surfaceKind: 'agent', interactiveResize: false, visible: true, linkOrigin: origin }), workbench ? createElement(WorkspaceWorkbench, { workspaceId, visible: true, viewOwnership: workbench }) : null)))
-    const review = container.querySelector('.session-result-review button[aria-expanded]') as HTMLButtonElement
+  async function mountReview(workbench: 'owner' | undefined = undefined, workspaceId = 'repo') {
+    await act(async () => root.render(createElement(Fragment, null, createElement('div', { className: 'fixture-floated-result' }, createElement(SessionPane, { sessionId: session.id, surfaceKind: 'agent', interactiveResize: false, visible: true, linkOrigin: origin })), workbench ? createElement(WorkspaceWorkbench, { workspaceId, visible: true, viewOwnership: workbench }) : null)))
+    const review = container.querySelector('.fixture-floated-result .session-result-review button[aria-expanded]') as HTMLButtonElement
     expect(review).toBeTruthy()
     await act(async () => review.click())
-    expect(container.querySelectorAll('.session-result-review__details-actions button').length).toBeGreaterThan(0)
+    expect(container.querySelectorAll('.fixture-floated-result .session-result-review__details-actions button').length).toBeGreaterThan(0)
   }
   async function clickResult(title: string) {
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.session-result-review__details-actions button')].filter((button) => button.querySelector('span')?.title === title)
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.fixture-floated-result .session-result-review__details-actions button')].filter((button) => button.querySelector('span')?.title === title)
     expect(buttons).toHaveLength(1)
     await act(async () => { buttons[0]!.click(); await new Promise((resolve) => setTimeout(resolve, 0)) })
   }
@@ -209,7 +217,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
     return () => complete({ status: 'read', document: { path: 'result.txt', content: 'after\n', revision: 'r1' } })
   }
   async function clickFileTab(tabId: string) {
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>('[data-workbench-tab-id]')].filter((el) => el.dataset.workbenchTabId === tabId)
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('button[data-workbench-tab-id]')].filter((el) => el.dataset.workbenchTabId === tabId)
     expect(buttons).toHaveLength(1)
     await act(async () => buttons[0]!.click())
   }
@@ -226,7 +234,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
     if (choice === 'Region') useAppStore.setState({ layouts: { ...useAppStore.getState().layouts, repo: activateLayoutTab(useAppStore.getState().layouts.repo!, 'group', tabId) } })
     const complete = deferResultRead()
     const action = vi.spyOn(useAppStore.getState(), choice === 'Region' ? 'focusRegion' : 'activateTab')
-    await mountReview(choice === 'Region' ? 'owner' : 'projection')
+    await mountReview('owner')
     await clickResult('result.txt')
     await vi.waitFor(() => expect(api.files.read).toHaveBeenCalledWith('repo', 'result.txt'))
     const focus = useAppStore.getState().agentFocus
@@ -253,14 +261,14 @@ describe('Focus Result controls activate their exact existing workbench destinat
     expect(done.tabs[tabId]?.layout.activeRegionId).toBe(choice === 'Region' ? 'secondary-region' : regionId)
     expect(done.lastActiveFileByWorkspace.repo).toBe(lastFile)
     expect(done.layouts.repo?.groups.find((g) => g.id === 'group')?.tabOrder).toContain(fileTabId('repo', 'result.txt'))
-    const activeButtons = [...container.querySelectorAll<HTMLButtonElement>('[data-workbench-tab-id]')].filter((el) => el.dataset.workbenchTabId === tabId)
+    const activeButtons = [...container.querySelectorAll<HTMLButtonElement>('button[data-workbench-tab-id]')].filter((el) => el.dataset.workbenchTabId === tabId)
     expect(activeButtons).toHaveLength(1); expect(activeButtons[0]!.classList.contains('workbench-tab--active')).toBe(true)
   })
 
   it('lets a later explicit Result click join shared data with its own navigation choice', async () => {
     const { tabId } = seedFileNavigation(), complete = deferResultRead()
     const open = vi.spyOn(useAppStore.getState(), 'openFile')
-    await mountReview('projection'); await clickResult('result.txt')
+    await mountReview('owner'); await clickResult('result.txt')
     await vi.waitFor(() => expect(api.files.read).toHaveBeenCalledTimes(1))
     await clickFileTab(tabId)
     await clickResult('result.txt')
@@ -276,7 +284,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
 
   it('still reveals when only an unrelated Region ratio and Focus object change while reading', async () => {
     const { tabId } = seedFileNavigation(), complete = deferResultRead()
-    await mountReview('projection'); await clickResult('result.txt')
+    await mountReview('owner'); await clickResult('result.txt')
     await vi.waitFor(() => expect(api.files.read).toHaveBeenCalledTimes(1))
     const state = useAppStore.getState()
     await act(async () => { state.updateRegionSplitRatio('repo', tabId, '', 0.6); useAppStore.setState({ agentFocus: { ...state.agentFocus } }) })
@@ -318,7 +326,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
   it.each(['earlier first', 'later first'] as const)('keeps the latest of two actual pending Result choices with %s completion', async (order) => {
     seedFileNavigation()
     const complete = deferResultPair(), resources = trackFileNavigation(), open = vi.spyOn(useAppStore.getState(), 'openFile')
-    await mountReview('projection'); await clickResult('result.txt'); await clickResult('later.txt')
+    await mountReview('owner'); await clickResult('result.txt'); await clickResult('later.txt')
     expect(vi.mocked(api.files.read).mock.calls.map((call) => call[1])).toEqual(['result.txt', 'later.txt'])
     expect(resources.maximum).toBe(1); expect(resources.active).toBe(1)
     const paths = order === 'earlier first' ? ['result.txt', 'later.txt'] : ['later.txt', 'result.txt']
@@ -336,7 +344,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
   it('does not revive the earlier pending file when the later actual Result choice fails', async () => {
     seedFileNavigation()
     const complete = deferResultPair(), resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult('result.txt'); await clickResult('later.txt')
+    await mountReview('owner'); await clickResult('result.txt'); await clickResult('later.txt')
     await act(async () => complete('later.txt', 'deleted'))
     await vi.waitFor(() => expect(useAppStore.getState().error).toContain('File was deleted'))
     expect(resources.active).toBe(0)
@@ -355,7 +363,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
     const state = useAppStore.getState()
     useAppStore.setState({ activeWorkspaceId: 'other', tabs: { ...state.tabs, [firstId]: first, [nextId]: next }, layouts: { ...state.layouts, other: createWorkspaceLayout('other-group', [firstId, nextId]) }, documents: { ...state.documents, [documentKey('other', 'first.txt')]: { path: 'first.txt', content: 'first\n', revision: 'r1' }, [documentKey('other', 'next.txt')]: { path: 'next.txt', content: 'next\n', revision: 'r1' } } })
     const complete = deferResultRead(), resources = trackFileNavigation(), activate = vi.spyOn(useAppStore.getState(), 'activateTab')
-    await mountReview('projection', 'other'); await clickResult('result.txt')
+    await mountReview('owner', 'other'); await clickResult('result.txt')
     await vi.waitFor(() => expect(api.files.read).toHaveBeenCalledTimes(1))
     expect(resources.active).toBe(1)
     await clickFileTab(nextId)
@@ -371,7 +379,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
 
   it('keeps a real Tab departure and return instead of treating equal final IDs as no navigation', async () => {
     const { tabId } = seedFileNavigation(), complete = deferResultRead(), resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult('result.txt')
+    await mountReview('owner'); await clickResult('result.txt')
     expect(resources.active).toBe(1)
     await clickFileTab(tabId); await clickFileTab(agentTab.id)
     expect(useAppStore.getState().layouts.repo?.groups[0]?.activeTabId).toBe(agentTab.id)
@@ -384,7 +392,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
 
   it('gives a cached actual Result choice its own intent ahead of an earlier read', async () => {
     const { tabId } = seedFileNavigation(), complete = deferResultPair('existing.txt'), resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult('result.txt'); await clickResult('existing.txt')
+    await mountReview('owner'); await clickResult('result.txt'); await clickResult('existing.txt')
     await vi.waitFor(() => expect(useAppStore.getState().editorRegionModes[initialWorkbenchRegionId(tabId)]).toBe('diff'))
     expect(vi.mocked(api.files.read).mock.calls.map((call) => call[1])).toEqual(['result.txt'])
     expect(resources.active).toBe(0)
@@ -398,7 +406,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
     let reject!: (reason: Error) => void
     vi.mocked(api.files.read).mockReturnValue(new Promise((_resolve, fail) => { reject = fail }))
     const resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult('result.txt')
+    await mountReview('owner'); await clickResult('result.txt')
     expect(resources.active).toBe(1); expect(resources.created).toBe(1)
     await act(async () => reject(new Error('read failed')))
     await vi.waitFor(() => expect(useAppStore.getState().error).toContain('read failed'))
@@ -413,7 +421,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
     const completions = new Map<string, () => void>()
     vi.mocked(api.files.read).mockImplementation((_workspaceId, path) => new Promise((done) => completions.set(path, () => done({ status: 'read', document: { path, content: 'after', revision: 'r1' } }))))
     const resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult('result.txt')
+    await mountReview('owner'); await clickResult('result.txt')
     // Real existing restoration producer, not an Editor leaf/Native restoration claim.
     const restoring = useAppStore.getState().attachPersistedFileDocument('repo', 'existing.txt')
     await vi.waitFor(() => expect(vi.mocked(api.files.read).mock.calls.map((call) => call[1])).toEqual(['result.txt', 'existing.txt']))
@@ -444,7 +452,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
   it.each(['bookmark', 'directory'] as const)('keeps the later actual Tab choice after a pending %s result', async (kind) => {
     const { tabId } = seedFileNavigation(), { path, complete } = deferNonFileResult(kind)
     const activate = vi.spyOn(useAppStore.getState(), 'activateTab'), resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult(path)
+    await mountReview('owner'); await clickResult(path)
     expect(resources.active).toBe(1)
     await clickFileTab(tabId)
     expect(activate).toHaveBeenCalledWith('repo', 'group', tabId)
@@ -463,7 +471,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
   it.each(['bookmark', 'directory'] as const)('keeps the existing %s outlet when its actual Result choice remains current', async (kind) => {
     seedFileNavigation()
     const { path, complete } = deferNonFileResult(kind), resources = trackFileNavigation()
-    await mountReview('projection'); await clickResult(path)
+    await mountReview('owner'); await clickResult(path)
     expect(resources.active).toBe(1)
     await act(complete)
     const state = useAppStore.getState()
@@ -488,7 +496,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
   it('gives a joined directory Result its own latest qualification without sharing navigation', async () => {
     const { tabId } = seedFileNavigation(), { path, complete } = deferNonFileResult('directory')
     const resources = trackFileNavigation(), open = vi.spyOn(useAppStore.getState(), 'openFile')
-    await mountReview('projection'); await clickResult(path); await clickFileTab(tabId); await clickResult(path)
+    await mountReview('owner'); await clickResult(path); await clickFileTab(tabId); await clickResult(path)
     expect(api.files.read).toHaveBeenCalledTimes(1); expect(resources.active).toBe(1)
     await act(complete)
     const state = useAppStore.getState()
@@ -515,7 +523,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
       documents: { ...stateBefore.documents, [documentKey('other', 'current.txt')]: { path: 'current.txt', content: 'current\n', revision: 'r1' } },
       config: { ...config, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], workspaces: [...config.workspaces, { id: 'other', path: '/other', name: 'Other', hostId: 'local', kind: 'folder' }] } as never })
     const otherLayout = useAppStore.getState().layouts.other
-    await mountReview('projection', 'other'); await clickResult(path)
+    await mountReview('owner', 'other'); await clickResult(path)
     expect(kind === 'bookmark' ? api.files.readBookmark : api.files.read).toHaveBeenCalledWith('repo', path)
     expect(useAppStore.getState().activeWorkspaceId).toBe('other'); expect(resources.active).toBe(1)
     await act(complete)
@@ -542,7 +550,7 @@ describe('Focus Result controls activate their exact existing workbench destinat
     const { path, complete } = deferNonFileResult('bookmark'), resources = trackFileNavigation()
     let attach!: () => void
     vi.mocked(api.browser.create).mockImplementation((id, url) => new Promise((done) => { attach = () => done(snapshot(id, url)) }))
-    await mountReview('projection'); await clickResult(path); await act(complete)
+    await mountReview('owner'); await clickResult(path); await act(complete)
     expect(api.browser.create).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(resources.active).toBe(0)
     await act(async () => useAppStore.getState().setMainSurface('board'))

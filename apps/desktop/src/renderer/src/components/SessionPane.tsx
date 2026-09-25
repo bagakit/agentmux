@@ -1,5 +1,5 @@
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason } from '@agentmux/core'
@@ -111,6 +111,8 @@ export function SessionPane({
   const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
   const [historyOpen, setHistoryOpen] = useState(false)
   const surfaceRef = useRef<HTMLElement>(null)
+  const resultAnchorId = useId()
+  const resultSurfaceAnchor = `--result-surface-${resultAnchorId.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const historyReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const historyOpenRef = useRef(historyOpen)
   historyOpenRef.current = historyOpen
@@ -206,7 +208,7 @@ export function SessionPane({
   // original root while the active workspace is the target. Reading the active root there is not merely
   // "unshortened" — when the wrong root is an ANCESTOR of the session path, the boundary guard in
   // shortenPath matches and strips it, producing a relative path rooted at the wrong repo. Measured:
-  // session /Users/me/proj/repo/src/auth.ts under a wrong root of /Users/me/proj renders `repo/src/auth.ts`,
+  // session home//proj/repo/src/auth.ts under a wrong root of home//proj renders `repo/src/auth.ts`,
   // which reads as a real answer. A wrong path that looks right is worse than a long one.
   //
   // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (/repo/sub) is
@@ -407,6 +409,10 @@ export function SessionPane({
   const pendingRestoreDetail = pendingAgentRestore && startupDecision ? continuityNotice?.reason ?? (recoveryCandidate
     ? session.status.detail
     : agentStartupRecoveryDetail(startupDecision)) : undefined
+  const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
+  const resultReview = session.kind === 'agent'
+    ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
+    : null
 
   return (
     <section
@@ -421,12 +427,13 @@ export function SessionPane({
         onHistory={!historyOpen && !inlineHistory ? openHistory : undefined}
         onRefreshObservation={observationMounted ? () => void refresh(true) : undefined}
         refreshing={refreshing}
+        resultReview={hasAgentComposer ? null : resultReview}
       /> : null}
       {launchNotice}
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }}
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
-      <div className="agent-body" data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
+      <div className="agent-body" style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
             pendingAgentRestore ? (inlineHistory ? null :
@@ -529,9 +536,6 @@ export function SessionPane({
           ) : null}
         </div>
       </div>
-      {session.kind === 'agent' ? (
-        <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} />
-      ) : null}
       <OpenDestinationPopover
         request={linkRequest}
         canSplit={canSplit}
@@ -540,7 +544,7 @@ export function SessionPane({
         }
         onSelect={onProseLinkSelect}
       />
-      {projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent' ? (
+      {hasAgentComposer && session.kind === 'agent' ? (
         <div
           className="agent-input-stack"
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
@@ -565,7 +569,7 @@ export function SessionPane({
               onRespond={async (response) => await respondInteraction(session.id, response)}
             />
           ) : null}
-          <AgentSessionComposer key={sessionId} sessionId={session.id} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer key={sessionId} sessionId={session.id} resultReview={resultReview} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>
