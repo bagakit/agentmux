@@ -41,6 +41,7 @@ const fakeElectron = vi.hoisted(() => {
     readonly close = vi.fn()
     // 手搭的替身缺一个 slice 就抛 TypeError，而栈指向生产文件，看起来像组件回归。
     readonly session = {
+      on: vi.fn(), removeListener: vi.fn(),
       setPermissionCheckHandler: vi.fn(),
       setPermissionRequestHandler: vi.fn()
     }

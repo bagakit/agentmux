@@ -13,7 +13,7 @@ vi.mock('electron', async () => {
     attached = false; attaches = 0; detaches = 0; reads = 0
     beforeRead?: () => Promise<void>
     beforeLoad?: () => Promise<void>
-    session = { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} }
+    session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} })
     navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     mainFrame = { framesInSubtree: [] }
     debugger = Object.assign(new EventEmitter(), {

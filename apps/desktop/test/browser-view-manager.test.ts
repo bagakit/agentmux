@@ -47,6 +47,7 @@ const fakeElectron = vi.hoisted(() => {
     })
     readonly capturePage = vi.fn(async () => await this.capturePageImpl())
     readonly session = {
+      on: vi.fn(), removeListener: vi.fn(),
       checkHandler: null as null | ((...args: any[]) => boolean),
       requestHandler: null as null | ((...args: any[]) => void),
       setPermissionCheckHandler: vi.fn((handler: (...args: any[]) => boolean) => {
