@@ -83,7 +83,9 @@ export function projectSessionUserMessages(params: {
 
       const author: AgentSessionUserMessageAuthor = item.authorAgentSessionId !== undefined
         ? { kind: 'agent', agentSessionId: item.authorAgentSessionId }
-        : { kind: 'unknown' }
+        : item.authorHuman === true
+          ? { kind: 'human' }
+          : { kind: 'unknown' }
 
       const source: AgentSessionUserMessageSource = {
         kind: 'captured',

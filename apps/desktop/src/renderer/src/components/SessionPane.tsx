@@ -209,7 +209,7 @@ export function SessionPane({
   // original root while the active workspace is the target. Reading the active root there is not merely
   // "unshortened" — when the wrong root is an ANCESTOR of the session path, the boundary guard in
   // shortenPath matches and strips it, producing a relative path rooted at the wrong repo. Measured:
-  // session home//proj/repo/src/auth.ts under a wrong root of home//proj renders `repo/src/auth.ts`,
+  // session /Users/me/proj/repo/src/auth.ts under a wrong root of /Users/me/proj renders `repo/src/auth.ts`,
   // which reads as a real answer. A wrong path that looks right is worse than a long one.
   //
   // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (/repo/sub) is
