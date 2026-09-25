@@ -9,18 +9,20 @@ import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 
 export type FocusMessageReader = {
-  contexts: readonly FocusContext[]; contextId: string | null; messages: readonly AgentSessionUserMessage[]
+  contexts: readonly { id: string; name: string; workspaceName: string; details?: string }[]; contextId: string | null; messages: readonly AgentSessionUserMessage[]
   loading: boolean; coverage: string; error: string | null; canContinue: boolean
   onContext(id: string): void; onMessage(message: AgentSessionUserMessage): void
   onContinue(): void; onRefresh(): void
+  sourceCoverage?: string; sourceError?: string | null; onMoreSources?: (() => void) | undefined; onRefreshSources?: () => void
 }
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected Core input. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ message, sender, recipient, lane, hierarchy, interactive, anchor, reader, onSelect, onClose }: {
+export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, onSelect, onClose }: {
   message: AgentSessionUserMessage | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
   interactive: boolean; anchor: HTMLElement; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
+  recipientName?: string | undefined; workspaceRoot?: string | undefined
 }) {
   const element = useRef<HTMLDivElement>(null)
   const returnFocus = useRef(true)
@@ -83,7 +85,11 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
       {message ? <time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Record time unknown'}</time> : null}
       {interactive ? <button type="button" className="icon-button" aria-label="Close message" onClick={onClose}><X size={12} /></button> : null}</header>
     {reader ? <div className="recent-focus__input-reader">
-      <label>Context <select aria-label="Input records Context" value={reader.contextId ?? ''} onChange={event => reader.onContext(event.target.value)}><option value="" disabled>Choose a Context</option>{reader.contexts.map(context => <option key={context.id} value={context.id}>{context.name} · {context.workspaceName}</option>)}</select></label>
+      <label>Context <select aria-label="Input records Context" value={reader.contextId ?? ''} onChange={event => reader.onContext(event.target.value)}><option value="" disabled>Choose a Context</option>{reader.contexts.map(context => <option key={context.id} value={context.id} title={context.details}>{context.name} · {context.workspaceName}</option>)}</select></label>
+      {reader.contexts.find(context => context.id === reader.contextId)?.details ? <details className="recent-focus__source-details"><summary>Source details</summary><p>{reader.contexts.find(context => context.id === reader.contextId)!.details}</p></details> : null}
+      {reader.sourceCoverage ? <p className="recent-focus__input-coverage" role="status">{reader.sourceCoverage}</p> : null}
+      {reader.sourceError ? <p className="recent-focus__input-error" role="status">{reader.sourceError} Existing inputs remain readable.</p> : null}
+      {reader.onMoreSources || reader.sourceError ? <div className="recent-focus__input-actions">{reader.onMoreSources ? <button type="button" onClick={reader.onMoreSources}>Show more input sources</button> : null}{reader.sourceError && reader.onRefreshSources ? <button type="button" onClick={reader.onRefreshSources}>Retry input sources</button> : null}</div> : null}
       <p role="status" className="recent-focus__input-coverage">{reader.loading ? 'Reading input records… ' : ''}{reader.coverage}</p>
       {reader.error ? <p role="status" className="recent-focus__input-error">{reader.error} Existing records and live input are preserved.</p> : null}
       <div className="recent-focus__input-actions"><button type="button" disabled={reader.loading || !reader.canContinue} onClick={reader.onContinue}>Read earlier records</button><button type="button" disabled={reader.loading} onClick={reader.onRefresh}>Refresh source</button></div>
@@ -92,7 +98,7 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
       </button>)}</div>
       {!reader.loading && reader.messages.length === 0 ? <p>No input records read in this view. Coverage may be incomplete.</p> : null}
     </div> : null}
-    {message ? <><p className="recent-focus__message-caption">{agent ? `Agent message · To ${recipient?.name ?? message.agentSessionId}` : 'Prompt · Sender not recorded'} · {message.source.kind === 'native' ? 'Native record' : 'Submission record'}</p>
+    {message ? <><p className="recent-focus__message-caption">{agent ? `Agent message · To ${recipient?.name ?? recipientName ?? message.agentSessionId}` : 'Prompt · Sender not recorded'} · {message.source.kind === 'native' ? 'Native record' : 'Submission record'}</p>
     {agent ? <><dl className="recent-focus__sender">
       <dt>Sender</dt><dd>{sender?.name ?? 'Context unavailable'}<small title={authorId}>{authorId}</small></dd>
       <dt>Current project</dt><dd>{project ?? 'Not recorded'}</dd>
@@ -104,7 +110,7 @@ export function FocusMessagePreview({ message, sender, recipient, lane, hierarch
       {...(authorId ? { speaker: { role: 'agent' as const, id: authorId } } : {})}
       name={agent ? sender?.name ?? 'Agent' : 'Sender not recorded'} content={message.contentParts}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
-      workspaceRoot={recipient?.workspacePath ?? ''} readPastedImage={readPastedImage} /></div>
+      workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} /></div>
     {interactive && agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ArrowUpRight size={12} aria-hidden="true" /></button> : null}
     {interactive ? <button type="button" disabled={!recipient} onClick={() => navigate(recipient)}>Return to Context</button> : <span className="recent-focus__message-hint">Click or press Enter to view actions</span>}</> : null}
   </div></WindowOverlayPortal>

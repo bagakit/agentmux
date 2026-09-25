@@ -22,7 +22,7 @@ function projectKey(identity: AgentFocusHistoryIdentity | undefined): string {
 }
 
 /** Historical segments use their own observation. Current ownership only describes current facts. */
-export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>): FocusTimelineProject[] {
+export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputSessionId?: string): FocusTimelineProject[] {
   const groups = new Map<string, FocusTimelineProject>()
   const tracks = new Map<string, FocusTimelineTrack>()
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
@@ -54,5 +54,8 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
     // This identity is used only for current-only rows; it cannot fill an old observation.
     if (!track.segments.length) track.identity = identity
   }
+  // Native/captured records do not establish a past project. Only an actually
+  // read, timed input creates this row; metadata discovery never fills a graveyard.
+  if (readonlyInputSessionId) ensure(readonlyInputSessionId, undefined)
   return [...groups.values()]
 }
