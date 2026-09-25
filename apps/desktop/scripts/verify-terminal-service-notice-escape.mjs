@@ -60,7 +60,7 @@ export class Terminal extends xterm.Terminal { constructor(...args) { super(...a
     plugins: [{ name: 'result-input-private-compile', enforce: 'pre',
       async transform(source, id) {
         if ((id.startsWith(join(desktop, 'src') + '/') || id.startsWith(fixture + '/')) && !id.includes('?')) loadedSourceInputs[id.slice(repository.length + 1)] = hash(source)
-        if (mutation && id === join(sourceRoot, mutation.file)) {
+        if (mutation && !mutation.file.endsWith('.css') && id === join(sourceRoot, mutation.file)) {
           const changed = mutation.change(source)
           assert.notEqual(changed, source, 'The actual production behavior block was changed')
           await writeFile(join(directory, 'original-source.txt'), source); await writeFile(join(directory, 'mutated-source.txt'), changed)
@@ -72,7 +72,29 @@ export class Terminal extends xterm.Terminal { constructor(...args) { super(...a
         for (const file of this.getWatchFiles()) if (file.startsWith(join(desktop, 'src') + '/') && file.endsWith('.css'))
           importedStyleInputs[file.slice(repository.length + 1)] = hash(await readFile(file))
       }
-    }], define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
+    }],
+    css: { postcss: { plugins: [{ postcssPlugin: 'terminal-notice-private-imported-css',
+      async Once(root) {
+        if (!mutation?.file.endsWith('.css')) return
+        const file = join(sourceRoot, mutation.file), original = [], replacement = []
+        root.walkDecls('flex', declaration => {
+          if (declaration.source?.input.file === file && declaration.parent.selector === '.terminal-service-window') original.push(declaration)
+        })
+        if (!original.length) return
+        const source = await readFile(file, 'utf8'), changed = mutation.change(source)
+        createRequire(require.resolve('vite'))('postcss').parse(changed, { from: file }).walkDecls('flex', declaration => {
+          if (declaration.parent.selector === '.terminal-service-window') replacement.push(declaration)
+        })
+        assert.equal(original.length, 1, 'The actual imported Terminal notice has one flex declaration')
+        assert.equal(replacement.length, 1, 'The private mutation changes that one imported declaration')
+        assert.notEqual(original[0].value, replacement[0].value)
+        const originalValue = original[0].value
+        original[0].value = replacement[0].value
+        await writeFile(join(directory, 'original-source.txt'), source); await writeFile(join(directory, 'mutated-source.txt'), changed)
+        mutationRecords.push({ file: file.slice(repository.length + 1), originalSha256: hash(source), mutatedSha256: hash(changed),
+          astDeclaration: { selector: '.terminal-service-window', property: 'flex', originalValue, mutatedValue: replacement[0].value }, productionWritten: false })
+      }
+    }] } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     build: { outDir, emptyOutDir: true, commonjsOptions: { include: [/node_modules/, /xterm-locked-925/] } } })
   assert.ok(Object.keys(loadedSourceInputs).length > 0, 'Actual loaded production sources are nonempty')
   for (const file of files.filter(file => file.endsWith('.tsx'))) assert.ok(loadedSourceInputs['apps/desktop/src/renderer/src/' + file], 'The actual production consumer is compiled: ' + file)
