@@ -7,7 +7,8 @@ describe('FullPageLoadingSurface', () => {
   it.each([
     ['loading', 'status', 'true'],
     ['recovering', 'status', 'true'],
-    ['failed', 'alert', 'false']
+    ['failed', 'alert', 'false'],
+    ['parked', 'status', 'false']
   ] as const)('renders %s as an accessible shared stage', (phase, role, busy) => {
     const markup = renderToStaticMarkup(createElement(FullPageLoadingSurface, {
       phase,
@@ -23,6 +24,9 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).toContain(`aria-busy="${busy}"`)
     expect(markup).toContain('AgentMux boot sequence')
     expect(markup).toContain('Starting the local Runtime.')
+    expect(markup.includes('full-page-loading__activity')).toBe(busy === 'true')
+    expect(markup).toContain('full-page-loading__atmosphere')
+    expect(markup).toContain('settings-banner.png')
     if (phase === 'failed') expect(markup).toContain('Retry startup')
   })
 

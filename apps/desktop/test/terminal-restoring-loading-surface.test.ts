@@ -40,12 +40,13 @@ describe('terminal restoring full-page contract', () => {
     expect(component).not.toContain('useAppStore')
     expect(terminal).toContain('replayGap')
     expect(terminal).toContain('ServiceWindowNotice')
-    expect(terminal).toContain('!hydrating && replayGap')
+    expect(terminal).toContain('replayGap || runtimeHistoryGap')
+    expect(terminal).toContain('historyNotice={historyNotice}')
   })
 
   it('has a reduced-motion path and a production caller', () => {
     expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
-    expect(styles).toMatch(/\.full-page-loading__grid::before[\s\S]*animation: none/)
+    expect(styles).toMatch(/\.full-page-loading__art[\s\S]*animation: none/)
     const productionCallers = [terminal, readFileSync(join(import.meta.dirname, '../src/renderer/src/App.tsx'), 'utf8')]
       .filter((source) => source.includes('FullPageLoadingSurface'))
     expect(productionCallers.length).toBeGreaterThan(0)
