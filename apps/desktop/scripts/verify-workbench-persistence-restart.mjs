@@ -48,7 +48,7 @@ const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
-let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic
+let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
 let goalsEntryFixture, goalsEntryRestored
@@ -186,7 +186,7 @@ async function seedWorkbench(seed) {
 async function surface(cdp) {
   return cdp.evaluate(`(() => {
     const state = JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state
-    const visible = selector => Array.from(document.querySelectorAll(selector)).filter(el => el.getClientRects().length > 0)
+    const visible = selector => Array.from(document.querySelectorAll(selector)).filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible')
     const editor = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')
     const panel = document.querySelector('.workbench-region-split > [data-panel]')
     return { workbench: state.restoredWorkbench, focus: state.agentFocus, draft: state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
@@ -198,6 +198,12 @@ async function surface(cdp) {
       tabs: visible('button.workbench-tab[data-workbench-tab-id]').map(el => el.dataset.workbenchTabId).sort(),
       regions: visible('[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
       activeRegions: visible('.workbench-region--active[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
+      regionVisibility: Array.from(document.querySelectorAll('[data-workbench-region-id]')).map(el => ({
+        regionId: el.dataset.workbenchRegionId, visibility: getComputedStyle(el).visibility, rectCount: el.getClientRects().length,
+        ancestors: Array.from((function* () { for (let node = el.parentElement; node; node = node.parentElement) yield node })())
+          .filter(node => node.inert || node.dataset.active === 'false' || node.dataset.visible === 'false')
+          .map(node => ({ className: node.className, inert: node.inert, active: node.dataset.active ?? null, visible: node.dataset.visible ?? null }))
+      })),
       ${identityMenuProof ? `identity: {name:document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header strong')?.textContent,
         stored:state.agentNames[${JSON.stringify(session.agentSessionId)}],more:visible('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more').length},` : ''}
     }
@@ -436,6 +442,8 @@ try {
   await assertPrivateRunOutsideElectronGroup(first.child.pid, originalRun.pid)
   await delay(Math.max(0, lastEditAt + 2_000 - Date.now()))
   const immediatelyBeforeCrash = await surface(first.cdp)
+  if (goalsEntryProof) surfaceDiagnostic = { stage: 'before-first-crash', regions: immediatelyBeforeCrash.regions,
+    activeRegions: immediatelyBeforeCrash.activeRegions, regionVisibility: immediatelyBeforeCrash.regionVisibility }
   const observer = await first.cdp.evaluate('window.__crashProof')
   const crashAt = Date.now()
   const hooks = observer.hooks.filter(event => event.at >= lastEditAt)
@@ -468,6 +476,8 @@ try {
   if (goalsEntryProof) await assertPrivateRunOutsideElectronGroup(second.child.pid, goalsEntryFixture.retry.process.pid)
   assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   const restored = await surface(second.cdp)
+  if (goalsEntryProof) surfaceDiagnostic = { stage: 'after-explicit-retry-and-original-focus', regions: restored.regions,
+    activeRegions: restored.activeRegions, regionVisibility: restored.regionVisibility }
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
     regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null, goalsEntry: goalsEntryRestored ?? null,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
@@ -482,6 +492,7 @@ try {
     second: { pid: second.child.pid, workbenchDigest: hash(JSON.stringify(restored.workbench)), draftDigest: hash(restored.draft ?? ''),
       exactDraftRestored: restored.draft === newDraft, exactWorkbenchRestored: JSON.stringify(restored.workbench) === JSON.stringify(restoredExpectedWorkbench),
       exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(restoredExpectedFocus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
+      regionVisibility: restored.regionVisibility,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
     limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
       'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
@@ -584,7 +595,7 @@ try {
   if (cleanupErrors.length) { failure ??= cleanupErrors[0]; cleanup.errors = cleanupErrors.map(error => error.message) }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
-const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, passed: !failure,
+const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
   failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
 // Task gate captures command output without preserving it on a failed command. Keep the same receipt
 // in the ignored diagnostic directory so an early failure remains inspectable after private cleanup.
