@@ -85,6 +85,9 @@ export function createSpeakerResolver(options?: {
  * 从 AgentSessionUserMessage 得到规范说话人。
  */
 export function speakerOfUserMessage(message: AgentSessionUserMessage): ConversationSpeaker {
+  if (message.author.kind === 'human') {
+    return { role: 'human', id: HUMAN_SPEAKER_ID }
+  }
   if (message.author.kind === 'agent') {
     return { role: 'agent', id: message.author.agentSessionId }
   }
@@ -103,6 +106,9 @@ export function speakerOf(
   const item = itemOrMessage as AgentTimelineItem
   if (item.authorAgentSessionId) {
     return { role: 'agent', id: item.authorAgentSessionId }
+  }
+  if (item.authorAgentSessionId === undefined && item.authorHuman === true) {
+    return { role: 'human', id: HUMAN_SPEAKER_ID }
   }
   if (item.source === 'user' || item.kind === 'user_message') {
     return { role: 'unknown', id: UNKNOWN_SPEAKER_ID }

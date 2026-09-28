@@ -164,7 +164,7 @@ export function AgentSessionComposer({
     if (!submitMode.canSubmit || !text.trim()) return
     const value = expandSemanticReferences(text)
     if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
-    if (!send(sessionId, value, feedback.report)) return
+    if (!send(sessionId, value, feedback.report, 'manual')) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
@@ -178,7 +178,7 @@ export function AgentSessionComposer({
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
-    if (!enqueueAgentSteer(sessionId, value, feedback.report)) return
+    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual')) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)

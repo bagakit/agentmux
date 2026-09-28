@@ -262,8 +262,8 @@ const api: AgentMuxPreloadApi = {
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
-    submitPrompt: (session, prompt, operationId, condition, authorAgentSessionId, choice) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, authorAgentSessionId, choice),
+    submitPrompt: (session, prompt, operationId, condition, authorAgentSessionId, choice, authorHuman) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, authorAgentSessionId, choice, authorHuman),
     respondInteraction: (session, response) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
     setPosture: (session: AgentSessionControl, modeId: string) =>

@@ -120,7 +120,7 @@ import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-
 import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
-import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
+import { assertManualPromptSenderTrusted, assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
 import { executeCrashLogControl, requestCrashLogReveal } from './crash-log-access.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
@@ -798,9 +798,25 @@ export async function registerIpc(args: {
     if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
     await args.runtime.paste(session, text, terminalData)
   })
-  handle('sessions:submitPrompt', async (session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }) => {
+  handleWithEvent('sessions:submitPrompt', async (
+    event,
+    session: AgentSessionControl,
+    prompt: string,
+    operationId: string,
+    condition: AgentPromptCondition,
+    authorAgentSessionId?: string,
+    choice?: { allowUncertainTurn: true },
+    authorHuman?: boolean
+  ) => {
+    let effectiveAuthorHuman = false
+    if (authorHuman === true) {
+      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      if (authorAgentSessionId === undefined) {
+        effectiveAuthorHuman = true
+      }
+    }
     pauseUserProgress(session, 'Paused for your message.')
-    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, authorAgentSessionId, choice)
+    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, authorAgentSessionId, choice, effectiveAuthorHuman)
   })
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,

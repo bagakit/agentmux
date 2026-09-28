@@ -1123,7 +1123,8 @@ export class RuntimeController {
     condition: AgentPromptCondition,
     automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     authorAgentSessionId?: string,
-    choice?: { allowUncertainTurn: true }
+    choice?: { allowUncertainTurn: true },
+    authorHuman?: boolean
   ): Promise<void> {
     const capturedCondition = validateAgentPromptCondition(condition)
     await this.trackHostLifecycleOperation(control.hostId, async () => {
@@ -1149,7 +1150,8 @@ export class RuntimeController {
           ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
           prompt,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
-          ...(authorAgentSessionId ? { authorAgentSessionId } : {})
+          ...(authorAgentSessionId ? { authorAgentSessionId } : {}),
+          ...(authorHuman === true && authorAgentSessionId === undefined ? { authorHuman: true } : {})
         })
       } catch (error) {
         // A process can exit in the small window after the first status check. Re-read the same
