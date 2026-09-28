@@ -36,6 +36,7 @@ import {
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
 import { SessionHistoryView } from './SessionHistoryView'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { AgentRegionHeader } from './AgentRegionHeader'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -446,15 +447,13 @@ export function SessionPane({
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
             pendingAgentRestore ? (inlineHistory ? null :
-              <div className="terminal-cold-parked" role="status">
-                <strong>Ready to restore</strong>
-                <span>Existing history and your draft are kept. Send your next request or use Resume.</span>
-              </div>
+              <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Session retained"
+                title="Ready to restore"
+                detail="Existing history and your draft are kept. Send your next request or use Resume." />
             ) : parked ? (
-              <div className="terminal-cold-parked" role="status" aria-live="polite">
-                <strong>Terminal parked</strong>
-                <span>Switch back to this tab to restore its terminal view.</span>
-              </div>
+              <FullPageLoadingSurface scope="region" phase="parked" eyebrow="View retained"
+                title="Terminal parked"
+                detail="Switch back to this tab to restore its terminal view." />
             ) : (
               <TerminalView
                 session={session}

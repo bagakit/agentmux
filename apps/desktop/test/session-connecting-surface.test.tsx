@@ -157,7 +157,7 @@ it('keeps reduced motion and readable prompt constraints on the actual imported 
   // 这里曾经还有一条 `prefers-reduced-motion` 断言。它守的是这张面自己那套扫描切片，而那套
   // 舞台已经整体归还给 `FullPageLoadingSurface`（见 session-connecting.css 头部）——动效不在
   // 这个文件里了，判据也就不该钉在这个文件上。同一件事下面那个 it 已经在**动效真正所在的**
-  // full-page-loading.css 上守着（`__grid::before` 与 `__signal i` 两条），这里再写一遍只会
+  // full-page-loading.css 上守着（背景画面与活动信号），这里再写一遍只会
   // 让规则搬家时红在错误的位置（记忆 test-pins-a-filename-the-rule-can-leave）。
   const start = styles.indexOf('.session-connecting__prompt pre {')
   const end = styles.indexOf('}', start)
@@ -172,6 +172,6 @@ it('keeps both state stages full-Region and gives Terminal recovery the shared s
   const styles = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/full-page-loading.css'), 'utf8')
   expect(styles).toContain('.full-page-loading--region')
   expect(styles).toContain('.full-page-loading--region')
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__grid::before[\s\S]*?animation:\s*none/)
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__signal i[\s\S]*?animation:\s*none/)
+  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__art[\s\S]*?animation:\s*none/)
+  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__activity i[\s\S]*?animation:\s*none/)
 })
