@@ -82,7 +82,8 @@ function DesktopApp() {
   const agentFocus = useAppStore((state) => state.agentFocus)
   const moteViewTargets = useMemo(() => pmoTeamsTopicFloatingViewTargets(
     moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId
-  ), [moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
+  ), [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId,
+    tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
   const mainSurface = useAppStore((state) => state.mainSurface)
   const presentationRef = useRef<DesktopAppPresentationOwner>({ loading: true,
     overlays: { settings: false, quickSwitcher: false, shortcutsHelp: false },
@@ -377,7 +378,6 @@ function DesktopApp() {
                   })}
                 </div>
               ) : null}
-              <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />
             </section>
           </div>
         <div className="main-shell__notices">
@@ -393,6 +393,7 @@ function DesktopApp() {
         </div>
       </main>
       </div>
+      <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />
       {settingsRoute ? (
         <SettingsPanel
           initialSection={settingsRoute.section}

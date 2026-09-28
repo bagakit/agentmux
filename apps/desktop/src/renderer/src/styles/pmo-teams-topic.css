@@ -1,29 +1,50 @@
-.pmo-teams-topic-floating { position: fixed; inset: auto; margin: 0; width: min(720px, calc(100vw - 16px)); height: min(520px, calc(100vh - 48px)); padding: 0; overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text); box-shadow: 0 4px 12px var(--scrim-1), 0 24px 64px var(--scrim-2); }
-.pmo-teams-topic-floating:popover-open { display: flex; flex-direction: column; }
-.mote-chooser { display: flex; align-items: center; flex: none; gap: var(--sp-1); min-width: 0; padding: var(--sp-1); border-bottom: 1px solid var(--line-soft); }
-.mote-chooser__choices { display: flex; flex: 1; align-items: center; gap: var(--sp-1); min-width: 0; overflow-x: auto; scrollbar-width: thin; }
-.mote-chooser__choice { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; width: clamp(120px, 28vw, 204px); min-height: 32px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
-.mote-chooser__choice:hover { background: var(--surface-2); }
-.mote-chooser__choice[aria-pressed="true"] { border-color: var(--line); background: var(--surface-2); color: var(--text); }
+.pmo-teams-topic-floating { position: fixed; inset: auto; margin: 0; width: min(720px, calc(100vw - 16px)); height: min(520px, calc(100vh - 48px)); padding: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text-2) 36%, var(--line)); border-radius: var(--radius); background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-3) 70%, transparent), 0 4px 12px var(--scrim-1), 0 20px 48px var(--scrim-2); }
+.pmo-teams-topic-floating:popover-open { display: flex; flex-direction: row; }
+.mote-chooser { display: flex; flex-direction: column; flex: 0 0 172px; gap: var(--sp-2); min-width: 0; min-height: 0; padding: var(--sp-2); border-right: 1px solid var(--line); background: var(--surface-2); }
+.mote-chooser__choices { display: flex; flex-direction: column; flex: 1; gap: var(--sp-1); min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.mote-chooser__choice { position: relative; display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: var(--sp-1); width: 100%; min-height: 50px; padding: 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.mote-chooser__choice:hover { background: var(--surface-3); }
+.mote-chooser__choice[aria-pressed="true"] { border-color: var(--text-3); background: var(--surface-3); color: var(--text); box-shadow: var(--hl); }
 .mote-chooser__name { display: flex; align-items: center; gap: var(--sp-1); width: 100%; min-width: 0; }
 .mote-chooser__name > strong { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-body); font-weight: 500; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.mote-chooser__name > img { flex: none; width: 16px; height: 16px; object-fit: contain; }
-.mote-chooser__name .space-object-icon { flex: none; }
+.mote-chooser__name > img { flex: none; width: 24px; height: 24px; object-fit: contain; }
+.mote-chooser__name .space-object-icon, .mote-chooser__name .space-object-icon > svg { flex: none; width: 24px; height: 24px; }
+.mote-chooser__selected { position: absolute; right: 6px; bottom: 6px; }
 .mote-chooser__status { display: flex; align-items: center; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.2; white-space: nowrap; }
+.mote-chooser__availability { display: inline-flex; align-items: center; justify-content: center; width: 7px; height: 7px; font-size: 10px; font-weight: 600; }
+.mote-chooser__identity { position: fixed; z-index: var(--layer-tooltip); max-width: min(280px, calc(100vw - 80px)); padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-3); box-shadow: 0 4px 12px var(--scrim-1); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; pointer-events: none; }
 .mote-chooser__choice:focus-visible { outline: 2px solid var(--green-2); outline-offset: -2px; }
-.mote-chooser__actions { display: flex; flex: none; align-items: center; gap: var(--sp-1); }
+.mote-chooser__actions { display: flex; flex: none; align-items: center; justify-content: center; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
 .mote-chooser__actions > button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .mote-chooser__actions > button:hover { background: var(--surface-3); color: var(--text); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser { flex-basis: 56px; padding: var(--sp-1); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__choice { align-items: center; justify-content: center; min-height: 44px; padding: var(--sp-1); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__name { justify-content: center; }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__name > strong, .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__status-text { display: none; }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__status { position: absolute; right: 4px; bottom: 4px; padding: 2px; border-radius: 4px; background: var(--surface-2); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__selected { left: 2px; right: auto; bottom: 2px; border-radius: 3px; background: var(--surface-3); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__actions { flex-direction: column; }
+.pmo-teams-topic-floating__content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; container-type: inline-size; container-name: mote-workface; }
 .pmo-teams-topic-floating__body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .pmo-teams-topic-floating__body > .workspace-workbench { flex: 1; min-height: 0; width: 100%; height: auto; }
 .pmo-teams-topic-floating .mote-context-notice { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; }
 .pmo-teams-topic-floating .mote-context-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pmo-teams-topic-floating .mote-context-notice > button { flex: none; white-space: nowrap; }
-.pmo-teams-topic-compact-launcher { position: relative; display: inline-flex; align-items: center; justify-content: center; }
-.pmo-teams-topic-compact-launcher__button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; cursor: pointer; }
-.pmo-teams-topic-compact-launcher__button:hover { background: var(--surface-2); }
-.pmo-teams-topic-compact-launcher__button:focus-visible { outline: 2px solid var(--green-2); outline-offset: 2px; }
-.pmo-teams-topic-compact-launcher__button img { position: relative; z-index: 1; width: 30px; height: 28px; border-radius: 5px; object-fit: contain; }
-.pmo-teams-topic-compact-launcher__status { position: absolute; z-index: 3; top: 2px; right: 2px; display: flex; padding: 1px; border-radius: 50%; background: var(--surface-2); }
+.pmo-teams-topic-compact-launcher { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; cursor: pointer; }
+.pmo-teams-topic-compact-launcher__button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+.pmo-teams-topic-compact-launcher__button:hover { background: transparent; }
+.pmo-teams-topic-compact-launcher__button:focus-visible { outline: none; }
+.pmo-teams-topic-compact-launcher__surface { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 17px; background: var(--surface-2); pointer-events: none; }
+.pmo-teams-topic-compact-launcher__button:focus-visible .pmo-teams-topic-compact-launcher__surface { outline: 2px solid var(--green-2); outline-offset: -2px; }
+.pmo-teams-topic-compact-launcher__button img { position: relative; z-index: 1; width: 26px; height: 26px; border-radius: 5px; object-fit: contain; }
+.pmo-teams-topic-compact-launcher__status { position: absolute; z-index: 3; bottom: 4px; right: 4px; display: flex; padding: 1px; border-radius: 50%; background: var(--surface-2); }
 .pmo-teams-topic-compact-launcher__status .status__dot { width: 5px; height: 5px; box-shadow: none; }
 .pmo-teams-topic-compact-launcher__status .status__dot::after { display: none; }
+@media (max-width: 560px) {
+  .pmo-teams-topic-floating[data-mote-navigation="cards"] .mote-chooser { flex-basis: 136px; padding: var(--sp-1); }
+  .mote-chooser__choice { padding: var(--sp-1); }
+}
+@container mote-workface (max-width: 320px) {
+  .pmo-teams-topic-floating .composer:has(.composer-tools[data-mode='collapsed']) { display: block; }
+  .pmo-teams-topic-floating .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { display: flex; }
+}

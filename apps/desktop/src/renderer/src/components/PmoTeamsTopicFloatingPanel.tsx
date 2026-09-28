@@ -1,6 +1,6 @@
-import { X, Maximize2 } from 'lucide-react'
+import { Check, Circle, X, Maximize2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
@@ -21,9 +21,10 @@ import { StatusDot } from './StatusDot'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 
-const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect }: {
+const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity }: {
   topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | undefined
   onSelect(topicId: string, tabId: string | undefined): void
+  onIdentity(anchor: HTMLButtonElement | null): void
 }) {
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
     targetTopicId: topic.id, ...(selected ? { targetTabId: savedTabId } : {}) }), [topic.id, selected, savedTabId])
@@ -38,34 +39,72 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const status = moteTargetStatus(tab, session, tabId)
+  const restoring = Boolean(tabId && (!tab || !region || region.kind === 'agent' && !session))
   return <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
     data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
-    aria-label={topic.title + ' · ' + status} title={topic.title + ' · ' + status} onClick={() => onSelect(topic.id, tabId)}>
+    aria-label={topic.title + ' · ' + status} onClick={() => onSelect(topic.id, tabId)}
+    onPointerEnter={event => { if (event.pointerType === 'mouse') onIdentity(event.currentTarget) }}
+    onPointerLeave={() => onIdentity(null)} onFocus={event => onIdentity(event.currentTarget)} onBlur={() => onIdentity(null)}>
     <span className="mote-chooser__name">
       {topic.id === PMO_TEAMS_TOPIC_ID && manualIcon === null ? <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" /> :
         <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon} />}
       <strong>{topic.title}</strong>
-    </span><span className="mote-chooser__status">{session ? <StatusDot status={session.status} /> : null}{status}</span>
+    </span><span className="mote-chooser__status">
+      {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? '?' : <Circle size={7} />}</span>}
+      <span className="mote-chooser__status-text">{status}</span>
+    </span>
+    {selected ? <Check className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
   </button>
 })
-const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, onSelect, onOpenSpace, onClose }: {
+function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [label, setLabel] = useState(anchor.getAttribute('aria-label') ?? '')
+  useLayoutEffect(() => {
+    const tooltip = ref.current, boundary = anchor.closest<HTMLElement>('[data-pmo-teams-topic-floating]')
+    if (!tooltip || !boundary) return
+    let disposed = false
+    const sync = () => setLabel(anchor.getAttribute('aria-label') ?? '')
+    const observer = new MutationObserver(sync)
+    observer.observe(anchor, { attributes: true, attributeFilter: ['aria-label'] }); sync()
+    const position = async () => {
+      const result = await computePosition(anchor, tooltip, { placement: 'right', strategy: 'fixed',
+        middleware: [offset(6), flip({ boundary, padding: 8 }), shift({ boundary, padding: 8 })] })
+      if (!disposed) Object.assign(tooltip.style, { left: result.x + 'px', top: result.y + 'px' })
+    }
+    const stop = autoUpdate(anchor, tooltip, () => { void position() })
+    return () => { disposed = true; observer.disconnect(); stop() }
+  }, [anchor])
+  return <div ref={ref} role="tooltip" className="mote-chooser__identity">{label}</div>
+}
+
+const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onOpenSpace, onClose }: {
   topics: readonly ScratchTopicSnapshot[]; topicId: string; tabId: string | undefined
+  railMode: 'cards' | 'avatars'; onToggleMode(): void
   onSelect(topicId: string, tabId: string | undefined): void; onOpenSpace(): void; onClose(): void
 }) {
+  const [identityAnchor, setIdentityAnchor] = useState<HTMLButtonElement | null>(null)
+  const showIdentity = useCallback((anchor: HTMLButtonElement | null) => {
+    const name = anchor?.querySelector<HTMLElement>('.mote-chooser__name > strong')
+    setIdentityAnchor(anchor && (railMode === 'avatars' || name && name.scrollWidth > name.clientWidth) ? anchor : null)
+  }, [railMode])
   return <div className="mote-chooser">
     <div className="mote-chooser__choices" role="group" aria-label="Motes">
-      {topics.map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} />)}
+      {topics.map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} />)}
     </div>
     <div className="mote-chooser__actions">
+      <button type="button" aria-label="Show Mote avatars only" aria-pressed={railMode === 'avatars'} title={railMode === 'cards' ? 'Show avatars only' : 'Show Mote cards'} onClick={onToggleMode}>
+        {railMode === 'cards' ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+      </button>
       <button type="button" aria-label="Open Mote Space" title="Open current Mote in Space" onClick={onOpenSpace}><Maximize2 size={13} /></button>
       <button type="button" aria-label="Close Mote" title="Close" onClick={onClose}><X size={13} /></button>
     </div>
+    {identityAnchor?.isConnected ? <MoteIdentityTip anchor={identityAnchor} /> : null}
   </div>
 })
 
 function foreignFloatOwnsKeyboardEvent(event: KeyboardEvent, panel: HTMLElement | null): boolean {
   const owner = event.target instanceof Element
-    ? event.target.closest('[data-overlay-layer], [popover], [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"]')
+    ? event.target.closest('[data-overlay-layer]:not([data-overlay-layer="window-chrome"]), [popover], [role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"]')
     : null
   return Boolean(owner && owner !== panel && (!owner.hasAttribute('popover') || owner.matches(':popover-open')))
 }
@@ -83,6 +122,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   const motes = useMemo(() => scratchMoteTopics(topics), [topics])
   const target = usePmoTeamsTopicTarget(floating)
   const visible = floating.open || floating.preview
+  const railMode = floating.railMode ?? 'cards'
   const panelRef = useRef<HTMLDivElement>(null)
   const floatingRef = useRef(floating); floatingRef.current = floating
   const spaceActionRef = useRef<AbortController | null>(null)
@@ -206,9 +246,13 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     data-mote-target-topic={target.topicId} data-mote-target-tab={target.tabId} data-mote-target-region={target.region?.regionId}
     data-mote-target-session={target.session?.id} data-mote-status={target.statusText}
     data-mote-presentation={floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed'}
+    data-mote-navigation={railMode}
     onToggle={event => { if (event.newState === 'closed' && (floatingRef.current.open || floatingRef.current.preview)) requestPmoTeamsTopicFloatingClose({ restoreFocus: false }) }}>
     <span hidden id="mote-floating-context-status">{target.label} · {target.statusText}</span>
-    {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={target.tabId} onSelect={selectMote} onOpenSpace={openSpace} onClose={close} /> : null}
+    {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={target.tabId} railMode={railMode}
+      onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
+      onSelect={selectMote} onOpenSpace={openSpace} onClose={close} /> : null}
+    <div className="pmo-teams-topic-floating__content">
     {!scratch ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
     {visible && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>
@@ -219,6 +263,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
         viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX} projectionTabId={target.tabId} visible={visible} interactiveResize={false}
         onTabSelect={tabId => { if (tabId !== target.tabId) { spaceActionRef.current?.abort(); setFloating({ targetTabId: tabId }) } }} />
+    </div>
     </div>
   </div></WorkbenchPresentationContext.Provider>
 }

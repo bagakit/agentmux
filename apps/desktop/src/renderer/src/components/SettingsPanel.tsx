@@ -3,6 +3,7 @@ import { Check, ChevronDown, LayoutDashboard, Search, Settings2, X } from 'lucid
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
 import { useAppStore } from '../store'
+import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { SETTINGS_GROUPS as GROUPS } from './settings/settings-catalog'
 import { settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
@@ -52,7 +53,7 @@ export function SettingsPanel({ onClose, initialSection = 'overview', executorId
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return
       if (query) { setQuery(''); return }
       if (event.target instanceof HTMLSelectElement) return
       onClose()
