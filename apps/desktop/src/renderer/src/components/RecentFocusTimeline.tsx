@@ -207,8 +207,8 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
 function FocusHistoryObservation({ segment, anchor, onClose }: { segment: FocusTimeSegment; anchor: HTMLElement; onClose(): void }) {
   const identity = segment.identity
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
-    <Dialog.Overlay className="confirmation-dialog__overlay" />
-    <Dialog.Content className="confirmation-dialog recent-focus__observation" onCloseAutoFocus={event => { event.preventDefault(); if (anchor.isConnected && document.activeElement === document.body) anchor.focus() }}>
+    <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
+    <Dialog.Content className="confirmation-dialog dialog-surface recent-focus__observation" onCloseAutoFocus={event => { event.preventDefault(); if (anchor.isConnected && document.activeElement === document.body) anchor.focus() }}>
       <Dialog.Title className="confirmation-dialog__title">{identity?.name ?? segment.sessionId}</Dialog.Title>
       <Dialog.Description className="confirmation-dialog__description">Retained focus observation. Reading it does not restore a Session.</Dialog.Description>
       <dl><dt>Focused</dt><dd>{dateClock(segment.focusedAt)}</dd><dt>Next focus</dt><dd>{segment.end === undefined ? 'Not recorded' : dateClock(segment.end)}</dd>

@@ -32,8 +32,8 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   }
   return <Dialog.Root open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}>
-      <Dialog.Overlay className="space-icon-picker__overlay" />
-      <Dialog.Content className="space-icon-picker" onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+      <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
+      <Dialog.Content className="space-icon-picker dialog-surface" onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}
         onCloseAutoFocus={event => {
           event.preventDefault()

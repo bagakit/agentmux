@@ -80,9 +80,9 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
       <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-        <Dialog.Overlay className="quick-switch__overlay" />
+        <Dialog.Overlay className="quick-switch__overlay dialog-scrim" />
         <Dialog.Content
-          className="quick-switch"
+          className="quick-switch dialog-surface"
           aria-label="Jump to a session or tab"
           onKeyDown={(event) => {
             // 组字确认用的 Enter（CJK 输入法）不能激活选中项，否则一次组字确认会误跳到某个会话/标签。

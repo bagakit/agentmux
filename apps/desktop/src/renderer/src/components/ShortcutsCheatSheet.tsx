@@ -38,9 +38,9 @@ export function ShortcutsCheatSheet({
   if (!open || !overlayHost) return null
   const groups = buildCheatSheet(isMac)
   return createPortal(
-    <div className="shortcuts-help__overlay" role="presentation" onClick={onClose}>
+    <div className="shortcuts-help__overlay dialog-scrim" role="presentation" onClick={onClose}>
       <div
-        className="shortcuts-help"
+        className="shortcuts-help dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"

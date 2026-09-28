@@ -5,34 +5,45 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-.confirmation-dialog__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
-.confirmation-dialog {
-  position: fixed;
-  z-index: var(--layer-dialog);
-  pointer-events: auto;
-  top: 50%;
-  left: 50%;
-  width: min(380px, calc(100vw - 32px));
-  padding:var(--sp-6);
-  transform: translate(-50%, -50%);
-  border: 1px solid var(--neutral-1);
-  border-radius: var(--radius-lg);
-  outline: none;
-  color: var(--text);
-  background: var(--surface-2);
-  box-shadow: 0 30px 90px var(--scrim-3);
+/* One material for task dialogs; each caller owns its layout and behavior. */
+.dialog-scrim { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-2); backdrop-filter: blur(4px); pointer-events: auto; }
+.dialog-surface {
+  z-index: var(--layer-dialog); pointer-events: auto; box-sizing: border-box;
+  max-height: calc(100dvh - 32px); outline: none; color: var(--text);
+  border: 0; border-radius: var(--radius-lg); background: var(--overlay-surface);
+  backdrop-filter: blur(var(--material-control-blur));
+  box-shadow: var(--elev-3), var(--hl-strong), 0 0 0 1px var(--material-control-line);
 }
-.confirmation-dialog__icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; margin-bottom:var(--sp-5); border: 1px solid var(--red-line); border-radius: var(--radius); color: var(--red-text); background: var(--red-bg); }
-.confirmation-dialog__title { margin:0; font-size: var(--fs-title); letter-spacing: -.015em; }
-.confirmation-dialog__description { margin:var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.55; }
-.confirmation-dialog > p { margin:var(--sp-5) 0 0; padding:var(--sp-4) var(--sp-4); overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font-family: "SFMono-Regular", monospace; font-size: var(--fs-meta); text-overflow: ellipsis; white-space: nowrap; }
-.confirmation-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding-top:var(--sp-5); border-top: 1px solid var(--line); }
+.dialog-surface[data-state='open'] { animation: dialog-surface-enter var(--dur-enter) var(--ease-enter); }
+.dialog-surface footer { flex-wrap: wrap; }
+.dialog-surface footer :is(.small-button, .primary-button, .danger-button) {
+  min-height: 28px; height: auto; padding: var(--sp-2) var(--sp-4); gap: var(--sp-3);
+  border: 0; border-radius: var(--radius-sm); font-size: var(--fs-body); line-height: 1.4; white-space: normal;
+}
+.dialog-surface footer .small-button { background: transparent; color: var(--text-2); box-shadow: none; }
+.dialog-surface footer .small-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.dialog-surface footer .primary-button { background: var(--green-bg); color: var(--green-text); box-shadow: none; }
+.dialog-surface footer .primary-button:hover:not(:disabled) { background: var(--green-bg-hover); }
+.dialog-surface footer .danger-button { background: var(--red-bg); color: var(--red-text); box-shadow: none; }
+.dialog-surface footer .danger-button:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 22%, var(--surface-0)); }
+.dialog-surface footer button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+@keyframes dialog-surface-enter { from { opacity: 0; translate: 0 4px; } to { opacity: 1; translate: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .dialog-surface[data-state='open'] { animation: none; } }
+
+.confirmation-dialog { position: fixed; top: 50%; left: 50%; width: min(400px, calc(100vw - 32px)); padding: var(--sp-6); transform: translate(-50%, -50%); overflow-y: auto; }
+.confirmation-dialog__heading { display: flex; align-items: center; gap: var(--sp-3); }
+.confirmation-dialog__heading > svg { flex: none; color: var(--red-text); }
+.confirmation-dialog__title { min-width: 0; margin: 0; font-size: var(--fs-title); font-weight: 600; line-height: 1.4; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.confirmation-dialog__subject { margin: var(--sp-3) 0 0; color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
+.confirmation-dialog__description { margin: var(--sp-4) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }
+.confirmation-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }
+.confirmation-dialog__cancel { margin-right: auto; }
+.dialog-surface footer .confirmation-dialog__confirm--neutral { background: var(--surface-3); color: var(--text); }
 
 /* Quick switcher — the window's one global navigation overlay. Graphite surface at the top elevation
    and largest radius; layered by surface fill + top highlight + shadow, not a stroke (density SSOT:
    "描边不作为控件的主要视觉手段"). Accent appears only to express a row's STATE (needs-you / error),
    never as decoration; row title ≥12px, subtitle at the 10–11px metadata floor. */
-.quick-switch__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
 .quick-switch {
   position: fixed;
   z-index: var(--layer-dialog);
@@ -44,12 +55,8 @@
   display: flex;
   flex-direction: column;
   transform: translateX(-50%);
-  border-radius: var(--radius-lg);
-  outline: none;
-  color: var(--text);
-  background: var(--surface-2);
-  box-shadow: var(--elev-3), var(--hl-strong);
   overflow: hidden;
+
 }
 /* Visually hidden, still read to assistive tech — one declaration for every dialog label that names
    itself without spending visible chrome: the quick switcher's title/description and the image
@@ -95,21 +102,17 @@
    is not a discovery channel). A plain conditional overlay, not a Radix Dialog, so it renders under the
    repo's renderToStaticMarkup tests. Same graphite elevation language as the quick switcher: surface fill
    + top highlight + shadow carry the layer, no stroke as the primary means. */
-.shortcuts-help__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; display: flex; align-items: flex-start; justify-content: center; padding:12vh var(--sp-6) var(--sp-6); background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
+.shortcuts-help__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; display: flex; align-items: flex-start; justify-content: center; padding:12vh var(--sp-6) var(--sp-6);  }
 .shortcuts-help {
   width: min(640px, 100%);
   max-height: 76vh;
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius-lg);
-  outline: none;
-  color: var(--text);
-  background: var(--surface-2);
-  box-shadow: var(--elev-3), var(--hl-strong);
   overflow: hidden;
+
 }
 .shortcuts-help__head { display: flex; align-items: flex-start; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); box-shadow: inset 0 -1px var(--line-soft); }
-.shortcuts-help__mark { flex: none; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); color: var(--text-2); background: var(--surface-3); }
+.shortcuts-help__mark { flex: none; width: 18px; height: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
 .shortcuts-help__head > div { flex: 1; min-width: 0; }
 .shortcuts-help__head h2 { margin:0; font-size: var(--fs-title); letter-spacing: -.015em; }
 .shortcuts-help__head p { margin:var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-micro); }
@@ -207,7 +210,7 @@
    window and clicking it closes (Radix routes an overlay click to onOpenChange); the content is only the
    image, sized to fit the viewport with room to breathe, so the whole point — seeing it larger — is met
    without chrome. The a11y title names the dialog for assistive tech without spending visible height. */
-.md-conversation-image__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(2px); pointer-events: auto; }
+.md-conversation-image__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-2); backdrop-filter: blur(4px); pointer-events: auto; }
 .md-conversation-image__lightbox {
   position: fixed;
   z-index: var(--layer-dialog);
