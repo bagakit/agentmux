@@ -449,7 +449,12 @@ export function SessionPane({
             pendingAgentRestore ? (inlineHistory ? null :
               <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Session retained"
                 title="Ready to restore"
-                detail="Existing history and your draft are kept. Send your next request or use Resume." />
+                detail="Existing history and your draft are kept. Send your next request or use Resume."
+                details={{ summary: 'Retained session', content: <dl>
+                  <dt>Session</dt><dd>{session.label}</dd>
+                  <dt>Session ID</dt><dd>{session.id}</dd>
+                  <dt>Retained Run</dt><dd>{session.control.run.runId}</dd>
+                </dl> }} />
             ) : parked ? (
               <FullPageLoadingSurface scope="region" phase="parked" eyebrow="View retained"
                 title="Terminal parked"

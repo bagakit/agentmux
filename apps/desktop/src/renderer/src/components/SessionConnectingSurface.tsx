@@ -45,15 +45,15 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
   >
     <div className="session-connecting__body">
       <header className="session-connecting__heading" role="status" aria-live="polite">
-        <h2>{title}<span className="session-connecting__cursor" aria-hidden="true">_</span></h2>
+        <h2>{title}</h2>
         <p>{detail}</p>
       </header>
       {surfaceKind === 'agent' ? <div className="session-connecting__executor">
         {executor
-          ? <AgentAvatar providerId={executor.providerId} executorId={request?.executorId} label={executorLabel} appearance={appearance} size={26} />
-          : <SquareDashed size={24} aria-label="Unknown executor" />}
+          ? <AgentAvatar providerId={executor.providerId} executorId={request?.executorId} label={executorLabel} appearance={appearance} size={18} />
+          : <SquareDashed size={18} aria-label="Unknown executor" />}
         <div><span className="session-connecting__eyebrow">Executor</span><strong>{executorLabel}</strong></div>
-      </div> : <div className="session-connecting__executor"><TerminalSquare size={24} /><strong>Terminal</strong></div>}
+      </div> : <div className="session-connecting__executor"><TerminalSquare size={18} /><strong>Terminal</strong></div>}
       {surfaceKind === 'agent' ? <section className="session-connecting__prompt" aria-label="Initial prompt">
         <div className="session-connecting__prompt-heading">
           <span className="session-connecting__eyebrow">Initial prompt</span>
