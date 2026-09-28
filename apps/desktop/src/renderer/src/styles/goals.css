@@ -3,15 +3,24 @@
 .goals-index { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; min-height: 0; }
 .goals-surface--detail-open .goals-index { flex: 0 0 39%; }
 .goals-entry { flex: none; padding: var(--sp-6) var(--sp-5); border-bottom: 1px solid var(--line-soft); }
-.goals-entry__heading { margin: 0 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
-.goals-entry__actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-.goals-entry__actions > button { display: flex; flex: 1 1 240px; min-width: 0; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: inherit; font-size: var(--fs-body); line-height: 1.6; text-align: left; cursor: pointer; }
-.goals-entry__actions > button:hover { color: var(--text); background: var(--surface-2); border-color: var(--line); }
-.goals-entry__actions > button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; }
-.goals-entry__actions > button:disabled { opacity: .55; cursor: default; }
-.goals-entry__actions > button > span { min-width: 0; overflow-wrap: anywhere; }
-.goals-entry__actions > button > svg { flex: none; }
-.goals-entry__actions small { display: block; color: var(--text-3); font-size: var(--fs-meta); }
+.goals-entry__heading { margin: 0 0 var(--sp-4); color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.5; }
+.goals-entry__actions { display: flex; flex-direction: column; width: 100%; max-width: 640px; border: 1px solid var(--material-control-line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.goals-entry__actions > button { display: flex; width: 100%; min-width: 0; min-height: 44px; align-items: start; gap: var(--sp-5); padding: var(--sp-5); border: 0; color: var(--text-2); background: transparent; font: var(--fs-prose)/1.5 var(--font-sans); text-align: left; cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.goals-entry__actions > button + button { border-top: 1px solid var(--line-soft); }
+.goals-entry__actions > button:first-child { border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
+.goals-entry__actions > button:last-child { border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px); }
+.goals-entry__actions > button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+.goals-entry__actions > button:active:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.goals-entry__actions > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.goals-entry__actions > button:disabled { color: var(--text-2); cursor: default; }
+.goals-entry__copy { min-width: 0; overflow-wrap: anywhere; }
+.goals-entry__request { display: block; text-wrap: pretty; }
+.goals-entry__request strong { color: var(--text); font-weight: 600; }
+.goals-entry__actions > button > svg { flex: none; margin-top: calc((1.5em - 15px) / 2); color: var(--text-3); }
+.goals-entry__actions small { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.goals-entry__preparing { margin: var(--sp-4) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .goals-entry__actions > button { transition: none; } }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .goals-entry__actions { border-color: var(--line); box-shadow: none; } }
 .goals-toolbar { display: flex; align-items: center; gap: var(--sp-3); flex: none; min-height: 38px; padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--line-soft); }
 .goals-search { display: flex; align-items: center; flex: 1; min-width: 64px; gap: var(--sp-3); height: 28px; color: var(--text-3); }
 .goals-search input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
