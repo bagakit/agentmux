@@ -114,6 +114,11 @@
      让下层隐约透出以说明层级关系。此前散成 f2/f5/f7 三个只差几个 alpha 的手调值。 */
   --overlay-surface: color-mix(in srgb, var(--surface-2) 96%, transparent);
   --overlay-line: color-mix(in srgb, var(--green) 22%, transparent);
+  /* Settings 的功能材质：内容始终实色，高不透明度保护两种主题下的文字。 */
+  --material-control-surface: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  --material-control-line: color-mix(in srgb, var(--text) 12%, var(--line-soft));
+  --material-control-glint: color-mix(in srgb, var(--text) 8%, transparent);
+  --material-control-blur: 16px;
   /* 中性灰阶：--text-3 与 --line 之间的中间层，此前手调出七八个近似值。
      用途是禁用文字、次级图标、滚动条与终端选区这类既不是正文也不是分隔线的东西。 */
   --neutral-1: #3b403e;  /* 滚动条轨道、终端选区底 */

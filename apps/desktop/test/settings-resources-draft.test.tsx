@@ -25,15 +25,14 @@ beforeEach(async()=>{
  vi.spyOn(api.config,'save').mockImplementation(async(next,expected)=>await f.owner.edit(expected!,next))
 })
 const pane=async(section:'prompts'|'agents')=>dom.render(<SettingsPanel onClose={()=>{}} initialSection={section}/> )
-const row=(id:string)=>[...dom.container.querySelectorAll<HTMLDetailsElement>('.prompt-settings-card')].find(node=>node.querySelector('input')?.value===id)!
 const field=(label:string,index=0)=>[...dom.container.querySelectorAll<HTMLLabelElement>('[data-settings-pane="prompts"] label')].filter(n=>n.querySelector('span')?.textContent===label)[index]!.querySelector<HTMLInputElement|HTMLTextAreaElement>('input,textarea')!
 async function fill(node:HTMLInputElement|HTMLTextAreaElement,value:string){
  expect(node).not.toBeNull()
  await act(async()=>{const prototype=node instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}))})
 }
 async function settled(){
- for(let tries=0;tries<100;tries++){
-  await act(async()=>{await new Promise(done=>setTimeout(done,5))})
+ for(let tries=0;tries<300;tries++){
+  await act(async()=>{await new Promise(done=>setTimeout(done,10))})
   if(!dom.container.querySelector('.settings-pane-actions [role="status"]')?.textContent?.includes('Saving'))return
  }
  throw new Error('durable resource save did not settle')
@@ -47,12 +46,13 @@ describe('resource editors keep authored baselines through real SettingsPanel sa
   const providerId='additional-provider'
   expect([...BUILT_IN_AGENT_PROVIDER_IDS]).not.toContain(providerId)
   await external('one',{providerId});await pane('prompts')
-  const cards=dom.container.querySelectorAll('.prompt-settings-card')
-  expect(cards).toHaveLength(2)
+  expect(dom.container.querySelectorAll('[data-prompt-id]')).toHaveLength(2)
+  const cards=dom.container.querySelectorAll('[data-prompt-editor]')
+  expect(cards).toHaveLength(1)
   const select=cards[0]!.querySelector('select')!
   expect(select).not.toBeNull();expect(select.value).toBe(providerId)
   expect([...select.options].filter(option=>option.value===providerId).map(option=>option.textContent)).toEqual([providerId])
-  expect(cards[0]!.querySelector('summary')!.textContent).toContain(`${providerId} only`)
+  expect(cards[0]!.querySelector('.prompt-editor__heading')!.textContent).toContain(`${providerId} only`)
   await fill(field('Name'),'Local');await save()
   expect(f.owner.current.composerShortcuts![0]!.providerId).toBe(providerId)
   expect((await f.disk()).composerShortcuts![0]!.providerId).toBe(providerId)
@@ -152,11 +152,10 @@ describe('resource editors keep authored baselines through real SettingsPanel sa
  })
  it('keeps local Prompt deletions after a failed durable Save, then retries the same original baseline',async()=>{
   await pane('prompts')
-  const buttons=[...dom.container.querySelectorAll<HTMLButtonElement>('.prompt-settings-card button')].filter(node=>node.textContent?.includes('Delete prompt'))
-  expect(buttons).toHaveLength(2)
-  await act(async()=>buttons[0]!.click())
+  expect(dom.container.querySelectorAll('[data-prompt-id]')).toHaveLength(2)
+  await dom.click('.prompt-editor__remove button')
   vi.mocked(api.config.save).mockRejectedValueOnce(new Error('disk unavailable'))
-  await save();expect(dom.container.querySelectorAll('.prompt-settings-card')).toHaveLength(1)
+  await save();expect(dom.container.querySelectorAll('[data-prompt-id]')).toHaveLength(1)
   expect(dom.container.querySelector('[role="alert"]')!.textContent).toBe('disk unavailable')
   await save();expect(f.owner.current.composerShortcuts).toEqual([prompts[1]])
   expect(vi.mocked(api.config.save).mock.calls.map(([,expected])=>expected!.composerShortcuts)).toEqual([prompts,prompts])
