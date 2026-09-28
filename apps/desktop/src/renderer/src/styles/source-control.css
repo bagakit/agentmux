@@ -56,23 +56,23 @@
 .branches-empty { min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-5); color: var(--text-3); font-size: var(--fs-micro); text-align: center; }
 .branches-empty strong { color: var(--text-2); font-size: var(--fs-meta); }
 .branches-empty--error span { max-width: 230px; line-height: 1.4; }
-.branch-create-dialog { position: fixed; z-index: var(--layer-dialog); pointer-events: auto; top: 50%; left: 50%; width: min(440px, calc(100vw - 32px)); transform: translate(-50%, -50%); border: 1px solid var(--neutral-1); border-radius: var(--radius-lg); outline: none; color: var(--text); background: var(--surface-2); box-shadow: 0 30px 90px var(--scrim-3); }
+.branch-create-dialog { position: fixed; z-index: var(--layer-dialog); pointer-events: auto; top: 50%; left: 50%; width: min(440px, calc(100vw - 32px)); transform: translate(-50%, -50%); overflow-y: auto; }
 .branch-create-dialog form { display: flex; flex-direction: column; }
-.branch-create-dialog header { display: grid; grid-template-columns: 30px minmax(0, 1fr) 24px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6) var(--sp-5); border-bottom: 1px solid var(--line); }
-.branch-create-dialog header > span { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); }
+.branch-create-dialog header { display: grid; grid-template-columns: 16px minmax(0, 1fr) 24px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6) var(--sp-5);  }
+.branch-create-dialog header > span { width: 16px; height: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
 .branch-create-dialog header > div { min-width: 0; }
 .branch-create-dialog h2 { margin:0; font-size: var(--fs-prose); letter-spacing: -.01em; }
 .branch-create-dialog header p { margin:var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
-.branch-create-dialog__context { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); margin:var(--sp-5) var(--sp-6) 0; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--green-2); background: var(--bg); }
+.branch-create-dialog__context { min-width: 0; display: flex; align-items: center; gap:var(--sp-3); margin:var(--sp-4) var(--sp-6) 0; color: var(--text-2); }
 .branch-create-dialog__context > span { min-width: 0; display: flex; flex-direction: column; }
-.branch-create-dialog__context small { color: var(--text-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .06em; }
-.branch-create-dialog__context strong { overflow: hidden; color: var(--text-2); font: 10px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.branch-create-dialog__context small { color: var(--text-3); font-size: var(--fs-micro);  }
+.branch-create-dialog__context strong { overflow: hidden; color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .branch-create-dialog label { display: grid; gap:var(--sp-2); padding:var(--sp-5) var(--sp-6) 0; color: var(--text-3); font-size: var(--fs-micro); }
 .branch-create-dialog input { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font: 11px/1.4 "SFMono-Regular", monospace; }
 .branch-create-dialog input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .branch-create-dialog form > p, .branches-inline-error { margin:0; color: var(--red-text); font-size: var(--fs-micro); line-height: 1.4; }
 .branch-create-dialog form > p { margin:var(--sp-4) var(--sp-6) 0; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); background: var(--red-bg); }
-.branch-create-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding:var(--sp-5) var(--sp-6) var(--sp-5); border-top: 1px solid var(--line); }
+.branch-create-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding:0 var(--sp-6) var(--sp-5); }
 .branch-create-dialog .primary-button { padding:var(--sp-3) var(--sp-4); }
 .branches-inline-error { padding:var(--sp-3) var(--sp-4); border-top: 1px solid var(--red-line); background: var(--red-bg); }
 .source-control-switch { flex: 0 0 auto; display: flex; gap:var(--sp-1); padding:var(--sp-2) var(--sp-3) 0; }

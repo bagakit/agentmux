@@ -420,9 +420,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         }}
       >
         <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-          <Dialog.Overlay className="confirmation-dialog__overlay" />
+          <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
           <Dialog.Content
-            className="branch-create-dialog"
+            className="branch-create-dialog dialog-surface"
             onEscapeKeyDown={(event) => busyBranch !== null && event.preventDefault()}
           >
             <form onSubmit={(event) => void createWorktree(event)}>
@@ -476,9 +476,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         }}
       >
         <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-          <Dialog.Overlay className="confirmation-dialog__overlay" />
+          <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
           <Dialog.Content
-            className="branch-create-dialog"
+            className="branch-create-dialog dialog-surface"
             onEscapeKeyDown={(event) => fanningOut && event.preventDefault()}
           >
             <form onSubmit={(event) => void startFanOut(event)}>

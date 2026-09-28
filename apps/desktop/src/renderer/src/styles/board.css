@@ -179,11 +179,10 @@
 .board-run-card:hover > svg { color: var(--text-2); }
 .board-cell__empty { min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-1); color: var(--neutral-1); font-size: var(--fs-body); }
 .board-cell__empty small { color: var(--neutral-2); font-size: var(--fs-micro); }
-.discussion-canvas__overlay { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-3); backdrop-filter: blur(8px); pointer-events: auto; }
-.discussion-canvas { width: min(760px, calc(100vw - 36px)); max-height: min(780px, calc(100vh - 40px)); position: fixed; z-index: var(--layer-dialog); pointer-events: auto; top: 50%; left: 50%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; transform: translate(-50%, -50%); border: 1px solid var(--green-line); border-radius: var(--radius-lg); outline: none; color: var(--text); background: radial-gradient(circle at 18% 0%, var(--overlay-line), transparent 32%), var(--surface-0); box-shadow: 0 34px 100px var(--scrim-3); }
-.discussion-canvas__header { display: grid; grid-template-columns: 38px minmax(0, 1fr) 28px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6); border-bottom: 1px solid var(--line); }
-.discussion-canvas__mark { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--green-line); border-radius: var(--radius-lg); color: var(--green); background: var(--surface-1); }
-.discussion-canvas__header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-display); letter-spacing: -.03em; }
+.discussion-canvas { width: min(760px, calc(100vw - 36px)); max-height: min(780px, calc(100vh - 40px)); position: fixed; z-index: var(--layer-dialog); pointer-events: auto; top: 50%; left: 50%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; transform: translate(-50%, -50%); }
+.discussion-canvas__header { display: grid; grid-template-columns: 18px minmax(0, 1fr) 28px; align-items: start; gap:var(--sp-4); padding:var(--sp-6) var(--sp-6); border-bottom: 1px solid var(--line); }
+.discussion-canvas__mark { width: 18px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.discussion-canvas__header h2 { margin:var(--sp-2) 0 var(--sp-1); font-size: var(--fs-title); letter-spacing: -.015em; }
 .discussion-canvas__header p { margin:0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
 .discussion-canvas__body { min-height: 0; display: grid; align-content: start; gap:var(--sp-5); padding:var(--sp-6) var(--sp-6) var(--sp-6); overflow: auto; }
 .discussion-context { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
@@ -214,5 +213,5 @@
 .discussion-unavailable strong { color: var(--text-2); font-size: var(--fs-meta); }
 .discussion-unavailable p { margin:var(--sp-1) 0 0; font-size: var(--fs-micro); }
 .discussion-canvas__error { padding:var(--sp-4) var(--sp-4); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }
-.discussion-canvas__footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-4); padding:var(--sp-5) var(--sp-6); border-top: 1px solid var(--line); background: var(--surface-0); }
+.discussion-canvas__footer { display: flex; align-items: center; justify-content: flex-end; gap:var(--sp-4); padding:var(--sp-4) var(--sp-6) var(--sp-5); }
 .discussion-canvas__footer > span { margin-right:auto; display: inline-flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }

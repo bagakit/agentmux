@@ -117,9 +117,9 @@ export function BoardDiscussionCanvas({
   return (
     <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
       <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-        <Dialog.Overlay className="discussion-canvas__overlay" />
+        <Dialog.Overlay className="discussion-canvas__overlay dialog-scrim" />
         <Dialog.Content
-          className="discussion-canvas"
+          className="discussion-canvas dialog-surface"
           onEscapeKeyDown={(event) => launching && event.preventDefault()}
         >
           <header className="discussion-canvas__header">

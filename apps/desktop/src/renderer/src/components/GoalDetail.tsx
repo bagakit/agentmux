@@ -4,6 +4,7 @@ import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { ComposerTextarea } from './ComposerTextarea'
 import { GoalProperties } from './GoalProperties'
+import { ConfirmationDialog } from './ConfirmationDialog'
 import { GoalExecution } from './GoalExecution'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
 
@@ -20,6 +21,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const failedPatch = useRef<Parameters<typeof updateDemand>[1]>({})
   const [saveError, setSaveError] = useState<string | null>(Object.keys(draft).length ? 'Review the retained draft and retry saving.' : null)
   const [executionOpen, setExecutionOpen] = useState(false)
+  const [deleteRequested, setDeleteRequested] = useState(false)
   const [intentOpen, setIntentOpen] = useState(draft.description !== undefined)
   useLayoutEffect(() => { for (const field of [titleRef.current, descriptionRef.current]) if (field) { field.style.height = 'auto'; if (field.scrollHeight > 0) field.style.height = `${field.scrollHeight}px` } }, [title, description, intentOpen, demand.alignment])
   useEffect(() => { if (!titleDirty) setTitle(demand.title) }, [demand.title, titleDirty])
@@ -31,7 +33,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const timeline = [...(demand.activities ?? []).map((activity) => ({ id: activity.id, at: activity.createdAt, label: activity.kind, text: activity.message })), ...(demand.decisions ?? []).map((decision) => ({ id: decision.id, at: decision.createdAt, label: 'Decision', text: decision.decision }))].sort((left, right) => right.at - left.at)
   const intentBody = <ComposerTextarea ref={descriptionRef} aria-label="Goal description" value={description} onValueChange={(value) => { draftRef.current.description = value; onDraftChange?.('description', value); setDescription(value); setDescriptionDirty(true) }} onBlur={() => { if (descriptionDirty) void update({ description }) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   return <aside className="goals-detail" data-goal-detail-id={demand.id} aria-label={`Goal workspace for ${demand.title}`}>
-    <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ArrowLeft size={14} />Goals</button><span>{demand.projectName}</span><button type="button" className={`goals-button${!acknowledgementFeedback.failure && demand.alignment?.confirmedAt && !demand.grounding ? ' goals-button--primary' : ''}`} disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ArrowUpRight size={13} />{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}</button><details className="goals-detail__menu"><summary aria-label="Goal actions"><MoreHorizontal size={15} /></summary><button type="button" onClick={() => { if (window.confirm(`Delete goal “${demand.title}”?`)) { deleteDemand(demand.id); onClose() } }}><Trash2 size={13} />Delete goal</button></details></header>
+    <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ArrowLeft size={14} />Goals</button><span>{demand.projectName}</span><button type="button" className={`goals-button${!acknowledgementFeedback.failure && demand.alignment?.confirmedAt && !demand.grounding ? ' goals-button--primary' : ''}`} disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ArrowUpRight size={13} />{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}</button><details className="goals-detail__menu"><summary aria-label="Goal actions"><MoreHorizontal size={15} /></summary><button type="button" onClick={() => setDeleteRequested(true)}><Trash2 size={13} />Delete goal</button></details></header>
     <article className="goals-document">
       <ComposerTextarea ref={titleRef} className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
       {!demand.alignment ? <section className="goals-intent-body"><h2>Your intent</h2>{intentBody}</section> : null}
@@ -45,5 +47,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
       </details>
       {timeline.length ? <details className="goals-activity"><summary>Activity<span>{timeline.length}</span></summary>{timeline.map((entry) => <div className="goals-activity__row" key={entry.id}><time dateTime={new Date(entry.at).toISOString()}>{new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(entry.at)}</time><span><b>{entry.label}</b> {entry.text}</span></div>)}</details> : null}
     </article>
+    <ConfirmationDialog open={deleteRequested} title="Delete goal?" subject={demand.title}
+      description="This removes the goal and its saved planning records. Linked Sessions keep running."
+      confirmLabel="Delete goal" onCancel={() => setDeleteRequested(false)}
+      onConfirm={() => { setDeleteRequested(false); deleteDemand(demand.id); onClose() }} />
   </aside>
 }

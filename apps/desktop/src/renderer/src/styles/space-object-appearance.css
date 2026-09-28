@@ -1,6 +1,5 @@
 .space-object-icon { flex-shrink: 0; }
-.space-icon-picker__overlay { position: fixed; inset: 0; z-index: var(--layer-dialog); background: var(--scrim-3); }
-.space-icon-picker { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 24px)); box-sizing: border-box; padding: var(--sp-5); display: grid; gap: var(--sp-4); background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: 0 30px 90px var(--scrim-3); }
+.space-icon-picker { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 24px)); box-sizing: border-box; padding: var(--sp-5); display: grid; gap: var(--sp-4); overflow-y: auto; }
 .space-icon-picker__title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 620; overflow-wrap: anywhere; }
 .space-icon-picker__description { margin: 0; font-size: var(--fs-meta); line-height: 1.5; }
 .space-icon-picker__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(32px, 1fr)); gap: var(--sp-2); }
