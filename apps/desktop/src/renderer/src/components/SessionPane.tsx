@@ -101,7 +101,7 @@ export function SessionPane({
   const appendAgentComposerDraft = useAppStore((state) => state.appendAgentComposerDraft)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const autoFocus = useAppStore(state => {
-    if (!visible || readOnly || state.retainedSpatialFocus || state.mainSurface !== 'workbench' ||
+    if (!visible || readOnly || state.retainedSpatialFocus || state.workbenchNavigationInputPolicy || state.mainSurface !== 'workbench' ||
       state.activeWorkspaceId !== linkOrigin.workspaceId || !linkOrigin.tabId || !linkOrigin.regionId) return false
     const layout = state.layouts[linkOrigin.workspaceId]
     const group = layout?.groups.find(one => one.id === layout.activeGroupId)

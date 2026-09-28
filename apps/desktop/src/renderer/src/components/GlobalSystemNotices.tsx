@@ -24,6 +24,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
   const workbenchSaveWarning = useAppStore(state => state.workbenchSaveWarning)
   const retryWorkbenchSave = useAppStore(state => state.retryWorkbenchSave)
+  const desktopNavigationNotice = useAppStore(state => state.desktopNavigationNotice)
   const id = useId()
   const [open, setOpen] = useState(false)
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
@@ -68,13 +69,18 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     }
   }, action: { label: 'Retry saving', run: () => { void retryWorkbenchSave() } } }] : []
   const storageInbox = useServiceNotices('global:workbench-save', storage, true)
+  const navigationInbox = useServiceNotices('global:desktop-navigation', desktopNavigationNotice ? [{
+    id: 'desktop-navigation', notice: { kind: 'indeterminate', notice: {
+      step: desktopNavigationNotice.step, mode: desktopNavigationNotice.message, restore: desktopNavigationNotice.recovery
+    } }
+  }] : [], true)
   const chromeInbox = useServiceNotices('global:native-chrome', nativeOverlayWarning ? [{
     id: 'floating-chrome', notice: { kind: 'process-degraded', notice: {
       step: 'Native floating content is unavailable', mode: nativeOverlayWarning,
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
   }] : [], true)
-  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox]
+  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
@@ -89,7 +95,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox])
+  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox])
   return <div className="global-system-notices">
     <button type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}

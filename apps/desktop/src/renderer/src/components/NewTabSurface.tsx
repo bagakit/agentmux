@@ -105,6 +105,7 @@ export function NewTabSurface({
   const recoverSession = useAppStore((state) => state.recoverSession)
   const promoteWarmTerminal = useAppStore((state) => state.promoteWarmTerminal)
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
+  const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null || state.workbenchSpaceSelection !== null)
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
@@ -182,14 +183,14 @@ export function NewTabSurface({
     // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
     // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
     // 所以这条 effect 多跑几次不会攒出多余进程。
-    if (workspace && visible && presentationActive) prewarmTerminal(workspace.id, launcherId)
-  }, [prewarmTerminal, visible, presentationActive, workspace?.id, launcherId, warmSlotHeld])
+    if (workspace && visible && presentationActive && !controlNavigation) prewarmTerminal(workspace.id, launcherId)
+  }, [prewarmTerminal, visible, presentationActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
-    if (!visible || !presentationActive) return
+    if (!visible || !presentationActive || controlNavigation) return
     void detectExecutors(workspace.hostId)
-  }, [executors, detectExecutors, visible, presentationActive, workspace])
+  }, [executors, detectExecutors, visible, presentationActive, controlNavigation, workspace])
 
   useEffect(() => {
     if (installedExecutors.some((executor) => executor.id === executorId)) return
@@ -362,7 +363,7 @@ export function NewTabSurface({
           const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
           return appendFileReferences('', [path])
         }, { separate: true })) }}
-        autoFocus={visible && presentationActive}
+        autoFocus={visible && presentationActive && !controlNavigation}
         value={prompt}
         onValueChange={setPrompt}
         // Cmd/Ctrl+Enter 从这里发车。挂在富文本输入上而不是整个 section 上：section 里还嵌着热终端的

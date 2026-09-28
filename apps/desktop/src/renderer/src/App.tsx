@@ -1,6 +1,6 @@
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation } from './components/SettingsNavigation'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useSidebarResize } from './hooks/useSidebarResize'
@@ -23,7 +23,9 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalSearchSurface } from './components/GlobalSearchSurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
-import { pmoTeamsTopicFloatingViewTargets, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
+import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
+import { desktopSurface } from './lib/desktop-focus-navigation'
+import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
 import { SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
@@ -73,12 +75,26 @@ function DesktopApp() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
   const tabs = useAppStore((state) => state.tabs)
+  const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
   const moteViewTargets = useMemo(() => pmoTeamsTopicFloatingViewTargets(
     moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId
   ), [moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
   const mainSurface = useAppStore((state) => state.mainSurface)
+  const presentationRef = useRef<DesktopAppPresentationOwner>({ loading: true,
+    overlays: { settings: false, quickSwitcher: false, shortcutsHelp: false },
+    floating: null })
+  useLayoutEffect(() => installDesktopPresentationOwner(() => presentationRef.current), [])
+  useLayoutEffect(() => {
+    const floating = readPmoTeamsTopicFloatingState()
+    presentationRef.current = { loading,
+      overlays: { settings: Boolean(settingsRoute), quickSwitcher: quickSwitchOpen, shortcutsHelp: shortcutsHelpOpen },
+      floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
+        topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
+        tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null } : null }
+    desktopPresentationCommitted()
+  })
   const [searchVisited, setSearchVisited] = useState(mainSurface === 'search')
   useEffect(() => {
     if (mainSurface === 'search') setSearchVisited(true)
@@ -284,7 +300,7 @@ function DesktopApp() {
                 />
               </div>
             ) : null}
-            <section className="workspace-main-surface">
+            <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}>
               {!workspace && mainSurface === 'workbench' ? (
                 <section className="welcome">
                   <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
@@ -312,12 +328,15 @@ function DesktopApp() {
                         key={candidate.id}
                         className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'} ${focusVisible ? 'workspace-workbench-slot--focus-source' : ''}`}
                         data-workspace-id={candidate.id}
+                        data-desktop-zone-id={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.zoneId : undefined}
                         data-visible={mounted ? 'true' : 'false'}
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >
                         <WorkspaceWorkbench
                           workspaceId={candidate.id}
+                          {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
+                            ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}
                           visible={mounted}
                           focusTabId={focusVisible && focusTab ? focusTab.id : null}
                           focusPortalTargetId={focusVisible ? 'focus-workspace-slot' : null}

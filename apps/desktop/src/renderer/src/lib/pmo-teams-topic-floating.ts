@@ -20,6 +20,8 @@ export type PmoTeamsTopicFloatingState = {
 
 const CLOSED: PmoTeamsTopicFloatingState = { open: false, preview: false }
 let state: PmoTeamsTopicFloatingState | undefined
+/** Read the original mounted owner without initializing, opening or retargeting it. */
+export function readPmoTeamsTopicFloatingState(): PmoTeamsTopicFloatingState | null { return state ?? null }
 const listeners = new Set<() => void>()
 let closeTimer: ReturnType<typeof setTimeout> | undefined
 let returnFocus: { primary: HTMLElement | null; onReturnFocus?: (() => void) | undefined } | null = null

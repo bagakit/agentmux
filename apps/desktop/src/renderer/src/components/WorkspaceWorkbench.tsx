@@ -44,7 +44,7 @@ import {
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { WorkbenchPresentationContext, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -623,7 +623,7 @@ function WorkbenchRegionLeaf({
   headerPortalTargetId: string | null
 }) {
   const focusRegion = useAppStore((state) => state.focusRegion)
-  const retainedSpatialFocus = useAppStore((state) => state.retainedSpatialFocus)
+  const retainedRegionId = useWorkbenchRetainedRegionId()
   const closeRegion = useAppStore((state) => state.closeRegion)
   const splitRegion = useAppStore((state) => state.splitRegion)
   const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
@@ -640,7 +640,7 @@ function WorkbenchRegionLeaf({
   // 否则窗口级层把环的三边物理盖掉）。见 region-focus.ts——分开各算一次时未聚焦的 browser 区
   // 也内缩，露出底下深色成了一圈无环的黑边。
   // 候选数一起喂进去：只有一格时环不表达任何选择，画出来就是整个界面镶一圈绿边。
-  const focus = regionFocusExpression(retainedSpatialFocus?.regionId ?? tab.layout.activeRegionId, node.regionId, regionCount)
+  const focus = regionFocusExpression(retainedRegionId ?? tab.layout.activeRegionId, node.regionId, regionCount)
   const canClose = regionCount > 1
   const dirty = surface?.kind === 'file' && Boolean(
     dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
@@ -737,7 +737,8 @@ function WorkbenchRegionLeaf({
       // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
       tabIndex={-1}
       onKeyDown={openRegionMenuFromKeyboard}
-      onPointerDown={() => focusRegion(tab.workspaceId, tab.id, node.regionId, 'pointer')}
+      onPointerDown={(event) => focusRegion(tab.workspaceId, tab.id, node.regionId,
+        event.currentTarget.closest('[data-pmo-teams-topic-floating]') ? 'floating-pointer' : 'pointer')}
     >
       <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
         <SurfaceContent
@@ -1459,8 +1460,16 @@ export function WorkspaceWorkbench({
         const projection = viewTargets?.[tab.id]
         const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
         const tabVisible = targetId !== null || (visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
-        return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}>
-          <WorkbenchPresentationContext.Provider value={focusTab?.id === tab.id ? true : projection?.active ?? true}>
+        return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
+          active={focusTab?.id === tab.id ? true : projection?.active ?? true}
+          homeNotice={projection && focusTab?.id !== tab.id && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
+            <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+              step: 'Selected View is in Mote',
+              mode: 'This Tab is selected here. Its original View remains in the floating window.',
+              restore: 'Close Mote to return this View to Space.'
+            } }} />
+          </div> : undefined}
+          retainedRegionId={targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null}>
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
@@ -1471,7 +1480,6 @@ export function WorkspaceWorkbench({
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}
           /> : <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />}
-          </WorkbenchPresentationContext.Provider>
         </StableWorkbenchView>
       })}
       <DragOverlay dropAnimation={null}>

@@ -20,6 +20,7 @@ import { detectLanguage } from '../lib/language-detect'
 import { useMonacoTheme } from '../hooks/useMonacoTheme'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
 import { regionCaretFocusTargets } from '../lib/region-focus'
+import { desktopElementVisible } from '../lib/desktop-presentation'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { GitDiffCanvas } from './GitDiffCanvas'
@@ -180,17 +181,26 @@ export function EditorPane({
   function consumeCaretFocus(): void {
     const request = useAppStore.getState().regionCaretFocus
     if (!regionCaretFocusTargets(request, surface.regionId)) return
-    if (!visibleRef.current) {
-      clearRegionCaretFocus(request.nonce)
-      return
-    }
-    if (!editorRef.current) return
-    editorRef.current.focus()
-    clearRegionCaretFocus(request.nonce)
+    if (!visibleRef.current) { clearRegionCaretFocus(request.nonce); return }
+    const editor = editorRef.current
+    const host = editor?.getContainerDomNode()
+    if (!editor || !desktopElementVisible(host ?? null)) return
+    editor.focus()
+    if (host?.contains(window.document.activeElement)) clearRegionCaretFocus(request.nonce)
   }
 
   useEffect(() => {
     consumeCaretFocus()
+    const nonce = regionCaretFocus?.nonce
+    if (nonce === undefined || useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
+    // Only the exact pending editor observes mount/inert changes; a later intent cancels it.
+    const observer = new MutationObserver(() => {
+      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return observer.disconnect()
+      consumeCaretFocus()
+      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) observer.disconnect()
+    })
+    observer.observe(window.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
+    return () => observer.disconnect()
   }, [regionCaretFocus, visible, released])
 
   if (released) return <EditorReleasedState />
