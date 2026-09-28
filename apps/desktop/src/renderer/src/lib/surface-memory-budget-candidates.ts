@@ -77,8 +77,8 @@ function candidateForSurface(
         // restore contract. Keep the viewport in this proof as well: restoring with a default viewport
         // would be a visible identity change even though the native owner could technically be rebuilt.
         canRebuild: Boolean(surface.browserId && surface.url && surface.profileId && surface.viewport),
-        // Navigation in flight is not safe to discard: restoring it would change the page identity.
-        protected: surface.loading
+        // Navigation and a live Agent drive both require this exact Main owner to keep working.
+        protected: surface.loading || (surface.driving && !surface.nativeOwnerUnavailable)
       }
     }
     default:

@@ -20,6 +20,7 @@ import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
+import { restoredSurveyBrowserSelection, sameSurveyBrowserSelection, surveyBrowserSurface, surveySelectionAfterClose, type SurveyBrowserSelection } from './lib/survey-browser'
 import { shallow } from 'zustand/shallow'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -287,7 +288,7 @@ export type EditorRegionDiffState = {
   diff: GitFileDiff | null
   error: string | null
 }
-export type MainSurface = 'search' | 'agents' | 'workbench' | 'board'
+export type MainSurface = 'survey' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
@@ -442,6 +443,11 @@ type AppState = {
   agentNames: Record<string, string>
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
+  surveyBrowserSelection: SurveyBrowserSelection | null
+  surveyToolsOpen: boolean
+  setSurveyBrowserSelection(selection: SurveyBrowserSelection | null): void
+  setSurveyToolsOpen(open: boolean): void
+  openSurveyBrowserTools(selection: SurveyBrowserSelection): void
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
   demands: Record<string, DemandRecord>
   /** Editor-owned binding from a Demand to its dedicated PMO Teams Tab. */
@@ -1734,6 +1740,7 @@ type PersistedAppState = {
   viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
+  surveyBrowserSelection?: SurveyBrowserSelection | null
   focusTimelineHeight?: number
   agentFocus?: AgentFocusContext
   selectedDemandId?: string | null
@@ -1756,6 +1763,7 @@ export type RestoredUiState = Pick<
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
+  | 'surveyBrowserSelection'
   | 'projectRailOpen'
   | 'collapsedProjectGroups'
   | 'explorerCollapsed'
@@ -1830,6 +1838,7 @@ export function restorePersistedUiState(
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
+    | 'surveyBrowserSelection'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
     | 'explorerCollapsed'
@@ -1848,6 +1857,7 @@ export function restorePersistedUiState(
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
+    surveyBrowserSelection: restoredSurveyBrowserSelection(persisted.surveyBrowserSelection),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
@@ -1897,6 +1907,7 @@ function selectPersistedInputs(state: AppState) {
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
+    surveyBrowserSelection: state.surveyBrowserSelection,
     agentFocus: state.agentFocus,
     focusTimelineHeight: state.focusTimelineHeight,
     selectedDemandId: state.selectedDemandId,
@@ -2074,7 +2085,7 @@ async function ensurePersistHydrated(): Promise<unknown | null> {
 }
 
 function restoredMainSurface(candidate: unknown): MainSurface {
-  if (candidate === 'search') return 'search'
+  if (candidate === 'survey') return 'survey'
   if (candidate === 'agents') return 'agents'
   return candidate === 'board' ? 'board' : 'workbench'
 }
@@ -2274,6 +2285,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
+  surveyBrowserSelection: null,
+  surveyToolsOpen: false,
+  setSurveyBrowserSelection(surveyBrowserSelection) { set({ surveyBrowserSelection, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
+  setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
+  openSurveyBrowserTools(surveyBrowserSelection) { set({ mainSurface: 'survey', surveyBrowserSelection, surveyToolsOpen: true, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
@@ -3419,13 +3435,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ? controlFailure('REGION_ALREADY_SOLE', 'Region is already the only Region of its Tab; it is already its own Tab.')
           : controlFailure('CONTROL_FAILED', 'Region cannot be promoted to a new Tab.')
       }
-      set({
-        retainedSpatialFocus: null,
-        activeWorkspaceId: result.target.workspaceId,
-        mainSurface: 'workbench',
+      set((current) => ({
+        ...(current.mainSurface === 'survey' ? {} : { retainedSpatialFocus: null,
+          activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
+        ...(sameSurveyBrowserSelection(current.surveyBrowserSelection, region) ? { surveyBrowserSelection: result.target } : {}),
         tabs: result.tabs,
         layouts: result.layouts
-      })
+      }))
       return {
         operation: request.operation,
         tabId: result.target.tabId,
@@ -3696,7 +3712,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
 
     const browserId = `browser:${crypto.randomUUID()}`
-    set({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
+    set((current) => ({ ...(current.mainSurface === 'survey' ? {} : { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const }), tabs: plan.tabs, layouts: plan.layouts }))
     const cancel = (): void => rollback(plan.launcher)
     signal?.addEventListener('abort', cancel, { once: true })
     let createdBrowserId: string | null = null
@@ -3871,6 +3887,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, null)
         return { ...reconcileWorkbenchFileProjection(current, topology),
+          surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
       })
@@ -3888,6 +3905,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
         return { ...reconcileWorkbenchFileProjection(current, topology),
+          surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
       })
@@ -3941,6 +3959,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set((current) => {
           const topology = applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
           return { ...reconcileWorkbenchFileProjection(current, topology),
+            surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
             workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
               { workspaceId, tabId, groupId: tabGroupId }) }
         })
@@ -4150,13 +4169,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // become its own Tab, so they want to see it. (mainSurface/activeWorkspaceId are normally already
     // these values, since the Region was right-clicked in the visible workbench, but setting them makes
     // "show the new Tab" true regardless of how the action was reached — e.g. a future command palette.)
-    set({
-      retainedSpatialFocus: null,
-      activeWorkspaceId: result.target.workspaceId,
-      mainSurface: 'workbench',
+    set((state) => ({
+      ...(state.mainSurface === 'survey' ? {} : { retainedSpatialFocus: null,
+        activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
+      ...(sameSurveyBrowserSelection(state.surveyBrowserSelection, { workspaceId, tabId, regionId }) ? { surveyBrowserSelection: result.target } : {}),
       tabs: result.tabs,
       layouts: result.layouts
-    })
+    }))
   },
   async closeRegion(workspaceId, tabId, regionId) {
     const current = get()
@@ -4187,6 +4206,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { ...(obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
         : { tabs }),
+        surveyBrowserSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyBrowserSelection),
         workbenchSpaceSelection: desktopSpaceSelectionAfterClose(state.workbenchSpaceSelection, { tabs, layouts: state.layouts },
           { workspaceId, tabId, regionId }) }
     })
@@ -6053,6 +6073,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   applyBrowserEvent(event) {
     set((state) => ({
       ...reduceBrowserEvent(state, event),
+      ...(event.type === 'closed' && surveyBrowserSurface(state.tabs, state.surveyBrowserSelection)?.browserId === event.id
+        ? { surveyBrowserSelection: null } : {}),
       ...(event.type === 'closed'
         ? {
             browserAnnotationsByBrowserId: Object.fromEntries(

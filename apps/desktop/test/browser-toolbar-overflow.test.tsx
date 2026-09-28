@@ -4,22 +4,24 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, expect, it, vi } from 'vitest'
+import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { AppConfig } from '../src/shared/contracts.js'
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   return { state: {
-    applyBrowserEvent: vi.fn(), reportError: vi.fn(), selectWorkspace: vi.fn(async () => {}), setMainSurface: vi.fn(),
+    applyBrowserEvent: vi.fn(), reportError: vi.fn(), tabs: {} as Record<string, WorkbenchTab>, openSurveyBrowserTools: vi.fn(), selectWorkspace: vi.fn(async () => {}), setMainSurface: vi.fn(),
     executeControl: vi.fn(async (_request: { operation: string; browserId?: string }) => ({ operation: 'browser.history', operations: [] })),
     saveBrowserBookmark: vi.fn(async () => 'Page.webloc'), openFile: vi.fn(async () => {}),
-    browserAnnotationsByBrowserId: {}, addBrowserAnnotation: vi.fn(), toolsOpen: false,
+    browserAnnotationsByBrowserId: {}, noticeReadReceipts: {}, addBrowserAnnotation: vi.fn(), toolsOpen: false,
     config: null as AppConfig | null
   } }
 })
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state })
+    { getState: () => fixture.state, setState: vi.fn() })
 }))
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
 import { api } from '../src/renderer/src/lib/api.js'
@@ -39,6 +41,7 @@ const tab = {
 
 beforeEach(() => {
   fixture.state.config = structuredClone(config)
+  fixture.state.tabs = { 'original-tab': createWorkbenchTab('original-tab', tab) }
   vi.clearAllMocks()
 })
 
@@ -132,7 +135,7 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
 })
 
 
-it('routes the real More management action to Search in its Browser Workspace without creating a new owner', async () => {
+it('routes the real More management action to Survey with its exact original page reference without creating a new owner', async () => {
   const create = vi.spyOn(api.browser, 'create')
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -140,13 +143,13 @@ it('routes the real More management action to Search in its Browser Workspace wi
   try {
     await act(async () => root.render(<BrowserPane tab={tab} visible />))
     const menu = await openMore(container)
-    const entry = menu.querySelector('[aria-label="Browser tools in Search"]')!
+    const entry = menu.querySelector('[aria-label="Browser tools in Survey"]')!
     expect(entry).not.toBeNull()
-    expect(entry.textContent).toBe('Browser tools in Search…')
+    expect(entry.textContent).toBe('Browser tools in Survey…')
     await act(async () => entry.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(fixture.state.selectWorkspace).toHaveBeenCalledExactlyOnceWith(tab.workspaceId)
-    expect(fixture.state.setMainSurface).toHaveBeenCalledExactlyOnceWith('search')
-    expect(fixture.state.selectWorkspace.mock.invocationCallOrder[0]).toBeLessThan(fixture.state.setMainSurface.mock.invocationCallOrder[0]!)
+    expect(fixture.state.openSurveyBrowserTools).toHaveBeenCalledExactlyOnceWith({ workspaceId: tab.workspaceId, tabId: 'original-tab', regionId: tab.regionId })
+    expect(fixture.state.selectWorkspace).not.toHaveBeenCalled()
+    expect(fixture.state.setMainSurface).not.toHaveBeenCalled()
     expect(create).not.toHaveBeenCalled()
   } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
 })

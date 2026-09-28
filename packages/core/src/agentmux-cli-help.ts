@@ -798,7 +798,7 @@ Usage:
   agentmux focus --tab <tab-id>
   agentmux focus --region <region-id>
   agentmux focus --goal <demand-id>
-  agentmux focus --surface <space|focus|goals|search>
+  agentmux focus --surface <space|focus|goals|survey>
   agentmux focus --region <region-id> --input target
   agentmux focus --tab <tab-id> --input target
 
