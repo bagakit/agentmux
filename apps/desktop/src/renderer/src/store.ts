@@ -1,5 +1,8 @@
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
-import { executeSpatialControl } from './lib/space-agent-control'
+import { executeSpatialControl, spatialCatalog } from './lib/space-agent-control'
+import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
@@ -25,7 +28,6 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxExecutorAvailability,
-  type AgentMuxRegion,
   type AgentMuxSpaceAddress
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
@@ -361,6 +363,10 @@ type AppState = {
   spatialRequests: Record<string, SpatialRequestBinding>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
+  workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
+  /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
+  workbenchNavigationInputPolicy: 'preserve' | 'target' | null
+  desktopNavigationNotice: AgentMuxSpatialIssue | null
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
   sessions: SessionSnapshot[]
@@ -1710,6 +1716,7 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
 }
 
 type PersistedAppState = {
+  workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   spaceZoneBindings: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   /** Exact logical focus retained when a background move removes the active leaf. */
@@ -1746,6 +1753,7 @@ type PersistedAppState = {
 
 export type RestoredUiState = Pick<
   AppState,
+  | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
   | 'projectRailOpen'
@@ -1819,6 +1827,7 @@ export function restorePersistedUiState(
   config: AppConfig,
   persisted: Pick<
     PersistedAppState,
+    | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
     | 'projectRailOpen'
@@ -1835,6 +1844,7 @@ export function restorePersistedUiState(
   >
 ): RestoredUiState {
   return {
+    workbenchSpaceSelection: restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection),
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
@@ -1859,6 +1869,7 @@ export function restorePersistedUiState(
 // references, so they can reuse the projection without visiting unrelated workbench / file content.
 function selectPersistedInputs(state: AppState) {
   return {
+    workbenchSpaceSelection: state.workbenchSpaceSelection,
     spaceZoneBindings: state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
     retainedSpatialFocus: state.retainedSpatialFocus,
@@ -1977,6 +1988,17 @@ async function requestWorkbenchStorageFlush(): Promise<void> {
     if (request === workbenchSaveRequest) useAppStore.getState().reportWorkbenchSaveFailure(error)
     throw error
   }
+}
+async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxSpatialSave> {
+  let localStorageWritten = false, storageFlushRequested = false, reason: string | null = null
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
+    persistentWorkbenchStorage.flush()
+    localStorageWritten = true
+    await requestWorkbenchStorageFlush()
+    storageFlushRequested = true
+  } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
+  return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: 'unconfirmed', reason }
 }
 function requestWorkbenchStorageCommit(): void {
   void requestWorkbenchStorageFlush().catch(() => {})
@@ -2205,6 +2227,9 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
+  workbenchSpaceSelection: null,
+  workbenchNavigationInputPolicy: null,
+  desktopNavigationNotice: null,
   spaceZoneBindings: {},
   spatialRequests: {},
   retainedSpatialFocus: null,
@@ -2694,6 +2719,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async selectWorkspace(id) {
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })
     const state = get()
@@ -2858,6 +2884,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return outcome
   },
   focusTabGroup(workspaceId, tabGroupId) {
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const layout = get().layouts[workspaceId]
     if (!layout || !findGroup(layout, tabGroupId)) return
@@ -2867,6 +2894,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   activateTab(workspaceId, tabGroupId, tabId) {
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const layout = get().layouts[workspaceId]
     if (!layout) return
@@ -2903,7 +2931,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv') {
       return await executeSpatialControl({
         get,
-        patch: patch => set(patch),
+        patch: patch => set(state => {
+          const choice = state.workbenchSpaceSelection, held = state.retainedSpatialFocus
+          if (!patch.tabs || !choice || !held || choice.workspaceId !== held.workspaceId ||
+            choice.tabId !== held.tabId || choice.regionId !== held.regionId) return patch
+          const sourceTab = patch.tabs[held.tabId], sourceLayout = (patch.layouts ?? state.layouts)[held.workspaceId]
+          const sourceGroup = sourceLayout?.groups.find(group => group.id === choice.groupId)
+          const sourceRemains = sourceTab?.workspaceId === held.workspaceId && sourceGroup?.tabOrder.includes(held.tabId)
+          if (sourceRemains && sourceTab.regions[held.regionId]) return patch
+          return { ...patch, workbenchSpaceSelection: { ...choice,
+            tabId: sourceRemains ? choice.tabId : null, groupId: sourceRemains ? choice.groupId : null, regionId: null } }
+        }),
         topics: async () => get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
           ? await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) : [],
         createResource: input => api.workspaces.createZoneResource(input),
@@ -2931,19 +2969,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           })
           if (gap) void get().resyncTimeline(gap)
         },
-        save: async layoutApplied => {
-          let localStorageWritten = false
-          let storageFlushRequested = false
-          let reason: string | null = null
-          try {
-            if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
-            persistentWorkbenchStorage.flush()
-            localStorageWritten = true
-            await requestWorkbenchStorageFlush()
-            storageFlushRequested = true
-          } catch (error) { reason = presentError(error); get().reportWorkbenchSaveFailure(error) }
-          return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: 'unconfirmed', reason }
-        },
+        save: saveWorkbenchSelection,
         preserveMovedFocus: from => {
           const state = get(), tab = state.tabs[from.tabId], layout = state.layouts[from.workspaceId]
           const group = layout && findGroupForTab(layout, from.tabId)
@@ -3002,29 +3028,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       return session
     }
-    const focus = (tabId: string, region?: AgentMuxRegion) => {
-      const state = get()
-      const tab = state.tabs[tabId]
-      const layout = tab && state.layouts[tab.workspaceId]
-      const group = layout && findGroupForTab(layout, tabId)
-      if (!tab || !layout || !group) throw controlFailure('TAB_NOT_OPEN', 'Tab target is not open.')
-      set({
-        retainedSpatialFocus: null,
-        activeWorkspaceId: tab.workspaceId,
-        mainSurface: 'workbench',
-        tabs: region ? { ...state.tabs, [tab.id]: focusWorkbenchTabRegion(tab, region.regionId) } : state.tabs,
-        layouts: { ...state.layouts, [tab.workspaceId]: activateLayoutTab(layout, group.id, tab.id) }
-      })
-      return { tabId, ...(region ? { regionId: region.regionId } : {}) }
-    }
     requireActive()
     if (request.operation === 'inspect.client') {
+      const discoveryWorkspace = get().config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      let topics: ScratchTopicSnapshot[] = []
+      try { if (discoveryWorkspace) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) } catch { /* Missing discovery stays unknown; durable placement is retained. */ }
+      // Directory I/O can outlive a user's navigation. Observe one current Store snapshot
+      // together with the actual DOM; never mix pre-await selection with a new caret.
       const state = get()
+      const currentWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      if (discoveryWorkspace && (currentWorkspace?.hostId !== discoveryWorkspace.hostId || currentWorkspace?.path !== discoveryWorkspace.path)) topics = []
+      const selection = desktopSelection(state, spatialCatalog(state, topics))
+      const presentation = readDesktopPresentation(selection, state.tabs)
       const sessions = sessionPresentationById(state.sessions)
       const observation: DesktopWorkbenchObservation = {
         loading: state.loading, startupProgress: state.startupProgress,
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
+        desktop: { selection, ...presentation,
+          focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId } },
         layouts: state.layouts,
         tabs: Object.values(state.tabs).map(tab => ({
           id: tab.id, workspaceId: tab.workspaceId, titleRegionId: tab.titleRegionId,
@@ -3281,12 +3303,88 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demandId: request.demandId, decisions: demand.decisionLog ?? [] }
     }
     if (request.operation === 'focus') {
-      if (request.target.kind === 'tab') {
-        const tab = resolveWorkbenchControlTab(input(), request.target)
-        return { operation: request.operation, ...focus(tab.id) }
+      const issues: AgentMuxSpatialIssue[] = []
+      let topics: ScratchTopicSnapshot[] = []
+      try { if (get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
+      catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
+        recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
+      const catalog = spatialCatalog(get(), topics)
+      const before = captureDesktopInput(get().tabs)
+      const beforeSelection = desktopSelection(get(), catalog)
+      let navigationState: AgentMuxDesktopFocusResult['navigation']['state'] = 'applied'
+      try {
+        requireActive()
+        if (request.target.kind === 'goal') {
+          if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
+            message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
+          // Explicit Goal/Surface selection does not invoke setMainSurface's execution-context inference.
+          set({ selectedDemandId: request.target.goalId, mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+        } else if (request.target.kind === 'surface') {
+          set({ mainSurface: desktopMainSurface[request.target.surface], regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+        } else {
+          const resolved = resolveDesktopSpaceSelection(get(), catalog, request.target)
+          if (resolved.tabId && resolved.regionId) get().focusRegion(resolved.workspaceId, resolved.tabId, resolved.regionId)
+          set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
+            workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+        }
+      } catch (error) {
+        navigationState = 'rejected'
+        const actual = error instanceof DesktopFocusFailure ? error.issue : (error as { issue?: AgentMuxSpatialIssue })?.issue
+        issues.push(actual ?? { step: 'navigation', code: signal?.aborted ? 'CONTROL_CANCELLED' : 'NAVIGATION_UNCONFIRMED',
+          message: presentError(error), recovery: 'The original workface is kept. Inspect the client before another navigation.' })
       }
-      const region = resolveWorkbenchControlRegion(input(), request.target)
-      return { operation: request.operation, ...focus(region.tabId, region) }
+      const expected = desktopSelection(get(), catalog)
+      let caretIntentNonce: number | undefined
+      if (navigationState !== 'rejected' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
+      if (navigationState !== 'rejected' && request.inputPolicy === 'target' && expected.space?.tabId && expected.space.regionId) {
+        const observed = readDesktopPresentation(expected, get().tabs)
+        if (observed.overlays.provenance === 'observed' && !observed.presentation.blockers.length) {
+          get().focusRegion(expected.space.workspaceId, expected.space.tabId, expected.space.regionId, 'keyboard')
+          caretIntentNonce = get().regionCaretFocus?.nonce
+          set({ workbenchSpaceSelection: expected.space, workbenchNavigationInputPolicy: request.inputPolicy })
+        }
+      }
+      if (navigationState !== 'rejected') await awaitDesktopPresentation(() => {
+        const actual = desktopSelection(get(), catalog)
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
+        const observed = readDesktopPresentation(actual, get().tabs)
+        return observed.presentation.state === 'covered' ||
+          ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating') &&
+            (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
+      }, signal)
+      const selection = desktopSelection(get(), catalog)
+      if (navigationState !== 'rejected' && (signal?.aborted || JSON.stringify(selection) !== JSON.stringify(expected))) {
+        navigationState = 'unconfirmed'
+        issues.push({ step: 'navigation', code: 'NAVIGATION_CHANGED', message: 'Selection changed before this navigation was observed.',
+          recovery: 'Inspect the current client. A later selection is kept and the old input intent is not repeated.' })
+      }
+      const observed = readDesktopPresentation(selection, get().tabs)
+      const after = captureDesktopInput(get().tabs)
+      const inputOutcome = request.inputPolicy === 'preserve' ? desktopInputPreserved(before, after) ? 'preserved'
+        : after.fact.provenance === 'observed' ? 'unavailable' : 'unconfirmed'
+        : navigationState !== 'rejected' && navigationState !== 'unconfirmed' && after.fact.regionId === expected.space?.regionId &&
+          after.fact.connected === true && after.fact.visible === true && after.fact.inert === false ? 'transferred'
+          : after.fact.provenance === 'observed' ? 'unavailable' : 'unconfirmed'
+      if (request.inputPolicy === 'target' && inputOutcome !== 'transferred' && caretIntentNonce !== undefined) {
+        get().clearRegionCaretFocus(caretIntentNonce)
+      }
+      const save = navigationState === 'rejected' ? { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false,
+        diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
+      const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || observed.presentation.state !== 'main-visible' ||
+        inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || !save.localStorageWritten
+      if (partial && navigationState !== 'rejected') {
+        const notice = { step: 'presentation', code: 'DESKTOP_PRESENTATION_PARTIAL',
+          message: `Main selection is kept. Presentation: ${observed.presentation.state}; input: ${inputOutcome}.`,
+          recovery: 'Keep using the current input. Inspect the client, or explicitly select the visible target when ready.' }
+        issues.push(notice)
+        set({ desktopNavigationNotice: notice })
+      } else if (!partial) {
+        set({ desktopNavigationNotice: null })
+      }
+      return { operation: 'focus', navigation: { state: navigationState, requested: request.target, selection },
+        presentation: observed.presentation, input: { policy: request.inputPolicy, outcome: inputOutcome, before: before.fact, after: after.fact },
+        floating: observed.floating, overlays: observed.overlays,
+        focus: { executionSessionId: get().agentFocus.execution.sessionId, pmoSessionId: get().agentFocus.pmo.sessionId }, partial, save, issues }
     }
     if (request.operation === 'arrange') {
       const state = get()
@@ -3646,6 +3744,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   selectSession(id, preferredTabGroupId) {
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return
     const existing = Object.values(get().tabs).flatMap((tab) => (
@@ -3716,6 +3815,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   openLauncher({ workspaceId, tabGroupId, topicId: requestedTopicId, reveal }) {
+    // Only an explicit main-surface navigation authorizes its launcher activation.
+    // A floating/background launcher leaves the current exact Space and input policy intact.
+    if (reveal) set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (reveal && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const state = get()
     const layout = state.layouts[workspaceId]
@@ -3766,10 +3868,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (!plan) return Promise.resolve(true)
     if (!plan.closesView) {
-      set((current) => reconcileWorkbenchFileProjection(
-        current,
-        applyWorkbenchViewCloseTopology(current, plan, null)
-      ))
+      set((current) => {
+        const topology = applyWorkbenchViewCloseTopology(current, plan, null)
+        return { ...reconcileWorkbenchFileProjection(current, topology),
+          workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
+            { workspaceId, tabId, groupId: tabGroupId }) }
+      })
       pruneEditorRegionState(get().tabs)
       return Promise.resolve(true)
     }
@@ -3781,10 +3885,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         receipts: []
       })
       const previousTabs = state.tabs
-      set((current) => reconcileWorkbenchFileProjection(
-        current,
-        applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
-      ))
+      set((current) => {
+        const topology = applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
+        return { ...reconcileWorkbenchFileProjection(current, topology),
+          workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
+            { workspaceId, tabId, groupId: tabGroupId }) }
+      })
       pruneEditorRegionState(get().tabs)
       return disposeClosedFileOwners(previousTabs, get().tabs).then(
         () => true,
@@ -3832,10 +3938,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           receipts: [...browserReceipts, ...sessionReceipts]
         })
         const previousTabs = get().tabs
-        set((current) => reconcileWorkbenchFileProjection(
-          current,
-          applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
-        ))
+        set((current) => {
+          const topology = applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
+          return { ...reconcileWorkbenchFileProjection(current, topology),
+            workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
+              { workspaceId, tabId, groupId: tabGroupId }) }
+        })
         await disposeClosedFileOwners(previousTabs, get().tabs)
         pruneEditorRegionState(get().tabs)
         if (reconciliation.failures.length > 0) {
@@ -3898,13 +4006,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   focusRegion(workspaceId, tabId, regionId, cause = 'pointer') {
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const tab = get().tabs[tabId]
     const layout = get().layouts[workspaceId]
     const tabGroupId = layout ? tabGroupForTab(layout, tabId) : null
     if (!tab || tab.workspaceId !== workspaceId || !tabGroupId || !tab.regions[regionId]) return
     const surface = tab.regions[regionId]
     const focusedSessionId = isSessionSurface(surface) ? surface.sessionId : null
+    if (cause === 'floating-pointer') {
+      // The borrowed View owns its local Region, native input and semantic lane. A click inside it
+      // does not navigate the main workbench or authorize another Zone's launcher.
+      set((state) => {
+        const focusedTab = focusWorkbenchTabRegion(tab, regionId)
+        return { regionCaretFocus: null,
+          ...(focusedTab === tab ? {} : { tabs: { ...state.tabs, [tabId]: focusedTab } }),
+          ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId) } : {}) }
+      })
+      return
+    }
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set((state) => ({
       tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
       layouts: {
@@ -4064,9 +4184,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const nextTab = removeWorkbenchRegion(liveTab, regionId)
       if (!nextTab) return state
       const tabs = { ...state.tabs, [tabId]: nextTab }
-      return obligations.releasesDocument
+      return { ...(obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
-        : { tabs }
+        : { tabs }),
+        workbenchSpaceSelection: desktopSpaceSelectionAfterClose(state.workbenchSpaceSelection, { tabs, layouts: state.layouts },
+          { workspaceId, tabId, regionId }) }
     })
     pruneEditorRegionState(get().tabs)
     if (obligations.releasesDocument) await disposeClosedFileOwners(previousTabs, get().tabs)
@@ -4224,6 +4346,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setMainSurface(mainSurface) {
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().regionCaretFocus) set({ regionCaretFocus: null })
     const selectedSessionId = executionFocusSessionId(get().agentFocus)
     const selectedSession = selectedSessionId

@@ -199,7 +199,7 @@ try {
   const oldSnapshot=(await active.cdp.evaluate('(async()=>await window.agentmux.sessions.snapshot())()')).sessions.find(s=>s.control.run.runId===terminal.runId);assert.equal(oldSnapshot?.kind,'terminal')
   phase='natural-terminal-exit';await active.cdp.evaluate(`window.agentmux.sessions.write(${JSON.stringify(oldSnapshot.control)},${JSON.stringify('exit 7\n')},'user')`)
   receipt.exitedRun=await waitFor('actual target Run exits',async()=>{const run=await sdk.status(terminal.runId);return run.state.type==='exited'?run:null})
-  await control('focus',{target:{kind:'region',regionId:opened.regionId}})
+  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.regionId}})
   await click('[aria-label^="Focus: show execution contexts"]');await click(`.focus-context[data-session-id="${oldSnapshot.id}"]`)
   receipt.before=await observe();const tab=receipt.before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId));assert.ok(tab);assert.equal(tab.regions.length,2);assert.equal(tab.layout.activeRegionId,opened.regionId);assert.equal(receipt.before.workbench.focus.executionSessionId,oldSnapshot.id)
   receipt.screenshotBefore=await screenshot('recovery-before')

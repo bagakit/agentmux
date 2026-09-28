@@ -115,7 +115,7 @@ async function launch(label) {
     goalsRestored = await restoreGoalsBeforeSpace({ cdp, fixture: goalsFixture, accepted: goalsAccepted,
       expectedWorkbench: goalsExpectedWorkbench, expectedFocus: goalsExpectedFocus, waitFor,
       focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: randomUUID(), operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
+        requestId: randomUUID(), operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
         assert.equal(reply.ok, true, JSON.stringify(reply)) } })
   }
   await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')${!regionCloseProof || label === 'first' ? ` && document.querySelector('[data-workbench-region-id="${fileRegionId}"]')` : ''}${swapNameProof ? ` && document.querySelector('[data-workbench-region-id="crash-third"] .composer [role="textbox"]')` : ''})`))
@@ -395,7 +395,7 @@ try {
   if (swapNameProof) {
     const focusNeighbor = async () => {
       const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
-        operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'))
+        operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'))
       assert.equal(reply.ok, true, JSON.stringify(reply)); assert.equal(reply.operation, 'focus'); return reply
     }
     swapSelection = await selectSwapTarget({ cdp: first.cdp, key, activateButton, waitFor, focusNeighbor, agentRegionId, fileRegionId, identityName, tabId })

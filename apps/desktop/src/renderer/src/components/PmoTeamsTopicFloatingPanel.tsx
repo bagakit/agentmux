@@ -73,6 +73,7 @@ function foreignFloatOwnsKeyboardEvent(event: KeyboardEvent, panel: HTMLElement 
 export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   floating: PmoTeamsTopicFloatingState; setFloating(next: Partial<PmoTeamsTopicFloatingState>): void
 }): React.JSX.Element {
+  const presentation = useMemo(() => ({ active: floating.open, retainedRegionId: null }), [floating.open])
   const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
   const openScratchTopic = useAppStore(state => state.openScratchTopic)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
@@ -199,7 +200,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     }).finally(disposeNavigation)
   }, [target.topicId, target.tabId, openScratchTopic, reportError])
 
-  return <WorkbenchPresentationContext.Provider value={floating.open}><div ref={panelRef} id="pmo-teams-topic-floating-panel" popover="auto" role="dialog" aria-modal="false"
+  return <WorkbenchPresentationContext.Provider value={presentation}><div ref={panelRef} id="pmo-teams-topic-floating-panel" popover="auto" role="dialog" aria-modal="false"
     aria-label={target.label} aria-describedby="mote-floating-context-status" tabIndex={-1} className="pmo-teams-topic-floating"
     data-pmo-teams-topic-floating data-state={visible ? 'open' : 'closed'}
     data-mote-target-topic={target.topicId} data-mote-target-tab={target.tabId} data-mote-target-region={target.region?.regionId}

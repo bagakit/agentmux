@@ -115,7 +115,7 @@ export function paneGroupFocusClass(
  *
  * 未知的 cause 保守地**不**搬（返回 false）：宁可少搬一次（用户可再点一下），也不要在不该夺焦时夺焦。
  */
-export const REGION_FOCUS_CAUSES = ['keyboard', 'pointer'] as const
+export const REGION_FOCUS_CAUSES = ['keyboard', 'pointer', 'floating-pointer'] as const
 export type RegionFocusCause = (typeof REGION_FOCUS_CAUSES)[number]
 
 export function regionFocusClaimsCaret(cause: RegionFocusCause): boolean {

@@ -8,6 +8,7 @@ import { prepareWindowWorkbenchForQuit, reportWorkbenchQuitFailure } from '../sr
 import { inspectDesktopClient } from '../src/main/client-observation.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { desktopWorkbenchObservationSchema, parseDesktopClientObservation } from '../src/shared/client-observation.js'
+import { readDesktopPresentation } from '../src/renderer/src/lib/desktop-presentation.js'
 import { requireOutgoingWorkbenchStorage } from '../scripts/package-runtime-upgrade.mjs'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
 import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store.js'
@@ -57,7 +58,9 @@ it('does not substitute configured files for an unconfirmed, nonpersistent, or m
 })
 it('keeps the original nonempty workbench observable when local storage qualification rejects', async () => {
   const tab = createWorkbenchTab('tab', { kind: 'agent', regionId: 'region', workspaceId: 'workspace', sessionId: 'session', phase: 'attached' })
+  const selection = { surface: 'space', mainSurface: 'workbench', space: null, goalId: null } as const
   const workbench = desktopWorkbenchObservationSchema.parse({ loading: false, startupProgress: { step: 'layout' }, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
+    desktop: { selection, ...readDesktopPresentation(selection, { [tab.id]: tab }), focus: { executionSessionId: 'session', pmoSessionId: null } },
     focus: { executionSessionId: 'session', pmoSessionId: null }, layouts: {}, tabs: [{ id: 'tab', workspaceId: 'workspace', titleRegionId: 'region', layout: tab.layout,
       regions: [{ kind: 'agent', regionId: 'region', workspaceId: 'workspace', sessionId: 'session', phase: 'attached', processState: 'running', control: null }] }] })
   const renderer = { kind: 'bundled', id: 'a'.repeat(64), identity: { shell: 'private-shell', ctxmux: 'private-native' } } as const

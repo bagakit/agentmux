@@ -278,7 +278,7 @@ async function opened(cdp, mode, destination) {
 }
 async function verifyNormal(probe,item) {
  phase='normal-restored-reader'
- await control('focus',{target:{kind:'region',regionId:item.region.regionId}})
+ await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:item.region.regionId}})
  const handle=await terminalHandle(probe.cdp,item.region.regionId)
  const before=await buffer(probe.cdp,handle);assert.equal(before.type,'normal');assert.equal(before.mouse,'none')
  assert.ok(before.lines.includes('ROW000'),'Normal origin history must survive actual raw prefix eviction and app restart')
@@ -296,7 +296,7 @@ async function verifyNormal(probe,item) {
 }
 async function verifyAlternate(probe,item) {
  phase='alternate-mouse-restored'
- await control('focus',{target:{kind:'region',regionId:item.region.regionId}})
+ await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:item.region.regionId}})
  const handle=await terminalHandle(probe.cdp,item.region.regionId)
  const before=await buffer(probe.cdp,handle);assert.equal(before.type,'alternate');assert.equal(before.mouse,'any');assert.ok(before.lines.some(line=>line.includes('READY500')))
  const start=await status(item),firstRun=await exactRun(item)
@@ -356,7 +356,7 @@ try {
  const launcher=await waitFor('actual new workspace launcher',()=>first.cdp.evaluate("document.querySelector('[data-workbench-region-id]:has(.launch-surface)')?.dataset.workbenchRegionId ?? null"))
  const normal=await opened(first.cdp,'normal',{kind:'launcher',regionId:launcher})
  const alternate=await opened(first.cdp,'alternate',{kind:'split',region:{kind:'region',regionId:normal.region.regionId},direction:'right'})
- await control('focus',{target:{kind:'region',regionId:normal.region.regionId}})
+ await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:normal.region.regionId}})
  const durable=await waitFor('actual durable workface',async()=>{const state=await localState(first.cdp);const tab=state?.restoredWorkbench?.tabs?.[normal.region.tabId];return tab?.layout.activeRegionId===normal.region.regionId&&Object.values(tab.regions).some(r=>r.sessionId===normal.region.runId)&&Object.values(tab.regions).some(r=>r.sessionId===alternate.region.runId)?state.restoredWorkbench:null})
  const native=client.runtimeIdentity();assert.equal(native.protocolVersion,18);receipt.runtimeBefore=native
  const before=await Promise.all(runs.map(exactRun));assert.equal(before.length,2)

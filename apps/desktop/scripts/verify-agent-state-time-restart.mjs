@@ -243,7 +243,7 @@ try {
   const region=inspected.result.region;assert.equal(region.agentSessionId,known.agentSessionId)
   const split=await control('agent.open',{content:{kind:'agent-session',agentSessionId:unknown.agentSessionId},destination:{regionId:region.regionId,split:'right'},focus:true})
   assert.equal(split.result.outcome,'opened');assert.ok(split.result.to);assert.equal(split.result.agent.agentSessionId,unknown.agentSessionId)
-  await control('focus',{target:{kind:'region',regionId:region.regionId}})
+  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:region.regionId}})
   const working=await post('Known clock','UserPromptSubmit');assert.ok(Number.isSafeInteger(working.stateEnteredAt))
   await waitFor('native working reaches actual snapshot',async()=>{const s=await sameRuns(first.cdp);return s.sessions.find(s=>s.id===known.agentSessionId)?.semanticStatus?.observedAt===working.observedAt})
   const beforeMenuGeometry=await actualGeometry(first.cdp)

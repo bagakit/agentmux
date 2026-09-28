@@ -29,8 +29,11 @@ async function render(visible = true) {
   })))
 }
 function mount() {
+  const host = document.createElement('div'), input = document.createElement('textarea')
+  host.append(input); container.append(host)
+  host.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 600, bottom: 400, width: 600, height: 400, toJSON: () => ({}) })
   const editor = {
-    focus: vi.fn(), addCommand: vi.fn(), addAction: vi.fn(),
+    focus: vi.fn(() => input.focus()), getContainerDomNode: () => host, addCommand: vi.fn(), addAction: vi.fn(),
     createContextKey: vi.fn(() => ({ set: vi.fn() })),
     onDidChangeCursorSelection: vi.fn(), onDidDispose: vi.fn(),
     revealLineInCenter: vi.fn(), setPosition: vi.fn()

@@ -65,7 +65,7 @@ const PERSISTED_REGION_ID = initialWorkbenchRegionId(PERSISTED_TAB_ID)
 const PERSISTED_SPACE_ID = directoryIdentity('local', '/workspace-alpha')
 const PERSISTED_ZONE_ID = workspaceZoneId(PERSISTED_SPACE_ID, 'workspace-alpha')
 
-/** 一个真实形状的 file tab + 布局。file 面是唯一必须活过重启的持久面（见 workbench-persistence.ts:49）。 */
+/** 一个真实形状的 file Tab + 布局，非空地验证原持久工作面。 */
 const PERSISTED_WORKBENCH = projectPersistedWorkbench({
   tabs: {
     [PERSISTED_TAB_ID]: createWorkbenchTab(PERSISTED_TAB_ID, {
@@ -79,6 +79,8 @@ const PERSISTED_WORKBENCH = projectPersistedWorkbench({
 })
 
 const PERSISTED_PREFERENCES = {
+  workbenchSpaceSelection: { spaceId: PERSISTED_SPACE_ID, zoneId: PERSISTED_ZONE_ID, workspaceId: 'workspace-alpha',
+    tabId: PERSISTED_TAB_ID, groupId: 'group-alpha', regionId: initialWorkbenchRegionId(PERSISTED_TAB_ID), topicId: null },
   // 第一组：Workbench 拓扑与启动期取值。这五项是这次补上的——它们此前一个都不在记录里。
   restoredWorkbench: PERSISTED_WORKBENCH,
   // 已有 durable 字段取非默认的真实地址/相关请求，空映射无法证明恢复。
@@ -213,6 +215,8 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.projectRailWidth, '项目栏宽度被重置了').toBe(PERSISTED_PREFERENCES.projectRailWidth)
     expect(state.toolsOpen, '工具面板开合被重置了').toBe(PERSISTED_PREFERENCES.toolsOpen)
     expect(state.agentFocus, 'Agent focus context was reset').toEqual(PERSISTED_PREFERENCES.agentFocus)
+    expect(state.viewModes).toEqual(PERSISTED_PREFERENCES.viewModes)
+    expect(state.workbenchSpaceSelection).toEqual(PERSISTED_PREFERENCES.workbenchSpaceSelection)
     expect(state.focusTimelineHeight, 'Focus 高度丢了').toBe(PERSISTED_PREFERENCES.focusTimelineHeight)
     expect(state.retainedSpatialFocus, '原精确空间焦点丢了').toEqual(PERSISTED_PREFERENCES.retainedSpatialFocus)
     expect(state.spaceObjectIcons, '原 Space 图标选择丢了').toEqual(PERSISTED_PREFERENCES.spaceObjectIcons)
@@ -311,7 +315,9 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
       'retainedSpatialFocus',
       'spaceObjectIcons',
       'spaceZoneBindings',
-      'spatialRequests'
+      'spatialRequests',
+      'workbenchSpaceSelection',
+      'viewModes'
     ] as const) {
       expect(
         JSON.stringify(PERSISTED_PREFERENCES[key]),

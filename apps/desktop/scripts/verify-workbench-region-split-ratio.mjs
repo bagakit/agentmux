@@ -195,7 +195,7 @@ try {
   phase='two-public-splits'
   const opened=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:browser.regionId,split:'right'},focus:true});assert.equal(opened.outcome,'opened');assert.ok(opened.to)
   terminal=(await control('open.terminal',{shellCommand:'/bin/cat',destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.to.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)
-  await control('focus',{target:{kind:'region',regionId:browser.regionId}})
+  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:browser.regionId}})
   receipt.before=await waitFor('public Browser descriptor reaches the actual page',async()=>{const value=await observe(),region=value.workbench.tabs.flatMap(tab=>tab.regions).find(region=>region.regionId===browser.regionId);return region?.kind==='browser'&&region.url===pageUrl?value:null});const tab=receipt.before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId));assert.ok(tab);assert.equal(tab.regions.length,3);assert.equal(tab.layout.root.type,'split');assert.equal(tab.layout.root.ratio,1/3)
   receipt.geometryBefore=await geometry(browser,pageUrl);assert.equal(receipt.geometryBefore.dom.panels[0].grow,33.3)
   const widths=receipt.geometryBefore.dom.panels.map(panel=>panel.bounds.width);assert.ok(Math.abs(widths[0]/(widths[0]+widths[1])-1/3)<0.002)

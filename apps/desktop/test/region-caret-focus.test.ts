@@ -59,7 +59,7 @@ describe('regionFocusClaimsCaret：谁触发的落焦决定抢不抢 caret', () 
     const claiming = REGION_FOCUS_CAUSES.filter((cause) => regionFocusClaimsCaret(cause))
     expect(claiming, `抢 caret 的 cause 应恰好一种，实测 [${claiming.join(', ')}]`).toEqual(['keyboard'])
     // 自检：cause 表本身覆盖了两种值，否则上面那条在「只有一种 cause」的表下恒真。
-    expect(new Set<RegionFocusCause>(REGION_FOCUS_CAUSES).size).toBe(2)
+    expect(new Set<RegionFocusCause>(REGION_FOCUS_CAUSES).size).toBe(3)
   })
 })
 

@@ -4,6 +4,7 @@ import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { focusFacts } from './fixtures/desktop-focus-facts.js'
 import {
   AgentMuxControlServer,
   parseAgentMuxControlReceipt,
@@ -157,8 +158,8 @@ describe('Control protocol', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'reserved-explicit-id',
       operation: 'focus',
-      target: { kind: 'tab', tabId: 'self' }
-    })).toThrow('Focus target')
+      target: { kind: 'space', tabId: 'self' }, inputPolicy: 'preserve'
+    })).toThrow('exact ID')
     expect(() => parseAgentMuxControlRequest({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'legacy',
@@ -691,7 +692,6 @@ describe('Control protocol', () => {
     })).toThrow('exactly one')
     for (const receipt of [
       { ...success, result: { agentSessionId: 'self' } },
-      { ...success, operation: 'focus', result: { tabId: 'self' } },
       {
         ...success,
         operation: 'inspect.region',
@@ -703,6 +703,12 @@ describe('Control protocol', () => {
         }
       }
     ]) expect(() => parseAgentMuxControlReceipt(receipt)).toThrow('invalid')
+    const { operation, ...focusResult } = focusFacts({ schemaVersion: 5, requestId: 'focus', operation: 'focus',
+      target: { kind: 'space', tabId: 'tab' }, inputPolicy: 'preserve' })
+    expect(() => parseAgentMuxControlReceipt({ ...success, operation, result: {
+      ...focusResult, navigation: { ...focusResult.navigation, selection: { ...focusResult.navigation.selection,
+        space: { ...focusResult.navigation.selection.space, tabId: 'self' } } }
+    } })).toThrow('exact ID')
   })
 
   // 方向邻居会被 Agent 直接当作地址喂回 focus/send，所以它是一条**信任边界**：主机说什么就
@@ -846,7 +852,7 @@ describe('external Control control', () => {
           }
           return { operation: request.operation, agentSessionId: 'semantic-1' }
         }
-        if (request.operation === 'focus') return { operation: request.operation, tabId: 'tab-main', regionId: 'agent-left' }
+        if (request.operation === 'focus') return focusFacts({ ...request, target: { kind: 'space', tabId: 'tab-main', regionId: 'agent-left' } })
         if (request.operation === 'arrange') return {
           operation: request.operation,
           tab: {

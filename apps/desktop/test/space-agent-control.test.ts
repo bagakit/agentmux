@@ -126,7 +126,10 @@ describe('public Desktop spatial Control owner', () => {
     const other = createWorkbenchTab('other-tab', { regionId: 'c', kind: 'agent', phase: 'attached', workspaceId: 'repo', sessionId: 'session-c' })
     useAppStore.setState({ sessions: [agent('session-a'), agent('session-b'), agent('session-c')], tabs: { source, 'other-tab': other },
       layouts: { repo: createWorkspaceLayout('g', ['source', 'other-tab']), other: createWorkspaceLayout('g2') }, activeWorkspaceId: 'repo', mainSurface: 'workbench' })
-    useAppStore.getState().focusRegion('repo', 'source', 'a')
+    const selected = await useAppStore.getState().executeControl(parseAgentMuxControlRequest({ schemaVersion: 5,
+      requestId: 'private-desktop-focus-before-move', operation: 'focus', target: { kind: 'space', regionId: 'a' } }))
+    if (selected.operation !== 'focus') throw new Error('Wrong focus operation')
+    expect(selected.navigation.selection.space).toMatchObject({ workspaceId: 'repo', tabId: 'source', regionId: 'a' })
     const beforeFocus = useAppStore.getState().agentFocus
     const moved = await control({ operation: 'space.mv', fromRegionId: 'a', expectedAgentSessionId: 'session-a', destination: { zoneId: workspaceZoneId(directoryIdentity('local', '/other'), 'other') }, focus: false })
     if (moved.operation !== 'space.mv') throw new Error('Wrong operation')
@@ -134,6 +137,9 @@ describe('public Desktop spatial Control owner', () => {
     const state = useAppStore.getState()
     expect(state.activeWorkspaceId).toBe('repo'); expect(state.agentFocus).toEqual(beforeFocus)
     expect(state.retainedSpatialFocus).toMatchObject({ regionId: 'a', tabId: 'source', workspaceId: 'repo' })
+    expect(state.workbenchSpaceSelection).toMatchObject({ spaceId: directoryIdentity('local', '/repo'),
+      zoneId: workspaceZoneId(directoryIdentity('local', '/repo'), 'repo'), workspaceId: 'repo',
+      tabId: split ? 'source' : null, groupId: split ? 'g' : null, regionId: null })
     expect(layoutForLogicalRegionFocus(state.layouts.repo!, state.tabs, state.retainedSpatialFocus).groups[0]?.activeTabId).toBe(split ? 'source' : null)
     if (split) expect(Object.keys(state.tabs.source!.regions)).toEqual(['b', 'c'])
     expect(focusedSessionId(state)).toBeNull()

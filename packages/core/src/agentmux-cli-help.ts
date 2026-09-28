@@ -45,7 +45,7 @@ Intents:
   whoami      Report your own Session, View, Region, Workspace, and available capabilities.
   doctor      Diagnose the local Runtime: capabilities, agents, endpoint storage and reclamation.
   endpoint    Print the Control endpoint path and schema version without connecting.
-  inspect     Inspect one Agent Session, Run, Tab, or Region without changing focus.
+  inspect     Read an Agent Session, Run, Tab, Region, or the Desktop client without side effects.
   list        List configured agents, projects, or active Agent Sessions from their owners.
   settings    Read or change preferences supported by the running Desktop host.
   diagnostics Inspect the Desktop crash log or explicitly request it in the file manager.
@@ -60,7 +60,7 @@ Intents:
   discuss     Start a Discussion: create a dedicated Agent and deliver the first message.
   dispatch    Open, report and inspect supervision of existing durable Agent messages.
   handoff     Declare a communication handoff to another Agent Session.
-  focus       Focus one exact Tab or Region.
+  focus       Select a Space, Zone, Tab, Region, Goal, or Surface; preserve input by default.
   promote     Promote one Region into its own new Tab.
   arrange     Apply one explicit layout operation to a Tab.
   output      Read or follow one Agent Session's ordered output.
@@ -307,6 +307,7 @@ independently selects durable state; neither override implies the other.
   ['inspect', `Inspect one exact owner identity without changing focus
 
 Usage:
+  agentmux inspect --client
   agentmux inspect --session <session-id|self>
   agentmux inspect --run <run-id>
   agentmux inspect --tab <tab-id|self>
@@ -314,6 +315,8 @@ Usage:
   agentmux inspect --provider-native <native-id> --provider <provider-id>
   agentmux inspect --acp-native <native-id> --adapter <adapter-id>
 
+Inspect --client reads the existing Desktop presentation, overlays, floating View and input
+owner without changing them. Its content-free snapshot cannot confirm a past request.
 Session/Run/native inspection reads Core truth. Tab/Region inspection requires the
 Desktop Control Host. Inspect --tab returns every closed-union Region surface and
 normalized bounds. Missing, stale, or ambiguous self fails closed.`],
@@ -787,13 +790,25 @@ The source label in the prompt is not authentication.
 Region must display an Agent. Tab succeeds only when it resolves to exactly one distinct
 Agent Session; zero or multiple candidates fail with MESSAGE_TARGET_NOT_UNIQUE. Send
 never resumes an ended Session.`],
-  ['focus', `Focus one exact presentation identity
+  ['focus', `Navigate the Desktop main surface while preserving existing input
 
 Usage:
+  agentmux focus --space <space-id> [--zone <zone-id>]
+  agentmux focus --zone <zone-id>
   agentmux focus --tab <tab-id>
   agentmux focus --region <region-id>
+  agentmux focus --goal <demand-id>
+  agentmux focus --surface <space|focus|goals|search>
+  agentmux focus --region <region-id> --input target
+  agentmux focus --tab <tab-id> --input target
 
-Focus never opens content or mutates a Run.`],
+Space/Zone/Tab/Region form one hierarchy; exact children infer parents and supplied parents
+must agree. Multi-Zone or ambiguous Tab targets return exact candidates. Goal and Surface
+selectors are exclusive with that hierarchy. Goal navigation never launches a discussion.
+Default --input preserve never steals conversation input. --input target requires the exact
+existing Tab/Region input owner. Selection, actual presentation, overlays, floating View,
+and before/after input are separate facts; inspect --client observes their current snapshot.
+Focus never opens content, dismisses overlays, closes a floating View or mutates a Run.`],
   ['promote', `Promote one Region into its own new Tab
 
 Usage:

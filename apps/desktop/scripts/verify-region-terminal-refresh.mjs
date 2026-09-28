@@ -398,7 +398,7 @@ try {
  const rightReport=await control('agent.open',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},
   destination:{regionId:left.regionId,split:'right'},focus:false});assert.equal(rightReport.outcome,'opened');const right=rightReport.to;assert.ok(right)
  await waitFor('second shared Region',async()=> (await inspected(right.regionId)).terminalView?.liveReady)
- await control('focus',{target:{kind:'region',regionId:left.regionId}})
+ await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:left.regionId}})
  const draft='Unsent exact Region draft survives failed observation and two restarts'
  await click(first.cdp,`[data-workbench-region-id="${left.regionId}"] .composer [role="textbox"]`)
  await first.cdp.call('Input.insertText',{text:draft})

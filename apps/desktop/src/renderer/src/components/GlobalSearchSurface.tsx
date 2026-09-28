@@ -8,6 +8,7 @@ import { SearchBrowserTools } from './SearchBrowserTools'
 export const GlobalSearchSurface = memo(function GlobalSearchSurface({ visible = true }: { visible?: boolean }) {
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
+  const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
   const layouts = useAppStore((state) => state.layouts)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const createBrowser = useAppStore((state) => state.createBrowser)
@@ -19,9 +20,11 @@ export const GlobalSearchSurface = memo(function GlobalSearchSurface({ visible =
   const queryRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    // Surface visibility from Control does not authorize an input handoff or blur.
+    if (controlNavigation) return
     if (visible) queryRef.current?.focus()
     else if (surfaceRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
-  }, [visible])
+  }, [visible, controlNavigation])
 
   async function openBrowser(input = 'about:blank'): Promise<void> {
     if (opening) return

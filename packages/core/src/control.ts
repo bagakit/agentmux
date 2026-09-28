@@ -6,7 +6,9 @@ import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
+import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 export type * from './space-control.js'
+export type * from './desktop-focus-control.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -240,7 +242,7 @@ export type AgentMuxControlSendRequest = RequestBase & {
   operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; caller?: AgentMuxControlCaller; message?: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
-  operation: 'focus'; target: { kind: 'tab'; tabId: string } | { kind: 'region'; regionId: string }
+  operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
 }
 export type AgentMuxControlArrangeRequest = RequestBase & {
   operation: 'arrange'; target: AgentMuxTabAnchor; mode: AgentMuxArrangeMode; caller?: AgentMuxControlCaller
@@ -639,7 +641,7 @@ export type AgentMuxControlResult =
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
   | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
   | { operation: 'send'; agentSessionId: string }
-  | { operation: 'focus'; tabId: string; regionId?: string }
+  | AgentMuxDesktopFocusResult
   | { operation: 'arrange'; tab: AgentMuxInspectedTab }
   // Where the promoted Region now lives: a brand-new Tab, same regionId (kept, not minted) and workspace.
   // The caller feeds this straight back into focus / inspect.region. A no-op (the Region was already its

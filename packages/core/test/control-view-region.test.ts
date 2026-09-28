@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { focusFacts } from './fixtures/desktop-focus-facts.js'
 import {
   AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxControlServer, parseAgentMuxControlReceipt,
   parseAgentMuxControlRequest, requestAgentMuxControl, resolveAgentMuxRegion,
@@ -26,7 +27,7 @@ describe('public Control views through the real owner endpoint', () => {
       seen.push(request.operation)
       if (request.operation === 'inspect.tab') return { operation: request.operation, tab: { tabId: view.tabId, workspaceId: view.workspaceId, regions: [inspectedView, inspectedAgent] } }
       if (request.operation === 'inspect.region') return { operation: request.operation, region: inspectedView }
-      if (request.operation === 'focus') return { operation: request.operation, tabId: view.tabId, regionId: view.regionId }
+      if (request.operation === 'focus') return focusFacts(request)
       if (request.operation === 'send') return { operation: request.operation, agentSessionId: agent.agentSessionId }
       throw new Error('Unexpected private operation')
     } }, path)
@@ -36,7 +37,7 @@ describe('public Control views through the real owner endpoint', () => {
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'inspect-mixed-tab', ok: true, operation: 'inspect.tab', result: { tab: { tabId: view.tabId, workspaceId: view.workspaceId, regions: [inspectedView, inspectedAgent] } }
       })
       await expect(requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'inspect-view', operation: 'inspect.region', target: { kind: 'region', regionId: view.regionId } }, path)).resolves.toMatchObject({ operation: 'inspect.region', result: { region: inspectedView } })
-      await expect(requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'focus-view', operation: 'focus', target: { kind: 'region', regionId: view.regionId } }, path)).resolves.toMatchObject({ operation: 'focus', result: { tabId: view.tabId, regionId: view.regionId } })
+      await expect(requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'focus-view', operation: 'focus', target: { kind: 'space', tabId: view.tabId, regionId: view.regionId }, inputPolicy: 'preserve' }, path)).resolves.toMatchObject({ operation: 'focus', result: { navigation: { selection: { space: { tabId: view.tabId, regionId: view.regionId } } } } })
       await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'send-adjacent-agent', operation: 'send', target: { kind: 'agent-session', agentSessionId: agent.agentSessionId }, text: 'Continue' }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: agent.agentSessionId } })
       expect(seen).toEqual(['inspect.tab', 'inspect.region', 'focus', 'send'])
       expect(resolveAgentMuxRegion([view, agent], { kind: 'region', regionId: view.regionId })).toEqual(view)

@@ -252,7 +252,7 @@ try {
   // A real user resize supplies the durable ratio through the existing committer.
   // The earlier programmatic nested-split/defaultSize mismatch is retained separately.
   await dragOriginalSplit()
-  await control('focus',{target:{kind:'region',regionId:initial.regionId}})
+  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:initial.regionId}})
   receipt.browserBefore=await nativePages(pageUrl);receipt.before=projectObservation(await observeUiClient(destination));assert.equal(receipt.before.workbench.tabs.flatMap(tab=>tab.regions).length,3)
   const loadedIdentityPath=packageIdentityPath(destination), loadedIdentityBytes=await readFile(loadedIdentityPath)
   try {

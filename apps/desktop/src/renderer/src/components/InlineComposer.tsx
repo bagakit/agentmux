@@ -7,6 +7,8 @@ import { ConversationImage, type ReadPastedImage } from './ConversationImage'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference'
 import { composerKeywordMatches } from '../../../shared/composer-shortcut-library'
 import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference'
+import { useAppStore } from '../store'
+import { desktopElementVisible } from '../lib/desktop-presentation'
 
 export function draftDocument(value: string): JSONContent {
   return { type: 'doc', content: value.split('\n').map((line) => ({
@@ -175,6 +177,31 @@ export function InlineComposer(props: InlineComposerProps) {
     editorProps
   })
   editorRef.current = editor
+  const regionCaretFocus = useAppStore(state => state.regionCaretFocus)
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || props.disabled || !regionCaretFocus) return
+    const target = editor.view.dom
+    const region = target.closest<HTMLElement>('[data-workbench-region-id]')
+    // In terminal mode the live xterm owns Region keyboard input. Activity/launcher
+    // composers consume the same exact intent, never a neighbouring input or overlay.
+    if (region?.dataset.workbenchRegionId !== regionCaretFocus.regionId || target.closest('[data-input-surface="terminal"]')) return
+    const nonce = regionCaretFocus.nonce
+    let observer: MutationObserver | undefined
+    const dispose = () => observer?.disconnect()
+    const attempt = (): void => {
+      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return dispose()
+      if (desktopElementVisible(target) && editor.isEditable) {
+        editor.view.focus()
+        if (target === document.activeElement || target.contains(document.activeElement)) useAppStore.getState().clearRegionCaretFocus(nonce)
+      }
+      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) dispose()
+    }
+    attempt()
+    if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
+    observer = new MutationObserver(attempt)
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
+    return dispose
+  }, [editor, props.disabled, regionCaretFocus])
   useImperativeHandle(props.insertionRef, () => ({
     insert: async (resolve, options) => {
       if (editor && !editor.isDestroyed) await insertComposerContent(editor, resolve, draftDocument, options)
