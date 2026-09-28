@@ -8,7 +8,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -1561,6 +1561,7 @@ export function TerminalView({
     <Fragment>
       <TerminalContextMenu
         hasSelection={hasSelection}
+        historyBoundary={!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap ? historyBoundary : null}
         pathActions={terminalFileMenuActions({
           link: pathActions,
           local: workspaceIsLocal,
@@ -1682,9 +1683,6 @@ export function TerminalView({
             historyContent={historyNotice?.id === 'history-gap' ? <TerminalReplayGapNotice
               scope={noticeScope} visible={visible} embedded canRedraw={canControlRun && !readOnly}
               onRedraw={redrawCurrentScreen} /> : historyNotice ? <ServiceWindowNotice notice={historyNotice.notice} /> : null} />
-          {!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap && historyBoundary ? <div className="terminal-replay-gap terminal-replay-gap--compact" role="status" title={historyBoundary} aria-label={historyBoundary}>
-            <History size={12} aria-hidden="true" /><span>{historyBoundary.startsWith('The full-screen') ? 'Full-screen history' : 'History line limit'}</span>
-          </div> : null}
           {searchOpen ? (
             <div className="terminal-search" role="search">
               <Search size={13} />

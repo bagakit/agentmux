@@ -122,13 +122,19 @@
 @media (prefers-reduced-motion: reduce) {
   .terminal-agent-startup__content::before { animation: none; }
 }
-/* One compact track for this Terminal's facts. Details only occupy the top layer after user action;
-   xterm stays mounted with its latest input visible, independent of the number of notices. */
-.terminal-view:has(> .terminal-service-window) { display: flex; flex-direction: column; }
-.terminal-view:has(> .terminal-service-window) > .terminal-view__xterm { flex: 1 1 0; height: auto; }
-.terminal-service-window {
-  flex: 0 0 auto; padding: 0 var(--sp-2); background: var(--surface-0);
+/* A local reading-safe corner, outside flow. The same original disclosure still owns all facts. */
+.terminal-view > .terminal-service-window {
+  position: absolute; isolation: isolate; z-index: 42; top: 0; left: var(--sp-2); max-width: min(140px, 42%);
+  min-height: 0; height: 22px; padding: 0; align-items: flex-start; gap: 0; background: transparent;
 }
+.terminal-service-window::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 13px; border-radius: var(--radius-sm); background: var(--surface-0); pointer-events: none; }
+.terminal-service-window .service-disclosure__trigger { height: 22px; padding: 0 var(--sp-1); align-items: flex-start; gap: var(--sp-1); }
+.terminal-service-window .service-disclosure__summary { line-height: 14px; }
+.terminal-service-window .service-disclosure__count { line-height: 14px; }
+.terminal-service-window > .service-disclosure__close { position: relative; width: 22px; height: 22px; align-items: flex-start; }
+.terminal-service-window > :is(.service-disclosure__trigger, .service-disclosure__close):hover { color: var(--text); background: transparent; }
+.terminal-service-window:has(> :is(.service-disclosure__trigger, .service-disclosure__close):hover)::before { background: var(--surface-2); }
+.agent-surface:has(.terminal-service-window) > .agent-region-header-home { max-width: calc(100% - min(148px, 44%)); }
 .terminal-gap-details > p { margin: var(--sp-3) 0; overflow-wrap: anywhere; }
 .terminal-gap-details > .small-button { min-height: 26px; border: 0; background: transparent; box-shadow: none; }
 .terminal-replay-gap {
@@ -289,7 +295,6 @@
 .terminal-font-size-control__unit { color: var(--text-3); font-size: var(--fs-micro); }
 .settings-hint { margin:0; padding:0 var(--sp-4) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 
-.terminal-replay-gap--compact { align-self: flex-start; width: fit-content; }
 
 @media (max-width: 900px) {
   .terminal-theme-grid { grid-template-columns: 1fr; }

@@ -22,10 +22,18 @@
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-body[data-observation-surface='workflow'] { box-sizing: border-box; padding-top: var(--sp-5); }
 .agent-region-header__name { flex: 0 1 auto; min-width: 0; max-width: 40ch; overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 400; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .agent-region-header__mode { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
-.agent-region-header__more { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; }
+.agent-region-header__more { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; }
 .agent-region-header__more:hover, .agent-region-header__more[data-state='open'] { color: var(--text); background: var(--surface-3); }
+/* The reading-safe glyph band is identical in every state; the larger hitbox stays transparent. */
+.agent-region-header-home .agent-region-header__more::before,
+:where(.workbench-region:has(.agent-region-header-home)) > .workbench-region__close::before { content: ''; position: absolute; z-index: -1; top: 0; left: 0; width: 100%; height: 13px; border-radius: var(--radius-sm); background: transparent; pointer-events: none; }
+.agent-region-header-home .agent-region-header__more:hover,
+.agent-region-header-home .agent-region-header__more[data-state='open'],
+:where(.workbench-region):has(.agent-region-header-home) > .workbench-region__close:hover { background: transparent; }
+.agent-region-header-home .agent-region-header__more:is(:hover, :focus-visible, [data-state='open'])::before,
+:where(.workbench-region:has(.agent-region-header-home)) > .workbench-region__close:is(:hover, :focus-visible)::before { background: var(--surface-3); }
 .agent-region-menu { max-height: calc(100vh - 2 * var(--sp-4)); overflow-y: auto; }
 .agent-region-menu__context { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .agent-region-menu, .region-context-menu { max-width: min(40ch, calc(100vw - 2 * var(--sp-4))); }
-:where(.workbench-region:has(.agent-region-header)) > .workbench-region__close { top: 1px; align-items: flex-start; border: 0; background: transparent; box-shadow: none; opacity: 1; }
+:where(.workbench-region:has(.agent-region-header)) > .workbench-region__close { isolation: isolate; top: 1px; align-items: flex-start; border: 0; background: transparent; box-shadow: none; opacity: 1; }
 .agent-region-header__more:focus-visible, :where(.workbench-region:has(.agent-region-header)) > .workbench-region__close:focus-visible { outline-offset: -2px; }
