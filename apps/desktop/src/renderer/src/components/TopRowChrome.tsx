@@ -4,7 +4,7 @@ import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
-import { WindowOverlayPortal } from './WindowOverlayHost'
+import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
 import type { SettingsPageId } from './SettingsPanel'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
@@ -175,12 +175,13 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
   const renderPlugin = (plugin: typeof SURFACE_NAVIGATION_PLUGINS[number]) => {
     if (plugin.kind === 'launcher') {
       return (
+        <WindowOverlayPortal key={plugin.id} layer={OVERLAY_LAYER_BANDS.windowChrome}>
         <div
-          key={plugin.id}
           className="surface-navigation__slot surface-navigation__slot--launcher"
         >
           {plugin.render()}
         </div>
+        </WindowOverlayPortal>
       )
     }
     const Icon = plugin.icon
