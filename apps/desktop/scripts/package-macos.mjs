@@ -1150,10 +1150,10 @@ export async function installApplication(appPath, { intent = installIntent, home
     }
     process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
     const activatedScope = await scopedProcesses(destination)
-    const activatedOwners = assertApplicationActivationOwnership({
+    const activatedOwners = confirmApplicationActivation({
       previous: previousScope.processes.filter(row => running.includes(row.pid)),
-      beforeLaunch: launchBaseline.processes, current: activatedScope.processes,
-      serving: activatedScope.serving, mainPid: observed.main.pid
+      beforeLaunch: launchBaseline.processes, scope: activatedScope,
+      main: observed.main, intent, native, path: destination
     })
     process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
     if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed,
@@ -1165,6 +1165,20 @@ export async function installApplication(appPath, { intent = installIntent, home
   } finally {
     await closeRuntimeUpgrade(runtimeUpgrade)
     await closeRuntimeUpgrade(uiRuntime)
+  }
+}
+
+/** Preserve already-qualified UI facts when the final process ownership is unknown. */
+export function confirmApplicationActivation({ previous, beforeLaunch, scope, main, intent, native, path }) {
+  try {
+    return assertApplicationActivationOwnership({ previous, beforeLaunch,
+      current: scope.processes, serving: scope.serving, mainPid: main.pid,
+      observation: scope.ownershipObservation })
+  } catch (error) {
+    error.transaction = { intent, ui: { status: 'unknown', path, error: error.message,
+      completedStages: ['candidate-launch', 'ui-activation'], failedStage: 'application-process-ownership',
+      main, ownership: error.ownershipDiagnostic }, native }
+    throw error
   }
 }
 

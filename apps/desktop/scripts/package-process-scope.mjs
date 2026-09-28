@@ -172,6 +172,7 @@ export async function observeApplicationProcesses(bundle, previousOwners = [],
   { processSnapshot = osProcessSnapshot, modes = electronNodeModes } = {}) {
   const first = processRows(await processSnapshot())
   const candidates = first.filter(row => row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `))
+  const requested = new Set(candidates.map(row => row.pid))
   let nodeModes = await modes(candidates.map(row => row.pid))
   let current = await processSnapshot()
   const original = new Map(candidates.map(row => [row.pid, row]))
@@ -183,6 +184,7 @@ export async function observeApplicationProcesses(bundle, previousOwners = [],
   // One reconciliation round covers new identities without chasing process churn.
   // Any later or unreadable candidate stays protected by the existing classifier.
   if (additional.length) {
+    for (const row of additional) requested.add(row.pid)
     const additionalModes = await modes(additional.map(row => row.pid))
     const replaced = new Set(additional.map(row => row.pid))
     nodeModes = [...nodeModes.filter(row => !replaced.has(row.pid)), ...additionalModes]
@@ -190,32 +192,83 @@ export async function observeApplicationProcesses(bundle, previousOwners = [],
   }
   const scope = snapshotApplicationProcesses(current, bundle, { nodeModes, previousOwners })
   return { ...scope, nodeModes: nodeModes.filter(mode => scope.processes.some(row =>
-    row.pid === mode.pid && row.birth === mode.birth && row.ppid === mode.ppid)) }
+    row.pid === mode.pid && row.birth === mode.birth && row.ppid === mode.ppid)),
+    // Internal point-time facts. The failure receipt selects only its affected
+    // identity and ancestry; commands, argv and environment never enter it.
+    ownershipObservation: { executable: bundle.executable, requested,
+      identities: new Map(processRows(current).map(({ uid, pid, ppid, birth }) => [pid, { uid, pid, ppid, birth }])),
+      modes: new Map(nodeModes.map(({ pid, ppid, birth, uid, mode, executable }) =>
+        [pid, { pid, ppid: ppid ?? null, birth: birth ?? null, uid: uid ?? null,
+          mode: mode ?? null, executable: executable ?? null }])) } }
+}
+
+function ownershipDiagnostic({ stage, pid, mainPid, before, after, previous, observation }) {
+  const identity = id => {
+    const row = observation?.identities.get(id) ?? after.get(id)
+    return row ? { uid: row.uid ?? null, pid: row.pid, ppid: row.ppid, birth: row.birth ?? null } : null
+  }
+  const current = identity(pid), mode = observation?.modes.get(pid)
+  const unknown = mode ? ['uid', 'birth', 'ppid', 'executable'].filter(key => mode[key] == null) : []
+  const mismatch = mode && current ? ['uid', 'birth', 'ppid'].filter(key => mode[key] != null && mode[key] !== current[key]) : []
+  if (mode) {
+    if (mode.uid != null && mode.uid !== process.getuid() && !mismatch.includes('uid')) mismatch.push('uid')
+    if (mode.executable != null && mode.executable !== observation.executable) mismatch.push('executable')
+  }
+  const path = [], visited = new Set()
+  let parent = current, termination = 'missing-process', missingPid = pid
+  while (parent) {
+    if (visited.has(parent.pid)) { termination = 'cyclic'; missingPid = null; break }
+    path.push(parent); visited.add(parent.pid)
+    if (parent.pid === mainPid || parent.pid === 1) {
+      termination = parent.pid === mainPid ? 'loaded-main' : 'system-root'; missingPid = null; break
+    }
+    missingPid = parent.ppid; parent = identity(parent.ppid); termination = 'missing-parent'
+  }
+  return { schema: 'agentmux.application-ownership-diagnostic.v1', stage, mainPid,
+    loadedMain: identity(mainPid), affected: { identity: current,
+      mode: { status: !observation ? 'unavailable' : !mode ? observation.requested.has(pid) ? 'not-returned' : 'not-requested'
+        : mismatch.length ? 'binding-mismatch' : unknown.length || !['node', 'gui'].includes(mode.mode) ? 'unknown' : 'bound',
+      observation: mode ?? null, mismatch, unknown },
+      previousSameBirth: !!current && previous.some(row => row.pid === pid && row.birth === current.birth),
+      beforeLaunchSameBirth: !!current && before.get(pid)?.birth === current.birth },
+    ancestry: { path, termination, missingPid } }
 }
 
 /** Late helpers belong to the observed new Main; a launch-time PID list is not an owner. */
-export function assertApplicationActivationOwnership({ previous, beforeLaunch, current, serving, mainPid }) {
+export function assertApplicationActivationOwnership({ previous, beforeLaunch, current, serving, mainPid, observation }) {
   const before = new Map(beforeLaunch.map(row => [row.pid, row]))
   const after = new Map(current.map(row => [row.pid, row]))
-  for (const row of previous) {
-    assert(after.get(row.pid)?.birth !== row.birth,
-      `A previous application owner is still running (pid ${row.pid}). Its old image cannot be declared replaced.`)
-  }
-  const main = after.get(mainPid)
-  assert(main && main.birth && serving.includes(mainPid), 'The loaded Main has no current application process observation.')
-  assert(before.get(mainPid)?.birth !== main.birth, 'The loaded Main existed before candidate launch; new activation is unconfirmed.')
-  return serving.map(pid => {
-    const owner = after.get(pid)
-    assert(owner?.birth, `Application process birth is unavailable (pid ${pid}).`)
-    assert(before.get(pid)?.birth !== owner.birth, `Application process ${pid} existed before candidate launch; its new ownership is unconfirmed.`)
-    const visited = new Set()
-    let parent = owner
-    while (parent.pid !== mainPid) {
-      assert(!visited.has(parent.pid), `Application process ancestry is cyclic (pid ${pid}).`)
-      visited.add(parent.pid)
-      parent = after.get(parent.ppid)
-      assert(parent, `Application process ${pid} is not a confirmed descendant of the loaded Main.`)
+  let stage = 'previous-owner', pid = mainPid
+  try {
+    for (const row of previous) {
+      pid = row.pid
+      assert(after.get(row.pid)?.birth !== row.birth,
+        `A previous application owner is still running (pid ${row.pid}). Its old image cannot be declared replaced.`)
     }
-    return owner
-  })
+    stage = 'loaded-main'; pid = mainPid
+    const main = after.get(mainPid)
+    assert(main && main.birth && serving.includes(mainPid), 'The loaded Main has no current application process observation.')
+    stage = 'main-birth'
+    assert(before.get(mainPid)?.birth !== main.birth, 'The loaded Main existed before candidate launch; new activation is unconfirmed.')
+    return serving.map(ownerPid => {
+      pid = ownerPid; stage = 'owner-birth'
+      const owner = after.get(pid)
+      assert(owner?.birth, `Application process birth is unavailable (pid ${pid}).`)
+      stage = 'owner-launch'
+      assert(before.get(pid)?.birth !== owner.birth, `Application process ${pid} existed before candidate launch; its new ownership is unconfirmed.`)
+      const visited = new Set()
+      let parent = owner
+      stage = 'owner-ancestry'
+      while (parent.pid !== mainPid) {
+        assert(!visited.has(parent.pid), `Application process ancestry is cyclic (pid ${pid}).`)
+        visited.add(parent.pid)
+        parent = after.get(parent.ppid)
+        assert(parent, `Application process ${pid} is not a confirmed descendant of the loaded Main.`)
+      }
+      return owner
+    })
+  } catch (error) {
+    error.ownershipDiagnostic = ownershipDiagnostic({ stage, pid, mainPid, before, after, previous, observation })
+    throw error
+  }
 }
