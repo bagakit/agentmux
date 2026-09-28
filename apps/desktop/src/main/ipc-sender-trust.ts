@@ -123,3 +123,13 @@ export function senderTrust(
 export function assertSenderTrusted(trust: SenderTrust): void {
   if (!trust.trusted) throw new Error(trust.reason)
 }
+
+/**
+ * 人工手动消息发送者校验：仅当显式声明人工来源时，验证发送者来自第一方受信任窗口。
+ * 普通提交或未归因来源不以此为前置。不可信时抛出确定的拒绝原因。
+ */
+export function assertManualPromptSenderTrusted(sender: unknown, trustedFrame: unknown): void {
+  if (!Object.is(sender, trustedFrame)) {
+    throw new Error('Untrusted manual prompt sender')
+  }
+}

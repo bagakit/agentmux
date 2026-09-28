@@ -338,6 +338,7 @@ export type AgentSteerQueueEntry = {
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
+  origin?: 'manual'
 }
 
 type AppState = {
@@ -845,12 +846,12 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
-  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string): boolean
+  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual'): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
-  send(sessionId: string, text: string, onRejected?: (error: unknown) => void): boolean
+  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual'): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -2067,7 +2068,7 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
   return typeof candidate === 'boolean' ? candidate : fallback
 }
 
-function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID()): string | false {
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual'): string | false {
   if (!text.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
@@ -2096,7 +2097,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(session.processState === 'running' && session.status.state !== 'disconnected'
       ? { runId: session.control.run.runId } : {}),
     text: text.trim(),
-    status: 'queued'
+    status: 'queued',
+    ...(origin === 'manual' ? { origin: 'manual' } : {})
   }
   void api.continuousProgress.pauseForInput(session.control).catch(error => useAppStore.getState().reportError(error))
   useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
@@ -6005,8 +6007,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
-  enqueueAgentSteer(sessionId, text, onRejected, operationId) {
-    return admitAgentSteer(sessionId, text, onRejected, operationId) !== false
+  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin) {
+    return admitAgentSteer(sessionId, text, onRejected, operationId, origin) !== false
   },
   removeAgentSteer(sessionId, operationId) {
     // A submitted request cannot be recalled by deleting its local projection.
@@ -6160,7 +6162,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!steerEntryTargetsRun(pending, session.control.run.runId) || condition.expectedRun.runId !== session.control.run.runId) throw new Error(
               'The bound Run changed before dispatch. This message will not be sent to another Run.')
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition, undefined,
-              explicitAttempt ? { allowUncertainTurn: true } : undefined)
+              explicitAttempt ? { allowUncertainTurn: true } : undefined,
+              pending.origin === 'manual')
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
               const agentSteerQueues = { ...current.agentSteerQueues }
@@ -6223,9 +6226,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     agentSteerDrains.set(sessionId, drain)
     return drain.promise
   },
-  send(sessionId, text, onRejected) {
+  send(sessionId, text, onRejected, origin) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = admitAgentSteer(sessionId, text, onRejected)
+    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin)
     if (operationId === false) return false
     void get().flushAgentSteerQueue(sessionId, operationId)
     return true
