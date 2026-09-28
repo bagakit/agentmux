@@ -25,6 +25,7 @@ export function TerminalContextMenu({
   children,
   hasSelection,
   identityActions,
+  historyBoundary,
   mouseTrackingMode,
   pathActions,
   onClear,
@@ -38,6 +39,8 @@ export function TerminalContextMenu({
 }: {
   children: ReactNode
   hasSelection: boolean
+  /** Contextual buffer information; it never becomes a persistent Terminal banner. */
+  historyBoundary: string | null
   /**
    * 这一格 Agent 的身份动作（发消息 / 复制 Session 地址），由 `terminalIdentityMenuActions` 算出。
    *
@@ -114,6 +117,7 @@ export function TerminalContextMenu({
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyScrollback}>
             <ScrollText size={14} /><span>Copy all output</span>
           </ContextMenu.Item>
+          {historyBoundary ? <div className="tab-context-menu__hint" role="note">{historyBoundary}</div> : null}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onPaste}>
             <ClipboardPaste size={14} /><span>Paste</span><kbd>{chords.paste}</kbd>
           </ContextMenu.Item>
