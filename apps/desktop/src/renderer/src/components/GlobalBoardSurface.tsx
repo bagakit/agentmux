@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, Check, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from '../lib/session-presentation'
@@ -21,6 +21,7 @@ function GoalsEntryActions() {
   const pending = useSyncExternalStore(subscribeGoalExploration, goalExplorationPending, goalExplorationPending)
   const [error, setError] = useState<string | null>(null)
   const mounted = useRef(true)
+  const nextEmphasis = '建议我下一步应该做什么'
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   function start(text: string, context?: GoalExplorationProject) {
     setError(null)
@@ -31,10 +32,14 @@ function GoalsEntryActions() {
   }
   return <section className="goals-entry" aria-label="开始对话">
     <p className="goals-entry__heading">从这里开始</p>
-    <div className="goals-entry__actions">
-      {GOAL_EXPLORATION_ACTIONS.map(action => <button key={action.id} type="button" data-goals-entry-action={action.id} disabled={pending} onClick={() => start(action.text)}><span>{action.text}</span><ArrowUpRight size={14} /></button>)}
-      {project ? <button type="button" data-goals-entry-action="next" disabled={pending} onClick={() => start(goalExplorationNextText(project), project)}><span>{goalExplorationNextText(project)}<small title={`${project.id} · ${project.hostId} · ${project.path}`}>{project.source === 'recent' ? '最近项目' : '当前项目'} · {project.name}</small></span><ArrowUpRight size={14} /></button> : null}
+    <div className="goals-entry__actions" aria-busy={pending}>
+      {GOAL_EXPLORATION_ACTIONS.map(action => {
+        const emphasis = action.id === 'understand' ? '了解我并给我建议吗？' : '开始尝试一个项目'
+        return <button key={action.id} type="button" data-goals-entry-action={action.id} disabled={pending} onClick={() => start(action.text)}><span className="goals-entry__copy"><span className="goals-entry__request">{action.text.slice(0, -emphasis.length)}<strong>{action.text.slice(-emphasis.length)}</strong></span></span><ArrowRight size={15} aria-hidden="true" /></button>
+      })}
+      {project ? <button type="button" data-goals-entry-action="next" disabled={pending} onClick={() => start(goalExplorationNextText(project), project)}><span className="goals-entry__copy"><span className="goals-entry__request">{goalExplorationNextText(project).slice(0, -nextEmphasis.length)}<strong>{goalExplorationNextText(project).slice(-nextEmphasis.length)}</strong></span><small title={`${project.id} · ${project.hostId} · ${project.path}`}>{project.source === 'recent' ? '最近项目' : '当前项目'} · {project.name}</small></span><ArrowRight size={15} aria-hidden="true" /></button> : null}
     </div>
+    {pending ? <p className="goals-entry__preparing" role="status">正在准备对话…</p> : null}
     {error ? <p className="goals-service" role="status">对话准备未确认，请求尚未发送。请核对原因后再选择上面的请求。<span>{error}</span></p> : null}
   </section>
 }
