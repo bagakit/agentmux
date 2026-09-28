@@ -1,137 +1,163 @@
-import { ChevronDown, Plus, Trash2 } from 'lucide-react'
-// 走 `/provider-id` 窄子路径而不是根 barrel：这是 renderer 里少有的对 core 的**值**导入（别处都是
-// `import type`，编译期就擦掉了）。根 barrel 会 re-export `agent-native-locator.js`，那个文件 import
-// `node:path`，于是 renderer 打包时 rollup 报「"isAbsolute" is not exported by __vite-browser-external」。
-// vitest 与 tsc 都不会报——只有真正打 renderer 的那一步会。同文件的 SettingsPanel.tsx 取同一个符号也走这条。
+import { ArrowLeft, Check, Plus, Search, Trash2, X } from 'lucide-react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
 import { COMPOSER_PROMPT_STATES, resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
+import { configValuesEqual } from '../../../../shared/config-edit'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
 
-/**
- * 本地 prompt 库的设置页。
- *
- * 这一族此前写死在渲染层代码里（两条 `COMPOSER_SHORTCUT_PRESETS`），于是「快捷指令」有两套而用户
- * 一条都改不了。用户的判断是「应该只有一套，而且配置页面要支持用户自定义」——所以正文归用户，
- * 内置那两条只是 `DEFAULT_CONFIG` 里的默认项，可改可删，删掉即永久没有。
- *
- * 草稿模式（本地 state + 一次 Save）照 AgentSettingsPane 走：逐字保存会在用户还在打字时把半句正文
- * 写上盘，而 keyword 半途的状态可能与另一条撞名。
- */
+const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'
+const providerName = (prompt: ComposerShortcut) => prompt.providerId ? `${agentProviderLabel(prompt.providerId)} only` : 'Every Agent'
+const stateName = (state: string) => state.charAt(0).toUpperCase() + state.slice(1)
+
+/** Selection belongs to the view; the complete authored library and its baseline stay in this Pane. */
 export function ShortcutSettingsPane({ config, onSave }: {
   config: AppConfig
   onSave: (prompts: ComposerShortcut[], expected: ComposerShortcut[]) => Promise<void>
 }) {
   const resource = useResourceDrafts(Object.fromEntries(resolveComposerShortcuts(config).map((prompt) => [prompt.id, prompt])))
   const drafts = Object.values(resource.value)
-  const setDrafts = (update: (current: ComposerShortcut[]) => ComposerShortcut[]) => resource.setValue((current) =>
-    Object.fromEntries(update(Object.values(current)).map((prompt) => [prompt.id, prompt])))
+  const [selectedId, setSelectedId] = useState<string | null>(() => drafts[0]?.id ?? null)
+  const [query, setQuery] = useState('')
+  const [view, setView] = useState<'library' | 'editor'>('library')
+  const [recentDelete, setRecentDelete] = useState<{ prompt: ComposerShortcut } | null>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const library = useRef<HTMLDivElement>(null)
+  const focusNewName = useRef(false)
+  const focusBack = useRef(false)
+  const descriptionId = useId()
   const saveState = useSettingsSave()
-  const dirty = resource.dirty
+  const prompt = selectedId !== null && Object.hasOwn(resource.value, selectedId) ? resource.value[selectedId] : undefined
+  const normalizedQuery = query.trim().toLowerCase()
+  const visible = drafts.filter((candidate) => [candidate.label, candidate.keyword, candidate.body, providerName(candidate), ...(candidate.states ?? [])]
+    .join(' ').toLowerCase().includes(normalizedQuery))
+  const problems = drafts.flatMap((candidate) => {
+    const keyword = candidate.keyword.trim()
+    const errors: Array<{ id: string; field: 'Keyword' | 'Prompt'; message: string }> = []
+    if (!keyword) errors.push({ id: candidate.id, field: 'Keyword', message: 'Add a keyword to reach this prompt.' })
+    else if (drafts.some((other) => other.id !== candidate.id && other.keyword.trim() === keyword)) {
+      errors.push({ id: candidate.id, field: 'Keyword', message: `“${keyword}” is already used by another prompt.` })
+    }
+    if (!candidate.body.trim()) errors.push({ id: candidate.id, field: 'Prompt', message: 'Write the instruction this prompt will use.' })
+    return errors
+  })
+  const errors = problems.filter((problem) => problem.id === selectedId)
+  const changedCount = drafts.filter((candidate) => !configValuesEqual(candidate, Object.hasOwn(resource.expected, candidate.id) ? resource.expected[candidate.id] : undefined)).length
+  const deletedCount = Object.keys(resource.expected).filter((id) => !Object.hasOwn(resource.value, id)).length
+
+  useEffect(() => {
+    if (selectedId !== null && Object.hasOwn(resource.value, selectedId)) return
+    setSelectedId(drafts[0]?.id ?? null)
+  }, [resource.value, selectedId])
+  useEffect(() => {
+    if (!focusNewName.current || !nameInput.current) return
+    nameInput.current.focus()
+    focusNewName.current = false
+  }, [selectedId])
+  useLayoutEffect(() => {
+    if (!focusBack.current || view !== 'library') return
+    const row = Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-prompt-id]') ?? [])
+      .find((item) => item.dataset.promptId === selectedId)
+    ;(row ?? searchInput.current)?.focus()
+    focusBack.current = false
+  }, [view, selectedId])
 
   function update(id: string, patch: Partial<ComposerShortcut>): void {
-    setDrafts((current) => current.map((prompt) => prompt.id === id ? { ...prompt, ...patch } : prompt))
+    resource.setValue((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
   }
-
-  /**
-   * 绑定/解绑 Provider。解绑必须**删掉这个 key**，不是把它设成 undefined——`exactOptionalPropertyTypes`
-   * 下后者根本不合法，而语义上也只有「缺席」才表示通用（取值层按 `providerId === undefined` 判）。
-   * 存一个空串会让这条 prompt 既不通用、也匹配不上任何 Provider，成为一条谁都看不见的 prompt。
-   */
   function bindProvider(id: string, providerId: string): void {
-    setDrafts((current) => current.map((prompt) => {
-      if (prompt.id !== id) return prompt
-      const { providerId: _dropped, ...rest } = prompt
-      return providerId ? { ...rest, providerId } : rest
-    }))
+    resource.setValue((current) => {
+      const { providerId: _dropped, ...rest } = current[id]!
+      return { ...current, [id]: providerId ? { ...rest, providerId } : rest }
+    })
   }
-
+  function open(id: string): void { setSelectedId(id); setView('editor') }
   function add(): void {
-    // id 只需在本库内唯一且稳定，不面向用户——所以用时间戳而不是让用户填一个。keyword 留空由
-    // 下面那条校验挡住：一条没有 keyword 的 prompt 既补全不了也识别不了裸词。
-    setDrafts((current) => [...current, { id: `prompt-${Date.now()}`, keyword: '', label: '', body: '' }])
+    const id = `prompt-${crypto.randomUUID()}`
+    resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '' } }))
+    setQuery('')
+    focusNewName.current = true
+    open(id)
   }
-
-  // 两个都是「存下来也不会工作」的形状，所以在保存前拦住而不是让 zod 在主进程里整块判失败：
-  // 那样用户看到的是一条关于配置文件的错误，而问题其实是这一行少填了一格。
-  const blank = drafts.filter((prompt) => !prompt.keyword.trim() || !prompt.body.trim())
-  const duplicated = drafts.filter((prompt, index) =>
-    drafts.findIndex((other) => other.keyword.trim() === prompt.keyword.trim()) !== index)
-  const problem = blank.length > 0
-    ? 'Every prompt needs a keyword and a body — one without either would never fire.'
-    : duplicated.length > 0
-      ? `Two prompts share the keyword “${duplicated[0]!.keyword.trim()}”. Typing it could only ever reach one of them.`
-      : ''
-
+  function remove(id: string): void {
+    if (Object.hasOwn(resource.expected, id) && Object.hasOwn(resource.value, id)) setRecentDelete({ prompt: resource.value[id]! })
+    resource.setValue((current) => {
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
+    setView('library')
+  }
+  function undoDelete(): void {
+    if (!recentDelete) return
+    const restored = recentDelete.prompt
+    resource.setValue((current) => Object.hasOwn(current, restored.id) ? current : { ...current, [restored.id]: restored })
+    setRecentDelete(null)
+    open(restored.id)
+  }
+  function back(): void {
+    focusBack.current = true
+    setView('library')
+  }
   async function save(): Promise<void> {
     const submitted = resource.beginSave()
-    const normalized = Object.values(submitted.value).map((prompt) => ({
-      ...prompt,
-      keyword: prompt.keyword.trim(),
-      label: prompt.label.trim() || prompt.keyword.trim(),
-      body: prompt.body
+    const deletionAtStart = recentDelete
+    const normalized = Object.values(submitted.value).map((candidate) => ({
+      ...candidate, keyword: candidate.keyword.trim(), label: candidate.label.trim() || candidate.keyword.trim(), body: candidate.body
     }))
     const committed = await saveState.run(() => onSave(normalized, Object.values(submitted.expected)))
-    submitted.finish(committed ? Object.fromEntries(normalized.map((prompt) => [prompt.id, prompt])) : undefined)
+    submitted.finish(committed ? Object.fromEntries(normalized.map((candidate) => [candidate.id, candidate])) : undefined)
+    if (committed) setRecentDelete((current) => current === deletionAtStart && current && Object.hasOwn(submitted.expected, current.prompt.id) && !Object.hasOwn(submitted.value, current.prompt.id) ? null : current)
   }
 
   return (
-    <div className="settings-pane-stack">
-      <p className="settings-lead">Bind states to show one-click buttons that send the prompt. Type <code>/</code> or its keyword to add it to your draft instead.</p>
-      <div className="settings-pane-toolbar">
-        <button className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
+    <div className="settings-pane-stack prompt-workbench" data-view={view}>
+      <div className="settings-pane-toolbar prompt-workbench__toolbar">
+        <span className="settings-resource-count">{drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
+        <button type="button" className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
       </div>
-      <div className="agent-settings-list">
-        {drafts.map((prompt) => (
-          <details className="agent-settings-card prompt-settings-card" key={prompt.id}>
-            <summary>
-              <span><strong>{prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'}</strong><small>{prompt.keyword.trim() ? `/${prompt.keyword.trim()}` : 'No keyword yet'}{prompt.providerId ? ` · ${agentProviderLabel(prompt.providerId)} only` : ''}</small></span>
-              <ChevronDown className="settings-disclosure-icon" size={14} />
-            </summary>
-            <div className="agent-settings-fields">
-              <label><span>Keyword</span><input value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small>Both the <code>/</code> candidate and the bare word underlined in your message.</small></label>
-              <label><span>Name</span><input value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
-              <label>
-                <span>Agent</span>
-                <select
-                  value={prompt.providerId ?? ''}
-                  onChange={(event) => bindProvider(prompt.id, event.target.value)}
-                >
-                  <option value="">Every Agent</option>
-                  {BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}
-                  {prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId)
-                    ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option>
-                    : null}
-                </select>
-                <small>Leave this on Every Agent unless the wording only makes sense for one of them.</small>
-              </label>
-              <label><span>Prompt</span><ComposerTextarea value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain this like I am five, then name what the simplification leaves out." rows={5} /></label>
-              <fieldset className="prompt-state-settings">
-                <legend>Show a button when</legend>
-                <div className="prompt-state-settings__choices">
-                  {COMPOSER_PROMPT_STATES.map((state) => (
-                    <label key={state}>
-                      <input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false}
-                        onChange={(event) => update(prompt.id, { states: event.target.checked
-                          ? [...(prompt.states ?? []), state]
-                          : (prompt.states ?? []).filter((candidate) => candidate !== state) })} />
-                      <span>{state.charAt(0).toUpperCase() + state.slice(1)}</span>
-                    </label>
-                  ))}
-                </div>
-                <small>Select any states. Leave all unchecked to keep this prompt in the draft shortcuts only.</small>
-              </fieldset>
-              <button type="button" className="small-button" onClick={() => setDrafts((current) => current.filter((candidate) => candidate.id !== prompt.id))}><Trash2 size={13} /> Delete prompt</button>
+      <div className="prompt-workbench__body">
+        <section className="prompt-library" aria-label="Prompt library">
+          <label className="prompt-library__search"><Search size={14} aria-hidden="true" /><input ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
+          <div ref={library} className="prompt-library__items">
+            {visible.map((candidate) => (
+              <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
+                <span className="prompt-library__name"><strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <Check size={13} aria-label="Selected prompt" /> : null}</span>
+                <code>{candidate.keyword.trim() ? `/${candidate.keyword.trim()}` : 'No keyword yet'}</code>
+                <span className="prompt-library__body">{candidate.body.trim().split('\n').find((line) => line.trim()) || 'Write an instruction…'}</span>
+                <span className="prompt-library__scope">{providerName(candidate)} · {candidate.states?.length ? candidate.states.map(stateName).join(', ') : 'Draft shortcut'}</span>
+                {problems.some((problem) => problem.id === candidate.id) ? <span className="prompt-library__invalid">Needs attention</span> : null}
+              </button>
+            ))}
+          </div>
+          {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No matching prompts. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
+        </section>
+        {prompt ? <section className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
+          <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ArrowLeft size={13} /> Back to prompts</button><span>{providerName(prompt)}</span></div>
+          {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search. <button type="button" className="small-button" onClick={() => setQuery('')}>Show in library</button></p> : null}
+          <div className="agent-settings-fields prompt-editor__fields">
+            <label><span>Name</span><input ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
+            <label><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
+            <div className="prompt-editor__reach">
+              <label><span>Keyword</span><input aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? 'Use /keyword or the bare word to expand your draft.'}</small></label>
+              <label><span>Agent</span><select value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Where this instruction is available.</small></label>
             </div>
-          </details>
-        ))}
+            <fieldset className="prompt-state-settings"><legend>Show a button when</legend><div className="prompt-state-settings__choices">{COMPOSER_PROMPT_STATES.map((state) => <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span>{stateName(state)}</span></label>)}</div></fieldset>
+            <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Button at {prompt.states.map(stateName).join(', ')}. Click sends this instruction; pending questions queue it.</span></div> : <p>Draft shortcut only. Select states to show one-click buttons that send the prompt; pending questions queue it.</p>}</section>
+            <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><Trash2 size={13} /> Delete prompt</> : <><X size={13} /> Cancel new prompt</>}</button></div>
+          </div>
+        </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
       </div>
-      {drafts.length === 0 ? <div className="agent-catalog__empty">No prompts. Add one, or leave this empty — the composer just won’t offer any.</div> : null}
-      {problem ? <p className="settings-inline-error">{problem}</p> : null}
-      <SettingsSaveBar save={saveState} dirty={dirty} disabled={problem !== ''} label="Save prompts" onSave={() => void save()} />
+      {problems.length ? <div className="prompt-validation" role="status"><strong>Check {new Set(problems.map((problem) => problem.id)).size} {new Set(problems.map((problem) => problem.id)).size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}
+      {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><button type="button" className="small-button" onClick={undoDelete}>Undo</button></div> : null}
+      <footer className="prompt-save-footer">
+        <p className="prompt-save-summary" role="status">Save prompts updates the whole library. {changedCount} changed · {deletedCount} pending {deletedCount === 1 ? 'deletion' : 'deletions'}.</p>
+        <SettingsSaveBar save={saveState} dirty={resource.dirty} disabled={problems.length > 0} label="Save prompts" onSave={() => void save()} />
+      </footer>
     </div>
   )
 }

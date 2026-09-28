@@ -6,6 +6,7 @@ import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot } from '../src/sh
 import { producingAgentCount, workingAgentCount } from '../src/renderer/src/lib/project-board.js'
 import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey, workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import type { SpaceIconOverrides } from '../src/renderer/src/lib/space-object-appearance.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -37,6 +38,7 @@ const fixture = vi.hoisted(() => ({
     projectRailOpen: true,
     collapsedProjectGroups: {} as Record<string, true>,
     pinnedItems: {} as Record<string, string[]>,
+    spaceObjectIcons: {} as SpaceIconOverrides,
     toolsOpen: false,
     selectWorkspace: vi.fn(async () => {}),
     setMainSurface: vi.fn(),
@@ -150,6 +152,7 @@ afterEach(() => {
   fixture.state.activeWorkspaceId = 'project-a'
   fixture.state.collapsedProjectGroups = {}
   fixture.state.pinnedItems = {}
+  fixture.state.spaceObjectIcons = {}
   fixture.topics = []
 })
 
@@ -453,9 +456,9 @@ describe('Project Rail 的分组与嵌套', () => {
     // 密度合同要求项目行**一行只占一行**，缩进不能把它撑成两行。
     useWorkspaces([['outer', '/w/outer'], ['inner', '/w/outer/inner'], ['other', '/w/other']])
     const markup = renderRail()
-    expect(depthOf(exactRow(markup, 'outer'))).toBe(1)
-    expect(depthOf(exactRow(markup, 'inner'))).toBe(2)
-    expect(depthOf(exactRow(markup, 'other'))).toBe(1)
+    expect(depthOf(exactRow(markup, 'outer'))).toBe(2)
+    expect(depthOf(exactRow(markup, 'inner'))).toBe(3)
+    expect(depthOf(exactRow(markup, 'other'))).toBe(2)
     // 注入的自定义属性必须在样式表里有默认值，否则未注入的行整条 padding 失效。
     expect(chrome).toContain('--rail-depth: 0')
     expect(chrome).toContain('var(--rail-depth)')
@@ -465,8 +468,8 @@ describe('Project Rail 的分组与嵌套', () => {
     // `…/agentmux-preview` 以 `…/agentmux` 开头但不在它里面。裸 startsWith 会把它错判成子节点。
     useWorkspaces([['agentmux', '/proj/agentmux'], ['agentmux-preview', '/proj/agentmux-preview']])
     const markup = renderRail()
-    expect(depthOf(exactRow(markup, 'agentmux'))).toBe(1)
-    expect(depthOf(exactRow(markup, 'agentmux-preview'))).toBe(1)
+    expect(depthOf(exactRow(markup, 'agentmux'))).toBe(2)
+    expect(depthOf(exactRow(markup, 'agentmux-preview'))).toBe(2)
   })
 
   it('renders the group header as a disclosure control, not as a selectable project row', () => {
@@ -517,16 +520,16 @@ describe('Project Rail 的分组与嵌套', () => {
     //
     // 父目录故意取得够深（4 段）：`/proj/kit` 那种两段路径根本不会被缩短，拿它断言"保留尾部"
     // 会得出一个与实现无关的绿——这条本来就是要判缩短方向的。
-    useWorkspaces([['one', 'home//proj/kit/one'], ['two', 'home//proj/kit/two']])
-    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', 'home//proj/kit'])]: true }
+    useWorkspaces([['one', '/private/me/proj/kit/one'], ['two', '/private/me/proj/kit/two']])
+    fixture.state.collapsedProjectGroups = { [JSON.stringify(['local', '/private/me/proj/kit'])]: true }
     const markup = renderRail()
     expect(expandedStates(markup)).toEqual(['false'])
     // 成员行真的不在了——只把 chevron 转个方向而不藏行，是这个功能最容易的假实现。
     expect(markup).not.toMatch(/aria-label="one"/)
     expect(markup).not.toMatch(/aria-label="two"/)
-    // 保留尾部而不是砍尾部：靠后的段才有分辨力，`home/` 那一头对区分身份毫无帮助。
+    // 保留尾部而不是砍尾部：靠后的段才有分辨力，`/private/` 那一头对区分身份毫无帮助。
     expect(markup).toContain('…/me/proj/kit')
-    expect(markup).not.toContain('home//proj/kit</span>')
+    expect(markup).not.toContain('/private/me/proj/kit</span>')
   })
 
   it('折叠的分组把里面等你的 Agent 卷到头上——不是藏起来', () => {
@@ -577,8 +580,8 @@ describe('Project Rail 的分组与嵌套', () => {
   it('keeps real path groups and nonempty members without connector-only modifiers', () => {
     useWorkspaces([['one', '/proj/kit/one'], ['two', '/proj/kit/two']])
     const markup = renderRail()
-    expect(exactRow(markup, 'one')).toContain('--rail-depth:1')
-    expect(exactRow(markup, 'two')).toContain('--rail-depth:1')
+    expect(exactRow(markup, 'one')).toContain('--rail-depth:2')
+    expect(exactRow(markup, 'two')).toContain('--rail-depth:2')
     expect(markup).toContain('project-rail-group__header')
     expect(markup).not.toContain('project-rail-group--expanded')
     expect(chrome.length).toBeGreaterThan(1000)
@@ -627,8 +630,8 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     fixture.state.pinnedItems = { [alphaScope]: ['feat-x'], [betaScope]: ['feat-y'] }
     const markup = renderRail()
     const child = pinnedChildFor(markup, 'feat-x')
-    // 子节点比父项目行深一层：Alpha 在扁平 fixture 里是 depth 0，子节点是 1。
-    expect(depthOf(child)).toBe(1)
+    // 子节点比父项目行深一层：Folders 分类成员 Alpha 是 depth 1，子节点是 2。
+    expect(depthOf(child)).toBe(2)
     // 位置证明归属：feat-x 紧跟在 Alpha 之后、Beta 之前；feat-y 跟在 Beta 之后。
     const alphaAt = markup.indexOf('aria-label="Alpha"')
     const betaAt = markup.indexOf('aria-label="Beta"')
@@ -648,7 +651,7 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     const at = markup.indexOf(child)
     expect(at).toBeGreaterThan(0)
     const prefix = markup.slice(0, at)
-    expect(prefix).toMatch(/<div class="project-rail-row-shell" style="--rail-depth:1">$/)
+    expect(prefix).toMatch(/<div class="project-rail-row-shell" style="--rail-depth:2">$/)
     expect(child).toContain('lucide-pin')
     expect(child).toContain('data-space-parent=')
   })
@@ -661,7 +664,7 @@ describe('Pinned Topics / Branches as child nodes in the rail', () => {
     fixture.state.pinnedItems = { [SCRATCH_WORKSPACE_ID]: ['view:launcher-abc'] }
     const markup = renderRail()
     const child = rowFor(markup, 'Open Pinned Topic')
-    expect(depthOf(child)).toBe(0)
+    expect(depthOf(child)).toBe(1)
     expect(markup).toContain('aria-label="Unpin Pinned Topic"')
     const topicsAt = markup.indexOf('aria-label="Topics overview"')
     const topicAt = markup.indexOf('aria-label="Open Pinned Topic"')
