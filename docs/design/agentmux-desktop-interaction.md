@@ -14,17 +14,19 @@
 
 ### Survey、当前浏览器工作面与知识入口
 
-用户此前要求 Browser 管理入口统一到 Search，并提出未来承担搜索与知识库；现在进一步明确：「survey 更好」「现在设计太像纯搜索」「最好本身像浏览器，不要搜索时又跳到其他页面」，并确认左侧竖向标签栏。当前入口、可访问名称与工作面身份统一为 Survey；查询是浏览查证的一部分，提交后网页仍在同一 Survey 工作面。后续知识入口定位保留，但资料来源、索引、检索、保存与组织方式尚未确认，不显示假知识库、书签库或全文搜索能力。
+用户此前要求 Browser 管理统一到 Search、未来承担搜索与知识库；本次明确「survey 更好」「最好本身像浏览器，不要搜索时又跳到其他页面」，确认左侧竖向标签和液体玻璃。随后进一步确认：其它对话中用户或 Agent 打开的 Browser 也应出现在 Survey，标明所属项目并可跳转；选择页面时显示其原 Tab 的完整 Region 布局，标签能看出当前人/Agent 控制事实，并要求「改完尽快合入一轮」。这取代此前只显示当前项目、只搬单 Browser Region 的范围。当前名称和工作面身份统一 Survey；未来知识入口保留为未定义职责，不冒称已有资料索引、书签库或全文检索。
 
-- **从开始到浏览都在 Survey。** 没有当前页面时提供中央网页输入；非空原输入交给 Main 现有解释，与 Browser 地址栏同源。没有 Browser 时沿原创建 owner 建立一个精确落点；已有当前 Browser 时在同一 Region 导航，不为每次输入另建页面，不自动转 Space。空白不创建或导航；失败保留输入、原页面和健康工作面，明确失败步骤与重试动作。输入解释不另加站点、厂商或搜索引擎分支。
-- **左侧标签指向原页面。** 标签来自当前明确 Workspace 的既有 Browser Regions，每项按原 workspaceId/tabId/regionId 定位，标题、URL 与运行事实来自原 descriptor。选择只保留指向该原落点的 UI 引用，不建立第二份 Tab、页面目录、URL、Profile 或生命周期；同名页和多 Browser Region 不混成一个。Tab Group、混合 Tab 与分割拓扑继续归原 durable owner，Survey 不把 Region 假装成另一个持久 Tab。
-- **只投影选中的 Browser Region。** Survey 使用原同一个 BrowserPane 显示树与 Main-owned 原生页面，不迁移整个混合 Tab，不同时挂载另一份 BrowserPane。其它 Agent/Terminal/File/Browser Region 保留原宿主、几何、草稿与健康 Run；单 Browser 投影不扩大无关 Region 的可见性、保活或资源工作量，既有 Mote/Focus 的 Tab 级投影合同保持。进入、选择和查询不改变 Space 的执行焦点或让无关 Terminal fit/resize。退出后原 Browser 回到其原 Region，网页内容与可操作状态沿原 owner 保留。
-- **创建和关闭各有精确作用域。** 新建沿原 launcher/createBrowser 落点与明确 Workspace，保持原 Space 的活动 Tab/Region 与 Agent 焦点。关闭只关闭被选中的 Browser Region；混合 Tab 的其它 Region 不能被一起删除。目标是最后一个单 Browser Region 时沿原 Tab close owner 消费该 Workspace 内该原 Tab 的全部仍在场 group placements，每次关闭前重核同一 Browser 身份与仍为单 Browser 的事实；目标变为混合 Tab 或身份变化时停止，不把剩余页面伪装成关闭成功。关闭失败保留原页面与可执行说明，关闭最后一页回到同一 Survey 开始面。
-- **页面是主内容，管理按需可达。** 现有地址、Back/Forward/Reload、选择、截图、权限、应用链接、操作历史与任务工具继续沿《Browser 工作面》及其原 Main owner。Browser Tools 就地打开 Survey 中的原管理控件，并定位被操作 Browser 的 Workspace；Space 二级工具不回流一份管理槽。进入工具不是再次跳页，收起后继续同一页面。
-- **保留已交付管理能力。** Browser bar 的草稿、显式保存、并发校验和失败说明保持；Profiles 的目录、导入、切换与删除批准保持，跨所有已打开 Browser 的占用校验统一见《破坏性 Browser 操作的作用域与人工批准》。元素标注仍绑定 Workspace/Browser/navigation，旧页面标注保持过期事实，只把当前有效标注交给可接收 Agent 的 Composer 草稿，不自动发送，删除/清空不越界。管理开合与工作面切换不丢未保存输入或重复执行 owner 动作。
-- **重启先恢复原对象。** Survey 的当前选中只引用原 Browser Region，由原 UI owner 恢复；普通进程重启先恢复原 Tab/Group/Region、URL、布局与焦点，再尝试原身份的页面重建和 Session 续接。原引用暂未恢复时保留其身份与明确恢复说明，不换成别的可用页面或清空健康工作面；运行历史、导航状态、权限与恢复事实以原 owner 的当前结果为准，不复制新 Runtime。
+- **从开始到浏览都在 Survey。** 无当前页时中央网页输入是主要动作；原非空输入交 Main 现有解释，与 Browser 地址栏同源。没有页时沿原创建 owner 在明确 Workspace 建精确落点，已有当前 Browser 时在同一 browserId/Region 导航，不为每次输入另建页或自动转 Space。原 about:blank 也沿原 BrowserPane 的输入/导航事实。空白不创建/导航；失败保留输入、页面和健康工作面，说明失败步骤与重试，pending 不抢后来明确选择。不新增站点、厂商或引擎分支。
+- **左栏汇总所有原 Browser 页面。** 来源是所有真实 Workspace 的原 Tab/Region 和仍在场 placements，不按当前项目、对话或创建者筛掉其它页面。每项引用原 workspaceId/tabId/regionId，标题、URL 与所属项目名称沿原 descriptor/项目 owner；同名、同 Tab 多 Browser、跨项目及同 Tab 多 placements 不混淆或重复铸页；后台新页只追加原目录，不抢当前选择或待恢复引用。左标签不是另一份持久 Tab、页面目录、URL、Profile 或生命周期。
+- **选页呈现原 Tab 的完整布局。** Survey 只保存原页面选择引用，在唯一原 Tab 宿主中显示完整 Region 树；原 Agent/Terminal/File/其它 Browser 一并成为当前显示内容，仍可通过原交互 owner 操作。同 Tab 两个 Browser 标签复用一次原 Tab 显示树，不复制 BrowserPane、原生页面或 Session。原 durable Tab/Group/Region、分割拓扑及草稿不迁移或重建，退出后原显示树回原目标；主 Survey 实际可见时，其选中 Tab 的目标优先于同 Tab 的 Mote floating 目标；离开 Survey 恢复原 Mote 目标，其它 Mote Tab 不受影响。同 Tab 各投影只认一个真正宿主，不同时声称多处可见。
+- **呈现与明确交互分开。** 左栏选页不暗改 Space 活动 group/Tab/Region 或 Agent execution focus，不因包含 Agent 自动 selectSession、发送或续跑；实际点击/输入所显示的 Agent、Terminal 或 Region，继续原 Region/Session focus 语义，不能把完整工作面变成只读预览。项目标记是独立明确导航动作，沿原导航回被点击页面的真实 Workspace/Tab/live placement，不能由旧执行 Session 或当前项目猜目标。
+- **成本跟随真实可见 Tab。** 完整选中 Tab 内的 Region 是相关消费者，允许原可见性、fit/resize 与输入；只进入左栏但未呈现的其它 Tab 不因此保活、fit、resize 或扩大 Runtime 工作量。原 Mote/Focus 和回收 owner 继续共用实际可见对象事实，不新加第二 Region 可见台账、每行轮询、全 history 扫描或 terminal bytes 消费者。原 Native 几何按实际 Tab 宿主重绑，按当前控制层遮挡决定可见，不沿隐藏 Space dock 的旧事实停放。
+- **标签表达当前控制事实。** 当前 Agent 驱动来自原 Main BrowserSnapshot 的瞬时 driving；只有当前活体已确认且 driving 为真时才称 Agent 正在操作，身份来自可信当前 operator，缺身份只称 Agent。原 activity.control 的人控制表示人可操作，不宣称人在输入；driving 已结束后，历史 operation/operator 或 control=agent 不等于仍在操作。原快照/控制未确认或恢复中如实显示未知/恢复，不从 idle、display status 或旧持久标记猜人，不新增操作 owner。
+- **创建与页面关闭仍有精确作用域。** 新建沿原 launcher/createBrowser 的明确 Workspace，保留原 Space 焦点。左栏关闭只关闭目标 Browser Region，不因当前呈现整 Tab 一并删 Agent/Terminal/File。多 Region 沿原 closeRegion；last 确切单 Browser 沿原 Tab close owner 消费该 Workspace 该 Tab 全部 live placements，每轮核同 Browser 和仍为 single Browser，混合或身份变化停止。失败保留页面与动作说明；最后 Browser 关闭回同 Survey 开始面，原健康 Session、Run 和草稿保留。
+- **管理按需并跟随准确页归属。** 原地址、Back/Forward/Reload、选择、截图、权限、应用链接、历史与任务工具继续归《Browser 工作面》及原 Main owner。创建和管理邻近可读地标明当前 Workspace：选页时用原 tuple 的 Workspace，未选页时用明确 activeWorkspace；跨项目选页不暗改 Space 的 activeWorkspace。More 带准确页面引用就地打开所属 Workspace 的原 Browser 管理，不另跳 Space 或回流重复管理槽。Browser bar 原草稿/显式保存/并发校验/失败、Profiles 全 Browser 占用与删除批准、元素标注 navigation stale/Agent eligible 保留；标注只加 Composer 草稿不自动发送，删除/清空不越界。开合、跨项目及投影不丢草稿或重复 owner 动作。
+- **重启先恢复原对象。** Survey 仅持久原 workspaceId/tabId/regionId 选择引用，经原 UI owner 的正常保存/恢复读回跨项目非首页面及完整原 Tab/Group/Region、URL、布局、草稿和焦点；Session 续接按 Core 的实际 reattach/resume 事实表达，合法新 Run 不冒称旧 Run。原引用暂未解析与原 owner 明确关闭是不同事实，前者保身份与服务窗，不切第一页、清工作面或新建替代页；后者才回开始面。控制/导航/权限/Run 等瞬时事实由原 owner 重建，不另恢复循环。
 
-左侧竖向标签、中央开始面和液体玻璃的视觉约束只见密度 SSOT《Survey 的浏览器工作面与液体玻璃》。本批不新增知识索引、搜索引擎配置、收藏管理或新的 Agent/Browser 生命周期。
+左栏项目/控制标记、完整工作面、中央开始面和液体玻璃的视觉约束只见密度 SSOT《Survey 的浏览器工作面与液体玻璃》。本批不扩知识索引、搜索引擎、收藏管理或 Agent/Browser 生命周期。
 
 ### Mote 快捷入口与当前协调上下文
 
@@ -403,6 +405,7 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 - **眼前的分屏比例必须与已保存布局一致。** 用户或公开 Control 追加、重排及改变分屏比例后，已打开的原 Region 立即按同一布局显示；不能只写持久树、等重启才变成真实尺寸。拖动仍由原分隔条表达当前意图，不被过时投影拉回。同步尺寸保留 Tab、Group、Region、焦点、原内容实例与健康 Run；普通重启在同窗口尺寸与字体条件下恢复同一最终比例和终端网格。
 - **应用重启必须先恢复持久化的 Tab Group/Region 拓扑，再恢复其中的 Session 投影**。Tab、分组、Region、焦点和 split ratio 是用户工作面的 durable 索引，不能因为 Runtime 首次快照暂时为空、恢复探测超时或恢复流程报错而被写回空布局；健康 Agent 的流程故障只留下可见服务窗告示并保留原 Region。只有 Core 明确报告 Session 已退休，才能移除该 Region。
 - **正常退出、重装与重新打开必须继续读取原工作面的实际持久化归属**。既有工作面的存储记录或物理目录未确认时，不能把新建的空数据库称为原工作面已经恢复；路径配置、内存里的工作面与跨进程可读的持久记录分别核实，保存或恢复缺口持续说明且不拿走健康 Run 的能力。原始备份与真实拓扑的有限恢复保留草稿、身份和未知输入，不自动补发；从旧备份取不到的较新编辑明确未知，找回工作面不能代签原存储缺失的根因已经修复。
+- **重开应用不能仅凭旧“未认领”标记停止原本健康的 Terminal**。持久化的未展示／归属待查记录不是新的用户停止意图；启动时已观察到的 Run 保持可查、可接回，已退出和状态未知分别如实说明，不把它们统统隐藏，也不凭标记新建工作视图。当前用户明确取消本次刚创建对象时，清理只针对本次已经确认的精确 Run；旧标记不能替代这个归属与意图。
 - **恢复不能把旧进程的生命周期租约当成仍在运行**。启动新进程时必须回收 owner PID 已退出、租约已过期或属于本次重启的未完成 lifecycle reservation；只有能证明旧 owner 仍活着的租约才报告“运行在其他进程”。判断不清时保留 Session/Region，并明确提示正在等待归属核验，不得静默丢失或伪造新 Session。
 - **退役 Run 记满了，不能把整次启动判死。** 用户原话：「刚才打包以后启动就失败了」。新进程回收未完成的停止租约时，必须把这次停止落进账本：该 Session 记成用户退役，它的 Run 进入有上限的退役 Run 环。环满时丢掉最旧的 Run，并同时丢掉只指向这些 Run 的退役 Session——这是容量到顶，不是账本损坏。刚刚停下的这条 Session 的退役记录必须留下。不得因为挤掉了旧记录就让停止落账失败、整窗退出。同一身份仍在当前 Session 里，才是真冲突，继续拒绝。
 - **界面就绪握手只证明新页面已挂上。** 用户原话：重启电脑后还是报 `Updated interface did not become ready`。打包启动要等渲染进程回报就绪，这个回报只表示页面已加载且 IPC 可用。恢复 Session、重绘终端这些启动工作在握手之后继续。不得把「全部恢复跑完」当作启动放行条件；恢复慢或超时走服务窗，不整窗退出。
@@ -1833,6 +1836,12 @@ PMO Teams 不再提供独立的浮动头像形态；产品入口的位置见《�
 
 设置页要像一个现代工作台：侧栏只负责快速定位，主区首屏明确当前设置对象、当前状态和唯一主操作；可编辑内容与只读说明分层，重复说明收起到次级层。搜索、键盘导航、窄窗口和保存反馈必须保持可见且可恢复，切换分区不能丢弃未保存草稿。
 
+**Prompts 的指令库与编辑工作台。** 用户认为 Prompts 的交互差，希望它特别吸引人，并要求整体 review、优化设置设计规范。Prompts 应让用户先认出要用的正文、看懂到达方式和适用范围，再进入明确对象的专注编辑；同一页的资源列表与单对象编辑台承载这一流程，搜索、选择和窄窗往返保留全库草稿。当前对象不在筛选结果时继续具名可见，不自动切换、删除或覆盖编辑。新增后立即进入可编辑的新对象；普通设置的导航、搜索和直接访问沿本节原合同。
+
+名称、关键词、正文、单个 Provider 范围与状态选择仍属于同一条用户 Prompt。新增、重命名、改正文、改范围或状态后，当前草稿有只读使用示意：`/keyword` 与裸词只展开草稿；状态绑定只说明何时出现正文按钮及单击的含义，沿《按状态配置 Prompt 按钮》的发送与 Queue 合同。没有状态绑定时明确只作草稿快捷展开；出现条件不能冒充当前发送能力，示意不执行、不连接 Run，也不提供实际发送动作。追加或暂未知的 Provider ID 保持其原值与明确范围，不被悄悄改成通用。
+
+Prompts 的明确保存动作仍提交全库本次编辑，界面必须让用户看清跨条未保存和待删除的事实，不能把它画成只保存当前对象。关键词和正文必需、关键词在全库唯一，名称可沿关键词作为默认；错误具名到对象与字段，筛选外的错误也能找到原编辑。删除先是未提交的本地编辑，提交成功后才是持久删除，两个结果必须可辨。冲突、外部删除、保存失败或结果未知继续保留原草稿和编辑基线；保存期间的后续输入仍未提交，无关外部字段可刷新 clean 内容，同字段不能静默覆盖。保存与配置 owner、CLI 的完整回执及原工作面保护沿本节原合同。材质、排版与宽窄构图归密度 SSOT《Settings 控制工作面》。
+
 - 用户随后明确追问「只是研究了吗？实现了不？」，结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），资源配置在后（Agents、Prompts、Workspaces、Hosts）；原九类能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复与 Provider。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
@@ -1874,7 +1883,11 @@ PMO Teams 不再提供独立的浮动头像形态；产品入口的位置见《�
 
 对话模式不是左右两张客服卡。用户自己发出的消息靠右对齐，用独立但克制的身份样式表达；Agent 消息保持阅读流宽度，不使用左侧单像素竖线或大面积卡片阴影。每条消息都必须有可发现的复制动作，复制的是该消息的完整原文（含纯文本降级）。
 
-用户可以在消息正文中选择一段文字，打开就地标注入口，输入留言后把“引用原文 + 留言 + 当前 Agent/Session”作为一次可追踪的回复请求发送。标注必须保留真实引用文本、来源消息稳定 ID 与留言；没有产品消费者的数字坐标不作为标注契约，不能根据重复文本的首次命中或渲染后正文猜测原文位置。选区消失、消息切换或发送失败时不丢留言草稿。没有选区时不显示标注入口，避免把普通点击变成额外 chrome。
+用户要的是“划线＋出现跟随便签”：在对话或 History 已呈现的消息正文中选择原文，选中的实际范围保留划线，旁侧出现紧凑留言便签。两入口仅在当前 Session 确实有可编辑回复草稿且非只读时提供标注；无正文的遮蔽、signature 与非正文控件不进入引用，没有有效选区时不增加标注 chrome。添加动作保留真实引用文本、来源消息稳定 ID 与留言，将它们加到当前 Session 的回复草稿，由用户显式发送；来源 ID 必须由该引用消费者实际采用，不能只停在回调中，也不自动提交输入。
+
+划线和便签只跟随当前真实 DOM 选区，跨行、相同引文的不同出现位置、滚动、展开与宽窄变化仍须贴合所选原范围，不覆盖原文或挤坏阅读面。没有产品消费者的数字坐标不作为标注契约，不按重复文本的首次命中或渲染后正文猜位置。折叠、隐藏或原 DOM 离开时，失效的定位层暂时隐藏并诚实说明位置不可用，留言保留；只有原范围再次有效才恢复跟随，不把旧便签绑定到别条消息或新 Session，不改变 History 阅读锚点。
+
+新选区或消息切换不能悄悄改变已有留言的引用目标；更换或丢弃沿用户显式动作。键盘取消和回焦沿原控件/有效阅读位置，保留尚未添加的留言，IME 输入不触发提交；原地添加失败可见、可重试，引用与留言不丢，既有 Composer 草稿不被覆盖。临时便签不成为持久标注账本；添加后的引用与留言仍由现 Session 回复草稿持有。行为不影响健康 Agent 的普通输入。
 
 ### PMO teams topic 名称与职责
 
@@ -2077,7 +2090,7 @@ Recent Focus 只读取同一份持久化 execution focus history 与 Core 已持
 
 用户希望「把用户什么时候在哪个块上把消息展示出来」，最初确认「只标用户消息」，随后追加「在 timeline 上区分是其他 Agent 发过来的，还是用户发过来的」。输入消息按 Core 记录的发生时间展示在原消息所属 Context 轨道，区分明确人类、已核 Agent 与未知作者，不标 Agent 回复，不从终端字节、焦点切换或回复猜测。原生 user 角色、条目种类和 source=user 提交入口不证明人类；已核 Agent 输入不冒称 Human，未记录发送者的提交仍以「Prompt · Sender not recorded」可读。消息标记能查看时间、原 Context 和正文，并可回到同一已有 Session 的原工作面；按需查看不修改焦点，不复制持久化对话，不创建第二份 Runtime 事实。单条 Agent 消息的按需说明可显示已核发送者及其当前 Project／Branch／Topic，并通过明确动作跳到已有发送者 Context；查看说明本身不导航、不写 focus history、不创建或恢复 Session。当前资料与发送时事实分开，缺作者、归属或资料如实未知，不能按名字或正文包装猜发送者。原记录 ID、时间、同正文重复输入和原 Context 身份保持；全来源、无时间可读及读取预算见下文《用户消息从 Provider 原生会话取得》。
 
-消息预览复用共享浮层的优先级与打开、关闭协议；窗口或音轨尺寸变化后仍贴近本次查看的入口且保持在可见窗口内，原正文选区与关闭还焦不因呈现位置改变而丢失。观察和尺寸变化不改变 Region 焦点或原工作面；显式 Context 返回继续沿原导航动作。
+消息预览复用共享浮层的优先级与打开、关闭协议；窗口或音轨尺寸变化后仍贴近本次查看的入口且保持在可见窗口内，原正文选区与关闭还焦不因呈现位置改变而丢失。观察和尺寸变化不改变 Region 焦点或原工作面；显式 Context 返回继续沿原导航动作。 固定消息阅读期间，音轨标题带上的时间导航与缩放控件仍能直接命中，预览不能盖住它们；平移使原标记离开窗口后，已打开正文与选区仍可读，不能用关闭阅读面换取操作空间。
 
 用户进一步希望「如果那个 Agent 自己还执行了的话，在 timeline 上也可以去关联起来」。消息与发送者执行的关联只消费公开 Core 已核的原 message/source、Session 与发送 Run 引用；Run 改变或引用缺席时不把旧消息关联到新执行。可展示同一 Run 的真实在线／working 观察，不用正文、近邻时间或关注事件猜因果，不把投递回执当执行、回复或完成。只有作者身份时仍可查看发送者当前 Context，但不能把当前工作说成本条消息的执行结果。不创建第二份历史或关系注册表。
 

@@ -1,0 +1,56 @@
+/* One functional plane; navigation children never apply a second blur.
+   The page stays opaque, so this material cannot reveal or cover a live Region. */
+.settings-sidebar,
+.settings-page .settings-pane-actions {
+  background: linear-gradient(145deg, var(--material-control-glint), transparent 48%), var(--material-control-surface);
+  backdrop-filter: blur(var(--material-control-blur)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--material-control-blur)) saturate(1.12);
+  box-shadow: var(--hl-strong);
+}
+.settings-sidebar { border-color: var(--material-control-line); }
+.settings-sidebar nav > button {
+  transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.settings-sidebar nav > button.selected {
+  background: linear-gradient(105deg, var(--green-bg), var(--surface-2));
+  box-shadow: var(--hl-strong);
+}
+.settings-sidebar nav > button:hover { box-shadow: var(--hl); }
+.settings-sidebar nav > button.selected:hover { background: var(--green-bg-hover); }
+.settings-sidebar nav > button:focus-visible,
+.settings-section-picker:focus-visible {
+  outline: 2px solid var(--focus-line);
+  outline-offset: 2px;
+}
+.settings-page .settings-pane-actions {
+  padding-inline: var(--sp-5);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--hl);
+}
+.settings-page .settings-pane-actions > span { min-width: 0; overflow-wrap: anywhere; }
+.settings-page .settings-pane-actions > button { flex-shrink: 0; }
+.settings-page .settings-pane-actions > .primary-button:disabled {
+  color: var(--text-3);
+  background: var(--surface-2);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* These are browser-reported signals. Their presence does not imply an OS bridge.
+   The normal material is already 92% opaque when a signal is unavailable. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .settings-sidebar,
+  .settings-page .settings-pane-actions {
+    background: var(--surface-1);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--line);
+    box-shadow: none;
+  }
+  .settings-sidebar nav > button.selected { background: var(--surface-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-sidebar nav > button { transition: none; }
+  .settings-pane-stack { animation: none; }
+}
