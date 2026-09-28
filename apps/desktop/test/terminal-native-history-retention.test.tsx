@@ -31,6 +31,7 @@ const fixture = vi.hoisted(() => ({
   blockFirstWrite: false,
   nativeFocusAllowed: true,
   releaseWrite: null as (() => void) | null,
+  menuHistoryBoundary: null as string | null,
   reveal: null as (() => void) | null,
   state: {noticeReadReceipts:{},acquireNativeSurfaceOverlay:vi.fn(),releaseNativeSurfaceOverlay:vi.fn(),sessions: [] as SessionSnapshot[],config:{appearance:{terminalTheme:'graphite'},executors:{},workspaces:[]},pendingAgentLaunches:{},recoveryCandidates:[],timelines:{},agentNames:{},viewModes:{},regionCaretFocus:null,clearRegionCaretFocus:vi.fn(),focusRegion:vi.fn(),appendAgentComposerDraft:vi.fn(),refreshSession:vi.fn(),recoverSession:vi.fn(),respondInteraction:vi.fn(),openFile:vi.fn(),reportError:vi.fn(),openHttpLink:vi.fn()}
 }))
@@ -128,7 +129,10 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
   }
 }))
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
-  TerminalContextMenu: ({ children }: { children: ReactNode }) => children
+  TerminalContextMenu: ({ children, historyBoundary }: { children: ReactNode; historyBoundary: string | null }) => {
+    fixture.menuHistoryBoundary = historyBoundary
+    return children
+  }
 }))
 
 const session: SessionSnapshot = {
@@ -199,10 +203,12 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
       expect(document.body.textContent).toContain('Live input remains available')
     } else if (state === 'alternate') {
       expect(terminal.buffer.active.type).toBe('alternate')
-      expect(document.querySelector('.terminal-replay-gap--compact')?.textContent).toContain('Full-screen history')
+      expect(document.querySelector('.terminal-replay-gap--compact')).toBeNull()
+      expect(fixture.menuHistoryBoundary).toContain('The full-screen buffer has no terminal scrollback')
     } else if (state === 'line boundary') {
       expect(terminal.buffer.active.length).toBe(terminal.rows + terminal.options.scrollback!)
-      expect(document.querySelector('.terminal-replay-gap--compact')?.textContent).toContain('History line limit')
+      expect(document.querySelector('.terminal-replay-gap--compact')).toBeNull()
+      expect(fixture.menuHistoryBoundary).toBe('This terminal view retains up to 5000 normal-buffer history lines. Earlier Runtime bytes may still be retained.')
     } else if (state === 'Runtime gap') {
       expect(document.querySelector('.terminal-service-window')?.textContent).toContain('Earlier scrollback is unavailable')
       const redraw = document.querySelector<HTMLButtonElement>('[aria-label="Redraw current terminal screen"]')
