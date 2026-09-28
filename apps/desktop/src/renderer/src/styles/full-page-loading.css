@@ -44,7 +44,7 @@
 }
 /* Hidden work surfaces and background windows retain presentation without continuous motion. */
 .full-page-loading[data-document-visible='false'] :is(.full-page-loading__art, .full-page-loading__light, .full-page-loading__activity i),
-.pane-body--hidden .full-page-loading :is(.full-page-loading__art, .full-page-loading__light, .full-page-loading__activity i) { animation-play-state: paused; }
+[inert] .full-page-loading :is(.full-page-loading__art, .full-page-loading__light, .full-page-loading__activity i) { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) {
   .full-page-loading:is(.full-page-loading--loading, .full-page-loading--recovering) :is(.full-page-loading__art, .full-page-loading__light),
   .full-page-loading__activity i { animation: none; transform: none; }
