@@ -104,7 +104,7 @@ async function currentNativeOwner(ctx) {
   return owner
 }
 
-async function showDiagnostic(ctx, actual, diagnostic, label) {
+export async function showDiagnostic(ctx, actual, diagnostic, label) {
   const owned = selector => ctx.selectors(browser(ctx) + ' ' + selector)
   const timeline = `${browser(ctx)} .browser-rsi-timeline[data-operation-id=${q(actual.id)}]`
   if (!await ctx.probe.cdp.evaluate(`(${owned('[aria-label="Browser operation history"]')}).length===1`)) {
@@ -121,18 +121,36 @@ async function showDiagnostic(ctx, actual, diagnostic, label) {
   await ctx.click(ctx.probe.cdp, `${owned('.browser-rsi-history__item')}.filter(element=>element.querySelector('time')?.dateTime===${q(timestamp)})`)
   await ctx.waitFor('original native failure selected in the existing activity timeline', () => ctx.probe.cdp.evaluate(`Boolean(document.querySelector(${q(timeline)}))`))
   await ctx.click(ctx.probe.cdp, ctx.selectors(`${timeline} [data-sequence="${diagnostic.step.sequence}"] .browser-rsi-timeline__step-button`))
-  const ui = await ctx.waitFor('final recovery goal and budget readable in the real evidence UI', () => ctx.probe.cdp.evaluate(`(()=>{
+  const ui = await ctx.waitFor('final recovery goal and budget readable in the real evidence UI', async () => {
+    const sample = await ctx.probe.cdp.evaluate(`(()=>{
     const root=document.querySelector(${q(browser(ctx) + ' .browser-step-evidence')}),paragraphs=Array.from(root?.querySelectorAll('p')??[]),message=paragraphs.find(item=>item.textContent===${q(diagnostic.item.content.message)}),nextAction=paragraphs.find(item=>item.textContent===${q(diagnostic.item.content.nextAction)});
-    if(!message||!message.getClientRects().length||getComputedStyle(message).visibility==='hidden')return null;
-    if(!nextAction||!nextAction.getClientRects().length||getComputedStyle(nextAction).visibility==='hidden')return null;
+    const bounds=element=>{if(!element)return null;const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
+    const facts=element=>{if(!element)return {present:false,clientRects:0,visibility:null,display:null,bounds:null,intersection:null};const style=getComputedStyle(element);return {present:true,clientRects:element.getClientRects().length,visibility:style.visibility,display:style.display,bounds:bounds(element),intersection:null}};
+    const timeline=document.querySelector(${q(browser(ctx) + ' .browser-rsi-timeline')}),selected=timeline?.querySelector('.browser-rsi-timeline__step.is-selected'),rail=message?.closest('.browser-trace-rail')??root?.closest('.browser-trace-rail');
+    const sample={readable:false,reason:null,coordinateSpace:'renderer-css-px',observedOperationId:timeline?.dataset.operationId??null,selectedSequence:selected?.dataset.sequence??null,evidencePresent:!!root,evidenceLabel:root?.getAttribute('aria-label')??null,viewport:{x:0,y:0,width:innerWidth,height:innerHeight},message:facts(message),nextAction:facts(nextAction),rail:{present:!!rail,bounds:bounds(rail)},scrollApplied:false};
+    const reject=reason=>{sample.reason=reason;return sample};
+    if(!message)return reject('message-missing');
+    if(!sample.message.clientRects)return reject('message-no-client-rects');
+    if(sample.message.visibility==='hidden')return reject('message-hidden');
+    if(!nextAction)return reject('next-action-missing');
+    if(!sample.nextAction.clientRects)return reject('next-action-no-client-rects');
+    if(sample.nextAction.visibility==='hidden')return reject('next-action-hidden');
     message.scrollIntoView({block:'nearest'});
-    const rect=message.getBoundingClientRect(),rail=message.closest('.browser-trace-rail');if(!rail)return null;
+    sample.scrollApplied=true;sample.message.bounds=bounds(message);sample.nextAction.bounds=bounds(nextAction);sample.rail.bounds=bounds(rail);
+    const rect=message.getBoundingClientRect();if(!rail)return reject('rail-missing');
     const r=rail.getBoundingClientRect(),left=Math.max(rect.x,r.x,0),top=Math.max(rect.y,r.y,0),right=Math.min(rect.right,r.right,innerWidth),bottom=Math.min(rect.bottom,r.bottom,innerHeight);
-    if(right<=left||bottom<=top)return null;
+    sample.message.intersection={x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)};
     const nextRect=nextAction.getBoundingClientRect(),nextLeft=Math.max(nextRect.x,r.x,0),nextTop=Math.max(nextRect.y,r.y,0),nextRight=Math.min(nextRect.right,r.right,innerWidth),nextBottom=Math.min(nextRect.bottom,r.bottom,innerHeight);
-    if(nextRight<=nextLeft||nextBottom<=nextTop)return null;
-    return {intersection:{x:left,y:top,width:right-left,height:bottom-top},text:message.textContent,nextAction:nextAction.textContent,nextActionIntersection:{x:nextLeft,y:nextTop,width:nextRight-nextLeft,height:nextBottom-nextTop},nextActionBounds:{x:nextRect.x,y:nextRect.y,width:nextRect.width,height:nextRect.height},bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},operationId:document.querySelector(${q(browser(ctx) + ' .browser-rsi-timeline')})?.dataset.operationId};
-  })()`))
+    sample.nextAction.intersection={x:nextLeft,y:nextTop,width:Math.max(0,nextRight-nextLeft),height:Math.max(0,nextBottom-nextTop)};
+    if(right<=left||bottom<=top)return reject('message-no-intersection');
+    if(nextRight<=nextLeft||nextBottom<=nextTop)return reject('next-action-no-intersection');
+    sample.readable=true;sample.reason='readable';sample.ui={intersection:{x:left,y:top,width:right-left,height:bottom-top},text:message.textContent,nextAction:nextAction.textContent,nextActionIntersection:{x:nextLeft,y:nextTop,width:nextRight-nextLeft,height:nextBottom-nextTop},nextActionBounds:{x:nextRect.x,y:nextRect.y,width:nextRect.width,height:nextRect.height},bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},operationId:timeline?.dataset.operationId};return sample;
+  })()`)
+    // Keep only the last real DOM reply, including failure branches. The canonical's
+    // catch/finally retains this same receipt; do not re-read after quit or hide failure.
+    ctx.receipt.localRecovery.diagnosticUiSample = { label, browserId: ctx.browserId, operationId: actual.id, sequence: diagnostic.step.sequence, ...sample }
+    return sample.readable ? sample.ui : null
+  })
   assert.equal(ui.operationId, actual.id); assert.equal(ui.nextAction, diagnostic.item.content.nextAction)
   assert.ok(ui.bounds.width > 0 && ui.bounds.height > 0)
   ;(ctx.receipt.localRecovery.ui ??= []).push({ label, ...ui })
