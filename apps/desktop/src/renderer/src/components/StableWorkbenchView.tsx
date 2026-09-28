@@ -1,13 +1,16 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { WorkbenchPresentationContext } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, children }: {
+export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, survey, controlsOpen, onBrowserControlConfirmation, children }: {
   homeId: string
   targetId: string | null
   active: boolean
   retainedRegionId: string | null
+  survey?: boolean | undefined
+  controlsOpen?: boolean | undefined
+  onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
   /** The existing projection owner describes a borrowed View at its original slot. */
   homeNotice?: ReactNode
   children: ReactNode
@@ -17,7 +20,8 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     element.className = 'retained-workbench-view'
     return element
   })
-  const presentation = useMemo(() => ({ active, retainedRegionId }), [active, retainedRegionId])
+  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, survey, controlsOpen, onBrowserControlConfirmation }),
+    [active, retainedRegionId, targetId, homeId, survey, controlsOpen, onBrowserControlConfirmation])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)

@@ -60,7 +60,7 @@ describe('native Browser stage position observation', () => {
 
   it('the product calls and cleans the observer in its geometry effect with actual visibility facts', () => {
     const source = readFileSync(fileURLToPath(new FileURL('../src/renderer/src/components/BrowserPane.tsx', import.meta.url)), 'utf8')
-    const start = source.indexOf('const stopObserving = observeBrowserStageGeometry(')
+    const start = source.indexOf('let stopObserving = observeBrowserStageGeometry(')
     const end = source.indexOf('// yieldToFocusRing', start)
     expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start)
     const effect = source.slice(start, end)

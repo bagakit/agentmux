@@ -204,7 +204,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     expect(result.navigation.selection).toMatchObject({ surface: 'goals', mainSurface: 'board', goalId: 'exact' })
     expect(container.querySelector('[data-goal-detail-id="exact"]')).not.toBeNull()
     expect(result.presentation.state).toBe('main-visible')
-    for (const surface of ['space', 'focus', 'search', 'goals'] as const) await control({ kind: 'surface', surface })
+    for (const surface of ['space', 'focus', 'survey', 'goals'] as const) await control({ kind: 'surface', surface })
     expect(useAppStore.getState().selectedDemandId).toBe('exact')
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled(); expect(document.activeElement).toBe(outside)
   })
@@ -214,9 +214,9 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     expect(document.activeElement?.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id')).toBe('target-region')
     expect(useAppStore.getState().regionCaretFocus).toBeNull()
     await act(async () => useAppStore.getState().focusRegion('target', 'target-tab', 'target-region', 'keyboard'))
-    await act(async () => useAppStore.getState().setMainSurface('search'))
+    await act(async () => useAppStore.getState().setMainSurface('survey'))
     expect(useAppStore.getState().regionCaretFocus).toBeNull()
-    await settle(); expect(useAppStore.getState().mainSurface).toBe('search')
+    await settle(); expect(useAppStore.getState().mainSurface).toBe('survey')
   })
   it('does not replay a pending exact input handoff after later user navigation and delayed Session facts', async () => {
     await act(async () => useAppStore.setState({ sessions: [source] }))
@@ -227,12 +227,12 @@ describe('actual Desktop navigation and content-free observation owners', () => 
       await Promise.resolve()
     })
     expect(useAppStore.getState().regionCaretFocus?.regionId).toBe('target-region')
-    await act(async () => useAppStore.getState().setMainSurface('search'))
+    await act(async () => useAppStore.getState().setMainSurface('survey'))
     expect(useAppStore.getState().regionCaretFocus).toBeNull()
     await act(async () => useAppStore.setState({ sessions: [source, target] }))
     const result = await pending as AgentMuxDesktopFocusResult
     expect(result.navigation.state).toBe('unconfirmed'); expect(result.input.outcome).not.toBe('transferred')
-    expect(useAppStore.getState().mainSurface).toBe('search'); expect(useAppStore.getState().regionCaretFocus).toBeNull()
+    expect(useAppStore.getState().mainSurface).toBe('survey'); expect(useAppStore.getState().regionCaretFocus).toBeNull()
     await settle()
     expect(document.activeElement?.closest('[data-workbench-region-id]')).toBeNull()
   })
@@ -332,13 +332,13 @@ describe('actual Desktop navigation and content-free observation owners', () => 
         { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: '/scratch', kind: 'folder' }] } })
       pending = useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'delayed-inspect', operation: 'inspect.client' })
     })
-    await act(async () => useAppStore.getState().setMainSurface('search')); await settle()
+    await act(async () => useAppStore.getState().setMainSurface('survey')); await settle()
     const actualInput = document.activeElement, current = useAppStore.getState()
     release([])
     const result = await pending as AgentMuxControlResult
     if (result.operation !== 'inspect.client') throw new Error('Wrong observation operation')
     const observed = desktopWorkbenchObservationSchema.parse(result.observation)
-    expect(observed.mainSurface).toBe('search'); expect(observed.desktop.selection.surface).toBe('search')
+    expect(observed.mainSurface).toBe('survey'); expect(observed.desktop.selection.surface).toBe('survey')
     expect(observed.desktop.presentation.state).toBe('main-visible')
     expect(document.activeElement).toBe(actualInput); expect(useAppStore.getState()).toBe(current)
   })
@@ -364,7 +364,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     const originalNode = editor, draft = useAppStore.getState().agentComposerDrafts[mote.id]
     const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop'), send = vi.spyOn(api.sessions, 'submitPrompt')
     for (const target of [{ kind: 'space', regionId: 'target-region' }, { kind: 'goal', goalId: 'exact' },
-      { kind: 'surface', surface: 'search' }, { kind: 'surface', surface: 'focus' }] as const) {
+      { kind: 'surface', surface: 'survey' }, { kind: 'surface', surface: 'focus' }] as const) {
       const result = await control(target)
       expect(result.input).toMatchObject({ outcome: 'preserved', after: { scope: 'floating', ownerKind: 'composer', sessionId: mote.id } })
       expect(result.floating).toMatchObject({ state: 'pinned', tabId: tab.id, regionId: 'mote-region', sessionId: mote.id, presentation: 'visible' })

@@ -69,6 +69,8 @@ export type LauncherWorkbenchSurface = {
 }
 
 export type BrowserWorkbenchSurface = BrowserSnapshot & {
+  /** Exact Main unavailable event; transient, cleared by its next confirmed snapshot. */
+  nativeOwnerUnavailable?: true
   regionId: string
   kind: 'browser'
   workspaceId: string

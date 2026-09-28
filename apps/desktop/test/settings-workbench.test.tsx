@@ -8,7 +8,7 @@ vi.mock('../src/renderer/src/components/PmoTeamsTopicFloatingPanel', () => ({ Pm
 vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDock: () => null }))
 vi.mock('../src/renderer/src/components/GlobalBoardSurface', () => ({ GlobalBoardSurface: () => null }))
 vi.mock('../src/renderer/src/components/GlobalFocusSurface', () => ({ GlobalFocusSurface: () => null }))
-vi.mock('../src/renderer/src/components/GlobalSearchSurface', () => ({ GlobalSearchSurface: () => null }))
+vi.mock('../src/renderer/src/components/GlobalSurveySurface', () => ({ GlobalSurveySurface: () => null }))
 import { App } from '../src/renderer/src/App'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { WorkspaceSettingsPane } from '../src/renderer/src/components/settings/WorkspaceSettingsPane'

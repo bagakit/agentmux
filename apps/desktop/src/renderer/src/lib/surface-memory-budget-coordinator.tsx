@@ -55,6 +55,11 @@ export function useBrowserSurfaceReleased(regionId: string): boolean {
   return useContext(SurfaceMemoryBudgetContext).browserRegionIds.has(regionId)
 }
 
+/** The same budget facts let page directories distinguish retained descriptors from live owners. */
+export function useReleasedBrowserRegionIds(): ReadonlySet<string> {
+  return useContext(SurfaceMemoryBudgetContext).browserRegionIds
+}
+
 type CoordinatorOptions = {
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined

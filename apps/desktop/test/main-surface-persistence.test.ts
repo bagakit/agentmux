@@ -15,7 +15,7 @@ describe('main surface persistence', () => {
     const restoreEnd = source.indexOf('\n}\n', restoreStart)
     expect(restoreEnd).toBeGreaterThan(restoreStart)
     const restoreBody = source.slice(restoreStart, restoreEnd)
-    expect(restoreBody).toContain("candidate === 'search'")
+    expect(restoreBody).toContain("candidate === 'survey'")
     expect(source).toContain('mainSurface: state.mainSurface')
   })
 })

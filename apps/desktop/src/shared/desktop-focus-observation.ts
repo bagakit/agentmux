@@ -11,7 +11,7 @@ const desktopInputObservationSchema = z.object({ provenance,
   tabId: nullableId, regionId: nullableId, sessionId: nullableId,
   connected: z.boolean().nullable(), visible: z.boolean().nullable(), inert: z.boolean().nullable() }).strict()
 export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z.object({
-  selection: z.object({ surface: z.enum(['space', 'focus', 'goals', 'search']), mainSurface: z.enum(['workbench', 'agents', 'board', 'search']),
+  selection: z.object({ surface: z.enum(['space', 'focus', 'goals', 'survey']), mainSurface: z.enum(['workbench', 'agents', 'board', 'survey']),
     space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict(),
   presentation: z.object({ provenance, state: z.enum(['main-visible', 'floating', 'covered', 'pending', 'unknown']),
     tabId: nullableId, regionId: nullableId, blockers: z.array(z.enum(['settings', 'quick-switcher', 'shortcuts-help'])) }).strict(),

@@ -44,7 +44,7 @@ import {
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { useWorkbenchRetainedRegionId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -466,6 +466,7 @@ function SurfaceContent({
   const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
   const browserReleased = useBrowserSurfaceReleased(surface.regionId)
+  const browserPresentation = useWorkbenchBrowserPresentation()
   if (isSessionSurface(surface)) {
     return (
       <SessionPane
@@ -501,12 +502,14 @@ function SurfaceContent({
   }
   if (surface.kind === 'browser') {
     return (
-      <BrowserPane
-        key={surface.browserId}
+      <BrowserPane key={surface.browserId}
         tab={surface}
         visible={nativeSurfacesVisible}
         released={browserReleased}
         yieldToFocusRing={focus.nativeViewYieldsToRing}
+        presentationTargetId={browserPresentation.tabHostId}
+        controlPanelOpen={browserPresentation.survey ? browserPresentation.controlsOpen : undefined}
+        onControlConfirmation={browserPresentation.onBrowserControlConfirmation}
       />
     )
   }
@@ -622,6 +625,7 @@ function WorkbenchRegionLeaf({
   interactiveResize: boolean
   headerPortalTargetId: string | null
 }) {
+  const browserPresentation = useWorkbenchBrowserPresentation()
   const focusRegion = useAppStore((state) => state.focusRegion)
   const retainedRegionId = useWorkbenchRetainedRegionId()
   const closeRegion = useAppStore((state) => state.closeRegion)
@@ -737,8 +741,12 @@ function WorkbenchRegionLeaf({
       // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
       tabIndex={-1}
       onKeyDown={openRegionMenuFromKeyboard}
-      onPointerDown={(event) => focusRegion(tab.workspaceId, tab.id, node.regionId,
-        event.currentTarget.closest('[data-pmo-teams-topic-floating]') ? 'floating-pointer' : 'pointer')}
+      onPointerDown={(event) => {
+        // A Region portal keeps React ancestry. Survey browser input does not navigate Space;
+        // the original floating pointer path still owns actual Mote/Agent/Terminal interaction.
+        if (!(browserPresentation.survey && surface?.kind === 'browser')) focusRegion(tab.workspaceId, tab.id, node.regionId,
+          event.currentTarget.closest('[data-pmo-teams-topic-floating]') ? 'floating-pointer' : 'pointer')
+      }}
     >
       <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
         <SurfaceContent
@@ -1263,6 +1271,7 @@ export function WorkspaceWorkbench({
   viewOwnership = 'owner',
   viewHostPrefix = 'workbench-tab-slot',
   viewTargets,
+  onBrowserControlConfirmation,
   projectionTabId,
   onTabSelect
 }: {
@@ -1285,6 +1294,7 @@ export function WorkspaceWorkbench({
   viewHostPrefix?: string
   /** Explicit visible destinations move existing Tab contents without mounting another tree. */
   viewTargets?: Readonly<Record<string, WorkbenchViewTarget>> | undefined
+  onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
   /** Select within projection chrome without changing the durable main workface. */
   projectionTabId?: string | undefined
   /** Explicit navigation inside this projection may retain its own selected Tab. */
@@ -1459,9 +1469,11 @@ export function WorkspaceWorkbench({
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const projection = viewTargets?.[tab.id]
         const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
-        const tabVisible = targetId !== null || (visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
+        const tabVisible = (targetId !== null && (projection?.surface === 'survey' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
           active={focusTab?.id === tab.id ? true : projection?.active ?? true}
+          survey={projection?.surface === 'survey'} controlsOpen={projection?.controlsOpen ?? false}
+          onBrowserControlConfirmation={onBrowserControlConfirmation}
           homeNotice={projection && focusTab?.id !== tab.id && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
               step: 'Selected View is in Mote',

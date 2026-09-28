@@ -61,6 +61,7 @@ import {
   rendererCssBoundsToWindowDip
 } from '../lib/browser-bounds-sync'
 import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
+import { presentError } from '../lib/error-presentation'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -87,7 +88,10 @@ export function BrowserPane({
   tab,
   visible,
   released = false,
-  yieldToFocusRing = false
+  yieldToFocusRing = false,
+  presentationTargetId,
+  controlPanelOpen,
+  onControlConfirmation
 }: {
   tab: BrowserWorkbenchSurface
   visible: boolean
@@ -100,12 +104,17 @@ export function BrowserPane({
    * 那样每一格都内缩，未聚焦的 browser 区会镶一圈无环的深边。
    */
   yieldToFocusRing?: boolean
+  /** The actual presentation host may change without changing page visibility or size. */
+  presentationTargetId?: string | undefined
+  /** Survey has its own controls; hidden Space dock state cannot cover this page. */
+  controlPanelOpen?: boolean | undefined
+  /** Presentation notice from this sole native owner; it never drives lifecycle. */
+  onControlConfirmation?: ((regionId: string, unconfirmed: boolean) => void) | undefined
 }) {
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const executeControl = useAppStore((state) => state.executeControl)
   const reportError = useAppStore((state) => state.reportError)
-  const selectWorkspace = useAppStore((state) => state.selectWorkspace)
-  const setMainSurface = useAppStore((state) => state.setMainSurface)
+  const openSurveyBrowserTools = useAppStore((state) => state.openSurveyBrowserTools)
   const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
   const openFile = useAppStore((state) => state.openFile)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
@@ -118,6 +127,7 @@ export function BrowserPane({
   // 边界同步那条 effect 每次挂载时把它的重算入口挂上来；焦点那条 effect 借它在不拆 synchronizer 的
   // 前提下重算。effect 未挂载（stage 还没有）时是 null，焦点 effect 的 `?.()` 便安全地什么都不做。
   const recomputeBoundsRef = useRef<(() => void) | null>(null)
+  const rebindBoundsObserverRef = useRef<(() => void) | null>(null)
   const screenshotToken = useRef(0)
   const selectionToken = useRef(0)
   const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
@@ -127,6 +137,8 @@ export function BrowserPane({
     selectionToken.current += 1
   }
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
+  const [addressError, setAddressError] = useState<string | null>(null)
+  const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [screenshot, setScreenshot] = useState<BrowserScreenshotCapture | null>(null)
@@ -165,6 +177,7 @@ export function BrowserPane({
 
   useEffect(() => {
     setAddress(tab.url === 'about:blank' ? '' : tab.url)
+    setAddressError(null)
   }, [tab.url])
 
   // History and replay belong to the Browser identity. A Region can reuse this pane while switching
@@ -192,6 +205,7 @@ export function BrowserPane({
   useEffect(() => {
     const token = ++lifecycleTokenRef.current
     if (released) {
+      onControlConfirmation?.(tab.regionId, true)
       if (nativeLifecycleRef.current === 'released' || nativeLifecycleRef.current === 'releasing') return
       nativeLifecycleRef.current = 'releasing'
       void api.browser.release(tab.browserId)
@@ -202,12 +216,14 @@ export function BrowserPane({
         .catch((error) => {
           if (lifecycleTokenRef.current !== token) return
           nativeLifecycleRef.current = 'present'
+          onControlConfirmation?.(tab.regionId, false)
           reportError(error)
         })
       return
     }
     if (nativeLifecycleRef.current === 'present' || nativeLifecycleRef.current === 'restoring') return
     nativeLifecycleRef.current = 'restoring'
+    onControlConfirmation?.(tab.regionId, true)
     setRestoring(true)
     void api.browser.restore(tab.browserId, {
       workspaceId: tab.workspaceId,
@@ -221,6 +237,7 @@ export function BrowserPane({
       nativeLifecycleRef.current = 'present'
       setRestoring(false)
       applyBrowserEvent({ type: 'updated', browser })
+      onControlConfirmation?.(tab.regionId, false)
     }).catch((error) => {
       if (lifecycleTokenRef.current !== token) return
       nativeLifecycleRef.current = 'released'
@@ -232,7 +249,9 @@ export function BrowserPane({
       // either commit through the token check above or be released as soon as it resolves.
       lifecycleTokenRef.current += 1
     }
-  }, [applyBrowserEvent, released, reportError, tab.browserId, tab.profileId, tab.url, tab.viewport])
+  }, [applyBrowserEvent, released, reportError, tab.browserId, tab.profileId, tab.url, tab.viewport, tab.regionId, onControlConfirmation])
+
+  useEffect(() => () => onControlConfirmation?.(tab.regionId, false), [tab.regionId, onControlConfirmation])
 
   useEffect(() => () => {
     lifecycleTokenRef.current += 1
@@ -267,7 +286,7 @@ export function BrowserPane({
     const update = (): void => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
-        const navigatorCoversBrowser = toolsOpen && window.innerWidth <= 900
+        const navigatorCoversBrowser = (controlPanelOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900)
         if (
           !visible ||
           released ||
@@ -315,9 +334,15 @@ export function BrowserPane({
     }
     // 把重算入口交给焦点那条 effect，让它能在**不拆掉这个 synchronizer** 的前提下重算边界。
     recomputeBoundsRef.current = update
-    const stopObserving = observeBrowserStageGeometry(stage, update, visible && !released && !restoring)
+    let stopObserving = observeBrowserStageGeometry(stage, update, visible && !released && !restoring)
+    rebindBoundsObserverRef.current = () => {
+      stopObserving()
+      stopObserving = observeBrowserStageGeometry(stage, update, visible && !released && !restoring)
+      update()
+    }
     return () => {
       recomputeBoundsRef.current = null
+      rebindBoundsObserverRef.current = null
       cancelAnimationFrame(frame)
       synchronizer.dispose()
       stopObserving()
@@ -326,7 +351,15 @@ export function BrowserPane({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [elementSelection, released, restoring, toolsOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, released, restoring, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible])
+
+  useLayoutEffect(() => {
+    // Portal children run before their host moves. Rebind against connected ancestors after that
+    // commit, keeping the existing synchronizer alive (no transient setBounds(null) on a host move).
+    let cancelled = false
+    queueMicrotask(() => { if (!cancelled) rebindBoundsObserverRef.current?.() })
+    return () => { cancelled = true }
+  }, [presentationTargetId])
 
   // 焦点环内缩是一件与「边界同步的生命周期」正交的事，所以它有自己的依赖数组（#545）。焦点结论翻转时
   // 只重算一次边界——复用上面那个还活着的 synchronizer（recomputeBoundsRef），不拆不建，因此没有那道
@@ -337,17 +370,26 @@ export function BrowserPane({
     recomputeBoundsRef.current?.()
   }, [yieldToFocusRing])
 
-  async function run(action: () => Promise<BrowserSnapshot>): Promise<void> {
+  async function run(action: () => Promise<BrowserSnapshot>, onFailure?: (cause: unknown) => void): Promise<void> {
     if (busy) return
     setBusy(true)
     try {
       const browser = await action()
       applyBrowserEvent({ type: 'updated', browser })
     } catch (error) {
-      reportError(error)
+      if (onFailure) onFailure(error)
+      else reportError(error)
     } finally {
       setBusy(false)
     }
+  }
+
+  function navigateAddress(): void {
+    if (!address.trim()) return
+    setAddressError(null)
+    void run(() => api.browser.navigate(tab.browserId, address), cause => {
+      setAddressError(`Page could not open: ${presentError(cause)}. Your input and page are kept; retry here.`)
+    })
   }
 
   async function runCommand(action: () => Promise<void>): Promise<void> {
@@ -670,12 +712,12 @@ export function BrowserPane({
   }
 
   return (
-    <section className="browser-surface">
+    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`}>
       <form
         className="browser-toolbar"
         onSubmit={(event) => {
           event.preventDefault()
-          if (address.trim()) void run(() => api.browser.navigate(tab.browserId, address.trim()))
+          navigateAddress()
         }}
       >
         <button
@@ -692,15 +734,15 @@ export function BrowserPane({
         <button type="button" className="browser-toolbar__reload" aria-label="Reload" title="Reload" disabled={busy} onClick={() => void run(() => api.browser.reload(tab.browserId))}>
           {tab.loading || busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
-        <label>
+        {inSurvey && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
           <Globe2 size={13} />
           <input
             aria-label="Browser address"
             value={address}
             placeholder="Search or enter an address"
-            onChange={(event) => setAddress(event.target.value)}
+            onChange={(event) => { setAddress(event.target.value); setAddressError(null) }}
           />
-        </label>
+        </label>}
         <BrowserOperationStatus
           activity={browserActivity}
           browserId={tab.browserId}
@@ -826,16 +868,21 @@ export function BrowserPane({
                   <FileCode2 size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
-                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools in Search" onSelect={() => {
-                  void selectWorkspace(tab.workspaceId)
-                  setMainSurface('search')
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools in Survey" onSelect={() => {
+                  const owner = Object.values(useAppStore.getState().tabs).find(candidate => {
+                    const surface = candidate.regions[tab.regionId]
+                    return candidate.workspaceId === tab.workspaceId && surface?.kind === 'browser' && surface.browserId === tab.browserId
+                  })
+                  if (owner) openSurveyBrowserTools({ workspaceId: tab.workspaceId, tabId: owner.id, regionId: tab.regionId })
+                  else reportError(new Error('The original Browser Region is still restoring. Retry after its owner is available.'))
                 }}>
-                  <SlidersHorizontal size={12} /><span>Browser tools in Search…</span>
+                  <SlidersHorizontal size={12} /><span>Browser tools in Survey…</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
       </form>
+      {addressError ? <p className="browser-address-error" role="alert">{addressError}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。
           原生 WebContentsView 跟随 stage 的真实矩形，详情不覆盖页面。 */}
@@ -919,7 +966,12 @@ export function BrowserPane({
             })}><RefreshCw size={12} /> Retry</button>
           </div>
         ) : tab.url === 'about:blank' ? (
-          <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Enter an address above. Electron Main will mount a native WebContentsView.</span></div>
+          inSurvey ? <div className="survey-start browser-empty"><Globe2 size={30} aria-hidden="true" />
+            <form className="survey-start-input" onSubmit={event => { event.preventDefault(); navigateAddress() }}>
+              <input aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address} onChange={event => { setAddress(event.target.value); setAddressError(null) }} />
+              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
+            </form>
+          </div> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
         ) : __AGENTMUX_WEB_PREVIEW__ ? (
           <div className="browser-preview"><Globe2 size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
         ) : null}

@@ -10,10 +10,10 @@ import { BrowserAnnotationsPanel } from './BrowserAnnotationsPanel'
 import { BrowserProfilesPanel } from './BrowserProfilesPanel'
 import { BrowserToolbarPreferences } from './BrowserToolbarPreferences'
 
-export const SearchBrowserTools = memo(function SearchBrowserTools({ workspace, visible = true }: { workspace: WorkspaceRecord; visible?: boolean }) {
+export const SurveyBrowserTools = memo(function SurveyBrowserTools({ workspace, visible = true }: { workspace: WorkspaceRecord; visible?: boolean }) {
   const config = useAppStore((state) => state.config)
   const layout = useAppStore((state) => state.layouts[workspace.id])
-  // Keep the original controls' local drafts while the visited Search surface is hidden.
+  // Keep the original controls' local drafts while the visited Survey controls are hidden.
   // Its data still comes from the same Store; hidden tools do not subscribe to runtime updates.
   const toolStore = useMemo(() => ({
     getState: useAppStore.getState,

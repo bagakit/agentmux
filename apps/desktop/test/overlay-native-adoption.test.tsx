@@ -228,12 +228,12 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(TOP_ROW_TSX).toContain('window.addEventListener(\'keydown\', onKeyDown)')
     expect(TOP_ROW_TSX).toContain('window.addEventListener(\'blur\', onBlur)')
 
-    useAppStore.setState({ mainSurface: 'search' })
+    useAppStore.setState({ mainSurface: 'survey' })
     await act(async () => {
       root?.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }))
     })
 
-    const searchBtn = container?.querySelector('button[aria-label^="Search"]') as HTMLButtonElement
+    const searchBtn = container?.querySelector('button[aria-label^="Survey"]') as HTMLButtonElement
     expect(searchBtn).toBeTruthy()
 
     // Mouse over triggers tooltip in host

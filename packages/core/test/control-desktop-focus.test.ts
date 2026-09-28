@@ -61,11 +61,11 @@ describe('public Desktop focus and client inspection', () => {
   })
   it('transports exact Goal and each existing Surface without an Agent launch/send', async () => {
     await json(['focus', '--goal', '--help'])
-    for (const surface of ['space', 'focus', 'goals', 'search']) await json(['focus', '--surface', surface])
+    for (const surface of ['space', 'focus', 'goals', 'survey']) await json(['focus', '--surface', surface])
     expect(seen.map(request => request.operation)).toEqual(['focus', 'focus', 'focus', 'focus', 'focus'])
     expect(seen[0]).toMatchObject({ target: { kind: 'goal', goalId: '--help' }, inputPolicy: 'preserve' })
     expect(seen.slice(1).map(request => request.operation === 'focus' && request.target)).toEqual(
-      ['space', 'focus', 'goals', 'search'].map(surface => ({ kind: 'surface', surface })))
+      ['space', 'focus', 'goals', 'survey'].map(surface => ({ kind: 'surface', surface })))
   })
   it('allows explicit input target only for exact existing Tab/Region selectors', async () => {
     await json(['focus', '--tab', 'tab', '--input', 'target'])
