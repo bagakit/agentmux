@@ -40,9 +40,9 @@ describe('Terminal Restoring uses the shared full-page surface', () => {
   })
 
   it('keeps reduced-motion and static readability in the shared surface', () => {
-    expect(styles).toMatch(/\.full-page-loading__grid::before[\s\S]*animation: full-page-loading-sweep var\(--dur-sweep\)/)
-    expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__grid::before[\s\S]*?animation: none/)
+    expect(styles).toMatch(/\.full-page-loading__art\s*\{\s*animation: full-page-loading-drift calc\(var\(--dur-sweep\)/)
+    expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__art[\s\S]*?animation: none/)
     expect(loadingComponent).toContain('aria-live="polite"')
-    expect(loadingComponent).toContain('aria-busy={!failed}')
+    expect(loadingComponent).toContain('aria-busy={busy}')
   })
 })
