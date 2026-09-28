@@ -24,6 +24,9 @@ async function pointer(expression,button='left',hover=false) {
 }
 async function escape() { for(const type of ['keyDown','keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await paint() }
 async function frame(name,width) {
+  // Capture the settled menu/surface, not an intermediate entry transition.
+  await evaluate(`Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))`)
+  await paint()
   const file=name+'.png', png=(await win.webContents.capturePage()).toPNG()
   assert.ok(png.length>0);await fs.writeFile(path.join(evidence,file),png);report.frames.push({name,width,file})
 }
