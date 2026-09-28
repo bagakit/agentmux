@@ -28,9 +28,12 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
       onPointerEnter={event => { if (event.pointerType === 'mouse' && event.buttons === 0) requestPmoTeamsTopicFloatingPreview() }}
       onPointerLeave={event => { if (event.pointerType === 'mouse') leavePmoTeamsTopicFloatingPreview() }}
       onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
-      onClick={event => { event.preventDefault(); floating.open ? requestPmoTeamsTopicFloatingClose() : requestPmoTeamsTopicFloatingOpen({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) }) }}>
-      <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" draggable={false} />
-      {target.session ? <span className={className + '__status'} aria-hidden="true"><StatusDot status={target.session.status} /></span> : null}
+      onClick={event => { event.preventDefault(); floating.open ? requestPmoTeamsTopicFloatingClose() : requestPmoTeamsTopicFloatingOpen({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) }) }}
+      >
+      <span className={className + '__surface'} data-state="open">
+        <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" draggable={false} />
+        {target.session ? <span className={className + '__status'} aria-hidden="true"><StatusDot status={target.session.status} /></span> : null}
+      </span>
       <span hidden id="mote-shortcut-status">{target.label} · {target.statusText}</span>
     </button>
   </div>

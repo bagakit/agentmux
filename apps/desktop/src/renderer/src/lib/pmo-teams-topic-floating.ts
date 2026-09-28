@@ -16,6 +16,8 @@ export type PmoTeamsTopicFloatingState = {
   preview: boolean
   targetTopicId?: string | undefined
   targetTabId?: string | undefined
+  /** Navigation presentation only; unrelated to an Agent's explicit view mode. */
+  railMode?: 'cards' | 'avatars' | undefined
 }
 
 const CLOSED: PmoTeamsTopicFloatingState = { open: false, preview: false }
@@ -34,7 +36,8 @@ function readState(): PmoTeamsTopicFloatingState {
     const value = JSON.parse(raw) as Partial<PmoTeamsTopicFloatingState>
     return { open: value.open === true, preview: false,
       ...(typeof value.targetTopicId === 'string' && value.targetTopicId.trim() ? { targetTopicId: value.targetTopicId.trim() } : {}),
-      ...(typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}) }
+      ...(typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}),
+      ...(value.railMode === 'cards' || value.railMode === 'avatars' ? { railMode: value.railMode } : {}) }
   } catch { return CLOSED }
 }
 
@@ -46,11 +49,12 @@ function update(next: Partial<PmoTeamsTopicFloatingState>): void {
   const current = snapshot()
   const resolved = { ...current, ...next }
   if (resolved.open === current.open && resolved.preview === current.preview &&
-    resolved.targetTopicId === current.targetTopicId && resolved.targetTabId === current.targetTabId) return
+    resolved.targetTopicId === current.targetTopicId && resolved.targetTabId === current.targetTabId &&
+    resolved.railMode === current.railMode) return
   state = resolved
-  if (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId) {
+  if (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || resolved.railMode !== current.railMode) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open,
-      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId })) } catch { /* Keep the usable surface. */ }
+      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, railMode: resolved.railMode })) } catch { /* Keep the usable surface. */ }
   }
   for (const listener of listeners) listener()
 }
