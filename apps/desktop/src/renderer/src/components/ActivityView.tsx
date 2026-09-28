@@ -1,4 +1,4 @@
-import { ChevronRight, Info } from 'lucide-react'
+import { ChevronRight, Info, LoaderCircle } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { AgentDisplayState, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -647,10 +647,34 @@ function WorkingIndicator(): JSX.Element {
   )
 }
 
+type UserMessageReadState = {
+  loading: boolean
+  error: Error | null
+  hasMore: boolean
+  onRetry: () => void
+  onReadEarlier: (trigger: HTMLButtonElement) => void
+}
+
+function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefined }) {
+  if (!read || (!read.loading && !read.error && !read.hasMore)) return null
+  return (
+    <div className="activity-feed__read-notice" role="status">
+      <span>
+        {read.loading ? <><LoaderCircle size={12} className="spin" /> Reading native inputs…</> : read.error
+          ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
+          : 'Earlier conversation records are available in History.'}
+      </span>
+      {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
+      {read.hasMore ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
+    </div>
+  )
+}
+
 export function ActivityView({
   sessionId,
   items,
   userMessages,
+  userMessageRead,
   capability,
   displayState,
   openWorkspaceFile,
@@ -664,6 +688,7 @@ export function ActivityView({
   sessionId: string
   items: AgentTimelineItem[]
   userMessages?: readonly AgentSessionUserMessage[]
+  userMessageRead?: UserMessageReadState
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
   displayState?: AgentDisplayState
@@ -834,10 +859,12 @@ export function ActivityView({
 
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasItems = items.length > 0
+  const readNotice = <UserMessageReadNotice read={userMessageRead} />
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
+        {readNotice}
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
         </div>
@@ -847,9 +874,10 @@ export function ActivityView({
   if (!hasUserMessages && showEmptyState(displayState, items)) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
-        <div className="activity-feed__empty">
-          No structured activity yet. Terminal remains available.
-        </div>
+        {readNotice}
+        {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
+          {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
+        </div> : null}
       </div>
     )
   }
@@ -858,6 +886,7 @@ export function ActivityView({
   if (!hasUserMessages && !hasItems) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
+        {readNotice}
         <WorkingIndicator />
       </div>
     )
@@ -874,6 +903,7 @@ export function ActivityView({
 
   return (
     <div className="activity-feed" ref={setFeedEl}>
+      {readNotice}
       {capability === 'unavailable' ? (
         <div className="activity-feed__empty" role="status">
           This executor does not provide structured activity. Terminal remains available.

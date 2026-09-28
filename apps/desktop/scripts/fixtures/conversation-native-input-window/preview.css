@@ -1,0 +1,4 @@
+html, body, #root { height: 100%; margin: 0; }
+.reading-preview { height: 100%; display: flex; flex-direction: column; background: var(--surface-0); color: var(--text-1); }
+.reading-preview__label { flex: none; margin: 0; padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); border-bottom: 1px solid var(--line-soft); }
+.reading-preview__pane { flex: 1; min-height: 0; }

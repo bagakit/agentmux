@@ -131,11 +131,11 @@ export function SessionPane({
   useEffect(() => {
     setHistoryOpen(false)
   }, [viewMode])
-  const openHistory = (): void => {
+  const openHistory = (trigger?: HTMLButtonElement): void => {
     const header = !readOnly && headerPortalTargetId
       ? document.getElementById(headerPortalTargetId)
       : surfaceRef.current
-    historyReturnFocusRef.current = header?.querySelector<HTMLButtonElement>('.agent-region-header__more') ?? null
+    historyReturnFocusRef.current = trigger ?? header?.querySelector<HTMLButtonElement>('.agent-region-header__more') ?? null
     setHistoryOpen(true)
   }
   const closeHistory = (): void => {
@@ -161,7 +161,13 @@ export function SessionPane({
   }) : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
     startupDecision.reason === 'idle-over-day'
-  const { messages: userMessages } = useSessionUserMessages(
+  const {
+    messages: userMessages,
+    loading: userMessagesLoading,
+    error: userMessagesError,
+    hasMore: hasEarlierUserRecords,
+    refresh: refreshUserMessages
+  } = useSessionUserMessages(
     session?.kind === 'agent' ? session.control : undefined,
     { enabled: visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore }
   )
@@ -427,7 +433,7 @@ export function SessionPane({
         name={agentInputIdentity!} executorLabel={agentInputExecutor!} sessionId={session.id}
         regionId={linkOrigin.regionId} readOnly={readOnly}
         portalTargetId={headerPortalTargetId}
-        onHistory={!historyOpen && !inlineHistory ? openHistory : undefined}
+        onHistory={!historyOpen && !inlineHistory ? () => openHistory() : undefined}
         onRefreshObservation={observationMounted ? () => void refresh(true) : undefined}
         refreshing={refreshing}
         resultReview={hasAgentComposer ? null : resultReview}
@@ -526,6 +532,13 @@ export function SessionPane({
                 sessionId={session.id}
                 items={timeline}
                 userMessages={userMessages}
+                userMessageRead={{
+                  loading: userMessagesLoading,
+                  error: userMessagesError,
+                  hasMore: hasEarlierUserRecords,
+                  onRetry: () => { void refreshUserMessages() },
+                  onReadEarlier: openHistory
+                }}
                 capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
                 displayState={session.status.state}
                 workspaceRoot={activeWorkspaceRoot}
