@@ -7,10 +7,6 @@
 .session-history__source { padding: var(--sp-2) var(--sp-4); color: inherit; opacity: .65; font-size: var(--fs-micro); }
 .session-history__viewport { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 0 var(--sp-5) var(--sp-5); scrollbar-gutter: stable; overflow-anchor: none; }
 .session-history__item { padding: var(--sp-3) 0; overflow-wrap: anywhere; }
-.session-history .log-turn > .log-turn__body { font: inherit; color: inherit; }
-.session-history__item .md, .session-history .md-block-code code { font: inherit; }
-.session-history .md-heading, .session-history .md-table td { color: inherit; }
-.session-history .md-block-code { background: transparent; box-shadow: none; padding: var(--sp-2) 0; border-radius: 0; }
 .session-history__boundary, .session-history__notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .session-history__notice { color: var(--amber); border-bottom: 1px solid var(--line-soft); }
 .session-history__notice > span { flex: 1; min-width: 0; }
