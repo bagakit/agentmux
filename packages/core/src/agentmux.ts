@@ -36,6 +36,7 @@ import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { settingsResourceBudget } from './settings-resource-json.js'
 import { parseSpaceControlRequest, spaceControlId } from './space-control-parser.js'
+import { parseDesktopFocusRequest } from './desktop-focus-parser.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
@@ -214,8 +215,13 @@ async function withClient<T>(operation: (client: AgentMuxClient) => Promise<T>):
 async function inspectCommand(args: readonly string[]): Promise<number> {
   const flags = parseFlags(args, {
     '--session': 'data', '--run': 'value', '--tab': 'value', '--region': 'value',
-    '--provider-native': 'value', '--provider': 'value', '--acp-native': 'value', '--adapter': 'value'
+    '--provider-native': 'value', '--provider': 'value', '--acp-native': 'value', '--adapter': 'value', '--client': 'boolean'
   })
+  if (flags.booleans.has('--client')) {
+    if (flags.values.size) throw cliError('--client cannot be combined with another inspection selector.')
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'inspect.client' })
+    printSuccess(receipt.operation, receipt.result); return 0
+  }
   const selector = exactlyOne(flags, ['--session', '--run', '--tab', '--region', '--provider-native', '--acp-native'], 'inspect')
   if ((selector === '--provider-native') !== flags.values.has('--provider')) {
     throw cliError('--provider-native and --provider must be used together.')
@@ -834,13 +840,18 @@ async function sendCommand(args: readonly string[]): Promise<number> {
   }
 }
 async function focusCommand(args: readonly string[]): Promise<number> {
-  const flags = parseFlags(args, { '--region': 'value', '--tab': 'value' })
-  const selected = exactlyOne(flags, ['--region', '--tab'], 'focus')
-  const value = flags.values.get(selected)!
-  const receipt = await requestAgentMuxControl({
-    ...requestBase(), operation: 'focus',
-    target: selected === '--region' ? { kind: 'region', regionId: explicitSelectorId(value, 'Region id') } : { kind: 'tab', tabId: explicitSelectorId(value, 'Tab id') }
-  })
+  const flags = parseFlags(args, { ...SPACE_SELECTOR_FLAGS, '--goal': 'data', '--surface': 'value', '--input': 'value' })
+  const spatial = spaceSelector(flags)
+  const goal = flags.values.has('--goal'), surface = flags.values.has('--surface')
+  if (Number(goal) + Number(surface) + Number(Object.keys(spatial).length > 0) !== 1) {
+    throw cliError('Focus requires one spatial hierarchy, one Goal, or one Surface.')
+  }
+  const target = goal ? { kind: 'goal', goalId: flags.values.get('--goal') }
+    : surface ? { kind: 'surface', surface: flags.values.get('--surface') }
+      : { kind: 'space', ...spatial }
+  const request = parseDesktopFocusRequest({ ...requestBase(), operation: 'focus', target,
+    inputPolicy: flags.values.get('--input') ?? 'preserve' }, 'INVALID_CLI_ARGUMENT')
+  const receipt = await requestAgentMuxControl(request)
   printSuccess(receipt.operation, receipt.result); return 0
 }
 
@@ -1090,8 +1101,8 @@ function requestsHelp(args: readonly string[]): boolean {
       (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3])) ||
       (args.length === 4 && args[1] === 'executors' && args[2] === 'refresh' && help(args[3]))
   }
-  if (args[0] === 'agent' || args[0] === 'space') {
-    const data = ['--executor', '--session', '--prompt', '--space', '--zone', '--tab', '--region', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
+  if (args[0] === 'agent' || args[0] === 'space' || args[0] === 'focus') {
+    const data = ['--executor', '--session', '--prompt', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
     return args.some((argument, index) => (argument === '--help' || argument === '-h') && !data.includes(args[index - 1] ?? ''))
   }
   return args.some((argument, index) => (

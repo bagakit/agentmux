@@ -53,6 +53,7 @@ import {
   type AgentMuxTerminalViewObservation
 } from './control.js'
 import { AgentMuxError } from './errors.js'
+import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -485,15 +486,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(owner ? { caller: owner } : {})
     } as AgentMuxControlRequest
   }
-  if (source.operation === 'focus') {
-    const targetSource = object(source.target, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST')
-    const target = targetSource.kind === 'tab'
-      ? { kind: targetSource.kind, tabId: identity(targetSource.tabId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
-      : targetSource.kind === 'region'
-        ? { kind: targetSource.kind, regionId: identity(targetSource.regionId, 'Focus target is invalid.', 'INVALID_CONTROL_REQUEST') } as const
-        : (() => { throw new AgentMuxError('Focus target is invalid.', 'INVALID_CONTROL_REQUEST') })()
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'focus', target }
-  }
+  if (source.operation === 'focus') return parseDesktopFocusRequest(source)
   if (source.operation === 'browser.run') {
     // caller 是可选的：CLI 直接发一条也合法（那时没有 managed caller）。没有 self 语义，所以不像别的
     // 操作那样需要"self 必须配 caller"那道闸——browserId 永远是显式的。
@@ -1044,7 +1037,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'open.terminal') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseTerminalRegion(result.region) } }
   if (operation === 'open.browser') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseBrowserRegion(result.region) } }
   if (operation === 'send') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
-  if (operation === 'focus') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.regionId === undefined ? {} : { regionId: identity(result.regionId, 'Control focus result is invalid.', 'CONTROL_PROTOCOL_ERROR') }) } }
+  if (operation === 'focus') return parseDesktopFocusSuccessReceipt(source)
   if (operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
   if (operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseExecutors(result.agents) } }
@@ -1263,6 +1256,7 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
     if (ok && !('value' in ok)) throw new AgentMuxError('Control receipt status must be data.', 'CONTROL_PROTOCOL_ERROR')
     if (ok?.value === true) return parseSpaceControlSuccessReceipt(source)
   }
+  if (operation?.value === 'focus' && Object.getOwnPropertyDescriptor(source, 'ok')?.value === true) return parseDesktopFocusSuccessReceipt(source)
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control receipt version is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (source.ok === true) {
     if (source.error !== undefined) throw new AgentMuxError('Control receipt must contain exactly one result or error.', 'CONTROL_PROTOCOL_ERROR')

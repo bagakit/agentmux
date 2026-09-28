@@ -53,7 +53,7 @@ function nullableId(value: unknown, name: string, code: Code, spatial = false): 
   return value === null ? null : spaceControlId(value, name, code, spatial)
 }
 
-function selector(value: unknown, code: Code): AgentMuxSpaceSelector {
+export function parseSpaceControlSelector(value: unknown, code: Code): AgentMuxSpaceSelector {
   const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId'], code)
   const target: AgentMuxSpaceSelector = {}
   for (const key of ['spaceId', 'zoneId', 'tabId', 'regionId'] as const) {
@@ -61,6 +61,7 @@ function selector(value: unknown, code: Code): AgentMuxSpaceSelector {
   }
   return target
 }
+const selector = parseSpaceControlSelector
 function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
   const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId', 'newTab', 'split', 'newZone'], code)
   const selected = Object.fromEntries(['spaceId', 'zoneId', 'tabId', 'regionId'].filter(key => Object.hasOwn(source, key)).map(key => [key, source[key]]))

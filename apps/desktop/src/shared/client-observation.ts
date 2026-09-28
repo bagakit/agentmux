@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
+import { desktopObservationSchema } from './desktop-focus-observation'
 
 const id = z.string().min(1)
 const nullableId = id.nullable()
@@ -43,6 +44,7 @@ export const desktopWorkbenchObservationSchema = z.object({
   ]),
   activeWorkspaceId: nullableId, mainSurface: z.enum(['search', 'agents', 'workbench', 'board']),
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict(),
+  desktop: desktopObservationSchema,
   tabs: z.array(z.object({ id, workspaceId: id, topicId: id.optional(), titleRegionId: id, name: z.string().optional(),
     layout: z.object({ root: regionTree, activeRegionId: id }).strict(), regions: z.array(region) }).strict()),
   layouts: z.record(z.string(), z.object({ root: groupTree, activeGroupId: id, groups: z.array(z.object({

@@ -179,6 +179,7 @@ export function adjacentRegionId(
 
 /** 落点解析 + 转发所需的最小 store 切片。App 直接把 store 快照传进来（它是这个类型的超集）。 */
 export type WorkbenchShortcutStore = {
+  workbenchSpaceSelection?: { workspaceId: string; topicId: string | null } | null
   retainedSpatialFocus?: { regionId: string; tabId: string; workspaceId: string; topicId?: string } | null
   mainSurface: string
   activeWorkspaceId: string | null
@@ -242,7 +243,7 @@ export function dispatchWorkbenchCommand(
   const layout = layoutForLogicalRegionFocus(layoutForActiveTopic(
     storedLayout,
     store.tabs,
-    store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
+    store.workbenchSpaceSelection?.workspaceId === workspaceId ? store.workbenchSpaceSelection.topicId : store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
   ), store.tabs, store.retainedSpatialFocus)
   const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
   if (!group) return false
@@ -348,7 +349,7 @@ export function focusedSessionId(store: WorkbenchShortcutStore): string | null {
   const layout = layoutForLogicalRegionFocus(layoutForActiveTopic(
     storedLayout,
     store.tabs,
-    store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
+    store.workbenchSpaceSelection?.workspaceId === workspaceId ? store.workbenchSpaceSelection.topicId : store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
   ), store.tabs, store.retainedSpatialFocus)
   const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
   const tab = group?.activeTabId ? store.tabs[group.activeTabId] : undefined
