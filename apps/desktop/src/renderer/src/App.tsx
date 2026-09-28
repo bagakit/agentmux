@@ -21,7 +21,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
-import { GlobalSearchSurface } from './components/GlobalSearchSurface'
+import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { desktopSurface } from './lib/desktop-focus-navigation'
@@ -43,6 +43,8 @@ import { RendererResourceOwners } from './components/RendererResourceOwners'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 import { beginRendererStartup, startupProgressDetail } from './lib/startup-progress'
+import { surveyBrowserSurface } from './lib/survey-browser'
+import type { WorkbenchViewTarget } from './lib/workbench-presentation'
 
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
@@ -95,12 +97,38 @@ function DesktopApp() {
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null } : null }
     desktopPresentationCommitted()
   })
-  const [searchVisited, setSearchVisited] = useState(mainSurface === 'search')
+  const surveySelection = useAppStore((state) => state.surveyBrowserSelection)
+  const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
+  const [unconfirmedBrowserRegionIds, setUnconfirmedBrowserRegionIds] = useState<ReadonlySet<string>>(() => new Set())
+  const onBrowserControlConfirmation = useCallback((regionId: string, unconfirmed: boolean) => {
+    setUnconfirmedBrowserRegionIds(current => {
+      if (current.has(regionId) === unconfirmed) return current
+      const next = new Set(current)
+      if (unconfirmed) next.add(regionId); else next.delete(regionId)
+      return next
+    })
+  }, [])
+  const [narrowControls, setNarrowControls] = useState(() => window.innerWidth <= 1100)
   useEffect(() => {
-    if (mainSurface === 'search') setSearchVisited(true)
+    const resized = () => setNarrowControls(window.innerWidth <= 1100)
+    window.addEventListener('resize', resized)
+    return () => window.removeEventListener('resize', resized)
+  }, [])
+  const surveyPage = surveyBrowserSurface(tabs, surveySelection)
+  const surveyVisible = mainSurface === 'survey' && !settingsRoute
+  const viewTargets = useMemo<Readonly<Record<string, WorkbenchViewTarget>>>(() => ({
+    ...moteViewTargets,
+    ...(surveyVisible && surveyPage && surveySelection ? { [surveySelection.tabId]: {
+      hostId: 'survey-browser-slot', active: !(surveyToolsOpen && narrowControls),
+      visible: !(surveyToolsOpen && narrowControls), surface: 'survey' as const, controlsOpen: surveyToolsOpen
+    } } : {})
+  }), [moteViewTargets, surveyVisible, surveyPage?.regionId, surveySelection?.tabId, surveyToolsOpen, narrowControls])
+  const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
+  useEffect(() => {
+    if (mainSurface === 'survey') setSurveyVisited(true)
   }, [mainSurface])
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
-  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'search'
+  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
@@ -153,8 +181,8 @@ function DesktopApp() {
   const focusSessionId = mainSurface === 'agents' ? executionFocusSessionId(agentFocus) : null
   const focusTab = tabForFocusedSession(tabs, focusSessionId)
   const projectedVisibleTabIds = useMemo(() => new Set([
-    ...Object.keys(moteViewTargets ?? {}), ...(focusTab ? [focusTab.id] : [])
-  ]), [moteViewTargets, focusTab?.id])
+    ...Object.entries(viewTargets).flatMap(([tabId, target]) => target.visible === false ? [] : [tabId]), ...(focusTab ? [focusTab.id] : [])
+  ]), [viewTargets, focusTab?.id])
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
@@ -162,7 +190,7 @@ function DesktopApp() {
   // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
   // registry rule as a project instead of being filtered out after a Topic click.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
+    fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || candidate.id === surveySelection?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
@@ -310,7 +338,7 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
                 </section>
               ) : null}
-              {searchVisited || mainSurface === 'search' ? <GlobalSearchSurface visible={mainSurface === 'search' && !settingsRoute} /> : null}
+              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
@@ -340,7 +368,8 @@ function DesktopApp() {
                           visible={mounted}
                           focusTabId={focusVisible && focusTab ? focusTab.id : null}
                           focusPortalTargetId={focusVisible ? 'focus-workspace-slot' : null}
-                          viewTargets={candidate.id === SCRATCH_WORKSPACE_ID ? moteViewTargets : undefined}
+                          viewTargets={viewTargets}
+                          onBrowserControlConfirmation={onBrowserControlConfirmation}
                           interactiveResize={windowResizeActive || isResizing}
                         />
                       </div>

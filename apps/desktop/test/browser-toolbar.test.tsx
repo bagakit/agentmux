@@ -27,6 +27,7 @@ const fixture = vi.hoisted(() => {
       saveBrowserBookmark: vi.fn(async () => 'Example.webloc'),
       openFile: vi.fn(async () => {}),
       browserAnnotationsByBrowserId: {},
+      noticeReadReceipts: {},
       addBrowserAnnotation: vi.fn(),
       toolsOpen: false,
       config: null as AppConfig | null
@@ -37,7 +38,7 @@ const fixture = vi.hoisted(() => {
 vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign(
     (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state }
+    { getState: () => fixture.state, setState: vi.fn() }
   )
 }))
 
@@ -149,7 +150,7 @@ beforeEach(() => {
 async function openActivityMenu(container: HTMLElement): Promise<HTMLElement> {
   const trigger = container.querySelector<HTMLButtonElement>('.browser-operation-status__trigger')!
   expect(trigger).not.toBeNull()
-  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
   const menu = document.querySelector<HTMLElement>('.browser-operation-menu')!
   expect(menu).not.toBeNull()
   return menu

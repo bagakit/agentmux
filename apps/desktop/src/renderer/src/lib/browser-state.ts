@@ -23,7 +23,7 @@ export function reduceBrowserEvent(
       const affected = workbenchSurfaces(tab).filter((surface): surface is BrowserWorkbenchSurface => surface.kind === 'browser' && surface.browserId === event.id)
       if (affected.length === 0) continue
       const regions = { ...tab.regions }
-      for (const surface of affected) regions[surface.regionId] = { ...surface, loading: false, error: event.error }
+      for (const surface of affected) regions[surface.regionId] = { ...surface, loading: false, error: event.error, nativeOwnerUnavailable: true }
       tabs = { ...tabs, [tab.id]: { ...tab, regions } }
     }
     return tabs === state.tabs ? state : { ...state, tabs }
@@ -34,9 +34,10 @@ export function reduceBrowserEvent(
       let regions = tab.regions
       for (const surface of Object.values(tab.regions)) {
         if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
-        if (Object.entries(event.browser).every(([key, value]) => Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
+        if (!surface.nativeOwnerUnavailable && Object.entries(event.browser).every(([key, value]) => Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
         if (regions === tab.regions) regions = { ...regions }
-        regions[surface.regionId] = { ...surface, ...event.browser, regionId: surface.regionId }
+        const { nativeOwnerUnavailable: _unavailable, ...availableSurface } = surface
+        regions[surface.regionId] = { ...availableSurface, ...event.browser, regionId: surface.regionId }
       }
       if (regions === tab.regions) continue
       if (tabs === state.tabs) tabs = { ...tabs }

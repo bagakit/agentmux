@@ -1,8 +1,8 @@
 import type { AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave } from './space-control.js'
 
 /** Client presentation facts. Core neither owns nor initializes a desktop surface. */
-export type AgentMuxDesktopSurface = 'space' | 'focus' | 'goals' | 'search'
-export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'search'
+export type AgentMuxDesktopSurface = 'space' | 'focus' | 'goals' | 'survey'
+export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'survey'
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   | { kind: 'goal'; goalId: string }

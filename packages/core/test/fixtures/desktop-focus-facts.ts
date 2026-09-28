@@ -6,7 +6,7 @@ export const input: AgentMuxDesktopInput = { provenance: 'observed', scope: 'flo
 export function focusFacts(request: AgentMuxControlFocusRequest): AgentMuxDesktopFocusResult {
   const target = request.target
   const surface = target.kind === 'goal' ? 'goals' : target.kind === 'surface' ? target.surface : 'space'
-  const mainSurface = ({ space: 'workbench', goals: 'board', focus: 'agents', search: 'search' } as const)[surface]
+  const mainSurface = ({ space: 'workbench', goals: 'board', focus: 'agents', survey: 'survey' } as const)[surface]
   const space = { spaceId: target.kind === 'space' ? target.spaceId ?? 'space' : 'space',
     zoneId: target.kind === 'space' ? target.zoneId ?? 'zone' : 'zone', workspaceId: 'workspace',
     tabId: target.kind === 'space' ? target.tabId ?? 'tab' : 'tab', groupId: 'group',

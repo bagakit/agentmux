@@ -7,7 +7,7 @@ import { MOTE_TYPE_NAME } from '../../../shared/scratch-topics'
 
 export type SurfaceNavigationPlugin =
   | {
-      id: 'search' | 'space' | 'focus' | 'goals'
+      id: 'survey' | 'space' | 'focus' | 'goals'
       kind: 'surface'
       label: string
       ariaLabel: string
@@ -72,13 +72,13 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     surface: 'board'
   },
   {
-    id: 'search',
+    id: 'survey',
     kind: 'surface',
-    label: 'Search',
-    ariaLabel: 'Search: search and manage browsers',
-    title: 'Search — search and manage browsers',
-    tooltip: 'Search the web and manage browsers',
+    label: 'Survey',
+    ariaLabel: 'Survey: browse and manage pages',
+    title: 'Survey — browse and manage pages',
+    tooltip: 'Browse the web and manage pages',
     icon: Search,
-    surface: 'search'
+    surface: 'survey'
   }
 ]

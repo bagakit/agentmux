@@ -10,7 +10,7 @@ import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSu
 import { WindowUtilityBar } from '../src/renderer/src/components/WindowUtilityBar.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-describe('PMO / Space / Focus / Goals / Search navigation', () => {
+describe('PMO / Space / Focus / Goals / Survey navigation', () => {
   const baseline = useAppStore.getState()
   let root: Root
   let container: HTMLDivElement
@@ -30,7 +30,7 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
   })
 
   it('renders the confirmed order with Settings after Search and names with one selected surface', async () => {
-    useAppStore.setState({ mainSurface: 'search' })
+    useAppStore.setState({ mainSurface: 'survey' })
     await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons).toHaveLength(6)
@@ -39,7 +39,7 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
       'Space: show terminal and file workbench',
       expect.stringMatching(/^Focus: show execution contexts\. \d+ working, \d+ requests, \d+ failed$/),
       'Goals: show goals and progress',
-      'Search: search and manage browsers',
+      'Survey: browse and manage pages',
       'Settings'
     ])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
@@ -57,13 +57,13 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
   })
 
   it('switches each product entry to its existing main surface', async () => {
-    useAppStore.setState({ mainSurface: 'search', sessions: [] })
+    useAppStore.setState({ mainSurface: 'survey', sessions: [] })
     await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
     const entries = [
       ['Space:', 'workbench'],
       ['Focus:', 'agents'],
       ['Goals:', 'board'],
-      ['Search:', 'search']
+      ['Survey:', 'survey']
     ] as const
     for (const [label, surface] of entries) {
       const button = container.querySelector(`button[aria-label^="${label}"]`) as HTMLButtonElement
@@ -102,7 +102,7 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
     const buttons = [...container.querySelectorAll<HTMLButtonElement>('nav button')]
     expect(buttons).toHaveLength(5)
     const settings = buttons[4]!
-    expect(buttons[3]!.getAttribute('aria-label')).toBe('Search: search and manage browsers')
+    expect(buttons[3]!.getAttribute('aria-label')).toBe('Survey: browse and manage pages')
     expect(settings.getAttribute('aria-label')).toBe('Settings')
     expect(settings.hasAttribute('aria-current')).toBe(false)
     expect(settings.classList.contains('selected')).toBe(false)
@@ -122,7 +122,7 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
     })
     try {
       await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
-      const launcher = container.querySelector('.surface-navigation__slot--launcher')!
+      const launcher = container.querySelector('button[aria-label^="Survey"]')!
       for (const [left, expected] of [[4, '8px'], [280, '112px']] as const) {
         anchorLeft = left
         await act(async () => launcher.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
@@ -142,7 +142,7 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
     // `import.meta.url` 是 http scheme，`readFileSync` 会抛 "The URL must be of scheme file"。
     // 本仓其它 happy-dom 测试（session-connecting-surface、message-tools-three-state）也都这么写。
     const source = readFileSync(join(import.meta.dirname, '../src/renderer/src/App.tsx'), 'utf8')
-    expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'search'")
+    expect(source).toContain("mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'")
     expect(source).toContain('!globalSurfaceOwnsProjectRail && projectRailOpen')
   })
 
@@ -152,7 +152,7 @@ describe('PMO / Space / Focus / Goals / Search navigation', () => {
     expect(container.querySelector('.global-board-surface')).toBeTruthy()
     expect(container.querySelector('.goals-detail')).toBeNull()
     expect(container.querySelector('.goals-list')).toBeNull()
-    expect(container.querySelector('.goals-empty')?.textContent).toContain('outcome')
+    expect(container.querySelector('.goals-empty')?.textContent).toBe('目标会显示在这里。')
     expect(container.querySelector('.goals-toolbar')?.textContent).toContain('New Goal')
     expect(container.querySelector('input[aria-label="Search goals"]')).toBeTruthy()
     expect(container.querySelector('.goals-footer')?.textContent).toContain('0 of 0 goals')

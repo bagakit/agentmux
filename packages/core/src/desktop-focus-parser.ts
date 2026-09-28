@@ -11,8 +11,8 @@ import type {
 type Code = 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR' | 'INVALID_CLI_ARGUMENT'
 const fail = (message: string, code: Code): never => { throw new AgentMuxError(message, code) }
 const fields = settingsResourceEnvelope
-const surfaces = ['space', 'focus', 'goals', 'search'] as const
-const mainSurfaces = { space: 'workbench', focus: 'agents', goals: 'board', search: 'search' } as const
+const surfaces = ['space', 'focus', 'goals', 'survey'] as const
+const mainSurfaces = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey' } as const
 function member<T extends string>(value: unknown, values: readonly T[], name: string, code: Code): T {
   if (!values.includes(value as T)) fail(`${name} is invalid.`, code)
   return value as T

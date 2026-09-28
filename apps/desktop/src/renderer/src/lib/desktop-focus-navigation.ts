@@ -5,9 +5,9 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { selectSpatialCatalog } from './space-agent-control'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 
-export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', search: 'search' } as const
+export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey' } as const
 export const desktopSurface: Record<AgentMuxDesktopMainSurface, AgentMuxDesktopSurface> = {
-  workbench: 'space', agents: 'focus', board: 'goals', search: 'search'
+  workbench: 'space', agents: 'focus', board: 'goals', survey: 'survey'
 }
 export type DesktopSelectionState = {
   activeWorkspaceId: string | null
