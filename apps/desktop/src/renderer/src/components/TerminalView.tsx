@@ -1650,6 +1650,11 @@ export function TerminalView({
               eyebrow="Terminal recovery"
               title="Restoring terminal"
               detail="Replaying retained output and confirming the viewport before live bytes return."
+              details={{ summary: 'Recovery details', content: <dl>
+                <dt>Session</dt><dd>{session.label}</dd>
+                <dt>Run</dt><dd>{session.control.run.runId}</dd>
+                <dt>Process</dt><dd>{session.processState}</dd>
+              </dl> }}
             />
           ) : null}
           {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
