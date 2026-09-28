@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { runInNewContext } from 'node:vm'
-import { Window } from 'happy-dom'
+import { Window, type Element } from 'happy-dom'
 import { describe, expect, it } from 'vitest'
 import { showDiagnostic } from '../scripts/browser-local-recovery-probe-scenario.mjs'
 
@@ -22,7 +22,7 @@ type Options = {
   nextActionBounds?: Box
   railBounds?: Box
   observedOperationId?: string
-  beforeSample?: (index: number, model: ReturnType<typeof model>) => void
+  beforeSample?: (index: number, view: { message: Element; geometry: (element: Element, box: Box, count?: number) => void }) => void
   samples?: number
 }
 function model(options: Options = {}) {
