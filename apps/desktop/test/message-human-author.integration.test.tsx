@@ -720,6 +720,31 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
       .toEqual([{ kind: 'unknown' }])
   })
 
+  it('actual demand.start control admits an unknown prompt through the original queue and Main', async () => {
+    const goal = { id: 'private-control-goal', title: 'Private control goal', description: 'Start this explicit non-human task',
+      status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null,
+      sessionIds: [], createdAt: 1, updatedAt: 1, source: 'default-topic' as const }
+    useAppStore.setState({ demands: { [goal.id]: goal } })
+    // Only unrelated Goal metadata persistence is isolated. executeControl/startDemand,
+    // admission, queue drain, Main, Runtime, public Core and FileStore remain actual.
+    vi.spyOn(useAppStore.getState(), 'updateDemand').mockImplementation(async (id, patch) => {
+      expect(Object.keys(patch).every(key => key === 'status' || key === 'activityLog')).toBe(true)
+      expect(Object.keys(patch).length).toBeGreaterThan(0)
+      useAppStore.setState(state => ({ demands: { ...state.demands, [id]: {
+        ...state.demands[id]!,
+        ...(patch.status === undefined ? {} : { status: patch.status }),
+        ...(patch.activityLog === undefined ? {} : { activityLog: patch.activityLog })
+      } } }))
+    })
+    const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'control-demand-start', operation: 'demand.start', demandId: goal.id, sessionId: SESSION_ID })
+    expect(result.operation).toBe('demand.start')
+    expect(writes).toEqual([goal.description, '\r'])
+    const timeline = await new AgentMuxFileAgentSessionStore(storeFile).loadTimeline(SESSION_ID)
+    expect(projectSessionUserMessages({ agentSessionId: SESSION_ID, timeline }).map(message => [message.content, message.author]))
+      .toEqual([[goal.description, { kind: 'unknown' }]])
+  })
+
   it('actual control send without caller stays unknown and a known Agent caller remains Agent', async () => {
     for (const [operationId, caller] of [['control-unknown', undefined], ['control-agent', 'peer-control-agent']] as const) {
       await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
