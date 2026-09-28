@@ -7,6 +7,8 @@
 
 .activity-feed { height: 100%; overflow: auto; padding:0 0 var(--sp-6); background: radial-gradient(80% 24% at 50% 0, color-mix(in oklab, var(--blue) 7%, transparent), transparent 72%), var(--surface-0); }
 .activity-feed__empty { padding-top:70px; color: var(--text-3); font-size: var(--fs-meta); text-align: center; }
+.activity-feed__read-notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); border-bottom: 1px solid var(--line-soft); }
+.activity-feed__read-notice > span { display: inline-flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* The ruler is an honest temporal axis: ticks sit at their real elapsed fraction, so a burst of
    machine steps clusters and a long think opens a gap. It reads the shape of the run at a glance. */
 .activity-ruler {

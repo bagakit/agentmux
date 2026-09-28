@@ -247,6 +247,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
       await act(async () => { await new Promise<void>(done => setTimeout(done, 0)) })
       expect(observation.refresh).toHaveBeenCalledTimes(1)
       const lifecycleButtons = [...host.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')]
+        .filter(button => button.textContent === 'Refresh observation' || button.textContent === 'Retry Resume')
       expect(lifecycleButtons.map(button => button.textContent)).toEqual(['Refresh observation', 'Retry Resume'])
       expect(lifecycleButtons.map(button => button.disabled)).toEqual([true, true])
       await agentHistoryMenuEntry(portal)
@@ -1395,6 +1396,8 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     sel.addRange(range)
     expect(sel.toString()).toBe('Message')
 
+    // The Activity projection makes one independent, typed bounded read.
+    historyPageSpy.mockResolvedValueOnce(makePage('activity-native-window', null))
     // Switch viewMode to 'activity'
     await act(async () => {
       useAppStore.setState({
@@ -1402,8 +1405,10 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
       })
     })
 
-    // Verify activity is rendered and history is hidden / no extra history reads happened
-    expect(historyPageSpy).toHaveBeenCalledTimes(2)
+    // Activity has its own bounded native-input read; the retained History pages never reread.
+    expect(historyPageSpy.mock.calls).toEqual([
+      [controlA, undefined], [controlA, { cursor: 'c-1' }], [controlA, { limit: 30 }]
+    ])
 
     // Switch viewMode back to 'terminal'
     await act(async () => {
@@ -1423,8 +1428,10 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     // Text node must still be connected!
     expect(textNode.isConnected).toBe(true)
     expect(sel.toString()).toBe('Message')
-    // ZERO new historyPage API calls made during mode switch (total remains 2, NOT 3)!
-    expect(historyPageSpy).toHaveBeenCalledTimes(2)
+    // No additional History or Activity reads after the exact three observed requests.
+    expect(historyPageSpy.mock.calls).toEqual([
+      [controlA, undefined], [controlA, { cursor: 'c-1' }], [controlA, { limit: 30 }]
+    ])
   })
 
   it('two SessionPane Regions for same control own independent trace disclosure', async () => {
