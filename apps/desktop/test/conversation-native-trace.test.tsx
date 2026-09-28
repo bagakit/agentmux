@@ -25,12 +25,13 @@ describe('shared conversation trace rendering', () => {
     }))
     expect(markup).toContain('data-speaker-role="agent"')
     expect(markup).toContain('Agent one')
-    const labels = ['First answer', 'Reasoning', 'Observed reasoning', 'Tool call',
+    const labels = ['First answer', 'Reasoning', 'Tool call',
       'Tool result', 'Failed', '/native/image.png', 'Last answer']
     const positions = labels.map((label) => markup.indexOf(label))
-    expect(positions).toHaveLength(8)
+    expect(positions).toHaveLength(7)
     expect(positions.every((value) => value >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(markup).not.toContain('Observed reasoning')
     expect(markup).toContain('data-trace-kind="tool-result" data-status="failed"')
     expect(markup).not.toContain('check &lt;input&gt;')
     expect(markup).not.toContain('Failed &lt;output&gt;')
@@ -104,22 +105,41 @@ describe('shared conversation trace rendering', () => {
       const detailsList = container.querySelectorAll<HTMLDetailsElement>('details[data-trace-kind="reasoning"]')
       expect(detailsList).toHaveLength(3)
 
-      // Item 0: empty text reasoning maintains disclosure; pre is empty string; signature not displayed
+      // Lazy contract: heavy payload is not mounted when closed
+      expect(detailsList[0]!.querySelector('.log-turn__trace-payload')).toBeNull()
+      expect(detailsList[1]!.querySelector('.log-turn__trace-payload')).toBeNull()
+      expect(detailsList[2]!.querySelector('.log-turn__trace-payload')).toBeNull()
+
+      // Item 0: empty text reasoning maintains disclosure; shows no reasoning recorded note; signature not displayed
+      await act(async () => {
+        detailsList[0]!.open = true
+        detailsList[0]!.dispatchEvent(new Event('toggle'))
+      })
       const pre0 = detailsList[0]!.querySelector('pre')
       expect(pre0).not.toBeNull()
-      expect(pre0!.textContent).toBe('')
+      expect(pre0!.textContent).toBe('No reasoning text recorded.')
       expect(container.textContent).not.toContain('opaque-empty-sig')
 
       // Item 1: redacted reasoning shows redacted notice; confidential text and signature not displayed
+      await act(async () => {
+        detailsList[1]!.open = true
+        detailsList[1]!.dispatchEvent(new Event('toggle'))
+      })
       const pre1 = detailsList[1]!.querySelector('pre')
       expect(pre1).not.toBeNull()
       expect(pre1!.textContent).toBe('Reasoning content redacted.')
       expect(container.textContent).not.toContain('confidential thought')
       expect(container.textContent).not.toContain('opaque-redacted-sig')
 
-      // Item 2: public thought renders text
-      const pre2 = detailsList[2]!.querySelector('pre')
-      expect(pre2!.textContent).toBe('Public thought')
+      // Item 2: public thought renders Markdown
+      await act(async () => {
+        detailsList[2]!.open = true
+        detailsList[2]!.dispatchEvent(new Event('toggle'))
+      })
+      const md2 = detailsList[2]!.querySelector('.log-turn__trace-body > p')
+      expect(md2).not.toBeNull()
+      expect(md2!.textContent).toBe('Public thought')
+      expect(detailsList[2]!.querySelector('pre')).toBeNull()
 
       // Copy message: normal reasoning and text copied; signature and redacted content omitted
       const button = container.querySelector<HTMLButtonElement>('button[aria-label="Copy message"]')
@@ -158,8 +178,12 @@ describe('shared conversation trace rendering', () => {
       await act(async () => root.render(createElement(ConversationMessage, {
         content: [{ kind: 'reasoning', text: 'confidential', redacted: true }]
       })))
-      const redactedDetails = container.querySelector('details[data-trace-kind="reasoning"]')
+      const redactedDetails = container.querySelector<HTMLDetailsElement>('details[data-trace-kind="reasoning"]')
       expect(redactedDetails).not.toBeNull()
+      await act(async () => {
+        redactedDetails!.open = true
+        redactedDetails!.dispatchEvent(new Event('toggle'))
+      })
       expect(redactedDetails!.querySelector('pre')?.textContent).toBe('Reasoning content redacted.')
       expect(container.querySelector('button[aria-label="Copy message"]')).toBeNull()
 

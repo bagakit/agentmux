@@ -8,6 +8,7 @@ import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from '
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ConversationToolTrace } from './ConversationToolTrace'
+import { ConversationReasoningTrace } from './ConversationReasoningTrace'
 import { ComposerTextarea } from './ComposerTextarea'
 import { SemanticIcon } from './semantic-icons'
 
@@ -86,7 +87,12 @@ export function ConversationMessage({
     : content
   const hasContent = parts.some(partHasRenderableContent)
   const hasCopyContent = parts.some((part) => partText(part).length > 0)
-  const displayName = name ?? (speaker?.role === 'human' ? 'You' : speaker?.role === 'unknown' ? 'Input' : speaker ? 'Assistant' : 'Activity')
+  const isTraceOnly = parts.length > 0 && parts.every((part) => part.kind !== 'text' || part.text.trim().length === 0)
+  const isUnknownInput = speaker?.role === 'unknown'
+  const rawDisplayName = name ?? (speaker?.role === 'human' ? 'You' : isUnknownInput ? 'Input' : speaker ? 'Assistant' : 'Activity')
+  const displayName = isUnknownInput && (rawDisplayName === 'You' || rawDisplayName === 'Human')
+    ? 'Input'
+    : rawDisplayName
   // Native parts have no annotation offset contract. Live string annotations retain their original
   // quote and note; read-only callers do not collect selection state.
   const canAnnotate = onAnnotate !== undefined && typeof content === 'string'
@@ -164,7 +170,12 @@ export function ConversationMessage({
   }
 
   return (
-    <div className="log-turn" data-speaker-role={speaker?.role} data-status={status}>
+    <div
+      className="log-turn"
+      data-speaker-role={speaker?.role}
+      data-status={status}
+      data-trace-only={isTraceOnly ? 'true' : undefined}
+    >
       <span className="log-turn__node" aria-hidden="true">
         {speaker ? <ConversationSpeakerAvatar
           speaker={speaker}
@@ -175,6 +186,9 @@ export function ConversationMessage({
       </span>
       <div className="log-turn__head">
         <span className="log-turn__who">{displayName}</span>
+        {isUnknownInput ? (
+          <span className="log-row__chip log-row__chip--unverified" role="note">作者未记录</span>
+        ) : null}
         {status === 'streaming' ? (
           <span className="log-row__chip" role="status"><SemanticIcon name="working" size={12} />Streaming</span>
         ) : null}
@@ -215,13 +229,17 @@ export function ConversationMessage({
                 {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
                 {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})} />
             ) : part.kind === 'reasoning' ? (
-              <details key={key} className="log-turn__trace" data-trace-kind={part.kind}
-                data-trace-id={traceDisclosureKey(messageId, key)}
-                open={expandedTraces ? expandedTraces.has(traceDisclosureKey(messageId, key)) : undefined}
-                onToggle={onToggleTrace ? (event) => onToggleTrace(traceDisclosureKey(messageId, key), event.currentTarget.open) : undefined}>
-                <summary>Reasoning</summary>
-                <pre>{part.redacted ? 'Reasoning content redacted.' : part.text}</pre>
-              </details>
+              <ConversationReasoningTrace
+                key={key}
+                part={part}
+                workspaceRoot={workspaceRoot}
+                traceId={traceDisclosureKey(messageId, key)}
+                {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
+                {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})}
+                {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+                {...(readPastedImage ? { readPastedImage } : {})}
+                {...(openHttpLink ? { openHttpLink } : {})}
+              />
             ) : <div key={key} className="log-turn__resource">
               <span>{part.label ?? `${part.resourceType} resource`}</span>
               <code>{part.reference}</code>

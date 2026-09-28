@@ -18,6 +18,8 @@
   column-gap:var(--sp-4);
   padding:var(--sp-4) var(--sp-5) var(--sp-4);
   margin:var(--sp-3) 0;
+  font-family: var(--font-sans);
+  font-weight: 400;
 }
 /* The node seats a 20px speaker avatar, which brings its own ground and identity colour — so the hole
    punch here is only the spine gap, and the colour that used to be set per kind now comes from the
@@ -47,6 +49,9 @@
 }
 .log-turn__actions { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: auto; opacity: 0; transition: opacity var(--dur-fast) ease; }
 .log-turn:hover .log-turn__actions, .log-turn:focus-within .log-turn__actions, .log-turn__actions[data-copy-state='failed'] { opacity: 1; }
+@media (hover: none) {
+  .log-turn__actions { opacity: 1; }
+}
 .log-turn__copy-error { display: inline-flex; align-items: center; color: var(--red-text); font-size: var(--fs-micro); }
 .log-turn__action { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .log-turn__action:hover { color: var(--text); background: var(--surface-3); }
@@ -75,10 +80,19 @@
 .log-turn__resource { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; font-size: var(--fs-meta); }
 .log-turn__resource code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__resource small { color: var(--text-3); font-size: var(--fs-micro); }
-.log-turn__trace { min-width: 0; margin: var(--sp-3) 0; font-size: var(--fs-meta); }
+.log-turn__trace { min-width: 0; margin: var(--sp-2) 0; font-size: var(--fs-meta); }
 .log-turn__trace > summary { cursor: pointer; color: var(--text-3); }
 .log-turn__trace[data-status='failed'] > summary { color: var(--red-text); }
+.log-turn__trace-payload { margin-top: var(--sp-2); padding-left: var(--sp-3); border-left: 2px solid var(--wash-2); }
+.log-turn__trace-body { color: var(--text-2); font-size: var(--fs-meta); }
+.log-turn__trace-body .md { gap: var(--sp-2); }
+.log-turn__trace-redacted { color: var(--text-3); font-style: italic; margin: 0; white-space: pre-wrap; font-family: inherit; font-size: inherit; }
+.log-turn__trace-empty { color: var(--text-3); font-style: italic; margin: 0; white-space: pre-wrap; font-family: inherit; font-size: inherit; }
 .log-turn__trace > pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.log-turn[data-trace-only='true'] { margin: var(--sp-1) 0; padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
+.log-turn[data-trace-only='true'] .log-turn__node { display: none; }
+.log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
+.log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
 .log-turn__annotation { grid-column: 2; grid-row: 3; display: grid; gap: var(--sp-2); max-width: min(460px, 100%); margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-1); }
 .log-turn__annotation-quote { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
 .log-turn__annotation textarea { min-height: 58px; width: 100%; resize: vertical; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-meta); }
@@ -284,34 +298,39 @@
 }
 .md-image-attachment--unavailable:hover { color: var(--text-3); }
 
-/* Human turns use a separate right-aligned reading lane without a decorative rail. */
-.log-turn[data-speaker-role='human'] {
+/* Human and unknown input turns use a right-aligned reading lane without a decorative rail. */
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) {
   grid-template-columns: minmax(0, 1fr) 20px;
   justify-self: end;
   width: min(78%, 720px);
   padding:var(--sp-3) var(--sp-4);
   margin:var(--sp-4) var(--sp-5);
   border-radius: var(--radius);
+}
+.log-turn[data-speaker-role='human'] {
   background: color-mix(in srgb, var(--blue) 8%, var(--surface-1));
+}
+.log-turn[data-speaker-role='unknown'] {
+  background: var(--surface-2);
 }
 /* 成块之后 body 自己不再需要底：那层底已经在整个 turn 上，再来一层就是浅底叠浅底，边界反而更糊。
    字色降一档——用户自己的话是"我说过什么"的回看，Agent 的答复才是这个视图的主叙述；降档也让两种
    回合在同一屏上有了字色层级，而不是只差底色。 */
-.log-turn[data-speaker-role='human'] .log-turn__head,
-.log-turn[data-speaker-role='human'] .log-turn__body {
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__head,
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__body {
   grid-column: 1;
   padding:0;
   color: var(--text-2);
   background: transparent;
   text-align: right;
 }
-.log-turn[data-speaker-role='human'] .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
-.log-turn[data-speaker-role='human'] .log-turn__head { grid-row: 1; }
-.log-turn[data-speaker-role='human'] .log-turn__body { grid-row: 2; text-align: left; }
-.log-turn[data-speaker-role='human'] .log-turn__annotation { grid-column: 1; justify-self: end; }
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__head { grid-row: 1; }
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__body { grid-row: 2; text-align: left; }
+.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__annotation { grid-column: 1; justify-self: end; }
 
 @media (max-width: 620px) {
-  .log-turn[data-speaker-role='human'] { width: calc(100% - var(--sp-6)); margin-inline: var(--sp-3); }
+  .log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) { width: calc(100% - var(--sp-6)); margin-inline: var(--sp-3); }
 }
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }

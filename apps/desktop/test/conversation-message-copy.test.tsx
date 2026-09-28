@@ -13,7 +13,8 @@ describe('conversation message copy contract', () => {
   })
 
   it('uses the editorial human lane without the old left rail', () => {
-    const humanStart = styles.indexOf(".log-turn[data-speaker-role='human'] {")
+    const selector = ":where([data-speaker-role='human'], [data-speaker-role='unknown']) {"
+    const humanStart = styles.indexOf(selector)
     expect(humanStart).toBeGreaterThan(-1)
     const humanEnd = styles.indexOf('}', humanStart)
     expect(styles.slice(humanStart, humanEnd)).toContain('justify-self: end')

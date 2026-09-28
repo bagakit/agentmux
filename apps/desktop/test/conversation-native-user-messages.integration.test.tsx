@@ -104,9 +104,10 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     const userTurn = turns[0]!
     expect(userTurn.getAttribute('data-speaker-role')).toBe('unknown')
 
-    // Name must be 'Input' / unknown, NEVER 'You'
+    // Explicit unknown input attribution, never Human/You.
     const who = userTurn.querySelector('.log-turn__who')
     expect(who?.textContent).toBe('Input')
+    expect(userTurn.querySelector('[role="note"]')?.textContent).toBe('作者未记录')
     expect(who?.textContent).not.toBe('You')
 
     // Avatar must be unknown circle-dot, NEVER human
@@ -166,7 +167,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     expect(turn.querySelector('.log-turn__time')).toBeNull()
     // No status chip fabricated
     expect(turn.getAttribute('data-status')).toBeNull()
-    expect(turn.querySelector('.log-row__chip')).toBeNull()
+    expect(turn.querySelector('.log-row__chip[role="status"]')).toBeNull()
   })
 
   it('历史入口与投影: 同正文不同原记录保留两个回合，不按正文吞记录', async () => {
@@ -295,6 +296,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     const nativeTurn = turns[0]!
     expect(nativeTurn.getAttribute('data-speaker-role')).toBe('unknown')
     expect(nativeTurn.querySelector('.log-turn__who')?.textContent).toBe('Input')
+    expect(nativeTurn.querySelector('[role="note"]')?.textContent).toBe('作者未记录')
     expect(nativeTurn.querySelector('.log-turn__who')?.textContent).not.toBe('You')
     expect(nativeTurn.querySelector('.conversation-avatar--unknown')).not.toBeNull()
     expect(nativeTurn.querySelector('.log-turn__body')?.textContent).toContain('Terminal native prompt')
@@ -353,7 +355,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     expect(turn.querySelector('.log-turn__time')).toBeNull()
     // No status chip
     expect(turn.getAttribute('data-status')).toBeNull()
-    expect(turn.querySelector('.log-row__chip')).toBeNull()
+    expect(turn.querySelector('.log-row__chip[role="status"]')).toBeNull()
   })
 
   it('共同 speaker resolver: 按真实 speaker.id 寻址，缺失保原 id，不冒用收件人资料', () => {

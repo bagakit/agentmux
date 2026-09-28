@@ -450,7 +450,14 @@ it('renders a repeated readonly part reference without duplicate React keys', as
       )
     )
     expect(host.querySelectorAll('.log-turn__trace')).toHaveLength(2)
-    expect([...host.querySelectorAll('pre')].map((p) => p.textContent)).toEqual([
+    expect(host.querySelectorAll('.log-turn__trace-payload')).toHaveLength(0)
+    await act(async () => {
+      for (const details of host.querySelectorAll<HTMLDetailsElement>('.log-turn__trace')) {
+        details.open = true
+        details.dispatchEvent(new Event('toggle'))
+      }
+    })
+    expect([...host.querySelectorAll('.log-turn__trace-body')].map((p) => p.textContent)).toEqual([
       'same valid part twice',
       'same valid part twice'
     ])

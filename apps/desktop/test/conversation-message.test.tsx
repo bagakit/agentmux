@@ -20,8 +20,8 @@ describe('ConversationMessage', () => {
     // 整张表而不是 activity-conversation.css 一个文件：这几条规则按表面再拆一刀就会搬走，
     // 而硬编码单文件时扫描面变空、`toContain` / `toMatch` 一条都不红。
     const styles = allStyles()
-    expect(styles).toMatch(/\.log-turn\[data-speaker-role='human'\] \.log-turn__body \{[^}]*text-align: left/)
-    expect(styles).toContain(".log-turn[data-speaker-role='human'] {")
+    expect(styles).toMatch(/:where\(\[data-speaker-role='human'\], \[data-speaker-role='unknown'\]\) \.log-turn__body \{[^}]*text-align: left/)
+    expect(styles).toContain(":where([data-speaker-role='human'], [data-speaker-role='unknown']) {")
     expect(styles).toContain('justify-self: end')
   })
   it('renders one shared message shape with identity, markdown and quiet time', () => {
