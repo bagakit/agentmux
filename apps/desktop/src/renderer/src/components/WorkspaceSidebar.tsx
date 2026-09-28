@@ -387,6 +387,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove project view?"
+        intent="neutral"
         description={
           removeRequest
             ? `This removes ${removeRequest.name} from the Project Rail only. Its files, layouts, Sessions and running Agents stay untouched.`
