@@ -19,7 +19,7 @@ const runtimeRow: RuntimeUsage = {
   hostId: 'local', resources, unavailable: null,
   process: { cpuPercent: null, rssKib: null, unavailable: 'ctxmux does not publish its daemon PID' },
   runtimeStorage: { path: '/fixture/current', bytes: 7890 },
-  runtimeStorageUnavailable: null
+  runtimeStorageUnavailable: null, runtimeStorageObservedAt: 1000
 }
 
 function metric(pid: number, type: Electron.ProcessMetric['type'], cpu: number, rss: number, creationTime = 1): Electron.ProcessMetric {
@@ -55,7 +55,7 @@ function sampling(observeRuntime = vi.fn(async () => [runtimeRow])) {
   sampler.setObservationSources({
     observeRuntime, processOwners, mainOwners
   })
-  sampler.trackRun('run-a', 100)
+  sampler.trackRun('run-a', 100, 'local')
   const seen: UsageSnapshot[] = []
   return {
     sampler, seen, table, appMetrics, observeRuntime, mainOwners, processOwners,
@@ -66,7 +66,7 @@ function sampling(observeRuntime = vi.fn(async () => [runtimeRow])) {
   }
 }
 
-beforeEach(() => { vi.useFakeTimers(); fixture.storage.mockReset() })
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1000); fixture.storage.mockReset() })
 afterEach(() => { vi.useRealTimers() })
 
 describe('product resource subscription', () => {
@@ -130,12 +130,12 @@ describe('product resource subscription', () => {
     expect(h.latest().runtimeUnavailable).toBe('Runtime inventory failed')
     expect(h.latest().runtime).toBeNull()
     expect(h.latest().app?.rssKib).toBe(2100)
-    expect(h.latest().runs).toEqual([{ runId: 'run-a', rootPid: 100, processCount: 2, rootRssKib: 1000, descendantsRssKib: 100, descendantProcessCount: 1, cpuPercent: 6, rssKib: 1100 }])
+    expect(h.latest().runs).toEqual([{ runId: 'run-a', hostId: 'local', rootPid: 100, processCount: 2, rootRssKib: 1000, descendantsRssKib: 100, descendantProcessCount: 1, cpuPercent: 6, rssKib: 1100 }])
     h.appMetrics.mockImplementationOnce(() => { throw new Error('Electron metrics failed') })
     await h.tick()
     expect(h.latest().app).toMatchObject({ rssKib: 2100, unavailable: 'Electron metrics failed' })
     expect(h.latest().unavailable).toBeNull()
-    expect(h.latest().runs).toEqual([{ runId: 'run-a', rootPid: 100, processCount: 2, rootRssKib: 1000, descendantsRssKib: 100, descendantProcessCount: 1, cpuPercent: 6, rssKib: 1100 }])
+    expect(h.latest().runs).toEqual([{ runId: 'run-a', hostId: 'local', rootPid: 100, processCount: 2, rootRssKib: 1000, descendantsRssKib: 100, descendantProcessCount: 1, cpuPercent: 6, rssKib: 1100 }])
     h.table.mockRejectedValueOnce(new Error('ps failed'))
     await h.tick()
     expect(h.latest().unavailable).toBe('ps failed')
@@ -161,7 +161,7 @@ describe('product resource subscription', () => {
     expect(h.latest().runtime).toBeNull()
     // App/Agent sampling keeps running while old Runtime I/O is pending.
     await h.tick()
-    expect(h.latest().runs).toEqual([{ runId: 'run-a', rootPid: 100, processCount: 2, rootRssKib: 1000, descendantsRssKib: 100, descendantProcessCount: 1, cpuPercent: 6, rssKib: 1100 }])
+    expect(h.latest().runs).toEqual([{ runId: 'run-a', hostId: 'local', rootPid: 100, processCount: 2, rootRssKib: 1000, descendantsRssKib: 100, descendantProcessCount: 1, cpuPercent: 6, rssKib: 1100 }])
     expect(h.latest().app?.cpuPercent).toBe(210)
     old.resolve([{ ...runtimeRow, hostId: 'old-open' }])
     await vi.advanceTimersByTimeAsync(0)
@@ -274,7 +274,7 @@ describe('existing RuntimeController resource observation owner', () => {
     const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
     Object.assign(controller, { hosts: new Map([['local', { executionHost: { kind: 'local' }, client }]]) })
     expect(await controller.resourceUsageObservation()).toEqual([{
-      ...runtimeRow, runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified'
+      ...runtimeRow, runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified', runtimeStorageObservedAt: null
     }])
     expect(fixture.storage).not.toHaveBeenCalled()
     expect(client.connect).not.toHaveBeenCalled()

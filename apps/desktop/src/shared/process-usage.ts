@@ -8,10 +8,6 @@
  * 与 `ps` 调用分开，就能在没有真实进程的情况下验证归并对不对。
  */
 
-import type {
-  AgentMuxRuntimeResourceSnapshot,
-  RuntimeStorageUsage
-} from '@agentmux/core'
 
 /** `ps -Ao pid,ppid,rss,pcpu` 的一行。rss 单位是 KiB，cpu 是百分比。 */
 export type ProcessRow = {
@@ -192,56 +188,8 @@ export function pruneSamples(
   return samples.filter((sample) => now - sample.observedAt <= longest)
 }
 
-/** 一个 run 现在吃多少资源。`null` 表示不可用（进程已退出、采样失败、还没采到）。 */
-export type RunUsage = {
-  runId: string
-  /** Root PID from the existing Core process-state observation, not a guessed executable. */
-  rootPid: number
-  /** null when the root is absent or already attributed to another Run. */
-  processCount: number | null
-  cpuPercent: number | null
-  rssKib: number | null
-  rootRssKib: number | null
-  descendantsRssKib: number | null
-  descendantProcessCount: number | null
-}
-
-export type AppProcessRole = 'main' | 'renderer' | 'browser' | 'gpu' | 'utility' | 'other'
-
-export type AppUsageGroup = {
-  role: AppProcessRole
-  processCount: number
-  cpuPercent: number | null
-  rssKib: number
-}
-
-export type AppUsage = {
-  processCount: number | null
-  cpuPercent: number | null
-  rssKib: number | null
-  groups: AppUsageGroup[]
-  /** Electron sampling or process attribution failed; retained readings are stale. */
-  unavailable: string | null
-}
-
-export type MainResourceOwnerCounts = {
-  sessionAttachmentOwners: number
-  sessionAttachmentLeases: number
-  fileWatchers: number
-  browserViews: number
-  releasedBrowserViews: number
-}
-
-export type RuntimeUsage = {
-  hostId: string
-  resources: AgentMuxRuntimeResourceSnapshot | null
-  unavailable: string | null
-  /** The vendored Runtime identity does not publish a daemon PID. */
-  process: { cpuPercent: null; rssKib: null; unavailable: string }
-  /** Disk usage of the selected Runtime only, without sibling discovery or cleanup. */
-  runtimeStorage: RuntimeStorageUsage | null
-  runtimeStorageUnavailable: string | null
-}
+export type { RunUsage, AppProcessRole, AppUsageGroup, AppUsage, MainResourceOwnerCounts, RuntimeUsage } from "@agentmux/core/control"
+import type { RunUsage, AppUsage, MainResourceOwnerCounts, RuntimeUsage } from "@agentmux/core/control"
 
 /**
  * 一次采样的成品。

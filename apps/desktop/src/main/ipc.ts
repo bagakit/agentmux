@@ -3,6 +3,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
+import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
 import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
@@ -238,8 +239,14 @@ export async function registerIpc(args: {
   const nativeChrome = new NativeOverlaySurfaces(args.window, browsers, warnNativeChrome,
     input => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input) })
   browsers.onNativeInput = (owner, input) => nativeChrome.forwardBrowserInput(owner, input)
+  const currentMetricsWindow = (): import('@agentmux/core/control').MetricsWindow | null => {
+    if (args.window.isDestroyed() || args.window.webContents.isDestroyed() || args.window.webContents.isLoadingMainFrame()) return null
+    const generation = args.runtime.rendererGeneration(args.window.webContents)
+    return generation === null ? null : { windowId: args.window.id, webContentsId: args.window.webContents.id, generation }
+  }
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
+    observeRenderer: signal => observeRendererResources(controlBridge, currentMetricsWindow, signal),
     processOwners: () => ({
       rendererPids: [...args.window.webContents.mainFrame.framesInSubtree
         .filter((frame) => !frame.detached && frame.osProcessId > 0)
@@ -270,6 +277,9 @@ export async function registerIpc(args: {
     sendRequest: (request) => args.window.webContents.send(CONTROL_REQUEST_CHANNEL, request),
     sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
+  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow })
+  const closeMetrics = () => metrics.dispose()
+  args.window.webContents.once('destroyed', closeMetrics)
   const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {
     const result = await controlBridge.execute({ operation: 'continuous-progress.observeInput', requestId: randomUUID(), control }, signal)
     if (result.operation !== 'continuous-progress.observeInput' || result.control.kind !== 'agent' ||
@@ -1036,6 +1046,7 @@ export async function registerIpc(args: {
   const detach = args.runtime.attach(args.window.webContents)
   const control = new AgentMuxControlServer({
     execute: executeControl,
+    metrics,
     /**
      * 进度订阅直接接到 journal 上，**不经过 Renderer**。
      *
@@ -1070,6 +1081,8 @@ export async function registerIpc(args: {
     await runOwnerDisposals([
       () => {
         acceptingControl = false
+        args.window.webContents.off('destroyed', closeMetrics)
+        metrics.dispose()
         ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)
         disposeProgressInput()
         disposeProgressChanges()

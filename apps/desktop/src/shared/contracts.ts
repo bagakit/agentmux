@@ -1037,8 +1037,8 @@ export type ExecutorDetection = { input: ExecutorDetectionInput } & (
   | { availability: 'check-failed'; cause: { code: string; message: string }; executable?: undefined }
 )
 
-export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest
-export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult
+export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest | import('@agentmux/core/control').MetricsRendererRequest
+export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult | import('@agentmux/core/control').MetricsRendererResult
 
 export type DesktopControlResponse =
   | { requestId: string; ok: true; result: DesktopControlResult }

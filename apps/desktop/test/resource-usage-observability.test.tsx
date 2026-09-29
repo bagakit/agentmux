@@ -48,7 +48,7 @@ async function push(snapshot: UsageSnapshot) { await act(async () => fixture.pus
 function snapshot(): UsageSnapshot {
   return {
     observedAt: 1000,
-    runs: [{ runId: 'run-test-1234', rootPid: 100, processCount: 1, rootRssKib: 65536, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 7, rssKib: 65536 }],
+    runs: [{ runId: 'run-test-1234', hostId: 'local', rootPid: 100, processCount: 1, rootRssKib: 65536, descendantsRssKib: 0, descendantProcessCount: 0, cpuPercent: 7, rssKib: 65536 }],
     app: { processCount: 3, cpuPercent: null, rssKib: 262144, unavailable: null, groups: [
       { role: 'main', processCount: 1, cpuPercent: null, rssKib: 131072 },
       { role: 'renderer', processCount: 1, cpuPercent: null, rssKib: 65536 },
@@ -57,7 +57,7 @@ function snapshot(): UsageSnapshot {
     runtime: [{ hostId: 'local', resources: { observedAt: 900, runCount: 11, runningRuns: 7, terminatedRuns: 4, terminatedUnattachedRuns: 2, attachments: 8, retainedOutputBytes: 3145728 },
       unavailable: null, process: { cpuPercent: null, rssKib: null, unavailable: 'Daemon PID is not published by Runtime; CPU and memory unavailable.' },
       runtimeStorage: { path: '/runtime/current', bytes: 4194304 },
-      runtimeStorageUnavailable: null
+      runtimeStorageUnavailable: null, runtimeStorageObservedAt: 900
     }], runtimeUnavailable: null, mainOwners: { sessionAttachmentOwners: 3, sessionAttachmentLeases: 4, fileWatchers: 5, browserViews: 2, releasedBrowserViews: 1 }, unavailable: null
   }
 }
@@ -70,6 +70,18 @@ function fact(label: string) {
 }
 
 describe('real resource panel observation', () => {
+  it('shows unknown Monaco as neutral marks and preserves established zero and other counts', async () => {
+    fixture.owners.mockReturnValue({ monacoEditors: null, monacoModels: 0, documents: 6,
+      runtimeSubscriptions: 1, terminalViews: 3, terminalAddons: 12, terminalListeners: 18 })
+    await open()
+    await push(snapshot())
+    expect(fact('Editors / models / documents')).toBe('— / 0 / 6')
+    expect(fact('Terminal views / addons / listeners')).toBe('3 / 12 / 18')
+    expect(fact('Runtime subscriptions')).toBe('1')
+    await act(async () => panel()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(panel()).toBeNull()
+    expect(fixture.unsubscribe).toHaveBeenCalledOnce()
+  })
   it('shows the same sampled Run root and descendants in the mounted resource disclosure', async () => {
     const readTable = vi.fn(async () => `PID PPID RSS %CPU
 100 1 28672 1
@@ -78,8 +90,8 @@ describe('real resource panel observation', () => {
 103 101 32768 1
 200 1 8192 0`)
     const sampler = new ProcessResourceSampler(readTable, () => 1000, () => [])
-    sampler.trackRun('large-run', 100)
-    sampler.trackRun('missing-run', 99999)
+    sampler.trackRun('large-run', 100, 'local')
+    sampler.trackRun('missing-run', 99999, 'local')
     fixture.subscribe.mockImplementation((push) => sampler.subscribe(push))
     try {
       await open()
