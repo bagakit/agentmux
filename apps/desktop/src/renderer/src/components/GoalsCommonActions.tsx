@@ -84,7 +84,7 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
   useLayoutEffect(() => {
     if (contextCompact) return
     if (revealRequested.current) {
-      const target = returnFocus.current?.isConnected ? returnFocus.current : manage && view === 'editor' ? editor.current?.querySelector<HTMLTextAreaElement>('textarea') : manageButton.current
+      const target = [returnFocus.current, manage && view === 'editor' ? editor.current?.querySelector<HTMLTextAreaElement>('textarea') : null, manageButton.current].find(candidate => candidate?.isConnected && !candidate.matches(':disabled') && !candidate.closest('[hidden]'))
       target?.focus(); revealRequested.current = false
     }
     if (focusRef.current && manage && view === 'library') {
