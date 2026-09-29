@@ -23,8 +23,9 @@ exports.run = async function run(p) {
     assert.deepEqual([...new Set(state.contentTransforms)], ['none'], 'Flow never scales the original text or icon')
     return state
   }
-  const trusted = async selector => {
-    const hit = await read(`(()=>{const n=${q(selector)};if(!n||!n.checkVisibility())throw Error('Missing visible native target');const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,reachable:n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`)
+  const reachable = selector => read(`(()=>{const n=${q(selector)};if(!n||!n.checkVisibility())throw Error('Missing visible native target');const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,reachable:n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`)
+  const trusted = async (selector, preparedHit) => {
+    const hit = preparedHit ?? await reachable(selector)
     assert.ok(hit.reachable, 'Natural motion uses a reachable actual button')
     win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, x: hit.x, y: hit.y })
     win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: hit.x, y: hit.y })
@@ -66,16 +67,45 @@ exports.run = async function run(p) {
   const rapid = async (from, first, last) => {
     await click(q(target(from))); await delay(460)
     const start = await docked(from)
-    await record(700); await trusted(target(first)); await delay(110)
-    const before = await snap()
-    assert.ok(Math.hypot(before.rect.x - start.rect.x, before.rect.y - start.rect.y) > 4, 'Rapid retarget starts during an actual in-flight move')
-    await trusted(target(last)); await until(`${q(lens)}?.dataset.liquidSelection===${JSON.stringify(last)}`)
-    const after = await snap()
+    // Read the native hit positions before the first move. The latest native
+    // click is observed in capture phase, then the original animate return is
+    // measured in that same Renderer task; IPC latency cannot hide its jump.
+    const firstHit = await reachable(target(first)), lastHit = await reachable(target(last))
+    await read(`(()=>{
+      const node=${q(lens)},container=${q(host)},descriptor=Object.getOwnPropertyDescriptor(Element.prototype,'animate');
+      if(!node?.isConnected||typeof descriptor?.value!=='function')throw Error('Native retarget observation has no connected lens/animate');
+      const original=descriptor.value,probe={node,firstClick:null,click:null,calls:[]};window.liquidRetargetProbe=probe;
+      const state=()=>{const id=node.dataset.liquidSelection,t=[...container.querySelectorAll('[${targetAttribute}]')].find(t=>t.getAttribute('${targetAttribute}')===id);return{at:performance.now(),connected:node.isConnected,sameNode:node===${q(lens)},id,paused:node.dataset.liquidPaused,hidden:node.hidden,rect:node.getBoundingClientRect().toJSON(),target:t?.getBoundingClientRect().toJSON(),computedTransform:getComputedStyle(node).transform,running:node.getAnimations().filter(a=>a.playState==='running'||a.pending).length}};
+      const onClick=event=>{const clicked=event.target?.closest('[${targetAttribute}]');if(!clicked||!container.contains(clicked))return;const native={at:performance.now(),id:clicked.getAttribute('${targetAttribute}'),isTrusted:event.isTrusted,connected:clicked.isConnected,visible:clicked.checkVisibility(),reachable:clicked.contains(document.elementFromPoint(event.clientX,event.clientY)),x:event.clientX,y:event.clientY};if(!probe.firstClick){probe.firstClick=native;return}if(!probe.click)probe.click={native,before:state()}};
+      const wrapped=function(...args){const animation=Reflect.apply(original,this,args);if(this===node&&probe.click&&probe.calls.length<2)probe.calls.push({after:state(),nativeAnimation:animation instanceof Animation,effectTargetSame:animation.effect?.target===node});return animation};
+      Object.defineProperty(Element.prototype,'animate',{...descriptor,value:wrapped});document.addEventListener('click',onClick,{capture:true,passive:true});
+      probe.stop=()=>{document.removeEventListener('click',onClick,{capture:true});if(Element.prototype.animate!==wrapped)throw Error('Retarget observer will not overwrite an unexpected native-method edit');Object.defineProperty(Element.prototype,'animate',descriptor);return Element.prototype.animate===original};
+    })()`)
+    let observed, restored
+    try {
+      await record(700); await trusted(target(first), firstHit)
+      await until(`window.liquidRetargetProbe.firstClick&&${q(lens)}?.dataset.liquidSelection===${JSON.stringify(first)}`)
+      await delay(55); await trusted(target(last), lastHit)
+      await until('window.liquidRetargetProbe.click&&window.liquidRetargetProbe.calls.length>0')
+      observed = await read('(()=>{const p=window.liquidRetargetProbe;return{firstClick:p.firstClick,click:p.click,calls:p.calls}})()')
+    } finally { restored = await read('window.liquidRetargetProbe.stop()') }
+    const samples = await trace()
+    result.motion.push({ scenario: 'rapid-retarget', from, first, last, start, observation: observed, nativeAnimateRestored: restored, samples })
+    assert.equal(restored, true, 'Bounded retarget observation restores the original native animate method')
+    assert.equal(observed.firstClick.id, first)
+    assert.equal(observed.click.native.id, last, 'Rapid retarget uses the exact latest native target')
+    assert.deepEqual([observed.firstClick.isTrusted, observed.click.native.isTrusted, observed.click.native.connected, observed.click.native.visible, observed.click.native.reachable], [true, true, true, true, true])
+    assert.equal(observed.calls.length, 1, 'The latest selection starts one owned native animation')
+    assert.deepEqual([observed.calls[0].nativeAnimation, observed.calls[0].effectTargetSame], [true, true], 'Observation preserves the original returned native animation and connected effect target')
+    const before = observed.click.before, after = observed.calls[0].after
+    assert.deepEqual([before.connected, before.sameNode, after.connected, after.sameNode], [true, true, true, true])
+    assert.equal(before.id, first); assert.equal(after.id, last)
+    assert.ok(before.running > 0 && Math.hypot(before.rect.x - start.rect.x, before.rect.y - start.rect.y) > 4, 'Rapid retarget starts during an actual in-flight move')
     const jump = Math.hypot(after.rect.x - before.rect.x, after.rect.y - before.rect.y)
     const oldDestinationDistance = Math.hypot(before.target.x - before.rect.x, before.target.y - before.rect.y)
+    result.actions.push({ rapidRetargetGeometry: { before, after, jump, oldDestinationDistance, synchronousElapsed: after.at - before.at } })
+    assert.ok(oldDestinationDistance > 24, 'Retarget observation opportunity has more than 24px remaining before the old endpoint')
     assert.ok(jump < Math.max(12, oldDestinationDistance * 0.5), 'Rapid retarget continues from the current visible shape instead of the cancelled inline endpoint')
-    const samples = await trace()
-    result.motion.push({ scenario: 'rapid-retarget', from, first, last, before, after, samples })
     await docked(last)
   }
   const runningMove = async (from, to) => {

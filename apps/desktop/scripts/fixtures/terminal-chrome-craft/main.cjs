@@ -23,10 +23,13 @@ async function pointer(expression,button='left',hover=false) {
   await paint()
 }
 async function escape() { for(const type of ['keyDown','keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await paint() }
-async function frame(name,width) {
-  // Capture the settled menu/surface, not an intermediate entry transition.
+async function settle() {
   await evaluate(`Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))`)
   await paint()
+}
+async function frame(name,width) {
+  // Capture the settled menu/surface, not an intermediate entry transition.
+  await settle()
   const file=name+'.png', png=(await win.webContents.capturePage()).toPNG()
   assert.ok(png.length>0);await fs.writeFile(path.join(evidence,file),png);report.frames.push({name,width,file})
 }
@@ -84,16 +87,28 @@ async function recoveryScenes() {
   for(const [width,height,phase,scope,theme,reduced] of [
     [1440,900,'loading','app','dark',false],[1440,900,'recovering','app','light',false],
     [720,420,'parked','region','dark',false],[320,360,'parked','region','light',false],
+    [720,420,'recovering','region','dark',false],[320,360,'recovering','region','light',false],
     [320,230,'failed','region','dark',false],[420,540,'connecting','region','dark',false],
     [720,420,'recovering','region','dark',true],[720,420,'loading','app','dark',true]]) {
     report.stage={width,height,phase,theme,reduced};await viewport(width,height)
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:reduced?'reduce':'no-preference'}]})
     await evaluate('terminalChrome.show('+JSON.stringify(phase)+','+JSON.stringify(scope)+','+JSON.stringify(theme)+')')
     if(scope==='app')await wait("document.querySelector('#loading-root img')?.complete")
-    await paint()
+    // A native disclosure retains its open state across viewport/theme changes.
+    // Start each comparison collapsed through the actual control, not a DOM rewrite.
+    if(await evaluate("Boolean(document.querySelector('#loading-root .full-page-loading__details')?.open)"))
+      await pointer("document.querySelector('#loading-root .full-page-loading__details summary')")
+    // Measure pointer invariants after the intentional finite entry has finished.
+    await settle()
     const facts=await loadingFacts();assert.equal(facts.appearance,theme);assert.equal(facts.colorScheme,theme)
     if(scope==='app'){assert.equal(facts.hero,true);assert.equal(facts.artLoaded,true,'The original startup brand image is loaded');assert.ok(facts.artWidth>=width&&facts.artWidth<=width*1.08)}
-    else {assert.equal(facts.hero,false,'Region recovery has no brand hero');assert.equal(facts.artLoaded,null)}
+    else {assert.equal(facts.hero,false,'Region recovery has no brand hero');assert.equal(facts.artLoaded,null)
+      const light=await evaluate("(() => { const s=document.querySelector('#loading-root .full-page-loading'), a=getComputedStyle(s,'::before'); return {content:a.content,image:a.backgroundImage,pointer:a.pointerEvents} })()")
+      assert.notEqual(light.content,'none','Actual Region light layer is nonempty')
+      assert.ok(light.image.includes('radial-gradient'),'Region has quiet local lighting')
+      assert.equal(light.pointer,'none','Decorative light cannot intercept recovery controls')
+      facts.localLight=light
+    }
     assert.ok(facts.text.length>50);assert.ok(facts.stage.top>=0&&facts.stage.bottom<=height+1,'Text stage stays inside the short viewport')
     assert.ok(facts.stage.left>=0&&facts.stage.right<=width+1);assert.equal(facts.scrollWidth,facts.clientWidth,'Long content wraps without horizontal overflow')
     assert.ok(facts.animations.length>0,'Actual content stage is nonempty');assert.ok(facts.animations.every(a=>a.iterations!=='infinite'),'There is no looping decorative motion')
@@ -112,6 +127,16 @@ async function recoveryScenes() {
       await pointer("document.querySelector('#loading-root button')");assert.equal(await evaluate('window.recoveryClicks'),1,'Original caller recovery action stays clickable')
     }
     await frame('recovery-'+width+'-'+phase+'-'+theme+(reduced?'-reduced':''),width)
+    if(scope==='region'&&phase==='recovering'){
+      const details="document.querySelector('#loading-root .full-page-loading__details')"
+      await pointer(details+'.querySelector("summary")')
+      const retained=await evaluate(details+'.innerText')
+      const identity=await evaluate('terminalChrome.identity()')
+      assert.ok(retained.includes(identity.label)&&retained.includes(identity.runId),'Restoring details expose controlled original Session and Run facts')
+      assert.equal(await evaluate(details+'.open'),true,'Native details opens through its original control')
+      await frame('recovery-'+width+'-recovering-'+theme+(reduced?'-reduced':'')+'-details',width)
+      report.scenarios.push({width,height,phase,scope,theme,reduced,retained,identity,detailsOpen:true,passed:true})
+    }
     report.scenarios.push({width,height,phase,scope,theme,reduced,facts,passed:true})
   }
   await viewport(1281,740);await evaluate("terminalChrome.workbench();terminalNotice.seed('healthy')");await wait('Boolean('+surface+".querySelector('.xterm'))")
