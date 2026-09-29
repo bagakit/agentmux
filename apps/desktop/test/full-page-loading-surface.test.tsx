@@ -41,6 +41,8 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).toContain('full-page-loading--region')
     expect(markup).toContain('Loading branches')
     expect(markup).toContain('Reading Git truth from Alpha.')
+    expect(markup).not.toContain('full-page-loading__atmosphere')
+    expect(markup).not.toContain('settings-banner.png')
     expect(markup).not.toContain('sessionId')
     expect(markup).not.toContain('runId')
   })

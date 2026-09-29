@@ -53,10 +53,11 @@ export function ConfirmationDialog({
             <button
               type="button"
               className={intent === 'danger' ? 'danger-button' : 'small-button confirmation-dialog__confirm--neutral'}
+              data-confirm-label={confirmLabel}
               disabled={busy}
               onClick={onConfirm}
             >
-              {busy ? 'Working…' : confirmLabel}
+              <span>{busy ? 'Working…' : confirmLabel}</span>
             </button>
           </footer>
         </Dialog.Content>

@@ -5,6 +5,7 @@ import { BrandIcon } from './BrandIcon'
 import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
+import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { SETTINGS_GROUPS as GROUPS } from './settings/settings-catalog'
 import { settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 
@@ -103,6 +104,7 @@ export function SettingsPanel({ onClose, initialSection = 'overview', executorId
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
         <nav aria-label="Settings sections">
+          <LiquidSelectionSurface selected={active} active={true} targetAttribute="data-settings-target" />
           {!query.trim() ? <button type="button" className={active === 'overview' ? 'selected' : ''} aria-current={active === 'overview' ? 'page' : undefined} data-settings-target="overview" data-settings-overview-nav onClick={() => setActive('overview')}><LayoutDashboard size={15} /><span><strong>Overview</strong></span></button> : null}
           {navGroups.map((group) => (
             <Fragment key={group.id}>

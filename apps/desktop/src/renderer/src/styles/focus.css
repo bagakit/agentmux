@@ -75,7 +75,7 @@
 .recent-focus__title { flex: 1; min-width: 0; overflow: hidden; }
 .recent-focus__title strong { font-weight: 500; color: var(--text-2); white-space: nowrap; }
 .recent-focus__range { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.recent-focus__controls { flex: 0 1 auto; min-width: 0; justify-content: flex-start; gap: 2px; overflow-x: auto; }
+.recent-focus__controls { flex: 0 1 auto; min-width: 0; justify-content: flex-start; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .recent-focus__controls > * { flex: none; }
 .recent-focus__controls .icon-button { width: 22px; height: 22px; }
 .recent-focus__controls button:disabled { opacity: .35; cursor: default; }

@@ -8,15 +8,40 @@
   box-shadow: var(--hl-strong);
 }
 .settings-sidebar { border-color: var(--material-control-line); }
+.settings-sidebar nav { position: relative; isolation: isolate; }
+.settings-sidebar nav > button, .settings-sidebar nav > p { position: relative; z-index: 1; }
+.settings-sidebar nav > .liquid-selection + p { margin-top: var(--sp-2); }
+.liquid-selection {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transform-origin: 0 0;
+  border: 1px solid color-mix(in srgb, var(--green) 22%, var(--material-control-line));
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--material-control-glint), transparent 38%), linear-gradient(115deg, var(--green-bg), var(--surface-2));
+  box-shadow: var(--hl-strong), inset 0 -1px 0 var(--line-soft), inset 0 1px 0 var(--wash-3);
+}
+.liquid-selection[hidden] { display: none; }
+.liquid-selection > i {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at var(--liquid-pointer-x, 25%) var(--liquid-pointer-y, 0%), var(--material-control-glint), transparent 72%);
+  border-radius: inherit;
+  opacity: .85;
+}
+.liquid-selection[data-liquid-paused='true'] > i { background: none; }
 .settings-sidebar nav > button {
   transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
 }
 .settings-sidebar nav > button.selected {
-  background: linear-gradient(105deg, var(--green-bg), var(--surface-2));
-  box-shadow: var(--hl-strong);
+  background: transparent;
+  box-shadow: none;
 }
 .settings-sidebar nav > button:hover { box-shadow: var(--hl); }
-.settings-sidebar nav > button.selected:hover { background: var(--green-bg-hover); }
+.settings-sidebar nav > button.selected:hover { background: transparent; box-shadow: none; }
 .settings-sidebar nav > button:focus-visible,
 .settings-section-picker:focus-visible {
   outline: 2px solid var(--focus-line);
@@ -48,7 +73,8 @@
     border-color: var(--line);
     box-shadow: none;
   }
-  .settings-sidebar nav > button.selected { background: var(--surface-3); }
+  .liquid-selection { background: var(--surface-3); box-shadow: none; }
+  .liquid-selection > i { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .settings-sidebar nav > button { transition: none; }

@@ -20,8 +20,10 @@ function replaceOne(source,from,to){assert.equal(source.split(from).length,2,'Pr
 const mutations=recovery?[
   {label:'parked-is-busy',file:'components/FullPageLoadingSurface.tsx',expected:/Parked and failed states are not busy/,
     change:source=>replaceOne(source,"const busy = phase === 'loading' || phase === 'recovering'",'const busy = true')},
-  {label:'reduced-motion-ignored',file:'styles/full-page-loading.css',expected:/Reduced motion renders a complete static surface/,
-    change:source=>replaceOne(source,'animation: none; transform: none;','animation: full-page-loading-light var(--dur-sweep) infinite; transform: none;')}
+  {label:'region-hero-returned',file:'components/FullPageLoadingSurface.tsx',expected:/Region recovery has no brand hero/,
+    change:source=>replaceOne(source,"{scope === 'app' ? <div className=\"full-page-loading__atmosphere\"","{true ? <div className=\"full-page-loading__atmosphere\"")},
+  {label:'pointer-moves-content',file:'components/FullPageLoadingSurface.tsx',expected:/Mouse interaction never moves startup content/,
+    change:source=>replaceOne(source,"surface.style.setProperty('--startup-focus-x',", "surface.querySelector('.full-page-loading__stage').style.transform = 'translateX(8px)'; surface.style.setProperty('--startup-focus-x',")}
 ]:[
   {label:'hover-band-expands',file:'styles/agent-region-header.css',expected:/Hover paint remains inside the quiet glyph band/,
     change:source=>replaceOne(source,'width: 100%; height: 13px;','width: 100%; height: 22px;')},

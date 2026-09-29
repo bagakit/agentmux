@@ -78,48 +78,52 @@ async function terminalScene(width) {
   await escape();report.scenarios.push({width,before,notified,notes,passed:true})
 }
 async function loadingFacts() {
-  return evaluate(`(()=>{const s=document.querySelector('#loading-root .full-page-loading'),stage=s.querySelector('.full-page-loading__stage'),art=s.querySelector('img'),r=s.getBoundingClientRect(),b=stage.getBoundingClientRect(),moving=[...s.querySelectorAll('.full-page-loading__art,.full-page-loading__light,.full-page-loading__activity i')];return{appearance:document.documentElement.dataset.appearance,colorScheme:getComputedStyle(document.documentElement).colorScheme,phase:s.dataset.loadingPhase,busy:s.getAttribute('aria-busy'),role:s.getAttribute('role'),artLoaded:art.complete&&art.naturalWidth>0,artWidth:art.getBoundingClientRect().width,atmosphereWidth:s.querySelector('.full-page-loading__atmosphere').getBoundingClientRect().width,stage:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},surface:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},clientWidth:stage.clientWidth,scrollWidth:stage.scrollWidth,clientHeight:stage.clientHeight,scrollHeight:stage.scrollHeight,activity:s.querySelectorAll('.full-page-loading__activity').length,animations:moving.map(e=>({name:getComputedStyle(e).animationName,state:getComputedStyle(e).animationPlayState})),text:s.innerText}})()`)
+  return evaluate("(()=>{const s=document.querySelector('#loading-root .full-page-loading'),stage=s.querySelector('.full-page-loading__stage'),art=s.querySelector('img'),r=s.getBoundingClientRect(),b=stage.getBoundingClientRect(),nodes=[stage,art,s.querySelector('.full-page-loading__light'),...s.querySelectorAll('.full-page-loading__activity i')].filter(Boolean);return{appearance:document.documentElement.dataset.appearance,colorScheme:getComputedStyle(document.documentElement).colorScheme,phase:s.dataset.loadingPhase,busy:s.getAttribute('aria-busy'),role:s.getAttribute('role'),artLoaded:art?art.complete&&art.naturalWidth>0:null,artWidth:art?.getBoundingClientRect().width??null,artTransform:art?getComputedStyle(art).transform:null,hero:!!s.querySelector('.full-page-loading__atmosphere'),stage:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},clientWidth:stage.clientWidth,scrollWidth:stage.scrollWidth,clientHeight:stage.clientHeight,scrollHeight:stage.scrollHeight,animations:nodes.map(e=>({name:getComputedStyle(e).animationName,iterations:getComputedStyle(e).animationIterationCount})),activity:s.querySelectorAll('.full-page-loading__activity').length,text:stage.innerText}})()")
 }
 async function recoveryScenes() {
   for(const [width,height,phase,scope,theme,reduced] of [
     [1440,900,'loading','app','dark',false],[1440,900,'recovering','app','light',false],
     [720,420,'parked','region','dark',false],[320,360,'parked','region','light',false],
     [320,230,'failed','region','dark',false],[420,540,'connecting','region','dark',false],
-    [720,420,'recovering','region','dark',true]]) {
+    [720,420,'recovering','region','dark',true],[720,420,'loading','app','dark',true]]) {
     report.stage={width,height,phase,theme,reduced};await viewport(width,height)
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:reduced?'reduce':'no-preference'}]})
-    await evaluate(`terminalChrome.show(${JSON.stringify(phase)},${JSON.stringify(scope)},${JSON.stringify(theme)})`)
-    await wait(`document.querySelector('#loading-root img')?.complete`);await paint()
-    const facts=await loadingFacts();assert.equal(facts.appearance,theme);assert.equal(facts.colorScheme,theme,'The actual product theme is applied'); assert.equal(facts.artLoaded,true,'The shared actual brand image is loaded');assert.equal(facts.atmosphereWidth,width,'Atmosphere fills the actual surface');assert.ok(facts.artWidth>=width&&facts.artWidth<=width*1.08,'Animated image covers the surface with a bounded drift')
+    await evaluate('terminalChrome.show('+JSON.stringify(phase)+','+JSON.stringify(scope)+','+JSON.stringify(theme)+')')
+    if(scope==='app')await wait("document.querySelector('#loading-root img')?.complete")
+    await paint()
+    const facts=await loadingFacts();assert.equal(facts.appearance,theme);assert.equal(facts.colorScheme,theme)
+    if(scope==='app'){assert.equal(facts.hero,true);assert.equal(facts.artLoaded,true,'The original startup brand image is loaded');assert.ok(facts.artWidth>=width&&facts.artWidth<=width*1.08)}
+    else {assert.equal(facts.hero,false,'Region recovery has no brand hero');assert.equal(facts.artLoaded,null)}
     assert.ok(facts.text.length>50);assert.ok(facts.stage.top>=0&&facts.stage.bottom<=height+1,'Text stage stays inside the short viewport')
     assert.ok(facts.stage.left>=0&&facts.stage.right<=width+1);assert.equal(facts.scrollWidth,facts.clientWidth,'Long content wraps without horizontal overflow')
-    assert.ok(facts.animations.length>=2,'The actual decorative nodes are nonempty')
-    if(phase==='parked'||phase==='failed') {
-      assert.equal(facts.busy,'false','Parked and failed states are not busy');assert.equal(facts.activity,0,'Parked states have no false busy signal')
-      assert.ok(facts.animations.every(a=>a.name==='none'),'Parked and failed scenery stays still')
-    } else { assert.equal(facts.busy,'true');assert.equal(facts.activity,1);if(!reduced)assert.ok(facts.animations.some(a=>a.name!=='none'),'Busy phases have actual atmospheric motion') }
-    if(reduced) assert.ok(facts.animations.every(a=>a.name==='none'),'Reduced motion renders a complete static surface')
-    if(phase==='failed') {
-      await evaluate(`document.querySelector('#loading-root button').scrollIntoView({block:'nearest'})`);await paint()
-      await pointer(`document.querySelector('#loading-root button')`);assert.equal(await evaluate('window.recoveryClicks'),1,'The original caller action is still clickable in a short surface')
+    assert.ok(facts.animations.length>0,'Actual content stage is nonempty');assert.ok(facts.animations.every(a=>a.iterations!=='infinite'),'There is no looping decorative motion')
+    if(phase==='parked'||phase==='failed'){assert.equal(facts.busy,'false','Parked and failed states are not busy');assert.equal(facts.activity,0)}
+    else {assert.equal(facts.busy,'true');assert.equal(facts.activity,1)}
+    if(scope==='app'){
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:width*.84,y:height*.28,button:'none'});await delay(240)
+      const moved=await loadingFacts();assert.deepEqual(moved.stage,facts.stage,'Mouse interaction never moves startup content')
+      if(reduced){assert.equal(moved.artTransform,'none','Reduced motion keeps art static');assert.ok(moved.animations.every(a=>a.name==='none'),'Reduced motion renders a complete static surface')}
+      else {assert.notEqual(moved.artTransform,facts.artTransform,'Actual pointer changes decorative depth');await frame('startup-pointer-'+theme,width)}
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:-2,y:-2,button:'none'});await delay(240)
+      assert.equal(await evaluate("document.querySelector('#loading-root .full-page-loading').style.getPropertyValue('--startup-offset-x')"),'','Pointer leaving returns startup to its resting light')
     }
-    await frame(`recovery-${width}-${phase}-${theme}${reduced?'-reduced':''}`,width)
-    if(!reduced&&phase==='loading') {
-      await evaluate(`Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'))`);await paint()
-      const hidden=await loadingFacts();assert.ok(hidden.animations.length>0);assert.ok(hidden.animations.every(a=>a.state==='paused'),'Hidden document pauses every actual animation')
-      await evaluate(`delete document.visibilityState;document.dispatchEvent(new Event('visibilitychange'))`)
-      await evaluate(`document.getElementById('loading-root').inert=true`);await paint()
-      const parkedView=await loadingFacts();assert.ok(parkedView.animations.length>0);assert.ok(parkedView.animations.every(a=>a.state==='paused'),'Inert work surfaces pause every actual animation')
-      await evaluate(`document.getElementById('loading-root').inert=false`)
+    if(phase==='failed'){
+      await evaluate("document.querySelector('#loading-root button').scrollIntoView({block:'nearest'})");await paint()
+      await pointer("document.querySelector('#loading-root button')");assert.equal(await evaluate('window.recoveryClicks'),1,'Original caller recovery action stays clickable')
     }
+    await frame('recovery-'+width+'-'+phase+'-'+theme+(reduced?'-reduced':''),width)
     report.scenarios.push({width,height,phase,scope,theme,reduced,facts,passed:true})
   }
-  await viewport(1281,740);await evaluate(`terminalChrome.workbench();terminalNotice.seed('healthy')`);await wait(`Boolean(${surface}.querySelector('.xterm'))`)
-  const before=await evaluate('terminalNotice.facts()');await evaluate('terminalChrome.park()');await wait(`Boolean(${surface}.querySelector('[data-loading-phase="parked"]'))`);await paint()
+  await viewport(1281,740);await evaluate("terminalChrome.workbench();terminalNotice.seed('healthy')");await wait('Boolean('+surface+".querySelector('.xterm'))")
+  const before=await evaluate('terminalNotice.facts()');await evaluate('terminalChrome.park()');await wait('Boolean('+surface+'.querySelector(\'[data-loading-phase="parked"]\'))');await paint()
   const after=await evaluate('terminalNotice.facts()')
-  for(const key of ['tab','layout','drafts']) assert.deepEqual(after[key],before[key],'Real SessionPane retains original '+key+' while parked')
-  assert.equal(await evaluate(`${surface}.querySelector('[data-loading-phase="parked"]').getAttribute('aria-busy')`),'false')
-  await frame('recovery-actual-session-pane',640);report.parkedCaller={passed:true,before,after}
+  for(const key of ['tab','layout','drafts'])assert.deepEqual(after[key],before[key],'Real SessionPane retains original '+key)
+  assert.equal(await evaluate(surface+'.querySelector(\'[data-loading-phase="parked"]\').getAttribute("aria-busy")'),'false')
+  assert.equal(await evaluate(surface+".querySelector('[data-loading-phase=parked] img')!==null"),false)
+  await pointer(surface+".querySelector('.full-page-loading__details summary')")
+  const detail=await evaluate(surface+".querySelector('.full-page-loading__details').innerText")
+  assert.ok(detail.includes('Retained Run')&&detail.includes(before.sessions[0].control.run.runId),'Original retained identity is available on demand')
+  await frame('recovery-actual-session-pane',640);report.parkedCaller={passed:true,before,after,detail}
 }
 app.whenReady().then(async()=>{
   try {
