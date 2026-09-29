@@ -1,0 +1,4 @@
+html,body,#root { height:100%;margin:0; }
+.request-preview { display:flex;flex-direction:column;height:100%;background:var(--surface-0);color:var(--text); }
+.request-preview__context { display:flex;flex-wrap:wrap;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line);font-size:var(--fs-meta);color:var(--text-3); }
+.request-preview__pane { flex:1;min-height:0;position:relative; }
