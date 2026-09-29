@@ -378,7 +378,7 @@ describe('Conversation and History shared reading UI presentation', () => {
     })
 
     // 1. Assert text category in mounted DOM (fails AssertionRED if remove-text-parts mutant runs)
-    const textEls = host.querySelectorAll('.log-turn__body > .md')
+    const textEls = host.querySelectorAll('.log-turn__body > .log-turn__text > .md')
     expect(textEls.length).toBeGreaterThan(0)
     expect(host.textContent).toContain('Mixed text body')
 
@@ -410,7 +410,7 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(host.textContent).toContain('src/index.ts')
     const body = host.querySelector('.log-turn__body')!
     expect([...body.children].map((element) =>
-      element.getAttribute('data-trace-kind') ?? (element.classList.contains('md') ? 'text' : 'resource')
+      element.getAttribute('data-trace-kind') ?? (element.classList.contains('log-turn__text') ? 'text' : 'resource')
     )).toEqual(['text', 'reasoning', 'tool-call', 'tool-result', 'resource'])
     const copy = host.querySelector<HTMLButtonElement>('button[aria-label="Copy message"]')!
     await act(async () => copy.click())
@@ -437,7 +437,7 @@ describe('Conversation and History shared reading UI presentation', () => {
         />
       )
     })
-    expect(host.querySelectorAll('.log-turn__body > .md')).toHaveLength(1)
+    expect(host.querySelectorAll('.log-turn__body > .log-turn__text > .md')).toHaveLength(1)
     expect(host.textContent).toContain('Mixed text body')
     expect(host.querySelectorAll('[data-trace-kind="reasoning"]')).toHaveLength(1)
     expect(host.querySelectorAll('.conversation-tool-trace')).toHaveLength(2)

@@ -7,6 +7,7 @@ import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { api } from '../src/renderer/src/lib/api'
+import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
 import * as markdown from '../src/renderer/src/lib/agent-markdown'
 
 type Entry = 'live' | 'history'
@@ -87,17 +88,17 @@ async function mount(entry: Entry, content = SOURCE, parts?: AgentSessionHistory
   await act(async () =>
     root.render(
       entry === 'live' ? (
-        <ActivityView
+        <ConversationAnnotationOwner onAnnotate={annotate}>{onSelectAnnotation => <ActivityView
           sessionId={control.agentSessionId}
           capability="complete-events"
           displayState="done"
           items={[item(content)]}
           workspaceRoot="/synthetic"
           describeSpeaker={() => ({ name: 'Agent' })}
-          onAnnotate={annotate}
+          onSelectAnnotation={onSelectAnnotation}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}
-        />
+        />}</ConversationAnnotationOwner>
       ) : (
         <SessionHistoryView
           control={control}
@@ -144,7 +145,7 @@ async function addNote() {
     textarea!.dispatchEvent(new Event('input', { bubbles: true }))
   })
   const submit = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation-actions button')].find(
-    (btn) => btn.textContent === 'Add note to reply'
+    (btn) => btn.textContent === 'Add to reply draft'
   )
   expect(submit).toBeDefined()
   expect(submit!.disabled).toBe(false)
@@ -367,7 +368,7 @@ it('retains the actual message body DOM node across copy and selection popover s
   expect(before?.isConnected).toBe(true)
 
   // 4. Cancelling popover does not remount the body node
-  const cancel = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation-actions button')].find(
+  const cancel = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation button')].find(
     (btn) => btn.textContent === 'Cancel'
   )!
   await act(async () => cancel.click())

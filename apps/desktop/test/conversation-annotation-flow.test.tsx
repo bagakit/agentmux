@@ -3,6 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage.js'
+import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
 
 /**
  * 选中一段正文 → 写一条注解 → 交给宿主。这条走的是用户真的会走的那条路。
@@ -17,7 +18,7 @@ import { ConversationMessage } from '../src/renderer/src/components/Conversation
  *   1. 没选区时弹层不在——它是选中才出现的东西，不是常驻面板；
  *   2. 选中后弹层出现，且**引文就是选中的那段**（不是整条消息）；
  *   3. 注解空着时提交键是禁用的——交一条空注解等于什么都没说；
- *   4. 提交后宿主拿到 messageId / quote / start / end / note 五个字段，range 对得上原文。
+ *   4. 提交后宿主拿到 messageId / quote / note 三个真实字段，Range 仍是所选原文。
  *
  * 为什么不走 `renderToStaticMarkup`：弹层由 `useState` 的 selection 驱动，静态渲染永远
  * 停在第一帧，看不见"选中之后"。
@@ -72,7 +73,7 @@ describe('对话消息上的选区注解', () => {
     document.body.append(host)
     const root = createRoot(host)
     await act(async () => root.render(
-      createElement(ConversationMessage, { ...BASE, onAnnotate: vi.fn() })
+      <ConversationAnnotationOwner onAnnotate={vi.fn()}>{onSelectAnnotation => <ConversationMessage {...BASE} onSelectAnnotation={onSelectAnnotation} />}</ConversationAnnotationOwner>
     ))
 
     expect(
@@ -102,11 +103,11 @@ describe('对话消息上的选区注解', () => {
     document.body.append(host)
     const root = createRoot(host)
     const onAnnotate = vi.fn()
-    await act(async () => root.render(createElement(ConversationMessage, { ...BASE, onAnnotate })))
+    await act(async () => root.render(<ConversationAnnotationOwner onAnnotate={onAnnotate}>{onSelectAnnotation => <ConversationMessage {...BASE} onSelectAnnotation={onSelectAnnotation} />}</ConversationAnnotationOwner>))
     await act(async () => { selectInsideBody(host, QUOTE) })
 
     const submit = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation-actions button')]
-      .find((button) => button.textContent?.includes('Add note'))
+      .find((button) => button.textContent === 'Add to reply draft')
     expect(submit, '提交键不在弹层里——这条判据在空转').toBeDefined()
     expect(submit!.disabled, '注解还空着，提交键却是可点的：交一条空注解等于什么都没说').toBe(true)
 

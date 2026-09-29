@@ -44,7 +44,7 @@ describe('conversation annotation contract', () => {
     expect(
       pane,
       'SessionPane 的引用拼装与判据不一致了；若确实要改格式，两处一起改'
-    ).toContain('`Regarding this message:\\n> ${annotation.quote.replace(/\\n/gu, \'\\n> \')}\\n\\nNote: ${annotation.note}`')
+    ).toContain('`Regarding message ${JSON.stringify(annotation.messageId)}:\\n> ${annotation.quote.replace(/\\n/gu, \'\\n> \')}\\n\\nNote: ${annotation.note}`')
   })
 
   it('追加进已有草稿，不覆盖用户已经写下的字', () => {
@@ -71,12 +71,16 @@ describe('conversation annotation contract', () => {
   it('注解只走这一条路：追加进草稿，不自己发送', () => {
     // `annotateMessage` 里出现任何直接发送，就等于第二条发送路径——用户点「Add note to reply」
     // 的预期是"写进我的输入框，我再决定什么时候发"。
-    const body = pane.slice(pane.indexOf('const annotateMessage'), pane.indexOf('const openFile'))
+    const start = pane.indexOf('const annotateMessage')
+    const end = pane.indexOf('const openFile')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const body = pane.slice(start, end)
     expect(body.length, 'annotateMessage 的函数体没切出来——这条判据在空转').toBeGreaterThan(80)
     expect(body, '注解路径里直接发送了').not.toMatch(/\bsend\(|enqueueAgentSteer\(/u)
     expect(body, '注解没有走共用的草稿追加动作').toContain('appendAgentComposerDraft(sessionId')
 
     // 宿主没接 onAnnotate 时不该往下传一个假的：Gallery 这类只读场景靠缺席关掉这条路。
-    expect(activity).toContain('...(onAnnotate ? { onAnnotate } : {})')
+    expect(activity).toContain('...(onSelectAnnotation ? { onSelectAnnotation } : {})')
   })
 })

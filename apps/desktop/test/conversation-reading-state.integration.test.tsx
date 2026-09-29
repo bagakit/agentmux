@@ -16,6 +16,7 @@ import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
 import * as markdown from '../src/renderer/src/lib/agent-markdown'
 
 const observation = vi.hoisted(() => ({ enabled: false, refresh: vi.fn<() => Promise<void>>() }))
@@ -892,11 +893,11 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
 
     await act(async () =>
       root.render(
-        <ConversationMessage
+        <ConversationAnnotationOwner onAnnotate={vi.fn()}>{onSelectAnnotation => <ConversationMessage
           messageId="msg-memo-test"
           content={content}
-          onAnnotate={vi.fn()}
-        />
+          onSelectAnnotation={onSelectAnnotation}
+        />}</ConversationAnnotationOwner>
       )
     )
 

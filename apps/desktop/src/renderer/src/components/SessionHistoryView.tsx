@@ -8,6 +8,7 @@ import { presentError } from '../lib/error-presentation'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import { ConversationMessage, parseTraceDisclosureKey } from './ConversationMessage'
+import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
 
 type ReadingAnchor = { id: string; offset: number }
@@ -71,11 +72,12 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
   control, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, describeSpeaker,
-  expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp
+  expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation
 }: {
   control: AgentSessionControl
   label: string
   onClose?(): void
+  onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   visible: boolean
   themeId: TerminalThemeId
   fontSize: number
@@ -386,6 +388,7 @@ export function SessionHistoryView({
                 openHttpLink={openHttpLink}
                 expandedTraces={openedTraces}
                 onToggleTrace={handleToggleTrace}
+                {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
               />
             </article>
           )
