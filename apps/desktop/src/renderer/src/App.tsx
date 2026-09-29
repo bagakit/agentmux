@@ -57,6 +57,7 @@ export function App() {
 function DesktopApp() {
   const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsPageId; executorId?: string | undefined } | null>(null)
   const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId }), [])
+  const closeSettings = useCallback((): void => setSettingsRoute(null), [])
   const settingsNavigation = useMemo(() => ({ open: openSettings }), [openSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
@@ -396,11 +397,11 @@ function DesktopApp() {
         <SettingsPanel
           initialSection={settingsRoute.section}
           executorId={settingsRoute.executorId}
-          onClose={() => setSettingsRoute(null)}
+          onClose={closeSettings}
         />
       ) : null}
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} settingsOpen={Boolean(settingsRoute)} onCloseSettings={() => setSettingsRoute(null)} /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
           <ResourceUsagePanel />
           <GlobalSystemNotices nativeOverlayWarning={nativeOverlayWarning} />
