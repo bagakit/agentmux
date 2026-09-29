@@ -26,7 +26,8 @@ function run(label, command, mutation) {
     const tests = JSON.parse(readFileSync(report)), modules = readFileSync(loaded, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
     const assertions = tests.testResults.flatMap(file => file.assertionResults), failed = assertions.filter(item => item.status === 'failed')
     assert.ok(assertions.length > 0); assert.ok(modules.length > 0)
-    const owner = modules.find(item => item.path === sourcePaths[0]); assert.ok(owner); assert.equal(owner.originalSHA256, receipt.before[sourcePaths[0]])
+    const ownerPath = mutation === 'old-four-levels' ? sourcePaths[1] : sourcePaths[0]
+    const owner = modules.find(item => item.path === ownerPath); assert.ok(owner); assert.equal(owner.originalSHA256, receipt.before[ownerPath])
     Object.assign(stage, { tests: tests.numTotalTests, passed: tests.numPassedTests, failed: tests.numFailedTests, reportSHA256: hash(readFileSync(report)), loadedSHA256: hash(readFileSync(loaded)), loadedOwner: owner })
     if (mutation) {
       assert.notEqual(result.status, 0); assert.ok(failed.length > 0)
@@ -40,7 +41,7 @@ function run(label, command, mutation) {
 }
 try {
   const baseline = run('baseline')
-  for (const mutation of ['wheel-disconnected', 'zoom-disconnected', 'viewport-reread']) {
+  for (const mutation of ['wheel-disconnected', 'zoom-disconnected', 'viewport-reread', 'old-four-levels']) {
     assert.equal(run(mutation, undefined, mutation).tests, baseline.tests)
     assert.equal(run(`${mutation}-exact-restore`).tests, baseline.tests)
   }

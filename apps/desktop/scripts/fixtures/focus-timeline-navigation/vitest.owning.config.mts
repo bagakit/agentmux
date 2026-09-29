@@ -16,7 +16,11 @@ export default defineConfig({
         'zoom-disconnected': ['onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex - 1]!)}', 'onClick={() => {}}'],
         'viewport-reread': ["historical ? 'snapshot' : 'latest', readonlyReading]", "historical ? 'snapshot' : 'latest', readonlyReading, anchor, hours]"]
       }
-      if (mutation && file.endsWith('/components/RecentFocusTimeline.tsx')) {
+      if (mutation === 'old-four-levels' && file.endsWith('/lib/focus-time-window.ts')) {
+        const needle = 'export const FOCUS_WINDOW_HOURS = [0.5, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48] as const'
+        if (code.split(needle).length !== 2) throw new Error('Missing unique eleven-level navigation mutation')
+        code = code.replace(needle, 'export const FOCUS_WINDOW_HOURS = [1, 4, 12, 24] as const')
+      } else if (mutation && mutation !== 'old-four-levels' && file.endsWith('/components/RecentFocusTimeline.tsx')) {
         const change = changes[mutation]; if (!change) throw new Error(`Unknown navigation mutation ${mutation}`)
         if (code.split(change[0]).length !== 2) throw new Error(`Missing unique navigation mutation ${mutation}`)
         code = code.replace(change[0], change[1])
