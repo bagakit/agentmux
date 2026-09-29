@@ -14,6 +14,8 @@ const proof=await json(process.argv[3])
 assert.equal(proof.schema,'agentmux.conversation-pending-interaction-qualification.v1')
 assert.equal(Object.keys(proof.source).length,6,'six declared owning Source inputs required')
 for(const [path,identity]of Object.entries(proof.source))assert.equal(hash(await bytes(path)),identity.sha256,`current Source differs: ${path}`)
+assert.equal(Object.keys(proof.core).length,14,'nonempty exact producer Source and compiled inputs')
+for(const [path,identity]of Object.entries(proof.core))assert.equal(hash(await bytes(path)),identity.sha256,`current producer differs: ${path}`)
 
 async function command(ref,exit){
   const receipt=JSON.parse(await bound(ref.receipt))
@@ -23,6 +25,7 @@ async function command(ref,exit){
   assert.deepEqual(receipt.sourceBefore,receipt.sourceAfter,'Source changed during command')
   assert.deepEqual(receipt.coreBefore,receipt.coreAfter,'Core changed during command')
   assert.equal(Object.keys(receipt.coreBefore).length,14,'actual Core source/compiled producer inputs must be nonempty')
+  assert.deepEqual(Object.keys(receipt.coreBefore).sort(),Object.keys(proof.core).sort(),'complete producer input set')
   // DOM/TS runs do not import agent.css. Its actual parsed input is bound separately by Renderer evidence.
   for(const [path,identity]of Object.entries(proof.source).filter(([path])=>!path.endsWith('/agent.css')))assert.equal(receipt.sourceBefore[path]?.sha256,identity.sha256,path)
   for(const [path,identity]of Object.entries(proof.core))assert.equal(receipt.coreBefore[path]?.sha256,identity.sha256,path)
