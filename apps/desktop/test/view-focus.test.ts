@@ -28,6 +28,7 @@ function session(id: string, kind: 'agent' | 'terminal'): SessionSnapshot {
         ...base,
         kind,
         providerId: 'codex',
+        agentSessionUpdatedAt: 1,
         executorId: 'codex',
         capabilities: {
           terminal: true, timeline: 'streaming', permission: 'observe',
@@ -145,7 +146,7 @@ describe('Desktop Control Region resolver', () => {
         sessions: [],
         tabs,
         layouts: { workspace: createWorkspaceLayout('pane', openTabIds) }
-      }, { kind: 'launcher', regionId }, undefined, 'new-tab', 'new-region')
+      }, { kind: 'launcher', regionId }, undefined, 'new-tab', 'new-region', 'open.browser')
     )
 
     expect(() => attempt({

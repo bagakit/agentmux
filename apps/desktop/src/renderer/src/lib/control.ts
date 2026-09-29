@@ -237,7 +237,8 @@ export function planControlOpen(
   destination: AgentMuxOpenDestination,
   caller: AgentMuxControlCaller | undefined,
   tabId: string,
-  regionId: string
+  regionId: string,
+  operation: 'open.browser' | 'open.terminal'
 ): ControlOpenPlan {
   const tabs = { ...input.tabs }
   const layouts = { ...input.layouts }
@@ -270,8 +271,12 @@ export function planControlOpen(
     const launcher: LauncherWorkbenchSurface = { regionId, kind: 'launcher', workspaceId: tab.workspaceId }
     const nextTab = addWorkbenchRegion(tab, anchor.regionId, destination.direction, launcher)
     if (nextTab === tab) throw error('CONTROL_FAILED', 'Split destination could not be created.')
-    tabs[tab.id] = nextTab
-    layouts[tab.workspaceId] = activateTab(layout, findGroupForTab(layout, tab.id)!.id, tab.id)
+    tabs[tab.id] = operation === 'open.browser'
+      ? { ...nextTab, layout: { ...nextTab.layout, activeRegionId: tab.layout.activeRegionId } }
+      : nextTab
+    layouts[tab.workspaceId] = operation === 'open.browser'
+      ? layout
+      : activateTab(layout, findGroupForTab(layout, tab.id)!.id, tab.id)
     return { workspaceId: tab.workspaceId, tabId: tab.id, regionId, kind: 'split', launcher, tabs, layouts }
   }
   const anchor = resolveWorkbenchControlTab(input, destination.after, caller)
@@ -285,7 +290,16 @@ export function planControlOpen(
   const nextLayout = insertTabAfter(layout, anchor.id, tab.id)
   if (nextLayout === layout) throw error('CONTROL_FAILED', 'Tab destination could not be created.')
   tabs[tab.id] = tab
-  layouts[anchor.workspaceId] = nextLayout
+  const anchorGroup = findGroupForTab(layout, anchor.id)!
+  layouts[anchor.workspaceId] = operation === 'open.browser'
+    ? {
+        ...nextLayout,
+        activeGroupId: layout.activeGroupId,
+        groups: nextLayout.groups.map((group) => group.id === anchorGroup.id
+          ? { ...group, activeTabId: anchorGroup.activeTabId, recentTabIds: anchorGroup.recentTabIds }
+          : group)
+      }
+    : nextLayout
   return { workspaceId: anchor.workspaceId, tabId: tab.id, regionId, kind: 'tab', launcher, tabs, layouts }
 }
 
@@ -346,6 +360,9 @@ export function rollbackControlOpen(
 ): { tabs: Record<string, WorkbenchTab>; layouts: Record<string, WorkspaceLayout> } | null {
   const owner = findWorkbenchRegion(input.tabs, plan.regionId)
   if (!owner || owner.tab.id !== plan.tabId || owner.surface !== expectedSurface) return null
+  // Browser Control keeps the original Launcher until Main returns. A failed create has
+  // nothing to restore there, and replacing that unchanged Launcher would select it again.
+  if (plan.kind === 'launcher' && expectedSurface === plan.launcher) return null
   const tabs = { ...input.tabs }
   const layouts = { ...input.layouts }
   if (plan.kind === 'launcher') {

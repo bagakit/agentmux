@@ -534,6 +534,9 @@ Usage: agentmux open browser --url <url> <destination>
 
 Exactly one destination from open --help is required. The Main Browser owner validates
 and opens the URL; Renderer layout state does not own Browser navigation truth.
+Control Browser open preserves the current Workbench selection; placement does not
+request input focus. Inspect the returned Tab/Region to find the Browser. Use the separate
+focus command only when the person explicitly wants to navigate there.
 
 A link the view cannot render — a custom application scheme, \`mailto:\` and anything
 else that belongs to a desktop app — is handed to the system instead, after asking the
@@ -1020,10 +1023,18 @@ agentmux open browser --url "http://localhost:5173" --tab self --new-tab
 Terminal commands execute once at creation through the host shell. Browser URLs go to
 the Main Browser owner. Pass them as flags; never synthesize terminal keystrokes or type
 into Browser chrome. Inspect the resulting Tab/Region to confirm where it landed.
+Control Browser open preserves the person's current Workbench selection. Placement and
+page driving do not request input focus; explicit focus is a separate navigation action.
 (This is about how the payload is delivered, not about driving the page afterwards.
 Use agentmux browser run to drive an already-open Browser.)
 
 ## Drive an open Browser
+
+Prefer this CLI path to interacting with Browser chrome or the desktop. First inspect the
+exact Tab/Region and read its typed Browser id, then run against that id. Do not guess from
+a title, stale address or neighboring Agent Tab. A missing or unknown Browser owner is an
+unconfirmed capability: keep the original work, report it, and do not reopen, focus, restart
+or use GUI input to get around that result.
 
 \`\`\`bash
 agentmux browser run --browser <browser-id> < program.js
