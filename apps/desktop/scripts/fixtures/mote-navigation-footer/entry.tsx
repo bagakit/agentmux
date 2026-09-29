@@ -198,6 +198,15 @@ function presentationReview() {
     defaultMoteId: PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId,
     moteIds: [PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId], facts,
     events: () => copy(events), publications: () => copy(publications),
+    footerCounts: (working: number, attention: number) => {
+      const originals = controlledSessions.map(session => ({ ...session, status: { ...session.status, state: 'idle' as const } }))
+      const counted = (count: number, state: 'working' | 'error') => Array.from({ length: count }, (_, index) => {
+        const id = `footer-${state}-${index}`
+        return { ...executionAgent, id, label: id, status: { ...executionAgent.status, state, observedAt },
+          control: { ...executionAgent.control, agentSessionId: id, run: { runId: `controlled-${id}` } } }
+      })
+      useAppStore.setState({ sessions: [...originals, ...counted(working, 'working'), ...counted(attention, 'error')] })
+    },
     longNames: () => {
       controlledTopics = controlledTopics.map(topic => topic.id === customMoteId
         ? { ...topic, title: 'Planning and reviewing every small next step with the original context and unsent draft' } : topic)

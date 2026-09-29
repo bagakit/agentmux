@@ -141,7 +141,7 @@
   .surface-navigation__surfaces { gap: 0; }
   .surface-navigation__settings { margin-left: 0; }
   .surface-navigation__slot:not(.surface-navigation__slot--launcher) { width: 22px; height: 22px; flex-basis: 22px; }
-  .window-status-bar .surface-navigation__focus { gap: 3px; padding: 0 var(--sp-2); }
+  .window-status-bar .surface-navigation__focus { width: auto; flex-basis: auto; gap: 3px; padding: 0 var(--sp-2); }
   .surface-navigation__slot--launcher { left: var(--sp-2); }
 }
 @media (prefers-reduced-motion: reduce) {
