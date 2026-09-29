@@ -89,7 +89,7 @@ try {
  let id
  if (mode === 'first') {
   await useAppStore.getState().selectWorkspace('private')
-  useAppStore.getState().openLauncher()
+  useAppStore.getState().openLauncher({ workspaceId: 'private', reveal: true })
   const layout = useAppStore.getState().layouts.private
   const tabId = layout.groups.find(group => group.id === layout.activeGroupId).activeTabId
   const tab = useAppStore.getState().tabs[tabId]
