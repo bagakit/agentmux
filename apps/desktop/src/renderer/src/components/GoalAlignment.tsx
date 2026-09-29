@@ -1,5 +1,5 @@
 import { ArrowUpRight, Check, CircleHelp, Minus } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, type DemandGroundingCheck } from '@agentmux/demand/goals'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
@@ -7,6 +7,9 @@ import { resolveWorkspaceRelativePath } from '../lib/terminal-path-link'
 import { parseHttpLinkUrl } from '../lib/open-destination'
 import { api } from '../lib/api'
 import { goalResultExplanation } from '../lib/goal-presentation'
+import { projectWorkspaces } from '../lib/workspace-projects'
+import type { WorkspaceRecord } from '../../../shared/contracts'
+import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 
 type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
@@ -15,6 +18,11 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
   const confirmDemandGoal = useAppStore((state) => state.confirmDemandGoal)
   const acceptDemandResult = useAppStore((state) => state.acceptDemandResult)
   const refreshDemand = useAppStore((state) => state.refreshDemand)
+  const workspaces = useAppStore((state) => state.config?.workspaces)
+  const workspace = useMemo(() => {
+    const project = projectWorkspaces((workspaces ?? []).filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID)).find(project => project.id === demand.projectId)
+    return workspaces?.find(workspace => workspace.id === project?.preferredWorkspaceId)
+  }, [workspaces, demand.projectId])
   const alignment = demand.alignment, grounding = demand.grounding
   const confirmIssue = alignmentConfirmationIssue(alignment)
   const acceptIssue = groundingAcceptanceIssue(alignment, grounding)
@@ -59,8 +67,8 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
     {grounding ? <section className="goals-grounding" aria-label="Results review" data-goal-grounding-submission={grounding.submissionId} data-goal-result-state={accepted ? (hasGaps ? 'accepted-with-gaps' : 'accepted') : stale ? 'stale' : 'reported'}>
       <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">{accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'}</span></div>
       {stale ? <p className="goals-condition">This report is for the previous goal (v{grounding.alignmentRevision}). Check the current goal (v{alignment!.revision}) again; previous acceptance does not apply.</p> : <p className="goals-proposal" data-goal-result-summary>{grounding.summary}</p>}
-      {alignment?.criteria.length ? <div className="goals-result-checks">{alignment.criteria.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={stale ? undefined : checks.get(criterion.id)} demand={demand} stale={stale} />)}</div> : <div className="goals-result-checks">{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} demand={demand} stale={false} />)}</div>}
-      {stale ? <details className="goals-previous-report"><summary>Previous agent report</summary><p className="goals-proposal">{grounding.summary}</p>{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId} check={check} demand={demand} stale={false} />)}</details> : null}
+      {alignment?.criteria.length ? <div className="goals-result-checks">{alignment.criteria.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={stale ? undefined : checks.get(criterion.id)} demand={demand} workspace={workspace} stale={stale} />)}</div> : <div className="goals-result-checks">{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} demand={demand} workspace={workspace} stale={false} />)}</div>}
+      {stale ? <details className="goals-previous-report"><summary>Previous agent report</summary><p className="goals-proposal">{grounding.summary}</p>{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId} check={check} demand={demand} workspace={workspace} stale={false} />)}</details> : null}
       {!accepted && !stale && resultExplanation ? <p className="goals-condition">{resultExplanation}</p> : null}
       {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
       <div className="goals-inline-actions">{!failure && !accepted && alignment && !acceptIssue ? <button type="button" className="goals-button goals-button--primary" data-goal-accept disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: false })}>{pending ? 'Saving…' : 'Accept results'}<Check size={13} /></button> : !failure && !accepted && alignment && gapIssue === null ? <button type="button" className="goals-button goals-button--primary" data-goal-accept-gaps disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: true })}>{pending ? 'Saving…' : 'Accept results, keep gaps'}</button> : null}{resultRequest}</div>
@@ -74,8 +82,7 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
 
 }
 
-function GoalResultCheck({ criterionId, criterion, check, demand, stale }: { criterionId: string; criterion: string; check: DemandGroundingCheck | undefined; demand: DemandProjection; stale: boolean }) {
-  const workspace = useAppStore((state) => state.config?.workspaces.find(project => project.id === demand.projectId))
+function GoalResultCheck({ criterionId, criterion, check, demand, workspace, stale }: { criterionId: string; criterion: string; check: DemandGroundingCheck | undefined; demand: DemandProjection; workspace: WorkspaceRecord | undefined; stale: boolean }) {
   const openFile = useAppStore((state) => state.openFile)
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const [openingError, setOpeningError] = useState<string | null>(null)
@@ -97,7 +104,7 @@ function GoalResultCheck({ criterionId, criterion, check, demand, stale }: { cri
       if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(reference) && !reference.startsWith('file://')) { await api.ui.openExternal(reference); return }
       const match = reference.match(/^(.*?)(?::([1-9]\d*)(?::([1-9]\d*))?)?$/u)!
       const raw = match[1]!.startsWith('file://') ? decodeURIComponent(new URL(match[1]!).pathname) : match[1]!
-      if (!workspace) throw new Error('Choose the goal’s Project in More properties to open local evidence, or copy its location.')
+      if (!workspace) throw new Error(demand.projectId ? 'The bound Project is unavailable. Its identity is kept. Restore the Project or copy this evidence location.' : 'Choose the goal’s Project in More properties to open local evidence, or copy its location.')
       const path = resolveWorkspaceRelativePath(raw, workspace.path)
       if (!path) throw new Error('This reference is outside the goal’s Project. Copy its location to inspect it in its own workspace.')
       const location = match[2] ? { line: Number(match[2]), ...(match[3] ? { column: Number(match[3]) } : {}) } : undefined
