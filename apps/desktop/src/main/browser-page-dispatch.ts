@@ -58,6 +58,8 @@ export type BrowserPageContext = {
   recordTarget?(target: BrowserReplayTarget): void
   /** Main rechecks original stop/control/view after resolving a handle, before an action is sent. */
   beforeAction?(): void
+  /** Passive feedback uses the actually resolved node/sender, never old-ref lookup or input values. */
+  actionFeedback?(node: BrowserPageNode, send: BrowserCdpSession['sendCommand']): Promise<void>
   /** Result source identity lives in storage; a continuation run supplies only its current authorization. */
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
   /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */
@@ -176,9 +178,11 @@ export function renderBrowserSnapshotText(snapshot: BrowserPageSnapshot, observa
  * 返回的闭包就是 `runBrowserScript` 的 `onPageCall`——**这是那两个模块唯一的生产调用点**，
  * 也是 T-010 验收里那条零调用者 grep 要看到的答案。
  */
+type BrowserPageActionScope = { feedback?: BrowserPageContext['actionFeedback']; beforeAction?: BrowserPageContext['beforeAction'] }
+
 export function createBrowserPageDispatch(
   context: BrowserPageContext
-): (name: string, args: unknown[]) => Promise<unknown> {
+): (name: string, args: unknown[], scope?: BrowserPageActionScope) => Promise<unknown> {
   const { session } = context
   // 最近一张快照。ref 只在发出它的那张快照里有意义，所以这里只留一张——留多张等于允许
   // Agent 拿两轮之前的 ref 说话，而那些 ref 指向的元素早就不在了。
@@ -266,7 +270,7 @@ export function createBrowserPageDispatch(
   async function handleIn(
     snapshot: BrowserPageSnapshot,
     ref: string
-  ): Promise<{ objectId: string; send: typeof session.sendCommand; node: BrowserPageNode }> {
+  ): Promise<{ objectId: string; send: typeof session.sendCommand; node: BrowserPageNode; navigationId: string }> {
     const resolution = await resolveBrowserRef({
       snapshot,
       ref,
@@ -280,11 +284,11 @@ export function createBrowserPageDispatch(
     // "cannot read property of undefined"——那看起来像我们的 bug，而不是页面变了。
     if (!send) throw new BrowserLocalRecoveryFailure(`The frame holding ${ref} went away. Take a new snapshot().`,
       'locator-changed', 'not-dispatched')
-    return { objectId: resolution.objectId, send, node: snapshot.nodes.find((node) => node.ref === ref)! }
+    return { objectId: resolution.objectId, send, node: snapshot.nodes.find((node) => node.ref === ref)!, navigationId: snapshot.navigationId }
   }
 
   /** 把 ref 解成可派发的句柄。本轮没发出过的 ref 交给账本认领，绝不撞进新快照的编号。 */
-  async function handleFor(ref: string, onCapture?: (snapshot: BrowserPageCapture) => void): Promise<{ objectId: string; send: typeof session.sendCommand; node: BrowserPageNode }> {
+  async function handleFor(ref: string, onCapture?: (snapshot: BrowserPageCapture) => void): Promise<{ objectId: string; send: typeof session.sendCommand; node: BrowserPageNode; navigationId: string }> {
     if (expired.has(ref)) throw new Error(`${ref} was superseded by a later snapshot in this run. Use a ref from the latest snapshot().`)
     if (issued !== null && current !== null && issued.has(ref)) return await handleIn(current, ref)
 
@@ -311,14 +315,34 @@ export function createBrowserPageDispatch(
   }
 
   /** 在一个句柄上跑一小段函数。动作全部走这条路——不是坐标，不是键鼠合成。 */
-  async function callOn(ref: string, declaration: string, ...extra: unknown[]): Promise<unknown> {
-    const { objectId, send } = await handleFor(ref)
-    const node = current?.nodes.find((candidate) => candidate.ref === ref)
+  async function callOn(scope: BrowserPageActionScope | undefined, ref: string, declaration: string, extra: unknown[] = [], feedback?: { scroll: string; action: string } | 'observe'): Promise<unknown> {
+    const { objectId, send, node, navigationId } = await handleFor(ref)
+    const actionFeedback = scope?.feedback ?? context.actionFeedback
+    const beforeAction = scope?.beforeAction ?? context.beforeAction
+    const guard = () => {
+      beforeAction?.()
+      if (context.pageInfo().navigationId !== navigationId) throw new BrowserLocalRecoveryFailure(
+        'The original document changed before this action was dispatched. Take a new snapshot().', 'locator-changed', 'not-dispatched')
+      if (node.sessionId && session.frames.get(node.sessionId) !== send) throw new BrowserLocalRecoveryFailure(
+        'The original frame sender changed before this action was dispatched. Take a new snapshot().', 'locator-changed', 'not-dispatched')
+    }
     if (node) {
       const same = current?.nodes.filter((candidate) => candidate.role === node.role && candidate.name === node.name) ?? []
-      context.recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === ref) + 1, count: same.length })
+      context.recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === node.ref) + 1, count: same.length })
     }
-    context.beforeAction?.()
+    guard()
+    if (actionFeedback && feedback !== 'observe') {
+      if (feedback) {
+        const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: feedback.scroll,
+          awaitPromise: true, returnByValue: true }) as { exceptionDetails?: { text?: string } }
+        if (prepared.exceptionDetails) throw new Error(`The page threw while preparing ${ref}: ${pageAuthoredText(prepared.exceptionDetails.text)}`)
+        guard()
+        declaration = feedback.action
+      }
+      await actionFeedback(node, send)
+      // Display work can yield to real takeover, navigation or stop. Recheck before the original action.
+      guard()
+    }
     const response = (await send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: declaration,
@@ -397,7 +421,7 @@ export function createBrowserPageDispatch(
     }
   }
 
-  return async (name, args) => {
+  return async (name, args, scope) => {
     switch (name) {
       case 'readResult': {
         if (!context.resultArtifacts) throw new Error('Durable result reading is unavailable for this Browser.')
@@ -421,7 +445,8 @@ export function createBrowserPageDispatch(
             (input.maxBytes !== undefined && typeof input.maxBytes !== 'number')) throw new TypeError('Download budgets must be numbers.')
         const ref = requireString(args[0], 'ref')
         const receipt = await waitForBrowserDownload(context.downloads.store, context.downloads.context(),
-          async () => await callOn(ref, 'function () { this.scrollIntoView({block: "center"}); this.click() }'),
+          async () => await callOn(scope, ref, 'function () { this.scrollIntoView({block: "center"}); this.click() }', [],
+            { scroll: 'function () { this.scrollIntoView({block: "center"}) }', action: 'function () { this.click() }' }),
           { path: requireString(input.path, 'path'), signal: context.downloads.signal,
             ...(typeof input.timeoutMs === 'number' ? { timeoutMs: input.timeoutMs } : {}),
             ...(typeof input.maxBytes === 'number' ? { maxBytes: input.maxBytes } : {}) })
@@ -484,7 +509,7 @@ export function createBrowserPageDispatch(
         // 归 `observe`：只读，连 scrollIntoView 都不做（那会挪走人此刻正在看的位置）。所以人工
         // 接管之后照常放行。
         const ref = requireString(args[0], 'ref')
-        const raw = await callOn(ref, buildBrowserElementContextDeclaration())
+        const raw = await callOn(scope, ref, buildBrowserElementContextDeclaration(), [], 'observe')
         // `this` 不是 Element 时页面侧返回 null。这一条要单独成话：它和"ref 解不开"是完全不同的
         // 下一步——前者是 ref 指向了一个文本节点之类，后者是那个 ref 根本不在页面上（`handleFor`
         // 已经各自成话了）。含混成一句会让 Agent 不知道该换 ref 还是该重新 snapshot。
@@ -501,13 +526,16 @@ export function createBrowserPageDispatch(
         // scrollIntoView 在前：视口外的元素 click() 仍然生效，但后续快照与截图会对不上 Agent
         // 看到的东西。滚进来让"程序做的"和"人能看见的"是同一件事。
         return await callOn(
+          scope,
           requireString(args[0], 'ref'),
-          'function () { this.scrollIntoView({block: "center"}); this.click() }'
+          'function () { this.scrollIntoView({block: "center"}); this.click() }', [],
+          { scroll: 'function () { this.scrollIntoView({block: "center"}) }', action: 'function () { this.click() }' }
         )
       case 'fillInput':
         // 派 input + change 两个事件：只设 value 的话，React/Vue 的受控输入完全看不见这次修改，
         // 表现为"填了但提交的是空的"（MEMORY「受控输入可静默变只读」是同一族的坑）。
         return await callOn(
+          scope,
           requireString(args[0], 'ref'),
           `function (value) {${RESTORE_FOCUS_SNIPPET}
             const previous = document.activeElement
@@ -519,7 +547,7 @@ export function createBrowserPageDispatch(
             this.dispatchEvent(new Event('change', {bubbles: true}))
             restoreFocus(this, previous)
           }`,
-          requireString(args[1], 'text')
+          [requireString(args[1], 'text')]
         )
       case 'typeText': {
         // 与 fillInput 的区别是**追加而不是替换**，不是"逐字符模拟打字"。真去合成按键就回到了
@@ -527,6 +555,7 @@ export function createBrowserPageDispatch(
         const ref = requireString(args[0], 'ref')
         const text = requireString(args[1], 'text')
         return await callOn(
+          scope,
           ref,
           `function (value) {${RESTORE_FOCUS_SNIPPET}
             const previous = document.activeElement
@@ -539,13 +568,14 @@ export function createBrowserPageDispatch(
             this.dispatchEvent(new Event('change', {bubbles: true}))
             restoreFocus(this, previous)
           }`,
-          text
+          [text]
         )
       }
       case 'pressKey':
         // 键事件派到元素上，不是派到窗口上。派到窗口会打断用户当下的输入焦点——这是 T-012 划下的
         // 那条线：Agent 驱动页面时不抢人的操作位。
         return await callOn(
+          scope,
           requireString(args[0], 'ref'),
           `function (key) {${RESTORE_FOCUS_SNIPPET}
             const previous = document.activeElement
@@ -555,22 +585,26 @@ export function createBrowserPageDispatch(
             }
             restoreFocus(this, previous)
           }`,
-          requireString(args[1], 'key')
+          [requireString(args[1], 'key')]
         )
       case 'hover':
         return await callOn(
+          scope,
           requireString(args[0], 'ref'),
           `function () {
             this.scrollIntoView({block: "center"})
             for (const type of ['pointerover', 'mouseover', 'mousemove']) {
               this.dispatchEvent(new MouseEvent(type, {bubbles: true}))
             }
-          }`
+          }`, [], { scroll: 'function () { this.scrollIntoView({block: "center"}) }',
+            action: `function () { for (const type of ['pointerover', 'mouseover', 'mousemove']) this.dispatchEvent(new MouseEvent(type, {bubbles:true})) }` }
         )
       case 'scroll':
         return await callOn(
+          scope,
           requireString(args[0], 'ref'),
-          'function () { this.scrollIntoView({block: "center", behavior: "instant"}) }'
+          'function () { this.scrollIntoView({block: "center", behavior: "instant"}) }', [],
+          { scroll: 'function () { this.scrollIntoView({block: "center", behavior: "instant"}) }', action: 'function () {}' }
         )
 
       // ── 等待 ──────────────────────────────────────────────────────────
