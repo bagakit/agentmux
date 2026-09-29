@@ -82,7 +82,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await mount(); await manage(); await reference(); await click('完成')
     const node = action('prompt:review')!
     expect(node.querySelector('.goals-entry__request')!.textContent, 'Live prompt body is the complete request').toBe(prompts[0]!.body)
-    expect(node.querySelector('.goals-common__facts')!.textContent).toBe('Agent · Claude Local')
+    expect(node.querySelector('.goals-common__facts')!.textContent, 'The visible target is the first configured matching Executor').toBe('Agent · Claude Local')
     expect(node.disabled).toBe(false)
     await act(async () => node.click())
     expect(createTopic, 'Visible body and matching executor reach the original Mote owner').toHaveBeenCalledExactlyOnceWith('mote', { prompt: prompts[0]!.body, executorId: 'claude' })
@@ -115,7 +115,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await fill(text)
     await external({ composerShortcuts: [{ ...prompts[0]!, label: '外部名称' }, prompts[1]!] })
     await save()
-    expect((await f.disk()).composerShortcuts).toEqual([{ ...prompts[0], label: '外部名称', body: text }, prompts[1]])
+    expect((await f.disk()).composerShortcuts, 'Shared library edit updates the original authored body').toEqual([{ ...prompts[0], label: '外部名称', body: text }, prompts[1]])
     expect(resolveComposerShortcuts(useAppStore.getState().config).find(prompt => prompt.id === 'review')!.body).toBe(text)
     await dom.render(<ShortcutSettingsPane config={f.owner.current} onSave={vi.fn()} />)
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor="review"] textarea')!.value).toBe(text)
@@ -124,6 +124,10 @@ describe('Goals common actions through the mounted product and durable config ow
 
   it('retains unsaved body when finishing or pressing Escape and only explicit cancel drops it', async () => {
     await mount(); await manage(); await click('新增操作'); await fill('尚未保存的点子')
+    const draftId = dom.container.querySelector<HTMLElement>('[data-common-editor]')!.dataset.commonEditor!
+    await click('返回目录')
+    expect((document.activeElement as HTMLElement).dataset.commonSelect, 'Unsaved new operation returns focus to the same stable draft').toBe(`prompt:${draftId}`)
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('.goals-common__draft')!.click())
     await act(async () => body().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     expect(dom.container.querySelector('[aria-label="管理常用操作"]')).toBeNull()
     await manage()
