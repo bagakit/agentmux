@@ -9,6 +9,10 @@ import { qualify } from './verify-settings-glass-prompts.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const args = process.argv.slice(2)
 assert.equal(args.filter(arg => arg === '--settings' || arg === '--prompts').length, 1, 'Choose exactly one owning Settings or Prompts slice')
+assert.ok(args.filter(arg => arg === '--mutation-only').length <= 1, 'Choose at most one bounded debug mutant')
+const mutationOnlyIndex = args.indexOf('--mutation-only')
+const mutationOnly = mutationOnlyIndex >= 0 ? args[mutationOnlyIndex + 1] : null
+if (mutationOnlyIndex >= 0) assert.ok(args.includes('--mutations') && typeof mutationOnly === 'string' && mutationOnly.length > 0 && !mutationOnly.startsWith('--'), 'A bounded debug mutant requires --mutations and one nonempty existing id')
 const task = args.includes('--settings') ? 'settings' : 'prompts'
 const mode = `liquid-${task}`
 const output = args.indexOf('--output')
@@ -105,18 +109,27 @@ async function mutations() {
     { id: 'prompt-status-always-saved', file: pane, source: exactly(originals.get(pane), 'data-prompt-status={promptStatus}', 'data-prompt-status="saved"') }
   ]
   assert.ok(variants.length > 0)
+  const owningFailures = {
+    'no-selection-flow': 'Movement reaches at least two natural intermediate frames outside origin and destination',
+    'no-finite-shape-change': 'Natural movement includes visible finite shape change',
+    'retarget-cancelled-inline-endpoint': 'Rapid retarget continues from the current visible shape instead of the cancelled inline endpoint',
+    'ignore-dynamic-reduced-motion': 'dynamic reduced motion: product marks its paused state',
+    'ignore-real-window-hidden': 'real hidden window: product marks its paused state'
+  }
+  const selectedVariants = mutationOnly === null ? variants : variants.filter(variant => variant.id === mutationOnly)
+  assert.ok(selectedVariants.length > 0 && (mutationOnly === null || selectedVariants.length === 1), 'Debug selection must match exactly one existing owning mutant')
   const at = path.join(directory, 'mutations', `run-${Date.now()}-${randomUUID()}`)
   await fs.mkdir(at, { recursive: true })
   const lockPath = path.join(root, '.bagakit/design/settings-liquid-motion/sourcewriter.lock')
   await fs.mkdir(path.dirname(lockPath), { recursive: true })
   const lock = await fs.open(lockPath, 'wx')
-  const receipt = { schema: 'agentmux.settings-liquid-motion-source-mutations.v1', task, root, passed: false, runs: [], original: Object.fromEntries([...originals].map(([file, text]) => [file, hash(text)])) }
+  const receipt = { schema: 'agentmux.settings-liquid-motion-source-mutations.v1', task, root, passed: false, debugMutationOnly: mutationOnly, plannedMutants: selectedVariants.map(variant => variant.id), runs: [], original: Object.fromEntries([...originals].map(([file, text]) => [file, hash(text)])) }
   let inFlight
   try {
     const control = await capture(path.join(at, 'control'))
     assert.equal(control.completed, true, JSON.stringify(control.failure))
     receipt.control = control.sourceIdentity
-    for (const variant of variants) {
+    for (const variant of selectedVariants) {
       const file = path.join(root, variant.file), original = originals.get(variant.file)
       assert.equal(hash(await fs.readFile(file)), hash(original), 'Only pristine owning product source enters mutation')
       assert.notEqual(variant.source, original)
@@ -125,6 +138,7 @@ async function mutations() {
       const raw = JSON.parse(await fs.readFile(path.join(at, variant.id, `${mode}.json`), 'utf8'))
       assert.notEqual(mutant.completed, true, 'Owning mutant must be falsified')
       assert.equal(raw.failure?.name, 'AssertionError', 'Compiler/setup/no-test errors never count as mutation RED')
+      if (task === 'settings') assert.equal(raw.failure.message.split('\n')[0], owningFailures[variant.id], 'The specific owning assertion must fail; sampling opportunity/reachability/setup failures never count as RED')
       receipt.runs.push({ id: variant.id, outcome: 'AssertionRED', sourceSha256: hash(variant.source), failure: raw.failure })
       assert.equal(hash(await fs.readFile(file)), hash(variant.source), 'Exact restore never overwrites an unexpected concurrent edit')
       await fs.writeFile(file, original); inFlight = undefined
@@ -139,7 +153,7 @@ async function mutations() {
     receipt.exactRestore = (await Promise.all([...originals].map(async ([file, text]) => hash(await fs.readFile(path.join(root, file))) === hash(text)))).includes(false) === false
     await fs.writeFile(path.join(at, 'mutation-receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
     await lock.close(); await fs.unlink(lockPath)
-    console.log(JSON.stringify({ directory: at, passed: receipt.passed, exactRestore: receipt.exactRestore }))
+    console.log(JSON.stringify({ directory: at, passed: receipt.passed, debugMutationOnly: receipt.debugMutationOnly, exactRestore: receipt.exactRestore }))
   }
 }
 

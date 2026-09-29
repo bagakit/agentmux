@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
@@ -22,7 +22,9 @@ const mutations=recovery?[
   {label:'region-hero-returned',file:'components/FullPageLoadingSurface.tsx',expected:/Region recovery has no brand hero/,
     change:source=>replaceOne(source,"{scope === 'app' ? <div className=\"full-page-loading__atmosphere\"","{true ? <div className=\"full-page-loading__atmosphere\"")},
   {label:'pointer-moves-content',file:'components/FullPageLoadingSurface.tsx',expected:/Mouse interaction never moves startup content/,
-    change:source=>replaceOne(source,"surface.style.setProperty('--startup-focus-x',", "surface.querySelector('.full-page-loading__stage').style.transform = 'translateX(8px)'; surface.style.setProperty('--startup-focus-x',")}
+    change:source=>replaceOne(source,"surface.style.setProperty('--startup-focus-x',", "surface.querySelector('.full-page-loading__stage').style.transform = 'translateX(8px)'; surface.style.setProperty('--startup-focus-x',")},
+  {label:'region-depth-flattened',file:'styles/full-page-loading.css',expected:/Region has quiet local lighting/,
+    change:source=>replaceOne(source,'background: radial-gradient(ellipse at 30% 36%, color-mix(in srgb, var(--recovery-accent) 12%, transparent), transparent 62%), radial-gradient(ellipse at 76% 68%, var(--surface-2), transparent 60%);','background: none;')}
 ]:[
   {label:'hover-band-expands',file:'styles/agent-region-header.css',expected:/Hover paint remains inside the quiet glyph band/,
     change:source=>replaceOne(source,'width: 100%; height: 13px;','width: 100%; height: 22px;')},
@@ -74,7 +76,11 @@ export class Terminal extends xterm.Terminal { constructor(...args){super(...arg
   const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,recovery?'recovery':'terminal'],{
     temporaryRoot:processRoot,cwd:repository,env,timeoutMs:90_000,onLine:line=>lines.push(line)})
   await writeFile(join(directory,'process.log'),lines.join('\n'));assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
-  return {directory,outcome,rendered:JSON.parse(await readFile(join(directory,'render.json'),'utf8')),identity}
+  const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'))
+  // Exit and descendant cleanup are observed before releasing this private build.
+  // Pictures, source pairs and compiled identity are already durable in evidence.
+  await rm(processRoot,{recursive:true})
+  return {directory,outcome,rendered,identity}
 }
 async function callers(){
   const checks=[['TerminalContextMenu','components/TerminalContextMenu.tsx','components/TerminalView.tsx','historyBoundary'],
