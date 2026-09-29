@@ -788,7 +788,8 @@ type AppState = {
    */
   createNote(
     tabGroupId?: string,
-    launcher?: { tabId: string; regionId: string }
+    launcher?: { tabId: string; regionId: string },
+    initialContent?: string
   ): Promise<string>
   renamePath(path: string, nextPath: string): Promise<void>
   deletePath(path: string): Promise<void>
@@ -5198,7 +5199,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
     return workspaceId
   },
-  async createNote(tabGroupId, launcher) {
+  async createNote(tabGroupId, launcher, initialContent) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     // 「落在哪个 Workspace」与其余四个启动动作走同一条判定。此前这里只读 activeWorkspaceId，
@@ -5213,7 +5214,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 刻意不走 createPath：那条路每次失败都 reportError，而撞名重试是这里的**正常**流程，
       // 会把一串「文件已存在」推到全局错误面上。只有走完全部候选后的那次真失败才该冒出去，
       // 由调用方（launcher 的 run()）显示。
-      async (candidate) => { await api.files.create(workspaceId, { path: candidate, kind: 'file' }) }
+      async (candidate) => {
+        if (initialContent === undefined) { await api.files.create(workspaceId, { path: candidate, kind: 'file' }); return }
+        const result = await api.files.write(workspaceId, { path: candidate, content: initialContent, expectedRevision: null })
+        if (result.status === 'error') throw new Error(result.message)
+        if (result.status === 'conflict') throw new Error(`${candidate} already exists`)
+      }
     )
     // 让文件树看到新文件。createScratchTopic 等写入面用的是同一个计数器，不另起一套失效机制。
     set((current) => ({

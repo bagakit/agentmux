@@ -1,0 +1,109 @@
+/* One workspace launchpad. Runtime facts stay with their existing owners. */
+.launch-surface { height: 100%; min-width: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; justify-content: safe center; padding: clamp(var(--sp-5), 4vw, var(--sp-8)); background: radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--green) 4%, transparent), transparent 58%), var(--surface-0); container-name: launcher; container-type: inline-size; }
+.launch-surface > * { flex: 0 0 auto; width: min(780px, 100%); margin-inline: auto; }
+.launcher-environment { margin-bottom: var(--sp-7); border-bottom: 1px solid var(--line-soft); }
+.launcher-environment summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-4); row-gap: var(--sp-3); padding-bottom: var(--sp-5); list-style: none; cursor: pointer; }
+.launcher-environment summary::-webkit-details-marker { display: none; }
+.launcher-environment summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 4px; border-radius: var(--radius-sm); }
+.launcher-environment__project { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); }
+.launcher-environment__project > svg { flex: none; color: var(--text-3); }
+.launcher-environment h2 { margin: 0; overflow: hidden; color: var(--text); font-size: var(--fs-display); font-weight: 650; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-environment__host { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.launcher-environment__host > span { color: var(--text-3); }
+.launcher-environment__path { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.launcher-environment[open] .launcher-environment__host > svg:last-child { transform: rotate(180deg); }
+.launcher-environment__details { padding: 0 0 var(--sp-5); }
+.launcher-environment dl { display: grid; gap: var(--sp-4); margin: 0; }
+.launcher-environment dl > div { display: grid; grid-template-columns: 142px minmax(0, 1fr); gap: var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
+.launcher-environment dt { color: var(--text-3); }
+.launcher-environment dd { margin: 0; overflow-wrap: anywhere; }
+.launcher-environment dd small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.launcher-agents-head { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.launcher-agents-head__identity { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); }
+.launcher-agents-head strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
+.launcher-agents-head small { min-width: 0; overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); white-space: nowrap; text-overflow: ellipsis; }
+.launcher-section-actions { flex: none; display: inline-flex; gap: var(--sp-1); align-items: center; }
+.launcher-section-actions .icon-button { width: 26px; height: 26px; color: var(--text-3); }
+.agent-catalog { max-height: 128px; overflow-y: auto; overscroll-behavior: contain; margin-bottom: var(--sp-4); }
+.agent-picks { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-pick { min-width: 0; max-width: 100%; min-height: 32px; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-2); background: transparent; font: inherit; cursor: pointer; }
+.agent-pick strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 550; }
+.agent-pick:hover { color: var(--text); background: var(--surface-1); }
+.agent-pick--selected { color: var(--text); background: var(--surface-2); border-color: var(--line); box-shadow: var(--hl); }
+.agent-pick--selected strong { font-weight: 650; }
+.agent-pick__check { flex: none; color: var(--green); }
+.agent-pick__unconfirmed { color: var(--amber); font-size: var(--fs-meta); }
+.launcher-other-agents { display: inline-flex; align-items: center; gap: var(--sp-2); border: 0; color: var(--text-3); background: transparent; font-size: var(--fs-meta); cursor: pointer; }
+.launcher-unavailable-agents { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
+.launcher-unavailable-agents > span { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.launcher-unavailable-agents strong { font-weight: 500; }
+.agent-catalog__empty { padding: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); }
+.launch-surface .launcher-composer { margin-top: 0; margin-bottom: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.launch-surface .launcher-composer:focus-within { border-color: var(--focus-line); background: var(--surface-1); }
+.launcher-tools { padding: var(--sp-3) 0 0; }
+.launcher-tools > div { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.launch-surface__footer { min-height: 36px; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-4); }
+.launcher-launch-tools { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.launch-surface__footer > .primary-button { flex: none; gap: var(--sp-2); }
+.launch-refine__toggle { min-height: 28px; display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
+.launch-refine__toggle:hover, .launch-refine__toggle[data-state='open'] { color: var(--text); background: var(--surface-2); }
+.launch-refine__toggle:disabled { opacity: .5; cursor: default; }
+.launch-refine__summary { display: flex; gap: var(--sp-2); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-refine__summary [data-tier='caution'], .launch-refine__panel select[data-tier='caution'] { color: var(--amber); }
+.launch-refine__summary [data-tier='danger'], .launch-refine__panel select[data-tier='danger'] { color: var(--red); }
+.launch-refine__named { width: 4px; height: 4px; border-radius: 50%; background: var(--text-2); }
+.launch-refine__panel { position: fixed; z-index: var(--layer-popover); width: min(400px, calc(100vw - 24px)); max-height: min(480px, calc(100vh - 32px)); overflow: auto; padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); outline: none; }
+.launch-refine__panel > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.launch-refine__panel h2 { margin: 0; font-size: var(--fs-title); font-weight: 600; }
+.launch-refine__panel > p { margin: var(--sp-2) 0 var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.launch-refine__fields { display: grid; gap: var(--sp-4); }
+.launch-refine__row { display: grid; grid-template-columns: minmax(0, 1fr) 156px; align-items: center; gap: var(--sp-3); }
+.launch-refine__row strong { font-size: var(--fs-meta); font-weight: 600; }
+.launch-refine__row small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.launch-refine__choice-description { grid-column: 1 / -1; }
+.launch-refine__panel select, .launch-refine__panel input { width: 100%; min-width: 0; min-height: 32px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-0); font: var(--fs-meta)/1.4 var(--font-sans); }
+.launch-refine__names { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); margin: var(--sp-2) 0 0; padding: var(--sp-4) 0 0; border: 0; border-top: 1px solid var(--line-soft); }
+.launch-refine__names legend { padding: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+.launch-refine__names label { display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.launcher-restores { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-5); }
+.launcher-restore { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 30px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
+.launcher-restore:hover { background: var(--surface-1); color: var(--text); }
+/* Utility modules share one quiet row language. Hiding only releases the View, never its Run. */
+.launch-surface__alt { margin-top: var(--sp-7); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.launch-surfaces-stack { display: grid; gap: var(--sp-4); }
+.launcher-utility { min-width: 0; }
+.launcher-utility__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 32px; padding: var(--sp-2) 0; }
+.launcher-utility__head > span:first-child { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
+.launcher-utility__head strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
+.launcher-utility__head small { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.launch-terminal { overflow: hidden; }
+.launch-terminal__body { height: 156px; min-height: 0; position: relative; overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); }
+.launcher-terminal-pending { min-height: 56px; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-3); font-size: var(--fs-meta); }
+.launcher-terminal-pending .small-button { margin-left: auto; }
+.launch-surface-quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--sp-6); }
+.launcher-browser-input { display: flex; align-items: center; gap: var(--sp-3); min-height: 38px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-3); }
+.launcher-browser-input:focus-within { border-color: var(--focus-line); }
+.launcher-browser-input > svg { flex: none; }
+.launcher-browser-input input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); }
+.launcher-browser-input input::placeholder { color: var(--text-3); }
+.launcher-note-composer { --composer-input-height: 6rem; --composer-input-max: 10rem; margin: 0; background: var(--surface-1); border-radius: var(--radius); }
+.launcher-note-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); padding-top: var(--sp-3); }
+.launcher-note-actions > span { margin-right: auto; color: var(--text-3); font-size: var(--fs-micro); }
+.launcher-mote { min-width: 0; }
+.launcher-mote__actions { display: flex; align-items: center; }
+.launcher-mote__actions .launch-refine__toggle { max-width: 210px; }
+.launcher-mote__actions .launch-refine__toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-mote__actions .icon-button { width: 22px; height: 26px; }
+.launcher-mote > .service-window { margin-top: var(--sp-3); }
+@container launcher (max-width: 560px) {
+  .launch-surface-quick-grid { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+  .launcher-environment summary { grid-template-columns: minmax(0, 1fr); }
+  .launcher-environment h2 { font-size: var(--fs-title); }
+  .launcher-environment__path { grid-column: 1; }
+  .launcher-environment { margin-bottom: var(--sp-5); }
+  .launch-surface__footer { flex-wrap: wrap; }
+  .launcher-launch-tools { flex: 1 1 100%; }
+  .launch-refine__summary { max-width: 200px; }
+  .launcher-environment dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+}
+@media (prefers-reduced-motion: reduce) { .launcher-environment__host > svg { transition: none; } }

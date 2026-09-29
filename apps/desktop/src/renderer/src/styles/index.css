@@ -38,6 +38,8 @@
 @import './agent-region-header.css';
 @import './session-connecting.css';
 @import './composer.css';
+@import './launcher.css';
+@import './resume.css';
 @import './activity.css';
 @import './activity-conversation.css';
 @import './conversation-tool-trace.css';
