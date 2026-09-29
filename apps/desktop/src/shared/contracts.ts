@@ -470,6 +470,12 @@ export type ComposerShortcut = {
   states?: AgentDisplayState[]
 }
 
+/** The directory owns order and visibility; a custom instruction stays in ComposerShortcut. */
+export type GoalsCommonActionRef =
+  | { kind: 'builtin'; id: 'understand' | 'ideas' | 'next' }
+  | { kind: 'prompt'; id: string }
+export type GoalsCommonActionsConfig = { items: GoalsCommonActionRef[]; collapsed: boolean }
+
 export type AppConfig = {
   version: typeof CONFIG_VERSION
   hosts: HostConfig[]
@@ -491,6 +497,8 @@ export type AppConfig = {
    * 补上默认」的回填都会把删掉的东西送回来——删了又回来比一开始不能删更糟。
    */
   composerShortcuts?: ComposerShortcut[]
+  /** Absence shows the starter directory. An explicitly empty items list is an authored choice. */
+  goalsCommonActions?: GoalsCommonActionsConfig
   /**
    * 用户就地选的 Project Rail 密度档。可选是因为字段后加（同 `appLinkSchemes` 的落地路径）：既有
    * 磁盘 config 没有它，写成必需会让整块判失败。

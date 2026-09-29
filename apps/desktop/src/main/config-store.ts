@@ -174,6 +174,14 @@ export const composerShortcutSchema = z
   })
   .strict()
 
+const goalsCommonActionsSchema = z.object({
+  items: z.array(z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('builtin'), id: z.enum(['understand', 'ideas', 'next']) }).strict(),
+    z.object({ kind: z.literal('prompt'), id: z.string().min(1) }).strict()
+  ])).refine(items => new Set(items.map(item => `${item.kind}:${item.id}`)).size === items.length, 'Common action references must be unique'),
+  collapsed: z.boolean()
+}).strict()
+
 /**
  * 可改可删的默认 prompt。一份定义两处用：`configSchema` 在**键缺席**时回填它，`DEFAULT_CONFIG`
  * 拿它当初始值。写成两份字面量会漂——而漂的时候没有症状：全新配置一套、旧配置另一套。
@@ -217,6 +225,7 @@ const configSchema = z
     // CONFIG_VERSION=9 晚到，磁盘上已有写于它之前的 v9 配置，也是用 `.default()` 收口的。
     // 版本号因此不必 +1（+1 会走 retiredConfigReplacement 那条退休路径，代价大得多）。
     composerShortcuts: z.array(composerShortcutSchema).default(() => structuredClone(DEFAULT_COMPOSER_SHORTCUTS)),
+    goalsCommonActions: goalsCommonActionsSchema.optional(),
     // 用户就地选的 Project Rail 密度档。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
     // 没有它，写成必需会让整块判失败）——且同样**不回填**：缺席即默认档，读处一律 `?? 'default'`，
     // 不补盘。成员来自 import 进来的元组（schema-enum-ssot.test.ts），未知字符串一律判失败。
@@ -498,6 +507,7 @@ export function authoredConfigCarryOver(raw: unknown): {
   browser: AppConfig['browser'] | undefined
   notifications: AppConfig['notifications'] | undefined
   composerShortcuts: AppConfig['composerShortcuts'] | undefined
+  goalsCommonActions: AppConfig['goalsCommonActions'] | undefined
   found: number
   strandedByDamagedHost: Array<{ hostId: string; workspaceIds: string[] }>
   /**
@@ -563,7 +573,8 @@ export function authoredConfigCarryOver(raw: unknown): {
       appearance: z.unknown().optional(),
       browser: z.unknown().optional(),
       notifications: z.unknown().optional(),
-      composerShortcuts: z.unknown().optional()
+      composerShortcuts: z.unknown().optional(),
+      goalsCommonActions: z.unknown().optional()
     })
     .safeParse(raw)
   const rawHosts = outer.success && Array.isArray(outer.data.hosts) ? outer.data.hosts : []
@@ -731,6 +742,8 @@ export function authoredConfigCarryOver(raw: unknown): {
     // 默认两条，而磁盘上的旧文件仍在，没有丢）。
     composerShortcuts: carried(z.array(composerShortcutSchema), outer.success ? outer.data.composerShortcuts : undefined) as
       AppConfig['composerShortcuts'] | undefined,
+    goalsCommonActions: carried(goalsCommonActionsSchema, outer.success ? outer.data.goalsCommonActions : undefined) as
+      AppConfig['goalsCommonActions'] | undefined,
     found: evidenceOfWorkspaces,
     hostsUnreadable,
     executorsUnreadable,
@@ -858,7 +871,8 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
     ...(carried.notifications ? { notifications: carried.notifications } : {}),
     // 空列表也要带过来：`[]` 是「用户把默认那两条都删了」这个事实，而 `? :` 对空数组是真值，
     // 所以这里落在带过来那一侧——写成按长度判会让「删光」静默变回默认两条。
-    ...(carried.composerShortcuts ? { composerShortcuts: carried.composerShortcuts } : {})
+    ...(carried.composerShortcuts ? { composerShortcuts: carried.composerShortcuts } : {}),
+    ...(carried.goalsCommonActions ? { goalsCommonActions: carried.goalsCommonActions } : {})
   }
 }
 
