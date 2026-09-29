@@ -1,0 +1,8 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../launcher-resume-picker.test.tsx",
+    "../../new-tab-resume.test.tsx",
+    "../../../src/renderer/src/global.d.ts"
+  ]
+}
