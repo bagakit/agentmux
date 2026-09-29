@@ -16,7 +16,14 @@ async function click(code) {
   for (const type of ['mousePressed','mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
   await paint()
 }
-async function frame(name, filePath) { await paint(); const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); report.frames.push({ name, file, geometry: filePath ? await evaluate(`filePreviewProbe.geometry(${JSON.stringify(filePath)})`) : null }) }
+async function frame(name, filePath) {
+  await paint()
+  const headers=await evaluate('filePreviewProbe.headerControls()');assert.ok(headers.length>0,'Visible production File headers are nonempty')
+  report.lastHeaderControls=headers
+  if(headers.some(header=>header.controls.some(control=>control.overlapsClose||!control.inside||(!control.disabled&&!control.hitOwnControl))))await fs.writeFile(path.join(evidence,'unreachable-header.png'),(await win.webContents.capturePage()).toPNG())
+  for(const header of headers){assert.ok(header.controls.length>0,'Real header controls are nonempty');for(const control of header.controls){assert.ok(control.width>0&&control.inside,'Header control stays in Region: '+control.label);assert.equal(control.overlapsClose,false,'Close split must not cover File header control: '+control.label);if(!control.disabled)assert.equal(control.hitOwnControl,true,'Actual pointer hits own header control: '+control.label)}}
+  const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); report.frames.push({ name, file, headerControls:headers, geometry: filePath ? await evaluate(`filePreviewProbe.geometry(${JSON.stringify(filePath)})`) : null })
+}
 const imageReady = path => `(()=>{const t=filePreviewProbe.geometry(${JSON.stringify(path)});return t.image?.naturalWidth>0})()`
 const active = selector => `filePreviewProbe.activeRegion().querySelector(${JSON.stringify(selector)})`
 async function open(file) { await evaluate(`filePreviewProbe.open(${JSON.stringify(file)})`); await paint() }
@@ -27,7 +34,7 @@ async function capture() {
   await click(active('button[title="Original size (1)"]')); const zoom = await evaluate('filePreviewProbe.geometry("original.png")'); assert.equal(zoom.image.width, zoom.image.naturalWidth); assert.ok(zoom.viewport.scrollWidth > zoom.viewport.width)
   await evaluate(`${active('.image-preview__viewport')}.scrollLeft=180`); await frame('png-original-size-pan', 'original.png')
   await evaluate('filePreviewProbe.split("original.png",.24,"light")'); await wait(imageReady('original.png')); await click(active('button[title="Fit image (F or 0)"]'))
-  await wait(`Boolean(document.querySelector('[data-workbench-region-id="preview-neighbor"] .monaco-editor'))`)
+  await wait(`Array.from(document.querySelectorAll('[data-workbench-region-id="preview-neighbor"] .monaco-editor .view-line')).map(line=>line.textContent).join(' ').replace(/\\u00a0/g,' ').includes('Saved Markdown')`)
   const narrow = await evaluate('filePreviewProbe.geometry("original.png")'); assert.ok(narrow.region.width <= 240); assert.ok(narrow.image.width <= narrow.viewport.width)
   for (const control of narrow.controls.filter(control=>control.width>0)) assert.ok(control.right <= narrow.region.x+narrow.region.width+1, 'Actual control fits its own Region: '+control.label)
   await frame('png-small-region-light', 'original.png')
@@ -65,7 +72,9 @@ async function capture() {
   await open('opaque.unknown'); await wait(`Boolean(${active('[data-preview-state="binary"]')})`); assert.equal(await evaluate('filePreviewProbe.facts().documents[filePreviewProbe.key("opaque.unknown")]'),undefined); await frame('unknown-binary-readonly','opaque.unknown')
   await open('broken.png'); await wait(`Boolean(${active('[data-decode-state="error"]')})`); await frame('image-decode-failure','broken.png')
   await open('large.png'); await wait(`Boolean(${active('[data-preview-state="too-large"]')})`); await frame('preview-budget-failure','large.png')
-  await evaluate('filePreviewProbe.split("original.png",.5,"dark")'); await wait(imageReady('original.png')); await frame('durable-file-split-before-restart','original.png')
+  await evaluate('filePreviewProbe.split("original.png",.5,"dark")'); await wait(imageReady('original.png'))
+  await wait(`Array.from(document.querySelectorAll('[data-workbench-region-id="preview-neighbor"] .monaco-editor .view-line')).map(line=>line.textContent).join(' ').replace(/\\u00a0/g,' ').includes('Current unsaved Markdown')`)
+  await frame('durable-file-split-before-restart','original.png')
   await evaluate('filePreviewProbe.flush()'); const facts = await evaluate('filePreviewProbe.facts()')
   assert.ok(facts.dirtyDocuments[filePreviewKey('drawing.svg')]); assert.ok(facts.dirtyDocuments[filePreviewKey('notes.md')]); assert.equal(facts.documents[filePreviewKey('opaque.unknown')],undefined)
   report.expected = { tabs: facts.tabs, layouts: facts.layouts, activeWorkspaceId: facts.activeWorkspaceId, documents: Object.fromEntries(Object.entries(facts.documents).filter(([key])=>facts.dirtyDocuments[key])), dirtyDocuments: Object.fromEntries(Object.entries(facts.dirtyDocuments).filter(([,dirty])=>dirty)) }
@@ -76,7 +85,8 @@ async function restart() {
   const expected = JSON.parse(await fs.readFile(path.join(evidence,'expected-durable.json'),'utf8')), actual = await evaluate('filePreviewProbe.beforeFixture')
   assert.deepEqual(actual.tabs,expected.tabs); assert.deepEqual(actual.layouts,expected.layouts); assert.equal(actual.activeWorkspaceId,expected.activeWorkspaceId)
   for(const [key,doc] of Object.entries(expected.documents)){assert.deepEqual(actual.documents[key],doc);assert.equal(actual.dirtyDocuments[key],true)}
-  await wait(imageReady('original.png')); await frame('renderer-profile-file-restart','original.png'); report.durable={passed:true,expected,actual,boundary:'A second ordinary Electron process reads original durable File Tabs/Regions/layout/focus/dirty documents before any scene setup. Native workspace bytes pass through production preload into the actual WorkspaceFiles owner.'}
+  await wait(imageReady('original.png'));await wait(`Array.from(document.querySelectorAll('[data-workbench-region-id="preview-neighbor"] .monaco-editor .view-line')).map(line=>line.textContent).join(' ').replace(/\\u00a0/g,' ').includes('Current unsaved Markdown'))`)
+  await frame('renderer-profile-file-restart','original.png'); report.durable={passed:true,expected,actual,boundary:'A second ordinary Electron process reads original durable File Tabs/Regions/layout/focus/dirty documents before any scene setup. Native workspace bytes pass through production preload into the actual WorkspaceFiles owner.'}
 }
 app.whenReady().then(async()=>{try{
   const { WorkspaceFiles, WORKSPACE_FILE_INVALIDATED_CHANNEL } = await import(nativeModule); files = new WorkspaceFiles(()=>({kind:'local'}))
