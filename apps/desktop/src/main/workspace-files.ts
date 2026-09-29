@@ -1,5 +1,6 @@
 import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { isBinaryContent } from '../shared/bookmark-file.js'
+import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
@@ -42,6 +43,7 @@ type LocalWorkerRequest =
       name: string
       expectedRevision: string | null
       exclusive?: true
+      textOnly?: true
       fault?: 'temporary-write' | 'replace'
     }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
@@ -74,6 +76,21 @@ export type WorkspaceFilesOptions = {
 
 let activeLocalFileObservers = 0
 
+/** Byte evidence, never a decoded replacement character or an extension guess. ESC logs stay text. */
+function fileBytesAreBinary(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) return true
+  const head = Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(bytes.byteLength, 12))
+  if (head.toString('ascii', 0, 5) === '%PDF-' || head.toString('ascii', 0, 6) === 'GIF87a' ||
+      head.toString('ascii', 0, 6) === 'GIF89a' || head.toString('ascii', 0, 3) === 'ID3' ||
+      head.toString('ascii', 0, 4) === 'fLaC' ||
+      (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) ||
+      (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) ||
+      (head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4) ||
+      (head[0] === 0x1f && head[1] === 0x8b) ||
+      (head.toString('ascii', 0, 4) === 'RIFF' && ['WEBP', 'WAVE', 'AVI '].includes(head.toString('ascii', 8, 12)))) return true
+  try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return false } catch { return true }
+}
+
 export function workspaceFileObserverCount(): number {
   return activeLocalFileObservers
 }
@@ -89,6 +106,8 @@ import { watch } from 'node:fs'
 import { constants, link, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, sep } from 'node:path'
+
+${fileBytesAreBinary.toString()}
 
 const request = JSON.parse(process.argv[1] ?? '')
 const expectedRoot = process.argv[2]
@@ -127,7 +146,7 @@ async function currentFile(name) {
     const handle = await openRegularFile(name, constants.O_RDONLY)
     try {
       const [bytes, info] = await Promise.all([handle.readFile(), handle.stat()])
-      return { revision: revisionFor(bytes), mode: info.mode & 0o7777 }
+      return { revision: revisionFor(bytes), mode: info.mode & 0o7777, binary: fileBytesAreBinary(bytes) }
     } finally {
       await handle.close()
     }
@@ -162,7 +181,7 @@ try {
       let position = 0
       while (position < totalBytes) {
         const read = await handle.read(block, 0, Math.min(block.length, totalBytes - position), position)
-        if (!read.bytesRead) throw new Error('Workspace file changed while reading its bytes')
+        if (!read.bytesRead) throw Object.assign(new Error('Workspace file changed while reading its bytes'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
         const chunk = block.subarray(0, read.bytesRead)
         digest.update(chunk)
         const start = Math.max(position, request.offset), stop = Math.min(position + read.bytesRead, end)
@@ -171,7 +190,7 @@ try {
       }
       const after = await handle.stat({ bigint: true })
       if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
-        throw new Error('Workspace file changed while reading its bytes')
+        throw Object.assign(new Error('Workspace file changed while reading its bytes'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
       }
       const revision = 'sha256:' + digest.digest('hex')
       if (request.expectedRevision !== undefined && request.expectedRevision !== revision) {
@@ -247,7 +266,9 @@ try {
     process.stdout.write('${LOCAL_WORKER_OBSERVING}\n')
   } else if (request.action === 'write') {
     const before = await currentFile(request.name)
-    if (before.revision !== request.expectedRevision) {
+    if (request.textOnly && before.binary) {
+      process.stdout.write(JSON.stringify({ status: 'error', code: 'WORKSPACE_BINARY_FILE_NOT_EDITABLE', message: 'The current file contains binary bytes. The original file and text draft were kept.' }))
+    } else if (before.revision !== request.expectedRevision) {
       process.stdout.write(JSON.stringify({ status: 'conflict', observedRevision: before.revision }))
     } else {
       const temporaryName = '.' + request.name + '.agentmux-' + process.pid + '-' + randomBytes(8).toString('hex')
@@ -270,7 +291,9 @@ try {
         handle = null
 
         const immediatelyBeforeReplace = await currentFile(request.name)
-        if (immediatelyBeforeReplace.revision !== request.expectedRevision) {
+        if (request.textOnly && immediatelyBeforeReplace.binary) {
+          process.stdout.write(JSON.stringify({ status: 'error', code: 'WORKSPACE_BINARY_FILE_NOT_EDITABLE', message: 'The current file contains binary bytes. The original file and text draft were kept.' }))
+        } else if (immediatelyBeforeReplace.revision !== request.expectedRevision) {
           process.stdout.write(JSON.stringify({
             status: 'conflict',
             observedRevision: immediatelyBeforeReplace.revision
@@ -1081,6 +1104,9 @@ export class WorkspaceFiles {
           action: 'read',
           name: basename(resolved.target)
         })
+        if (fileBytesAreBinary(bytes)) {
+          return { status: 'binary', path: requestedPath, revision: revisionFor(bytes), byteLength: bytes.byteLength }
+        }
         return {
           status: 'read',
           document: {
@@ -1192,6 +1218,32 @@ export class WorkspaceFiles {
     return await this.readByteRange(workspace, requestedPath, { ...options, offset: 0, maxBytes: WORKSPACE_FILE_MAX_BYTES })
   }
 
+  /** One visible file consumer, one complete bounded snapshot through the existing byte owner. */
+  async readPreview(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFilePreviewReadOptions = {}): Promise<WorkspaceFilePreviewResult> {
+    try {
+      if (this.hostFor(workspace.hostId).kind !== 'local') {
+        return { status: 'unavailable', code: 'REMOTE_WORKSPACE_PREVIEW_UNAVAILABLE', message: 'Binary preview is unavailable for this remote workspace. Remote file execution is not available.' }
+      }
+      const format = workspaceFilePreviewFormat(requestedPath)
+      if (!format) return { status: 'unsupported', message: 'This file format has no built-in bytes preview.' }
+      const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+      if ((await stat(resolved.target)).isDirectory()) return { status: 'directory' }
+      const snapshot = await this.snapshotBytes(workspace, requestedPath, options)
+      if (format.kind === 'pdf' && Buffer.from(snapshot.bytes.subarray(0, 5)).toString('ascii') !== '%PDF-') {
+        return { status: 'unsupported', message: 'These bytes do not have a PDF header. The original file was kept.' }
+      }
+      return { status: 'ready', kind: format.kind, mimeType: format.mimeType, bytes: snapshot.bytes,
+        revision: snapshot.revision, byteLength: snapshot.totalBytes, readCost: snapshot.readCost }
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'WORKSPACE_FILE_PREVIEW_UNAVAILABLE'
+      const message = error instanceof Error ? error.message : String(error)
+      if (code === 'ENOENT') return { status: 'deleted', message: 'This file no longer exists.' }
+      if (code === 'WORKSPACE_FILE_BYTE_LIMIT') return { status: 'too-large', maxBytes: WORKSPACE_FILE_MAX_BYTES, message: 'This file exceeds the 16 MiB preview budget. Open it in a system application to view the original.' }
+      if (code === 'WORKSPACE_FILE_REVISION_MISMATCH' || code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') return { status: 'changed', message }
+      return { status: 'unavailable', code, message }
+    }
+  }
+
   private async readByteRange(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number }): Promise<WorkspaceFileByteRead> {
     if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
     const { offset, maxBytes } = options
@@ -1233,6 +1285,7 @@ export class WorkspaceFiles {
               name: resolved.name,
               expectedRevision: input.expectedRevision,
               ...(input.exclusive ? { exclusive: true as const } : {}),
+              ...(typeof input.content === 'string' ? { textOnly: true as const } : {}),
               ...(fault ? { fault } : {})
             }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
           } catch (error) {
