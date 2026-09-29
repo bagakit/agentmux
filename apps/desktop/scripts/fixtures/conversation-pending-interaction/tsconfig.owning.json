@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../test/conversation-pending-interaction.integration.test.tsx",
+    "../conversation-chat-identity/pending.tsx",
+    "vitest.owning.config.mts"
+  ]
+}

@@ -3,6 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentMuxInteractionRequest } from '@agentmux/core'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // TerminalView requires a full linkOrigin/session-state graph to render; this test lives
@@ -14,14 +15,15 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView:
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
-function session(id: string, pendingInteraction?: unknown): SessionSnapshot {
+function session(id: string, pendingInteraction?: AgentMuxInteractionRequest): Extract<SessionSnapshot, {kind:'agent'}> {
   return {
     id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo', label: id,
-    createdAt: 1, updatedAt: 2, processState: 'running', latestOutputBytes: 0,
-    status: { state: 'waiting', source: 'run-process', observedAt: id === 'a' ? 1 : 2 }, capabilities: {},
-    ...(pendingInteraction ? { pendingInteraction } : {}),
-    control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}`, generation: 1 } }
-  } as unknown as SessionSnapshot
+    createdAt: 1, updatedAt: 2, agentSessionUpdatedAt: 2, processState: 'running', latestOutputBytes: 0,
+    status: { state: 'waiting', source: 'run-process', observedAt: id === 'a' ? 1 : 2 },
+    capabilities: {terminal:true,timeline:'complete-events',permission:'respond',providerResume:true,replyCorrelation:'none'},
+    ...(pendingInteraction ? { pendingInteraction:{...pendingInteraction,agentSessionId:id,evidence:{...pendingInteraction.evidence,run:{runId:`run-${id}`}}} } : {}),
+    control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
+  }
 }
 
 function completedSession(id: string): SessionSnapshot {
@@ -29,8 +31,8 @@ function completedSession(id: string): SessionSnapshot {
   return { ...session(id), status: completion, semanticStatus: completion } as SessionSnapshot
 }
 
-const request = { kind: 'question', id: 'request-a', questions: [{ id: 'q', title: 'Choose', prompt: 'Choose one', options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }] }] }
-const replacement = { kind: 'question', id: 'request-b', questions: [{ id: 'q', title: 'New request', prompt: 'Choose the replacement', options: [{ id: 'next', label: 'Next' }] }] }
+const request: AgentMuxInteractionRequest = { kind: 'question', id: 'request-a', agentSessionId:'a', evidence:{source:'native-hook',observedAt:2,hookReceiptId:'request-a'}, questions: [{ id: 'q', title: 'Choose', prompt: 'Choose one', options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }] }] }
+const replacement: AgentMuxInteractionRequest = { kind: 'question', id: 'request-b', agentSessionId:'a', evidence:{source:'native-hook',observedAt:2,hookReceiptId:'request-b'}, questions: [{ id: 'q', title: 'New request', prompt: 'Choose the replacement', options: [{ id: 'next', label: 'Next' }] }] }
 
 // GlobalFocusSurface renders session cards inside project lanes derived from `config.workspaces`.
 // Without a workspace matching a session's workspacePath, deriveFocusProjectLanes returns [] and no
@@ -66,7 +68,7 @@ describe('attention request resolution boundaries', () => {
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     await act(async () => (container.querySelector('[data-session-id="a"]') as HTMLElement).click())
     await act(async () => reviewButton().click())
-    expect(container.querySelector('[aria-label="Agent question"]')).toBeNull()
+    expect(container.querySelector('.attention-request-panel [aria-label="Agent question"]')).toBeNull()
     expect(container.textContent).toContain('Core has not exposed a typed request')
   })
 
@@ -93,12 +95,12 @@ describe('attention request resolution boundaries', () => {
     const response = new Promise<void>((resolve) => { resolveResponse = resolve })
     useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
-    const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
+    const answer = [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel .agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
     resolveResponse()
     await act(async () => response)
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose one')
-    expect(container.querySelector<HTMLButtonElement>('.agent-interaction button')?.disabled).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('.attention-request-panel .agent-interaction button')?.disabled).toBe(true)
 
     await act(async () => useAppStore.setState({ sessions: [completedSession('a'), session('b', replacement)] }))
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('New request')
@@ -109,17 +111,17 @@ describe('attention request resolution boundaries', () => {
     const response = Promise.resolve()
     useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
-    const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
+    const answer = [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel .agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
     await act(async () => response)
-    expect(container.querySelector('[aria-label="Agent question"]')).not.toBeNull()
-    expect(container.querySelector<HTMLButtonElement>('.agent-interaction button')?.disabled).toBe(true)
+    expect(container.querySelector('.attention-request-panel [aria-label="Agent question"]')).not.toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('.attention-request-panel .agent-interaction button')?.disabled).toBe(true)
 
     await act(async () => useAppStore.setState({ sessions: [session('a'), session('b', replacement)] }))
     expect(useAppStore.getState().sessions).toHaveLength(2)
     expect(useAppStore.getState().sessions[0]!.status.state).toBe('waiting')
     expect(container.querySelector('.attention-request-panel')?.getAttribute('aria-label')).toBe('Request from a')
-    expect(container.querySelector('[aria-label="Agent question"]')).toBeNull()
+    expect(container.querySelector('.attention-request-panel [aria-label="Agent question"]')).toBeNull()
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Core has not exposed a typed request')
     expect(container.querySelector('.attention-request-panel')?.textContent).not.toContain('All caught up')
     expect(container.querySelector('.attention-request-panel')?.textContent).not.toContain('Choose the replacement')
@@ -128,8 +130,8 @@ describe('attention request resolution boundaries', () => {
     expect(useAppStore.getState().sessions).toHaveLength(2)
     expect(container.querySelector('.attention-request-panel')?.getAttribute('aria-label')).toBe('Request from b')
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose the replacement')
-    expect(container.querySelector('[aria-label="Agent question"]')).not.toBeNull()
-    const nextAnswer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction__options button')].find((button) => button.textContent === 'Next')
+    expect(container.querySelector('.attention-request-panel [aria-label="Agent question"]')).not.toBeNull()
+    const nextAnswer = [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel .agent-interaction__options button')].find((button) => button.textContent === 'Next')
     expect(nextAnswer).toBeDefined()
     expect(nextAnswer!.disabled).toBe(false)
   })
@@ -139,7 +141,7 @@ describe('attention request resolution boundaries', () => {
     const response = new Promise<void>((_resolve, reject) => { rejectResponse = reject })
     useAppStore.setState({ config: testConfig, sessions: [session('a', request), session('b', replacement)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
-    const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
+    const answer = [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel .agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
     await act(async () => useAppStore.setState({ sessions: [completedSession('a'), session('b', replacement)] }))
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('New request')
@@ -152,7 +154,7 @@ describe('attention request resolution boundaries', () => {
   it('keeps the same request and reports an answer failure', async () => {
     useAppStore.setState({ config: testConfig, sessions: [session('a', request)], providerCatalog: [], respondInteraction: vi.fn(() => Promise.reject(new Error('Core rejected answer'))) as never })
     await openReview('a')
-    const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
+    const answer = [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel .agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Core rejected answer')
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('Choose one')
@@ -163,7 +165,7 @@ describe('attention request resolution boundaries', () => {
     const response = new Promise<void>((resolve) => { resolveResponse = resolve })
     useAppStore.setState({ config: testConfig, sessions: [session('a', request)], providerCatalog: [], respondInteraction: vi.fn(() => response) as never })
     await openReview('a')
-    const answer = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
+    const answer = [...container.querySelectorAll<HTMLButtonElement>('.attention-request-panel .agent-interaction button')].find((button) => button.textContent?.includes('Yes'))!
     await act(async () => answer.click())
     await act(async () => useAppStore.setState({ sessions: [session('a', replacement)] }))
     expect(container.querySelector('.attention-request-panel')?.textContent).toContain('New request')

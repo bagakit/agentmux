@@ -1,0 +1,949 @@
+{
+  "schema": "agentmux.current-request-scene-input.v1",
+  "boundary": "Authenticated private Hook/public Core/MemoryStore/publication; controlled byte owner, not vendor Writer",
+  "session": {
+    "id": "interaction-intake",
+    "kind": "agent",
+    "hostId": "local",
+    "workspacePath": "/isolated",
+    "label": "Private observation",
+    "createdAt": 1,
+    "updatedAt": 1791062680928,
+    "agentSessionUpdatedAt": 1791062680928,
+    "promptSubmissionPredecessor": null,
+    "processState": "running",
+    "latestOutputBytes": 0,
+    "status": {
+      "state": "waiting",
+      "source": "native-hook",
+      "observedAt": 1791062680928,
+      "detail": "PreToolUse"
+    },
+    "providerId": "claude",
+    "executorId": "claude",
+    "capabilities": {
+      "terminal": true,
+      "timeline": "complete-events",
+      "permission": "respond",
+      "providerResume": true,
+      "replyCorrelation": "none"
+    },
+    "control": {
+      "kind": "agent",
+      "hostId": "local",
+      "agentSessionId": "interaction-intake",
+      "run": {
+        "runId": "interaction-intake-run"
+      }
+    },
+    "semanticStatus": {
+      "state": "waiting",
+      "source": "native-hook",
+      "observedAt": 1791062680928,
+      "stateEnteredAt": 1791062680928,
+      "detail": "PreToolUse"
+    },
+    "pendingInteraction": {
+      "kind": "question",
+      "id": "unsupported-1",
+      "agentSessionId": "interaction-intake",
+      "evidence": {
+        "source": "native-hook",
+        "observedAt": 1791062680928,
+        "run": {
+          "runId": "interaction-intake-run"
+        },
+        "hookReceiptId": "unsupported-1"
+      },
+      "questions": [],
+      "responseUnavailableReason": "This Provider supports one question with up to nine single-choice options. Answer this question in the native terminal.",
+      "nativeToolCallId": "call-1"
+    },
+    "interactionResponseUnavailableReason": "This Provider supports one question with up to nine single-choice options. Answer this question in the native terminal."
+  },
+  "config": {
+    "version": 9,
+    "hosts": [
+      {
+        "id": "local",
+        "kind": "local",
+        "label": "Private"
+      }
+    ],
+    "executors": {},
+    "workspaces": [
+      {
+        "id": "ws",
+        "name": "Private",
+        "hostId": "local",
+        "path": "/isolated",
+        "kind": "folder"
+      }
+    ],
+    "appearance": {
+      "terminalTheme": "graphite"
+    },
+    "browser": {
+      "toolbar": {
+        "selectElement": true,
+        "screenshot": true,
+        "devTools": true,
+        "viewport": true,
+        "saveBookmark": true,
+        "more": true
+      }
+    }
+  },
+  "providerCatalog": [
+    {
+      "composer": {
+        "skillRoots": [
+          ".agents/skills",
+          ".codex/skills"
+        ],
+        "commands": [
+          {
+            "text": "/help",
+            "description": "Available commands"
+          },
+          {
+            "text": "/status",
+            "description": "Session and usage"
+          },
+          {
+            "text": "/model",
+            "description": "Choose model"
+          },
+          {
+            "text": "/compact",
+            "description": "Compact context"
+          },
+          {
+            "text": "/diff",
+            "description": "Review changes"
+          }
+        ]
+      },
+      "id": "codex",
+      "label": "Codex",
+      "executable": "codex",
+      "expectedProcess": "codex",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "respond",
+        "providerResume": true,
+        "replyCorrelation": "none",
+        "usage": {
+          "kind": "native-transcript",
+          "transcriptFormat": "codex-rollout"
+        }
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "codex"
+      },
+      "launchOptions": [
+        {
+          "id": "sandbox",
+          "label": "Sandbox",
+          "description": "How much of the machine Codex may touch when it runs commands.",
+          "choices": [
+            {
+              "id": "read-only",
+              "label": "Read only",
+              "tier": "safe"
+            },
+            {
+              "id": "workspace-write",
+              "label": "Workspace write",
+              "description": "Writes limited to the workspace.",
+              "tier": "caution"
+            },
+            {
+              "id": "danger-full-access",
+              "label": "Full access",
+              "description": "No sandbox — full machine access.",
+              "tier": "danger"
+            }
+          ]
+        },
+        {
+          "id": "approval",
+          "label": "Approval policy",
+          "description": "When Codex pauses for human approval before running a command.",
+          "choices": [
+            {
+              "id": "on-request",
+              "label": "On request",
+              "description": "The model decides when to ask.",
+              "tier": "caution"
+            },
+            {
+              "id": "never",
+              "label": "Never",
+              "description": "Never pauses for approval.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "composer": {
+        "skillRoots": [
+          ".claude/skills",
+          ".agents/skills"
+        ],
+        "commands": [
+          {
+            "text": "/help",
+            "description": "Available commands"
+          },
+          {
+            "text": "/model",
+            "description": "Choose model"
+          },
+          {
+            "text": "/compact",
+            "description": "Compact context"
+          },
+          {
+            "text": "/cost",
+            "description": "Session usage"
+          },
+          {
+            "text": "/context",
+            "description": "Context usage"
+          }
+        ]
+      },
+      "id": "claude",
+      "label": "Claude",
+      "executable": "claude",
+      "expectedProcess": "claude",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "respond",
+        "providerResume": true,
+        "replyCorrelation": "none",
+        "usage": {
+          "kind": "native-transcript",
+          "transcriptFormat": "claude-jsonl"
+        }
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "claude"
+      },
+      "launchOptions": [
+        {
+          "id": "model",
+          "label": "Model",
+          "description": "Which Claude model this session runs on.",
+          "choices": [
+            {
+              "id": "fable",
+              "label": "Fable"
+            },
+            {
+              "id": "opus",
+              "label": "Opus"
+            },
+            {
+              "id": "sonnet",
+              "label": "Sonnet"
+            }
+          ]
+        },
+        {
+          "id": "effort",
+          "label": "Effort",
+          "description": "How much reasoning effort Claude spends per turn.",
+          "choices": [
+            {
+              "id": "low",
+              "label": "Low"
+            },
+            {
+              "id": "medium",
+              "label": "Medium"
+            },
+            {
+              "id": "high",
+              "label": "High"
+            },
+            {
+              "id": "xhigh",
+              "label": "Extra high"
+            },
+            {
+              "id": "max",
+              "label": "Max"
+            }
+          ]
+        },
+        {
+          "id": "permission-mode",
+          "label": "Permission mode",
+          "description": "How Claude handles tool-permission prompts for this session.",
+          "choices": [
+            {
+              "id": "manual",
+              "label": "Manual",
+              "description": "Ask for each action.",
+              "tier": "safe"
+            },
+            {
+              "id": "plan",
+              "label": "Plan",
+              "description": "Plan first, no edits.",
+              "tier": "safe"
+            },
+            {
+              "id": "acceptEdits",
+              "label": "Accept edits",
+              "description": "Auto-accept file edits.",
+              "tier": "caution"
+            },
+            {
+              "id": "auto",
+              "label": "Auto",
+              "tier": "caution"
+            },
+            {
+              "id": "dontAsk",
+              "label": "Don't ask",
+              "tier": "caution"
+            },
+            {
+              "id": "bypassPermissions",
+              "label": "Bypass permissions",
+              "description": "Skip all permission checks.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "traex",
+      "label": "TraeX",
+      "executable": "traex",
+      "expectedProcess": "traex",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "none"
+      },
+      "resumeStrategy": {
+        "kind": "none"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "unavailable",
+        "permission": "none",
+        "providerResume": false,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "traex"
+      },
+      "launchOptions": [
+        {
+          "id": "sandbox",
+          "label": "Sandbox",
+          "description": "How much of the machine TraeX may touch when it runs commands.",
+          "choices": [
+            {
+              "id": "read-only",
+              "label": "Read only",
+              "tier": "safe"
+            },
+            {
+              "id": "workspace-write",
+              "label": "Workspace write",
+              "description": "Writes limited to the workspace.",
+              "tier": "caution"
+            },
+            {
+              "id": "danger-full-access",
+              "label": "Full access",
+              "description": "No sandbox — full machine access.",
+              "tier": "danger"
+            }
+          ]
+        },
+        {
+          "id": "permission-mode",
+          "label": "Permission mode",
+          "description": "How TraeX handles tool-permission prompts for this session.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Default",
+              "description": "Edit the workspace and run commands; the network or other files need approval.",
+              "tier": "safe"
+            },
+            {
+              "id": "auto",
+              "label": "Auto",
+              "description": "Workspace-write, with on-request approvals routed to an auto-reviewer.",
+              "tier": "caution"
+            },
+            {
+              "id": "bypass_permissions",
+              "label": "Bypass permissions",
+              "description": "Edit files outside the workspace and access the internet without approval.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hermes",
+      "label": "Hermes",
+      "executable": "hermes",
+      "expectedProcess": "hermes",
+      "promptDelivery": "hermes-query",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "none"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": false,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "hermes"
+      },
+      "launchOptions": [
+        {
+          "id": "yolo",
+          "label": "Approvals",
+          "description": "Whether Hermes bypasses its dangerous-command approval prompts.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Ask",
+              "description": "Prompt before dangerous commands.",
+              "tier": "safe"
+            },
+            {
+              "id": "yolo",
+              "label": "YOLO",
+              "description": "Bypass all dangerous-command approval prompts.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "composer": {
+        "skillRoots": [
+          ".pi/agent/skills",
+          ".agents/skills"
+        ],
+        "commands": [
+          {
+            "text": "/help",
+            "description": "Available commands"
+          },
+          {
+            "text": "/model",
+            "description": "Choose model"
+          },
+          {
+            "text": "/compact",
+            "description": "Compact context"
+          }
+        ]
+      },
+      "id": "pi",
+      "label": "Pi",
+      "executable": "pi",
+      "expectedProcess": "pi",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "transcript-path"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "none",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "pi"
+      },
+      "launchOptions": []
+    },
+    {
+      "id": "grok",
+      "label": "Grok",
+      "executable": "grok",
+      "expectedProcess": "grok",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "grok"
+      },
+      "launchOptions": [
+        {
+          "id": "permission-mode",
+          "label": "Permission mode",
+          "description": "How Grok handles tool-permission prompts for this session.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Default",
+              "description": "Ask for approval.",
+              "tier": "safe"
+            },
+            {
+              "id": "plan",
+              "label": "Plan",
+              "description": "Plan first, no edits.",
+              "tier": "safe"
+            },
+            {
+              "id": "acceptEdits",
+              "label": "Accept edits",
+              "description": "Auto-accept file edits.",
+              "tier": "caution"
+            },
+            {
+              "id": "auto",
+              "label": "Auto",
+              "tier": "caution"
+            },
+            {
+              "id": "dontAsk",
+              "label": "Don't ask",
+              "tier": "caution"
+            },
+            {
+              "id": "bypassPermissions",
+              "label": "Bypass permissions",
+              "description": "Skip all permission checks.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ],
+      "postureControl": {
+        "id": "approval",
+        "label": "Approvals",
+        "modes": [
+          {
+            "id": "ask",
+            "label": "Ask each time",
+            "description": "Grok asks before running commands or editing files.",
+            "tier": "safe"
+          },
+          {
+            "id": "always-approve",
+            "label": "Auto-approve",
+            "description": "Skip all permission prompts for this session.",
+            "tier": "danger"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini",
+      "executable": "gemini",
+      "expectedProcess": "gemini",
+      "promptDelivery": "flag-prompt-interactive",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "gemini"
+      },
+      "launchOptions": [
+        {
+          "id": "approval-mode",
+          "label": "Approval mode",
+          "description": "When Gemini pauses for approval before using a tool.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Default",
+              "description": "Prompt for approval.",
+              "tier": "safe"
+            },
+            {
+              "id": "plan",
+              "label": "Plan",
+              "description": "Read-only mode.",
+              "tier": "safe"
+            },
+            {
+              "id": "auto_edit",
+              "label": "Auto edit",
+              "description": "Auto-approve edit tools.",
+              "tier": "caution"
+            },
+            {
+              "id": "yolo",
+              "label": "YOLO",
+              "description": "Auto-approve all tools.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "antigravity",
+      "label": "Antigravity",
+      "executable": "agy",
+      "expectedProcess": "agy",
+      "promptDelivery": "flag-prompt-interactive",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "agy"
+      },
+      "launchOptions": [
+        {
+          "id": "sandbox",
+          "label": "Sandbox",
+          "description": "Whether Antigravity runs with terminal restrictions.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Off",
+              "description": "No sandbox — terminal commands run unrestricted.",
+              "tier": "caution"
+            },
+            {
+              "id": "sandboxed",
+              "label": "Sandboxed",
+              "description": "Run with terminal restrictions enabled.",
+              "tier": "safe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor",
+      "executable": "cursor-agent",
+      "expectedProcess": "cursor-agent",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "cursor-agent"
+      },
+      "launchOptions": [
+        {
+          "id": "mode",
+          "label": "Execution mode",
+          "description": "How much Cursor may change while it works.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Full",
+              "description": "Read, edit, and run.",
+              "tier": "caution"
+            },
+            {
+              "id": "plan",
+              "label": "Plan",
+              "description": "Analyze and propose, no edits.",
+              "tier": "safe"
+            },
+            {
+              "id": "ask",
+              "label": "Ask",
+              "description": "Q&A only, read-only.",
+              "tier": "safe"
+            }
+          ]
+        },
+        {
+          "id": "sandbox",
+          "label": "Sandbox",
+          "description": "Whether Cursor runs commands inside its sandbox.",
+          "choices": [
+            {
+              "id": "enabled",
+              "label": "Sandboxed",
+              "description": "Commands run sandboxed.",
+              "tier": "safe"
+            },
+            {
+              "id": "disabled",
+              "label": "Unsandboxed",
+              "description": "Commands run without the sandbox.",
+              "tier": "danger"
+            }
+          ]
+        },
+        {
+          "id": "approvals",
+          "label": "Approvals",
+          "description": "Whether Cursor asks before running a command.",
+          "choices": [
+            {
+              "id": "default",
+              "label": "Ask",
+              "description": "Prompt before running commands.",
+              "tier": "safe"
+            },
+            {
+              "id": "force",
+              "label": "Run everything",
+              "description": "Allow every command unless explicitly denied.",
+              "tier": "danger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kimi",
+      "label": "Kimi",
+      "executable": "kimi",
+      "expectedProcess": "kimi",
+      "promptDelivery": "post-launch-only",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "unmanaged"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "kimi"
+      },
+      "launchOptions": []
+    },
+    {
+      "id": "droid",
+      "label": "Droid",
+      "executable": "droid",
+      "expectedProcess": "droid",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "droid"
+      },
+      "launchOptions": []
+    },
+    {
+      "id": "copilot",
+      "label": "Copilot",
+      "executable": "copilot",
+      "expectedProcess": "copilot",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "copilot"
+      },
+      "launchOptions": []
+    },
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "executable": "opencode",
+      "expectedProcess": "opencode",
+      "promptDelivery": "positional-argv",
+      "hookStrategy": {
+        "kind": "native",
+        "installation": "explicit-managed"
+      },
+      "resumeStrategy": {
+        "kind": "provider-native",
+        "locator": "session-id"
+      },
+      "acpStrategy": {
+        "kind": "none"
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "readySignal": {
+        "kind": "foreground-process",
+        "expectedProcess": "opencode"
+      },
+      "launchOptions": []
+    }
+  ],
+  "originalDraft": "Unsent original draft"
+}
