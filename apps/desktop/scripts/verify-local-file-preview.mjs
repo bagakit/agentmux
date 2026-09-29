@@ -18,6 +18,9 @@ async function bindings() {
  for(const name of rendererModules)sources['renderer:'+name]=sha(await readFile(join(sourceRoot,name)))
  for(const name of ['main/workspace-files.ts','preload/index.ts','shared/contracts.ts','shared/workspace-file-preview.ts','shared/workspace-file-bytes.ts'])sources[name]=sha(await readFile(join(desktop,'src',name)))
  const store=await readFile(join(sourceRoot,'store.ts'),'utf8')
+ const storeAst=ts.createSourceFile('store.ts',store,ts.ScriptTarget.Latest,true)
+ const saveOwner=storeAst.statements.filter(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='enqueueFileSave')
+ assert.equal(saveOwner.length,1,'Exactly one real save owner is bound');sources['store:enqueueFileSave']=sha(saveOwner[0].getText(storeAst))
  for(const anchor of ['async function loadPersistedFileDocument(','  async openFile(','  async reloadDocument(','  async createBrowser(']) {
   const start=store.indexOf(anchor),end=anchor.startsWith('async function')?store.indexOf('\nasync function enqueueFileSave(',start):store.indexOf('\n  },',start)
   assert.ok(start>=0&&end>start,'Nonempty exact Store production binding: '+anchor);sources['store:'+anchor]=sha(store.slice(start,end))
@@ -58,7 +61,16 @@ async function consumeSourceProofs() {
  for(const [file,expected]of Object.entries(html.identity))assert.equal(sha(await readFile(join(desktop,file))),expected,'Actual Browser proof source remains current: '+file)
  const facts=html.result.facts,prefs=html.result.preferences;assert.equal(facts.imageLoaded,true);assert.equal(facts.node,'undefined');assert.equal(facts.appBridge,'undefined');assert.equal(facts.electron,'undefined');assert.equal(prefs.contextIsolation,true);assert.equal(prefs.sandbox,true);assert.equal(prefs.nodeIntegration,false);assert.equal(prefs.preload,null)
  assert.equal(sha(await readFile(join(dirname(htmlPath),'html-native-browser.png'))),html.pngSha256)
- return {renderer:{path:rendererPath,sha256:sha(await readFile(rendererPath)),proof:renderer},main:{path:mainPath,sha256:sha(await readFile(mainPath)),proof:main},html:{path:htmlPath,sha256:sha(await readFile(htmlPath)),proof:html}}
+ const runtimePath=join(proofRoot,'runtime-current/restart-last.json'),runtime=JSON.parse(await readFile(runtimePath,'utf8'))
+ assert.equal(runtime.passed,true);assert.equal(runtime.records.length,2);assert.deepEqual(runtime.inputsBefore,runtime.inputsAfter)
+ for(const [file,expected]of Object.entries(runtime.inputsBefore))assert.equal(sha(await readFile(file)),expected,'Actual native continuity proof remains current: '+file)
+ const [first,second]=runtime.records;assert.notEqual(first.clientPid,second.clientPid)
+ for(const field of ['id','run','childPid','daemon','tabs','layouts','retainedCreated'])assert.deepEqual(second[field],first[field],'Two ordinary processes retain '+field)
+ assert.ok(first.id&&first.run.runId&&first.childPid&&first.daemon);assert.ok(Object.keys(first.tabs).length>0&&Object.keys(first.layouts).length>0)
+ assert.equal(second.accepted,first.accepted+1);assert.ok(second.output>first.output);assert.deepEqual(runtime.cleanup.remaining,[]);assert.deepEqual(runtime.cleanup.errors,[]);assert.equal(runtime.cleanup.rootRemoved,true)
+ const observationPath=join(proofRoot,'user-run-preserved-observation.json'),observation=JSON.parse(await readFile(observationPath,'utf8')),session=observation.result.session
+ assert.equal(observation.ok,true);assert.equal(observation.operation,'inspect.session');assert.ok(session.agentSessionId&&session.run.runId);assert.deepEqual(session.terminalHandshake.run,session.run);assert.equal(session.terminalHandshake.acknowledged,true);assert.deepEqual(session.retiredRuns,[]);assert.ok(observation.observationScope.includes('Read-only'))
+ return {renderer:{path:rendererPath,sha256:sha(await readFile(rendererPath)),proof:renderer},main:{path:mainPath,sha256:sha(await readFile(mainPath)),proof:main},html:{path:htmlPath,sha256:sha(await readFile(htmlPath)),proof:html},runtime:{path:runtimePath,sha256:sha(await readFile(runtimePath)),proof:runtime},userRunObservation:{path:observationPath,sha256:sha(await readFile(observationPath)),proof:observation}}
 }
 await mkdir(evidence,{recursive:true});const identity=await bindings(),realCallers=await callers()
 if(receiptPath) {
@@ -66,7 +78,13 @@ if(receiptPath) {
  const review=JSON.parse(await readFile(arg('--review')?resolve(repository,arg('--review')):join(evidence,'independent-visual-review.json'),'utf8'));assert.equal(review.passed,true);assert.equal(review.sourceDigest,identity.digest);assert.ok(review.reviewer&&review.reviewer!=='launcher_surface')
  for(const frame of capture.frames){assert.equal(sha(await readFile(join(evidence,frame.file))),frame.sha256);assert.equal(review.frames.find(item=>item.file===frame.file)?.sha256,frame.sha256,'Independent review inspected exact image '+frame.file)}
  const sourceProofs=await consumeSourceProofs()
- const receipt={schema:'agentmux.local-file-preview-acceptance.v1',passed:true,identity,callers:realCallers,sourceProofs,capture,independentVisualReview:review,boundary:capture.boundary}
+ assert.equal(review.frames.find(item=>item.file==='html-native-browser.png')?.sha256,sourceProofs.html.proof.pngSha256,'Independent review inspected the exact native HTML image')
+ const controls=JSON.parse(await readFile(join(evidence,'control-mutation-receipt.json'),'utf8'))
+ const controlsSource=await readFile(join(repository,controls.source),'utf8');assert.equal(sha(controlsSource),controls.restoredSourceSha256);assert.equal(controlsSource.split(controls.productionBlock.text).length,2);assert.equal(sha(controls.productionBlock.text),controls.productionBlock.sha256)
+ assert.notEqual(controls.red.exitCode,0);assert.equal(controls.red.assertionError,true);const controlLog=await readFile(join(evidence,controls.red.log));assert.equal(sha(controlLog),controls.red.sha256);assert.ok(controlLog.includes('AssertionError'));assert.ok(controlLog.includes('Close split must not cover File header control'))
+ assert.ok(Object.keys(controls.red.sourceBindings).length>0);for(const [file,expected]of Object.entries(controls.red.sourceBindings))assert.equal(identity.sources[file],expected,'Native CSS mutation consumes the same final production/fixture source: '+file)
+ assert.ok(capture.frames.length>0);for(const process of capture.processes){assert.ok(process.render.frames.length>0);for(const frame of process.render.frames){assert.ok(frame.headerControls.length>0);for(const header of frame.headerControls){assert.ok(header.controls.length>0);for(const control of header.controls){assert.equal(control.overlapsClose,false);assert.equal(control.inside,true);if(!control.disabled)assert.equal(control.hitOwnControl,true)}}}}
+ const receipt={schema:'agentmux.local-file-preview-acceptance.v1',passed:true,identity,callers:realCallers,sourceProofs,controlMutation:controls,capture,independentVisualReview:review,boundary:capture.boundary}
  await writeFile(receiptPath,JSON.stringify(receipt,null,2));console.log(JSON.stringify({passed:true,receipt:receiptPath,sourceDigest:identity.digest}));process.exit(0)
 }
 const privateRoot=await mkdtemp('/tmp/amx-file-preview-'),profile=join(privateRoot,'profile'),workspace=join(privateRoot,'workspace'),outDir=join(privateRoot,'out')

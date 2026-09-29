@@ -65,6 +65,23 @@ const probe = {
       viewport: viewport ? { width: viewport.clientWidth, height: viewport.clientHeight, scrollWidth: viewport.scrollWidth, scrollHeight: viewport.scrollHeight } : null,
       controls: [...region.querySelectorAll('button')].map(element => ({ label: element.getAttribute('aria-label') ?? element.textContent, width: element.getBoundingClientRect().width, right: element.getBoundingClientRect().right, bottom: element.getBoundingClientRect().bottom })) }
   },
+  headerControls() {
+    return [...document.querySelectorAll('.workbench-region')].flatMap(region => {
+      const header = region.querySelector('.editor-header')
+      if (!header || region.closest('[inert]') || getComputedStyle(header).visibility !== 'visible' || !header.getBoundingClientRect().width) return []
+      const close = region.querySelector('.workbench-region__close')?.getBoundingClientRect()
+      const bounds = region.getBoundingClientRect()
+      return [{ regionId: region.getAttribute('data-workbench-region-id'), controls: [...header.querySelectorAll('button')].map(button => {
+        const box = button.getBoundingClientRect(), hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+        return { label: button.getAttribute('aria-label') || button.title || button.textContent, width: box.width,
+          inside: box.left >= bounds.left && box.right <= bounds.right && box.top >= bounds.top && box.bottom <= bounds.bottom,
+          overlapsClose: Boolean(close && box.left < close.right && box.right > close.left && box.top < close.bottom && box.bottom > close.top),
+          hitOwnControl: hit === button || Boolean(hit && button.contains(hit)), disabled: button.disabled,
+          hitElement: hit ? { tag: hit.tagName, class: hit.getAttribute('class'), label: hit.getAttribute('aria-label') } : null,
+          bounds: { left:box.left, top:box.top, width:box.width, height:box.height } }
+      }) }]
+    })
+  },
   flush() { return prepareRendererUpdate('quit') },
   key: (path: string) => documentKey(workspaceId, path)
 }
