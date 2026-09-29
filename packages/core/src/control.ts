@@ -7,6 +7,8 @@ import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
+import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
+export * from './metrics.js'
 export type * from './space-control.js'
 export type * from './desktop-focus-control.js'
 
@@ -19,6 +21,7 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'CONTROL_UNAVAILABLE',
   'CONTROL_OWNER_BUSY',
   'CONTROL_FAILED',
+  'METRICS_UNSUPPORTED',
   'CRASH_LOG_NOT_FILE',
   'CONTROL_CANCELLED',
   'CONTROL_REQUEST_CONFLICT',
@@ -219,6 +222,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' })
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client' }
 export type AgentMuxControlInspectTabRequest = RequestBase & {
@@ -542,6 +546,7 @@ export type AgentMuxControlCrashLogResult =
   | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
 
 export type AgentMuxControlRequest =
+  | AgentMuxControlMetricsRequest
   | AgentMuxSpaceControlRequest
   | AgentMuxControlInspectClientRequest
   | AgentMuxControlInspectTabRequest
@@ -634,6 +639,8 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | { operation: 'metrics.get'; observation: MetricsObservation }
+  | { operation: 'metrics.watch' }
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
@@ -801,6 +808,7 @@ export type AgentMuxControlBrowserSubscription = {
 }
 
 export interface AgentMuxControlHost {
+  metrics?: AgentMuxMetricsPort
   execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
   /**
    * 建立一条进度订阅。**可选**——不实现它的宿主照旧服务其余 14 个操作，订阅请求得到一个类型化的
@@ -862,6 +870,8 @@ export const AGENTMUX_CONTROL_MAX_MESSAGE_BYTES = 256 * 1024
  * owner 已坏或写入未提交。
  */
 const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+  'metrics.get': 'short',
+  'metrics.watch': 'short',
   'inspect.client': 'short',
   'inspect.tab': 'short',
   'inspect.region': 'short',

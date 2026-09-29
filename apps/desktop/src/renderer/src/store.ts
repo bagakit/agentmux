@@ -1754,7 +1754,7 @@ export function readRendererResourceOwnerCounts() {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('agentmux:resource-owner-counts', (event) => {
-    const target = event as CustomEvent<Record<string, number | boolean>>
+    const target = event as CustomEvent<Record<string, number | boolean | null>>
     Object.assign(target.detail, readRendererResourceOwnerCounts())
     target.detail.observed = true
   })
@@ -2437,7 +2437,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       else get().applyBrowserEvent(event)
     })
     const disposeControl = api.control.onRequest((request, signal) => request.operation === 'continuous-progress.observeInput'
-      ? readContinuousProgressInput(get(), request, signal) : get().executeControl(request, signal))
+      ? readContinuousProgressInput(get(), request, signal)
+      : request.operation === 'metrics.renderer'
+        ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), counts: readRendererResourceOwnerCounts() }
+        : get().executeControl(request, signal))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
@@ -3023,6 +3026,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal) {
+    if (request.operation === 'metrics.get' || request.operation === 'metrics.watch') {
+      throw Object.assign(new Error('Metrics queries belong to the Main observation owner.'), { code: 'CONTROL_FAILED' })
+    }
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') {
       throw Object.assign(new Error('Crash log diagnostics belong to the Main owner.'), { code: 'CONTROL_FAILED' })
     }

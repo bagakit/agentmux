@@ -1,11 +1,9 @@
-export type RendererResourceOwnerCounts = {
-  monacoEditors: number
-  monacoModels: number
-  documents: number
-  runtimeSubscriptions: number
-  terminalViews: number
-  terminalAddons: number
-  terminalListeners: number
+import type { RendererResourceOwnerCounts } from '@agentmux/core/control'
+export type { RendererResourceOwnerCounts } from '@agentmux/core/control'
+
+function readCount(getter: (() => number) | undefined): number | null {
+  if (!getter) return null
+  try { const count = getter(); return Number.isSafeInteger(count) && count >= 0 ? count : null } catch { return null }
 }
 
 export function rendererResourceOwnerCounts(input: {
@@ -20,8 +18,8 @@ export function rendererResourceOwnerCounts(input: {
   monacoModelCount?: () => number
 }): RendererResourceOwnerCounts {
   return {
-    monacoEditors: input.monacoEditorCount?.() ?? 0,
-    monacoModels: input.monacoModelCount?.() ?? 0,
+    monacoEditors: readCount(input.monacoEditorCount),
+    monacoModels: readCount(input.monacoModelCount),
     documents: input.documentCount,
     runtimeSubscriptions: input.runtimeSubscriptionCount,
     ...input.terminalOwners

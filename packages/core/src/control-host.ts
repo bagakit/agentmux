@@ -19,6 +19,7 @@ import {
   type AgentMuxControlBrowserEvent,
   type AgentMuxControlBrowserSubscribeRequest,
   type AgentMuxControlBrowserSubscription,
+  type AgentMuxControlMetricsRequest,
   type AgentMuxControlHost,
   type AgentMuxControlErrorReceipt,
   type AgentMuxControlErrorCode,
@@ -53,6 +54,7 @@ import {
   type AgentMuxTerminalViewObservation
 } from './control.js'
 import { AgentMuxError } from './errors.js'
+import { parseMetricsObservation, type MetricsObservation, type MetricsSubscription } from './metrics.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
@@ -258,6 +260,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (source.operation === 'metrics.get' || source.operation === 'metrics.watch') {
+    if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
+      throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
+    }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
   if (source.operation === 'diagnostics.crash-log.get' || source.operation === 'diagnostics.crash-log.reveal') {
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
       throw new AgentMuxError('Crash log diagnostics take no data parameters.', 'INVALID_CONTROL_REQUEST')
@@ -877,6 +885,15 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'metrics.get') {
+    settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { observation: parseMetricsObservation(result.observation) } }
+  }
+  if (operation === 'metrics.watch') {
+    settingsFields(result, [], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: {} }
+  }
   if (operation === 'settings.executors.refresh') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
@@ -1381,6 +1398,7 @@ export class AgentMuxControlServer {
       raw = await readMessage(socket)
       const request = parseAgentMuxControlRequest(raw)
       socket.setTimeout(agentMuxControlTimeoutMs(request.operation))
+      if (request.operation === 'metrics.get' || request.operation === 'metrics.watch') { await this.metrics(socket, request); return }
       if (request.operation === 'browser.subscribe') { await this.stream(socket, request); return }
       receipt = successReceipt(request, await this.control.execute(request))
       if (request.operation === 'inspect.client' && Buffer.byteLength(JSON.stringify(receipt)) > MAX_MESSAGE_BYTES) {
@@ -1421,6 +1439,99 @@ export class AgentMuxControlServer {
    *    承载方那边的监听留着，而它持有的是对已死 socket 的写入闭包，于是每条新事件都往一个关掉的
    *    socket 写——EPIPE 会被 `try` 吃掉，看起来一切正常，实际上泄漏一条订阅。
    */
+  private async metrics(socket: Socket, request: AgentMuxControlMetricsRequest): Promise<void> {
+    socket.setTimeout(0)
+    const controller = new AbortController()
+    let subscription: MetricsSubscription | undefined
+    let closed = false, opened = false, blocked = false
+    let latest: MetricsObservation | null = null
+    let pending: string | null = null
+    let wake: (() => void) | undefined
+    const changed = () => { wake?.(); wake = undefined }
+    const dispose = () => {
+      if (closed) return
+      closed = true
+      clearTimeout(deadline)
+      controller.abort()
+      try { subscription?.dispose() } catch { /* Termination remains authoritative if a host cleanup fails. */ }
+      subscription = undefined
+      pending = null
+      this.streams.delete(socket)
+      socket.off('close', disconnected); socket.off('end', disconnected); socket.off('error', disconnected)
+      socket.off('drain', drain)
+      changed()
+    }
+    const disconnected = () => { dispose(); socket.destroy() }
+    const frame = (event: 'attached' | 'snapshot' | 'end', result: unknown) => ({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true,
+      operation: request.operation, event, result
+    })
+    const encode = (payload: unknown): string => {
+      const line = `${JSON.stringify(payload)}\n`
+      if (Buffer.byteLength(line) > MAX_MESSAGE_BYTES) throw new AgentMuxError('Complete metrics observation exceeds the Control message budget.', 'CONTROL_FAILED')
+      return line
+    }
+    const fail = (error: unknown) => {
+      if (closed) return
+      const raw = controlErrorCode(typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined)
+      const code = raw === 'MESSAGE_TARGET_NOT_UNIQUE' ? 'CONTROL_FAILED' : raw
+      const line = encode({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId,
+        ok: false, operation: request.operation, error: { code, message: String(error instanceof Error ? error.message : error).slice(0, 4096) } })
+      dispose()
+      if (!socket.destroyed) socket.end(line, () => socket.destroy())
+    }
+    const send = (observation: MetricsObservation) => {
+      const line = encode(frame('snapshot', { observation }))
+      if (blocked) pending = line // At most one latest complete frame, never a queue.
+      else blocked = !socket.write(line)
+    }
+    const drain = () => {
+      blocked = false
+      if (pending && !closed) { const line = pending; pending = null; blocked = !socket.write(line) }
+    }
+    const deadline = setTimeout(() => fail(new AgentMuxError('Metrics observation did not establish within its owner deadline.', 'CONTROL_TIMEOUT')),
+      agentMuxControlTimeoutMs(request.operation) - 250)
+    // Own the socket and termination BEFORE calling an async host. This includes get.
+    socket.once('close', disconnected); socket.once('end', disconnected); socket.once('error', disconnected)
+    socket.on('drain', drain)
+    this.streams.add(socket)
+    if (!this.control.metrics) { fail(new AgentMuxError('Control owner does not provide resource metrics.', 'METRICS_UNSUPPORTED')); return }
+    try {
+      const establish = this.control.metrics.subscribe(value => {
+        if (closed) return
+        try {
+          latest = parseMetricsObservation(value)
+          if (opened) send(latest)
+          changed()
+        } catch (error) { fail(error) }
+      }, error => {
+        if (closed) return
+        if (error) fail(error)
+        else if (request.operation === 'metrics.get' || !opened) fail(new AgentMuxError('Metrics owner closed before a complete observation.', 'CONTROL_UNAVAILABLE'))
+        else { const line = encode(frame('end', { reason: 'owner-closed' })); dispose(); socket.end(line, () => socket.destroy()) }
+      }, controller.signal).then(value => {
+        if (closed || controller.signal.aborted) { try { value.dispose() } catch { /* Late establishment is already terminated. */ } }
+        else subscription = value
+        changed()
+      }, fail)
+      // A closed connection must not await an uncooperative establishing host.
+      while (!closed && !subscription) await new Promise<void>(resolve => { wake = resolve })
+      void establish
+      if (closed) return
+      if (request.operation === 'metrics.watch') {
+        blocked = !socket.write(encode(frame('attached', {})))
+        opened = true
+        clearTimeout(deadline)
+        if (latest) send(latest)
+        return
+      }
+      try {
+        while (!closed && !latest) await new Promise<void>(resolve => { wake = resolve })
+        if (!closed && latest) socket.end(encode(successReceipt(request, { operation: 'metrics.get', observation: latest })), () => socket.destroy())
+      } catch (error) { fail(error) } finally { dispose() }
+    } catch (error) { fail(error) }
+  }
+
   private async stream(socket: Socket, request: AgentMuxControlBrowserSubscribeRequest): Promise<void> {
     // 预算清零：`setTimeout(0)` 关掉超时（Node 的语义），不是"立刻超时"。
     socket.setTimeout(0)
@@ -1498,6 +1609,86 @@ export class AgentMuxControlServer {
     for (const event of beforeOpening) progress(event)
     beforeOpening.length = 0
   }
+}
+
+export type MetricsStreamFrame = {
+  schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string; ok: true; operation: 'metrics.watch'
+} & ({ event: 'attached'; result: Record<string, never> } |
+  { event: 'snapshot'; result: { observation: MetricsObservation } } | { event: 'end'; result: { reason: string } })
+
+/** A bounded NDJSON stream on the same public Unix endpoint; no Runtime connection. */
+export async function subscribeAgentMuxMetrics(
+  value: AgentMuxControlMetricsRequest,
+  handlers: { onFrame(frame: MetricsStreamFrame): void; onEnd(error?: Error): void },
+  options: { path?: string; signal?: AbortSignal } = {}
+): Promise<MetricsSubscription> {
+  const request = parseAgentMuxControlRequest(value)
+  if (request.operation !== 'metrics.watch') throw new AgentMuxError('Metrics watch request is invalid.', 'INVALID_CONTROL_REQUEST')
+  const socket = createConnection(options.path ?? defaultAgentMuxControlSocketPath())
+  let opened = false, closed = false
+  let buffer = Buffer.alloc(0)
+  return await new Promise<MetricsSubscription>((resolve, reject) => {
+    const deadline = setTimeout(() => finish(new AgentMuxError('Metrics watch establishment timed out.', 'CONTROL_TIMEOUT')),
+      agentMuxControlTimeoutMs(request.operation))
+    const abort = () => finish(new AgentMuxError('Metrics consumption was cancelled.', 'CONTROL_CANCELLED'))
+    const finish = (error?: Error) => {
+      if (closed) return
+      closed = true; clearTimeout(deadline); options.signal?.removeEventListener('abort', abort)
+      socket.destroy()
+      if (!opened) reject(error ?? new AgentMuxError('Metrics connection closed before opening.', 'CONTROL_PROTOCOL_ERROR'))
+      else handlers.onEnd(error)
+    }
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) { abort(); return }
+    socket.on('error', (error: NodeJS.ErrnoException) => finish(new AgentMuxError(error.message,
+      error.code === 'ENOENT' || error.code === 'ECONNREFUSED' ? 'CONTROL_UNAVAILABLE' : 'CONTROL_PROTOCOL_ERROR')))
+    const eof = () => finish(buffer.length > 0
+      ? new AgentMuxError('Metrics connection ended with an incomplete NDJSON frame.', 'CONTROL_PROTOCOL_ERROR') : undefined)
+    socket.once('end', eof)
+    socket.once('close', eof)
+    socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n`))
+    socket.on('data', chunk => {
+      if (closed) return
+      buffer = Buffer.concat([buffer, chunk])
+      try {
+        let newline: number
+        while ((newline = buffer.indexOf(10)) >= 0) {
+          if (newline + 1 > MAX_MESSAGE_BYTES) throw new AgentMuxError('Metrics frame exceeds the Control message budget.', 'CONTROL_PROTOCOL_ERROR')
+          const raw = JSON.parse(buffer.subarray(0, newline).toString('utf8')) as Record<string, unknown>
+          buffer = buffer.subarray(newline + 1)
+          if (raw.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION || raw.requestId !== request.requestId || raw.operation !== request.operation) {
+            throw new AgentMuxError('Metrics frame does not match its request.', 'CONTROL_PROTOCOL_ERROR')
+          }
+          if (raw.ok === false) {
+            const receipt = parseAgentMuxControlReceipt(raw)
+            if (!receipt.ok) throw new AgentMuxError(receipt.error.message, receipt.error.code)
+          }
+          if (raw.ok !== true || raw.error !== undefined) throw new AgentMuxError('Metrics frame is invalid.', 'CONTROL_PROTOCOL_ERROR')
+          if (Object.keys(raw).some(key => !['schemaVersion','requestId','ok','operation','event','result'].includes(key))) {
+            throw new AgentMuxError('Metrics frame has unexpected fields.', 'CONTROL_PROTOCOL_ERROR')
+          }
+          const result = object(raw.result, 'Metrics frame is invalid.', 'CONTROL_PROTOCOL_ERROR')
+          let frame: MetricsStreamFrame
+          if (!opened) {
+            if (raw.event !== 'attached' || Object.keys(result).length) throw new AgentMuxError('Metrics opening frame is invalid.', 'CONTROL_PROTOCOL_ERROR')
+            opened = true; clearTimeout(deadline)
+            frame = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: 'metrics.watch', event: 'attached', result: {} }
+            resolve({ dispose: () => finish() })
+          } else if (raw.event === 'snapshot') {
+            settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+            frame = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: 'metrics.watch', event: 'snapshot', result: { observation: parseMetricsObservation(result.observation) } }
+          } else if (raw.event === 'end') {
+            settingsFields(result, ['reason'], 'CONTROL_PROTOCOL_ERROR')
+            frame = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: 'metrics.watch', event: 'end', result: { reason: text(result.reason, 'Metrics end reason', 'CONTROL_PROTOCOL_ERROR') } }
+          } else throw new AgentMuxError('Metrics stream boundary is invalid.', 'CONTROL_PROTOCOL_ERROR')
+          handlers.onFrame(frame)
+          if (closed) return
+          if (frame.event === 'end') { finish(); return }
+        }
+        if (buffer.length > MAX_MESSAGE_BYTES) throw new AgentMuxError('Metrics frame exceeds the Control message budget.', 'CONTROL_PROTOCOL_ERROR')
+      } catch (error) { finish(error instanceof AgentMuxError ? error : new AgentMuxError('Metrics stream is invalid.', 'CONTROL_PROTOCOL_ERROR')) }
+    })
+  })
 }
 
 export async function requestAgentMuxControl(value: AgentMuxControlRequest, path = defaultAgentMuxControlSocketPath()): Promise<AgentMuxControlSuccessReceipt> {

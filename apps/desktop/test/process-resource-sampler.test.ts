@@ -240,7 +240,7 @@ describe('ProcessResourceSampler', () => {
     vi.useFakeTimers()
     try {
       const { readTable, sampler, seen } = harness()
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       // 把时间推得远远超过采样周期：真有常驻定时器，这里必然已经采过很多次。
       await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 20)
       expect(readTable).not.toHaveBeenCalled()
@@ -255,7 +255,7 @@ describe('ProcessResourceSampler', () => {
     vi.useFakeTimers()
     try {
       const { readTable, sampler, watch } = harness()
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stopA = watch()
       const stopB = watch()
       await vi.advanceTimersByTimeAsync(0)
@@ -286,7 +286,7 @@ describe('ProcessResourceSampler', () => {
       const { readTable, sampler, watch } = harness({
         table: () => new Promise<string>((resolve) => { release = resolve })
       })
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(readTable).toHaveBeenCalledTimes(1)
@@ -314,7 +314,7 @@ describe('ProcessResourceSampler', () => {
       const { sampler, watch, latest } = harness({
         table: async () => { throw new Error('ps timed out') }
       })
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(latest()?.unavailable).toContain('ps timed out')
@@ -342,7 +342,7 @@ describe('ProcessResourceSampler', () => {
           return TABLE_TEXT
         }
       })
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       // 前提自检：先真的采到了一条带数字的样本，否则下面全是空话。
@@ -367,8 +367,8 @@ describe('ProcessResourceSampler', () => {
     vi.useFakeTimers()
     try {
       const { sampler, watch, latest } = harness()
-      sampler.trackRun('gone', 99999)
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('gone', 99999, 'local')
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(latest()?.runs.find((run) => run.runId === 'gone')?.rssKib).toBeNull()
@@ -386,17 +386,17 @@ describe('ProcessResourceSampler', () => {
     vi.useFakeTimers()
     try {
       const { sampler, watch, latest } = harness({ table: async () => TABLE })
-      sampler.trackRun('inner', 101)
-      sampler.trackRun('outer', 100)
-      sampler.trackRun('claimed', 103)
-      sampler.trackRun('missing', 99999)
+      sampler.trackRun('inner', 101, 'local')
+      sampler.trackRun('outer', 100, 'local')
+      sampler.trackRun('claimed', 103, 'local')
+      sampler.trackRun('missing', 99999, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(latest()?.runs).toEqual([
-        { runId: 'inner', rootPid: 101, processCount: 2, rssKib: 2500, rootRssKib: 2000, descendantsRssKib: 500, descendantProcessCount: 1, cpuPercent: 1.5 },
-        { runId: 'outer', rootPid: 100, processCount: 2, rssKib: 13000, rootRssKib: 10000, descendantsRssKib: 3000, descendantProcessCount: 1, cpuPercent: 7 },
-        { runId: 'claimed', rootPid: 103, processCount: null, rssKib: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null },
-        { runId: 'missing', rootPid: 99999, processCount: null, rssKib: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null }
+        { runId: 'inner', hostId: 'local', rootPid: 101, processCount: 2, rssKib: 2500, rootRssKib: 2000, descendantsRssKib: 500, descendantProcessCount: 1, cpuPercent: 1.5 },
+        { runId: 'outer', hostId: 'local', rootPid: 100, processCount: 2, rssKib: 13000, rootRssKib: 10000, descendantsRssKib: 3000, descendantProcessCount: 1, cpuPercent: 7 },
+        { runId: 'claimed', hostId: 'local', rootPid: 103, processCount: null, rssKib: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null },
+        { runId: 'missing', hostId: 'local', rootPid: 99999, processCount: null, rssKib: null, rootRssKib: null, descendantsRssKib: null, descendantProcessCount: null, cpuPercent: null }
       ])
       stop()
       sampler.dispose()
@@ -409,7 +409,7 @@ describe('ProcessResourceSampler', () => {
     vi.useFakeTimers()
     try {
       const { sampler, watch, latest } = harness()
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(latest()?.runs).toHaveLength(1)
@@ -433,7 +433,7 @@ describe('ProcessResourceSampler', () => {
       const { sampler, watch, latest, advance } = harness({
         table: async () => `  PID  PPID    RSS  %CPU\n  100     1  10000  ${cpu}`
       })
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       expect(latest()?.runs[0]?.cpuPercent).toBe(90)
@@ -466,7 +466,7 @@ describe('ProcessResourceSampler', () => {
       const { sampler, watch, seen, latest, advance } = harness({
         table: () => new Promise<string>((resolve) => { release = resolve })
       })
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
 
       // 面板打开，第一次采样落地：安静基线 5%。
       const stop = watch()
@@ -514,7 +514,7 @@ describe('ProcessResourceSampler', () => {
       const { sampler, watch, seen, advance } = harness({
         table: () => new Promise<string>((resolve, reject) => { release = resolve; fail = reject })
       })
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       release(tableWithCpu('5.0'))
@@ -548,7 +548,7 @@ describe('ProcessResourceSampler', () => {
     vi.useFakeTimers()
     try {
       const { readTable, sampler, watch } = harness()
-      sampler.trackRun('run-a', 100)
+      sampler.trackRun('run-a', 100, 'local')
       watch()
       await vi.advanceTimersByTimeAsync(0)
       const before = readTable.mock.calls.length

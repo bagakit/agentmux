@@ -353,18 +353,18 @@ export class RuntimeController {
   /** Observe already-connected owners; this never reconnects, stops, attaches, or removes a Run. */
   async resourceUsageObservation(): Promise<RuntimeUsage[]> {
     const hosts = [...this.hosts]
-    const storage = new Map<string, Promise<Pick<RuntimeUsage, 'runtimeStorage' | 'runtimeStorageUnavailable'>>>()
+    const storage = new Map<string, Promise<Pick<RuntimeUsage, 'runtimeStorage' | 'runtimeStorageUnavailable' | 'runtimeStorageObservedAt'>>>()
     const observeStorage = async (client: AgentMuxClient) => {
       try {
         const directory = (await client.runtimeDiagnostics()).ctxmux.state.servingDirectory
-        if (directory === null) return { runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified' }
+        if (directory === null) return { runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified', runtimeStorageObservedAt: null }
         if (!storage.has(directory)) storage.set(directory, runtimeStorageUsage(directory).then(
-          (runtimeStorage) => ({ runtimeStorage, runtimeStorageUnavailable: null }),
-          (error: unknown) => ({ runtimeStorage: null, runtimeStorageUnavailable: error instanceof Error ? error.message : String(error) })
+          (runtimeStorage) => ({ runtimeStorage, runtimeStorageUnavailable: null, runtimeStorageObservedAt: Date.now() }),
+          (error: unknown) => ({ runtimeStorage: null, runtimeStorageUnavailable: error instanceof Error ? error.message : String(error), runtimeStorageObservedAt: null })
         ))
         return await storage.get(directory)!
       } catch (error) {
-        return { runtimeStorage: null, runtimeStorageUnavailable: error instanceof Error ? error.message : String(error) }
+        return { runtimeStorage: null, runtimeStorageUnavailable: error instanceof Error ? error.message : String(error), runtimeStorageObservedAt: null }
       }
     }
     return await Promise.all(hosts.map(async ([hostId, { client, executionHost }]): Promise<RuntimeUsage> => {
@@ -375,7 +375,7 @@ export class RuntimeController {
         ),
         executionHost.kind === 'local'
           ? observeStorage(client)
-          : Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Remote Runtime storage is unavailable' })
+          : Promise.resolve({ runtimeStorage: null, runtimeStorageUnavailable: 'Remote Runtime storage is unavailable', runtimeStorageObservedAt: null })
       ])
       return {
         hostId,
@@ -1692,10 +1692,10 @@ export class RuntimeController {
     }
     // 资源采样要知道每个 run 的 pid，而 Core 已经在这条事件里报了它——顺手记下即可，
     // 不新建第二份 pid 台账（第二份会与 Core 漂移，且漂移时不会有任何测试变红）。
-    if (event.type === 'process-state') {
-      if (event.state === 'running') this.resourceSampler.trackRun(event.run.runId, event.pid)
+    if (this.hosts.get(hostId)?.executionHost.kind === 'local' && event.type === 'process-state') {
+      if (event.state === 'running') this.resourceSampler.trackRun(event.run.runId, event.pid, hostId)
       else this.resourceSampler.forgetRun(event.run.runId)
-    } else if (event.type === 'run-removed') {
+    } else if (this.hosts.get(hostId)?.executionHost.kind === 'local' && event.type === 'run-removed') {
       this.resourceSampler.forgetRun(event.run.runId)
     }
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event }
