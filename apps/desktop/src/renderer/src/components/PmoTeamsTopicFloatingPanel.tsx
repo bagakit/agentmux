@@ -9,6 +9,7 @@ import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pinPmoTeamsTopicFloating,
   createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, PMO_FLOATING_TAB_SLOT_PREFIX,
+  resolvePmoTeamsTopicFloatingSize, type PmoTeamsTopicFloatingSize,
   type PmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { moteTargetStatus, usePmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 import { pmoFocusSessionId } from '../lib/agent-focus'
@@ -128,6 +129,41 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   const spaceActionRef = useRef<AbortController | null>(null)
   const [preparationAttempt, setPreparationAttempt] = useState(0)
   const [preparationIssue, setPreparationIssue] = useState<string | null>(null)
+  const positionRef = useRef<(() => Promise<void>) | undefined>(undefined)
+  const availableSize = useRef<PmoTeamsTopicFloatingSize>({ width: 0, height: 0 })
+  const drag = useRef<{ pointerId: number; handle: HTMLElement; x: number; y: number;
+    start: PmoTeamsTopicFloatingSize; preferred: PmoTeamsTopicFloatingSize; size: PmoTeamsTopicFloatingSize;
+    changedX: boolean; changedY: boolean; cursor: string; userSelect: string } | null>(null)
+  const frame = useRef<number | null>(null)
+  const [resizing, setResizing] = useState(false)
+  const endResize = useCallback((commit: boolean) => {
+    const gesture = drag.current
+    if (!gesture) return
+    drag.current = null
+    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    frame.current = null
+    if (gesture.handle.hasPointerCapture(gesture.pointerId)) gesture.handle.releasePointerCapture(gesture.pointerId)
+    document.body.style.cursor = gesture.cursor; document.body.style.userSelect = gesture.userSelect
+    setResizing(false)
+    const widthChanged = gesture.changedX && gesture.size.width !== gesture.start.width
+    const heightChanged = gesture.changedY && gesture.size.height !== gesture.start.height
+    if (commit && (widthChanged || heightChanged)) setFloating({ size: {
+      width: widthChanged ? gesture.size.width : gesture.preferred.width,
+      height: heightChanged ? gesture.size.height : gesture.preferred.height
+    } })
+    void positionRef.current?.()
+  }, [setFloating])
+  useEffect(() => {
+    const cancel = () => endResize(false)
+    const escape = (event: KeyboardEvent) => {
+      if (!drag.current || event.key !== 'Escape' || isImeOwnedKeyboardEvent(event)) return
+      event.preventDefault(); event.stopImmediatePropagation(); endResize(false)
+    }
+    window.addEventListener('blur', cancel)
+    document.addEventListener('keydown', escape, true)
+    return () => { window.removeEventListener('blur', cancel); document.removeEventListener('keydown', escape, true); cancel() }
+  }, [endResize])
+  useEffect(() => { if (!visible) endResize(false) }, [visible, endResize])
 
   useEffect(() => () => { spaceActionRef.current?.abort(); spaceActionRef.current = null },
     [floating.open, floating.preview, target.topicId, target.tabId])
@@ -168,16 +204,20 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       const result = await computePosition(anchor, panel, { placement: 'top-start', strategy: 'fixed', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
         apply({ availableWidth, availableHeight }) {
           if (disposed) return
-          panel.style.width = Math.max(0, Math.min(720, availableWidth)) + 'px'
-          panel.style.height = Math.max(0, Math.min(520, availableHeight)) + 'px'
+          availableSize.current = { width: availableWidth, height: availableHeight }
+          const dimensions = resolvePmoTeamsTopicFloatingSize(drag.current?.size ?? floatingRef.current.size,
+            availableSize.current, floatingRef.current.railMode ?? 'cards', window.innerWidth)
+          panel.style.width = dimensions.width + 'px'
+          panel.style.height = dimensions.height + 'px'
         }
       })] })
       if (!disposed) Object.assign(panel.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
     }
     panel.style.visibility = 'hidden'
+    positionRef.current = position
     const stop = autoUpdate(anchor, panel, () => { void position() })
-    return () => { disposed = true; stop() }
-  }, [visible])
+    return () => { disposed = true; stop(); if (positionRef.current === position) positionRef.current = undefined }
+  }, [visible, floating.size?.width, floating.size?.height, railMode])
   useEffect(() => {
     if (!floating.preview) return
     const dismiss = (event: KeyboardEvent) => {
@@ -217,7 +257,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     spaceActionRef.current?.abort()
     setFloating({ open: true, preview: false, targetTopicId: topicId, targetTabId: tabId })
   }, [setFloating])
-  const close = useCallback(() => { spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [])
+  const close = useCallback(() => { endResize(false); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [endResize])
   const openSpace = useCallback(() => {
     spaceActionRef.current?.abort()
     const controller = new AbortController(); spaceActionRef.current = controller
@@ -247,12 +287,52 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     data-mote-target-session={target.session?.id} data-mote-status={target.statusText}
     data-mote-presentation={floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed'}
     data-mote-navigation={railMode}
+    data-mote-resizing={resizing ? 'true' : 'false'}
     onToggle={event => { if (event.newState === 'closed' && (floatingRef.current.open || floatingRef.current.preview)) requestPmoTeamsTopicFloatingClose({ restoreFocus: false }) }}>
     <span hidden id="mote-floating-context-status">{target.label} · {target.statusText}</span>
+    {visible ? <span className="pmo-teams-topic-floating__resize" role="separator" tabIndex={0}
+      aria-label="Resize Mote window" aria-orientation="vertical"
+      onPointerDown={event => {
+        if (drag.current || event.button !== 0 || !panelRef.current) return
+        event.preventDefault()
+        const rect = panelRef.current.getBoundingClientRect()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        drag.current = { pointerId: event.pointerId, handle: event.currentTarget, x: event.clientX, y: event.clientY,
+          start: { width: rect.width, height: rect.height }, size: { width: rect.width, height: rect.height },
+          preferred: floatingRef.current.size ?? { width: rect.width, height: rect.height }, changedX: false, changedY: false,
+          cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }
+        document.body.style.cursor = 'nesw-resize'; document.body.style.userSelect = 'none'; setResizing(true)
+      }}
+      onPointerMove={event => {
+        const gesture = drag.current
+        if (!gesture || event.pointerId !== gesture.pointerId) return
+        gesture.changedX = event.clientX !== gesture.x; gesture.changedY = event.clientY !== gesture.y
+        gesture.size = resolvePmoTeamsTopicFloatingSize({ width: gesture.start.width + event.clientX - gesture.x,
+          height: gesture.start.height + gesture.y - event.clientY }, availableSize.current, railMode, window.innerWidth)
+        if (frame.current === null) frame.current = requestAnimationFrame(() => { frame.current = null; void positionRef.current?.() })
+      }}
+      onPointerUp={event => { if (event.pointerId === drag.current?.pointerId) endResize(true) }}
+      onPointerCancel={event => { if (event.pointerId === drag.current?.pointerId) endResize(false) }}
+      onLostPointerCapture={event => { if (event.pointerId === drag.current?.pointerId) endResize(false) }}
+      onKeyDown={event => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) || !panelRef.current) return
+        event.preventDefault(); event.stopPropagation()
+        if (drag.current) return
+        pinPmoTeamsTopicFloating()
+        const rect = panelRef.current.getBoundingClientRect(), step = event.shiftKey ? 20 : 10
+        const horizontal = event.key === 'ArrowRight' || event.key === 'ArrowLeft'
+        const dimensions = resolvePmoTeamsTopicFloatingSize({ width: rect.width + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0),
+          height: rect.height + (event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0) }, availableSize.current, railMode, window.innerWidth)
+        if (horizontal ? dimensions.width === rect.width : dimensions.height === rect.height) return
+        const preferred = floatingRef.current.size ?? rect
+        setFloating({ size: { width: horizontal ? dimensions.width : preferred.width,
+          height: horizontal ? preferred.height : dimensions.height } })
+      }} /> : null}
     {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={target.tabId} railMode={railMode}
       onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
       onSelect={selectMote} onOpenSpace={openSpace} onClose={close} /> : null}
     <div className="pmo-teams-topic-floating__content">
+    {floating.preferenceIssue ? <div role="status" className="workbench-restore-notice mote-size-notice">{floating.preferenceIssue}</div> : null}
     {!scratch ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
     {visible && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>

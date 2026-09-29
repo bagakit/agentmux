@@ -695,13 +695,13 @@ app.whenReady().then(async () => {
       })
       await recordStep('shortcuts-covered-preserve', async () => {
         await evaluate('window.focusProofOpenShortcuts(); true')
-        await until("document.querySelector('[aria-label=\"Close keyboard shortcuts\"]')")
+        await until("document.querySelector('[data-settings-page=\"keyboard-shortcuts\"]')")
         const cursor = calls.length
         const receipt = await cli(['focus', '--goal', 'private-goal-exact'])
-        assert.equal(receipt.presentation.state, 'covered'); assert.deepEqual(receipt.presentation.blockers, ['shortcuts-help'])
+        assert.equal(receipt.presentation.state, 'covered'); assert.deepEqual(receipt.presentation.blockers, ['settings'])
         assert.deepEqual(lifecycle(calls.slice(cursor)), [])
         await screenshot('shortcuts-covered')
-        await evaluate("document.querySelector('[aria-label=\"Close keyboard shortcuts\"]').click(); true")
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click(); true")
         return { receipt }
       })
       await recordStep('original-ui-tab-close-keeps-session-and-parent', async () => {

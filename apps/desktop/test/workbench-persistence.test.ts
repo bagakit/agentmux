@@ -129,7 +129,7 @@ describe('durable Workbench presentation', () => {
     expect(restored.layouts.workspace?.groups[0]?.activeTabId).toBe(tab.id)
   })
 
-  it('persists only attached Session Regions and keeps their remaining split tree', () => {
+  it('persists attached Sessions and Project Launchers with their original split tree', () => {
     let tab = splitView()
     tab = addWorkbenchRegion(tab, 'right-bottom', 'right', {
       regionId: 'launcher',
@@ -141,8 +141,29 @@ describe('durable Workbench presentation', () => {
       layouts: { workspace: createWorkspaceLayout('group', [tab.id]) }
     })
 
-    expect(workbenchSurfaces(projected.tabs[tab.id]!)).toHaveLength(3)
-    expect(projected.tabs[tab.id]!.regions.launcher).toBeUndefined()
+    expect(workbenchSurfaces(projected.tabs[tab.id]!)).toHaveLength(4)
+    expect(projected.tabs[tab.id]!.regions.launcher).toEqual(tab.regions.launcher)
+    expect(projected.tabs[tab.id]!.layout).toEqual(tab.layout)
+  })
+
+  it('round-trips an ordinary Project Launcher and its focused split without changing the draft identity', () => {
+    const launcher = createWorkbenchTab('project-launcher', {
+      regionId: 'original-draft-region', kind: 'launcher', workspaceId: 'workspace'
+    })
+    let split = addWorkbenchRegion(launcher, 'original-draft-region', 'right', {
+      regionId: 'healthy-neighbor', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'neighbor'
+    })
+    split = { ...split, layout: { ...split.layout, activeRegionId: 'original-draft-region' } }
+    const layout = createWorkspaceLayout('original-group', [split.id])
+    const projected = projectPersistedWorkbench({ tabs: { [split.id]: split }, layouts: { workspace: layout } })
+    expect(projected.tabs[split.id]).toEqual(split)
+    const restored = restorePersistedWorkbench({ config, sessions: [session('neighbor')],
+      persisted: JSON.parse(JSON.stringify(projected)), createTabGroupId: () => 'unwanted-new-group' })
+    expect(restored.tabs[split.id]).toEqual(split)
+    expect(restored.layouts.workspace).toEqual(layout)
+    expect(restored.tabs[split.id]!.layout.activeRegionId).toBe('original-draft-region')
+    const solo = projectPersistedWorkbench({ tabs: { [launcher.id]: launcher }, layouts: { workspace: createWorkspaceLayout('solo-group', [launcher.id]) } })
+    expect(restorePersistedWorkbench({ config, sessions: [], persisted: solo, createTabGroupId: () => 'unwanted-new-group' }).tabs[launcher.id]).toEqual(launcher)
   })
 
   it('restores a Scratch View Topic when its Agent cwd is the Topic directory', () => {
@@ -412,19 +433,15 @@ describe('durable Workbench file/browser projection', () => {
   })
 
   it('G5: on restore, removes only the non-surviving Region and keeps the tab (collapses to leaf)', () => {
-    // A file's out-of-bounds case cannot be a split sibling of a surviving Region: addWorkbenchRegion
-    // forces every Region to share the tab's workspaceId, so an unconfigured file implies an
-    // unconfigured agent sibling too (that is G6, whole-tab collapse). The genuinely constructible
-    // partial-removal on the non-session branch is [agent(attached, configured) | launcher(non-topic)]:
-    // the agent survives, the non-topic launcher is dropped via removeWorkbenchRegion. This one guard
-    // kills BOTH restore mutations — return-null (whole tab dies, agent lost) and bare-continue (the
-    // launcher wrongly survives) — and proves the split collapses to a leaf without killing the tab.
-    const viewId = 'view:agent-launcher'
+    // A not-yet-attached Terminal has no confirmed Run to restore; only that Region is removed.
+    const viewId = 'view:agent-pending-terminal'
     const left = initialWorkbenchRegionId(viewId)
     let tab = createWorkbenchTab(viewId, agentSurface(left, 'al-agent'))
     tab = addWorkbenchRegion(tab, left, 'right', {
-      regionId: 'al-launcher',
-      kind: 'launcher',
+      regionId: 'al-pending-terminal',
+      kind: 'terminal',
+      phase: 'launching',
+      sessionId: 'not-attached',
       workspaceId: 'workspace'
     })
     const restored = restorePersistedWorkbench({
@@ -439,7 +456,7 @@ describe('durable Workbench file/browser projection', () => {
     const restoredTab = restored.tabs[viewId]!
     expect(restoredTab).toBeDefined()
     expect(workbenchSurfaces(restoredTab)).toHaveLength(1)
-    expect(restoredTab.regions['al-launcher']).toBeUndefined()
+    expect(restoredTab.regions['al-pending-terminal']).toBeUndefined()
     expect(restoredTab.regions[left]!.kind).toBe('agent')
     expect(restoredTab.layout.root.type).toBe('leaf')
   })

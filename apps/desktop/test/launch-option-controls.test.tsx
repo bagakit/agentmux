@@ -24,6 +24,8 @@ describe('compact actual launch options', () => {
   it('uses one compact action without duplicate count/default copy, opening only on explicit click', async () => {
     await mount(); expect(container.textContent).toBe('Options'); expect(document.querySelector('[role="dialog"]')).toBeNull()
     await click('[aria-label="Launch options"]'); expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sandbox')
+    expect(document.querySelector<HTMLElement>('[role="dialog"]')!.style.visibility).toBe('visible')
+    expect(document.querySelector('[data-overlay-host] [role="dialog"]')).not.toBeNull()
     expect(document.querySelectorAll('select')).toHaveLength(1); expect(document.querySelector('select')!.value).toBe('')
   })
   it('passes the exact choice, keeps dangerous posture in the compact summary, and clears to defaults', async () => {

@@ -21,6 +21,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const relativeScript = path.relative(root, fileURLToPath(import.meta.url))
 const sources = [relativeScript,
   'apps/desktop/scripts/fixtures/settings-liquid-motion/scenario.cjs',
+  ...(task === 'prompts' ? ['apps/desktop/scripts/fixtures/settings-liquid-motion/scenario-prompts.cjs'] : []),
   'apps/desktop/scripts/fixtures/settings-liquid-motion/vitest.config.mts',
   'apps/desktop/scripts/fixtures/settings-liquid-motion/product-dom.tsx',
   `apps/desktop/test/${task === 'settings' ? 'settings-liquid-selection' : 'settings-prompts-liquid'}.test.tsx`]
@@ -114,7 +115,11 @@ async function mutations() {
     'no-finite-shape-change': 'Natural movement includes visible finite shape change',
     'retarget-cancelled-inline-endpoint': 'Rapid retarget continues from the current visible shape instead of the cancelled inline endpoint',
     'ignore-dynamic-reduced-motion': 'dynamic reduced motion: product marks its paused state',
-    'ignore-real-window-hidden': 'real hidden window: product marks its paused state'
+    'ignore-real-window-hidden': 'real hidden window: product marks its paused state',
+    'prompt-selection-disconnected': 'Selected surface and native target are connected',
+    'prompt-active-hard-true': 'active=false releases every owned Prompt resize target including the visibility sentinel',
+    'prompt-textarea-remounted': 'One actual connected ComposerTextarea survives selection, filtering and section changes',
+    'prompt-status-always-saved': 'Selected authored Prompt reports Unsaved before the whole-library save'
   }
   const selectedVariants = mutationOnly === null ? variants : variants.filter(variant => variant.id === mutationOnly)
   assert.ok(selectedVariants.length > 0 && (mutationOnly === null || selectedVariants.length === 1), 'Debug selection must match exactly one existing owning mutant')
@@ -138,7 +143,7 @@ async function mutations() {
       const raw = JSON.parse(await fs.readFile(path.join(at, variant.id, `${mode}.json`), 'utf8'))
       assert.notEqual(mutant.completed, true, 'Owning mutant must be falsified')
       assert.equal(raw.failure?.name, 'AssertionError', 'Compiler/setup/no-test errors never count as mutation RED')
-      if (task === 'settings') assert.equal(raw.failure.message.split('\n')[0], owningFailures[variant.id], 'The specific owning assertion must fail; sampling opportunity/reachability/setup failures never count as RED')
+      assert.equal(raw.failure.message.split('\n')[0], owningFailures[variant.id], 'The specific owning assertion must fail; sampling opportunity/reachability/setup failures never count as RED')
       receipt.runs.push({ id: variant.id, outcome: 'AssertionRED', sourceSha256: hash(variant.source), failure: raw.failure })
       assert.equal(hash(await fs.readFile(file)), hash(variant.source), 'Exact restore never overwrites an unexpected concurrent edit')
       await fs.writeFile(file, original); inFlight = undefined

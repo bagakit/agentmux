@@ -185,7 +185,7 @@ describe('AgentSessionComposer adapter', () => {
     composer.props.onSubmit()
 
     await vi.waitFor(() => {
-      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context', expect.any(Function))
+      expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'Browser element context', expect.any(Function), 'manual')
       expect(fixture.state.clearAgentComposerDraftIfUnchanged)
         .toHaveBeenCalledWith('agent-1', 'Browser element context')
     })
@@ -211,7 +211,7 @@ describe('AgentSessionComposer adapter', () => {
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     expect(composer.props.onQueue).toBeTypeOf('function')
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file', expect.any(Function))
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'Actually, edit the other file', expect.any(Function), undefined, 'manual')
   })
 
   it('clears the draft when a message enters the queue, so entering is observable', () => {
@@ -222,7 +222,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.agentComposerDrafts = { 'agent-1': 'queue me and clear the box' }
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box', expect.any(Function))
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'queue me and clear the box', expect.any(Function), undefined, 'manual')
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('agent-1', 'queue me and clear the box')
   })
 
@@ -235,7 +235,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.enqueueAgentSteer.mockReturnValueOnce(false)
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onQueue?: () => void } }
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue', expect.any(Function))
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'too large to queue', expect.any(Function), undefined, 'manual')
     expect(fixture.state.setAgentComposerDraft).not.toHaveBeenCalled()
   })
 
@@ -246,7 +246,7 @@ describe('AgentSessionComposer adapter', () => {
     fixture.state.send.mockReturnValueOnce(false)
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as { props: { onSubmit(): void } }
     composer.props.onSubmit()
-    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent', expect.any(Function))
+    expect(fixture.state.send).toHaveBeenCalledWith('agent-1', 'same words, distinct intent', expect.any(Function), 'manual')
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
   })
 
@@ -371,7 +371,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(composer.props.onSubmit).toBeUndefined()
     expect(composer.props.onQueue).toBeTypeOf('function')
     composer.props.onQueue?.()
-    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out', expect.any(Function))
+    expect(fixture.state.enqueueAgentSteer).toHaveBeenCalledWith('agent-1', 'This must not go out', expect.any(Function), undefined, 'manual')
   })
 
   it('一张待答卡片不许夺走中断——daemon 那条路从来没关过', () => {
@@ -553,7 +553,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', 'draft edit without execution')
     expect(fixture.state.send).not.toHaveBeenCalled()
     composer.props.onSubmit!()
-    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('agent-1', text, expect.any(Function)))
+    await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('agent-1', text, expect.any(Function), 'manual'))
     expect(fixture.state.setPosture).not.toHaveBeenCalled()
   })
 

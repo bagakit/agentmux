@@ -36,13 +36,38 @@ async function fill(row: Element, name: string, value: string) {
 async function save() {
   await dom.click('.settings-pane-actions button')
   for (let attempt = 0; attempt < 100; attempt++) {
-    await act(async () => { await new Promise((done) => setTimeout(done, 5)) })
+    await act(async () => { await new Promise((done) => setTimeout(done, 50)) })
     if (!dom.container.querySelector('.settings-pane-actions [role="status"]')?.textContent?.includes('Saving')) break
   }
-  expect(dom.container.querySelector('.settings-pane-actions [role="status"]')?.textContent).not.toContain('Saving')
   expect(dom.container.querySelector('[role="alert"]')).toBeNull()
+  expect(dom.container.querySelector('.settings-pane-actions [role="status"]')?.textContent).not.toContain('Saving')
 }
 describe('real Prompts Settings uses the same durable state bindings', () => {
+  it('explains independent activity, process and input boundaries without changing saved bindings', async () => {
+    await mount()
+    const choices = [...dom.container.querySelectorAll<HTMLLabelElement>('.prompt-state-settings__choices label')]
+    expect(choices).toHaveLength(9)
+    expect(choices.map(label => label.querySelector('input')!.value)).toEqual([
+      'starting', 'running', 'disconnected', 'working', 'waiting', 'blocked', 'done', 'exited', 'error'
+    ])
+    const choice = (state: string) => choices.find(label => label.querySelector('input')!.value === state)!
+    expect(choice('running').querySelector('strong')!.textContent).toBe('Status unknown running')
+    expect(choice('running').querySelector('small')!.textContent).toContain('current activity is unknown')
+    expect(choice('running').querySelector('small')!.textContent).toContain('does not mean working, idle, or input ready')
+    expect(choice('working').querySelector('small')!.textContent).toContain('activity statement, separate from input readiness')
+    expect(choice('done').querySelector('strong')!.textContent).toBe('Turn ended done')
+    expect(choice('done').querySelector('small')!.textContent).toContain('does not mean the process exited, the goal is complete')
+    expect(choice('waiting').querySelector('small')!.textContent).toContain('permission or question is shown separately')
+    expect(choice('blocked').querySelector('small')!.textContent).toContain('does not identify a specific request')
+    expect(choice('error').querySelector('small')!.textContent).toContain('process may still be running')
+    await act(async () => choice('running').querySelector<HTMLInputElement>('input')!.click())
+    expect(choice('working').querySelector<HTMLInputElement>('input')!.checked).toBe(false)
+    expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('receiving Agent avatar')
+    expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('instruction only; pending permission or question requests queue it')
+    expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('Your draft is kept')
+    await save()
+    expect((await new ConfigStore(f.store.filePath).get()).composerShortcuts).toEqual([{ ...original, states: ['running'] }])
+  })
   it('selects all display states, edits content and Provider, then reads them through a new ConfigStore', async () => {
     await mount()
     const choices = [...dom.container.querySelectorAll<HTMLInputElement>('.prompt-state-settings input')]
@@ -57,7 +82,7 @@ describe('real Prompts Settings uses the same durable state bindings', () => {
     const expected = [{ ...original, label: '大白话说说做了什么', body: '大白话说清楚\n1. 做了什么\n2. 下一步继续优化', providerId: 'codex', states: [...COMPOSER_PROMPT_STATES] }]
     expect(f.owner.current.composerShortcuts).toEqual(expected)
     expect((await new ConfigStore(f.store.filePath).get()).composerShortcuts).toEqual(expected)
-    expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('Click sends this instruction')
+    expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('Click sends this instruction only')
     expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('draft instead of sending')
     expect(dom.container.querySelector('.prompt-usage')!.textContent).toContain('bare keyword')
   })

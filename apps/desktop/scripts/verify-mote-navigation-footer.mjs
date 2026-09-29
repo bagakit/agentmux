@@ -11,23 +11,24 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const fixture = join(desktop, 'scripts/fixtures/mote-navigation-footer')
 const require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
-let selectedFrames = null, candidateFile = null, footerOnly = false, reuseRenderer = null
+let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, reuseRenderer = null
 if (args[0] === '--reuse') {
   const { recapture } = await import('./fixtures/mote-navigation-footer/recapture.mjs')
   await recapture({ desktop, repository, fixture, driver: import.meta.filename }, args)
   process.exit(0)
 }
 if (args.length) {
-  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
+  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only|floating-resize --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
   assert.equal(args[0], '--capture'); assert.equal(args[2], '--candidate')
-  assert.ok(['affected-entry', 'footer-only'].includes(args[1]))
+  assert.ok(['affected-entry', 'footer-only', 'floating-resize'].includes(args[1]))
   footerOnly = args[1] === 'footer-only'
+  floatingResize = args[1] === 'floating-resize'
   if (args.length === 6) {
-    assert.equal(footerOnly, true); assert.equal(args[4], '--reuse-renderer')
+    assert.ok(footerOnly || floatingResize); assert.equal(args[4], '--reuse-renderer')
     reuseRenderer = resolve(repository, args[5])
   }
   candidateFile = resolve(repository, args[3])
-  selectedFrames = footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
+  selectedFrames = floatingResize ? ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue'] : footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
     'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts'] : ['wide-closed-low-footer-circle', 'wide-hover-cards-original-input',
     'narrow-long-names-all-motes-cards', 'narrow-avatars-custom-original-draft',
     'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
@@ -90,8 +91,8 @@ const result = {
   ], stage: 'preparation', cleanup: null
 }
 if (selectedFrames) {
-  result.captureSelection = { mode: footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
-    scope: footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
+  result.captureSelection = { mode: floatingResize ? 'floating-resize' : footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
+    scope: floatingResize ? 'One actual App Renderer compile: bounded resize, both rail forms, narrow viewport, cancel, advisory storage failure/recovery and reload proof. Five complete frames; no old Footer/native or eight-flow replay.' : footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
       'New actual Renderer compilation and six new affected frames; all eight original interactions/assertions replayed. The prior wide avatar and light images retain their original scope, not new candidate screenshots.' }
 }
 await mkdir(evidence, { recursive: true })
@@ -100,7 +101,11 @@ try {
     const bytes = await readFile(candidateFile), candidate = JSON.parse(bytes)
     assert.ok(candidate.files.length > 0, 'The coherent Source candidate must be nonempty')
     for (const row of candidate.files) assert.equal(hash(await readFile(join(repository, row.path))), row.sha256, 'Candidate inputs agree before actual compilation')
-    result.candidate = { path: candidateFile, sha256: hash(bytes), files: candidate.files }
+    if (floatingResize && candidate.compiledReuse && !reuseRenderer) {
+      reuseRenderer = resolve(repository, candidate.compiledReuse.path)
+      assert.equal(hash(await readFile(reuseRenderer)), candidate.compiledReuse.sha256, 'Explicit candidate reuse receipt identity agrees')
+    }
+    result.candidate = { path: candidateFile, sha256: hash(bytes), files: candidate.files, ...(candidate.compiledReuse ? { compiledReuse:candidate.compiledReuse } : {}) }
     await writeFile(join(evidence, 'candidate.json'), bytes)
   }
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'),
@@ -126,8 +131,8 @@ try {
       assert.equal(hash(await readFile(join(parent.compiledRenderer, file))), digest, 'Every original compiled byte agrees')
     }
     // A corrected Node capture/assertion driver does not change compiled Renderer inputs.
-    for (const row of result.candidate.files.filter(row => /\.(tsx|css)$/.test(row.path))) {
-      assert.equal(parent.inputs[row.path], row.sha256, 'Current Footer Renderer producers agree with the reused compilation')
+    for (const row of result.candidate.files.filter(row => floatingResize ? /^(apps\/desktop\/src\/renderer\/src\/|apps\/desktop\/scripts\/fixtures\/mote-navigation-footer\/entry\.tsx$)/.test(row.path) && /\.(?:[jt]sx?|css)$/.test(row.path) : /\.(tsx|css)$/.test(row.path))) {
+      assert.equal(parent.inputs[row.path], row.sha256, 'Current task Renderer producers, including floating size/persistence lib.ts, agree with the reused compilation')
     }
     await cp(parent.compiledRenderer, outDir, { recursive: true })
     result.reusedCompilation = { receipt: reuseRenderer, sha256: hash(parentBytes), compiled: parent.compiled,
@@ -147,6 +152,13 @@ try {
   }
   for (const name of ['index.css', 'agent.css', 'pmo-teams-topic.css']) {
     assert.ok([...styles].some(file => file.endsWith('/styles/' + name)), `Actual style missing: ${name}`)
+  }
+  if (floatingResize) {
+    const producers = result.candidate.files.filter(row =>
+      row.path.startsWith('apps/desktop/src/renderer/src/') || row.path.endsWith('/mote-navigation-footer/entry.tsx'))
+    assert.ok(producers.length >= 4, 'Resize producer set is nonempty, including lib/Panel/CSS/entry')
+    assert.ok(producers.some(row => row.path.endsWith('/lib/pmo-teams-topic-floating.ts')), 'The actual size and persistence lib.ts is bound')
+    for (const row of producers) assert.equal(inputs.get(join(repository, row.path)), row.sha256, 'Actual compiled resize producer consumes candidate bytes')
   }
   result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
@@ -190,7 +202,10 @@ try {
   assert.equal(result.renderer.passed, true)
   assert.equal(result.renderer.frames.length, selectedFrames?.length ?? 8, 'Every selected actual frame must be captured')
   if (selectedFrames) assert.deepEqual(result.renderer.frames.map(frame => frame.name), selectedFrames)
-  if (footerOnly) assert.equal(result.renderer.checks.length, 16, 'Every actual Footer count case is retained')
+  if (floatingResize) {
+    assert.ok(result.renderer.checks.length >= 12, 'Actual resize proof must be nonempty and complete')
+    assert.equal(result.renderer.replayedFrames.length, selectedFrames.length, 'Only reviewed resize frames replayed')
+  } else if (footerOnly) assert.equal(result.renderer.checks.length, 16, 'Every actual Footer count case is retained')
   else assert.equal(result.renderer.replayedFrames.length, 8, 'All original actual interactions and assertions are retained')
   for (const frame of result.renderer.frames) {
     assert.equal(hash(await readFile(join(evidence, frame.file))), frame.sha256, 'Actual frame bytes agree')
@@ -245,13 +260,15 @@ try {
   }
   result.stage = 'source-style-and-compiled-final-binding'
   for (const [file, digest] of inputs) {
-    assert.equal(hash(await readFile(file)), digest, `Input changed during capture: ${relative(repository, file)}`)
+    if (!floatingResize || result.candidate.files.some(row => row.path === relative(repository, file)))
+      assert.equal(hash(await readFile(file)), digest, `Owned input changed during capture: ${relative(repository, file)}`)
     assert.equal(hash(await readFile(join(result.originalInputs, relative(repository, file)))), digest, 'Archived original bytes agree')
   }
   for (const [name, digest] of Object.entries(result.compiled)) {
     assert.equal(hash(await readFile(join(evidence, 'renderer', name))), digest, 'Archived compilation agrees')
   }
   for (const row of result.candidate?.files ?? []) assert.equal(hash(await readFile(join(repository, row.path))), row.sha256, 'Candidate remains coherent after capture')
+  if (floatingResize) result.bindingScope = 'All actual compiled inputs and styles are immutable archived bytes. Task-owned candidate/producers remain current; unrelated whole-App end drift is separately reported without changing archived proof.'
   result.passed = true; result.stage = 'captured-independent-look-pending'
 } catch (error) {
   result.failure = { name: error.name, message: error.message, stack: error.stack }
@@ -264,8 +281,8 @@ try {
     })
   }
   if (result.inputFreshnessAtFinish.changed.length) {
-    result.passed = false
     result.sourceDrift = true
+    if (!floatingResize || result.inputFreshnessAtFinish.changed.some(row => result.candidate?.files.some(owned => owned.path === row.path))) result.passed = false
   }
   // Partial images/results remain reviewable even when a later stage failed.
   const phase = await readFile(join(evidence, 'renderer.json'), 'utf8').catch(() => null)
@@ -280,7 +297,7 @@ try {
     '# Mote rail / footer / Settings — independent actual look pending', '',
     `Capture passed: ${result.passed}. Stage: ${result.stage}. This is a single private Renderer capture, not native/OS/Core Run sign-off.`, '',
     ...(result.renderer?.frames ?? []).map(frame => `- ${frame.name}: [Actual complete Renderer frame](${frame.file}) — ${frame.sha256}`), '',
-    footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
+    floatingResize ? 'Open all five complete frames. Review actual corner handle discoverability/hit area, 10px top/right frame, wide/narrow card/avatar original workface, advisory storage failure and usable original input. Only floating resize scope is new.' : footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
       'Open every frame. Review both rail forms, complete objects and original input, narrow long names, dark/light boundary, low bar and complete circle/status/focus, and Settings operability.',
     'Original inputs/raw CSS/compiled bytes and actual geometry/events are in receipt.json. Capture success does not constitute aesthetic approval.'
   ].join('\n'))

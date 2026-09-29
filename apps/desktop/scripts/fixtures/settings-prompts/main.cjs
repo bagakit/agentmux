@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
     const { ConfigStore, ConfigOwner, DEFAULT_CONFIG } = await import(pathToFileURL(ownerBundle).href)
     const store = new ConfigStore(path.join(privateRoot, 'userData', 'config.json'))
     const initial = !fs.existsSync(store.filePath)
-    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts'].includes(mode), 'Restart must reuse durable config, never seed again')
+    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts'].includes(mode), 'Restart must reuse durable config, never seed again')
     let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), composerShortcuts: [
       { id: 'explain', label: 'Explain simply', keyword: 'eli5', body: '用大白话说说这次做了什么，指出关键变化、验证结果与还没确认的部分。', states: ['done', 'error'] },
       { id: 'review', label: 'Review changes', keyword: 'review', providerId: 'codex', states: ['waiting', 'done'], body: Array.from({ length: 10 }, (_, i) => `${i + 1}. Review the current changes for correctness, scope, readability and recovery. Explain concrete risks, cite the relevant code and propose the smallest complete fix.`).join('\n') },
@@ -91,6 +91,15 @@ app.whenReady().then(async () => {
     await until('window.promptsProbe?.ready && !!document.querySelector(".window-status-bar [aria-label=Settings]")')
     await read('window.promptsProbe.beginSurface()')
     await click(q('.window-status-bar [aria-label="Settings"]')); await section('prompts')
+    if (mode === 'keyboard-shortcuts') {
+      await require('../settings-keyboard-shortcuts/scenario.cjs').run({ win, read, q, button, until, settle, click, field, type, scene, capture, section, owner, result, evidence, mode })
+      result.completed = true
+      result.disk = JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
+      assert.deepEqual(result.disk, owner.current)
+      result.surface = await read('window.promptsProbe.surface()')
+      assert.equal(result.surface.exact, true, 'Shortcuts preserve the original work surface')
+      return
+    }
     const material = async (feature, value) => {
       await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: feature ? [{ name: feature, value }] : [] }); await settle()
       return read(`(()=>{const sidebar=document.querySelector('.settings-sidebar'),bar=document.querySelector('[data-settings-pane="prompts"] [data-settings-save-bar]');if(!sidebar||!bar)throw Error('Material has no actual consumer');return{signal:${feature ? `matchMedia(${JSON.stringify(`(${feature}: ${value})`)}).matches` : 'null'},sidebar:getComputedStyle(sidebar).backdropFilter,save:getComputedStyle(bar).backdropFilter,background:getComputedStyle(sidebar).backgroundImage,animation:getComputedStyle(document.querySelector('[data-settings-pane="prompts"] .settings-pane-stack')).animationName}})()`)

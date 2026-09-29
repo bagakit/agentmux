@@ -40,7 +40,7 @@ describe('设置搜索', () => {
     for (const keyword of ['copy', 'clipboard', 'tilde', '~', 'absolute']) {
       expect(visibleSettingsSections(keyword).map((section) => section.id)).toEqual(['general'])
     }
-    expect(all.map(section => section.id)).toEqual(['appearance', 'notifications', 'browser', 'general', 'agents', 'prompts', 'workspaces', 'hosts'])
+    expect(all.map(section => section.id)).toEqual(['appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'agents', 'prompts', 'workspaces', 'hosts'])
     // 而一个谁都不含的词必须什么都不返回——否则「过滤」只是名义上的。
     expect(visibleSettingsSections('zzzznotakeyword')).toEqual([])
   })

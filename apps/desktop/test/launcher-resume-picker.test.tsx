@@ -135,6 +135,15 @@ describe('Launcher saved Session picker', () => {
     expect(api.sessions.historyPage).not.toHaveBeenCalledWith(expect.objectContaining({ agentSessionId: a.agentSessionId }), expect.anything())
   })
 
+  it('deduplicates equal Provider/Executor labels while preserving distinct names in the mounted detail', async () => {
+    const sameNameConfig = { ...config, executors: { ...config.executors, codex: { ...config.executors.codex!, label: 'Codex' } } }
+    await open([candidate('same')], { config: sameNameConfig })
+    const headingLabel = () => dialog().querySelector('.launcher-resume__detail-heading > div > span')?.textContent
+    expect(headingLabel()).toBe('Codex')
+    await act(async () => useAppStore.setState({ config }))
+    expect(headingLabel()).toBe('Codex · Code Review')
+  })
+
   it('reads only the selected native conversation page, enforces its identity and discards late selection replies', async () => {
     let releaseFirst!: (value: AgentSessionHistoryPage) => void
     vi.mocked(api.sessions.historyPage).mockImplementation(identity => identity.agentSessionId === 'first'

@@ -169,7 +169,7 @@ describe('Session result review control', () => {
     expect(close).toBeTruthy()
     await act(async () => close.click())
     expect(container.querySelector('.session-result-review')).toBeNull()
-    expect(container.querySelector('.session-result-review-slot')).toBeTruthy()
+    expect(container.querySelector('.session-result-review-slot')).toBeNull()
   })
 
   it('keeps a dismissed done report closed and discovers the next completed turn', async () => {
@@ -180,7 +180,7 @@ describe('Session result review control', () => {
     await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, observedAt: 3 } }] }))
     expect(container.querySelector('.session-result-review__trigger')).toBeNull()
     await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, state: 'working', observedAt: 4 } }] }))
-    expect(container.querySelector('.session-result-review-slot')).toBeTruthy()
+    expect(container.querySelector('.session-result-review-slot')).toBeNull()
     expect(container.querySelector('.session-result-review__trigger')).toBeNull()
     await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, observedAt: 5 } }] }))
     expect(container.querySelector('.session-result-review__trigger')?.getAttribute('aria-expanded')).toBe('false')

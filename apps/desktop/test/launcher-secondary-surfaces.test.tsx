@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, Profiler } from 'react'
 import type { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-warm-preview /> }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
+import { LauncherMoteAction } from '../src/renderer/src/components/LauncherMoteAction'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
@@ -85,5 +86,47 @@ describe('actual Launcher utility surfaces', () => {
     expect(dom.draft('region')).toBe('The complete request\nwith a second line')
     expect(readPmoTeamsTopicFloatingState().open).toBe(false)
     expect(open).toHaveBeenCalledTimes(waitingFor === 'ensure' ? 0 : 1)
+  })
+  it('Mote preparation never writes a different Region of the same target Tab after awaiting', async () => {
+    await mount()
+    let mote = { ...createWorkbenchTab('mote', { regionId: 'original-mote-input', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
+    mote = addWorkbenchRegion(mote, 'original-mote-input', 'right', { regionId: 'other-mote-input', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'other-mote-session' }) as typeof mote
+    mote = { ...mote, layout: { ...mote.layout, activeRegionId: 'original-mote-input' } }
+    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', path: '/scratch', hostId: 'local', kind: 'folder' as const }
+    let release!: () => void
+    const late = new Promise<void>(resolve => { release = resolve })
+    await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratch] }, tabs: { ...useAppStore.getState().tabs, mote }, layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [mote.id]) }, agentComposerDrafts: { region: 'The complete request', 'original-mote-input': 'Original target request', 'other-mote-session': 'Other target request' }, openScratchTopic: vi.fn().mockImplementation(() => late), refreshScratchTopics: vi.fn().mockResolvedValue(undefined) }))
+    vi.spyOn(api.scratch, 'ensureMote').mockResolvedValue({} as never)
+    const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.includes('Prepare in'))!
+    await act(async () => button.click())
+    await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, mote: { ...mote, layout: { ...mote.layout, activeRegionId: 'other-mote-input' } } } }))
+    await act(async () => release())
+    expect(useAppStore.getState().agentComposerDrafts).toMatchObject({ region: 'The complete request', 'original-mote-input': 'Original target request', 'other-mote-session': 'Other target request' })
+    expect(readPmoTeamsTopicFloatingState().open).toBe(false)
+  })
+
+  it('the selected Mote input cannot prepare its own request into itself', async () => {
+    await mount()
+    const mote = { ...createWorkbenchTab('mote', { regionId: 'mote-input', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
+    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', path: '/scratch', hostId: 'local', kind: 'folder' as const }
+    await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratch] }, tabs: { ...useAppStore.getState().tabs, mote }, layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [mote.id]) }, agentComposerDrafts: { 'mote-input': 'Original coordinator request' }, refreshScratchTopics: vi.fn().mockResolvedValue(undefined) }))
+    await dom.render(<NewTabSurface tabGroupId="mote-group" tabId="mote" regionId="mote-input" visible={false} />)
+    expect(dom.container.querySelector('.launcher-mote')).toBeNull()
+    expect(dom.draft('mote-input')).toBe('Original coordinator request')
+  })
+  it('Mote output does not add detail work to retained Launcher handoff actions', async () => {
+    await mount()
+    const mote = { ...createWorkbenchTab('mote', { regionId: 'mote-input', kind: 'agent', phase: 'attached', sessionId: 'mote-session', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
+    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', path: '/scratch', hostId: 'local', kind: 'folder' as const }
+    const session = composerSession('mote-session'), paints = vi.fn()
+    const recap = (content: string) => ({ agentSessionId: session.id, revision: 1, items: [{ id: 'message', agentSessionId: session.id, kind: 'user_message' as const, status: 'complete' as const, source: 'user' as const, content, createdAt: 1, updatedAt: 1 }] })
+    await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratch] }, tabs: { ...useAppStore.getState().tabs, mote }, layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [mote.id]) }, sessions: [session], timelines: { [session.id]: recap('Original coordinator task') }, refreshScratchTopics: vi.fn().mockResolvedValue(undefined) }))
+    await dom.render(<Profiler id="retained-launcher-handoff" onRender={paints}><LauncherMoteAction workspace={composerConfig.workspaces[0]} prompt="Original project request" sourceTabId="launcher" sourceRegionId="region" /></Profiler>)
+    expect(dom.container.querySelector('.launcher-mote')?.textContent).toContain('Prepare in Mote')
+    paints.mockClear()
+    await act(async () => useAppStore.setState({ timelines: { [session.id]: recap('New coordinator output') } }))
+    await act(async () => useAppStore.setState({ sessions: [{ ...session, latestOutputBytes: 2048 }] }))
+    await act(async () => useAppStore.setState({ timelines: { ...useAppStore.getState().timelines, unrelated: recap('Unrelated streaming output') } }))
+    expect(paints).not.toHaveBeenCalled()
   })
 })

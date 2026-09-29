@@ -12,7 +12,7 @@ import {
   SCRATCH_TOPIC_WIKI_STATE_PATH,
   DEFAULT_TOPIC_WIKI,
   DEFAULT_PMO_TEAMS_TOPIC_WIKI,
-  PMO_TEAMS_TOPIC_ROLE,
+  MOTE_COORDINATION_ROLE,
   PMO_TEAMS_TOPIC_ID,
   scratchTopicDirectoryName,
   scratchTopicIdFromDirectoryName,
@@ -376,7 +376,7 @@ This saved personality applies to this new Session. Recovery retains the Session
 Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Session, Project and Run facts take precedence over this personality.
 
 ${snapshot.soul.content}`] : []),
-        ...(topicId === PMO_TEAMS_TOPIC_ID ? [PMO_TEAMS_TOPIC_ROLE] : []),
+        ...(snapshot.soul ? [MOTE_COORDINATION_ROLE] : []),
         snapshot.wiki?.enabled
         ? topicPrompt(absolutePath, {
             content: snapshot.wiki.content,

@@ -105,7 +105,7 @@ function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
   const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers'], code)
   const result = { provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'covered', 'pending', 'unknown'], 'Presentation', code),
     tabId: nullableId(source.tabId, 'Presented Tab', code), regionId: nullableId(source.regionId, 'Presented Region', code),
-    blockers: list(source.blockers, value => member(value, ['settings', 'quick-switcher', 'shortcuts-help'] as const, 'Overlay blocker', code), code) }
+    blockers: list(source.blockers, value => member(value, ['settings', 'quick-switcher'] as const, 'Overlay blocker', code), code) }
   if (new Set(result.blockers).size !== result.blockers.length ||
     (result.state === 'main-visible' && (result.provenance !== 'observed' || result.blockers.length > 0)) ||
     (result.state === 'covered' && result.blockers.length === 0)) fail('Desktop presentation facts disagree.', code)
@@ -119,9 +119,9 @@ function floating(value: unknown, code: Code): AgentMuxDesktopFloating {
     presentation: member(source.presentation, ['visible', 'hidden', 'pending', 'unknown'], 'Floating presentation', code) }
 }
 function overlays(value: unknown, code: Code): AgentMuxDesktopOverlays {
-  const source = fields(value, ['provenance', 'settings', 'quickSwitcher', 'shortcutsHelp'], code)
+  const source = fields(value, ['provenance', 'settings', 'quickSwitcher'], code)
   return { provenance: provenance(source.provenance, code), settings: nullableBoolean(source.settings, 'Settings', code),
-    quickSwitcher: nullableBoolean(source.quickSwitcher, 'Quick switcher', code), shortcutsHelp: nullableBoolean(source.shortcutsHelp, 'Shortcut help', code) }
+    quickSwitcher: nullableBoolean(source.quickSwitcher, 'Quick switcher', code) }
 }
 function focus(value: unknown, code: Code): AgentMuxDesktopObservation['focus'] {
   const source = fields(value, ['executionSessionId', 'pmoSessionId'], code)

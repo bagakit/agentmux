@@ -74,13 +74,15 @@ export function composeOutboundMessage(input: { amux?: string; user?: string }):
  * `agentMuxNote` 是 AgentMux 自己的话，因此即便运行时引导关闭也照样署名进信封——`injectAgentMuxGuide`
  * 只管那段引导语，不代表 "这次不署任何名"。
  *
- * AgentMux 什么都不说时（无引导、无 note），用户原文（或空串）直接返回，不套空信封。
+ * `text` preserves the complete original wire payload. `systemContext` is the generated system
+ * content, without its wire envelope, and is absent when AgentMux has nothing to say.
+ * A user-supplied envelope is never parsed into this field.
  */
 export function composeAgentLaunchPrompt(
   prompt: string | undefined,
   injectAgentMuxGuide: boolean,
   agentMuxNote?: string
-): string {
+): { text: string; systemContext?: string } {
   // trim 只用来判断 "有没有内容"；一旦有，透传/署名的是**未修剪的原文**，保住每一个字节。
   const userRequest = prompt?.trim() ? prompt : undefined
   const note = agentMuxNote?.trim() ? agentMuxNote : undefined
@@ -90,8 +92,13 @@ export function composeAgentLaunchPrompt(
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
   if (amuxParts.length > 0) amuxParts.push(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)
   const amux = amuxParts.join('\n\n')
-  return composeOutboundMessage({
-    ...(amux ? { amux } : {}),
-    ...(userRequest === undefined ? {} : { user: userRequest })
-  })
+  // Retain the generated system segment before wire formatting. Clients consume this fact;
+  // an amux-looking string in the user's text never becomes a system message.
+  return {
+    text: composeOutboundMessage({
+      ...(amux ? { amux } : {}),
+      ...(userRequest === undefined ? {} : { user: userRequest })
+    }),
+    ...(amux ? { systemContext: amux } : {})
+  }
 }

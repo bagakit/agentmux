@@ -172,7 +172,7 @@ const SCOPE_INTERROGATIONS = new Map<string, (ids: readonly string[]) => void>([
       // 壳查一张 `Record<id, () => boolean>`，所以直接向那份 map 要 handler。
       const handlers = windowShortcutHandlers(stubStore(), {
         toggleQuickSwitch: () => {},
-        toggleShortcutsHelp: () => {}
+        openShortcuts: () => {}
       })
       for (const id of ids) {
         expect(typeof handlers[id], `window 绑定 ${id} 在 handler map 里没有 handler`).toBe('function')

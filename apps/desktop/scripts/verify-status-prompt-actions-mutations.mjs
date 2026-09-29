@@ -14,13 +14,38 @@ const cases = mode === '--settings' ? [
   { name: 'schema-rejects-real-state-bindings', file: 'apps/desktop/src/main/config-store.ts',
     from: 'states: z.array(z.enum(COMPOSER_PROMPT_STATES)).optional()', to: "states: z.array(z.enum(['running'])).optional()" },
   { name: 'state-editor-drops-selections', file: 'apps/desktop/src/renderer/src/components/settings/ShortcutSettingsPane.tsx',
-    from: 'states: event.target.checked', to: 'states: false' }
+    from: 'states: event.target.checked', to: 'states: false' },
+  { name: 'running-masquerades-as-working', file: 'apps/desktop/src/shared/agent-state-presentation.ts',
+    from: "label: 'Status unknown'", to: "label: 'Working'" },
+  { name: 'usage-drops-queue-boundary', file: 'apps/desktop/src/renderer/src/components/settings/ShortcutSettingsPane.tsx',
+    from: 'Click sends this instruction only; pending permission or question requests queue it.', to: 'Click sends this instruction immediately.' }
 ] : [
   { name: 'dispatch-drops-configured-body', file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
-    from: 'send(sessionId, prompt.body, feedback.report)', to: "send(sessionId, 'wrong body', feedback.report)" },
+    from: "send(sessionId, prompt.body, feedback.report, 'manual')", to: "send(sessionId, 'wrong body', feedback.report, 'manual')" },
   { name: 'dispatch-clears-unrelated-draft', file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
     from: '// State actions leave the independently authored Composer draft intact.',
-    to: "setAgentComposerDraft(sessionId, '')" }
+    to: "setAgentComposerDraft(sessionId, '')" },
+  { name: 'exact-binding-becomes-group-match', file: 'apps/desktop/src/renderer/src/components/AgentStatusPromptActions.tsx',
+    from: 'prompt.states?.includes(state)', to: "prompt.states?.includes(state) || (state === 'running' && prompt.states?.includes('working'))" },
+  { name: 'pin-disappears-on-leave', file: 'apps/desktop/src/renderer/src/components/AgentAvatar.tsx',
+    from: 'if (pinned.current) return', to: 'if (false) return' },
+  { name: 'escape-reopens-focus-preview', file: 'apps/desktop/src/renderer/src/components/AgentAvatar.tsx',
+    from: 'suppressFocusPreview.current = true', to: 'suppressFocusPreview.current = false' },
+  { name: 'review-mounts-without-user-intent', file: 'apps/desktop/src/renderer/src/components/AgentIdentity.tsx',
+    from: 'const [review, setReview] = useState(false)', to: 'const [review, setReview] = useState(true)' },
+  { name: 'empty-prompt-section-still-mounts', file: 'apps/desktop/src/renderer/src/components/AgentStatusPromptActions.tsx',
+    from: 'if (visible.length === 0) return null', to: 'if (visible.length === 0) return <section className="agent-status-prompts" />' },
+  { name: 'header-review-leaves-empty-slot', file: 'apps/desktop/src/renderer/src/components/SessionResultReview.tsx',
+    from: 'if (!ready || dismissed || !visible) return null', to: 'if (!ready || dismissed || !visible) return <span className="session-result-review-slot" />', tests: ['apps/desktop/test/session-result-review.test.tsx'] },
+  { name: 'review-keyboard-drops-focus', file: 'apps/desktop/src/renderer/src/components/AgentIdentity.tsx',
+    from: 'if (!transferFocus.current) return', to: 'if (true) return' },
+  { name: 'timeline-capability-hides-reported-statement', file: 'apps/desktop/src/renderer/src/components/AgentIdentity.tsx',
+    from: '<dt>Agent statement</dt><dd>{statement', to: "<dt>Agent statement</dt><dd>{statement && session.capabilities.timeline !== 'unavailable'" },
+  { name: 'send-loses-manual-authorship', file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
+    from: "send(sessionId, prompt.body, feedback.report, 'manual')", to: 'send(sessionId, prompt.body, feedback.report)' },
+  { name: 'face-forces-unreadable-upper-space', file: 'apps/desktop/src/renderer/src/components/AgentAvatar.tsx',
+    from: 'const useBelow = belowBottom - belowTop > aboveBottom - aboveTop', to: 'const useBelow = false' }
+
 ]
 const tests = mode === '--settings' ? ['apps/desktop/test/status-prompt-settings.test.tsx'] : ['apps/desktop/test/agent-status-prompt-actions.test.tsx']
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-status-prompts-mutations-'))
@@ -30,25 +55,22 @@ const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const receipt = { schema: 'agentmux.status-prompt-actions-mutations.v1', passed: false, mode, sharedSourceMutated: false, cases: [] }
 await mkdir(evidence, { recursive: true })
 try {
-  for (const dir of ['apps/desktop/src', 'apps/desktop/test', 'apps/desktop/resources', 'packages/core/src', 'packages/demand/src']) {
+  for (const dir of ['apps/desktop/src', 'apps/desktop/test', 'apps/desktop/resources', 'packages/core/src', 'packages/demand/src', 'packages/layout/src']) {
     await cp(join(root, dir), join(privateRoot, dir), { recursive: true, preserveTimestamps: true })
   }
-  for (const file of ['package.json', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts',
-    'apps/desktop/package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/tsconfig.test.json']) {
+  for (const file of ['package.json', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'vitest.setup.ts',
+    'apps/desktop/package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/tsconfig.test.json', 'packages/core/package.json',
+    'apps/desktop/scripts/fixtures/status-prompt-actions/vitest.config.mts', 'apps/desktop/scripts/fixtures/settings-overview/vitest.config.mts']) {
     await cp(join(root, file), join(privateRoot, file), { preserveTimestamps: true })
   }
-  const configPath = join(privateRoot, 'vitest.config.ts'), configSource = await readFile(configPath, 'utf8')
-  assert.equal(configSource.split('  define: {').length, 2, 'The private test config retains its original globalSetup and checks')
-  // Existing Core assets resolve through the isolated worktree dependency links. Admit only these
-  // two exact roots; the entire production test setup and dist freshness guard are retained.
-  await writeFile(configPath, configSource.replace('  define: {', `  server: { fs: { allow: ${JSON.stringify([privateRoot, root])} } },\n  define: {`))
+  // Use the same explicit Renderer/Core-source slice config as the baseline gate.
   await symlink(join(root, 'node_modules'), join(privateRoot, 'node_modules'), 'dir')
   await symlink(join(root, 'apps/desktop/node_modules'), join(privateRoot, 'apps/desktop/node_modules'), 'dir')
-  for (const name of ['core', 'demand']) await symlink(join(root, `packages/${name}/dist`), join(privateRoot, `packages/${name}/dist`), 'dir')
+  for (const name of ['core', 'demand', 'layout']) await symlink(join(root, `packages/${name}/node_modules`), join(privateRoot, `packages/${name}/node_modules`), 'dir')
   for (const item of cases) originals.set(item.file, await readFile(join(root, item.file), 'utf8'))
-  async function test(label, expectRed) {
+  async function test(label, expectRed, selected = tests) {
     let output = '', code = 0
-    try { const value = await run(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', ...tests, '--maxWorkers=1'], { cwd: privateRoot, timeout: 60000, maxBuffer: 4 * 1024 * 1024 }); output = value.stdout + value.stderr }
+    try { const value = await run(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/scripts/fixtures/status-prompt-actions/vitest.config.mts', ...selected, '--maxWorkers=1'], { cwd: privateRoot, timeout: 60000, maxBuffer: 4 * 1024 * 1024 }); output = value.stdout + value.stderr }
     catch (error) { code = error.code; output = (error.stdout ?? '') + (error.stderr ?? '') }
     await writeFile(join(evidence, `${label}.log`), output)
     if (expectRed) {
@@ -63,9 +85,9 @@ try {
     const original = originals.get(item.file)
     assert.equal(original.split(item.from).length, 2, `${item.name}: source anchor must occur exactly once`)
     await writeFile(join(privateRoot, item.file), original.replace(item.from, item.to))
-    const red = await test(item.name, true)
+    const red = await test(item.name, true, item.tests)
     await writeFile(join(privateRoot, item.file), original)
-    const restored = await test(`${item.name}-restored`, false)
+    const restored = await test(`${item.name}-restored`, false, item.tests)
     receipt.cases.push({ name: item.name, file: item.file, originalSha256: hash(original), red, restored })
   }
   for (const [file, original] of originals) assert.equal(hash(await readFile(join(root, file))), hash(original), `${file}: shared candidate stayed untouched`)

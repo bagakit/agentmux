@@ -3,6 +3,7 @@ import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/dist/index.js'
@@ -26,8 +27,10 @@ const receiptPath = process.argv.find(value => value.startsWith('--receipt-path=
 const root = await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-')
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
+const messageContextProof = process.argv.includes('--message-context')
+const messagePrompt = { id: 'private-status-context', keyword: 'statuscontext', label: 'Private message context', body: 'Configured private instruction\n  Exact retained spacing', states: ['running', 'working'], providerId: 'codex' }
 const goalsEntryProof = process.argv.includes('--goals-entry')
-const inheritedCallerNames = goalsEntryProof ? Object.keys(process.env).filter(name =>
+const inheritedCallerNames = (goalsEntryProof || messageContextProof) ? Object.keys(process.env).filter(name =>
   /^AGENTMUX_(?:ENV|CLI|AGENT_SESSION(?:_.*)?|AGENT_CAPABILITY|HOOK(?:_.*)?|PROVIDER_ID|EXECUTOR_ID|LIFECYCLE_OPERATION_ID|USAGE_TRANSCRIPT_FORMAT)$/.test(name)) : []
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME', ...inheritedCallerNames].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
@@ -44,14 +47,16 @@ const swapNameProof = process.argv.includes('--swap-names')
 assert.ok(!swapNameProof || (identityMenuProof && !regionCloseProof), 'Three-Agent Swap is a separate identity case, never the original close case')
 assert.ok(!goalsAlignmentProof || (!regionCloseProof && !identityMenuProof && !swapNameProof), 'Goals is a separate original-workspace recovery case')
 assert.ok(!goalsEntryProof || (!goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Actual Goals CTA entry is a separate original-workspace recovery case')
+assert.ok(!messageContextProof || (!goalsEntryProof && !goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Message context is an explicit separate restart case')
 const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
 let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic
+let pressurePreflight, pressureProducer, pressureFinal
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
-let goalsEntryFixture, goalsEntryRestored
+let goalsEntryFixture, goalsEntryRestored, messageBefore
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function waitFor(label, read, budget = 20_000) {
@@ -62,7 +67,7 @@ async function waitFor(label, read, budget = 20_000) {
 
 async function connectCdp(url) {
   const socket = new WebSocket(url)
-  await new Promise((done, fail) => { socket.addEventListener('open', done, { once: true }); socket.addEventListener('error', fail, { once: true }) })
+  await new Promise((done, fail) => { const timer=setTimeout(()=>{ socket.close();fail(new Error('Private CDP connect timed out')) },5000);socket.addEventListener('open',()=>{clearTimeout(timer);done()},{once:true});socket.addEventListener('error',error=>{clearTimeout(timer);fail(error)},{once:true}) })
   let serial = 0
   const pending = new Map()
   socket.addEventListener('message', ({ data }) => {
@@ -98,7 +103,7 @@ async function launch(label) {
     try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch { return null }
   })
   const endpoint = new URL(await waitFor(`${label} debugger`, () => debuggingUrl))
-  const target = await waitFor(`${label} renderer`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
+  const target = await waitFor(`${label} renderer`, async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.call('Runtime.enable')
   // Only the private fixture gets focus emulation: an occluded native window otherwise pauses
@@ -170,7 +175,9 @@ async function seedWorkbench(seed) {
     }
     throw new Error(`${error.message}; private seed stderr: ${diagnostics}`)
   }
-  const target = await waitFor('seed renderer', async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
+  let target
+  try { target = await waitFor('seed renderer', async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).find(item => item.type === 'page' && item.url.startsWith('file:'))) }
+  catch (error) { seedDiagnostic = { stage:'private-seed-CDP', pid:child.pid, exitCode:child.exitCode, signalCode:child.signalCode, stderr:diagnostics }; throw error }
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   try {
     await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -208,6 +215,25 @@ async function surface(cdp) {
         stored:state.agentNames[${JSON.stringify(session.agentSessionId)}],more:visible('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more').length},` : ''}
     }
   })()`)
+}
+
+async function readMessageContext(cdp) {
+  const config = await cdp.evaluate('window.agentmux.config.get()')
+  assert.deepEqual(config.composerShortcuts, [messagePrompt], 'Real ConfigOwner preserves exact saved state/provider/body bindings')
+  const avatar = `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer-agent-identity button')`
+  await activateButton(cdp, avatar)
+  const content = await waitFor('original Session status face with configured instruction', () => cdp.evaluate(`(() => {
+    const trigger = ${avatar}, face = trigger && document.getElementById(trigger.getAttribute('aria-controls'))
+    if (!face) return null
+    const prompts = [...face.querySelectorAll('.agent-status-prompts__button')]
+    if (!prompts.length) return null
+    return { avatar: trigger.getAttribute('aria-label'), prompts: prompts.map(button => ({label:button.querySelector('.agent-status-prompts__label').textContent, body:button.querySelector('small').textContent})),
+      standalonePromptRows:document.querySelectorAll('.composer > .agent-status-prompts').length, emptyReviewSlots:document.querySelectorAll('.session-result-review-slot').length }
+  })()`))
+  assert.deepEqual(content.prompts,[{label:messagePrompt.label,body:messagePrompt.body}]);assert.equal(content.standalonePromptRows,0);assert.equal(content.emptyReviewSlots,0)
+  await key(cdp,'Escape','Escape')
+  await waitFor('message face Escape closes without reopening',()=>cdp.evaluate(`!document.getElementById(${avatar}.getAttribute('aria-controls'))`))
+  return { savedPrompts:config.composerShortcuts, content }
 }
 
 async function key(cdp, key, code) {
@@ -254,7 +280,12 @@ async function compiledRendererIdentity() {
   const assets = await Promise.all((await readdir(join(rendererRoot, 'assets'))).filter(name => name.endsWith('.js')).sort()
     .map(async name => ({ name, sha256: hash(await readFile(join(rendererRoot, 'assets', name))) })))
   assert.ok(assets.length > 0)
-  return { htmlDigest: hash(html), entries, assets }
+  const resolvedCore = await exec(process.execPath, ['--input-type=module','--experimental-import-meta-resolve','-e',
+    "import {pathToFileURL} from 'node:url';process.stdout.write(import.meta.resolve('@agentmux/core',pathToFileURL(process.argv[1]).href))",join(desktopRoot,'out/main/index.js')])
+  const coreEntry = fileURLToPath(resolvedCore.stdout)
+  assert.ok(!messageContextProof || coreEntry.startsWith(join(repositoryRoot,'packages/core/dist/')), 'Private Desktop uses the owned Core build')
+  return { htmlDigest: hash(html), entries, assets, coreEntry, coreEntrySha256:hash(await readFile(coreEntry)),
+    coreSourceIndexSha256:hash(await readFile(join(repositoryRoot,'packages/core/src/index.ts'))) }
 }
 
 try {
@@ -299,6 +330,7 @@ try {
     executors: { probe: { label: 'Private cat', providerId: 'codex', command: goalsEntryFixture?.executable ?? executable, args: [], env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false } },
     workspaces: [{ id: '__scratch__', name: 'Private Topics', hostId: 'local', path: topicsPath, kind: 'folder' },
       { id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
+    ...(messageContextProof ? { composerShortcuts: [messagePrompt] } : {}),
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }))
   const seed = { version: 1, state: { activeWorkspaceId: workspaceId, mainSurface: 'workbench',
     ...(identityMenuProof ? { agentNames: { [session.agentSessionId]: identityName } } : {}),
@@ -348,13 +380,63 @@ try {
     return true
   })()`)
   const producerPath = join(root, 'status-producer.mjs')
-  await writeFile(producerPath, `import {readFile} from 'node:fs/promises';\nconst binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));\nlet receipts=0;\nfor(;;){const start=Date.now();try {const r=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+(++receipts),eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(1000)});process.stdout.write(JSON.stringify({at:Date.now(),status:r.status,receipts})+'\\n');}catch{process.stdout.write(JSON.stringify({at:Date.now(),status:'unavailable',receipts})+'\\n');}await new Promise(r=>setTimeout(r,Math.max(0,100-(Date.now()-start))));}\n`, { mode: 0o600 })
+  const producerSource = messageContextProof ? `import {readFile} from 'node:fs/promises';
+const binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));
+let receipts=0,inFlight=0,maximumInFlight=0,skippedTicks=0;
+function tick(){
+  if(inFlight>=4){skippedTicks++;return;}
+  const receipt=++receipts;
+  inFlight++;
+  maximumInFlight=Math.max(maximumInFlight,inFlight);
+  void(async()=>{
+    let status;
+    try{const response=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+receipt,eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(1000)});status=response.status;}
+    catch{status='unavailable';}
+    finally{inFlight--;process.stdout.write(JSON.stringify({at:Date.now(),status,receipts:receipt,launchedRequests:receipts,inFlight,maximumInFlight,skippedTicks})+'\\n');}
+  })();
+}
+tick();
+setInterval(tick,100);
+` : `import {readFile} from 'node:fs/promises';\nconst binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));\nlet receipts=0;\nfor(;;){const start=Date.now();try {const r=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+(++receipts),eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(1000)});process.stdout.write(JSON.stringify({at:Date.now(),status:r.status,receipts})+'\\n');}catch{process.stdout.write(JSON.stringify({at:Date.now(),status:'unavailable',receipts})+'\\n');}await new Promise(r=>setTimeout(r,Math.max(0,100-(Date.now()-start))));}\n`
+  if (messageContextProof) pressureProducer = { mode: 'fixed-cadence-bounded-in-flight', intervalMs: 100, inFlightLimit: 4, timeoutMs: 1_000,
+    observedMaximumInFlight: 0, completedRequests: 0, launchedRequests: 0, skippedTicks: 0 }
+  await writeFile(producerPath, producerSource, { mode: 0o600 })
   producer = spawn(process.execPath, [producerPath], { detached: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env } })
   children.add(producer)
   const acknowledgements = []
   let producerTail = ''
-  producer.stdout.on('data', data => { producerTail += data; const lines = producerTail.split('\n'); producerTail = lines.pop(); for (const line of lines) if (line) acknowledgements.push(JSON.parse(line)) })
+  producer.stdout.on('data', data => { producerTail += data; const lines = producerTail.split('\n'); producerTail = lines.pop(); for (const line of lines) if (line) {
+    const post = JSON.parse(line)
+    acknowledgements.push(post)
+    if (pressureProducer) { pressureProducer.observedMaximumInFlight = Math.max(pressureProducer.observedMaximumInFlight, post.maximumInFlight)
+      pressureProducer.completedRequests++; pressureProducer.launchedRequests = Math.max(pressureProducer.launchedRequests, post.launchedRequests)
+      pressureProducer.skippedTicks = Math.max(pressureProducer.skippedTicks, post.skippedTicks); pressureProducer.inFlightAfterLastCompletion = post.inFlight }
+  } })
   await waitFor('real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
+  if (messageContextProof) {
+    const startedAt = Date.now(), budgetMs = 20_000
+    pressurePreflight = { passed: false, startedAt, budgetMs, windowMs: 2_000, minimumEvents: 12, maximumGapMs: 400 }
+    // Qualify actual pressure before editing durable UI. Startup scheduling is not a Runtime verdict.
+    // The producer stays live; this only observes the same real hook IPC and HTTP acknowledgements.
+    await waitFor('message-context continuous accepted hook cadence before UI edits', async () => {
+      const observer = await first.cdp.evaluate('window.__crashProof')
+      const at = Date.now(), windowStart = at - 2_000
+      const hooks = observer.hooks.filter(event => event.at >= windowStart)
+      const posts = acknowledgements.filter(post => post.at >= windowStart)
+      const gaps = hooks.length ? [hooks[0].at - windowStart, ...hooks.slice(1).map((event, i) => event.at - hooks[i].at), at - hooks.at(-1).at] : []
+      pressurePreflight.lastObservation = { at, windowStart, rendererHookEvents: hooks.length,
+        maxEventGapMs: gaps.length ? Math.max(...gaps) : null, successfulHookPosts: posts.filter(post => post.status === 204).length,
+        lastEvents: hooks.slice(-6), lastPosts: posts.slice(-6), producerExit: producer.exitCode, producerSignal: producer.signalCode }
+      assert.equal(producer.exitCode, null, 'The private pressure producer must remain alive during warmup')
+      assert.equal(producer.signalCode, null, 'The private pressure producer must not stop during warmup')
+      if (at - startedAt < 2_000 || hooks.length < 12 || Math.max(...gaps) >= 400 ||
+        posts.filter(post => post.status === 204).length < 12 || posts.at(-1)?.status !== 204 || at - posts.at(-1).at >= 400) return false
+      pressurePreflight.passed = true
+      pressurePreflight.completedAt = at
+      return true
+    }, budgetMs)
+  }
+  if (messageContextProof) messageBefore = await readMessageContext(first.cdp)
   // Keyboard activation exercises actual native popover and React buttons without changing Agent
   // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
   await activateButton(first.cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer__mailbox')`)
@@ -447,6 +529,12 @@ try {
   const observer = await first.cdp.evaluate('window.__crashProof')
   const crashAt = Date.now()
   const hooks = observer.hooks.filter(event => event.at >= lastEditAt)
+  if (messageContextProof) {
+    const observedGaps = hooks.length ? [hooks[0].at-lastEditAt, ...hooks.slice(1).map((event, i) => event.at-hooks[i].at), crashAt-hooks.at(-1).at] : []
+    pressureFinal = { lastEditAt, crashAt, windowMs: crashAt-lastEditAt, count: hooks.length, hooks, gaps: observedGaps,
+      maxGapMs: observedGaps.length ? Math.max(...observedGaps) : null, lastPosts: acknowledgements.slice(-6),
+      producerExit: producer.exitCode, producerSignal: producer.signalCode }
+  }
   assert.ok(hooks.length >= 12, 'The producer must keep emitting real accepted Renderer events during the fixed two-second window; ' + JSON.stringify({lastEditAt,crashAt,eventCount:hooks.length,totalEvents:observer.hooks.length,lastEvents:observer.hooks.slice(-6),lastPosts:acknowledgements.slice(-6),producerExit:producer.exitCode,producerSignal:producer.signalCode}))
   const gaps = [hooks[0].at-lastEditAt, ...hooks.slice(1).map((event, i) => event.at-hooks[i].at), crashAt-hooks.at(-1).at]
   assert.ok(Math.max(...gaps) < 400, 'No quiet debounce interval may occur before the abrupt crash')
@@ -483,7 +571,7 @@ try {
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsEntryProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsEntryProof || messageContextProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: Math.max(...gaps), successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
@@ -508,6 +596,15 @@ try {
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
   assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
+  if (messageContextProof) {
+    const messageAfter = await readMessageContext(second.cdp)
+    assert.deepEqual(messageAfter.savedPrompts,messageBefore.savedPrompts)
+    assert.deepEqual(messageAfter.content.prompts,messageBefore.content.prompts)
+    assert.deepEqual(await runProcessIdentity(originalRun.pid),ownedRunProcess,'Original Run process birth survives message context restart')
+    result.messageContext = { passed:true, exactFlag:'--message-context', before:messageBefore, after:messageAfter,
+      originalAgentSessionId:attached.id, originalRunId:attached.control.run.runId, processState:attached.processState,
+      automaticallyAttachedSameRun:true, nativeRestartedProcess:true, originalRunBirth:ownedRunProcess }
+  }
   if(identityMenuProof){
     assert.deepEqual(restored.identity,before.identity,'The original Agent name and More return from the same durable Session facts')
     await activateButton(second.cdp,`document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`)
@@ -596,7 +693,7 @@ try {
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
 const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
-  failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
+  pressurePreflight, pressureProducer, pressureFinal, failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
 // Task gate captures command output without preserving it on a failed command. Keep the same receipt
 // in the ignored diagnostic directory so an early failure remains inspectable after private cleanup.
 try {

@@ -75,7 +75,7 @@ describe('对话轴的渲染', () => {
     // 人类轴上两枚（u1、u2），Agent 轴上一枚（a1）——数量与身份都不同。
     expect(human.match(/conversation-axis__mark/g)).toHaveLength(2)
     expect(agent.match(/conversation-axis__mark/g)).toHaveLength(1)
-    expect(human).toContain('conversation-avatar--unknown')
+    expect(human).toContain('conversation-avatar--human')
     expect(human).not.toContain('conversation-avatar--agent')
     expect(agent).toContain('conversation-avatar--agent')
     expect(agent).not.toContain('conversation-avatar--unknown')
@@ -331,7 +331,7 @@ describe('对话轴的渲染', () => {
         onSelect={() => {}}
       />
     )
-    expect(markup).toContain('conversation-avatar--unknown')
+    expect(markup).toContain('conversation-avatar--human')
     expect(markup).not.toContain('data-agent-provider="claude"')
   })
 

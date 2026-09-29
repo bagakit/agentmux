@@ -46,7 +46,7 @@ function skillSection(startHeader: string, endHeader: string): string {
   return AGENTMUX_CLI_SKILL.slice(start, end < 0 ? undefined : end)
 }
 
-const launchGuide = composeAgentLaunchPrompt('do the work', true)
+const launchGuide = composeAgentLaunchPrompt('do the work', true).text
 
 function splitView(): DirectionalNeighborInput {
   return {

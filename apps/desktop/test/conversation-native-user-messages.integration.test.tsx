@@ -102,18 +102,17 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
 
     // User turn verification
     const userTurn = turns[0]!
-    expect(userTurn.getAttribute('data-speaker-role')).toBe('unknown')
+    expect(userTurn.getAttribute('data-speaker-role')).toBe('human')
 
-    // Explicit unknown input attribution, never Human/You.
+    // The raw author is unknown; the shared UI applies the requested user default.
     const who = userTurn.querySelector('.log-turn__who')
-    expect(who?.textContent).toBe('Input')
-    expect(userTurn.querySelector('[role="note"]')?.textContent).toBe('作者未记录')
-    expect(who?.textContent).not.toBe('You')
-
-    // Avatar must be unknown circle-dot, NEVER human
-    const avatar = userTurn.querySelector('.conversation-avatar--unknown')
+    expect(who?.textContent).toBe('You')
+    expect(userTurn.querySelector('[role="note"]')).toBeNull()
+    
+    // Avatar uses the same user appearance without changing the input record.
+    const avatar = userTurn.querySelector('.conversation-avatar--human')
     expect(avatar).not.toBeNull()
-    expect(userTurn.querySelector('.conversation-avatar--human')).toBeNull()
+    expect(userTurn.querySelector('.conversation-avatar--unknown')).toBeNull()
 
     // Parts must be preserved in exact order: text then resource
     const body = userTurn.querySelector('.log-turn__body')
@@ -294,11 +293,10 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
 
     // 1. Native user message is a conversation turn, not a machine row
     const nativeTurn = turns[0]!
-    expect(nativeTurn.getAttribute('data-speaker-role')).toBe('unknown')
-    expect(nativeTurn.querySelector('.log-turn__who')?.textContent).toBe('Input')
-    expect(nativeTurn.querySelector('[role="note"]')?.textContent).toBe('作者未记录')
-    expect(nativeTurn.querySelector('.log-turn__who')?.textContent).not.toBe('You')
-    expect(nativeTurn.querySelector('.conversation-avatar--unknown')).not.toBeNull()
+    expect(nativeTurn.getAttribute('data-speaker-role')).toBe('human')
+    expect(nativeTurn.querySelector('.log-turn__who')?.textContent).toBe('You')
+    expect(nativeTurn.querySelector('[role="note"]')).toBeNull()
+    expect(nativeTurn.querySelector('.conversation-avatar--human')).not.toBeNull()
     expect(nativeTurn.querySelector('.log-turn__body')?.textContent).toContain('Terminal native prompt')
 
     // 2. Peer agent message shows known agent author
@@ -375,9 +373,9 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
       name: 'other-unlisted-agent'
     })
 
-    // Unknown user input: returns 'Input', NEVER 'You' or recipient
+    // Unknown input uses the user display default without altering the recorded author.
     expect(resolver({ role: 'unknown', id: UNKNOWN_SPEAKER_ID })).toEqual({
-      name: 'Input'
+      name: 'You'
     })
   })
 
@@ -617,9 +615,9 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
 
     expect(host.querySelectorAll('.log-turn')).toHaveLength(2)
 
-    // Axes marks must contain both Input and Recipient
+    // Axes use the same user default and current Agent name.
     const marks = [...host.querySelectorAll<HTMLButtonElement>('.conversation-axis__mark')]
-    expect(marks.map((x) => x.getAttribute('aria-label'))).toEqual(['Input', 'Recipient'])
+    expect(marks.map((x) => x.getAttribute('aria-label'))).toEqual(['You', 'Recipient'])
 
     // Clicking Recipient scrolls to the assistant segment (index 1), not native input (index 0)
     const rows = [...host.querySelectorAll<HTMLElement>('.activity-log__segment')]

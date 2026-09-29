@@ -16,7 +16,6 @@ import { TopicWorkbenchTopology } from '../src/renderer/src/components/TopicPres
 import { getWindowOverlayHost } from '../src/renderer/src/components/WindowOverlayHost'
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
 import { OpenDestinationPopover } from '../src/renderer/src/components/OpenDestinationBar'
-import { ShortcutsCheatSheet } from '../src/renderer/src/components/ShortcutsCheatSheet'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { AgentContextUsage } from '../src/renderer/src/components/AgentContextUsage'
@@ -30,7 +29,6 @@ const NOTICES_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/
 const CONTEXT_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/AgentContextUsage.tsx'), 'utf8')
 const MAILBOX_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/SessionMailbox.tsx'), 'utf8')
 const OPEN_DEST_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/OpenDestinationBar.tsx'), 'utf8')
-const SHORTCUTS_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/ShortcutsCheatSheet.tsx'), 'utf8')
 const TOP_ROW_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/TopRowChrome.tsx'), 'utf8')
 
 describe('T-003: Native popover and bespoke portal families adoption', () => {
@@ -319,50 +317,6 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(host?.querySelector('.open-destination-bar')).toBeNull()
   })
 
-  it('ShortcutsCheatSheet mounts into shared host, holds browser-yield lease, and dismisses on Escape/backdrop click', async () => {
-    expect(OVERLAYS_CSS).toContain('.shortcuts-help__overlay {')
-    expect(OVERLAYS_CSS).toContain('z-index: var(--layer-dialog);')
-    expect(SHORTCUTS_TSX).toContain('createPortal')
-    expect(SHORTCUTS_TSX).toContain('getWindowOverlayHost')
-
-    let closed = false
-    await act(async () => {
-      root?.render(
-        <ShortcutsCheatSheet
-          open={true}
-          onClose={() => { closed = true }}
-          isMac={true}
-        />
-      )
-    })
-
-    const sheetInHost = host?.querySelector('.shortcuts-help__overlay')
-    expect(sheetInHost).toBeTruthy()
-    expect(container?.querySelector('.shortcuts-help__overlay')).toBeNull()
-
-    // Browser-yield lease held
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
-
-    // Backdrop click dismisses
-    await act(async () => {
-      sheetInHost?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(closed).toBe(true)
-
-    // Close releases lease
-    await act(async () => {
-      root?.render(
-        <ShortcutsCheatSheet
-          open={false}
-          onClose={vi.fn()}
-          isMac={true}
-        />
-      )
-    })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
-    expect(host?.querySelector('.shortcuts-help__overlay')).toBeNull()
-  })
-
   it('proves native popovers yield browser surface and track open/close lifecycle', async () => {
     // 1. GlobalSystemNotices
     expect(NOTICES_TSX).toContain('acquireNativeSurfaceOverlay')
@@ -500,7 +454,6 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(owners).toContain('AgentAvatar')
     expect(owners).toContain('TopicWorkbenchTopology')
     expect(owners).toContain('OpenDestinationPopover')
-    expect(owners).toContain('ShortcutsCheatSheet')
     expect(owners).toContain('GlobalSystemNotices')
     expect(owners).toContain('SessionMailbox')
     expect(owners).toContain('AgentContextUsage')
@@ -606,30 +559,6 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
           canSplit={false}
           onSelect={vi.fn()}
           onDismiss={vi.fn()}
-        />
-      )
-    })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
-
-    // 2. ShortcutsCheatSheet opens: lease acquired
-    await act(async () => {
-      root?.render(
-        <ShortcutsCheatSheet
-          open={true}
-          onClose={vi.fn()}
-          isMac={true}
-        />
-      )
-    })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
-
-    // Close ShortcutsCheatSheet: lease releases
-    await act(async () => {
-      root?.render(
-        <ShortcutsCheatSheet
-          open={false}
-          onClose={vi.fn()}
-          isMac={true}
         />
       )
     })

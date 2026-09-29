@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { composeAgentLaunchPrompt } from '../src/agent-outbound-message.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { hashAgentCapability } from '../src/agent-capability.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -67,8 +68,15 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
       expect(result.run.runId).toBe('new-run')
       expect(submitted).toBe(providerId === 'kimi' ? 1 : 0)
       expect(stop).not.toHaveBeenCalled()
-      expect((await store.loadTimeline(result.agentSessionId)).items.map(({ content, status, authorAgentSessionId }) => ({ content, status, authorAgentSessionId })))
-        .toEqual([{ content: 'exact words', status: confirmed ? 'complete' : 'failed', authorAgentSessionId: operation === 'discuss' ? 'mail-agent' : undefined }])
+      const recorded = (await store.loadTimeline(result.agentSessionId)).items
+      expect(recorded.map(({ kind, source, content, status, authorAgentSessionId }) => ({ kind, source, content, status, authorAgentSessionId })))
+        .toEqual([
+          ...(operation === 'discuss' ? [{ kind: 'system_message', source: 'agentmux',
+            content: composeAgentLaunchPrompt('exact words', true).systemContext,
+            status: confirmed ? 'complete' : 'failed', authorAgentSessionId: undefined }] : []),
+          { kind: 'user_message', source: 'user', content: 'exact words', status: confirmed ? 'complete' : 'failed',
+            authorAgentSessionId: operation === 'discuss' ? 'mail-agent' : undefined }
+        ])
       expect(errors).toHaveLength(confirmed ? 0 : 1)
       if (!confirmed) expect(errors[0]).toMatchObject({ message: expect.stringContaining('was not confirmed') })
       expect((await client.agentSession(result.agentSessionId)).run.runId).toBe('new-run')

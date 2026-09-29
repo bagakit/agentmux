@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
+import { readPmoTeamsTopicFloatingState } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { rendererCssBoundsToWindowDip } from '../../../src/renderer/src/lib/browser-bounds-sync'
@@ -108,7 +109,18 @@ useAppStore.setState((current): Partial<Store> => ({
   enqueueAgentSteer: (...args) => { note('queue', args); return false },
   reportError: error => { errors.push(String(error)) }
 }))
-window.localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
+// Seed once only. Reload must consume the real floating owner's saved preferences.
+if (window.localStorage.getItem(savedMoteKey) === null)
+  window.localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
+let failPreferenceSave = false
+const storageSetItem = Storage.prototype.setItem
+Storage.prototype.setItem = function (key: string, value: string) {
+  if (key === savedMoteKey) {
+    note('preferenceSave', { failed: failPreferenceSave })
+    if (failPreferenceSave) throw new DOMException('Controlled storage unavailable', 'SecurityError')
+  }
+  return storageSetItem.call(this, key, value)
+}
 
 const rect = (node: Element | null | undefined) => {
   if (!node) return null
@@ -155,10 +167,16 @@ function facts() {
   const identity = floating?.querySelector<HTMLElement>('.mote-chooser__identity[role="tooltip"]')
   return {
     ready: document.querySelector('.app-shell') !== null, protected: protectedFacts(), calls: copy(calls), errors: [...errors],
-    saved: JSON.parse(localStorage.getItem(savedMoteKey) ?? 'null'),
+    saved: JSON.parse(localStorage.getItem(savedMoteKey) ?? 'null'), floating: copy(readPmoTeamsTopicFloatingState()),
     ui: { appearance: document.documentElement.dataset[APP_APPEARANCE_DATASET_KEY],
       visible: floating?.matches(':popover-open') ?? false, presentation: floating?.dataset.motePresentation,
       rail: floating?.dataset.moteNavigation, topicId: floating?.dataset.moteTargetTopic,
+      resizing: floating?.dataset.moteResizing, resizeRect: rect(floating?.querySelector('[aria-label="Resize Mote window"]')),
+      bodyStyles: { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect },
+      preferenceNotice: floating?.querySelector('.mote-size-notice')?.textContent ?? null,
+      workfaceControls: [...(floating?.querySelectorAll<HTMLElement>('.pmo-teams-topic-floating__content button, .pmo-teams-topic-floating__content [aria-label="Message Agent"]') ?? [])]
+        .filter(node => node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0)
+        .map(node => ({ label: node.getAttribute('aria-label') ?? node.textContent, rect: rect(node) })),
       tabId: floating?.dataset.moteTargetTab, sessionId: floating?.dataset.moteTargetSession,
       state: floating?.dataset.moteStatus, panelRect: rect(floating), footerRect: rect(footer),
       entryRect: rect(launcher), entryWrapperRect: rect(launcher?.closest('[data-pmo-teams-topic-launcher]')),
@@ -198,6 +216,7 @@ function presentationReview() {
     defaultMoteId: PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId,
     moteIds: [PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId], facts,
     events: () => copy(events), publications: () => copy(publications),
+    preferenceSaveFailure: (fail: boolean) => { failPreferenceSave = fail },
     footerCounts: (working: number, attention: number) => {
       const originals = controlledSessions.map(session => ({ ...session, status: { ...session.status, state: 'idle' as const } }))
       const counted = (count: number, state: 'working' | 'error') => Array.from({ length: count }, (_, index) => {
@@ -229,7 +248,7 @@ function presentationReview() {
     dispose: () => { root.unmount(); window.motePresentationReview.ready = false }
   }
 }
-for (const type of ['pointerenter', 'pointerleave', 'pointerdown', 'click', 'focusin', 'keydown', 'toggle']) {
+for (const type of ['pointerenter', 'pointerleave', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'click', 'focusin', 'keydown', 'toggle']) {
   document.addEventListener(type, event => {
     const target = event.target instanceof Element ? event.target : null
     if (!target?.closest('[data-pmo-teams-topic-launcher], [data-pmo-teams-topic-floating], [data-settings-page]')) return

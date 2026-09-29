@@ -64,7 +64,7 @@ afterEach(async () => {
 })
 
 describe('Conversation and History shared reading UI presentation', () => {
-  it('renders Agent open reading on left, Human right-docked, and Unknown neutral block in ActivityView', async () => {
+  it('renders Agent open reading on left and both known and unattributed user inputs right-docked in ActivityView', async () => {
     const userMsgHuman: AgentSessionUserMessage = {
       id: 'msg-human',
       rawId: 'raw-human-1',
@@ -147,12 +147,12 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(humanTurn!.textContent).toContain('You')
     expect(humanTurn!.textContent).toContain('人类提问：请检查代码。')
 
-    // 3. Unknown input: right-docked neutral block, clearly says "Input" and "作者未记录", NOT "You"
-    const unknownTurn = Array.from(turns).find((t) => t.dataset.speakerRole === 'unknown')
+    // 3. Recorded author remains unknown; the user-requested display default is You.
+    const unknownTurn = Array.from(turns).find((t) => t.dataset.messageId === 'msg-unknown')
     expect(unknownTurn).toBeDefined()
-    expect(unknownTurn!.textContent).toContain('Input')
-    expect(unknownTurn!.textContent).toContain('作者未记录')
-    expect(unknownTurn!.textContent).not.toContain('You')
+    expect(unknownTurn!.dataset.speakerRole).toBe('human')
+    expect(unknownTurn!.textContent).not.toContain('作者未记录')
+    expect(unknownTurn!.textContent).toContain('You')
     expect(unknownTurn!.textContent).toContain('未核实作者输入。')
 
     // 4. Undefined speaker machine activity: does NOT shift right

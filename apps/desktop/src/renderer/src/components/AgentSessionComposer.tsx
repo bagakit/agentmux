@@ -23,7 +23,6 @@ import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from './AgentComposer'
-import { AgentStatusPromptActions } from './AgentStatusPromptActions'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
@@ -60,14 +59,16 @@ export function AgentSessionComposer({
   disabled = false,
   readOnly = false,
   tabName,
-  resultReview
+  resultReview,
+  visible = true
 }: {
   sessionId: string
   disabled?: boolean
   readOnly?: boolean
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
-  resultReview?: ReactNode
+  resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
+  visible?: boolean
 }) {
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   const feedback = useComposerFeedback(sessionId)
@@ -149,15 +150,16 @@ export function AgentSessionComposer({
   const submitMode = composerSubmitMode(session, disabled || readOnly)
   const queueStatusPrompt = submitMode.canType && session?.kind === 'agent' && Boolean(session.pendingInteraction)
 
-  function sendStatusPrompt(prompt: ComposerShortcut): void {
-    if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt)) return
+  function sendStatusPrompt(prompt: ComposerShortcut): boolean {
+    if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt)) return false
     // State actions leave the independently authored Composer draft intact.
     const accepted = queueStatusPrompt
-      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report)
-      : send(sessionId, prompt.body, feedback.report)
-    if (!accepted) return
+      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual')
+      : send(sessionId, prompt.body, feedback.report, 'manual')
+    if (!accepted) return false
     feedback.dismiss()
     if (queueStatusPrompt) void useAppStore.getState().flushAgentSteerQueue(sessionId)
+    return true
   }
 
   function submit(): void {
@@ -254,10 +256,6 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
-      resultReview={resultReview}
-      statusPrompts={session?.kind === 'agent' ? <AgentStatusPromptActions prompts={shortcutsHere}
-        state={session.status.state} disabled={!submitMode.canType || (!submitMode.canSubmit && !queueStatusPrompt)}
-        queue={queueStatusPrompt} onSelect={sendStatusPrompt} /> : null}
       mailbox={<SessionMailbox system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
@@ -278,7 +276,12 @@ export function AgentSessionComposer({
       />}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
-        appearance={executors?.[session.executorId]?.avatar} /> : null}
+        appearance={executors?.[session.executorId]?.avatar} prompts={shortcutsHere} visible={visible}
+        disabled={!submitMode.canType || (!submitMode.canSubmit && !queueStatusPrompt)} queue={queueStatusPrompt}
+        inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : queueStatusPrompt
+          ? 'Queue a message until the pending request is answered.' : session.processState !== 'running' || session.status.state === 'disconnected'
+            ? 'Send to restore this Session.' : 'Send a message to this Session.'}
+        onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
       contextUsage={<AgentContextUsage usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       onActivateSemanticReference={(reference) => {
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference

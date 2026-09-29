@@ -225,7 +225,7 @@ describe('focusedSessionId：游标是焦点那一格', () => {
 describe('attention.next 接线', () => {
   it('按下去真的调 selectSession，落点是队首', () => {
     const spy = store({ sessions: [agent('busy', 'working', 1), agent('asking', 'waiting', 10)] })
-    const handlers = windowShortcutHandlers(spy, { toggleQuickSwitch: () => {}, toggleShortcutsHelp: () => {} })
+    const handlers = windowShortcutHandlers(spy, { toggleQuickSwitch: () => {}, openShortcuts: () => {} })
     expect(handlers['attention.next']!()).toBe(true)
     expect(spy.calls).toEqual(['selectSession:asking'])
   })

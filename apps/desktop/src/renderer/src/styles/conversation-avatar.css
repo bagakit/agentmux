@@ -68,3 +68,5 @@
   overflow: hidden; font-size: var(--fs-micro); font-weight: 560; line-height: 1;
   color: var(--text-3); background: var(--surface-2); filter: grayscale(1);
 }
+
+.conversation-avatar--system { color: var(--text-3); background: var(--surface-2); }

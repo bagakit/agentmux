@@ -10,7 +10,7 @@ const require=createRequire(import.meta.url), {build}=await import('vite'), ts=r
 const fixture=join(desktop,'scripts/fixtures/dialog-surface-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only')
 const privateRoot=await mkdtemp('/tmp/amx-dialog-craft-'), evidence=join(repository,'.tmp/dialog-surface-craft',`attempt-${Date.now()}${recovery?'-recovery':''}`)
 const hash=value=>createHash('sha256').update(value).digest('hex')
-const files=['components/ConfirmationDialog.tsx','components/WorkspaceWorkbench.tsx','components/GoalDetail.tsx','components/QuickSwitcher.tsx','components/SpaceIconPicker.tsx','components/ShortcutsCheatSheet.tsx','styles/overlays.css','styles/source-control.css','styles/board.css','styles/space-object-appearance.css']
+const files=['components/ConfirmationDialog.tsx','components/WorkspaceWorkbench.tsx','components/GoalDetail.tsx','components/QuickSwitcher.tsx','components/SpaceIconPicker.tsx','styles/overlays.css','styles/source-control.css','styles/board.css','styles/space-object-appearance.css']
 const result={schema:'agentmux.dialog-surface-craft.v1',passed:false,recovery,candidateOnly,userRunTouched:false,
   boundary:'Actual isolated production Renderer, original Workbench/Store/confirmation and navigation callers. Controlled preview API and gallery facts; no real CLI, installed App, user Run, TCC or durable restart claim.',
   aestheticReview:'Root self-review only; independent image review pending under user no-messaging instruction',mutations:[],callers:[]}

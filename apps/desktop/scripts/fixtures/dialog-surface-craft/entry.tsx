@@ -4,7 +4,6 @@ import { flushSync } from 'react-dom'
 import { ConfirmationDialog } from '../../../src/renderer/src/components/ConfirmationDialog'
 import { QuickSwitcher } from '../../../src/renderer/src/components/QuickSwitcher'
 import { SpaceIconPicker } from '../../../src/renderer/src/components/SpaceIconPicker'
-import { ShortcutsCheatSheet } from '../../../src/renderer/src/components/ShortcutsCheatSheet'
 import { GoalDetail } from '../../../src/renderer/src/components/GoalDetail'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -35,8 +34,7 @@ Object.assign(window, { dialogCraft: {
     document.documentElement.dataset.appearance = theme
     document.getElementById('root')!.style.display = 'none'
     flushSync(() => root.render(kind === 'switch' ? <QuickSwitcher open onClose={closeGallery} /> : kind === 'icons' ?
-      <SpaceIconPicker target={{ key: 'folder:private-craft', name: 'Retained workspace', kind: 'folder' }} onClose={closeGallery} /> : kind === 'shortcuts' ?
-      <ShortcutsCheatSheet open isMac onClose={closeGallery} /> : kind === 'goal' ?
+      <SpaceIconPicker target={{ key: 'folder:private-craft', name: 'Retained workspace', kind: 'folder' }} onClose={closeGallery} /> : kind === 'goal' ?
       <GoalDetail demand={goal} acknowledgementFeedback={{ pending: false, failure: null, reloadError: null }} onAcknowledgementFeedbackChange={() => {}}
         onClose={() => actions.push('goal-close')} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} moteError={null} onRetryMote={() => {}} /> :
       <ConfirmationDialog open title="Stop Agent Session?" subject={longSubject}

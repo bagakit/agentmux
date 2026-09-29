@@ -103,7 +103,7 @@ describe('Kimi provider', () => {
       //
       // 所以这里必须走**真的组装器**：先确认它非空（否则下面在对空串取胜），再确认分流把它整份
       // 划给 deferred、启动侧拿到空串，且这个空串真的能起来。
-      const composed = composeAgentLaunchPrompt('review this', true)
+      const composed = composeAgentLaunchPrompt('review this', true).text
       expect(composed.length).toBeGreaterThan(100)
       const split = splitLaunchPromptByDelivery(kimi.catalog, composed)
       expect(split.atLaunch).toBe('')
@@ -118,7 +118,7 @@ describe('Kimi provider', () => {
     it('送得到的 Provider 分流后整份随启动走，没有要补送的', () => {
       // 反面锚点。没有它，把 splitLaunchPromptByDelivery 写成「永远划给 deferred」会全绿，
       // 而那会让另外十个 Provider 的启动 prompt 全部退化成起来之后再键入。
-      const composed = composeAgentLaunchPrompt('review this', true)
+      const composed = composeAgentLaunchPrompt('review this', true).text
       expect(splitLaunchPromptByDelivery(providers.get('claude').catalog, composed))
         .toEqual({ atLaunch: composed, deferred: '' })
     })

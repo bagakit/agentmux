@@ -1,5 +1,5 @@
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason } from '@agentmux/core'
@@ -36,6 +36,7 @@ import {
 } from '../lib/continuity-failure-notice'
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
+import { SessionResultReviewContent } from './SessionResultReviewContent'
 import { SessionHistoryView } from './SessionHistoryView'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { AgentRegionHeader } from './AgentRegionHeader'
@@ -112,6 +113,13 @@ export function SessionPane({
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
   const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
+  const activityLifetime = useRef({ sessionId, opened: false })
+  const activityContent = useRef<ReactNode>(null)
+  if (activityLifetime.current.sessionId !== sessionId) {
+    activityLifetime.current = { sessionId, opened: false }
+    activityContent.current = null
+  }
+  if (viewMode !== 'terminal') activityLifetime.current.opened = true
   const [historyOpen, setHistoryOpen] = useState(false)
   const surfaceRef = useRef<HTMLElement>(null)
   const annotationNoteRef = useRef<ConversationAnnotationNoteHandle>(null)
@@ -355,7 +363,7 @@ export function SessionPane({
   if (!session && acceptedLaunch) {
     return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
       <div className="agent-body">{launchNotice}<p>Agent created · {acceptedLaunch.agentSessionId}</p></div>
-      {!readOnly ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
+      {!readOnly ? <AgentSessionComposer key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>
   }
 
@@ -371,7 +379,7 @@ export function SessionPane({
           executor={connectingExecutor}
           appearance={connectingAppearance}
         />
-        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} disabled {...(tabName ? { tabName } : {})} /> : null}
+        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -425,6 +433,30 @@ export function SessionPane({
     ? session.status.detail
     : agentStartupRecoveryDetail(startupDecision)) : undefined
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
+  // Reuse the original element while covered/hidden, so late observations do not
+  // repaint its rows or disturb selected text. Return applies only current visible facts.
+  if (session.kind === 'agent' && visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore) {
+    activityContent.current = <ActivityView
+      sessionId={session.id}
+      items={timeline}
+      userMessages={userMessages}
+      userMessageRead={{
+        loading: userMessagesLoading,
+        error: userMessagesError,
+        hasMore: hasEarlierUserRecords,
+        onRetry: () => { void refreshUserMessages() },
+        onReadEarlier: openHistory
+      }}
+      capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
+      displayState={session.status.state}
+      workspaceRoot={activeWorkspaceRoot}
+      openWorkspaceFile={openWorkspaceFile}
+      readPastedImage={readPastedImage}
+      openHttpLink={onProseLinkClick}
+      {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
+      describeSpeaker={describeSpeaker}
+              />
+  }
   const resultReview = session.kind === 'agent'
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
@@ -448,7 +480,7 @@ export function SessionPane({
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }} visible={visible}
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
-      <div className="agent-body" style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
+      <div className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
             pendingAgentRestore ? (inlineHistory ? null :
@@ -536,31 +568,32 @@ export function SessionPane({
               </div>
             </div>
           ) : null}
-          {session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore ? (
-            <div inert={historyOpen} style={{ height: '100%' }}>
-              <ActivityView
-                sessionId={session.id}
-                items={timeline}
-                userMessages={userMessages}
-                userMessageRead={{
-                  loading: userMessagesLoading,
-                  error: userMessagesError,
-                  hasMore: hasEarlierUserRecords,
-                  onRetry: () => { void refreshUserMessages() },
-                  onReadEarlier: openHistory
-                }}
-                capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
-                displayState={session.status.state}
-                workspaceRoot={activeWorkspaceRoot}
-                openWorkspaceFile={openWorkspaceFile}
-                readPastedImage={readPastedImage}
-                openHttpLink={onProseLinkClick}
-                {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
-                describeSpeaker={describeSpeaker}
-              />
+          {session.kind === 'agent' && activityLifetime.current.opened ? (
+            <div hidden={viewMode === 'terminal' || pendingAgentRestore} inert={historyOpen || viewMode === 'terminal' || pendingAgentRestore} style={{ height: '100%' }}>
+              {activityContent.current}
             </div>
           ) : null}
         </div>
+        {session.kind === 'agent' && session.pendingInteraction ? (
+          <AgentInteractionCard
+            key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}
+            request={session.pendingInteraction}
+            readOnly={!hasAgentComposer}
+            responseUnavailableReason={session.interactionResponseUnavailableReason}
+            {...(hasAgentComposer ? { onOpenTerminal: () => {
+              useAppStore.getState().setViewMode(session.id, 'terminal')
+              setHistoryOpen(false)
+              if (linkOrigin.tabId && linkOrigin.regionId) {
+                useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId)
+              }
+            } } : {})}
+            // A pending request outlives the process that asked it, so the card must go inert on the
+            // same terms as the composer below it — otherwise a dead Run still shows live buttons and
+            // answering it fails on a Run that can no longer accept input.
+            disabled={!visible || session.processState !== 'running' || session.status.state === 'disconnected' || Boolean(session.pendingInteraction.evidence.run && session.pendingInteraction.evidence.run.runId !== session.control.run.runId)}
+            onRespond={async (response) => await respondInteraction(session.id, response)}
+          />
+          ) : null}
       </div>
       <OpenDestinationPopover
         request={linkRequest}
@@ -579,26 +612,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          {session.pendingInteraction ? (
-            <AgentInteractionCard
-              key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}
-              request={session.pendingInteraction}
-              responseUnavailableReason={session.interactionResponseUnavailableReason}
-              onOpenTerminal={() => {
-                useAppStore.getState().setViewMode(session.id, 'terminal')
-                setHistoryOpen(false)
-                if (linkOrigin.tabId && linkOrigin.regionId) {
-                  useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId)
-                }
-              }}
-              // A pending request outlives the process that asked it, so the card must go inert on the
-              // same terms as the composer below it — otherwise a dead Run still shows live buttons and
-              // answering it fails on a Run that can no longer accept input.
-              disabled={session.processState !== 'running' || session.status.state === 'disconnected'}
-              onRespond={async (response) => await respondInteraction(session.id, response)}
-            />
-          ) : null}
-          <AgentSessionComposer key={sessionId} sessionId={session.id} resultReview={resultReview} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>

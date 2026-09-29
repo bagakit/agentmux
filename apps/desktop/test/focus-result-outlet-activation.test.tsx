@@ -20,7 +20,6 @@ vi.mock('react-resizable-panels', async () => {
 })
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({ ActivityView: () => null }))
-vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({ AgentSessionComposer: ({ resultReview }: { resultReview: ReactNode }) => resultReview }))
 vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({ AgentInteractionCard: () => null }))
 // Region chrome is real; HappyDOM does not qualify Monaco paint/native geometry.
 vi.mock('../src/renderer/src/components/EditorPane.js', () => ({ EditorPane: () => null }))
@@ -75,13 +74,17 @@ describe('Focus Result controls activate their exact existing workbench destinat
 
   async function mountReview(workbench: 'owner' | undefined = undefined, workspaceId = 'repo') {
     await act(async () => root.render(createElement(Fragment, null, createElement('div', { className: 'fixture-floated-result' }, createElement(SessionPane, { sessionId: session.id, surfaceKind: 'agent', interactiveResize: false, visible: true, linkOrigin: origin })), workbench ? createElement(WorkspaceWorkbench, { workspaceId, visible: true, viewOwnership: workbench }) : null)))
-    const review = container.querySelector('.fixture-floated-result .session-result-review button[aria-expanded]') as HTMLButtonElement
+    const avatar = container.querySelector<HTMLButtonElement>('.fixture-floated-result .composer-agent-identity .agent-avatar')!
+    expect(avatar).toBeTruthy()
+    await act(async () => avatar.click())
+    const face = document.getElementById(avatar.getAttribute('aria-controls')!)!
+    const review = face.querySelector<HTMLButtonElement>('.agent-state-face__review')!
     expect(review).toBeTruthy()
     await act(async () => review.click())
-    expect(container.querySelectorAll('.fixture-floated-result .session-result-review__details-actions button').length).toBeGreaterThan(0)
+    expect(face.querySelectorAll('.session-result-review__details-actions button').length).toBeGreaterThan(0)
   }
   async function clickResult(title: string) {
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.fixture-floated-result .session-result-review__details-actions button')].filter((button) => button.querySelector('span')?.title === title)
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('.agent-identity-popover--actions .session-result-review__details-actions button')].filter((button) => button.querySelector('span')?.title === title)
     expect(buttons).toHaveLength(1)
     await act(async () => { buttons[0]!.click(); await new Promise((resolve) => setTimeout(resolve, 0)) })
   }

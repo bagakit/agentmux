@@ -66,7 +66,7 @@ describe('唯一出站出口 composeOutboundMessage', () => {
 
 describe('启动提示路径经同一出口', () => {
   it('运行时引导进信封，用户请求原样透传且逐字节一致', () => {
-    const out = composeAgentLaunchPrompt(NASTY_USER, true)
+    const out = composeAgentLaunchPrompt(NASTY_USER, true).text
     // AgentMux 的引导语被署名。
     expect(out.startsWith('<amux from="amux">\n')).toBe(true)
     expect(out).toContain('AgentMux runtime guide:')
@@ -79,7 +79,7 @@ describe('启动提示路径经同一出口', () => {
   it('引导只指路不抄语法：绝不把完整 CLI flag 语法塞进提示', () => {
     // 守 SSOT「不把完整 CLI 语法抄进提示」——语法的唯一真相在 skill，抄进来会在语法演进时过期。
     // 这条负向断言此前在旧 agent-launch-prompt.test.ts 里，随模块删除一并搬来。
-    const guide = composeAgentLaunchPrompt('do the work', true)
+    const guide = composeAgentLaunchPrompt('do the work', true).text
     for (const direction of ['left', 'right', 'above', 'below']) expect(guide).toContain(direction)
     for (const flag of ['--left-of', '--right-of', '--above', '--below', 'open terminal', 'agent open', 'space mv']) {
       expect(guide).not.toContain(flag)
@@ -87,12 +87,12 @@ describe('启动提示路径经同一出口', () => {
   })
 
   it('关闭注入时不加任何 AgentMux 的话，用户原文原样返回', () => {
-    expect(composeAgentLaunchPrompt(NASTY_USER, false)).toBe(NASTY_USER)
-    expect(composeAgentLaunchPrompt(undefined, false)).toBe('')
+    expect(composeAgentLaunchPrompt(NASTY_USER, false).text).toBe(NASTY_USER)
+    expect(composeAgentLaunchPrompt(undefined, false).text).toBe('')
   })
 
   it('还没有用户请求时给出等待指示，且它属于 AgentMux 的话（进信封）', () => {
-    const idle = composeAgentLaunchPrompt(undefined, true)
+    const idle = composeAgentLaunchPrompt(undefined, true).text
     expect(idle).toContain('<amux from="amux">')
     expect(idle).toContain('No request yet. Wait for the user.')
     // 没有用户段时，信封是唯一内容，末尾就是闭合标签。
@@ -106,7 +106,7 @@ describe('启动提示路径经同一出口', () => {
 // 从引导里摘掉、或把它挪出信封落进用户段、或把动词抄错成一个 CLI 并不分发的名字，都会让某一条变红。
 describe('启动定向握手：启动提示携带 whoami 指令并署名进信封', () => {
   it('启动提示指示 Agent 先运行 whoami 拿到自己的坐标与能力', () => {
-    const out = composeAgentLaunchPrompt('do the work', true)
+    const out = composeAgentLaunchPrompt('do the work', true).text
     // 行为断言：握手动词进了启动提示，且用的是 CLI 真正分发的那个动词名（防 guide/dispatch 漂移）。
     expect(out).toContain(`"$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB}`)
     // 握手的目的：让 Agent 知道自己是谁、在哪、有哪些能力——坐标各项都被点到。
@@ -116,7 +116,7 @@ describe('启动定向握手：启动提示携带 whoami 指令并署名进信�
   })
 
   it('握手指令是 AgentMux 的话：署名在 amux 信封内，不落进用户段', () => {
-    const out = composeAgentLaunchPrompt('do the work', true)
+    const out = composeAgentLaunchPrompt('do the work', true).text
     const envelopeEnd = out.indexOf('</amux>')
     expect(envelopeEnd).toBeGreaterThan(0)
     const insideEnvelope = out.slice(0, envelopeEnd)
@@ -129,7 +129,7 @@ describe('启动定向握手：启动提示携带 whoami 指令并署名进信�
   })
 
   it('握手指路而不抄语法：指向 --skill 查确切用法，不把 whoami 的 flag 语法塞进提示', () => {
-    const out = composeAgentLaunchPrompt('do the work', true)
+    const out = composeAgentLaunchPrompt('do the work', true).text
     // 确切用法的唯一真相在 skill——引导指向它。
     expect(out).toContain('"$AGENTMUX_CLI" --skill')
     // 不把 whoami 的任何 flag/子句抄进来（whoami 无参，抄语法只会在演进时过期）。
@@ -139,7 +139,7 @@ describe('启动定向握手：启动提示携带 whoami 指令并署名进信�
   })
 
   it('关闭注入时连握手指令也不出现——它属于运行时引导这一整块', () => {
-    const out = composeAgentLaunchPrompt('do the work', false)
+    const out = composeAgentLaunchPrompt('do the work', false).text
     expect(out).toBe('do the work')
     expect(out).not.toContain(AGENTMUX_SELF_CONTEXT_VERB)
   })
@@ -151,7 +151,7 @@ describe('agentMuxNote 是 AgentMux 的话：署名进信封，与用户段分�
   const NOTE = 'Scratch Topic context:\nRead topic.md and inspect .agents/ to discover collaborators.'
 
   it('note 与运行时引导同在一个信封里，用户请求逐字节留在信封外', () => {
-    const out = composeAgentLaunchPrompt(NASTY_USER, true, NOTE)
+    const out = composeAgentLaunchPrompt(NASTY_USER, true, NOTE).text
     expect(out.startsWith('<amux from="amux">\n')).toBe(true)
     expect(out).toContain('AgentMux runtime guide:')
     expect(out).toContain('Scratch Topic context:')
@@ -165,7 +165,7 @@ describe('agentMuxNote 是 AgentMux 的话：署名进信封，与用户段分�
   })
 
   it('note 是 AgentMux 的话：引导关闭时它仍署名进信封，不落进用户段', () => {
-    const out = composeAgentLaunchPrompt(NASTY_USER, false, NOTE)
+    const out = composeAgentLaunchPrompt(NASTY_USER, false, NOTE).text
     expect(out.startsWith('<amux from="amux">\n')).toBe(true)
     expect(out).toContain('Scratch Topic context:')
     expect(out).not.toContain('AgentMux runtime guide:')
@@ -173,7 +173,7 @@ describe('agentMuxNote 是 AgentMux 的话：署名进信封，与用户段分�
   })
 
   it('无请求 + 有 note 时给出等待指示，用户段为空', () => {
-    const out = composeAgentLaunchPrompt(undefined, true, NOTE)
+    const out = composeAgentLaunchPrompt(undefined, true, NOTE).text
     expect(out).toContain('Scratch Topic context:')
     expect(out).toContain('No request yet. Wait for the user.')
     expect(out.endsWith('</amux>')).toBe(true)
@@ -202,7 +202,7 @@ describe('discuss 首条消息路径经同一出口', () => {
       operationId: 'op-1',
       now: 1000
     })
-    const out = composeAgentLaunchPrompt(plan.launchPrompt, true)
+    const out = composeAgentLaunchPrompt(plan.launchPrompt, true).text
     expect(out.startsWith('<amux from="amux">\n')).toBe(true)
     expect(out.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
   })
@@ -223,7 +223,7 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
   })
 
   it('send（submitAgentPrompt）经出口产出 outbound 再投递，不直传 content', () => {
-    const submit = clientSlice('async submitAgentPrompt(', 'await this.recordPromptAfterSideEffect(')
+    const submit = clientSlice('async submitAgentPrompt(', 'await this.recordMessageAfterSideEffect(')
     expect(submit).toContain('composeOutboundMessage({ user: content })')
     // 出口的产物 outbound 才是喂给 provider/记录的东西——不是原始 content。
     expect(submit).toContain('planPromptInput(outbound)')

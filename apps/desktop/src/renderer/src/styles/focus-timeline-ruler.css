@@ -1,0 +1,40 @@
+.focus-ruler-settings { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 32px); overflow: auto; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-2); color: var(--text-2); font-size: var(--fs-meta); }
+.focus-ruler-settings header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.focus-ruler-settings header h2 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.focus-ruler-settings > p { margin: var(--sp-2) 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.focus-ruler-settings__modes { display: grid; gap: var(--sp-1); min-width: 0; margin: 0; padding: 0; border: 0; }
+.focus-ruler-settings legend { padding: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.focus-ruler-settings__modes label { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; }
+.focus-ruler-settings__modes label[data-selected='true'] { background: var(--surface-3); border-color: var(--line); }
+.focus-ruler-settings__modes input { accent-color: var(--green); }
+.focus-ruler-settings__modes strong, .focus-ruler-settings__modes small { display: block; font-weight: 400; }
+.focus-ruler-settings__modes strong { color: var(--text); }
+.focus-ruler-settings__modes small { margin-top: 2px; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-ruler-settings__interval { display: flex; gap: var(--sp-3); margin-top: var(--sp-3); }
+.focus-ruler-settings__interval label { flex: 1; min-width: 0; }
+.focus-ruler-settings__interval input, .focus-ruler-settings__zone select { box-sizing: border-box; display: block; width: 100%; min-width: 0; height: 28px; margin-top: var(--sp-2); padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); color: var(--text); font: inherit; }
+.focus-ruler-settings__interval input[aria-invalid='true'] { border-color: var(--red); }
+.focus-ruler-settings__zone { display: block; margin-top: var(--sp-4); }
+.focus-ruler-settings footer { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-4); }
+.focus-ruler-settings footer button:disabled { opacity: .5; cursor: default; }
+.focus-ruler-settings__dates { display: grid; gap: var(--sp-2); }
+.focus-ruler-settings__dates button { display: grid; gap: var(--sp-1); padding: var(--sp-3); text-align: left; }
+.focus-ruler-settings__dates span { color: var(--text-3); font-size: var(--fs-micro); }
+.recent-focus[data-ruler-mode] .recent-focus__canvas { position: relative; }
+.recent-focus[data-ruler-mode] .recent-focus__lane { background: transparent; }
+.recent-focus__grid { position: absolute; top: 18px; left: calc(var(--focus-name-width, 112px) + 8px); width: calc(100% - var(--focus-name-width, 112px) - 24px); height: calc(100% - 18px); pointer-events: none; }
+.recent-focus__grid path { fill: none; stroke: var(--line); stroke-width: 1; opacity: .25; }
+.recent-focus__grid path[data-tier='major'] { opacity: .65; }
+.recent-focus__grid path[data-tier='short'] { opacity: .45; }
+.recent-focus__grid path[data-tier='fine'] { opacity: .15; }
+.recent-focus__tick { position: absolute; inset-block: 0; width: 1px; }
+.recent-focus__tick::after { position: absolute; bottom: 0; height: 5px; border-left: 1px solid var(--line); content: ''; }
+.recent-focus__tick[data-tier='shorter']::after { height: 8px; }
+.recent-focus__tick[data-tier='short']::after { height: 11px; }
+.recent-focus__tick[data-tier='major']::after { height: 15px; border-color: var(--text-3); }
+.recent-focus[data-ruler-mode] .recent-focus__tick time { z-index: 1; padding: 0 2px; white-space: nowrap; background: var(--surface-1); transform: translateX(-50%); }
+.recent-focus[data-ruler-mode] .recent-focus__tick time[data-edge='start'] { transform: none; }
+.recent-focus[data-ruler-mode] .recent-focus__tick time[data-edge='end'] { transform: translateX(-100%); }
+.recent-focus__tick time small { margin-left: 3px; color: var(--text-3); font-size: inherit; }
+.recent-focus__date-error { margin: 0; padding: var(--sp-1) var(--sp-2); color: var(--red); font-size: var(--fs-micro); }
+.recent-focus__date[aria-invalid='true'] { border-color: var(--red); }

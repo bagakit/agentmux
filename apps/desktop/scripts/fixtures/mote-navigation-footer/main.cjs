@@ -10,22 +10,25 @@ const affectedEntryFrames = ['wide-closed-low-footer-circle', 'wide-hover-cards-
 const selectedFrames = frameSelection ? JSON.parse(frameSelection) : null
 const footerFrames = ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
   'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts']
+const resizeFrames = ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue']
+const floatingResize = selectedFrames?.[0] === resizeFrames[0]
 const footerOnly = selectedFrames?.[0] === footerFrames[0]
 if (selectedFrames) {
-  const expected = footerOnly ? footerFrames : selectedFrames.length === 2 ? narrowFrames : affectedEntryFrames
+  const expected = floatingResize ? resizeFrames : footerOnly ? footerFrames : selectedFrames.length === 2 ? narrowFrames : affectedEntryFrames
   assert.deepEqual(selectedFrames, expected, 'Capture filtering must retain the reviewed bounded scenario selection')
 }
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, pid: process.pid, frames: [], checks: [],
   replayedFrames: [],
-  scope: footerOnly ? 'Only actual Footer count geometry: four widths and four count variants; five actual complete Renderer frames. No rail/Settings/native/OS/Core Run sign-off.' : selectedFrames?.length === 2 ? 'All original interactions and assertions replayed; two affected narrow Renderer frames captured from an explicitly derived CSS archive.' : selectedFrames ?
+  scope: floatingResize ? 'One actual production App Renderer: trusted CDP pointer drag and keyboard; DOM-dispatched pointercancel/blur boundaries; UI storage failure/recovery and private reload. Five complete frames, no OS/Core Run claim.' : footerOnly ? 'Only actual Footer count geometry: four widths and four count variants; five actual complete Renderer frames. No rail/Settings/native/OS/Core Run sign-off.' : selectedFrames?.length === 2 ? 'All original interactions and assertions replayed; two affected narrow Renderer frames captured from an explicitly derived CSS archive.' : selectedFrames ?
     'New actual Renderer compile; all original interactions and assertions replayed; six affected Entry/Settings/narrow frames captured.' :
     'Eight actual Renderer frames in one private process. Controlled public data; no native/OS/Core Run sign-off.' }
 let win
 const selectors = {
   entry: '[data-pmo-teams-topic-launcher] button', panel: '[data-pmo-teams-topic-floating]',
   toggle: '[data-pmo-teams-topic-floating] [aria-label="Show Mote avatars only"]',
+  resize: '[data-pmo-teams-topic-floating] [aria-label="Resize Mote window"]',
   close: '[data-pmo-teams-topic-floating] [aria-label="Close Mote"]',
   prompt: '[data-pmo-teams-topic-floating] [aria-label="Message Agent"]',
   settings: '.surface-navigation__settings[aria-label="Settings"]'
@@ -171,6 +174,148 @@ app.whenReady().then(async () => {
     await until('window.motePresentationReview?.ready && window.motePresentationReview.facts().ready', 'actual App/footer ready')
     win.webContents.debugger.attach('1.3')
     await input('Emulation.setFocusEmulationEnabled', { enabled: true })
+    if (floatingResize) {
+      result.stage = 'actual-floating-resize'
+      await hover(); await click(selectors.prompt); await paint()
+      const original = await facts(), anchor = { x: original.ui.panelRect.x, offset: original.ui.entryRect.y - original.ui.panelRect.bottom }
+      const record = async label => {
+        const one = await facts()
+        assert.equal(one.errors.length, 0); assert.equal(forbidden(one).length, 0)
+        assert.deepEqual(one.protected, original.protected, 'Resize preserves original Tabs, layout, draft, execution and view facts')
+        assert.equal(one.ui.tabId, original.ui.tabId); assert.equal(one.ui.input.token, original.ui.input.token)
+        assert.equal(one.ui.input.text, original.ui.input.text)
+        const p = one.ui.panelRect, h = one.ui.resizeRect
+        assert.ok(p && h && h.width > 0 && h.height > 0, 'Actual corner handle has a positive hit area')
+        assert.ok(p.x >= 7.9 && p.y >= 7.9 && p.right <= win.getContentSize()[0] - 7.9, 'Effective panel fits current viewport horizontally and above')
+        assert.ok(Math.abs(p.x - anchor.x) <= .2 && Math.abs(p.bottom + anchor.offset - one.ui.entryRect.y) <= .2, 'Resize preserves original left/bottom anchor and offset')
+        await allMotes(one)
+        const controls = one.ui.actions
+        assert.ok(one.ui.actions.length === 3 && one.ui.workfaceControls.length > 0, 'Original navigation, Tab actions and Composer consumers are nonempty')
+        for (const control of controls) {
+          const r = control.rect
+          assert.ok(r.width > 0 && r.height > 0 && r.x >= p.x - .1 && r.right <= p.right + .1 && r.y >= p.y - .1 && r.bottom <= p.bottom + .1, 'Original visible action/input is contained in actual panel: ' + control.label)
+          assert.ok(h.right <= r.x + .1 || r.right <= h.x + .1 || h.bottom <= r.y + .1 || r.bottom <= h.y + .1, 'Corner handle does not overlap original action/input: ' + control.label)
+        }
+        const hits = await read(`(() => {
+          const handle = document.querySelector(${JSON.stringify(selectors.resize)})
+          const r = handle.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+          const controls = [...document.querySelectorAll(${JSON.stringify(selectors.panel + ' .mote-chooser__actions button')})]
+          const body = document.querySelector(${JSON.stringify(selectors.panel + ' .pmo-teams-topic-floating__content')})
+          const visible = n => { const b=n.getBoundingClientRect(), s=getComputedStyle(n);return b.width>0&&b.height>0&&s.visibility==='visible'&&Number(s.opacity)>0 }
+          const required = [...body.querySelectorAll('.pane-tabbar__actions button, .workbench-tab-strip__nav, [data-agent-composer] button, [aria-label="Message Agent"]')].filter(visible)
+          const essentialInput = body.querySelector('[aria-label="Message Agent"]')
+          const essentialNewTab = body.querySelector('button[title="New tab"]')
+          const active = body.querySelector('.workbench-tab--active')
+          // Required input/New tab bypass visibility filtering: missing, hidden,
+          // clipped or zero-area consumers must fail rather than disappear.
+          const bodyControls = [...new Set([essentialInput, essentialNewTab, ...required, active])]
+          const p = document.querySelector(${JSON.stringify(selectors.panel)}).getBoundingClientRect()
+          return { essentialInputFound:!!essentialInput, essentialNewTabFound:!!essentialNewTab, handle: hit === handle || handle.contains(hit), actions: controls.map(n => { const b=n.getBoundingClientRect(); return n.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)) }),
+            body:bodyControls.map(n=>{
+              if(!n)return {label:'missing active Tab/input',hit:false,contained:false}
+              const b=n.getBoundingClientRect();let left=b.left,right=b.right,top=b.top,bottom=b.bottom
+              // A scrollable Tab owns a clipped viewport. Test its actual visible
+              // intersection, while preserving all raw rectangles in facts.
+              if(n===active){const clip=n.closest('.pane-tabbar__tabs').getBoundingClientRect();left=Math.max(left,clip.left);right=Math.min(right,clip.right);top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom)}
+              const h=document.elementFromPoint((left+right)/2,(top+bottom)/2)
+              return {label:n.getAttribute('aria-label')??n.textContent,rect:{left,right,top,bottom},positive:right>left&&bottom>top,
+                contained:left>=p.left-.1&&right<=p.right+.1&&top>=p.top-.1&&bottom<=p.bottom+.1,
+                hit:!!h&&(h===n||n.contains(h)),hitNode:h?.outerHTML.slice(0,220)}
+            }) }
+        })()`)
+        assert.equal(hits.handle, true, 'Real corner is hit-testable'); assert.equal(hits.actions.length, 3); assert.deepEqual(hits.actions, [true, true, true]); assert.equal(hits.essentialInputFound, true, 'Required original Message Agent exists'); assert.equal(hits.essentialNewTabFound, true, 'Required original New tab exists'); assert.ok(hits.body.length >= 2, 'Input and original Tab controls are nonempty'); for (const hit of hits.body) { assert.equal(hit.positive, true, 'Required body control has visible area: ' + hit.label); assert.equal(hit.contained, true, 'Required body control is contained: ' + hit.label); assert.equal(hit.hit, true, 'Original body control center is operable: ' + hit.label + ' / ' + hit.hitNode) }
+        result.checks.push({ label, viewport: win.getContentSize(), saved: one.saved, floating: one.floating, ui: one.ui, hits })
+        return one
+      }
+      let pressed, oldSaved, oldStyles
+      const start = async () => {
+        pressed = await point(selectors.resize)
+        const before = await facts(); oldSaved = before.saved; oldStyles = before.ui.bodyStyles
+        await move(pressed); await input('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...pressed })
+        await until('window.motePresentationReview.facts().ui.resizing === "true"', 'real pointer gesture started')
+        assert.equal(await read(`document.querySelector(${JSON.stringify(selectors.resize)}).hasPointerCapture(1)`), true, 'Trusted mouse owns actual pointer capture')
+      }
+      const draft = async (width, height) => {
+        const current = await facts(), p = current.ui.panelRect
+        await input('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: pressed.x + width - p.width, y: pressed.y + p.height - height })
+        await paint()
+        assert.deepEqual((await facts()).saved, oldSaved, 'Pointer draft never writes durable preferences')
+      }
+      const release = async () => {
+        await input('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...pressed }); await paint()
+        const one = await facts()
+        assert.equal(one.ui.resizing, 'false'); assert.deepEqual(one.ui.bodyStyles, oldStyles, 'End restores cursor and selection styles')
+        return one
+      }
+      const resize = async (width, height) => { await start(); await draft(width, height); return release() }
+      let one = await resize(620, 430)
+      assert.deepEqual(one.saved.size, { width: 620, height: 430 }); assert.equal(one.ui.panelRect.width, 620); assert.equal(one.ui.panelRect.height, 430)
+      await record('wide cards drag committed'); await capture('resize-wide-cards')
+      await rail('avatars'); await resize(610, 420); await record('wide avatars drag committed'); await capture('resize-wide-avatars')
+      await rail('cards'); await resize(1, 1); one = await record('wide cards lower bound')
+      assert.equal(one.ui.panelRect.width, 404); assert.equal(one.ui.panelRect.height, 250)
+      await rail('avatars'); await resize(1, 1); one = await record('wide avatars lower bound')
+      assert.equal(one.ui.panelRect.width, 288); assert.equal(one.ui.panelRect.height, 250)
+      await resize(9000, 9000); one = await record('viewport upper bound'); assert.ok(one.ui.panelRect.width <= 964 && one.ui.panelRect.height <= 740)
+      await resize(620, 650); const preference = (await facts()).saved.size
+      win.setContentSize(420, 460); await paint(); await rail('cards')
+      one = await record('narrow cards viewport clamp'); assert.deepEqual(one.saved.size, preference)
+      await start(); await release(); assert.deepEqual((await facts()).saved.size, preference, 'No-motion click does not persist the temporary viewport clamp')
+      const effective = (await facts()).ui.panelRect
+      await resize(380, effective.height); one = await record('horizontal drag preserves unclamped height preference')
+      assert.deepEqual(one.saved.size, { width:380, height:preference.height })
+      win.setContentSize(980, 740); await paint(); await resize(620, 650)
+      win.setContentSize(420, 460); await paint(); one = await facts()
+      await resize(one.ui.panelRect.width, 400); one = await record('vertical drag preserves unclamped width preference')
+      assert.deepEqual(one.saved.size, { width:620, height:400 })
+      await resize(380, 390); one = await record('both axes commit explicit bounded changes')
+      assert.deepEqual(one.saved.size, { width:380, height:390 })
+      win.setContentSize(420, 740); await paint()
+      await resize(1, 1); one = await record('narrow cards lower bound'); assert.equal(one.ui.panelRect.width, 368); assert.equal(one.ui.panelRect.height, 250)
+      await resize(395, 430); await record('narrow cards real drag'); await capture('resize-narrow-cards')
+      await rail('avatars'); await resize(350, 430); await record('narrow avatars real drag'); await capture('resize-narrow-avatars')
+      const narrowPreference = (await facts()).saved.size
+      win.setContentSize(240, 220); await paint()
+      one = await facts(); assert.ok(one.ui.panelRect.width <= 224 && one.ui.panelRect.height < 250, 'Available viewport wins when smaller than the normal minimum')
+      assert.ok(one.ui.panelRect.x >= 7.9 && one.ui.panelRect.y >= 7.9 && one.ui.panelRect.bottom <= 220)
+      assert.deepEqual(one.saved.size, narrowPreference, 'Small viewport clamp leaves preferred size unchanged')
+      result.checks.push({ label: 'small viewport below minimum', viewport: win.getContentSize(), saved: one.saved, panel: one.ui.panelRect })
+      win.setContentSize(980, 740); await paint(); one = await record('viewport expands to saved preference')
+      assert.deepEqual({ width: one.ui.panelRect.width, height: one.ui.panelRect.height }, narrowPreference)
+      for (const termination of ['Escape', 'pointercancel', 'blur']) {
+        await start(); await draft(one.ui.panelRect.width + 30, one.ui.panelRect.height + 20)
+        if (termination === 'Escape') { await read(`document.querySelector(${JSON.stringify(selectors.resize)}).focus()`); await key('ArrowRight', 39); assert.deepEqual((await facts()).saved, oldSaved); await key('Escape', 27) }
+        else if (termination === 'pointercancel') await read(`document.querySelector(${JSON.stringify(selectors.resize)}).dispatchEvent(new PointerEvent('pointercancel', { bubbles:true, pointerId:1, pointerType:'mouse' }))`)
+        else await read('window.dispatchEvent(new Event("blur"))')
+        await paint(); one = await record('cancel ' + termination)
+        assert.equal(one.ui.resizing, 'false'); assert.equal(one.ui.presentation, 'pinned'); assert.deepEqual(one.saved, oldSaved); assert.deepEqual(one.ui.bodyStyles, oldStyles)
+        await input('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...pressed })
+      }
+      const beforeKeyboard = one.saved.size
+      await read(`document.querySelector(${JSON.stringify(selectors.resize)}).focus()`); await key('ArrowRight', 39); await paint()
+      one = await record('keyboard resize outside gesture'); assert.equal(one.saved.size.width, beforeKeyboard.width + 10)
+      await call('preferenceSaveFailure', true); const durableBeforeFailure = one.saved.size
+      await resize(one.ui.panelRect.width + 20, one.ui.panelRect.height + 20)
+      one = await record('failed storage retains live preference and original work')
+      assert.match(one.ui.preferenceNotice, /could not be saved/); assert.deepEqual(one.saved.size, durableBeforeFailure)
+      assert.notDeepEqual(one.floating.size, one.saved.size); await capture('resize-storage-issue')
+      await call('preferenceSaveFailure', false); await resize(one.ui.panelRect.width + 10, one.ui.panelRect.height + 10)
+      one = await record('storage recovered on next explicit resize'); assert.equal(one.ui.preferenceNotice, null); assert.deepEqual(one.saved.size, one.floating.size)
+      const restoredPreference = one.saved, target = one.ui.tabId
+      await click(selectors.close); await click(selectors.entry); await paint()
+      one = await record('close and reopen retained size'); assert.deepEqual(one.saved.size, restoredPreference.size)
+      const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve)); win.reload(); await reloaded
+      await until('window.motePresentationReview?.ready && window.motePresentationReview.facts().ui.visible && window.motePresentationReview.facts().ui.input', 'private Renderer reload restored Mote')
+      await input('Emulation.setFocusEmulationEnabled', { enabled: true }); await paint()
+      one = await facts()
+      assert.equal(one.errors.length, 0); assert.equal(forbidden(one).length, 0); assert.equal(one.ui.tabId, target)
+      assert.deepEqual(one.saved, restoredPreference); assert.deepEqual(one.floating.size, restoredPreference.size)
+      assert.deepEqual({ width:one.ui.panelRect.width, height:one.ui.panelRect.height }, restoredPreference.size)
+      result.checks.push({ label:'private Renderer reload reads real saved preference; fixture seed is first-load only', saved:one.saved, floating:one.floating, ui:one.ui })
+      assert.equal(result.frames.length, resizeFrames.length)
+      result.events = await call('events'); result.passed = true; result.stage = 'floating-resize-captured-look-pending'
+      return
+    }
     if (footerOnly) {
       result.stage = 'actual-footer-count-containment'
       const geometry = () => read(`(() => {

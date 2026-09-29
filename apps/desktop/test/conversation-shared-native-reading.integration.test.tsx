@@ -94,7 +94,7 @@ describe('shared native presentation preserves the existing reading owner', () =
     expect(pages.map(page => page.items.map(item => item.id))).toEqual([[f.rawId]])
     const row = host.querySelector<HTMLElement>('[data-history-item-id]')!
     expect(row.dataset.historyItemId).toBe(f.rawId)
-    expect(row.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('unknown')
+    expect(row.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
     const trace = row.querySelector<HTMLButtonElement>('button.conversation-tool-trace__row')!
     expect(trace).not.toBeNull(); expect(trace.getAttribute('aria-expanded')).toBe('false')
     await act(async () => trace.click())
@@ -178,7 +178,7 @@ describe('shared native presentation preserves the existing reading owner', () =
           collision ? 'Earlier captured input' : 'Earlier agent answer', 'Native tail initial', 'Do not leak this future answer'
         ])
         const selected = turns[1]!
-        expect(selected.dataset.speakerRole).toBe('unknown')
+        expect(selected.dataset.speakerRole).toBe('human')
         const button = selected.querySelector<HTMLButtonElement>('.log-turn__continue')!
         expect(button.textContent).toBe('Continue from here')
         await act(async () => button.click())
