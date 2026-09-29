@@ -48,7 +48,7 @@ export function subscribeGoalExploration(listener: () => void): () => void {
 }
 
 /** One finite operation survives Goals unmounting. The original Topic owner holds the actual request. */
-export function startGoalExploration(text: string, project?: GoalExplorationProject): Promise<void> {
+export function startGoalExploration(text: string, project?: GoalExplorationProject, requestedExecutorId?: string): Promise<void> {
   if (flight) return flight
   let resolve!: () => void, reject!: (cause: unknown) => void
   flight = new Promise<void>((yes, no) => { resolve = yes; reject = no })
@@ -56,7 +56,7 @@ export function startGoalExploration(text: string, project?: GoalExplorationProj
   listeners.forEach(listener => listener())
   const state = useAppStore.getState()
   const prompt = project ? `${text}\n\n项目：${project.name}\nProject ID: ${project.id}\nHost: ${project.hostId}\nPath: ${project.path}` : text
-  const executorId = configuredExecutors(state.config)[0]?.id
+  const executorId = requestedExecutorId ?? configuredExecutors(state.config)[0]?.id
   void state.createScratchTopic('mote', { prompt, ...(executorId ? { executorId } : {}) })
     .then(() => resolve(), reject).finally(() => {
       if (flight === current) { flight = null; listeners.forEach(listener => listener()) }
