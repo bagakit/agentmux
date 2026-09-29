@@ -170,8 +170,9 @@ it('keeps reduced motion and readable prompt constraints on the actual imported 
 
 it('keeps both state stages full-Region and gives Terminal recovery the shared static frame', () => {
   const styles = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/full-page-loading.css'), 'utf8')
+  expect(styles.length).toBeGreaterThan(0)
   expect(styles).toContain('.full-page-loading--region')
-  expect(styles).toContain('.full-page-loading--region')
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__art[\s\S]*?animation:\s*none/)
-  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__activity i[\s\S]*?animation:\s*none/)
+  expect(styles).not.toMatch(/animation:\s*[^;]+\binfinite\b/)
+  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?animation:\s*none/)
+  expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.full-page-loading__art\s*\{\s*transform: none; transition: none;/)
 })

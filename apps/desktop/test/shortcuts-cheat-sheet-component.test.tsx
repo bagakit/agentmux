@@ -9,6 +9,7 @@ import { SHORTCUT_BINDINGS } from '../src/renderer/src/lib/shortcut-registry.js'
 function render(props: { open: boolean; isMac: boolean }): string {
   const container = document.createElement('div')
   const host = document.createElement('div')
+  host.id = 'agentmux-window-overlay-host'
   host.className = 'window-overlay-host'
   host.dataset.overlayHost = ''
   document.body.append(container, host)

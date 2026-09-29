@@ -201,7 +201,8 @@ it('keeps two identical public captured Agent inputs and an unknown input on the
   expect(markers.map(node => node.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId)).toEqual([RECIPIENT, RECIPIENT, RECIPIENT])
   expect(markers.map(node => node.dataset.messageAuthor)).toEqual(['agent', 'agent', 'unknown'])
   expect(markers.map(node => node.querySelector('.lucide-bot') !== null)).toEqual([true, true, false])
-  expect(markers.map(node => node.querySelector('.lucide-message-square') !== null)).toEqual([false, false, true])
+  expect(markers.map(node => node.querySelector('.lucide-circle-dot') !== null)).toEqual([false, false, true])
+  expect(markers[2]!.querySelector('.conversation-avatar.conversation-avatar--unknown')).not.toBeNull()
   expect(markers.map(node => Number(node.dataset.messageAt))).toEqual(h.captured.items.map(item => item.createdAt))
   expect(markers.map(node => node.getAttribute('aria-label'))).toEqual([
     expect.stringMatching(/^Agent message in Recipient worker .+, sender association-sender$/),

@@ -38,6 +38,14 @@
 .confirmation-dialog__description { margin: var(--sp-4) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }
 .confirmation-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }
 .confirmation-dialog__cancel { margin-right: auto; }
+.confirmation-dialog footer button[data-confirm-label] { display: grid; place-items: center; }
+.confirmation-dialog footer button[data-confirm-label]::before { content: attr(data-confirm-label); }
+.confirmation-dialog footer button[data-confirm-label]::after { content: 'Working…'; }
+.confirmation-dialog footer button[data-confirm-label] > span,
+.confirmation-dialog footer button[data-confirm-label]::before,
+.confirmation-dialog footer button[data-confirm-label]::after { grid-area: 1 / 1; }
+.confirmation-dialog footer button[data-confirm-label]::before,
+.confirmation-dialog footer button[data-confirm-label]::after { visibility: hidden; pointer-events: none; }
 .dialog-surface footer .confirmation-dialog__confirm--neutral { background: var(--surface-3); color: var(--text); }
 
 /* Quick switcher — the window's one global navigation overlay. Graphite surface at the top elevation

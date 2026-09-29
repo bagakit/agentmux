@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const output = resolve(root, `.tmp/focus-timeline-navigation-qualification-${Date.now()}`)
 mkdirSync(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const sourcePaths = ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/lib/focus-time-window.ts', 'apps/desktop/src/renderer/src/styles/focus.css', 'apps/desktop/test/focus-timeline-navigation.test.tsx', 'apps/desktop/scripts/fixtures/focus-timeline-navigation/vitest.owning.config.mts']
+const sourcePaths = ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/lib/focus-time-window.ts', 'apps/desktop/src/renderer/src/styles/focus.css', 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx', 'apps/desktop/test/focus-timeline-navigation.test.tsx', 'apps/desktop/scripts/fixtures/focus-timeline-navigation/vitest.owning.config.mts']
 const binding = () => Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(resolve(root, file)))]))
 const receipt = { schema: 'agentmux.focus-timeline-navigation-qualification.v1', passed: false, sourcePass: false, taskDone: false, before: binding(), stages: [], output: relative(root, output), boundary: 'Mounted production Timeline, public private FileStore/Reader and compiled presentation. No Runtime, ordinary App restart, installation or healthy-user Run qualification.' }
 const config = 'apps/desktop/scripts/fixtures/focus-timeline-navigation/vitest.owning.config.mts'
@@ -56,7 +56,7 @@ try {
     const sceneFile = resolve(root, scenePath), reviewFile = resolve(root, reviewPath), sceneBytes = readFileSync(sceneFile), reviewBytes = readFileSync(reviewFile)
     const scene = JSON.parse(sceneBytes), review = JSON.parse(reviewBytes)
     assert.equal(scene.schema, 'agentmux.focus-timeline-navigation-scene-delivery.v1'); assert.equal(scene.passed, true)
-    for (const file of sourcePaths.slice(0, 3)) assert.equal(scene.inputs[file], receipt.before[file])
+    for (const file of sourcePaths.slice(0, 4)) assert.equal(scene.inputs[file], receipt.before[file])
     assert.deepEqual(scene.actual.controls, []); assert.equal(scene.cleanup.privateRootRemoved, true); assert.ok(scene.images.length >= 2)
     assert.equal(review.verdict, 'pass'); assert.ok(review.reviewerAgentId?.length > 0); assert.equal(review.sceneReceiptSHA256, hash(sceneBytes))
     for (const image of scene.images) { assert.equal(hash(readFileSync(resolve(dirname(sceneFile), image.path))), image.sha256); assert.ok(review.viewedImages.some(item => item.path === image.path && item.sha256 === image.sha256 && item.observation?.trim().length > 0)) }
