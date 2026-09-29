@@ -130,10 +130,7 @@ export function createRegionCopyModel({
  * 里消失（6 红）、排到末尾（2 红）、分隔线无条件加（1 红）、交接退化成 Session 地址（2 红）、
  * JSX 退回读 `model.handoff` 的条件写法（1 红）、清单画空（1 红）。
  *
- * 有一颗变异**不会红，而且不该红**：把 handoff 的 onSelect 换成 regionAddress 的。
- * `formatMessagingAddress({ agentSessionId, regionId })` 在带 regionId 时就是
- * `formatRegionAddress(regionId)`（agent-address.ts），两者逐字节相同——那不是存活的洞，
- * 是一次 no-op。别为它编断言。
+ * Agent 名片和显式 Region 地址是不同意图：前者保留 SID 与已知位置，后者指向这一格。
  *
  * 分屏那一节排在地址项之后：来这个菜单最常见的意图是「把这一格的东西交出去 / 拿到它的地址」，
  * 分屏是对这一格**布局**的操作，属次要一组。它与地址项之间的分隔线同样只在两侧都真有东西时出现，

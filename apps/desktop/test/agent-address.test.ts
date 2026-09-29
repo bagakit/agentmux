@@ -14,7 +14,7 @@ import {
   formatMessagingAddress,
   formatRegionAddress,
   formatSessionAddress,
-  formatViewAddress
+  formatTabAddress
 } from '../src/renderer/src/lib/agent-address.js'
 import { promoteRegionToTab } from '../src/renderer/src/lib/promote-region-to-tab.js'
 import {
@@ -80,12 +80,12 @@ describe('Region 地址：屏幕上哪一格', () => {
   it('说明它在分屏下无歧义地指向那一格', () => {
     // 这正是 Region 地址存在的理由：Tab 地址在多 Agent 时有歧义，它没有。
     expect(address).toMatch(/split|Region/u)
-    expect(address.toLowerCase()).toContain('unambiguous')
+    expect(address).toContain('空间位置')
   })
 })
 
 describe('View 地址：哪张完整工作面', () => {
-  const address = formatViewAddress('view:abc')
+  const address = formatTabAddress('view:abc')
 
   it('给出 --to-tab 命令', () => {
     expect(address).toContain("agentmux send --to-tab='view:abc'")
@@ -93,7 +93,8 @@ describe('View 地址：哪张完整工作面', () => {
   })
 
   it('如实声明它只在该 View 承载唯一 Agent 时可用于 Agent 寻址', () => {
-    expect(address.toLowerCase()).toContain('exactly one')
+    expect(address).toContain('恰好一个不同的 Agent Session ID')
+    expect(address).toContain('同一 SID 的多个 Region 投影仍是一个 Agent')
   })
 
   it('多 Agent 时引导用 Region 地址，而不是把消歧甩给接收方', () => {
@@ -114,7 +115,7 @@ describe('shell 转义：粘贴即可执行', () => {
     for (const [where, address] of [
       ['session', formatSessionAddress("a'b c")],
       ['region', formatRegionAddress("a'b c")],
-      ['view', formatViewAddress("a'b c")]
+      ['view', formatTabAddress("a'b c")]
     ] as const) {
       seen += assertEveryCommandRunnable(address, where)
     }
@@ -130,7 +131,7 @@ describe('shell 转义：粘贴即可执行', () => {
   it('三级地址用同一套转义', () => {
     const nasty = "a'b c"
     expect(formatRegionAddress(nasty)).toContain(`--to-region='a'"'"'b c'`)
-    expect(formatViewAddress(nasty)).toContain(`--to-tab='a'"'"'b c'`)
+    expect(formatTabAddress(nasty)).toContain(`--to-tab='a'"'"'b c'`)
   })
 })
 
@@ -138,12 +139,16 @@ describe('交接入口：按意图命名，替用户解析出最精确的地址'
   // 用户想的是"把这个 Agent 交给别人"，不是"我要 Region 还是 Session"。解析顺序只有一条规则：
   // 指向某一格分屏时给 Region，目标唯一时给 Session。两条分支都要有断言。
 
-  it('指向某一格分屏时给 Region 地址——消歧做在源头', () => {
+  it('点击的 Agent 用 SID 发送，准确 Region 另给检查导航和移动模板', () => {
     const handoff = formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
-    expect(handoff).toBe(formatRegionAddress('region:pane-2'))
-    expect(handoff).toContain("agentmux send --to-region='region:pane-2'")
-    // 点击发生在那一格上，此时给 Session 就是把"是哪一格"这个我们已知、接收方未知的信息丢掉。
-    expect(handoff).not.toContain('--to-session')
+    expect(handoff).toContain(formatSessionAddress('agent-7'))
+    expect(handoff).toContain("agentmux send --to-session='agent-7'")
+    expect(handoff).toContain("agentmux inspect --region='region:pane-2'")
+    expect(handoff).toContain("agentmux focus --region='region:pane-2'")
+    expect(handoff).toContain('导航默认保留当前输入')
+    expect(handoff).toContain('agentmux space ls')
+    expect(handoff).toContain("模板：agentmux space mv --from-region='region:pane-2' --expect-session='agent-7' --zone='<zone-id>' --new-tab")
+    expect(handoff).not.toContain('--to-region')
   })
 
   it('没有那一格时给 Session 地址——它跨 View 稳定', () => {
@@ -168,9 +173,9 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
         { agentSessionId: 'agent-b', regionIds: ['region:2'] }
       ]
     })
-    // 有 Region 就用 Region：分屏下唯一无歧义的那一格。
-    expect(recovery).toContain("agentmux send --to-region='region:1'")
-    expect(recovery).toContain("agentmux send --to-region='region:2'")
+    // 收件人按 SID 已确定；语义发送不猜第一个投影。
+    expect(recovery).toContain("agentmux send --to-session='agent-a'")
+    expect(recovery).toContain("agentmux send --to-session='agent-b'")
     // 判据是"能不能直接跑"，所以必须是完整命令而不是裸 id。
     expect(recovery).not.toMatch(/^\s*region:1\s*$/mu)
   })
@@ -182,7 +187,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     expect(recovery).toMatch(/没有 Agent/u)
   })
 
-  it('stale View、目标不是 Agent、Agent 已退出各自有自己的恢复入口', () => {
+  it('未打开的 Tab、目标不是 Agent、暂缺 Session 各自有自己的恢复入口', () => {
     // 码取自真实抛出点：TAB_NOT_OPEN 见 lib/control.ts，UNKNOWN_AGENT_SESSION 见 store.ts。
     const notAgent = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_AGENT' })
     const stale = addressingRecovery({ code: 'TAB_NOT_OPEN' })
@@ -191,6 +196,17 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     expect(new Set([notAgent, stale, gone]).size).toBe(3)
     // REGION_NOT_OPEN 与 TAB_NOT_OPEN 是同一件事的两个粒度，共用一条下一步是有意的。
     expect(addressingRecovery({ code: 'REGION_NOT_OPEN' })).toBe(stale)
+  })
+
+  it('暂缺 Session 不代签终局，未打开的位置使用 Tab 词根', () => {
+    const unknown = addressingRecovery({ code: 'UNKNOWN_AGENT_SESSION' })
+    const notOpen = addressingRecovery({ code: 'TAB_NOT_OPEN' })
+    expect(unknown).toContain('当前未观察到')
+    expect(unknown).toContain('不能据此确认它已退出或被回收')
+    expect(unknown).toContain('agentmux list sessions')
+    expect(notOpen).toContain('当前没有打开这个 Tab 或 Region')
+    expect(notOpen).toContain('不代表其中的 Agent Session 已结束')
+    expect(notOpen).not.toContain('View')
   })
 
   // 恢复文本里出现的每一行命令都必须真能跑。这条是本轮补的：原来那句
@@ -272,6 +288,24 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'CONTROL_CANCELLED',
       'CONTROL_REQUEST_CONFLICT',
       'CONTROL_OWNER_LOST',
+      // 文件诊断及设置冲突/资源约束不由换Agent地址恢复，保留各owner的原始message。
+      'CRASH_LOG_NOT_FILE',
+      'UNSUPPORTED_SETTING',
+      'INVALID_SETTING_VALUE',
+      'CONFIG_CONFLICT',
+      'SETTING_RESOURCE_NOT_FOUND',
+      'SETTING_RESOURCE_EXISTS',
+      'SETTING_IDENTITY_IMMUTABLE',
+      'SETTING_RESOURCE_IN_USE',
+      'SETTING_RESOURCE_REFERENCES_UNKNOWN',
+      // Envelope身份与发送条件不成立不能教自动重发或改投其他收件人。
+      'MESSAGE_SENDER_MISMATCH',
+      'MESSAGE_RECIPIENT_MISMATCH',
+      'MESSAGE_ENVELOPE_INVALID',
+      // Prompt忙/未确认与Session store读未确认都不代表Agent终局，也不是换地址可恢复。
+      'AGENT_PROMPT_INPUT_UNCONFIRMED',
+      'AGENT_PROMPT_SUBMISSION_BUSY',
+      'AGENT_SESSION_STORE_READ_UNCONFIRMED',
       'AGENT_EXECUTOR_NOT_CONFIGURED',
       'SESSION_CLOSING',
       'SESSION_NOT_RUNNING',
@@ -425,8 +459,8 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
   // 这条是本 task 的架构核心：两份拼接会各自演进，漂移时不会有任何测试变红。
   // 因此这里不是"看起来一样"，而是断言两侧逐字来自同一处。
 
-  it('同一个 Region，复制出的命令与恢复给出的命令逐字一致', () => {
-    const copied = formatRegionAddress('region:1')
+  it('同一个 Session，复制出的语义命令与恢复给出的命令逐字一致', () => {
+    const copied = formatSessionAddress('agent-a')
     const recovered = addressingRecovery({
       code: 'MESSAGE_TARGET_NOT_UNIQUE',
       candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
@@ -437,39 +471,30 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     expect(recovered).toContain(sendLine!)
   })
 
-  it('恢复给的是那一格，不是退回 Session——已知的东西不许丢', () => {
-    // 这条原来叫"同一个 Session 两侧逐字一致"，测的是候选没有 Region 时退到 Session。
-    // 那条路已经删了：候选的 regionIds 现在是非空元组，"没有 Region"在类型上就不成立。
-    // 留下的这条问的是另一件事——恢复必须给最精确的那个身份。多 Agent 的 View 里，
-    // 我们知道每个候选在哪一格，接收方不知道；给 Session 等于把这个信息丢掉，
-    // 让接收方再撞一次歧义。
+  it('恢复按语义 SID 发送，不替一个多投影 Agent 猜第一格', () => {
     const recovered = addressingRecovery({
       code: 'MESSAGE_TARGET_NOT_UNIQUE',
-      candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
+      candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1', 'region:2'] }]
     })
     const sessionSendLine = formatSessionAddress('agent-a')
       .split('\n')
       .find((line) => line.startsWith('agentmux send '))
     expect(sessionSendLine).toBeDefined()
-    expect(recovered).not.toContain(sessionSendLine!)
-    expect(recovered).toContain("agentmux send --to-region='region:1'")
+    expect(recovered).toContain(sessionSendLine!)
+    expect(recovered).not.toContain('--to-region')
   })
 
   it('复制侧与恢复侧断言的是同一段文本，改格式必然一起红', () => {
     // 上面两条断言"两侧一致"，但共用出口时它们在任何格式下都一致——那证明不了"同时变红"。
     // 这条锁住的是另一件事：两侧各自都有**独立的字面断言**钉住命令长什么样。
-    // 复制侧钉在 `agentmux send --to-region='…'`（本文件上方三个地址 describe），
-    // 恢复侧钉在同一段字面（下方 recovery describe）——所以改一次格式，两组断言一起塌。
-    // 实测（2026-08-31 复测）：把命令出口的 `=` 改成空格，本文件 15 条红，横跨复制侧与恢复侧。
-    // 这个数字随本文件的用例增减而变——它只是"确实横跨两侧"的一次佐证，不是被守护的不变量。
-    // 上一版写 11，后来加了 RUNNABLE 与分类两组用例就过时了；再引用前请重跑一次，别照抄。
-    const region = 'region:1'
-    const literal = `agentmux send --to-region='${region}'`
-    expect(formatRegionAddress(region)).toContain(literal)
+    // Agent 名片和候选恢复都钉住语义 SID；显式 Region 地址仍有独立的空间用途。
+    const sessionId = 'agent-a'
+    const literal = `agentmux send --to-session='${sessionId}'`
+    expect(formatSessionAddress(sessionId)).toContain(literal)
     expect(
       addressingRecovery({
         code: 'MESSAGE_TARGET_NOT_UNIQUE',
-        candidates: [{ agentSessionId: 'agent-a', regionIds: [region] }]
+        candidates: [{ agentSessionId: sessionId, regionIds: ['region:1'] }]
       })
     ).toContain(literal)
   })
@@ -654,7 +679,7 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
     // 先钉住"五条都结算了"。否则微任务没排干时 messages 是短数组，下面的循环会少跑几轮却依然全绿。
     expect(messages).toHaveLength(failures.length)
     // 每种寻址失败都带上了能直接跑的下一步，而不只是"发生了什么"。
-    expect(messages[0]).toContain("agentmux send --to-region='region:1'")
+    expect(messages[0]).toContain("agentmux send --to-session='agent-a'")
     // 这三条拿不到 tab/region id，给的是 Session 旁路——它带子命令，真能跑。原来这里断言的是
     // `toContain('agentmux inspect')`，而裸 inspect 跑不了，那句话分不清能跑与不能跑。
     for (const index of [1, 2, 3]) expect(messages[index]).toContain('agentmux list sessions')

@@ -270,6 +270,30 @@ describe('Desktop Control owner', () => {
     })
   })
 
+  it('refuses a replacement Tab recipient without losing the original semantic Session or submitting twice', async () => {
+    const tab = fixture([agent('reviewer')])
+    const original = agent('caller')
+    const message: AgentMuxMessageEnvelope = {
+      schema: 'agentmux.a2a.v1', messageId: 'captured-tab-message', operationId: 'captured-tab-request', createdAt: 1,
+      sender: { kind: 'human', principal: 'local-cli' },
+      recipient: { kind: 'agent-session', agentSessionId: original.id },
+      threadId: 'captured-tab-message', correlationId: 'captured-tab-message', replyTo: null, workspaceId: null,
+      senderSessionId: null, senderRunId: null, recipientSessionId: original.id, recipientRunId: null,
+      body: 'original recipient only'
+    }
+    const replacement = createWorkbenchTab(tab.id, { regionId: 'region-caller', kind: 'agent', phase: 'attached',
+      workspaceId: 'workspace', sessionId: 'reviewer' })
+    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: replacement } }))
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    await expect(useAppStore.getState().executeControl(request({ operation: 'send',
+      target: { kind: 'tab', tabId: tab.id }, text: message.body, message,
+      promptCondition: { expectedRun: { runId: original.control.run.runId }, afterSubmissionId: null }
+    }))).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
+    expect(submit).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions.map(item => item.id)).toEqual(['caller', 'reviewer'])
+    expect(useAppStore.getState().tabs[tab.id]).toBe(replacement)
+  })
+
   it('delivers the verified A2A envelope to the resolved recipient instead of dropping to bare text', async () => {
     const tab = fixture()
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))

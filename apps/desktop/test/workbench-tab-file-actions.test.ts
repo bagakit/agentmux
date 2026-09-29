@@ -69,7 +69,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
   it('文件 Tab 有三项文件动作，且顺序在地址之后', () => {
     const labels = labelsOf(fileEntries())
     expect(labels).toEqual([
-      'Copy View Address',
+      'Copy Tab Address',
       'Copy Path',
       'Copy Relative Path',
       'Reveal in Finder'
@@ -195,7 +195,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
       writeClipboardText
     })
     const expectedCopy = new Map<string, string>([
-      ['Copy View Address', 'AgentMux View view:x'],
+      ['Copy Tab Address', 'AgentMux Tab view:x'],
       ['Copy Path', '~/repo/src/app/main.ts'],
       ['Copy Relative Path', 'src/app/main.ts']
     ])
