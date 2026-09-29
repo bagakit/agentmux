@@ -70,6 +70,8 @@ type InlineContext = {
   workspaceRoot: string
   /** Host home directory, for expanding a leading `~/` in a cited path. See the component prop. */
   homeDir: string
+  /** Only File previews resolve explicit hrefs relative to the source document. */
+  sourcePath?: string
 }
 
 /** A file reference: same affordance as a link, but it opens in the editor rather than leaving. */
@@ -169,14 +171,14 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} context={context} /></em>
         if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} context={context} /></del>
         if (node.kind === 'image') {
-          const fileHref = context.openWorkspaceFile ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir) : null
+          const fileHref = context.openWorkspaceFile ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath) : null
           if (fileHref && context.openWorkspaceFile) return <button key={key} type="button" className="md-image-attachment" title={fileHref.path} onClick={() => context.openWorkspaceFile?.(fileHref.path, referenceRevealLocation(fileHref))}>🖼️ {node.alt || fileHref.path}</button>
           return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed">🖼️ {node.alt || node.href}</span>
         }
         // An explicit `[label](path)` pointing inside the Workspace opens the file. Everything else,
         // http(s) included, keeps leaving through the external seam that Main already adjudicates.
         const fileHref = context.openWorkspaceFile
-          ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir)
+          ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath)
           : null
         if (fileHref && context.openWorkspaceFile) {
           const openWorkspaceFile = context.openWorkspaceFile
@@ -321,7 +323,8 @@ export function AgentMarkdown({
   openWorkspaceFile,
   readPastedImage,
   workspaceRoot = '',
-  homeDir = ''
+  homeDir = '',
+  sourcePath
 }: {
   content: string
   className?: string
@@ -335,11 +338,14 @@ export function AgentMarkdown({
   /** Host home directory. Absent (the default) means a `~/`-prefixed path stays plain text, exactly
    *  as an out-of-workspace absolute path does — the host supplies it once it knows the real home. */
   homeDir?: string
+  /** Workspace-relative File path; affects explicit hrefs only, never Agent prose scanning. */
+  sourcePath?: string
 }) {
   const context: InlineContext = {
     openHttpLink,
     workspaceRoot,
     homeDir,
+    ...(sourcePath ? { sourcePath } : {}),
     ...(openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(readPastedImage ? { readPastedImage } : {})
   }

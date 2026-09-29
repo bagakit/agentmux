@@ -65,19 +65,35 @@ export function splitMarkdownFileReferences(
 export function classifyMarkdownLinkHref(
   href: string,
   workspaceRoot: string,
-  homeDir = ''
+  homeDir = '',
+  sourcePath?: string
 ): MarkdownFileReference | null {
   // A scheme means the target is not a workspace path, whatever its shape. Checked before detection
   // so `file:///etc/passwd` can never be mistaken for a relative path with colons in it.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return null
   const trimmed = href.trim()
   if (!trimmed) return null
-  const references = detectTerminalPathLinks(trimmed, workspaceRoot, homeDir)
+  // An explicit Markdown href already declares a destination; a bare filename is not ambiguous prose.
+  // Add the relative-path marker only here, preserving the Terminal/plain-text scanner's stricter rule.
+  let candidate = !trimmed.includes('/') && /^[\w.@+-]+\.[\w.+-]+$/.test(trimmed) ? `./${trimmed}` : trimmed
+  if (sourcePath && !candidate.startsWith('/') && !candidate.startsWith('~/')) {
+    // Explicit file hrefs use their document directory. Plain Agent prose keeps its root grammar.
+    // Normalize dot segments before the existing within-workspace parser judges the complete token.
+    const segments: string[] = []
+    const directory = sourcePath.slice(0, Math.max(0, sourcePath.lastIndexOf('/')))
+    for (const segment of `${directory}/${candidate}`.split('/')) {
+      if (!segment || segment === '.') continue
+      if (segment === '..') { if (!segments.length) return null; segments.pop() }
+      else segments.push(segment)
+    }
+    candidate = `./${segments.join('/')}`
+  }
+  const references = detectTerminalPathLinks(candidate, workspaceRoot, homeDir)
   // The whole href must be the path. A partial match means the href is something else that merely
   // contains a path-like run (`a b/c`), and opening that would be a guess.
   const [only] = references
   if (!only || references.length !== 1) return null
-  return only.index === 0 && only.length === trimmed.length ? only : null
+  return only.index === 0 && only.length === candidate.length ? { ...only, length: trimmed.length } : null
 }
 
 /**

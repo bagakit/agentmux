@@ -1,0 +1,10 @@
+{
+  "schema": "agentmux.focus-hover-producer-reference.v1",
+  "source": ".tmp/focus-message-author-consumer-qualification/public-producer.json",
+  "sourceSHA256": "5c9ba8012b4ec21edb80a7003f068ca3d02239c041b60d3526810c992171af54",
+  "qualifiedSource": "apps/desktop/test/focus-message-author-consumer.test.tsx",
+  "qualifiedSourceSHA256": "715aff703bc60e586a6bcd7eb4873a12db295d09c4a7276ff7ae29ee44f39fb4",
+  "boundary": "Immutable output of the existing genuine Composer -> registered IPC/Main RuntimeController -> Core accepted receipt -> fresh FileStore -> public projector. This fixture consumes recorded raw captured/native facts; no new writer/Runtime qualification or hand-created human DTO.",
+  "sanitizedSHA256": "68ad75f7387c6995d0f101d02184b2cb365b62ca094e2c07f8537d05a594c19d",
+  "sanitization": "Relative test clocks and paths; sourceSHA256 retains the original recorded source digest."
+}

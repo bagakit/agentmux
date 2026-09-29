@@ -340,14 +340,6 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   }, [])
   const viewportRef = useRef<HTMLDivElement>(null)
   const [scaleWidth, setScaleWidth] = useState(0)
-  useLayoutEffect(() => {
-    const scale = viewportRef.current?.querySelector<HTMLElement>('.recent-focus__time-scale')
-    if (!scale || typeof ResizeObserver === 'undefined') return
-    const update = () => setScaleWidth(scale.getBoundingClientRect().width)
-    const observer = new ResizeObserver(update)
-    observer.observe(scale); update()
-    return () => observer.disconnect()
-  }, [mode])
   const headerRef = useRef<HTMLElement>(null)
   const viewportIntent = useRef({ hours, now }); viewportIntent.current = { hours, now }
   useEffect(() => {
@@ -508,6 +500,35 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const projects = useMemo(() => orderFocusTimelineProjects(groupFocusTimeline(contexts, lanes ?? [], tracks, readonlyInputTrack), timelineOrder), [contexts, lanes, tracks, readonlyInputTrack, timelineOrder])
   const ticks = useMemo(() => focusRulerTicks(range, displayedRuler), [range, displayedRuler])
   const tickLabels = useMemo(() => focusRulerLabels(ticks, range, scaleWidth), [ticks, range, scaleWidth])
+  useLayoutEffect(() => {
+    const scale = viewportRef.current?.querySelector<HTMLElement>('.recent-focus__time-scale')
+    if (!scale || typeof ResizeObserver === 'undefined') return
+    const labels = [...scale.querySelectorAll<HTMLTimeElement>('.recent-focus__tick > time')]
+    const priority = { major: 0, short: 1, shorter: 2, fine: 3 }
+    const update = () => {
+      const bounds = scale.getBoundingClientRect()
+      setScaleWidth(bounds.width)
+      // Read every candidate first, including density-hidden text. Visibility
+      // preserves border-box size, so these writes do not feed back into resize.
+      const measured = labels.map(node => ({ node, rect: node.getBoundingClientRect(),
+        tier: node.parentElement!.dataset.tier as keyof typeof priority,
+        instant: Number(node.parentElement!.dataset.tickAt)
+      })).sort((a, b) => priority[a.tier] - priority[b.tier] || a.instant - b.instant)
+      const accepted: DOMRect[] = []
+      for (const row of measured) {
+        const fits = row.rect.width > 0 && row.rect.left >= bounds.left && row.rect.right <= bounds.right && accepted.every(before => row.rect.right <= before.left || row.rect.left >= before.right)
+        if (fits) accepted.push(row.rect)
+        row.node.style.visibility = fits ? '' : 'hidden'
+        if (fits) row.node.removeAttribute('aria-hidden')
+        else row.node.setAttribute('aria-hidden', 'true')
+      }
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(scale)
+    for (const label of labels) observer.observe(label, { box: 'border-box' })
+    update()
+    return () => observer.disconnect()
+  }, [mode, tickLabels, time])
   const gridPaths = useMemo(() => (['major', 'short', 'shorter', 'fine'] as const).map(tier => ({ tier,
     path: ticks.filter(tick => tick.tier === tier).map(tick => `M${focusTimePosition(tick.instant, range)} 0V1`).join(' ')
   })), [ticks, range])
@@ -583,7 +604,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         <svg className="recent-focus__grid" viewBox="0 0 100 1" preserveAspectRatio="none" aria-hidden="true">{gridPaths.filter(item => item.path).map(item => <path key={item.tier} data-tier={item.tier} d={item.path} vectorEffect="non-scaling-stroke" />)}</svg>
         <div className="recent-focus__ruler" aria-label="Focus time ruler"><span className="recent-focus__gutter" title={time.zone}>Context</span><div className="recent-focus__time-scale" title={`Scroll horizontally or Shift+scroll to browse time · ${time.zone}`}>{ticks.map(tick => {
           const position = focusTimePosition(tick.instant, range)
-          return <span key={tick.instant} className="recent-focus__tick" data-tier={tick.tier} data-tick-at={tick.instant} title={time.detailed(tick.instant)} style={{ left: `${position}%` }}>{tickLabels.has(tick.instant) ? <time dateTime={new Date(tick.instant).toISOString()} data-edge={position * scaleWidth / 100 < 36 ? 'start' : position * scaleWidth / 100 > scaleWidth - 36 ? 'end' : undefined}>{time.ruler(tick.instant)}{tick.repeated ? <small>{focusUtcOffset(tick.offset)}</small> : null}</time> : null}</span>
+          return <span key={tick.instant} className="recent-focus__tick" data-tier={tick.tier} data-tick-at={tick.instant} title={time.detailed(tick.instant)} style={{ left: `${position}%`, '--focus-tick-x': `${position * scaleWidth / 100}px`, '--focus-time-scale-width': `${scaleWidth}px` } as CSSProperties}>{tickLabels.has(tick.instant) ? <time dateTime={new Date(tick.instant).toISOString()}>{time.ruler(tick.instant)}{tick.repeated ? <small>{focusUtcOffset(tick.offset)}</small> : null}</time> : null}</span>
         })}{position >= 0 && position <= 100 ? <span className="recent-focus__playhead recent-focus__playhead--ruler" data-now={now} style={{ left: `${position}%` }} aria-label={`Current time ${clock(now)}`} /> : null}</div></div>
         <div className="recent-focus__tracks">
           {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentSessionId={currentSessionId} inputContextId={inputReference?.agentSessionId} inputTrackKey={inputTrackKey} nativeMessages={readonlyReading ? inputMessages : nativeMessages} window={range} now={now} lanesByContext={lanesByContext} time={time} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} />)}
