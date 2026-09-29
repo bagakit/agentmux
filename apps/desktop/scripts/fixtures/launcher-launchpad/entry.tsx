@@ -14,7 +14,7 @@ import { usePmoTeamsTopicFloatingState, readPmoTeamsTopicFloatingState, pmoTeams
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { draftDocument } from '../../../src/renderer/src/components/InlineComposer'
 import type { Editor } from '@tiptap/core'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../../../src/shared/scratch-topics'
 import '../../../src/renderer/src/styles/index.css'
 
 // The production Workbench/Region, rich inputs, CSS and xterm run unchanged. Only native preview
@@ -75,7 +75,7 @@ function Shell() {
 }
 const probe = {
   workspaceId, tabId, regionId, neighborId, groupId,
-  readBeforeFixtureSetup: restarting ? {tabs:boot.tabs,layouts:boot.layouts,activeWorkspaceId:boot.activeWorkspaceId,sections:useLauncherState.getState().sections,drafts:useLauncherState.getState().drafts,sourceDraft:boot.agentComposerDrafts[regionId]} : null,
+  readBeforeFixtureSetup: restarting ? {tabs:boot.tabs,layouts:boot.layouts,activeWorkspaceId:boot.activeWorkspaceId,sections:useLauncherState.getState().sections,drafts:useLauncherState.getState().drafts,sourceDraft:boot.agentComposerDrafts[regionId],agentDrafts:boot.agentComposerDrafts} : null,
   flush() { return prepareRendererUpdate('quit') },
   bootFacts() { const state=useAppStore.getState(); return {config:state.config,snapshot:{...snapshot,sessions:state.sessions,timelines:state.timelines,recoveryCandidates:state.recoveryCandidates},warm,neighbor} },
   settings() { flushSync(()=>root.render(<div style={{display:'flex',width:'100%',height:'100%'}}><SettingsPanel onClose={()=>probe.scene()} /></div>)) },
@@ -106,6 +106,23 @@ const probe = {
       timelines: snapshot.timelines,
       agentComposerDrafts: { [regionId]: 'Review the launch experience and preserve the original working context.\nFocus on clear runtime facts and small Region usability.', ...state.agentComposerDrafts } }))
     flushSync(() => root.render(<Shell />))
+  },
+  async motes() {
+    const state = useAppStore.getState()
+    await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
+    await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, 'Mote')
+    await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, 'launcher:design')
+    await api.scratch.renameTitle(SCRATCH_WORKSPACE_ID, 'launcher:design', 'Design & implementation partner with a long readable name')
+    await state.openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { reveal: false })
+    await state.openScratchTopic('launcher:design', SCRATCH_WORKSPACE_ID, { reveal: false })
+    await state.refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)
+    const current = useAppStore.getState()
+    const drafts = { ...current.agentComposerDrafts }
+    for (const tab of Object.values(current.tabs).filter(tab => tab.workspaceId === SCRATCH_WORKSPACE_ID)) {
+      const region = tab.regions[tab.layout.activeRegionId]
+      if (region?.kind === 'launcher') drafts[region.regionId] = 'Existing Mote draft must stay unsent.'
+    }
+    useAppStore.setState({ agentComposerDrafts: drafts })
   },
   editNote(text: string) {
     const node = document.querySelector<HTMLElement & { editor: Editor }>(`[data-workbench-region-id="${regionId}"] .launcher-note-composer .tiptap`)

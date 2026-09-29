@@ -80,7 +80,7 @@ try{
  const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')))
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
  for(const phase of ['capture','restart']){
-  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})
+  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase,arg('--scenes')??'full'],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})
   await writeFile(join(evidence,phase+'-process.log'),lines.join('\n'));const render=JSON.parse(await readFile(join(evidence,phase+'-render.json'),'utf8'));result.processes.push({phase,outcome,render});assert.equal(outcome.exitCode,0,render.failure?.message);assert.equal(render.passed,true)
   for(const frame of render.frames)result.frames.push({...frame,sha256:sha(await readFile(join(evidence,frame.file)))})
  }
