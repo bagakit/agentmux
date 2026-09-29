@@ -139,7 +139,7 @@ export function ResourceUsagePanel() {
                 <dt>File watchers</dt><dd>{mainOwners?.fileWatchers ?? '—'}</dd>
                 <dt>Browser views / released</dt><dd>{mainOwners ? `${mainOwners.browserViews} / ${mainOwners.releasedBrowserViews}` : '—'}</dd>
                 <dt>Terminal views / addons / listeners</dt><dd>{rendererOwners ? `${rendererOwners.terminalViews} / ${rendererOwners.terminalAddons} / ${rendererOwners.terminalListeners}` : '—'}</dd>
-                <dt>Editors / models / documents</dt><dd>{rendererOwners ? `${rendererOwners.monacoEditors} / ${rendererOwners.monacoModels} / ${rendererOwners.documents}` : '—'}</dd>
+                <dt>Editors / models / documents</dt><dd>{rendererOwners ? `${rendererOwners.monacoEditors ?? '—'} / ${rendererOwners.monacoModels ?? '—'} / ${rendererOwners.documents}` : '—'}</dd>
                 <dt>Runtime subscriptions</dt><dd>{rendererOwners?.runtimeSubscriptions ?? '—'}</dd>
               </dl>
             </details>

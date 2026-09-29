@@ -46,6 +46,7 @@ Intents:
   doctor      Diagnose the local Runtime: capabilities, agents, endpoint storage and reclamation.
   endpoint    Print the Control endpoint path and schema version without connecting.
   inspect     Read an Agent Session, Run, Tab, Region, or the Desktop client without side effects.
+  metrics     Read or watch the running host's bounded resource observation (NDJSON).
   list        List configured agents, projects, or active Agent Sessions from their owners.
   settings    Read or change preferences supported by the running Desktop host.
   diagnostics Inspect the Desktop crash log or explicitly request it in the file manager.
@@ -223,7 +224,17 @@ These flags do not confirm the Goal alignment or accept its results; those remai
 After registration, rediscover the Project before creating or linking a Demand. Parse the
 actual receipt and inspect the Demand; do not guess an identity or retry an unconfirmed write.`
 
+const METRICS_HELP = `Usage: agentmux metrics get | watch
+Read one complete observation, or follow latest complete observations until Ctrl-C.
+Scope: the existing Unix Host/Main and its current Renderer window. Each source keeps
+its own observation time and availability. Runtime CPU/RSS can be unavailable.
+No Runtime is started or connected. Offline host: CONTROL_UNAVAILABLE; host without
+this capability: METRICS_UNSUPPORTED. Slow output terminates instead of queueing frames.`
+
 const HELP = new Map<string, string>([
+  ['metrics', METRICS_HELP],
+  ['metrics.get', METRICS_HELP],
+  ['metrics.watch', METRICS_HELP],
   ['diagnostics', CRASH_LOG_HELP],
   ['diagnostics.crash-log.get', CRASH_LOG_HELP],
   ['diagnostics.crash-log.reveal', CRASH_LOG_HELP],

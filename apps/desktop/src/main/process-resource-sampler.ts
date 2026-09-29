@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { app } from 'electron'
+import type { MetricsRenderer } from '@agentmux/core/control'
 import {
   USAGE_SAMPLE_INTERVAL_MS,
   aggregateUsage,
@@ -36,6 +37,13 @@ export type ProcessResourceObservationSources = {
   observeRuntime(): Promise<RuntimeUsage[]>
   processOwners(): { rendererPids: readonly number[]; browserPids: readonly number[] }
   mainOwners(): MainResourceOwnerCounts
+  observeRenderer?(signal: AbortSignal): Promise<{ observedAt: number; data: MetricsRenderer }>
+}
+
+export type ResourceSample = UsageSnapshot & {
+  processObservedAt: number | null; appObservedAt: number | null; runtimeObservedAt: number | null
+  mainObservedAt: number | null; mainUnavailable: string | null
+  renderer: { observedAt: number | null; data: MetricsRenderer | null; unavailable: string | null }
 }
 
 function readProcessTable(): Promise<string> {
@@ -52,12 +60,16 @@ function readProcessTable(): Promise<string> {
 }
 
 export class ProcessResourceSampler {
-  private readonly runPids = new Map<string, number>()
+  private readonly runPids = new Map<string, { pid: number; hostId: string }>()
   private readonly samples = new Map<string, UsageSample[]>()
-  private readonly subscribers = new Set<(snapshot: UsageSnapshot) => void>()
+  private readonly subscribers = new Set<(snapshot: ResourceSample) => void>()
   private timer: NodeJS.Timeout | null = null
   private inFlight: Promise<void> | null = null
-  private latest: UsageSnapshot | null = null
+  private latest: ResourceSample | null = null
+  private runtimeObservedAt: number | null = null
+  private renderer: ResourceSample['renderer'] = { observedAt: null, data: null, unavailable: null }
+  private rendererInFlight: Promise<void> | null = null
+  private rendererController: AbortController | null = null
   private observationSources: ProcessResourceObservationSources | null = null
   private runtime: RuntimeUsage[] | null = null
   private runtimeUnavailable: string | null = null
@@ -97,9 +109,9 @@ export class ProcessResourceSampler {
    * pid 来自 Core 已经在推的 `process-state` 事件，不新建第二份台账——这里只是把流过的事实
    * 留住，Core 仍是唯一来源。
    */
-  trackRun(runId: string, pid: number | null): void {
+  trackRun(runId: string, pid: number | null, hostId: string): void {
     if (pid === null) this.forgetRun(runId)
-    else this.runPids.set(runId, pid)
+    else this.runPids.set(runId, { pid, hostId })
   }
 
   forgetRun(runId: string): void {
@@ -110,13 +122,18 @@ export class ProcessResourceSampler {
   /**
    * 开始采样，返回退订函数。没有订阅者时定时器不存在，因此折叠态零开销。
    */
-  subscribe(onSample: (snapshot: UsageSnapshot) => void): () => void {
+  subscribe(onSample: (snapshot: ResourceSample) => void): () => void {
     this.subscribers.add(onSample)
     if (this.timer === null) {
       void this.observeRuntime(this.generation)
       // 立刻采一次，否则面板要空等一个周期才有数。
       void this.sampleOnce()
       this.timer = setInterval(() => void this.sampleOnce(), USAGE_SAMPLE_INTERVAL_MS)
+    }
+    try { if (this.latest) onSample(this.latest) } catch (error) {
+      this.subscribers.delete(onSample)
+      if (this.subscribers.size === 0) this.stop()
+      throw error
     }
     return () => {
       this.subscribers.delete(onSample)
@@ -132,6 +149,9 @@ export class ProcessResourceSampler {
     this.latest = null
     this.runtime = null
     this.runtimeUnavailable = null
+    this.runtimeObservedAt = null
+    this.renderer = { observedAt: null, data: null, unavailable: null }
+    this.rendererController?.abort()
     this.appProcesses.clear()
     this.appSamples.clear()
     // 递增之后，任何在途采样落地时都会发现自己属于上一段观察，从而不写回刚清掉的东西。
@@ -154,13 +174,14 @@ export class ProcessResourceSampler {
       const runtime = await this.observationSources.observeRuntime()
       if (generation !== this.generation) return
       this.runtime = runtime
+      this.runtimeObservedAt = this.now()
       this.runtimeUnavailable = null
     } catch (error) {
       if (generation !== this.generation) return
       this.runtimeUnavailable = error instanceof Error ? error.message : String(error)
     }
     if (this.latest) {
-      this.latest = { ...this.latest, runtime: this.runtime, runtimeUnavailable: this.runtimeUnavailable }
+      this.latest = { ...this.latest, runtime: this.runtime, runtimeUnavailable: this.runtimeUnavailable, runtimeObservedAt: this.runtimeObservedAt }
       this.notify()
     }
   }
@@ -238,7 +259,7 @@ export class ProcessResourceSampler {
   }
 
   private async runSample(generation: number): Promise<void> {
-    const observedAt = this.now()
+    void this.observeRenderer(generation)
     let rows = null
     let unavailable: string | null = null
     try {
@@ -250,10 +271,11 @@ export class ProcessResourceSampler {
       unavailable = cause instanceof Error ? cause.message : String(cause)
     }
 
-    const roots = [...this.runPids].map(([runId, pid]) => ({ key: runId, pid }))
+    const observedAt = this.now()
+    const roots = [...this.runPids].map(([runId, { pid, hostId }]) => ({ key: runId, pid, hostId }))
     const usage = rows ? rollUpSubtrees(rows, roots) : null
     const runs: RunUsage[] = usage ? [] : this.latest?.runs ?? []
-    for (const { key: runId, pid } of usage ? roots : []) {
+    for (const { key: runId, pid, hostId } of usage ? roots : []) {
       const subtree = usage!.get(runId) ?? null
       const history = this.samples.get(runId) ?? []
       const next = subtree
@@ -267,6 +289,7 @@ export class ProcessResourceSampler {
       const { cpuPercent, rssKib } = aggregateUsage(next, observedAt)
       runs.push({
         runId,
+        hostId,
         rootPid: pid,
         processCount: subtree?.processCount ?? null,
         rootRssKib: subtree?.rootRssKib ?? null,
@@ -277,14 +300,27 @@ export class ProcessResourceSampler {
       })
     }
 
+    const application = this.sampleApp(observedAt)
+    let mainOwners = this.latest?.mainOwners ?? null
+    let mainObservedAt = this.latest?.mainObservedAt ?? null
+    let mainUnavailable: string | null = null
+    try {
+      mainOwners = this.observationSources?.mainOwners() ?? null
+      mainObservedAt = mainOwners === null ? null : observedAt
+    } catch (error) { mainUnavailable = error instanceof Error ? error.message : String(error) }
     this.latest = {
       observedAt,
       runs,
-      app: this.sampleApp(observedAt),
+      app: application,
       runtime: this.runtime,
       runtimeUnavailable: this.runtimeUnavailable,
-      mainOwners: this.observationSources?.mainOwners() ?? null,
-      unavailable
+      mainOwners,
+      mainObservedAt, mainUnavailable,
+      unavailable,
+      processObservedAt: unavailable ? this.latest?.processObservedAt ?? null : observedAt,
+      appObservedAt: application.unavailable ? this.latest?.appObservedAt ?? null : observedAt,
+      runtimeObservedAt: this.runtimeObservedAt,
+      renderer: this.renderer
     }
     this.notify()
   }
@@ -293,6 +329,29 @@ export class ProcessResourceSampler {
     const snapshot = this.latest
     if (!snapshot) return
     for (const subscriber of this.subscribers) subscriber(snapshot)
+  }
+
+  private observeRenderer(generation: number): void {
+    if (this.rendererInFlight) return
+    const controller = new AbortController()
+    this.rendererController = controller
+    const sources = this.observationSources
+    this.rendererInFlight = Promise.resolve().then(async () => {
+      try {
+        if (!sources?.observeRenderer) throw new Error('Renderer resource observation is not connected')
+        const reading = await sources.observeRenderer(controller.signal)
+        if (generation !== this.generation || controller.signal.aborted) return
+        this.renderer = { ...reading, unavailable: null }
+      } catch (error) {
+        if (generation !== this.generation || controller.signal.aborted) return
+        this.renderer = { ...this.renderer, unavailable: error instanceof Error ? error.message : String(error) }
+      }
+      if (this.latest) { this.latest = { ...this.latest, renderer: this.renderer }; this.notify() }
+    }).finally(() => {
+      this.rendererInFlight = null
+      if (this.rendererController === controller) this.rendererController = null
+      if (generation !== this.generation && this.subscribers.size > 0) this.observeRenderer(this.generation)
+    })
   }
 
   dispose(): void {

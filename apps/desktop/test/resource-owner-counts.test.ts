@@ -24,11 +24,20 @@ describe('Renderer resource owner counts', () => {
     expect(monacoModelCount).toHaveBeenCalledOnce()
   })
 
-  it('reports zero Monaco owners before the lazy editor module installs its counter', () => {
+  it('keeps missing Monaco getters unknown while established true zero remains zero', () => {
     expect(rendererResourceOwnerCounts({
       documentCount: 0,
       runtimeSubscriptionCount: 2,
       terminalOwners: { terminalViews: 0, terminalAddons: 0, terminalListeners: 0 }
-    })).toMatchObject({ monacoEditors: 0, monacoModels: 0 })
+    })).toMatchObject({ monacoEditors: null, monacoModels: null, runtimeSubscriptions: 2 })
+    expect(rendererResourceOwnerCounts({ documentCount: 6, runtimeSubscriptionCount: 2,
+      terminalOwners: { terminalViews: 1, terminalAddons: 3, terminalListeners: 4 },
+      monacoModelCount: () => 0
+    })).toEqual({ monacoEditors: null, monacoModels: 0, documents: 6, runtimeSubscriptions: 2,
+      terminalViews: 1, terminalAddons: 3, terminalListeners: 4 })
+    expect(rendererResourceOwnerCounts({ documentCount: 6, runtimeSubscriptionCount: 2,
+      terminalOwners: { terminalViews: 1, terminalAddons: 3, terminalListeners: 4 },
+      monacoEditorCount: () => { throw new Error('not ready') }, monacoModelCount: () => 3
+    })).toMatchObject({ monacoEditors: null, monacoModels: 3, documents: 6 })
   })
 })

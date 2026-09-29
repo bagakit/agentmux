@@ -1,4 +1,4 @@
-import { agentMuxControlTimeoutMs } from '@agentmux/core/control'
+import { agentMuxControlTimeoutMs, type MetricsRendererRequest, type MetricsRendererResult } from '@agentmux/core/control'
 import type {
   AgentMuxControlError,
   AgentMuxControlErrorCode,
@@ -44,6 +44,7 @@ export class DesktopControlIpcBridge {
   constructor(private readonly transport: DesktopControlTransport) {}
 
   execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
+  execute(request: MetricsRendererRequest, signal?: AbortSignal): Promise<MetricsRendererResult>
   execute(request: ContinuousProgressInputRequest, signal?: AbortSignal): Promise<ContinuousProgressInputResult>
   async execute(request: DesktopControlRequest, signal?: AbortSignal): Promise<DesktopControlResult> {
     if (!this.transport.isAvailable()) {
@@ -64,7 +65,7 @@ export class DesktopControlIpcBridge {
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
-      }, agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation))
+      }, agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation))
       this.pending.set(request.requestId, { resolve, reject, timeout })
       signal?.addEventListener('abort', abort, { once: true })
       try {

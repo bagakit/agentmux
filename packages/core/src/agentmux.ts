@@ -22,7 +22,7 @@ import {
   , type AgentMuxDemandPriority
   , type AgentMuxDemandStatus
 } from './control.js'
-import { requestAgentMuxControl, subscribeAgentMuxControl } from './control-host.js'
+import { requestAgentMuxControl, subscribeAgentMuxControl, subscribeAgentMuxMetrics } from './control-host.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { AgentMuxError } from './errors.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -1089,6 +1089,7 @@ async function readAllStdin(): Promise<string> {
 }
 
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'metrics' && (args[1] === 'get' || args[1] === 'watch')) return `metrics.${args[1]}`
   if (args[0] === 'diagnostics' && args[1] === 'crash-log') return args[2] === 'reveal' ? 'diagnostics.crash-log.reveal' : 'diagnostics.crash-log.get'
   if (args[0] === 'settings' && args[1] === 'workspaces') {
     return args[2] === undefined || args[2].startsWith('-') ? 'settings.workspaces' : `settings.workspaces.${args[2]}`
@@ -1220,6 +1221,44 @@ async function endpointCommand(args: readonly string[]): Promise<number> {
   return 0
 }
 
+async function metricsCommand(args: readonly string[]): Promise<number> {
+  if (args.length !== 1 || (args[0] !== 'get' && args[0] !== 'watch')) throw cliError('Run agentmux metrics --help for resource queries.')
+  if (args[0] === 'get') {
+    const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'metrics.get' })
+    writeJson(receipt); return 0
+  }
+  const controller = new AbortController()
+  let settle: (error?: Error) => void = () => {}
+  let endError: Error | undefined
+  const ended = new Promise<void>(resolve => { settle = error => { endError = error; resolve() } })
+  const interrupted = () => { controller.abort(); settle() }
+  const brokenOutput = (error: Error) => { controller.abort(); settle(error) }
+  process.once('SIGINT', interrupted); process.once('SIGTERM', interrupted)
+  process.stdout.once('error', brokenOutput)
+  let subscription: Awaited<ReturnType<typeof subscribeAgentMuxMetrics>> | undefined
+  let sawEnd = false
+  try {
+    subscription = await subscribeAgentMuxMetrics({ ...requestBase(), operation: 'metrics.watch' }, {
+      onFrame: frame => {
+        if (frame.event === 'end') sawEnd = true
+        if (!process.stdout.write(`${JSON.stringify(frame)}\n`)) {
+          // A CLI with blocked output terminates instead of accumulating frames.
+          controller.abort(); settle(new AgentMuxError('Metrics output consumer is too slow.', 'CONTROL_FAILED'))
+        }
+      },
+      onEnd: error => settle(error && (error as AgentMuxError).code !== 'CONTROL_CANCELLED' ? error : undefined)
+    }, { signal: controller.signal })
+    await ended
+    if (endError) throw endError
+    if (!sawEnd && !process.stdout.destroyed) printStream('metrics.watch', 'end', { reason: 'consumer-closed' })
+    return 0
+  } finally {
+    subscription?.dispose()
+    controller.abort()
+    process.off('SIGINT', interrupted); process.off('SIGTERM', interrupted); process.stdout.off('error', brokenOutput)
+  }
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') { process.stdout.write(`${AGENTMUX_CLI_HELP}\n`); return 0 }
@@ -1234,6 +1273,7 @@ async function main(): Promise<number> {
   if (args[0] === 'doctor') return await doctorCommand(args.slice(1))
   if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
+  if (args[0] === 'metrics') return await metricsCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'diagnostics') {
     if (args[1] !== 'crash-log' || (args.length !== 2 && !(args.length === 3 && args[2] === 'reveal'))) {
