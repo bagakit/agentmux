@@ -13,7 +13,7 @@ describe('conversation message reading surface', () => {
   it('gives human turns a distinct speaker role and every non-empty turn a copy action', () => {
     const html = renderToStaticMarkup(createElement(ConversationMessage, {
       messageId: 'm-1', speaker: { role: 'human', id: 'human' }, name: 'You', content: 'Please inspect this line.',
-      status: 'complete', createdAt: 1, origin: 1, onAnnotate: () => {}
+      status: 'complete', createdAt: 1, origin: 1, onSelectAnnotation: () => {}
     }))
     expect(html).toContain('data-speaker-role="human"')
     expect(html).toContain('aria-label="Copy message"')

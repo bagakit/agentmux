@@ -39,7 +39,8 @@ import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
-import { ConversationMessage, type ConversationAnnotation } from './ConversationMessage'
+import { ConversationMessage } from './ConversationMessage'
+import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { SemanticIcon } from './semantic-icons'
 
 /**
@@ -682,7 +683,7 @@ export function ActivityView({
   openHttpLink,
   workspaceRoot = '',
   onContinue,
-  onAnnotate,
+  onSelectAnnotation,
   describeSpeaker
 }: {
   sessionId: string
@@ -701,7 +702,7 @@ export function ActivityView({
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot?: string
   onContinue?: (prompt: string) => void
-  onAnnotate?: (annotation: ConversationAnnotation) => void
+  onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   /**
    * 把一个说话人身份解析成「叫什么、画哪个 provider 的图标」。由持有 Session 的那一层给出——
    * 本组件不读 Store，所以 `providerId` 与显示名只能从外面进来。缺省时两条对话轴不渲染：轴的
@@ -978,7 +979,7 @@ export function ActivityView({
                   {...(readPastedImage ? { readPastedImage } : {})}
                   {...(openHttpLink ? { openHttpLink } : {})}
                   {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
-                  {...(onAnnotate ? { onAnnotate } : {})}
+                  {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
                 />
               ) : speaker ? (
                 <ConversationMessage
@@ -994,7 +995,7 @@ export function ActivityView({
                   {...(readPastedImage ? { readPastedImage } : {})}
                   {...(openHttpLink ? { openHttpLink } : {})}
                   {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
-                  {...(onAnnotate ? { onAnnotate } : {})}
+                  {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
                 />
               ) : (
                 <Row item={entry.item} origin={origin} count={1} showSource workspaceRoot={workspaceRoot} />

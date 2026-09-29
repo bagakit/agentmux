@@ -9,7 +9,7 @@ import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ConversationToolTrace } from './ConversationToolTrace'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace'
-import { ComposerTextarea } from './ComposerTextarea'
+import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { SemanticIcon } from './semantic-icons'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
@@ -28,7 +28,7 @@ export type ConversationMessageProps = {
   readPastedImage?: ReadPastedImage
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   onContinue?: () => void
-  onAnnotate?: (annotation: ConversationAnnotation) => void
+  onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   expandedTraces?: ReadonlySet<string>
   onToggleTrace?: (traceId: string, open: boolean) => void
 }
@@ -79,7 +79,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   speaker, name, providerId, content, status, createdAt, origin, workspaceRoot = '', messageId = '',
-  openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onAnnotate, expandedTraces, onToggleTrace
+  openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -93,15 +93,11 @@ export function ConversationMessage({
   const displayName = isUnknownInput && (rawDisplayName === 'You' || rawDisplayName === 'Human')
     ? 'Input'
     : rawDisplayName
-  // Native parts have no annotation offset contract. Live string annotations retain their original
-  // quote and note; read-only callers do not collect selection state.
-  const canAnnotate = onAnnotate !== undefined && typeof content === 'string'
+  const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const activeCopyActionRef = useRef(0)
   const copyTimerRef = useRef<number | null>(null)
-  const [selection, setSelection] = useState<{ quote: string } | null>(null)
-  const [note, setNote] = useState('')
 
   useEffect(() => {
     return () => {
@@ -114,14 +110,17 @@ export function ConversationMessage({
   }, [])
 
   function captureSelection(): void {
-    if (!canAnnotate || typeof content !== 'string') return
+    if (!canAnnotate || !onSelectAnnotation) return
     const current = window.getSelection()
     if (!current || current.isCollapsed || !bodyRef.current || !current.rangeCount) return
     const range = current.getRangeAt(0)
-    if (!bodyRef.current.contains(range.commonAncestorContainer)) return
-    const quote = current.toString().trim()
-    if (!quote) return
-    setSelection({ quote })
+    const start = (range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer as Element : range.startContainer.parentElement)?.closest<HTMLElement>('.log-turn__text')
+    const end = (range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer as Element : range.endContainer.parentElement)?.closest<HTMLElement>('.log-turn__text')
+    // A real rendered text part, never a trace/control or a cross-record range.
+    if (!start || start !== end || !bodyRef.current.contains(start)) return
+    const quote = range.toString()
+    if (!quote.trim()) return
+    onSelectAnnotation({ messageId, quote, range: range.cloneRange(), contextElement: start })
   }
 
   async function copyMessage(): Promise<void> {
@@ -151,14 +150,6 @@ export function ConversationMessage({
     }
   }
 
-  function submitAnnotation(): void {
-    if (!selection || !note.trim() || !onAnnotate) return
-    onAnnotate({ messageId, quote: selection.quote, note: note.trim() })
-    setNote('')
-    setSelection(null)
-    window.getSelection()?.removeAllRanges()
-  }
-
   const occurrenceCounts = new Map<string, number>()
   function partKey(part: AgentSessionHistoryContentPart): string {
     if (isStringContent) return 'text'
@@ -172,6 +163,7 @@ export function ConversationMessage({
   return (
     <div
       className="log-turn"
+      data-message-id={messageId || undefined}
       data-speaker-role={speaker?.role}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
@@ -216,14 +208,13 @@ export function ConversationMessage({
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {parts.map((part) => {
             const key = partKey(part)
-            return part.kind === 'text' ? <MemoizedAgentMarkdown
-              key={key}
+            return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}><MemoizedAgentMarkdown
               content={part.text}
               workspaceRoot={workspaceRoot}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
               {...(readPastedImage ? { readPastedImage } : {})}
               {...(openHttpLink ? { openHttpLink } : {})}
-            /> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
+            /></div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
               <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot}
                 traceId={traceDisclosureKey(messageId, key)}
                 {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
@@ -248,11 +239,6 @@ export function ConversationMessage({
           })}
         </div>
       ) : null}
-      {selection && onAnnotate ? <div className="log-turn__annotation" role="dialog" aria-label="Annotate selected text">
-        <div className="log-turn__annotation-quote">“{selection.quote}”</div>
-        <ComposerTextarea value={note} onValueChange={setNote} placeholder="Leave a note for this Agent…" autoFocus />
-        <div className="log-turn__annotation-actions"><button type="button" className="small-button" onClick={() => setSelection(null)}>Cancel</button><button type="button" className="primary-button" disabled={!note.trim()} onClick={submitAnnotation}>Add note to reply</button></div>
-      </div> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
     </div>
   )

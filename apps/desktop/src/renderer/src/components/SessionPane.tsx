@@ -19,6 +19,7 @@ import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import type { ConversationAnnotation } from './ConversationMessage'
+import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle, type ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { errorIdentity } from '../lib/error-presentation'
@@ -113,6 +114,10 @@ export function SessionPane({
   const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
   const [historyOpen, setHistoryOpen] = useState(false)
   const surfaceRef = useRef<HTMLElement>(null)
+  const annotationNoteRef = useRef<ConversationAnnotationNoteHandle>(null)
+  const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
+    annotationNoteRef.current?.select(selection, sessionId)
+  }, [sessionId])
   const resultAnchorId = useId()
   const resultSurfaceAnchor = `--result-surface-${resultAnchorId.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const historyReturnFocusRef = useRef<HTMLButtonElement | null>(null)
@@ -203,7 +208,7 @@ export function SessionPane({
     // `setAgentComposerDraft`），两份实现在尾部空白上**不一致**（实测：草稿是 `'Existing\n'` 时
     // 手写那份给出 `Existing\n\nREF`、store 给出 `Existing\n\n\nREF`）。同一个产品动作在两个
     // 表面上给两种结果，而只有其中一份有判据。
-    appendAgentComposerDraft(sessionId, `Regarding this message:\n> ${annotation.quote.replace(/\n/gu, '\n> ')}\n\nNote: ${annotation.note}`)
+    appendAgentComposerDraft(sessionId, `Regarding message ${JSON.stringify(annotation.messageId)}:\n> ${annotation.quote.replace(/\n/gu, '\n> ')}\n\nNote: ${annotation.note}`)
   }
   // Same two reads TerminalView makes for its path links, for the same reason: an Agent that writes
   // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
@@ -487,6 +492,7 @@ export function SessionPane({
             openHttpLink={onProseLinkClick}
             describeSpeaker={describeSpeaker}
             expandedTraces={historyDisclosures}
+            {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
             onToggleTrace={(traceId, open) => {
               setHistoryDisclosures((prev) => {
                 const next = new Set(prev)
@@ -549,7 +555,7 @@ export function SessionPane({
                 openWorkspaceFile={openWorkspaceFile}
                 readPastedImage={readPastedImage}
                 openHttpLink={onProseLinkClick}
-                onAnnotate={annotateMessage}
+                {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
                 describeSpeaker={describeSpeaker}
               />
             </div>
@@ -564,6 +570,9 @@ export function SessionPane({
         }
         onSelect={onProseLinkSelect}
       />
+      <ConversationAnnotationNote ref={annotationNoteRef} sessionId={sessionId} regionRef={surfaceRef}
+        active={visible && hasAgentComposer && (historyOpen || inlineHistory || viewMode === 'activity')}
+        {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})} />
       {hasAgentComposer && session.kind === 'agent' ? (
         <div
           className="agent-input-stack"
