@@ -440,6 +440,6 @@ describe('外部追加草稿只有一条路径', () => {
       callers,
       'appendAgentComposerDraft 的调用方变了。composer-composition.ts 顶部那段注释据此断言' +
         '「两个外部写入者都先移焦、组字已结束」——新增一个就得先确认它也满足这个前提，再改注释。'
-    ).toEqual(['components/SessionPane.tsx', 'components/SurfaceToolDock.tsx'])
+    ).toEqual(['components/SessionPane.tsx', 'components/SurveyBrowserTools.tsx'])
   })
 })

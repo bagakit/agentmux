@@ -76,7 +76,8 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.log-turn__body > .md { min-width: 0; }
+.log-turn__text > .md { min-width: 0; }
+.log-turn__text { min-width: 0; }
 .log-turn__resource { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; font-size: var(--fs-meta); }
 .log-turn__resource code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__resource small { color: var(--text-3); font-size: var(--fs-micro); }
@@ -93,11 +94,19 @@
 .log-turn[data-trace-only='true'] .log-turn__node { display: none; }
 .log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
 .log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
-.log-turn__annotation { grid-column: 2; grid-row: 3; display: grid; gap: var(--sp-2); max-width: min(460px, 100%); margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-1); }
-.log-turn__annotation-quote { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
+.log-turn__annotation { display: grid; gap: var(--sp-2); width: min(300px, 100%); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-1); overflow: auto; pointer-events: auto; }
+.log-turn__annotation-quote { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; border-left: 2px solid var(--blue); padding-left: var(--sp-2); }
 .log-turn__annotation textarea { min-height: 58px; width: 100%; resize: vertical; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-meta); }
 .log-turn__annotation textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .log-turn__annotation-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.conversation-annotation-note__header { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-meta); gap: var(--sp-3); }
+.conversation-annotation-note__header strong { font-weight: 500; }
+.conversation-annotation-underline { height: 2px; background: var(--blue); pointer-events: none; }
+.conversation-annotation-note__location, .conversation-annotation-note__error { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
+.conversation-annotation-note__error { color: var(--red-text); }
+.conversation-annotation-recovery { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.agent-surface > .log-turn__annotation { align-self: end; width: min(360px, calc(100% - var(--sp-3) * 2)); max-height: min(240px, 40%); margin: var(--sp-2) var(--sp-3); flex-shrink: 0; }
+.agent-surface[data-conversation-note='side'] > .agent-body { margin-right: 320px; }
 /* "Continue from here" 是一个开在回合体下方的小控件——不是正文，所以从 --text-3 起，hover 才升到
    强调色。无底色无描边：它坐在 turn 自己的地上，一条底色会在密集的对话流里读成一个多余的盒子。 */
 .log-turn__continue {
@@ -327,7 +336,6 @@
 .log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
 .log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__head { grid-row: 1; }
 .log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__body { grid-row: 2; text-align: left; }
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__annotation { grid-column: 1; justify-self: end; }
 
 @media (max-width: 620px) {
   .log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) { width: calc(100% - var(--sp-6)); margin-inline: var(--sp-3); }
