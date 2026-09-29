@@ -159,8 +159,8 @@ app.whenReady().then(async () => {
   } finally {
     result.calls = calls
     await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
-    if (win && !win.isDestroyed()) win.destroy()
     await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
+    if (win && !win.isDestroyed()) win.destroy()
     app.exit(result.passed ? 0 : 1)
   }
 })
