@@ -6,12 +6,12 @@
  * 每一段文本都自带命令，接收方粘贴即可执行。
  *
  * 三级地址回答三个不同的问题，绝不互为别名：
- *   - Session 回答"哪个 Agent"，跨 View 稳定，可同时投影到多个 Region 与多个 Tab；
+ *   - Session 回答"哪个 Agent"，跨 Tab 稳定，可同时投影到多个 Region 与多个 Tab；
  *   - Region 回答"屏幕上哪一格"，是分屏下唯一无歧义的展示身份；
- *   - View 回答"哪张完整工作面"，只在它恰好承载唯一一个 Agent 时才谈得上 Agent 寻址。
+ *   - Tab 回答"哪张完整工作面"，按不同 SID 消歧；多个 Region 可以展示同一个 SID。
  *
- * 三个入口共用这里，不各自拼字符串——同一个 Session 从 Tab 菜单和从 Region 菜单复制出来必须
- * 逐字一致，那是同一份真相的两个入口，不是两套格式。
+ * 三个入口共用这里，不各自拼字符串——同一个 Session 的发送与检查命令从各菜单复制出来必须
+ * 逐字一致；准确位置另行标明，那是同一份真相的两个入口，不是两套格式。
  */
 
 /** 按 shell 语义转义，使带空格或单引号的 id 粘贴即可执行。 */
@@ -64,7 +64,7 @@ const LIST_SESSIONS = 'agentmux list sessions'
 export function formatSessionAddress(agentSessionId: string): string {
   return `AgentMux Agent Session ${agentSessionId}
 
-这是 Agent 的语义身份，与它显示在哪张 View、哪一格无关。
+这是 Agent 的语义身份，与它显示在哪张 Tab、哪一格无关；一个 Session 可以有多个展示位置。
 
 发消息给它：
 ${sendCommand('session', agentSessionId)}
@@ -83,7 +83,7 @@ ${inspectCommand('session', agentSessionId)}`
 export function formatRegionAddress(regionId: string): string {
   return `AgentMux Region ${regionId}
 
-这是 View 里的一格。分屏承载多个 Agent 时，它 unambiguous 地指向这一格，View 地址做不到。
+这是 Tab 里准确的一格。它指向空间位置，其中的内容可能更换；它不是 Agent 的语义身份。
 
 发消息给这一格里的 Agent：
 ${sendCommand('region', regionId)}
@@ -92,18 +92,12 @@ ${sendCommand('region', regionId)}
 ${inspectCommand('region', regionId)}`
 }
 
-/**
- * 哪张完整工作面。
- *
- * 它如实声明自己的前提：只有当这张 View 恰好承载一个 Agent 时，它才谈得上 Agent 寻址。
- * 多 Agent 时引导去用 Region 地址——而不是像旧 handoff 那样，让接收方先撞一次
- * MESSAGE_TARGET_NOT_UNIQUE 再自己从 candidates 里挑。
- */
-export function formatViewAddress(tabId: string): string {
-  return `AgentMux View ${tabId}
+/** 完整 Tab；按不同 SID 判定语义收件人，多个 Region 可以展示同一个 SID。 */
+export function formatTabAddress(tabId: string): string {
+  return `AgentMux Tab ${tabId}
 
-这是一张完整工作面。它用于 Agent 寻址的前提是：这张 View 里 exactly one Agent。
-这张 View 分屏承载多个 Agent 时，改用那一格的 Region 地址——在那一格上右键复制。
+这是一张完整工作面。语义发送要求其中恰好一个不同的 Agent Session ID；同一 SID 的多个 Region 投影仍是一个 Agent。
+有多个不同 SID 时，在目标 Agent 的 Region 上右键取得它的名片。
 
 发消息给它（前提如上）：
 ${sendCommand('tab', tabId)}
@@ -112,29 +106,29 @@ ${sendCommand('tab', tabId)}
 ${inspectCommand('tab', tabId)}`
 }
 
-/**
- * 「给这个 Agent 发消息」这个入口解析出的最精确地址。
- *
- * **它与 Core 的 Handoff（交出所有权，`originAwaits: false`）没有任何关系**——这里产出的只是一段
- * 可粘贴的地址文本，供人拿去发消息。曾经叫 `formatHandoffAddress`，那个名字会让人以为 Desktop 侧
- * 已经有了所有权转移的入口，而实际上两个调用点的菜单标签都是 "Message this Agent"。
- *
- * 入口按意图命名，因此这里要替用户决定该给哪一层身份——用户想的是"把话送到这个 Agent"，不是
- * "我要 Region 还是 Session"。解析只有一条规则：**调用方知道是哪一格就给 Region 地址，不知道就给
- * Session 地址**。
- *
- * 判据是`调用方知不知道`，不是`有没有分屏`：歧义只在源头可见。Region 菜单的点击天然发生在某一格上，
- * 它知道是哪一格而接收方不知道，此时给 Region 才是把消歧做在源头——哪怕这张 View 眼下没分屏，下一秒
- * 分屏了这个地址依然指得准。Tab 菜单没有这个信息，于是落到 Session：它在 View 被关掉、移动、分屏之后
- * 依然指向同一个 Agent。
- */
+/** Agent 名片始终按 SID 发送；准确 Region 另给空间操作，不根据 SID 猜位置。 */
 export function formatMessagingAddress(target: {
   agentSessionId: string
   regionId?: string
 }): string {
-  return target.regionId === undefined
-    ? formatSessionAddress(target.agentSessionId)
-    : formatRegionAddress(target.regionId)
+  const session = formatSessionAddress(target.agentSessionId)
+  if (target.regionId === undefined) return session
+  return `${session}
+
+已知空间位置：Region ${target.regionId}
+这是复制时点击的投影。导航默认保留当前输入；空间移动不改变 Session、Run 或执行目录。
+
+查看这一格：
+${inspectCommand('region', target.regionId)}
+
+在主面选择这一格（保留当前输入）：
+agentmux focus --region=${shellArgument(target.regionId)}
+
+列出可选择的目标空间：
+agentmux space ls
+
+移动这一格的模板（先选择目标 Zone，替换 <zone-id> 后执行）：
+模板：agentmux space mv --from-region=${shellArgument(target.regionId)} --expect-session=${shellArgument(target.agentSessionId)} --zone='<zone-id>' --new-tab`
 }
 
 /**
@@ -175,15 +169,15 @@ export function addressingRecovery(error: {
 ${LIST_SESSIONS}`
   }
   if (error.code === 'UNKNOWN_AGENT_SESSION') {
-    return `这个 Agent 已经不在了（已退出或已被回收）。
-列出还活着的 Agent：
+    return `当前未观察到这个 Agent Session，不能据此确认它已退出或被回收。
+列出当前可观察的 Agent Session：
 ${LIST_SESSIONS}`
   }
   if (error.code === 'TAB_NOT_OPEN' || error.code === 'REGION_NOT_OPEN') {
     // View / Region id 是界面上的临时身份，关掉就没了，CLI 无从重建——所以"重新取一次"只能在
     // 界面里做，这一句没有对应命令。能给的是另一条路：Session 跨 View 稳定，用它照样够得到。
-    return `这个地址指向的 View 或 Region 已经不存在了（被关掉或重新分屏过）。
-要回到那个位置，在界面里重新取一次地址；要够到同一个 Agent，用它跨 View 稳定的 Session 身份：
+    return `当前没有打开这个 Tab 或 Region；这不代表其中的 Agent Session 已结束。
+要找那个空间位置，重新取得准确地址；要联系同一个 Agent，使用跨 Tab 稳定的 Session 身份：
 ${LIST_SESSIONS}`
   }
   if (error.code === 'AMBIGUOUS_REGION_TARGET' || error.code === 'AMBIGUOUS_TAB_TARGET') {
@@ -236,12 +230,12 @@ function formatTargetNotUnique(
 ): string {
   // 候选为空是"这张 View 里一个 Agent 都没有"，与"有多个"是不同的下一步。
   if (candidates.length === 0) {
-    return `这张 View 里没有 Agent，没有可交接的目标。
-先在这张 View 里启动一个 Agent，或改为在承载 Agent 的那一格上操作。`
+    return `这张 Tab 里没有 Agent，没有可交接的目标。
+先在这张 Tab 里启动一个 Agent，或改为在承载 Agent 的那一格上操作。`
   }
-  // 每个候选都给那一格的命令：Region 是分屏下唯一无歧义的身份。
-  const lines = candidates.map((candidate) => sendCommand('region', candidate.regionIds[0]))
-  return `这张 View 承载多个 Agent，--to-tab 无法唯一寻址。挑一个直接跑：
+  // 语义收件人已经确定；不为发送猜第一个空间投影。
+  const lines = candidates.map((candidate) => sendCommand('session', candidate.agentSessionId))
+  return `这张 Tab 承载多个不同的 Agent Session，--to-tab 无法唯一指定收件人。选择一个 Agent：
 
 ${lines.join('\n')}`
 }

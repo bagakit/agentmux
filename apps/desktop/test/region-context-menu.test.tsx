@@ -49,7 +49,7 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     expect(copied).not.toContain('pane-1')
   })
 
-  it('承载 Agent 的一格给出交接入口，复制的是那一格的 Region 地址', async () => {
+  it('Agent 名片给出稳定 SID 与这一格的准确空间命令', async () => {
     // 交接是这个菜单的主要意图。点击发生在某一格上，我们知道是哪一格而接收方不知道，
     // 所以它解析成 Region 而非 Session——把消歧做在源头。
     const writeClipboardText = vi.fn(async (_text: string) => {})
@@ -66,6 +66,12 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     }))
     // 退化成 Session 地址会丢掉"是哪一格"，那正是这个入口要保住的信息。
     expect(writeClipboardText).not.toHaveBeenCalledWith(formatSessionAddress('agent-7'))
+    const copied = writeClipboardText.mock.calls[0]![0]
+    expect(copied).toContain("agentmux send --to-session='agent-7'")
+    expect(copied).toContain("agentmux focus --region='region:pane-2'")
+    expect(copied).toContain("--from-region='region:pane-2' --expect-session='agent-7'")
+    expect(copied).toContain('模板：')
+    expect(copied).not.toContain('--to-region')
   })
 
   it('非 Agent 的 Region 不提供 Session 地址——缺席表达，不画禁用的假按钮', () => {

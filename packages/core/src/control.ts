@@ -746,6 +746,19 @@ export type AgentMuxControlSuccessReceipt = {
   [Operation in AgentMuxControlResult['operation']]: SuccessByOperation<Operation>
 }[AgentMuxControlResult['operation']]
 export type AgentMuxMessageTargetCandidate = { agentSessionId: string; regionIds: string[] }
+
+/** Semantic recipients in one inspected Tab; multiple projections of one Session are one recipient. */
+export function agentMuxMessageTargetCandidates(regions: readonly AgentMuxRegion[]): AgentMuxMessageTargetCandidate[] {
+  const candidates = new Map<string, string[]>()
+  for (const region of regions) {
+    if (region.kind !== 'agent') continue
+    const regionIds = candidates.get(region.agentSessionId)
+    if (regionIds) regionIds.push(region.regionId)
+    else candidates.set(region.agentSessionId, [region.regionId])
+  }
+  return [...candidates].map(([agentSessionId, regionIds]) => ({ agentSessionId, regionIds }))
+}
+
 export type AgentMuxControlError =
   | { code: 'MESSAGE_TARGET_NOT_UNIQUE'; message: string; candidates: AgentMuxMessageTargetCandidate[] }
   | {
