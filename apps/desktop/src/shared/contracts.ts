@@ -1,4 +1,5 @@
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
+import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
 import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousProgressInputResult } from './continuous-progress'
 import type {
   AgentCatalogEntry,
@@ -527,6 +528,8 @@ export type FileDocument = {
 
 export type WorkspaceFileReadResult =
   | { status: 'read'; document: FileDocument }
+  /** Raw bytes have binary evidence; no decoded content may enter the editable document owner. */
+  | { status: 'binary'; path: string; revision: string; byteLength: number }
   | { status: 'deleted' }
   // The target exists but is a directory. Not an error: the caller reveals it in the file tree
   // instead of opening it as a document. Path detection is pure-string, so a directory path is a
@@ -1353,6 +1356,8 @@ export type AgentMuxDesktopApi = {
   files: {
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
+    /** One complete, revision-verified bytes snapshot within the shared preview budget. */
+    readPreview(workspaceId: string, path: string, options?: WorkspaceFilePreviewReadOptions): Promise<WorkspaceFilePreviewResult>
     /**
      * 读一份书签文件（`.webloc`/`.url`），一次拿齐 `openFile` 要的两件事：`url`（拿去导航，取不出＝
      * `null`，调用方退回把文件当文本打开）和 `binary`（这份文件本身是不是二进制）。书签读走这条而不是
