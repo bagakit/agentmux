@@ -1,0 +1,8 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "compilerOptions": {
+    "paths": { "@agentmux/core": ["../../../../../packages/core/src/index.ts"],
+      "@agentmux/core/*": ["../../../../../packages/core/src/*"] }
+  },
+  "include": ["../../../src/**/*.d.ts", "../../../test/browser-nonactivating-cli.test.ts", "../../../test/view-focus.test.ts", "./vitest.owning.config.mts"]
+}

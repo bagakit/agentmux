@@ -3714,7 +3714,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       request.destination,
       request.caller,
       `view:${crypto.randomUUID()}`,
-      newRegionId()
+      newRegionId(),
+      request.operation
     )
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, plan.tabId)) {
       throw controlFailure('CONTROL_OWNER_LOST', 'Control target Tab is closing.')
@@ -3801,7 +3802,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
 
     const browserId = `browser:${crypto.randomUUID()}`
-    set((current) => ({ ...(current.mainSurface === 'survey' ? {} : { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const }), tabs: plan.tabs, layouts: plan.layouts }))
+    // Control places a Browser; explicit focus is a separate request. The human UI open path
+    // keeps its own selection intent, while this path retains the current work and input owner.
+    set({ tabs: plan.tabs, layouts: plan.layouts })
     const cancel = (): void => rollback(plan.launcher)
     signal?.addEventListener('abort', cancel, { once: true })
     let createdBrowserId: string | null = null
@@ -3834,7 +3837,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           !workbenchViewCloseAllowsView(current.closingWorkbenchViews, owner.tab.id)
         ) return current
         attached = true
-        return { tabs: { ...current.tabs, [owner.tab.id]: replaceWorkbenchRegion(owner.tab, plan.regionId, surface) } }
+        return { tabs: { ...current.tabs, [owner.tab.id]: updateWorkbenchRegion(owner.tab, plan.regionId, () => surface) } }
       })
       if (!attached) await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Browser creation.'))
       return {

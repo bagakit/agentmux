@@ -103,6 +103,11 @@ export function NewTabSurface({
   const launchAgent = useAppStore((state) => state.launchAgent)
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null || state.workbenchSpaceSelection !== null)
+  // A visible Tab can contain an unselected Launcher created by Control. Only its
+  // selected Region may acquire input; the original empty-group Launcher has no Region.
+  const inputRegionActive = useAppStore(state => tabId && regionId
+    ? state.tabs[tabId]?.layout.activeRegionId === regionId
+    : tabId === undefined && regionId === undefined)
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
@@ -194,14 +199,14 @@ export function NewTabSurface({
     // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
     // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
     // 所以这条 effect 多跑几次不会攒出多余进程。
-    if (workspace && visible && presentationActive && !controlNavigation && sections.terminal === 'expanded') prewarmTerminal(workspace.id, launcherId)
-  }, [prewarmTerminal, visible, presentationActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, sections.terminal])
+    if (workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded') prewarmTerminal(workspace.id, launcherId)
+  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, sections.terminal])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
-    if (!visible || !presentationActive || controlNavigation) return
+    if (!visible || !presentationActive || !inputRegionActive || controlNavigation) return
     void detectExecutors(workspace.hostId)
-  }, [executors, detectExecutors, visible, presentationActive, controlNavigation, workspace])
+  }, [executors, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace])
 
   useEffect(() => {
     if (installedExecutors.some((executor) => executor.id === executorId)) return
@@ -319,7 +324,7 @@ export function NewTabSurface({
         </div>
         <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}
           onPasteImage={(file, insert) => { void feedback.run(() => insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return appendFileReferences('', [path]) }, { separate: true })) }}
-          autoFocus={visible && presentationActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
+          autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
           placeholder="What would you like to work on?" /></div>
         <div className="composer__toolbar launcher-tools"><div>
