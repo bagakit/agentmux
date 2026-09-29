@@ -53,10 +53,10 @@ it('preserves notification drafts when an unrelated save returns cloned config v
 
 it('keeps an unsaved SSH host across cloned configuration and saves the original host/workspace contract', async () => {
   const onSave = vi.fn(async () => {})
-  await dom.render(<HostSettingsPane config={composerConfig} onSave={onSave} />)
+  await dom.render(<HostSettingsPane active={true} config={composerConfig} onSave={onSave} />)
   await dom.click('.settings-pane-toolbar button')
   await input('[placeholder="dev.example.com"]', 'host.example.test')
-  await dom.render(<HostSettingsPane config={structuredClone(composerConfig)} onSave={onSave} />)
+  await dom.render(<HostSettingsPane active={true} config={structuredClone(composerConfig)} onSave={onSave} />)
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="dev.example.com"]')!.value).toBe('host.example.test')
   await dom.click('.primary-button')
   expect(onSave).toHaveBeenCalledWith([
@@ -67,9 +67,10 @@ it('keeps an unsaved SSH host across cloned configuration and saves the original
 
 it('keeps prompt edits across cloned saved arrays', async () => {
   const config = { ...composerConfig, composerShortcuts: [{ id: 'p', keyword: 'explain', label: 'Explain', body: 'Explain clearly' }] }
-  await dom.render(<ShortcutSettingsPane config={config} onSave={async () => {}} />)
+  await dom.render(<ShortcutSettingsPane active={true} config={config} onSave={async () => {}} />)
   await input('[placeholder="eli5"]', 'review')
-  await dom.render(<ShortcutSettingsPane config={structuredClone(config)} onSave={async () => {}} />)
+  await dom.render(<ShortcutSettingsPane active={true} config={structuredClone(config)} onSave={async () => {}} />)
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="eli5"]')!.value).toBe('review')
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Unsaved changes')
+  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Save prompts updates the whole library. 1 changed · 0 pending deletions.')
+  expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(false)
 })
