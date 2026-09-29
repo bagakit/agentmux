@@ -43,9 +43,6 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const sessions = useWorkbenchTabSessions(tab)
   const names = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
-  const name = useMemo(() => tab
-    ? workbenchTabDisplayName(tab, sessions, names, timelines)
-    : tabId ? 'Saved context' : PMO_TEAMS_TOPIC_TITLE, [tab, tabId, sessions, names, timelines])
   // Unlike activeWorkbenchSurface, a missing active Region must stay unknown;
   // it cannot borrow the title Region's Agent status.
   const region = tab?.regions[tab.layout.activeRegionId]
@@ -56,6 +53,9 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
     state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)))
   const moteName = useMemo(() => topics?.find(topic => topic.id === topicId)?.title ??
     (topicId === PMO_TEAMS_TOPIC_ID ? PMO_TEAMS_TOPIC_TITLE : 'Saved Mote'), [topics, topicId])
+  const name = useMemo(() => tab
+    ? workbenchTabDisplayName(tab, sessions, names, timelines)
+    : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, moteName])
   const statusText = moteTargetStatus(tab, session, tabId)
   const label = name === moteName ? moteName : `${moteName} · ${name}`
   return { topicId, tabId, tab, region, session, name, moteName, label, statusText }

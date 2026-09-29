@@ -119,15 +119,13 @@ describe('one operative Mote hover surface', () => {
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
   })
 
-  it.each(['ensure', 'read'] as const)('keeps an unprepared Mote without an unowned input through deferred %s failure and retry', async step => {
+  it('keeps an empty Mote through deferred identity failure and retry until explicit New Tab', async () => {
     const { [quietTab.id]: _tab, ...tabs } = useAppStore.getState().tabs
     useAppStore.setState({ tabs, layouts: { ...useAppStore.getState().layouts,
       [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', Object.keys(tabs)) } })
     window.localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: quietMoteId }))
-    let releaseEnsure!: (topic: typeof moteTopics[number]) => void, failEnsure!: (error: Error) => void
-    vi.mocked(api.scratch.ensureMote).mockReturnValueOnce(new Promise((resolve, reject) => { releaseEnsure = resolve; failEnsure = reject }))
-    let failRead!: (error: Error) => void
-    if (step === 'read') vi.mocked(api.scratch.readTopic).mockReturnValueOnce(new Promise((_resolve, reject) => { failRead = reject }))
+    let failEnsure!: (error: Error) => void
+    vi.mocked(api.scratch.ensureMote).mockReturnValueOnce(new Promise((_resolve, reject) => { failEnsure = reject }))
     await mount()
     const before = useAppStore.getState()
     await hover()
@@ -140,13 +138,7 @@ describe('one operative Mote hover surface', () => {
     expect(api.scratch.ensureMote).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, quietMoteId)
     expect(panel().querySelector('[aria-label="Agent prompt"]')).toBeNull()
     expect(warm).not.toHaveBeenCalled()
-    if (step === 'read') {
-      await act(async () => releaseEnsure(moteTopics.find(topic => topic.id === quietMoteId)!)); await settle()
-      expect(api.scratch.readTopic).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, quietMoteId)
-      expect(panel().querySelector('[aria-label="Agent prompt"]')).toBeNull()
-      expect(warm).not.toHaveBeenCalled()
-      await act(async () => failRead(new Error('read unavailable')))
-    } else await act(async () => failEnsure(new Error('identity unavailable')))
+    await act(async () => failEnsure(new Error('identity unavailable')))
     await settle()
     expect(panel().textContent).toContain('Context preparation did not complete')
     expect(panel().querySelector('[aria-label="Agent prompt"]')).toBeNull()
@@ -157,6 +149,13 @@ describe('one operative Mote hover surface', () => {
     expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
     const retry = Array.from(panel().querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Retry context')!
     await click(retry)
+    expect(panel().dataset.moteTargetTab).toBeUndefined()
+    expect(panel().querySelector('[aria-label="Agent prompt"]')).toBeNull()
+    expect(warm).not.toHaveBeenCalled()
+    expect(api.scratch.readTopic).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    const newTab = panel().querySelector<HTMLButtonElement>('[aria-label="New Tab"]')!
+    expect(newTab).not.toBeNull(); await click(newTab)
     const tabId = panel().dataset.moteTargetTab!, tab = useAppStore.getState().tabs[tabId]!
     expect(tab?.topicId).toBe(quietMoteId)
     expect(tab?.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
@@ -406,8 +405,9 @@ describe('one operative Mote hover surface', () => {
       expect(api.scratch.ensureMote).toHaveBeenLastCalledWith(SCRATCH_WORKSPACE_ID, customMoteId)
       if (state === 'bound') expect(panel().dataset.moteTargetTab).toBe(customTab.id)
       else {
-        const tabId = panel().dataset.moteTargetTab!
-        expect(useAppStore.getState().tabs[tabId]?.topicId).toBe(customMoteId)
+        expect(panel().dataset.moteTargetTab).toBeUndefined()
+        expect(Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === customMoteId)).toEqual([])
+        expect(panel().querySelector('[aria-label="New Tab"]')).not.toBeNull()
         expect(panel().dataset.moteTargetSession).toBeUndefined()
       }
     }
