@@ -15,7 +15,7 @@ const defaultOutput = '.bagakit/design/settings-glass-prompts/evidence'
 const outputIndex = args.indexOf('--output')
 const evidence = path.resolve(root, outputIndex >= 0 ? args[outputIndex + 1] : defaultOutput)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const owned = /(?:\/App\.tsx|\/SettingsPanel\.tsx|\/settings\/[^/]+\.(?:tsx|ts)|\/settings\/modules\/prompts\.tsx|\/styles\/[^/]+\.css|\/fixtures\/settings-prompts\/[^/]+)$/
+const owned = /(?:\/App\.tsx|\/SettingsPanel\.tsx|\/settings\/[^/]+\.(?:tsx|ts)|\/settings\/modules\/prompts\.tsx|\/styles\/[^/]+\.css|\/fixtures\/settings-(?:prompts|liquid-motion)\/[^/]+)$/
 
 async function files(directory, prefix = '') {
   const result = []
@@ -47,7 +47,7 @@ async function reviewedProof(directory) {
   } catch { return null }
 }
 
-async function qualify(directory, materialsOnly = false, preview = false) {
+export async function qualify(directory, materialsOnly = false, preview = false, options = {}) {
   await fs.mkdir(directory, { recursive: true })
   const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-settings-prompts-'))
   const receipt = { captureOnly: true, aestheticReview: 'not-performed', boundary: 'Actual App Renderer; private IPC ConfigOwner/ConfigStore seam; no user config, Runtime, Run, native activation or installation. CSS reduced preferences are emulated known signals, not OS bridge facts.', source: {}, assets: [], compiled: [], processes: [], privateRoot }
@@ -90,13 +90,14 @@ async function qualify(directory, materialsOnly = false, preview = false) {
     } }] })
     for (const filename of ['main.cjs', 'preload.cjs', 'index.html', 'vitest.config.mts']) await bind(path.join(fixture, filename), await fs.readFile(path.join(fixture, filename)))
     await bind(fileURLToPath(import.meta.url), await fs.readFile(fileURLToPath(import.meta.url)))
+    for (const filename of options.sources ?? []) await bind(path.resolve(root, filename), await fs.readFile(path.resolve(root, filename)))
     receipt.source = Object.fromEntries([...inputs].sort((a, b) => a[0].localeCompare(b[0])))
     assert.ok(Object.keys(receipt.source).length > 0, 'Source binding must not be empty')
     receipt.sourceIdentity = hash(JSON.stringify(receipt.source))
     receipt.compiled = await files(path.join(directory, 'compiled'))
     receipt.ownerCompiled = { sha256: hash(await fs.readFile(path.join(directory, 'owner.mjs'))) }
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-    for (const mode of materialsOnly ? ['materials'] : preview ? ['preview'] : ['control', 'reread', 'reread-empty']) {
+    for (const mode of options.modes ?? (materialsOnly ? ['materials'] : preview ? ['preview'] : ['control', 'reread', 'reread-empty'])) {
       const lines = []
       const processResult = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(directory, 'compiled/index.html'), path.join(directory, 'owner.mjs'), privateRoot, directory, mode],
         { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 90000, onLine: line => lines.push(line) })
@@ -106,10 +107,11 @@ async function qualify(directory, materialsOnly = false, preview = false) {
       assert.equal(processResult.exitCode, 0, JSON.stringify(result.failure || processResult))
       assert.equal(result.completed, true)
     }
-    if (!materialsOnly && !preview) assert.equal(new Set(receipt.processes.map(p => p.pid)).size, 3, 'Three ordinary processes must read the same private durable store')
+    if (!options.modes && !materialsOnly && !preview) assert.equal(new Set(receipt.processes.map(p => p.pid)).size, 3, 'Three ordinary processes must read the same private durable store')
     for (const [relative, consumed] of inputs) assert.equal(hash(await fs.readFile(path.join(root, relative))), consumed.sha256, 'Proof input changed: ' + relative)
     receipt.png = (await files(directory)).filter(record => record.file.endsWith('.png') && !record.file.startsWith('compiled/'))
-    receipt.raw = (await files(directory)).filter(record => /^(control|reread|reread-empty)\.(json|log)$/.test(record.file))
+    const modes = new Set(receipt.processes.map(process => process.mode))
+    receipt.raw = (await files(directory)).filter(record => modes.has(record.file.replace(/\.(json|log)$/, '')) && /\.(json|log)$/.test(record.file))
     receipt.completed = true
   } catch (error) {
     receipt.failure = { name: error.name, message: error.message, stack: error.stack }
@@ -121,6 +123,7 @@ async function qualify(directory, materialsOnly = false, preview = false) {
   return receipt
 }
 
+async function main() {
 if (args.includes('--materials-mutant')) {
   const sourcePath = path.join(root, 'apps/desktop/src/renderer/src/styles/settings-materials.css')
   const original = await fs.readFile(sourcePath, 'utf8')
@@ -159,3 +162,6 @@ if (args.includes('--materials-mutant')) {
   console.log(JSON.stringify({ evidence, completed: receipt.completed, sourceIdentity: receipt.sourceIdentity, frames: receipt.png?.length, reusedSourceBoundProof: !!existing, failure: receipt.failure }))
   if (!receipt.completed) process.exitCode = 1
 }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main()

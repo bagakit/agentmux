@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
     const { ConfigStore, ConfigOwner, DEFAULT_CONFIG } = await import(pathToFileURL(ownerBundle).href)
     const store = new ConfigStore(path.join(privateRoot, 'userData', 'config.json'))
     const initial = !fs.existsSync(store.filePath)
-    assert.equal(initial, ['control', 'materials', 'preview'].includes(mode), 'Restart must reuse durable config, never seed again')
+    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts'].includes(mode), 'Restart must reuse durable config, never seed again')
     let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), composerShortcuts: [
       { id: 'explain', label: 'Explain simply', keyword: 'eli5', body: '用大白话说说这次做了什么，指出关键变化、验证结果与还没确认的部分。', states: ['done', 'error'] },
       { id: 'review', label: 'Review changes', keyword: 'review', providerId: 'codex', states: ['waiting', 'done'], body: Array.from({ length: 10 }, (_, i) => `${i + 1}. Review the current changes for correctness, scope, readability and recovery. Explain concrete risks, cite the relevant code and propose the smallest complete fix.`).join('\n') },
@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('proof:config:external', (_event, id, patch) => owner.update(config => ({ ...config, composerShortcuts: config.composerShortcuts.map(prompt => prompt.id === id ? { ...prompt, ...patch } : prompt) })))
     ipcMain.handle('proof:config:hold', () => { assert.equal(holdNext, false); holdNext = true })
     ipcMain.handle('proof:config:release', () => { assert.ok(release, 'Actual pending Main save exists'); release(); release = undefined })
-    win = new BrowserWindow({ width: 1480, height: 900, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
+    win = new BrowserWindow({ width: 1480, height: 900, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: mode.startsWith('liquid-') } })
     win.webContents.on('console-message', (_event, _level, message) => result.errors.push(message))
     await win.loadFile(html)
     win.webContents.debugger.attach('1.3')
@@ -100,7 +100,10 @@ app.whenReady().then(async () => {
     result.materialContrast = await material('prefers-contrast', 'more'); assert.equal(result.materialContrast.signal, true); assert.equal(result.materialContrast.sidebar, 'none')
     result.materialMotion = await material('prefers-reduced-motion', 'reduce'); assert.equal(result.materialMotion.signal, true); assert.equal(result.materialMotion.animation, 'none')
     await material()
-    if (mode === 'preview') {
+    if (mode === 'liquid-settings' || mode === 'liquid-prompts') {
+      await require('../settings-liquid-motion/scenario.cjs').run({ win, read, q, button, until, settle, click, field, type, scene, capture, section, material, owner, result, evidence, mode })
+      result.completed = true
+    } else if (mode === 'preview') {
       await capture('1480-dark-prompts.png', 'Draft actual Prompt library/editor; not final qualification')
       await click(q('[data-prompt-id="review"]')); await scene(1480, 'light'); await capture('1480-light-prompts-long.png', 'Draft long body and compact instruction reach')
       await scene(640, 'dark'); await capture('640-dark-editor.png', 'Draft narrow editor')

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
-import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
+import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { ArrowUpRight, MessageSquare, X } from 'lucide-react'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { FocusContext } from '../lib/focus-context'
@@ -44,8 +44,17 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
     returnFocus.current = true
     let disposed = false
     let positioned = false
+    const header = anchor.closest('.recent-focus')!.querySelector<HTMLElement>('.recent-focus__header')!
+    let markerBounds = anchor.getBoundingClientRect()
+    const reference: VirtualElement = {
+      contextElement: header,
+      getBoundingClientRect() {
+        if (anchor.isConnected) markerBounds = anchor.getBoundingClientRect()
+        return new DOMRect(markerBounds.left, header.getBoundingClientRect().top, markerBounds.width, 0)
+      }
+    }
     const update = async () => {
-      const { x, y } = await computePosition(anchor, surface, {
+      const { x, y } = await computePosition(reference, surface, {
         strategy: 'fixed', placement: 'top', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
           apply({ availableWidth, availableHeight }) {
             if (disposed) return
@@ -61,7 +70,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
         if (interactive && (document.activeElement === previous || document.activeElement === document.body)) surface.focus()
       }
     }
-    const stopPosition = autoUpdate(anchor, surface, () => { void update() })
+    const stopPosition = autoUpdate(reference, surface, () => { void update() })
     const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); onClose() } }
     const outside = (event: PointerEvent) => {
       // A nested image Portal remains inside this React subtree, though DOM.contains is false.
