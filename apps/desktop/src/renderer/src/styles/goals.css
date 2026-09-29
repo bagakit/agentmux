@@ -29,7 +29,7 @@
 .goals-entry__actions > button + button { border-top: 1px solid var(--line-soft); }
 .goals-entry__actions > button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .goals-entry__actions > button:active:not(:disabled) { color: var(--text); background: var(--surface-3); }
-.goals-entry__actions > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.goals-surface .goals-common :is(button,textarea):focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .goals-entry__actions > button:disabled { color: var(--text-2); opacity: 1; cursor: default; }
 .goals-common__request-line { display: flex; align-items: flex-start; justify-content: flex-start; gap: var(--sp-3); min-width: 0; }
 .goals-entry__request { display: block; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; text-wrap: pretty; }
