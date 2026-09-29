@@ -10,6 +10,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
@@ -45,7 +46,7 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true); await rm(temporaryRoot, { recursive: true, force: true }) })
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 async function save(alignment?: DemandAlignmentProposal, confirmed = false, grounding?: DemandGroundingProposal) {
-  await useAppStore.getState().createDemand({ title: 'Restore my work', description: intent, status: 'in_progress', projectId: 'repo', projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
+  await useAppStore.getState().createDemand({ title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
   if (alignment) await useAppStore.getState().updateDemand('goal', { alignment })
   if (confirmed) await useAppStore.getState().confirmDemandGoal('goal', 1)
   if (grounding) await useAppStore.getState().updateDemand('goal', { grounding })

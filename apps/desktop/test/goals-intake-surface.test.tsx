@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { useAppStore } from '../src/renderer/src/store'
 
@@ -41,9 +42,9 @@ describe('Goals real-intent intake and reading surface', () => {
     useAppStore.setState({ createDemand: create, requestDemandPmoTask: request })
     await mount(); await click('Goal filters')
     const project = container.querySelector<HTMLSelectElement>('[aria-label="Filter project"]')!
-    await act(async () => { project.value = 'repo'; project.dispatchEvent(new Event('change', { bubbles: true })) })
+    await act(async () => { project.value = workspaceProjectId(config.workspaces[0]!); project.dispatchEvent(new Event('change', { bubbles: true })) })
     await click('Goal filters'); await click('New Goal'); await edit('Goal intent', original); await click('Save & discuss')
-    expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ description: original, projectId: 'repo', projectName: 'Repo', status: 'backlog' }))
+    expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ description: original, projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', status: 'backlog' }))
     expect(request).not.toHaveBeenCalled(); expect(useAppStore.getState().selectedDemandId).toBeNull()
     await act(async () => { useAppStore.setState({ demands: { 'goal:saved': { ...goal('goal:saved'), description: original } } }); resolve('goal:saved') })
     expect(request).toHaveBeenCalledExactlyOnceWith('goal:saved', 'grill')
