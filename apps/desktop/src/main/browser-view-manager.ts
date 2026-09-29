@@ -24,6 +24,7 @@ import {
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
+import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { browserPngFromNativeImage } from './browser-image.js'
@@ -97,6 +98,8 @@ type BrowserEntry = {
   humanControl: boolean
   activeRun: { operationId: string; stop: () => void } | undefined
   runInFlight: boolean
+  feedbackRevision: number
+  feedback?: BrowserOperationFeedback
   demonstration?: BrowserDemonstrationState
   taskAssets?: BrowserTaskAssetState
 }
@@ -387,6 +390,7 @@ export class BrowserViewManager {
     const entry = this.entries.get(id)
     if (!entry) return
     this.releaseUploadFiles(entry)
+    void entry.feedback?.clear()
     void this.releaseDemonstrationCapture(entry)
     this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
     const contents = entry.view.webContents
@@ -472,7 +476,8 @@ export class BrowserViewManager {
       activity: { operation: null, control: 'human' },
       humanControl: false,
       activeRun: undefined,
-      runInFlight: false
+      runInFlight: false,
+      feedbackRevision: 0
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
@@ -619,6 +624,7 @@ export class BrowserViewManager {
       this.releaseUploadFiles(entry)
       void this.releaseDemonstrationCapture(entry)
       entry.pendingSwitch = null
+      void entry.feedback?.clear()
       entry.view = candidate
       entry.profileId = profileId
       entry.requestedUrl = candidate.webContents.getURL() || url
@@ -775,6 +781,22 @@ export class BrowserViewManager {
       throw error
     }
     entry.activity = { operation, control: 'agent' }
+    await entry.feedback?.clear()
+    const feedbackView = entry.view
+    const feedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
+      navigationId: () => entry.navigationId, operatorName: operation.operator.name,
+      nextRevision: () => ++entry.feedbackRevision,
+      isCurrent: () => this.entries.get(entry.id) === entry && entry.view === feedbackView && entry.visible &&
+        entry.activeRun?.operationId === operation.id && !entry.humanControl &&
+        entry.activity.control === 'agent' && !feedbackView.webContents.isDestroyed(),
+      warn: () => {
+        if (this.entries.get(entry.id) !== entry || entry.view !== feedbackView || entry.activity.operation?.id !== operation.id) return
+        const warning = 'Browser action feedback could not be displayed. The page and Agent remain usable; inspect the activity and run another action to retry the visual feedback.'
+        operation.warning ??= warning
+        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? warning }
+        this.emit(entry)
+      } })
+    entry.feedback = feedback
     const contents = entry.view.webContents
     const onInput = (_event: unknown, input: { type: string }): void => {
       // 只记第一次：要报的是「什么时候被接管的」，后来的每一下都不改变这个答案。
@@ -946,7 +968,7 @@ export class BrowserViewManager {
         operation.phase = 'completed'
         operation.summary = 'Browser program completed'
         operation.finishedAt = Date.now()
-        entry.activity = { operation, control: 'agent' }
+        entry.activity = { operation, control: 'agent', ...(operation.warning ? { warning: operation.warning } : {}) }
         return { result: run.value, logs: run.logs, outcome: { kind: 'completed' }, runOperation: operation }
       }
       const failureOutcome = browserRunOutcomeFromFailure(run.failure)
@@ -983,6 +1005,7 @@ export class BrowserViewManager {
       entry.activity = { operation, control: 'agent', ...('message' in outcome ? { warning: outcome.message } : {}) }
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
+      await feedback.end(operation.phase === 'completed')
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
         operation.warning ??= cleanupWarning
@@ -1528,10 +1551,10 @@ export class BrowserViewManager {
       }
       return view
     }
-    const beforeAction = (): void => {
+    const beforeAction = (step = activeStep): void => {
       if (requireLive() !== observingView || entry.activeRun?.operationId !== operation.id) throw new Error('The original Browser operation changed before dispatch.')
       // elementContext also resolves a handle; observation remains available after human takeover.
-      if (!activeStep || !BROWSER_ACTION_PAGE_CALLS.has(activeStep.method)) return
+      if (!step || !BROWSER_ACTION_PAGE_CALLS.has(step.method)) return
       if (signal?.aborted) throw new Error('This Browser operation stopped before dispatch.')
       if (takeover.at !== null || entry.humanControl) throw new Error(takeoverMessage(takeover))
       if (activeRecoveryMayDispatch && !activeRecoveryMayDispatch()) throw new Error('This recovery attempt no longer has dispatch authority.')
@@ -1654,7 +1677,22 @@ export class BrowserViewManager {
       }
       try {
         let value: unknown
-        try { value = await dispatch(name, args) }
+        try {
+          const feedback = entry.feedback
+          let action: number | undefined
+          if (BROWSER_ACTION_PAGE_CALLS.has(name)) {
+            beforeAction(step)
+            action = await feedback?.begin(name)
+            beforeAction(step)
+          } else await feedback?.clear()
+          value = await dispatch(name, args, { beforeAction: () => beforeAction(step),
+            ...(feedback && action !== undefined && entry.visible ? { feedback: async (node: BrowserPageSnapshot['nodes'][number], send: typeof session.sendCommand) => {
+              beforeAction(step)
+              await feedback.showTarget(node, send, action)
+              beforeAction(step)
+            } } : {}) })
+          if (action !== undefined) await feedback?.completeAction(action)
+        }
         catch (error) {
           if (!taskPage?.step || !operation.outcome || !signal) throw error
           const recovered = await recoverBrowserTaskStep({ identity: { ...taskPage.cursor, operationId: operation.id, sequence: step.sequence },
@@ -1941,6 +1979,7 @@ export class BrowserViewManager {
     if (!entry) return
     if (bounds === null) {
       entry.visible = false
+      void entry.feedback?.clear()
       entry.view.setVisible(false)
       cancelBrowserWebAuthnAccounts(entry.view.webContents)
       return
@@ -1979,6 +2018,7 @@ export class BrowserViewManager {
     const entry = this.entries.get(id)
     if (!entry) return this.releasedEntries.delete(id)
     this.releaseUploadFiles(entry)
+    void entry.feedback?.clear()
     void this.releaseDemonstrationCapture(entry)
     this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
     if (!entry.view.webContents.isDestroyed()) {
@@ -2023,6 +2063,7 @@ export class BrowserViewManager {
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     const contents = view.webContents
     contents.on('input-event', (_event, input) => {
+      if (this.owns(entry, view) && HUMAN_INPUT_EVENT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
       const owner = this.nativeOwner(entry.id)
       if (owner) this.onNativeInput(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
@@ -2089,6 +2130,7 @@ export class BrowserViewManager {
       if (!details.isSameDocument) this.releaseUploadFiles(entry)
       this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
       entry.selectionOperation = null
+      void entry.feedback?.clear()
       const selectionRevision = ++entry.selectionRevision
       const annotationRevision = ++entry.annotationRevision
       void contents.executeJavaScriptInIsolatedWorld(
@@ -2286,6 +2328,7 @@ export class BrowserViewManager {
   }
 
   private emit(entry: BrowserEntry): void {
+    if (entry.activity.control === 'human' || ['waiting', 'failed', 'stopped', 'indeterminate'].includes(entry.activity.operation?.phase ?? '')) void entry.feedback?.clear()
     if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
     this.send({ type: 'updated', browser: this.snapshot(entry) })
   }
