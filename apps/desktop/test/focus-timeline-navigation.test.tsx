@@ -35,11 +35,22 @@ async function fixture(count = 130) {
   const reservation = { kind: 'stop' as const, reservationId: 'retire', ownerId: 'private', ownerPid: process.pid, agentSessionId: session.agentSessionId, expectedRun: session.run, operationId: 'retire', expiresAt: NOW + 60_000, stopOperation: { daemonInstance: 'no-runtime', operationKey: 'not-a-stop', runId: session.run.runId } }
   await store.reserveLifecycle(reservation); await store.commitLifecycle(reservation, null)
   const client = new AgentMuxClient({ store })
-  cleanups.push(async () => { await client.dispose(); await rm(directory, { recursive: true, force: true }) })
+  const pendingReads = new Set<Promise<unknown>>()
+  function read<T>(promise: Promise<T>): Promise<T> {
+    pendingReads.add(promise)
+    void promise.then(() => pendingReads.delete(promise), () => pendingReads.delete(promise))
+    return promise
+  }
+  cleanups.push(async () => {
+    await Promise.allSettled([...pendingReads])
+    expect(pendingReads.size).toBe(0)
+    await client.dispose()
+    await rm(directory, { recursive: true, force: true })
+  })
   const control = vi.spyOn(client, 'connect').mockRejectedValue(new Error('No Runtime permitted'))
-  const catalog = vi.spyOn(api.sessions, 'historySources').mockImplementation(() => client.sessionHistorySources())
-  const page = vi.spyOn(api.sessions, 'historyPage').mockImplementation((reference, options) => client.sessionHistoryPage(reference.agentSessionId, options))
-  const timeline = vi.spyOn(api.sessions, 'timeline').mockImplementation(reference => client.sessionTimeline(reference.agentSessionId))
+  const catalog = vi.spyOn(api.sessions, 'historySources').mockImplementation(() => read(client.sessionHistorySources()))
+  const page = vi.spyOn(api.sessions, 'historyPage').mockImplementation((reference, options) => read(client.sessionHistoryPage(reference.agentSessionId, options)))
+  const timeline = vi.spyOn(api.sessions, 'timeline').mockImplementation(reference => read(client.sessionTimeline(reference.agentSessionId)))
   const projector = vi.spyOn(UserMessages, 'projectSessionUserMessages')
   useAppStore.setState({ sessions: [], timelines: {}, config: null, tabs: {}, layouts: {}, agentFocus: EMPTY_AGENT_FOCUS, agentComposerDrafts: { original: 'Keep my draft' } })
   const element = document.createElement('div'); document.body.append(element); elements.push(element)
@@ -89,17 +100,26 @@ it('uses real ruler geometry for pixel, line and page deltas and accumulates eve
   expect(h.range()).toEqual(start.map(time => time + 2.16 * HOUR_MS)); h.unchanged()
 })
 
-it('zooms through the existing presets around a historical anchor, disables both bounds and preserves Now mode', async () => {
+it('zooms through all eleven requested presets around a historical anchor, disables both bounds and preserves Now mode', async () => {
   const h = await fixture(1)
   const select = h.element.querySelector<HTMLSelectElement>('[aria-label="Focus window size"]')!
   const plus = h.element.querySelector<HTMLButtonElement>('[aria-label="Zoom in Focus timeline"]')!, minus = h.element.querySelector<HTMLButtonElement>('[aria-label="Zoom out Focus timeline"]')!
   expect([plus, minus]).not.toContain(null); expect(plus.title).toContain('narrower'); expect(minus.title).toContain('wider')
-  expect(plus.tabIndex).toBe(0); await h.click('Zoom in Focus timeline'); expect(select.value).toBe('1'); expect(plus.disabled).toBe(true)
+  const presets = ['0.5', '1', '2', '4', '6', '8', '12', '18', '24', '36', '48']
+  expect([...select.options].map(option => [option.value, option.text])).toEqual([
+    ['0.5', '30m'], ['1', '1h'], ['2', '2h'], ['4', '4h'], ['6', '6h'], ['8', '8h'],
+    ['12', '12h'], ['18', '18h'], ['24', '24h'], ['36', '1.5d'], ['48', '2d']
+  ])
+  expect(plus.tabIndex).toBe(0)
+  for (const expected of ['2', '1', '0.5']) { await h.click('Zoom in Focus timeline'); expect(select.value).toBe(expected) }
+  expect(plus.disabled).toBe(true)
   expect(h.element.querySelector('[aria-label="Return to current focus window"]')?.getAttribute('aria-pressed')).toBe('true')
-  await h.wheel({ deltaX: -400 }); const anchor = h.range()[0]! + .75 * HOUR_MS
-  await h.click('Zoom out Focus timeline'); await h.click('Zoom out Focus timeline'); await h.click('Zoom out Focus timeline')
-  expect(select.value).toBe('24'); expect(minus.disabled).toBe(true)
-  expect(h.range()).toEqual([anchor - 18 * HOUR_MS, anchor + 6 * HOUR_MS])
+  await h.wheel({ deltaX: -400 }); const anchor = h.range()[0]! + .375 * HOUR_MS
+  for (const expected of presets.slice(1)) {
+    await h.click('Zoom out Focus timeline'); expect(select.value).toBe(expected)
+    expect(h.range()).toEqual([anchor - Number(expected) * .75 * HOUR_MS, anchor + Number(expected) * .25 * HOUR_MS])
+  }
+  expect(select.value).toBe('48'); expect(minus.disabled).toBe(true)
   expect(h.element.querySelector('[aria-label="Return to current focus window"]')?.getAttribute('aria-pressed')).toBe('false'); h.unchanged()
 })
 

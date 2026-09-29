@@ -1,6 +1,9 @@
 import type { AgentFocusHistoryEntry } from './agent-focus'
 
-export const FOCUS_WINDOW_HOURS = [1, 4, 12, 24] as const
+export const FOCUS_WINDOW_HOURS = [0.5, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48] as const
+export function focusWindowLabel(hours: number): string {
+  return hours < 1 ? `${hours * 60}m` : hours > 24 ? `${hours / 24}d` : `${hours}h`
+}
 export type FocusTimeWindow = { start: number; end: number }
 export type FocusTimeSegment = AgentFocusHistoryEntry & { end: number | undefined; left: number; width: number | undefined }
 export type FocusWorkSegment = { enteredAt: number; left: number; width: number }
