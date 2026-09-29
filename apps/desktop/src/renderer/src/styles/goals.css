@@ -16,7 +16,7 @@
 .goals-common--compact .goals-common__heading h2 { font-size: var(--fs-body); color: var(--text-2); }
 .goals-common__context-feedback { margin: var(--sp-2) 0 0; color: var(--amber); font: var(--fs-meta)/1.6 var(--font-sans); overflow-wrap: anywhere; }
 .goals-common--managing .goals-common__heading { flex: none; }
-.goals-common--managing .goals-common__manager { min-height: 0; overflow: auto; }
+.goals-common--managing .goals-common__manager { min-height: 0; overflow: auto; padding-inline-end: var(--sp-5); }
 .goals-common--managing .goals-service { flex: none; max-height: 88px; overflow: auto; margin-top: var(--sp-3); }
 .goals-common__column { width: min(100%, 760px); margin-inline: auto; }
 .goals-common__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-4); }

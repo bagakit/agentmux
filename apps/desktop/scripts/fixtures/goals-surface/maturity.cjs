@@ -1,0 +1,127 @@
+const { app, BrowserWindow } = require('electron')
+const assert = require('node:assert/strict')
+const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
+const [html, privateRoot, evidence, scope] = process.argv.slice(2)
+app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
+const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: 'maturity', beforeOnly: scope === 'before-only', passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
+let win
+const evaluate = expression => win.webContents.executeJavaScript(expression)
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+async function waitFor(expression) { for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(25)}throw new Error('Timed out: '+expression) }
+async function paint(){ await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await delay(70) }
+async function size(width){await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:780,deviceScaleFactor:1,mobile:false});await paint()}
+async function capture(name,width){if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
+const button = label => `([...document.querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)} || node.getAttribute('aria-label')===${JSON.stringify(label)}))`
+async function click(expression){const point=await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});await paint()}
+async function insert(selector,text){await click(`document.querySelector(${JSON.stringify(selector)})`);await win.webContents.debugger.sendCommand('Input.insertText',{text});await paint()}
+async function keyboardFocus(selector){for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);await paint()}
+async function visibleDetail(label){const bounds=await evaluate(`(()=>{const detail=document.querySelector('.goals-detail'),title=document.querySelector('.goals-title'),d=detail.getBoundingClientRect(),t=title.getBoundingClientRect();return {width:d.width,height:d.height,left:d.left,right:d.right,top:d.top,bottom:d.bottom,viewportWidth:innerWidth,viewportHeight:innerHeight,titleHeight:t.height,titleScrollHeight:title.scrollHeight,titleRows:title.rows,titleTop:t.top,titleBottom:t.bottom,nativeFieldSizing:CSS.supports('field-sizing','content')}})()`);assert.ok(bounds.width>200 && bounds.height>200 && bounds.left>=0 && bounds.right<=bounds.viewportWidth+1 && bounds.top>=0 && bounds.top<bounds.viewportHeight-200,'Selected Goal detail occupies a real readable viewport');assert.ok(bounds.titleHeight<150 && bounds.titleTop<bounds.viewportHeight-100,'Goal title grows with actual current width without hiding the document');assert.equal(bounds.nativeFieldSizing,true);result.observations.push({scene:label,visibleDetail:bounds})}
+async function scenario(mode,width,theme){await evaluate(`goalsVisual.seed(${JSON.stringify(mode)});goalsVisual.appearance(${JSON.stringify(theme)})`);await size(width);await paint();const facts=await evaluate('goalsVisual.facts()');result.observations.push({scene:mode,width,theme,facts});return facts}
+app.whenReady().then(async()=>{
+ try{
+  await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1280,height:780,webPreferences:{sandbox:false,backgroundThrottling:false}})
+  win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push({message:details.message,line:details.lineNumber,source:details.sourceId})})
+  await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+  await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===6')
+  const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
+  if(scope==='before-only'){
+   await scenario('confirmed',1280,'dark');await waitFor('Boolean(document.querySelector("[data-goal-summary]"))')
+   const counts=await evaluate('({goals:document.querySelectorAll("[data-demand-id]").length,criteria:document.querySelectorAll("[data-goal-success-criterion]").length})')
+   assert.ok(counts.goals>0 && counts.criteria>0,'Actual baseline Goal and criteria exist');result.observations.push({scene:'wide-detail-baseline',counts})
+   await capture('1280-dark-before-detail',1280)
+  }else if(scope==='width-only'){
+   await scenario('results',1280,'dark');await evaluate('window.originalGoalTitle=document.querySelector(".goals-title")');await insert('[aria-label="Goal title"]',' · retained draft');const titleDraft=await evaluate('document.querySelector(".goals-title").value');await size(620);await visibleDetail('same-goal-narrow');await size(1280);await visibleDetail('same-goal-wide-return');assert.equal(await evaluate('window.originalGoalTitle===document.querySelector(".goals-title")'),true,'Width changes retain the same Goal title editor');assert.equal(await evaluate('document.querySelector(".goals-title").value'),titleDraft,'Width changes retain the same authored title draft');await capture('1280-dark-retained-title-width-return',1280)
+   await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
+   await click(button('管理'));await click(button('新增操作'));await insert('[data-common-editor] textarea','先读取真实记录，再建议一次可验证的小尝试。')
+   await evaluate('goalsVisual.holdConfigSave()');await click(button('保存操作'))
+   await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")')
+   await evaluate('goalsVisual.finishConfigSave(true)')
+   await waitFor('Boolean(document.querySelector(".goals-common__context-feedback")?.textContent.includes("保存未完成"))')
+   assert.equal(await evaluate('document.querySelector(".goals-common__content").hidden'),true)
+   await size(620);await visibleDetail('compact-narrow-new-save-error');await capture('620-dark-compact-new-save-failure',620);await click(button('回到常用操作'))
+   assert.equal(await evaluate('document.querySelector("[data-common-editor] textarea").value'),'先读取真实记录，再建议一次可验证的小尝试。')
+   assert.equal(await evaluate('document.activeElement.textContent.trim()'),'保存操作','Return restores the original now-enabled save control')
+   const focus=await evaluate(`(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),p=e.closest('.goals-common__manager').getBoundingClientRect();return {label:e.textContent.trim(),top:r.top,bottom:r.bottom,left:r.left,right:r.right,scrollLeft:p.left,scrollRight:p.right,scrollClientRight:p.left+e.closest('.goals-common__manager').clientWidth,scrollbarWidth:parseFloat(getComputedStyle(e.closest('.goals-common__manager'),'::-webkit-scrollbar').width),scrollTop:p.top,scrollBottom:p.bottom,viewport:innerHeight,outline:getComputedStyle(e).outlineWidth,outlineStyle:getComputedStyle(e).outlineStyle,outlineColor:getComputedStyle(e).outlineColor}})()`);assert.ok(focus.top>=focus.scrollTop && focus.bottom<=Math.min(focus.scrollBottom,focus.viewport),'Returned original focus control is visible inside its scrollport');assert.ok(focus.left>=focus.scrollLeft && focus.right<=focus.scrollRight-focus.scrollbarWidth,'Returned focus stays clear of the manager scrollbar');assert.equal(focus.outline,'2px','Returned original focus has a complete authored outline');assert.equal(focus.outlineStyle,'solid');result.observations.push({scene:'returned-common',focus});await capture('620-dark-returned-common-draft',620)
+  }else if(scope==='return-only'){
+   await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
+   await click(button('管理'));await click(button('新增操作'));await insert('[data-common-editor] textarea','先读取真实记录，再建议一次可验证的小尝试。')
+   await evaluate('goalsVisual.holdConfigSave()');await click(button('保存操作'))
+   await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")')
+   await evaluate('goalsVisual.finishConfigSave(true)')
+   await waitFor('Boolean(document.querySelector(".goals-common__context-feedback")?.textContent.includes("保存未完成"))')
+   assert.equal(await evaluate('document.querySelector(".goals-common__content").hidden'),true)
+   await size(620);await visibleDetail('compact-narrow-new-save-error');await capture('620-dark-compact-new-save-failure',620);await click(button('回到常用操作'))
+   assert.equal(await evaluate('document.querySelector("[data-common-editor] textarea").value'),'先读取真实记录，再建议一次可验证的小尝试。')
+   assert.equal(await evaluate('document.activeElement.textContent.trim()'),'保存操作','Return restores the original now-enabled save control')
+   const focus=await evaluate(`(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),p=e.closest('.goals-common__manager').getBoundingClientRect();return {label:e.textContent.trim(),top:r.top,bottom:r.bottom,left:r.left,right:r.right,scrollLeft:p.left,scrollRight:p.right,scrollClientRight:p.left+e.closest('.goals-common__manager').clientWidth,scrollbarWidth:parseFloat(getComputedStyle(e.closest('.goals-common__manager'),'::-webkit-scrollbar').width),scrollTop:p.top,scrollBottom:p.bottom,viewport:innerHeight,outline:getComputedStyle(e).outlineWidth,outlineStyle:getComputedStyle(e).outlineStyle,outlineColor:getComputedStyle(e).outlineColor}})()`);assert.ok(focus.top>=focus.scrollTop && focus.bottom<=Math.min(focus.scrollBottom,focus.viewport),'Returned original focus control is visible inside its scrollport');assert.ok(focus.left>=focus.scrollLeft && focus.right<=focus.scrollRight-focus.scrollbarWidth,'Returned focus stays clear of the manager scrollbar');assert.equal(focus.outline,'2px','Returned original focus has a complete authored outline');assert.equal(focus.outlineStyle,'solid');result.observations.push({scene:'returned-common',focus});await capture('620-dark-returned-common-draft',620)
+  }else if(scope==='narrow-layout-only'){
+   await scenario('proposal',620,'light');await visibleDetail('narrow-layout');await capture('620-light-narrow-layout-legibility',620)
+  }else if(scope==='legibility-only'){
+   await scenario('results',1280,'dark')
+   const type=await evaluate('({heading:parseFloat(getComputedStyle(document.querySelector(".goals-grounding h2")).fontSize),body:parseFloat(getComputedStyle(document.querySelector("[data-goal-result-summary]")).fontSize),checks:document.querySelectorAll("[data-goal-criterion-id]").length})')
+   assert.ok(type.checks>0,'Actual result checks are nonempty');assert.ok(type.heading>type.body,'Reading responsibilities have stronger heading hierarchy than prose');result.observations.push({scene:'legibility',type});await capture('1280-dark-results-legibility',1280)
+  }else{
+   await scenario('empty',620,'light')
+   assert.deepEqual(await evaluate('goalsVisual.facts().ids'),[])
+   assert.deepEqual(await evaluate('[...document.querySelectorAll(".goals-entry__request")].map(node=>node.textContent)'),['我还不知道能做什么，可以了解我并给我建议吗？','我有一些点子，我们开始尝试一个项目'])
+   await capture('620-light-initial',620)
+   await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
+   const mixed=await evaluate('goalsVisual.facts()');assert.equal(mixed.ids.length,6);assert.ok(mixed.criteria>0 && mixed.reports>0 && mixed.checks>0,'Mixed fixture includes nonempty actual target and result collections')
+   result.observations.push({scene:'mixed',facts:mixed})
+   assert.deepEqual(await evaluate('[...document.querySelectorAll(".goals-row__next")].map(node=>node.textContent)'),['Goal needs an outline','Decision needed','Goal ready for confirmation','Goal agreed · No result report','Results ready for review','Results need checking'])
+   await capture('1280-dark-mixed-list',1280)
+   await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")')
+   await waitFor('Boolean(document.querySelector(".goals-detail"))')
+   const compact=await evaluate('({context:document.querySelector(".goals-common").dataset.commonContext,height:document.querySelector(".goals-common").getBoundingClientRect().height,hidden:document.querySelector(".goals-common__content").hidden,headings:[...document.querySelectorAll(".goals-document h2")].map(node=>node.textContent)})')
+   assert.equal(compact.context,'compact');assert.equal(compact.hidden,true);assert.ok(compact.height<80,'Start area gives Goal navigation its reading space');assert.ok(compact.headings.includes('Goal definition'));result.observations.push({scene:'unoutlined',compact})
+   await capture('1280-dark-unoutlined-detail',1280)
+   await scenario('proposal',620,'light')
+   assert.equal(await evaluate('document.querySelectorAll("[data-goal-success-criterion]").length'),2)
+   assert.equal(await evaluate('[...document.querySelectorAll("[data-goal-success-criterion]")].some(node=>node.closest("details:not([open])"))'),false,'Pre-confirmation criteria stay expanded')
+   assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-confirm]"))'),true)
+   await visibleDetail('confirmable');await keyboardFocus('[data-goal-confirm]');await capture('620-light-confirmable-detail-focus',620)
+   await scenario('confirmed',620,'light')
+   assert.equal(await evaluate('document.querySelectorAll("[aria-label^=\\\"Open discussion for\\\"]").length'),1)
+   assert.equal(await evaluate('document.querySelector(".goals-no-results .goals-button--primary").textContent.trim()'),'Open discussion')
+   await visibleDetail('no-report');await capture('620-light-agreed-no-report',620)
+   await scenario('results',1280,'dark')
+   assert.equal(await evaluate('document.querySelectorAll("[data-goal-criterion-id]").length'),2)
+   assert.equal(await evaluate('document.querySelectorAll(".goals-evidence__open").length'),2)
+   const type=await evaluate('({heading:parseFloat(getComputedStyle(document.querySelector(".goals-grounding h2")).fontSize),body:parseFloat(getComputedStyle(document.querySelector("[data-goal-result-summary]")).fontSize)})')
+   assert.ok(type.heading>type.body,'Reading responsibilities have stronger heading hierarchy than prose');result.observations.push({scene:'results',type})
+   await visibleDetail('results');await capture('1280-dark-results-and-evidence',1280)
+   await evaluate('document.querySelector("[data-goal-accept]").scrollIntoView({block:"nearest"})');await capture('1280-dark-results-reading-tail',1280)
+   await evaluate('window.originalGoalTitle=document.querySelector(".goals-title")');await insert('[aria-label="Goal title"]',' · retained draft');const titleDraft=await evaluate('document.querySelector(".goals-title").value');await size(620);await visibleDetail('same-goal-narrow');await size(1280);await visibleDetail('same-goal-wide-return');assert.equal(await evaluate('window.originalGoalTitle===document.querySelector(".goals-title")'),true,'Width changes retain the same Goal title editor');assert.equal(await evaluate('document.querySelector(".goals-title").value'),titleDraft,'Width changes retain the same authored title draft');await capture('1280-dark-retained-title-width-return',1280)
+   await scenario('unknown',620,'dark')
+   assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-accept],[data-goal-accept-gaps]"))'),false)
+   await visibleDetail('unknown');await evaluate('document.querySelector(".goals-grounding").scrollIntoView({block:"start"})');await capture('620-dark-unknown-results',620)
+   await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("light")');await size(620)
+   await insert('[aria-label="Search goals"]','No matching goal')
+   assert.equal(await evaluate('document.querySelectorAll("[data-demand-id]").length'),0)
+   await keyboardFocus('.goals-empty button');await capture('620-light-zero-match-focus',620)
+   await click(button('Clear search & filters'))
+   assert.equal(await evaluate('document.querySelectorAll("[data-demand-id]").length'),6)
+   assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'),'Search goals','Zero-match recovery returns focus to the live search')
+   await scenario('questions',620,'light')
+   assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-confirm]"))'),false)
+   assert.equal(await evaluate('Boolean(document.querySelector(".goals-open-questions"))'),true)
+   await visibleDetail('decisions');await capture('620-light-decisions-detail',620)
+   await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
+   await click(button('管理'));await click(button('新增操作'));await insert('[data-common-editor] textarea','先读取真实记录，再建议一次可验证的小尝试。')
+   await evaluate('goalsVisual.holdConfigSave()');await click(button('保存操作'))
+   await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")')
+   await evaluate('goalsVisual.finishConfigSave(true)')
+   await waitFor('Boolean(document.querySelector(".goals-common__context-feedback")?.textContent.includes("保存未完成"))')
+   assert.equal(await evaluate('document.querySelector(".goals-common__content").hidden'),true)
+   await capture('1280-dark-compact-new-save-failure',1280)
+   await size(620);await visibleDetail('compact-narrow-new-save-error');await capture('620-dark-compact-new-save-failure',620);await click(button('回到常用操作'))
+   assert.equal(await evaluate('document.querySelector("[data-common-editor] textarea").value'),'先读取真实记录，再建议一次可验证的小尝试。')
+   assert.equal(await evaluate('document.activeElement.textContent.trim()'),'保存操作','Return restores the original now-enabled save control')
+   const focus=await evaluate(`(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),p=e.closest('.goals-common__manager').getBoundingClientRect();return {label:e.textContent.trim(),top:r.top,bottom:r.bottom,left:r.left,right:r.right,scrollLeft:p.left,scrollRight:p.right,scrollClientRight:p.left+e.closest('.goals-common__manager').clientWidth,scrollbarWidth:parseFloat(getComputedStyle(e.closest('.goals-common__manager'),'::-webkit-scrollbar').width),scrollTop:p.top,scrollBottom:p.bottom,viewport:innerHeight,outline:getComputedStyle(e).outlineWidth,outlineStyle:getComputedStyle(e).outlineStyle,outlineColor:getComputedStyle(e).outlineColor}})()`);assert.ok(focus.top>=focus.scrollTop && focus.bottom<=Math.min(focus.scrollBottom,focus.viewport),'Returned original focus control is visible inside its scrollport');assert.ok(focus.left>=focus.scrollLeft && focus.right<=focus.scrollRight-focus.scrollbarWidth,'Returned focus stays clear of the manager scrollbar');assert.equal(focus.outline,'2px','Returned original focus has a complete authored outline');assert.equal(focus.outlineStyle,'solid');result.observations.push({scene:'returned-common',focus});await capture('620-dark-returned-common-draft',620)
+   assert.ok(result.frames.length===(scope==='corrections-only'?9:14),'Finite representative images with only necessary reading/decision/feedback frames')
+  }
+  assert.deepEqual(await evaluate('goalsVisual.facts().runs'),originalRuns,'Original preview Run identities remain intact')
+  assert.deepEqual(result.consoleErrors,[]);result.passed=true
+ }catch(error){result.failure={name:error.name,message:error.message,stack:error.stack}}
+ finally{await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2));win?.destroy();app.exit(result.passed?0:1)}
+})
