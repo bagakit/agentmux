@@ -522,6 +522,9 @@ export async function registerIpc(args: {
     await files.readDirectory(workspace(config, workspaceId), path)
   )
   handle('files:read', async (workspaceId: string, path: string) => await files.read(workspace(config, workspaceId), path))
+  handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
+    await files.readPreview(workspace(config, workspaceId), path, options)
+  )
   handle('files:readBookmark', async (workspaceId: string, path: string) => {
     // 书签读这条走字节而不是 `files.read` 的 string：二进制 `.webloc` 过 utf8 会坏。种类由路径判，
     // 非书签返回 null。一次返回 {url, binary}：url 供 openFile 决定开 Browser 还是退回文本；binary
