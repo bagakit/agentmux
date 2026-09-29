@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
 import { act } from 'react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
@@ -288,44 +289,58 @@ it.each([
   { terminalBottom: 88.6, composerTop: 220, expectedTop: 94.6, expectedHeight: 119.4 },
   { terminalBottom: 300, composerTop: 310, expectedTop: 62, expectedHeight: 200 }
 ])('places the actual action face in readable space around the native input band: %o', async ({ terminalBottom, composerTop, expectedTop, expectedHeight }) => {
-  const request: AgentMuxInteractionRequest = { kind: 'question', id: 'geometry-question', agentSessionId: sessionId,
-    questions: [{ id: 'q', prompt: 'Which?', options: [{ id: 'choice', label: 'Choice' }] }],
-    evidence: { source: 'native-hook', observedAt: 2, run: composerSession().control.run } }
-  const original = { ...composerSession(), pendingInteraction: request }, respond = vi.fn()
-  useAppStore.setState({ sessions: [original] })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.dataset.workbenchRegionId) return new DOMRect(0, 0, 320, 430)
-    if (this.classList.contains('terminal-view__xterm')) return new DOMRect(0, 40, 320, terminalBottom - 40)
-    if (this.classList.contains('composer')) return new DOMRect(0, composerTop, 320, 100)
-    if (this.classList.contains('agent-avatar')) return new DOMRect(280, composerTop + 10, 24, 24)
-    if (this.classList.contains('agent-identity-popover')) {
-      const maximum = Number.parseFloat(this.style.maxHeight)
-      return new DOMRect(Number.parseFloat(this.style.left) || 0, Number.parseFloat(this.style.top) || 0, 296,
-        Math.min(200, Number.isFinite(maximum) ? maximum : 200))
-    }
-    return new DOMRect()
-  })
-  await dom.render(<div data-workbench-region-id="geometry-owner"><section className="agent-surface">
-    <div className="agent-body"><div className="terminal-view__xterm" /><AgentInteractionCard request={request} onRespond={respond} /></div>
-    <AgentSessionComposer sessionId={sessionId} />
-  </section></div>)
-  const card = dom.container.querySelector<HTMLElement>('.agent-interaction')!, cardText = card.textContent
-  const answer = card.querySelector<HTMLButtonElement>('button')!
-  expect(answer.disabled).toBe(false)
-  await open()
-  const panel = document.querySelector<HTMLElement>('.agent-identity-popover--actions')!, bounds = panel.getBoundingClientRect()
-  expect(bounds.top).toBeCloseTo(expectedTop)
-  expect(bounds.height).toBeCloseTo(expectedHeight)
-  expect(bounds.height).toBeGreaterThan(100)
-  expect(bounds.bottom).toBeLessThanOrEqual(composerTop - 5)
-  expect(bounds.bottom <= terminalBottom - 32 - 5 || bounds.top >= terminalBottom + 5).toBe(true)
-  expect(buttons()[0]!.getAttribute('aria-label')).toBe('Queue Action for running')
-  await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Close Agent status"]')!.click())
-  expect(document.querySelector('.agent-identity-popover--actions')).toBeNull()
-  expect(dom.container.querySelector('.agent-interaction')).toBe(card)
-  expect(card.textContent).toBe(cardText)
-  expect(answer.disabled).toBe(false)
-  expect(respond).not.toHaveBeenCalled()
-  expect(useAppStore.getState().sessions[0]).toEqual(original)
-  expect(dom.draft()).toBe(draft)
+  const productionStyle = document.createElement('style')
+  productionStyle.textContent = readFileSync('apps/desktop/src/renderer/src/styles/status-prompts.css', 'utf8')
+  document.head.append(productionStyle)
+  try {
+    const request: AgentMuxInteractionRequest = { kind: 'question', id: 'geometry-question', agentSessionId: sessionId,
+      questions: [{ id: 'q', prompt: 'Which?', options: [{ id: 'choice', label: 'Choice' }] }],
+      evidence: { source: 'native-hook', observedAt: 2, run: composerSession().control.run } }
+    const original = { ...composerSession(), pendingInteraction: request }, respond = vi.fn()
+    useAppStore.setState({ sessions: [original] })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.workbenchRegionId) return new DOMRect(0, 0, 320, 430)
+      if (this.classList.contains('terminal-view__xterm')) return new DOMRect(0, 40, 320, terminalBottom - 40)
+      if (this.classList.contains('composer')) return new DOMRect(0, composerTop, 320, 100)
+      if (this.classList.contains('agent-avatar')) return new DOMRect(280, composerTop + 10, 24, 24)
+      if (this.classList.contains('agent-identity-popover')) {
+        const maximum = Number.parseFloat(this.style.maxHeight)
+        return new DOMRect(Number.parseFloat(this.style.left) || 0, Number.parseFloat(this.style.top) || 0, 296,
+          Math.min(200, Number.isFinite(maximum) ? maximum : 200))
+      }
+      return new DOMRect()
+    })
+    await dom.render(<div data-workbench-region-id="geometry-owner"><section className="agent-surface">
+      <div className="agent-body"><div className="terminal-view__xterm" /><AgentInteractionCard request={request} onRespond={respond} /></div>
+      <AgentSessionComposer sessionId={sessionId} />
+    </section></div>)
+    const card = dom.container.querySelector<HTMLElement>('.agent-interaction')!, cardText = card.textContent
+    const answer = card.querySelector<HTMLButtonElement>('button')!
+    expect(answer.disabled).toBe(false)
+    await open()
+    const panel = document.querySelector<HTMLElement>('.agent-identity-popover--actions')!, bounds = panel.getBoundingClientRect()
+    const compact = expectedHeight < 160
+    expect(panel.dataset.compact).toBe(String(compact))
+    const summary = panel.querySelector<HTMLElement>('.agent-state-face__summary')!, heading = panel.querySelector<HTMLElement>('.agent-status-prompts h3')!
+    expect(summary.textContent).toContain('Queue a message')
+    expect(getComputedStyle(summary).flexDirection).toBe(compact ? 'row' : 'column')
+    expect(getComputedStyle(summary).alignItems).toBe(compact ? 'baseline' : 'flex-start')
+    expect(heading.textContent).toBe('User prompts')
+    expect(getComputedStyle(heading).display).toBe(compact ? 'none' : 'block')
+    expect(panel.querySelector('.agent-status-prompts')!.getAttribute('aria-label')).toBe('Prompts for running')
+    expect(bounds.top).toBeCloseTo(expectedTop)
+    expect(bounds.height).toBeCloseTo(expectedHeight)
+    expect(bounds.height).toBeGreaterThan(100)
+    expect(bounds.bottom).toBeLessThanOrEqual(composerTop - 5)
+    expect(bounds.bottom <= terminalBottom - 32 - 5 || bounds.top >= terminalBottom + 5).toBe(true)
+    expect(buttons()[0]!.getAttribute('aria-label')).toBe('Queue Action for running')
+    await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Close Agent status"]')!.click())
+    expect(document.querySelector('.agent-identity-popover--actions')).toBeNull()
+    expect(dom.container.querySelector('.agent-interaction')).toBe(card)
+    expect(card.textContent).toBe(cardText)
+    expect(answer.disabled).toBe(false)
+    expect(respond).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions[0]).toEqual(original)
+    expect(dom.draft()).toBe(draft)
+  } finally { productionStyle.remove() }
 })

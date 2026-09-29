@@ -44,5 +44,7 @@
 /* When fixed chrome would consume a very short face, the status joins its scroll body. */
 .agent-identity-popover--actions[data-compact='true'] .agent-state-face { overflow: auto; overscroll-behavior: contain; }
 .agent-identity-popover--actions[data-compact='true'] .agent-state-face__body { overflow: visible; flex: none; }
+.agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary { flex-direction: row; align-items: baseline; }
+.agent-identity-popover--actions[data-compact='true'] .agent-status-prompts h3 { display: none; }
 .agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary button { position: absolute; top: var(--sp-3); right: calc(var(--sp-7) + var(--sp-3) * 2); width: var(--sp-7); height: var(--sp-7); margin: 0; }
 .agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary button span { display: none; }

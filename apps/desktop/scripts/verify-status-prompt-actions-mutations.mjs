@@ -44,7 +44,10 @@ const cases = mode === '--settings' ? [
   { name: 'send-loses-manual-authorship', file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
     from: "send(sessionId, prompt.body, feedback.report, 'manual')", to: 'send(sessionId, prompt.body, feedback.report)' },
   { name: 'face-forces-unreadable-upper-space', file: 'apps/desktop/src/renderer/src/components/AgentAvatar.tsx',
-    from: 'const useBelow = belowBottom - belowTop > aboveBottom - aboveTop', to: 'const useBelow = false' }
+    from: 'const useBelow = belowBottom - belowTop > aboveBottom - aboveTop', to: 'const useBelow = false' },
+  { name: 'compact-face-hides-first-prompt-action', file: 'apps/desktop/src/renderer/src/styles/status-prompts.css',
+    from: ".agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary { flex-direction: row; align-items: baseline; }\n.agent-identity-popover--actions[data-compact='true'] .agent-status-prompts h3 { display: none; }",
+    to: ".agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary { flex-direction: column; align-items: baseline; }\n.agent-identity-popover--actions[data-compact='true'] .agent-status-prompts h3 { display: block; }" }
 
 ]
 const tests = mode === '--settings' ? ['apps/desktop/test/status-prompt-settings.test.tsx'] : ['apps/desktop/test/agent-status-prompt-actions.test.tsx']

@@ -53,7 +53,7 @@ const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
 let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic
-let pressurePreflight, pressureProducer, pressureFinal
+let pressureProducer, pressureFinal, pressureQualification, maximumPressureGap
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
 let goalsEntryFixture, goalsEntryRestored, messageBefore
@@ -413,29 +413,6 @@ setInterval(tick,100);
       pressureProducer.skippedTicks = Math.max(pressureProducer.skippedTicks, post.skippedTicks); pressureProducer.inFlightAfterLastCompletion = post.inFlight }
   } })
   await waitFor('real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
-  if (messageContextProof) {
-    const startedAt = Date.now(), budgetMs = 20_000
-    pressurePreflight = { passed: false, startedAt, budgetMs, windowMs: 2_000, minimumEvents: 12, maximumGapMs: 400 }
-    // Qualify actual pressure before editing durable UI. Startup scheduling is not a Runtime verdict.
-    // The producer stays live; this only observes the same real hook IPC and HTTP acknowledgements.
-    await waitFor('message-context continuous accepted hook cadence before UI edits', async () => {
-      const observer = await first.cdp.evaluate('window.__crashProof')
-      const at = Date.now(), windowStart = at - 2_000
-      const hooks = observer.hooks.filter(event => event.at >= windowStart)
-      const posts = acknowledgements.filter(post => post.at >= windowStart)
-      const gaps = hooks.length ? [hooks[0].at - windowStart, ...hooks.slice(1).map((event, i) => event.at - hooks[i].at), at - hooks.at(-1).at] : []
-      pressurePreflight.lastObservation = { at, windowStart, rendererHookEvents: hooks.length,
-        maxEventGapMs: gaps.length ? Math.max(...gaps) : null, successfulHookPosts: posts.filter(post => post.status === 204).length,
-        lastEvents: hooks.slice(-6), lastPosts: posts.slice(-6), producerExit: producer.exitCode, producerSignal: producer.signalCode }
-      assert.equal(producer.exitCode, null, 'The private pressure producer must remain alive during warmup')
-      assert.equal(producer.signalCode, null, 'The private pressure producer must not stop during warmup')
-      if (at - startedAt < 2_000 || hooks.length < 12 || Math.max(...gaps) >= 400 ||
-        posts.filter(post => post.status === 204).length < 12 || posts.at(-1)?.status !== 204 || at - posts.at(-1).at >= 400) return false
-      pressurePreflight.passed = true
-      pressurePreflight.completedAt = at
-      return true
-    }, budgetMs)
-  }
   if (messageContextProof) messageBefore = await readMessageContext(first.cdp)
   // Keyboard activation exercises actual native popover and React buttons without changing Agent
   // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
@@ -531,15 +508,35 @@ setInterval(tick,100);
   const hooks = observer.hooks.filter(event => event.at >= lastEditAt)
   if (messageContextProof) {
     const observedGaps = hooks.length ? [hooks[0].at-lastEditAt, ...hooks.slice(1).map((event, i) => event.at-hooks[i].at), crashAt-hooks.at(-1).at] : []
+    const posts = acknowledgements.filter(post => post.at >= lastEditAt && post.at <= crashAt)
     pressureFinal = { lastEditAt, crashAt, windowMs: crashAt-lastEditAt, count: hooks.length, hooks, gaps: observedGaps,
-      maxGapMs: observedGaps.length ? Math.max(...observedGaps) : null, lastPosts: acknowledgements.slice(-6),
+      maxGapMs: observedGaps.length ? Math.max(...observedGaps) : null, posts, lastPosts: acknowledgements.slice(-6),
       producerExit: producer.exitCode, producerSignal: producer.signalCode }
-  }
+    const latest = posts.at(-1), latestAgeMs = latest ? crashAt-latest.at : null, successfulHookPosts = posts.filter(post => post.status === 204).length
+    const reasons = []
+    if (pressureFinal.windowMs < 2_000) reasons.push('Observed after-edit window is shorter than 2000ms')
+    if (hooks.length < 12) reasons.push('Fewer than 12 accepted Renderer events')
+    if (pressureFinal.maxGapMs === null || pressureFinal.maxGapMs >= 400) reasons.push('A quiet event interval is at least 400ms or no event interval was observed')
+    if (latest?.status !== 204) reasons.push('The latest HTTP acknowledgement is not 204')
+    if (latestAgeMs === null || latestAgeMs >= 400) reasons.push('No HTTP acknowledgement newer than 400ms')
+    if (producer.exitCode !== null || producer.signalCode !== null) reasons.push('The pressure producer stopped')
+    pressureQualification = { status: reasons.length ? 'not_qualified' : 'qualified', reasons,
+      criteria: { minimumWindowMs: 2_000, minimumRendererEvents: 12, maximumEventGapExclusiveMs: 400, latestHTTPStatus: 204,
+        maximumLastPostAgeExclusiveMs: 400, producerMustStayAlive: true },
+      facts: { ...pressureFinal, successfulHookPosts, lastAcknowledgementAgeMs: latestAgeMs } }
+    assert.ok(pressureFinal.windowMs >= 2_000, 'Ordinary recovery observes a real fixed after-edit window of at least two seconds')
+    assert.ok(hooks.length > 0, 'Ordinary recovery requires nonempty actual accepted Renderer events after the final UI edit')
+    assert.ok(successfulHookPosts > 0, 'Ordinary recovery requires at least one real HTTP204 acknowledgement in the after-edit window')
+    assert.equal(producer.exitCode, null); assert.equal(producer.signalCode, null)
+    maximumPressureGap = pressureFinal.maxGapMs
+  } else {
   assert.ok(hooks.length >= 12, 'The producer must keep emitting real accepted Renderer events during the fixed two-second window; ' + JSON.stringify({lastEditAt,crashAt,eventCount:hooks.length,totalEvents:observer.hooks.length,lastEvents:observer.hooks.slice(-6),lastPosts:acknowledgements.slice(-6),producerExit:producer.exitCode,producerSignal:producer.signalCode}))
   const gaps = [hooks[0].at-lastEditAt, ...hooks.slice(1).map((event, i) => event.at-hooks[i].at), crashAt-hooks.at(-1).at]
   assert.ok(Math.max(...gaps) < 400, 'No quiet debounce interval may occur before the abrupt crash')
   assert.equal(producer.exitCode, null); assert.equal(producer.signalCode, null)
   assert.equal(acknowledgements.at(-1)?.status, 204); assert.ok(crashAt-acknowledgements.at(-1).at < 400)
+    maximumPressureGap = Math.max(...gaps)
+  }
   assert.deepEqual(observer.unloads, [])
   if (!goalsAlignmentProof && !goalsEntryProof) { assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60) }
   assert.equal(immediatelyBeforeCrash.draft, newDraft)
@@ -573,7 +570,7 @@ setInterval(tick,100);
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
     fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsEntryProof || messageContextProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
-      rendererHookEvents: hooks.length, maxEventGapMs: Math.max(...gaps), successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
+      rendererHookEvents: hooks.length, maxEventGapMs: maximumPressureGap, successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
       newLayoutWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.workbench) === JSON.stringify(expectedWorkbench),
       movedQueueWasWrittenBeforeCrash: JSON.stringify(immediatelyBeforeCrash.queued) === JSON.stringify(expectedQueue) },
@@ -583,7 +580,8 @@ setInterval(tick,100);
       regionVisibility: restored.regionVisibility,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
     limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
-      'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
+      messageContextProof ? 'Ordinary message-context recovery; no fixture/manual post-edit storage flush, unload or quit before SIGKILL. The live producer pressure is observed separately in pressureQualification; recovery passed does not certify uninterrupted stress.'
+        : 'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
       'Historical queue admission times are synthetic seeded facts; actual first-admission clock behavior is separately bound by the owning source test.',
       'Renderer status counts observe public IPC arrival; actual Store consumption and projection bounds are verified by the owning behavioral suite.',
       'Source hashes are reference observations; compiled Main/Renderer identities and the separate build receipt bind executed code.',
@@ -693,7 +691,7 @@ setInterval(tick,100);
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
 const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
-  pressurePreflight, pressureProducer, pressureFinal, failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
+  pressureProducer, pressureFinal, pressureQualification, failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
 // Task gate captures command output without preserving it on a failed command. Keep the same receipt
 // in the ignored diagnostic directory so an early failure remains inspectable after private cleanup.
 try {
