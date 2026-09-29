@@ -34,6 +34,8 @@ import { BrowserPane } from './BrowserPane'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { NewTabSurface } from './NewTabSurface'
+import { useScratchTopics } from '../hooks/useScratchTopics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
 import {
@@ -929,6 +931,15 @@ function PaneGroup({
     tabsById[id] ? [tabsById[id]] : []
   ))
   const activeTab = tabs.find((tab) => tab.id === group.activeTabId) ?? null
+  const emptySpaceSelection = useAppStore(state => showWindowChrome && workspaceId === SCRATCH_WORKSPACE_ID &&
+    state.workbenchSpaceSelection?.workspaceId === workspaceId && state.workbenchSpaceSelection.topicId &&
+    state.workbenchSpaceSelection.tabId === null ? state.workbenchSpaceSelection : null)
+  const storedSpaceLayout = useAppStore(state => emptySpaceSelection ? state.layouts[workspaceId] : undefined)
+  const { topics: spaceTopics } = useScratchTopics(emptySpaceSelection ? workspaceId : null)
+  const emptySpaceTopic = spaceTopics?.find(topic => topic.id === emptySpaceSelection?.topicId && !topic.readError &&
+    (topic.id === PMO_TEAMS_TOPIC_ID || topic.soul))
+  const hasOriginalTopicTab = emptySpaceSelection && Object.values(tabsById).some(tab => tab.topicId === emptySpaceSelection.topicId)
+  const showEmptySpace = emptySpaceSelection && !activeTab
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const focusMoved = retainedSpatialFocus?.workspaceId === workspaceId && layout.activeGroupId === group.id &&
     (!activeTab || !activeTab.regions[retainedSpatialFocus.regionId])
@@ -1039,6 +1050,13 @@ function PaneGroup({
       </div>
       </header>
       <div className="pane-body">
+        {showEmptySpace ? storedSpaceLayout && emptySpaceTopic && !hasOriginalTopicTab ? <div className="pane-state" data-mote-empty-space={emptySpaceTopic.id}
+          onPointerDown={event => event.stopPropagation()}>
+          <span>{emptySpaceTopic.title}</span>
+          <strong role="status">No Tab in this context</strong>
+          <button type="button" className="small-button" aria-label="New Tab" title="New tab"
+            onClick={() => onNewTab(group.id)}><Plus size={13} /> New Tab</button>
+        </div> : <div role="status" className="workbench-restore-notice">Original context retained · Topic or Tab placement is still being confirmed · Reopen this context in Space to continue recovery</div> : null}
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
             此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
             随之销毁；切回时 TerminalView 的 hydrating 从 true 起步，必然重放全部 scrollback，
@@ -1057,7 +1075,7 @@ function PaneGroup({
           >
             <div id={`${viewHostPrefix}:${tab.id}`} data-workbench-tab-id={tab.id} className="workbench-tab-slot" />
           </div>
-        )) : !focusMoved ? (
+        )) : !focusMoved && !showEmptySpace ? (
           <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
         ) : null}
       </div>
@@ -1420,7 +1438,11 @@ export function WorkspaceWorkbench({
 
   if (viewOwnership === 'projection' && !projectionTabId) {
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
-      <div role="status" className="workbench-restore-notice">This context has no prepared Tab yet · Select it to prepare its original work surface</div>
+      {layout ? <div className="pane-state">
+        <strong role="status">No Tab in this context</strong>
+        <button type="button" className="small-button" aria-label="New Tab" title="New tab"
+          onClick={() => newTab(layout.activeGroupId)}><Plus size={13} /> New Tab</button>
+      </div> : <div role="status" className="workbench-restore-notice">Original context retained · Workspace layout is still restoring</div>}
     </div>
   }
   const projectedTab = projectionTabId ? tabs[projectionTabId] : undefined

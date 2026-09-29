@@ -85,6 +85,7 @@ import { errorIdentity, presentError } from './lib/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
+import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge, type GitBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
@@ -3955,14 +3956,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       closingViewIds: new Set(Object.keys(state.closingWorkbenchViews))
     })
     if (!plan) return Promise.resolve(true)
-    if (!plan.closesView) {
+    // Publish only the exact View deletion committed here, independently of cleanup receipts.
+    const commitClose = (tab: WorkbenchTab | null): void => {
+      let removedTab: WorkbenchTab | undefined
       set((current) => {
-        const topology = applyWorkbenchViewCloseTopology(current, plan, null)
-        return { ...reconcileWorkbenchFileProjection(current, topology),
+        const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
+        const committed = { ...reconcileWorkbenchFileProjection(current, topology),
           surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
+        removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
+        return committed
       })
+      if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, error => get().reportError(error))
+    }
+    if (!plan.closesView) {
+      commitClose(null)
       pruneEditorRegionState(get().tabs)
       return Promise.resolve(true)
     }
@@ -3974,13 +3983,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         receipts: []
       })
       const previousTabs = state.tabs
-      set((current) => {
-        const topology = applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
-        return { ...reconcileWorkbenchFileProjection(current, topology),
-          surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
-          workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
-            { workspaceId, tabId, groupId: tabGroupId }) }
-      })
+      commitClose(reconciliation.tab)
       pruneEditorRegionState(get().tabs)
       return disposeClosedFileOwners(previousTabs, get().tabs).then(
         () => true,
@@ -4028,13 +4031,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           receipts: [...browserReceipts, ...sessionReceipts]
         })
         const previousTabs = get().tabs
-        set((current) => {
-          const topology = applyWorkbenchViewCloseTopology(current, plan, reconciliation.tab)
-          return { ...reconcileWorkbenchFileProjection(current, topology),
-            surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
-            workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
-              { workspaceId, tabId, groupId: tabGroupId }) }
-        })
+        commitClose(reconciliation.tab)
         await disposeClosedFileOwners(previousTabs, get().tabs)
         pruneEditorRegionState(get().tabs)
         if (reconciliation.failures.length > 0) {
