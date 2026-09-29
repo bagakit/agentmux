@@ -8,14 +8,14 @@ for (const key of ['home', 'userData', 'sessionData']) {
   const directory = path.join(privateRoot, key)
   fs.mkdirSync(directory, { recursive: true }); app.setPath(key, directory)
 }
-const result = { pid: process.pid, mode, captureOnly: true, aestheticReview: 'not-performed', frames: [], actions: [], commits: [], errors: [] }
+const result = { pid: process.pid, mode, captureOnly: true, aestheticReview: 'not-performed', frames: [], actions: [], commits: [], saves: [], errors: [] }
 let win
 app.whenReady().then(async () => {
   try {
     const { ConfigStore, ConfigOwner, DEFAULT_CONFIG } = await import(pathToFileURL(ownerBundle).href)
     const store = new ConfigStore(path.join(privateRoot, 'userData', 'config.json'))
     const initial = !fs.existsSync(store.filePath)
-    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts'].includes(mode), 'Restart must reuse durable config, never seed again')
+    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'appearance-preview', 'appearance-preview-glyphs'].includes(mode), 'Restart must reuse durable config, never seed again')
     let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), composerShortcuts: [
       { id: 'explain', label: 'Explain simply', keyword: 'eli5', body: '用大白话说说这次做了什么，指出关键变化、验证结果与还没确认的部分。', states: ['done', 'error'] },
       { id: 'review', label: 'Review changes', keyword: 'review', providerId: 'codex', states: ['waiting', 'done'], body: Array.from({ length: 10 }, (_, i) => `${i + 1}. Review the current changes for correctness, scope, readability and recovery. Explain concrete risks, cite the relevant code and propose the smallest complete fix.`).join('\n') },
@@ -28,7 +28,10 @@ app.whenReady().then(async () => {
       return store.save(next)
     }, publish: saved => { current = saved; result.commits.push(structuredClone(saved)); win.webContents.send('proof:config:changed', saved) } })
     ipcMain.handle('proof:config:get', () => structuredClone(owner.current))
-    ipcMain.handle('proof:config:save', (_event, next, expected) => owner.edit(expected, next))
+    ipcMain.handle('proof:config:save', (_event, next, expected) => {
+      result.saves.push({ next: structuredClone(next), expected: structuredClone(expected) })
+      return owner.edit(expected, next)
+    })
     ipcMain.handle('proof:config:external', (_event, id, patch) => owner.update(config => ({ ...config, composerShortcuts: config.composerShortcuts.map(prompt => prompt.id === id ? { ...prompt, ...patch } : prompt) })))
     ipcMain.handle('proof:config:hold', () => { assert.equal(holdNext, false); holdNext = true })
     ipcMain.handle('proof:config:release', () => { assert.ok(release, 'Actual pending Main save exists'); release(); release = undefined })
@@ -91,6 +94,15 @@ app.whenReady().then(async () => {
     await until('window.promptsProbe?.ready && !!document.querySelector(".window-status-bar [aria-label=Settings]")')
     await read('window.promptsProbe.beginSurface()')
     await click(q('.window-status-bar [aria-label="Settings"]')); await section('prompts')
+    if (mode === 'appearance-preview' || mode === 'appearance-preview-glyphs') {
+      await require('../settings-appearance-preview/scenario.cjs').run({ win, read, q, button, until, settle, click, scene, capture, section, owner, result, evidence, mode })
+      result.completed = true
+      result.disk = JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
+      assert.deepEqual(result.disk, owner.current)
+      result.surface = await read('window.promptsProbe.surface()')
+      assert.equal(result.surface.exact, true, 'Appearance preserves the original work surface')
+      return
+    }
     if (mode === 'keyboard-shortcuts') {
       await require('../settings-keyboard-shortcuts/scenario.cjs').run({ win, read, q, button, until, settle, click, field, type, scene, capture, section, owner, result, evidence, mode })
       result.completed = true
