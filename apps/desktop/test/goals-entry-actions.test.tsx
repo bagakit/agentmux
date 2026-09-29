@@ -84,7 +84,7 @@ describe('Goals one-click requests through the mounted product and original owne
     useAppStore.setState({ agentFocus: focus })
     const originalLayout = useAppStore.getState().layouts.project
     const createGoal = vi.spyOn(api.demands, 'create')
-    await mount(); expect(action(id).textContent).toBe(text); expect(container.querySelector('[data-goals-entry-action="next"]')).toBeNull()
+    await mount(); expect(action(id).querySelector('.goals-entry__request')?.textContent).toBe(text); expect(container.querySelector('[data-goals-entry-action="next"]')).toBeNull()
     await click(id)
     const tab = createdTab(), state = useAppStore.getState(), region = tab.regions[tab.layout.activeRegionId]!
     expect(api.scratch.ensureMote).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, tab.topicId)
@@ -110,7 +110,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(action('ideas').disabled).toBe(true)
     expect(container.querySelector('.goals-entry__actions')?.getAttribute('aria-busy')).toBe('true')
     expect(container.querySelector('.goals-entry__preparing[role="status"]')?.textContent).toBe('正在准备对话…')
-    expect(action('understand').textContent).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
+    expect(action('understand').querySelector('.goals-entry__request')?.textContent).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
     await click('ideas'); expect(api.scratch.ensureMote).toHaveBeenCalledTimes(1)
     await act(async () => { useAppStore.getState().renameTab(tab.id, 'My conversation'); useAppStore.setState({ activeWorkspaceId: 'project' }); preparation.resolve(topic(tab.topicId!)) })
     expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
