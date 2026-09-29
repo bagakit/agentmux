@@ -1469,7 +1469,7 @@ export function WorkspaceWorkbench({
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const projection = viewTargets?.[tab.id]
         const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
-        const tabVisible = (targetId !== null && (projection?.surface === 'survey' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
+        const tabVisible = (targetId !== null && (focusTab?.id === tab.id ? visible : projection?.surface === 'survey' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
           active={focusTab?.id === tab.id ? true : projection?.active ?? true}
           survey={projection?.surface === 'survey'} controlsOpen={projection?.controlsOpen ?? false}
