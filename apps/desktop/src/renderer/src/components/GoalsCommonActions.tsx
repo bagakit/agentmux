@@ -81,7 +81,7 @@ export function GoalsCommonActions() {
   useLayoutEffect(() => {
     if (focusRef.current && manage && view === 'library') {
       const target = focusRef.current === 'add' ? addButton.current : [...(library.current?.querySelectorAll<HTMLButtonElement>('[data-common-select]') ?? [])].find(button => button.dataset.commonSelect === focusRef.current)
-      target?.focus(); focusRef.current = null
+      ;(target ?? addButton.current)?.focus(); focusRef.current = null
     }
     if (focusEditor.current && manage && view === 'editor') { editor.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus(); focusEditor.current = false }
   }, [manage, view, directory, selectedKey])
@@ -168,7 +168,7 @@ export function GoalsCommonActions() {
     <div className="goals-common__column">
       <header className="goals-common__heading"><h2>常用操作</h2><div><button ref={manageButton} type="button" className="goals-common__text-button" aria-expanded={manage} onClick={() => { setManage(!manage); setView('library'); setSettingsRequested(false); focusRef.current = selectedKey ?? 'add' }}>{manage ? '完成' : '管理'}</button><button type="button" className="goals-common__text-button" disabled={saving} aria-label={directory.collapsed ? '展开常用操作' : '收起常用操作'} aria-expanded={!directory.collapsed} onClick={() => void saveDirectory(directory.items, !directory.collapsed)}>{directory.collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}</button></div></header>
       {manage ? <div className="goals-common__manager" data-view={view} aria-label="管理常用操作">
-        <p className="goals-common__hint">常用操作只保留指令的引用。排序、编辑和移出都不会发起对话。</p>
+        <p className="goals-common__hint">排序或移出不会删除指令，也不会发起对话。</p>
         <div className="goals-common__manage-body">
           <div className="goals-common__library" ref={library}>
             <div className="goals-common__manage-tools"><button ref={addButton} type="button" className="goals-common__text-button" disabled={saving} onClick={add}><Plus size={13} />新增操作</button><button type="button" className="goals-common__text-button" disabled={saving} onClick={() => setView('add')}>引用已有</button></div>
@@ -179,7 +179,7 @@ export function GoalsCommonActions() {
                 </SortableContext>
               </DndContext>
               {!actions.length ? <p className="goals-common__hint">还没有常用操作。可以新增一句指令，或引用已有指令。</p> : null}
-              {Object.values(resource.value).filter(prompt => !Object.hasOwn(resource.expected, prompt.id)).map(prompt => <button type="button" key={prompt.id} className="goals-common__draft" onClick={() => select({ kind: 'prompt', id: prompt.id })}><span>{prompt.body.trim().split('\n')[0] || '新操作'}</span><small>正文尚未保存</small></button>)}
+              {Object.values(resource.value).filter(prompt => !Object.hasOwn(resource.expected, prompt.id)).map(prompt => <button type="button" key={prompt.id} className="goals-common__draft" data-common-select={`prompt:${prompt.id}`} aria-pressed={selectedKey === `prompt:${prompt.id}`} onClick={() => select({ kind: 'prompt', id: prompt.id })}><span>{prompt.body.trim().split('\n')[0] || '新操作'}</span><small>正文尚未保存</small></button>)}
             </div>
           </div>
           <div ref={editor} className="goals-common__editor">
