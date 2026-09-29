@@ -19,7 +19,7 @@ export const hostsSettingsModule = {
   icon: Server,
   keywords: 'ssh remote hostname user port key test connection',
   savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'host' : 'hosts'}`,
-  Pane({ config }) {
-    return <HostSettingsPane config={config} onSave={saveHosts} />
+  Pane({ config, active }) {
+    return <HostSettingsPane config={config} onSave={saveHosts} active={active} />
   }
 } as const satisfies SettingsModule

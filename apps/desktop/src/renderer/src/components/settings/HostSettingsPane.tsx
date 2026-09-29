@@ -1,14 +1,18 @@
 import { CheckCircle2, ChevronDown, Info, LoaderCircle, Monitor, Plus, RadioTower, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
-import type { AppConfig, HostConfig, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
-import { useAppStore } from '../../store'
+import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
+import { useAppStore, type HostCheckState } from '../../store'
 import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 
-export function HostSettingsPane({ config, onSave }: {
+const NO_SESSIONS: SessionSnapshot[] = []
+const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
+
+export function HostSettingsPane({ config, onSave, active }: {
   config: AppConfig
+  active: boolean
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
   const resource = useResourceDrafts(Object.fromEntries(config.hosts.map((host) => [host.id, host])))
@@ -24,9 +28,9 @@ export function HostSettingsPane({ config, onSave }: {
   const saveState = useSettingsSave()
   const { saving } = saveState
   const dirty = resource.dirty
-  const checks = useAppStore((state) => state.hostChecks)
+  const checks = useAppStore((state) => active ? state.hostChecks : NO_HOST_CHECKS)
   const checkHost = useAppStore((state) => state.checkHost)
-  const sessions = useAppStore((state) => state.sessions)
+  const sessions = useAppStore((state) => active ? state.sessions : NO_SESSIONS)
 
   function update(id: string, patch: Partial<SshHostConfig>): void {
     setHosts((current) => current.map((host) => host.id === id && host.kind === 'ssh' ? { ...host, ...patch } : host))
