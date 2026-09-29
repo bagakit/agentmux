@@ -1,0 +1,1 @@
+{"extends":"../../../tsconfig.json","compilerOptions":{"types":["node","vite/client","vitest/globals"]},"include":["../../../src/**/*.ts","../../../src/**/*.tsx","../../../*.ts","../../../test/focus-agent-membership.test.tsx","../../../test/focus-terminal-owner-identity.test.tsx","../../../test/focus-pmo-attention.test.tsx","../../../test/recent-focus-timeline.test.tsx"]}

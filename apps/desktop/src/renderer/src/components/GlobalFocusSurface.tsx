@@ -2,7 +2,7 @@ import { CheckCircle2, CirclePause, Inbox, PlayCircle, Search, Unplug, Users } f
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createTerminalFocusProjectionSelector, type FocusBucket, type FocusContext } from '../lib/focus-context'
+import { createFocusProjectionSelector, type FocusBucket, type FocusContext } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
@@ -32,7 +32,7 @@ function columnFor(context: FocusContext): FocusColumn {
 }
 
 export function GlobalFocusSurface() {
-  const contextSelector = useMemo(createTerminalFocusProjectionSelector, [])
+  const contextSelector = useMemo(createFocusProjectionSelector, [])
   const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
   const moteIdentity = useAppStore(useShallow(state => {
     const session = state.sessions.find(item => item.id === pmoAttention[0])
@@ -147,7 +147,7 @@ export function GlobalFocusSurface() {
           if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
         } })
       }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
-      {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent or Terminal from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
+      {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} /> : null}
           {filtered.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
