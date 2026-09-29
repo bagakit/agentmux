@@ -100,7 +100,7 @@ it('Overview, sidebar and actual navigation share the eight configuration sectio
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const catalog = visibleSettingsSections('')
   expect(catalog.map(entry => entry.id)).toEqual([
-    'appearance', 'notifications', 'browser', 'general', 'agents', 'prompts', 'workspaces', 'hosts'
+    'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'agents', 'prompts', 'workspaces', 'hosts'
   ])
   const links = [...overview().querySelectorAll<HTMLButtonElement>('[data-settings-section]')]
   expect(links.map(link => link.dataset.settingsSection)).toEqual(catalog.map(entry => entry.id))

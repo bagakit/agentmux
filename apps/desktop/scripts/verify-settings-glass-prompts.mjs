@@ -15,7 +15,7 @@ const defaultOutput = '.bagakit/design/settings-glass-prompts/evidence'
 const outputIndex = args.indexOf('--output')
 const evidence = path.resolve(root, outputIndex >= 0 ? args[outputIndex + 1] : defaultOutput)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const owned = /(?:\/App\.tsx|\/SettingsPanel\.tsx|\/settings\/[^/]+\.(?:tsx|ts)|\/settings\/modules\/prompts\.tsx|\/styles\/[^/]+\.css|\/fixtures\/settings-(?:prompts|liquid-motion)\/[^/]+)$/
+const owned = /(?:\/App\.tsx|\/SettingsPanel\.tsx|\/settings\/[^/]+\.(?:tsx|ts)|\/settings\/modules\/[^/]+\.tsx|\/styles\/[^/]+\.css|\/fixtures\/settings-(?:prompts|liquid-motion|keyboard-shortcuts)\/[^/]+)$/
 
 async function files(directory, prefix = '') {
   const result = []
@@ -52,12 +52,23 @@ export async function qualify(directory, materialsOnly = false, preview = false,
   const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-settings-prompts-'))
   const receipt = { captureOnly: true, aestheticReview: 'not-performed', boundary: 'Actual App Renderer; private IPC ConfigOwner/ConfigStore seam; no user config, Runtime, Run, native activation or installation. CSS reduced preferences are emulated known signals, not OS bridge facts.', source: {}, assets: [], compiled: [], processes: [], privateRoot }
   const inputs = new Map()
+  const originalInputs = new Map()
+  const consumedSource = async (filename, code) => {
+    const override = options.sourceOverrides?.[path.relative(root, filename)]
+    if (!override) return code
+    assert.equal(hash(code), override.originalSha256, 'Private Source mutation consumes its exact original: ' + filename)
+    originalInputs.set(path.relative(root, filename), { sha256: hash(code), bytes: Buffer.byteLength(code) })
+    const changed = await fs.readFile(override.file, 'utf8')
+    assert.notEqual(hash(changed), hash(code), 'Private Source mutation is nonempty')
+    assert.equal(hash(changed), override.sha256, 'Private Source mutation bytes are qualified')
+    return changed
+  }
   const bind = async (filename, bytes) => {
     if (!filename.startsWith(root + '/') || filename.includes('/node_modules/')) return
     const relative = path.relative(root, filename), record = { sha256: hash(bytes), bytes: Buffer.byteLength(bytes) }
     if (inputs.has(relative)) assert.equal(inputs.get(relative).sha256, record.sha256, 'Input drift while building: ' + relative)
     inputs.set(relative, record)
-    if (owned.test(filename)) {
+    if (options.preserveAllSources || owned.test(filename)) {
       const target = path.join(directory, 'source', relative)
       await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, bytes)
     }
@@ -71,7 +82,11 @@ export async function qualify(directory, materialsOnly = false, preview = false,
         const filename = id.split('?')[0]
         if (/\.(png|svg|jpe?g|webp|woff2?|ttf)$/.test(filename)) {
           if (filename.startsWith(root + '/')) { const bytes = await fs.readFile(filename); receipt.assets.push({ file: path.relative(root, filename), bytes: bytes.length, sha256: hash(bytes) }) }
-        } else await bind(filename, code)
+        } else {
+          const consumed = await consumedSource(filename, code)
+          await bind(filename, consumed)
+          if (consumed !== code) return { code: consumed, map: null }
+        }
       } }],
       css: { postcss: { plugins: [{ postcssPlugin: 'bind-proof-css', async OnceExit(tree) {
         const sources = new Map(); tree.walk(node => { if (node.source?.input?.file) sources.set(node.source.input.file, node.source.input.css) })
@@ -92,6 +107,7 @@ export async function qualify(directory, materialsOnly = false, preview = false,
     await bind(fileURLToPath(import.meta.url), await fs.readFile(fileURLToPath(import.meta.url)))
     for (const filename of options.sources ?? []) await bind(path.resolve(root, filename), await fs.readFile(path.resolve(root, filename)))
     receipt.source = Object.fromEntries([...inputs].sort((a, b) => a[0].localeCompare(b[0])))
+    receipt.originalInputs = Object.fromEntries(originalInputs)
     assert.ok(Object.keys(receipt.source).length > 0, 'Source binding must not be empty')
     receipt.sourceIdentity = hash(JSON.stringify(receipt.source))
     receipt.compiled = await files(path.join(directory, 'compiled'))
@@ -108,7 +124,8 @@ export async function qualify(directory, materialsOnly = false, preview = false,
       assert.equal(result.completed, true)
     }
     if (!options.modes && !materialsOnly && !preview) assert.equal(new Set(receipt.processes.map(p => p.pid)).size, 3, 'Three ordinary processes must read the same private durable store')
-    for (const [relative, consumed] of inputs) assert.equal(hash(await fs.readFile(path.join(root, relative))), consumed.sha256, 'Proof input changed: ' + relative)
+    receipt.originalInputs = Object.fromEntries(originalInputs)
+    for (const [relative, consumed] of inputs) assert.equal(hash(await fs.readFile(path.join(root, relative))), (originalInputs.get(relative) ?? consumed).sha256, 'Proof input changed: ' + relative)
     receipt.png = (await files(directory)).filter(record => record.file.endsWith('.png') && !record.file.startsWith('compiled/'))
     const modes = new Set(receipt.processes.map(process => process.mode))
     receipt.raw = (await files(directory)).filter(record => modes.has(record.file.replace(/\.(json|log)$/, '')) && /\.(json|log)$/.test(record.file))

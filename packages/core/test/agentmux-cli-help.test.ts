@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { defaultAgentMuxControlSocketPath } from '../src/runtime-paths.js'
 
@@ -162,10 +162,29 @@ describe('agentmux CLI discovery', () => {
     expect(send).toContain('never resumes')
   })
 
-  it('prints bounded Agent instructions for inspect, open, and send', async () => {
+  it('prints bounded Agent instructions for inspect, open, navigation, and send', async () => {
     const skill = await run(['--skill'])
+    expect(skill.length).toBeGreaterThan(0)
+    expect(skill).toBe(`${AGENTMUX_CLI_SKILL}\n`)
     expect(skill).toContain('agentmux inspect --tab self')
+    expect(skill).toContain('agentmux inspect --client')
     expect(skill).toContain('agentmux agent open --executor <exact-executor-id>')
+    expect(skill).toContain('result.agent.agentSessionId')
+    expect(skill).toContain('result.to, when confirmed')
+    expect(skill).toContain('agentmux space inspect --request <request-id>')
+    expect(skill).toContain('agentmux focus --region <region-id>')
+    expect(skill).toContain('agentmux focus --goal <demand-id>')
+    expect(skill).toContain('agentmux focus --region <region-id> --input target')
+    expect(skill).toContain('Default --input preserve does not focus, blur, or restore input')
+    expect(skill).toContain('caret, draft and IME')
+    expect(skill).toContain('a hidden or unmounted owner is unavailable/unconfirmed')
+    expect(skill).toContain('does not start a PMO discussion or send a task')
+    expect(skill).toContain('result.navigation.state')
+    expect(skill).toContain('result.presentation.state')
+    expect(skill).toContain('result.input.outcome')
+    expect(skill).toContain('result.partial and result.issues')
+    expect(skill).toContain('It does not confirm a previous request or authorize repeating an unconfirmed operation')
+    expect(skill).toContain('Existing agent open --session and space mv --expect-session require exact Session IDs')
     expect(skill).toContain('agentmux send --to-tab <tab-id>')
     expect(skill).toContain('agentmux open terminal --command')
     expect(skill).toContain('agentmux open browser --url')

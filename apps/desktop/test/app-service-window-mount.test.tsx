@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // Canvas rendering is covered by native probes; this test owns the App service-window wiring.
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
@@ -9,6 +9,7 @@ import { App } from '../src/renderer/src/App.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts.js'
+import { composerConfig } from './helpers/composer-dom-fixture.js'
 
 /** Real App → canonical snapshots → one footer inbox. Removing its actual caller must fail. */
 
@@ -16,6 +17,10 @@ const initial = useAppStore.getState()
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 let mounted: { root: Root; element: HTMLElement } | null = null
+beforeEach(() => {
+  // Mount the real App against a legal durable directory, rather than the preview's display path.
+  vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
+})
 afterEach(async () => {
   if (mounted) {
     const { root, element } = mounted

@@ -28,15 +28,15 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
   return {
   persistenceIssue: null, sections: {}, drafts: {}, executors: {},
   setSection(workspaceId, section, mode) {
-    try { set(state => ({ sections: { ...state.sections, [workspaceId]: { ...state.sections[workspaceId], [section]: mode } } })); return true }
+    try { set(state => ({ persistenceIssue: null, sections: { ...state.sections, [workspaceId]: { ...state.sections[workspaceId], [section]: mode } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
   setDraft(launcherId, field, value) {
-    try { set(state => ({ drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
   selectExecutor(workspaceId, executorId) {
-    try { set(state => ({ executors: { ...state.executors, [workspaceId]: executorId } })); return true }
+    try { set(state => ({ persistenceIssue: null, executors: { ...state.executors, [workspaceId]: executorId } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   }
 }

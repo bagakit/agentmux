@@ -24,7 +24,7 @@ export const promptsSettingsModule = {
     const count = resolveComposerShortcuts(config).length
     return `${count} ${count === 1 ? 'prompt' : 'prompts'}`
   },
-  Pane({ config }) {
-    return <ShortcutSettingsPane config={config} onSave={saveComposerShortcuts} />
+  Pane({ config, active }) {
+    return <ShortcutSettingsPane config={config} active={active} onSave={saveComposerShortcuts} />
   }
 } as const satisfies SettingsModule

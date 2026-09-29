@@ -36,6 +36,7 @@ const UTF8_ENCODER = new TextEncoder()
 // hand-written array is behaviourally identical to this projection, so only the compiler catches the
 // drift. Blind spot: it does not check the ORDER of members, only their exact set.
 const KIND_MEMBERS: Record<AgentTimelineItemKind, true> = {
+  system_message: true,
   user_message: true,
   assistant_message: true,
   tool_call: true,
@@ -54,7 +55,8 @@ const SOURCE_MEMBERS: Record<AgentMuxEvidenceSource, true> = {
   'run-process': true,
   'native-hook': true,
   acp: true,
-  user: true
+  user: true,
+  agentmux: true
 }
 const SOURCES = Object.keys(SOURCE_MEMBERS) as readonly AgentMuxEvidenceSource[]
 

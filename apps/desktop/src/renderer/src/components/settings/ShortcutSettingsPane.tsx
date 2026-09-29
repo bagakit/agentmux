@@ -8,14 +8,17 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'
 const providerName = (prompt: ComposerShortcut) => prompt.providerId ? `${agentProviderLabel(prompt.providerId)} only` : 'Every Agent'
-const stateName = (state: string) => state.charAt(0).toUpperCase() + state.slice(1)
+const stateName = (state: (typeof COMPOSER_PROMPT_STATES)[number]) => describeAgentDisplayState(state).label
 
 /** Selection belongs to the view; the complete authored library and its baseline stay in this Pane. */
-export function ShortcutSettingsPane({ config, onSave }: {
+export function ShortcutSettingsPane({ config, active, onSave }: {
   config: AppConfig
+  active: boolean
   onSave: (prompts: ComposerShortcut[], expected: ComposerShortcut[]) => Promise<void>
 }) {
   const resource = useResourceDrafts(Object.fromEntries(resolveComposerShortcuts(config).map((prompt) => [prompt.id, prompt])))
@@ -46,6 +49,8 @@ export function ShortcutSettingsPane({ config, onSave }: {
     return errors
   })
   const errors = problems.filter((problem) => problem.id === selectedId)
+  const selectedChanged = prompt && !configValuesEqual(prompt, Object.hasOwn(resource.expected, prompt.id) ? resource.expected[prompt.id] : undefined)
+  const promptStatus = errors.length ? 'invalid' : selectedChanged ? 'unsaved' : 'saved'
   const changedCount = drafts.filter((candidate) => !configValuesEqual(candidate, Object.hasOwn(resource.expected, candidate.id) ? resource.expected[candidate.id] : undefined)).length
   const deletedCount = Object.keys(resource.expected).filter((id) => !Object.hasOwn(resource.value, id)).length
 
@@ -85,6 +90,7 @@ export function ShortcutSettingsPane({ config, onSave }: {
   }
   function remove(id: string): void {
     if (Object.hasOwn(resource.expected, id) && Object.hasOwn(resource.value, id)) setRecentDelete({ prompt: resource.value[id]! })
+    if (selectedId === id) setSelectedId(drafts.find((candidate) => candidate.id !== id)?.id ?? null)
     resource.setValue((current) => {
       const next = { ...current }
       delete next[id]
@@ -124,6 +130,7 @@ export function ShortcutSettingsPane({ config, onSave }: {
         <section className="prompt-library" aria-label="Prompt library">
           <label className="prompt-library__search"><Search size={14} aria-hidden="true" /><input ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
           <div ref={library} className="prompt-library__items">
+            <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => (
               <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
                 <span className="prompt-library__name"><strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <Check size={13} aria-label="Selected prompt" /> : null}</span>
@@ -137,17 +144,20 @@ export function ShortcutSettingsPane({ config, onSave }: {
           {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No matching prompts. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
         </section>
         {prompt ? <section className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
-          <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ArrowLeft size={13} /> Back to prompts</button><span>{providerName(prompt)}</span></div>
+          <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ArrowLeft size={13} /> Back to prompts</button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}>{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
           {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search. <button type="button" className="small-button" onClick={() => setQuery('')}>Show in library</button></p> : null}
           <div className="agent-settings-fields prompt-editor__fields">
-            <label><span>Name</span><input ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
-            <label><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
+            <label className="prompt-editor__name"><span>Name</span><input ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
+            <label className="prompt-editor__instruction"><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
             <div className="prompt-editor__reach">
               <label><span>Keyword</span><input aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? 'Use /keyword or the bare word to expand your draft.'}</small></label>
               <label><span>Agent</span><select value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Where this instruction is available.</small></label>
             </div>
-            <fieldset className="prompt-state-settings"><legend>Show a button when</legend><div className="prompt-state-settings__choices">{COMPOSER_PROMPT_STATES.map((state) => <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span>{stateName(state)}</span></label>)}</div></fieldset>
-            <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Button at {prompt.states.map(stateName).join(', ')}. Click sends this instruction; pending questions queue it.</span></div> : <p>Draft shortcut only. Select states to show one-click buttons that send the prompt; pending questions queue it.</p>}</section>
+            <fieldset className="prompt-state-settings"><legend>Available in Agent status when</legend><div className="prompt-state-settings__choices">{COMPOSER_PROMPT_STATES.map((state) => {
+              const meaning = describeAgentDisplayState(state)
+              return <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label} <code>{state}</code></strong><small>{meaning.description}</small></span></label>
+            })}</div><small>Each selection matches its exact state. Running does not include working. Visibility is separate from whether a message can be sent.</small></fieldset>
+            <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
             <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><Trash2 size={13} /> Delete prompt</> : <><X size={13} /> Cancel new prompt</>}</button></div>
           </div>
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}

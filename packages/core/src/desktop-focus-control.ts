@@ -29,7 +29,7 @@ export type AgentMuxDesktopPresentation = {
   provenance: AgentMuxDesktopProvenance
   state: 'main-visible' | 'floating' | 'covered' | 'pending' | 'unknown'
   tabId: string | null; regionId: string | null
-  blockers: ('settings' | 'quick-switcher' | 'shortcuts-help')[]
+  blockers: ('settings' | 'quick-switcher')[]
 }
 export type AgentMuxDesktopFloating = {
   provenance: AgentMuxDesktopProvenance
@@ -39,7 +39,7 @@ export type AgentMuxDesktopFloating = {
 }
 export type AgentMuxDesktopOverlays = {
   provenance: AgentMuxDesktopProvenance
-  settings: boolean | null; quickSwitcher: boolean | null; shortcutsHelp: boolean | null
+  settings: boolean | null; quickSwitcher: boolean | null
 }
 export type AgentMuxDesktopObservation = {
   selection: AgentMuxDesktopSelection

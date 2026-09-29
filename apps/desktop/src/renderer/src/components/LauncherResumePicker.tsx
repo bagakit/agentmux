@@ -69,6 +69,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   const projectCount = rows.filter(row => row.inProject).length
   const selectedHostConfigured = Boolean(config?.hosts.some(host => host.id === selectedHostId))
   const selectedRead = selectedSessionId ? reads[selectedSessionId] : undefined
+  const selectedProviderLabel = selected ? agentProviderLabel(selected.candidate.providerId) : ''
 
   // Opening takes one candidate-only snapshot for search. Subsequent live work is owned by the
   // selected detail, through exact-key selectors and one-row derivation. An unrelated Timeline
@@ -216,7 +217,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
           </div>
           {selected ? <section className="launcher-resume__detail" aria-label="Selected Session details">
             <div className="launcher-resume__detail-heading"><AgentAvatar label={selected.name} providerId={selected.candidate.providerId} size={24} />
-              <div><strong>{selected.name}</strong><span>{agentProviderLabel(selected.candidate.providerId)} · {selected.executorName}</span></div></div>
+              <div><strong>{selected.name}</strong><span>{selectedProviderLabel === selected.executorName ? selectedProviderLabel : `${selectedProviderLabel} · ${selected.executorName}`}</span></div></div>
             <div className="launcher-resume__recap"><h3>Recap</h3>
               {selected.recap ? <><p>{selected.recap.text}</p><small>{selected.recap.source} · {selected.recap.origin === 'native' ? 'Provider conversation' : 'Captured conversation'}</small></>
                 : selectedRead?.state === 'loading' ? <p className="launcher-resume__muted"><LoaderCircle size={12} className="spin" /> Reading this Session’s recap…</p>

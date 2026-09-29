@@ -207,6 +207,22 @@ Absent, inaccessible or nonregular paths and failed requests return a typed erro
 No path, input file, managed Agent or View is required. Offline Main returns CONTROL_UNAVAILABLE;
 the CLI never reads the log directly. Configuration and running Agents are unchanged.`
 
+const DEMAND_CREATE_GUIDE = `Discover the current Project with agentmux list projects and use its exact projectId.
+settings workspaces add returns a Workspace id; it is not the Project id.
+
+Demand creation also records a routing decision:
+  --risk low|medium|high|unknown
+  --confirm automatic|user|pending
+  --wiki-version <version>
+Defaults are risk=unknown and confirmation=pending; they do not authorize a write.
+Choose the actual risk and carry the authorization already given for this scoped Demand write.
+Use --confirm user only when the person has explicitly authorized it; automatic records an
+authorized policy decision, and pending records unresolved authorization. Never invent either.
+A known Project, known risk and actual authorization are required by the existing write owner.
+These flags do not confirm the Goal alignment or accept its results; those remain human actions.
+After registration, rediscover the Project before creating or linking a Demand. Parse the
+actual receipt and inspect the Demand; do not guess an identity or retry an unconfirmed write.`
+
 const HELP = new Map<string, string>([
   ['diagnostics', CRASH_LOG_HELP],
   ['diagnostics.crash-log.get', CRASH_LOG_HELP],
@@ -749,7 +765,8 @@ Cross-workspace delivery is refused. Remote targets are not supported yet.`],
 Usage:
   agentmux demand list [--status <status>] [--project <project-id>] [--executor <executor-id>] [--session <session-id>] [--limit <n>]
   agentmux demand show --demand <demand-id>
-  agentmux demand create --title <title> [--project <project-id>] [--status <status>] [--priority <priority>]
+  agentmux demand create --title <title> [--description <text>] [--project <project-id>] [--status <status>] [--priority <priority>]
+    [--session <session-id>] [--risk low|medium|high|unknown] [--confirm automatic|user|pending] [--wiki-version <version>]
   agentmux demand update --demand <demand-id> [--title <title>] [--status <status>] [--priority <priority>]
   agentmux demand update --demand <demand-id> --alignment <proposal-json>
   agentmux demand update --demand <demand-id> --grounding <proposal-json>
@@ -760,6 +777,8 @@ Usage:
   agentmux demand link-session --demand <demand-id> --session <session-id>
   agentmux demand link-project --demand <demand-id> --project <project-id>
   agentmux demand decision-log --demand <demand-id>
+
+${DEMAND_CREATE_GUIDE}
 
 Demand is the Board identity. Session links are explicit execution facts; a Demand can have zero,
 one, or multiple linked Sessions.`],
@@ -912,11 +931,15 @@ Names shown to a person are display facts, not replacements for runtime identity
 \`\`\`bash
 agentmux inspect --session self
 agentmux inspect --tab self
+agentmux inspect --client
 \`\`\`
 
 Session inspection reads only Core Session/Run truth. Tab inspection reads the Desktop
 Control Host's current Region map and normalized bounds. Parse receipts; never infer from
 titles, UI focus, terminal output, or list order.
+Client inspection is read-only: it observes the current Desktop selection, presentation,
+overlays, floating View and input owner without exposing drafts or terminal input.
+It does not confirm a previous request or authorize repeating an unconfirmed operation.
 
 ## Open an Agent in a Space
 
@@ -939,6 +962,14 @@ parents must agree. A Region target must be empty unless --split creates a neigh
 Open preserves current focus by default; --focus explicitly navigates. Existing --session
 adds a view without changing the original Run/cwd and cannot take a prompt or new Zone.
 A non-Git Zone uses --new-zone --directory <existing-absolute-directory> in an exact Space.
+Use result.agent.agentSessionId for the Session and result.to, when confirmed, for its
+spatial address. The SID can be passed to send --to-session; the Region to moves or focus.
+
+## Create and bind an authorized Demand
+
+Run agentmux demand --help for the complete commands before writing. ${DEMAND_CREATE_GUIDE}
+Assign the actual Executor with demand assign, and bind the actual returned Agent Session
+with demand link-session. A recorded assignment does not itself deliver a task or start a Run.
 
 ## Move one Agent presentation
 
@@ -952,9 +983,31 @@ Move one exact source projection, preserving its Region/Session/Run, original Ho
 other views. It never resumes, stops, spawns or sends. Both open and mv accept --request-id;
 without it the final single JSON receipt supplies a generated ID. partial/unknown exits
 nonzero and retains real owner facts. A missing reply does not mean no operation happened:
-inspect --request before choosing any recovery. Initial prompt confirmed proves the same
-Core creation protocol, not Agent task acceptance. Chromium flush is only a request;
+agentmux space inspect --request <request-id> before choosing any recovery. Initial prompt
+confirmed proves the same Core creation protocol, not Agent task acceptance. Chromium flush is only a request;
 diskDurability remains unconfirmed until actual restart/readback evidence exists.
+
+## Navigate the Desktop and keep the conversation
+
+\`\`\`bash
+agentmux focus --region <region-id>
+agentmux focus --goal <demand-id>
+agentmux focus --region <region-id> --input target
+\`\`\`
+
+Default --input preserve does not focus, blur, or restore input. It preserves the existing
+Mote input owner, caret, draft and IME while that owner remains connected and visible;
+a hidden or unmounted owner is unavailable/unconfirmed. Goal navigation only selects and
+shows the exact Demand; it does not start a PMO discussion or send a task.
+Use --input target only to deliberately transfer input to an exact existing Tab/Region
+input owner. Space/Zone, Goal or Surface alone never chooses an input target.
+
+Read result.navigation.state and selection, result.presentation.state, result.input.outcome,
+result.partial and result.issues as separate facts. A selected address alone does not prove
+main-visible presentation or input transfer. Floating, covered, pending and unknown facts
+remain explicit; navigation never closes a Mote or dismisses an overlay automatically.
+Use agentmux inspect --client to observe the current state after navigation. See focus --help
+for the complete Space/Zone/Tab/Region, Goal and Surface selectors.
 
 ## Open a Terminal or Browser
 
@@ -1083,7 +1136,7 @@ Tab send succeeds only for one distinct Agent Session. If candidates are returne
 the Tab and select an exact Session. Send never broadcasts and never resumes.
 
 Session send/inspect/runtime commands accept a full canonical ID or a currently unique prefix.
-Agent open and space mv require exact Session IDs.
+Existing agent open --session and space mv --expect-session require exact Session IDs.
 Full IDs win exact matches. Ambiguous prefixes require more characters; unknown prefixes
 never select an Agent. New canonical IDs use 16 base64url characters, an alphanumeric first
 character, and over 95 bits of effective entropy.

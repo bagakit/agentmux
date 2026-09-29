@@ -1,14 +1,48 @@
-/* User-authored Prompt bindings and the stable Composer action rail. */
+/* User-authored Prompt bindings and the receiver action face. */
 .prompt-state-settings { min-width: 0; margin: 0; padding: 0; border: 0; }
 .prompt-state-settings legend { padding: 0; margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
-.prompt-state-settings__choices { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
-.agent-settings-fields .prompt-state-settings__choices label { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-7); cursor: pointer; }
+.prompt-state-settings__choices { display: grid; gap: var(--sp-3); }
+.agent-settings-fields .prompt-state-settings__choices label { display: flex; align-items: flex-start; gap: var(--sp-3); cursor: pointer; }
 .agent-settings-fields .prompt-state-settings__choices input { flex: none; width: var(--sp-6); height: var(--sp-6); margin: 0; padding: 0; accent-color: var(--green); }
+.prompt-state-settings__choices label > span { display: grid; gap: var(--sp-1); }
+.prompt-state-settings__choices strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
+.prompt-state-settings__choices code { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.prompt-state-settings__choices small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
 .prompt-state-settings > small { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.agent-status-prompts { display: flex; align-items: center; gap: var(--sp-2); grid-column: 1 / -1; grid-row: 1; min-width: 0; flex: none; height: var(--sp-7); min-height: var(--sp-7); padding-inline: var(--sp-4); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; white-space: nowrap; }
-.composer:has(.composer-tools[data-mode='collapsed']):has(.agent-status-prompts) :is(.composer__editor, .composer__toolbar > div) { grid-row: 2; }
-.agent-status-prompts__button { flex: none; height: var(--sp-7); max-width: 100%; padding: 0 var(--sp-3); font-weight: 400; color: var(--text-2); background: transparent; box-shadow: none; }
-.agent-status-prompts__button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); box-shadow: none; }
-.agent-status-prompts__button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
-.agent-status-prompts__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-status-prompts__queue { flex: none; color: var(--text-3); }
+/* These actions live inside the existing receiver face, outside Composer layout. */
+.agent-status-prompts { display: grid; gap: var(--sp-1); min-width: 0; }
+.agent-status-prompts h3 { margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.agent-status-prompts__button { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); border: 0; background: transparent; box-shadow: none; font-weight: 400; text-align: left; }
+.agent-status-prompts__button:hover:not(:disabled) { background: var(--surface-3); box-shadow: none; }
+.agent-status-prompts__button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.agent-status-prompts__copy { display: grid; gap: var(--sp-1); min-width: 0; overflow-wrap: anywhere; }
+.agent-status-prompts__label { color: var(--text); font-size: var(--fs-meta); white-space: normal; }
+.agent-status-prompts__copy small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; white-space: pre-wrap; }
+.agent-status-prompts__intent { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
+.agent-status-prompts__reason { color: var(--text-3); font-size: var(--fs-micro); }
+.agent-identity-popover--actions { display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; padding: var(--sp-3); background: var(--surface-2); }
+.agent-identity-popover--actions > header { flex: none; }
+.agent-identity-popover__controls { display: inline-flex; flex: none; gap: var(--sp-1); }
+.agent-state-face { display: flex; flex-direction: column; min-height: 0; }
+.agent-state-face__summary { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); flex: none; padding: var(--sp-1) 0; }
+.agent-state-face__summary > strong { font-size: var(--fs-meta); font-weight: 500; }
+.agent-state-face .agent-state-face__summary p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.agent-state-face__body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.agent-state-face__review { display: flex; justify-content: space-between; width: 100%; margin-top: var(--sp-3); }
+.agent-state-face__facts { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.agent-state-face__facts summary { color: var(--text-3); cursor: pointer; font-size: var(--fs-micro); }
+.agent-state-face__facts dd small { display: block; color: var(--text-3); }
+.agent-state-face__summary .small-button { padding: 0; margin: 0; }
+.agent-state-face .small-button { box-shadow: none; border: 0; background: transparent; }
+.agent-state-face .small-button:hover:not(:disabled) { background: var(--surface-3); }
+.agent-state-face .session-result-review__details-actions .small-button { justify-content: flex-start; text-align: left; }
+
+/* Keep the original 26px identity envelope with 18px artwork and a 24px button. */
+.composer .composer-agent-identity { padding: calc(var(--sp-1) / 2); }
+.composer-agent-identity > .agent-avatar { width: var(--sp-7); height: var(--sp-7); }
+
+/* When fixed chrome would consume a very short face, the status joins its scroll body. */
+.agent-identity-popover--actions[data-compact='true'] .agent-state-face { overflow: auto; overscroll-behavior: contain; }
+.agent-identity-popover--actions[data-compact='true'] .agent-state-face__body { overflow: visible; flex: none; }
+.agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary button { position: absolute; top: var(--sp-3); right: calc(var(--sp-7) + var(--sp-3) * 2); width: var(--sp-7); height: var(--sp-7); margin: 0; }
+.agent-identity-popover--actions[data-compact='true'] .agent-state-face__summary button span { display: none; }

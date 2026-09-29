@@ -391,7 +391,7 @@ export function dispatchNextAttention(store: WorkbenchShortcutStore): boolean {
  */
 export function windowShortcutHandlers(
   store: WorkbenchShortcutStore,
-  actions: { toggleQuickSwitch: () => void; toggleShortcutsHelp: () => void }
+  actions: { toggleQuickSwitch: () => void; openShortcuts: () => void }
 ): Record<string, () => boolean> {
   const handlers: Record<string, () => boolean> = {
     'quick-switch.toggle': () => {
@@ -399,7 +399,7 @@ export function windowShortcutHandlers(
       return true
     },
     'help.shortcuts': () => {
-      actions.toggleShortcutsHelp()
+      actions.openShortcuts()
       return true
     },
     'attention.next': () => dispatchNextAttention(store)

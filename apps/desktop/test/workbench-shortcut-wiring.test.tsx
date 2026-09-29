@@ -76,16 +76,11 @@ describe('App 把窗口快捷键接到唯一的 capture 路由', () => {
     expect(registrations.length).toBe(1)
   })
 
-  it('快捷键清单的召唤走同一个 handler map，且面板真的被挂进 App', () => {
-    // 「组件触发面可静默失效」的接线侧：判定/渲染的单测再全绿，若 help 的 toggle 没接进路由、或
-    // ShortcutsCheatSheet 根本没被 App 渲染，用户按了召唤键什么都不出、菜单又没有加速键，清单就发现不了。
-    // toggle 走的是与 quick-switch 同一份 handler map（help.shortcuts 由 windowShortcutHandlers 接），不另起监听。
-    expect(routerEffect()).toContain('toggleShortcutsHelp')
-    // 面板被挂进渲染树——删掉这一句，effect 层全绿而清单永远不显示。
-    expect(code).toContain('<ShortcutsCheatSheet')
-    // 且它的开关状态由 App 持有（shortcutsHelpOpen），open 由它驱动，不是恒 false 的死值。
-    expect(code).toMatch(/setShortcutsHelpOpen/)
-    expect(code).toMatch(/<ShortcutsCheatSheet[\s\S]*?open=\{shortcutsHelpOpen\}/)
+  it('help routes to the existing Settings owner through the same handler map', () => {
+    expect(routerEffect()).toMatch(/openShortcuts:\s*\(\)\s*=>\s*openSettings\('keyboard-shortcuts'\)/)
+    expect(code).toContain('<SettingsPanel')
+    expect(code).toMatch(/initialSection=\{settingsRoute.section\}/)
+    expect(code).not.toContain('shortcutsHelpOpen')
   })
 
   it('onKeyDown 壳里没有任何早退——只有取值、构建 handler、路由这几句转发', () => {

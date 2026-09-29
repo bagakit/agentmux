@@ -27,8 +27,6 @@ export type AgentComposerProps = {
   activeFile?: string
   contextUsage?: ReactNode
   mailbox?: ReactNode
-  resultReview?: ReactNode
-  statusPrompts?: ReactNode
   identity?: ReactNode
   onActivateSemanticReference?: (reference: ComposerSemanticReference) => void
   tools?: ReactNode
@@ -70,8 +68,6 @@ export function AgentComposer({
   tools,
   contextUsage,
   mailbox,
-  resultReview,
-  statusPrompts,
   identity,
   onActivateSemanticReference,
   commands = [],
@@ -128,7 +124,6 @@ export function AgentComposer({
   const suggestionGroups = [...grouped]
   return (
     <div className="composer" data-agent-composer="true">
-      {statusPrompts}
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <InlineComposer
         aria-label="Message Agent"
@@ -244,7 +239,6 @@ export function AgentComposer({
                 : <ArrowUp size={15} aria-hidden="true" />}
             </button>
             {mailbox}
-            {resultReview}
             {identity}
           </div>
         </div>

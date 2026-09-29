@@ -20,6 +20,7 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
     let animation: Animation | undefined
     let destination: Bounds | null = null
+    let watching = false
     let observing = false
     let pointing = false
     let observedTarget: HTMLElement | null = null
@@ -91,21 +92,27 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
       lens.style.setProperty('--liquid-pointer-x', `${clamp((event.clientX - rect.left) / rect.width * 100)}%`)
       lens.style.setProperty('--liquid-pointer-y', `${clamp((event.clientY - rect.top) / rect.height * 100)}%`)
     }
-    const resize = new ResizeObserver(() => update())
+    const resize = new ResizeObserver(() => sync())
     const mutation = new MutationObserver(() => {
       // A filter may remove the selected control without changing the selection fact.
       update()
     })
     const onScroll = () => update()
     const sync = () => {
-      const visible = active && !document.hidden
+      const watch = active && !document.hidden
+      if (watch && !watching) resize.observe(host)
+      else if (!watch && watching) resize.unobserve(host)
+      watching = watch
+      // Keep only the host resize sentinel while a media query hides this
+      // region. It detects its return without keeping local consumers alive.
+      const rect = host.getBoundingClientRect()
+      const visible = watch && rect.width > 0 && rect.height > 0
       if (visible && !observing) {
-        resize.observe(host)
         mutation.observe(host, { childList: true, subtree: true, characterData: true })
         host.addEventListener('scroll', onScroll, { passive: true })
         observing = true
       } else if (!visible && observing) {
-        resize.disconnect()
+        if (observedTarget) resize.unobserve(observedTarget)
         mutation.disconnect()
         host.removeEventListener('scroll', onScroll)
         observing = false

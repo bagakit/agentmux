@@ -18,7 +18,7 @@ import type { AgentTimelineItem } from '../../../shared/contracts'
  * `'agent'` 为已知 Agent，`'unknown'` 为未记录或原生用户输入，`'human'` 仅在确知人类身份时保留。
  * 绝不再从 `source=user` 或原生角色盲目猜测 Human。
  */
-export type SpeakerRole = 'human' | 'agent' | 'unknown'
+export type SpeakerRole = 'human' | 'agent' | 'unknown' | 'system'
 
 /**
  * 对话体里的一个说话人。
@@ -43,6 +43,14 @@ export const HUMAN_SPEAKER_ID = 'human'
  */
 export const UNKNOWN_SPEAKER_ID = 'unknown'
 
+/** The producing system, separate from session identities. */
+export const AGENTMUX_SYSTEM_SPEAKER_ID = 'agentmux'
+
+/** User-requested display default; recorded authorship remains unchanged. */
+export function speakerForDisplay(speaker: ConversationSpeaker): ConversationSpeaker {
+  return speaker.role === 'unknown' ? { role: 'human', id: HUMAN_SPEAKER_ID } : speaker
+}
+
 /**
  * 把一个身份解析成「叫什么、画哪个 provider」。
  */
@@ -59,9 +67,10 @@ export function createSpeakerResolver(options?: {
   lookupAgent?: (agentSessionId: string) => { label?: string; providerId?: AgentProviderId } | undefined
   currentSession?: { id: string; label?: string; providerId?: AgentProviderId } | undefined
 }): DescribeSpeaker {
-  return (speaker: ConversationSpeaker) => {
+  return (recordedSpeaker: ConversationSpeaker) => {
+    const speaker = speakerForDisplay(recordedSpeaker)
     if (speaker.role === 'human') return { name: 'You' }
-    if (speaker.role === 'unknown') return { name: 'Input' }
+    if (speaker.role === 'system') return { name: 'AgentMux' }
     if (options?.lookupAgent) {
       const found = options.lookupAgent(speaker.id)
       if (found) {
@@ -104,6 +113,9 @@ export function speakerOf(
     return speakerOfUserMessage(itemOrMessage)
   }
   const item = itemOrMessage as AgentTimelineItem
+  if (item.kind === 'system_message' && item.source === 'agentmux') {
+    return { role: 'system', id: AGENTMUX_SYSTEM_SPEAKER_ID }
+  }
   if (item.authorAgentSessionId) {
     return { role: 'agent', id: item.authorAgentSessionId }
   }

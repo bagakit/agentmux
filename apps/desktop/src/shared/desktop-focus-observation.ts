@@ -14,10 +14,10 @@ export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z
   selection: z.object({ surface: z.enum(['space', 'focus', 'goals', 'survey']), mainSurface: z.enum(['workbench', 'agents', 'board', 'survey']),
     space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict(),
   presentation: z.object({ provenance, state: z.enum(['main-visible', 'floating', 'covered', 'pending', 'unknown']),
-    tabId: nullableId, regionId: nullableId, blockers: z.array(z.enum(['settings', 'quick-switcher', 'shortcuts-help'])) }).strict(),
+    tabId: nullableId, regionId: nullableId, blockers: z.array(z.enum(['settings', 'quick-switcher'])) }).strict(),
   input: desktopInputObservationSchema,
   floating: z.object({ provenance, state: z.enum(['closed', 'preview', 'pinned', 'unknown']), topicId: nullableId,
     tabId: nullableId, regionId: nullableId, sessionId: nullableId, presentation: z.enum(['visible', 'hidden', 'pending', 'unknown']) }).strict(),
-  overlays: z.object({ provenance, settings: z.boolean().nullable(), quickSwitcher: z.boolean().nullable(), shortcutsHelp: z.boolean().nullable() }).strict(),
+  overlays: z.object({ provenance, settings: z.boolean().nullable(), quickSwitcher: z.boolean().nullable() }).strict(),
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict()
 }).strict()

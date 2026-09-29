@@ -1,9 +1,10 @@
 import * as DropdownMenu from './HoverDropdownMenu'
 import { Check, ChevronDown, LayoutDashboard, Search, Settings2, X } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
 import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
+import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { SETTINGS_GROUPS as GROUPS } from './settings/settings-catalog'
@@ -21,6 +22,7 @@ export function SettingsPanel({ onClose, initialSection = 'overview', executorId
   const [active, setActive] = useState<SettingsPageId>(initialSection)
   const [query, setQuery] = useState('')
   const searchInput = useRef<HTMLInputElement>(null)
+  const opener = useRef(typeof document === 'undefined' ? null : document.activeElement)
   const [visited, setVisited] = useState<SettingsSectionId[]>(initialSection === 'overview' ? [] : [initialSection])
 
   function clearSearch(): void {
@@ -47,10 +49,14 @@ export function SettingsPanel({ onClose, initialSection = 'overview', executorId
     if (first) setActive(first.id)
   }, [active, query, visibleSections])
 
-  useEffect(() => {
-    const opener = document.activeElement
-    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus() }
+  useEffect(() => () => {
+    if (opener.current instanceof HTMLElement && desktopElementVisible(opener.current)) opener.current.focus()
   }, [])
+  useLayoutEffect(() => {
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && focused !== document.body && focused.isConnected && !focused.closest('[hidden], [inert]')) return
+    searchInput.current?.focus()
+  }, [active])
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {

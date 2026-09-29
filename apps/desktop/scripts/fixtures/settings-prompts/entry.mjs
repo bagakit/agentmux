@@ -4,6 +4,9 @@ import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import '../../../src/renderer/src/styles/index.css'
+import { SHORTCUT_BINDINGS, chordForPlatform } from '../../../src/renderer/src/lib/shortcut-registry'
+import { formatChord } from '../../../src/renderer/src/lib/shortcut-cheat-sheet'
+import { isMacPlatform } from '../../../src/renderer/src/lib/host-platform'
 
 // Private transport seam only: the actual App and ConfigOwner/ConfigStore own
 // rendering and persistence. No user config or Runtime is connected.
@@ -17,6 +20,7 @@ const keys = ['tabs', 'layouts', 'sessions', 'activeWorkspaceId', 'agentComposer
 let before
 window.promptsProbe = {
   ready: true,
+  shortcuts: () => ({ isMac: isMacPlatform(), bindings: SHORTCUT_BINDINGS.map(binding => ({ ...binding, keys: formatChord(chordForPlatform(binding, isMacPlatform()), isMacPlatform()) })) }),
   config: () => bridge.get(),
   theme: async (mode) => {
     const current = await api.config.get()

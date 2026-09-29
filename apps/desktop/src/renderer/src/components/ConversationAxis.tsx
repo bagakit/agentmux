@@ -1,4 +1,4 @@
-import type { ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker'
+import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
 import { conversationAxis, type ConversationAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 
@@ -138,7 +138,8 @@ function AxisMark({
   onPeek?: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
   onPeekEnd?: () => boolean
 }) {
-  const { name, providerId } = describe(mark.speaker)
+  const displaySpeaker = speakerForDisplay(mark.speaker)
+  const { name, providerId } = describe(displaySpeaker)
   // hover 与 focus 走**同一个** peek，pointerleave 与 blur 走同一个 peekEnd：触屏上没有 hover，
   // 键盘上没有指针，若两条通路各写一份，移动端与键盘就成了两套要各自维护的实现。这里让四个事件
   // 收敛到一对出口上，于是「不存在只能靠鼠标 hover 才能获得的信息」是结构性的，不靠自觉。
@@ -168,7 +169,7 @@ function AxisMark({
           视觉能识别的身份。 */}
       <span className="conversation-axis__glyph" aria-hidden="true">
       <ConversationSpeakerAvatar
-        speaker={mark.speaker}
+        speaker={displaySpeaker}
         name={name}
         size={size}
         {...(providerId === undefined ? {} : { providerId })}

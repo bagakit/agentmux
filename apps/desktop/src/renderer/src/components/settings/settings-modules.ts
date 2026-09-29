@@ -3,6 +3,7 @@ import { appearanceSettingsModule } from './modules/appearance'
 import { notificationsSettingsModule } from './modules/notifications'
 import { browserSettingsModule } from './modules/browser'
 import { generalSettingsModule } from './modules/general'
+import { keyboardShortcutsSettingsModule } from './modules/keyboard-shortcuts'
 import { agentsSettingsModule } from './modules/agents'
 import { promptsSettingsModule } from './modules/prompts'
 import { workspacesSettingsModule } from './modules/workspaces'
@@ -14,6 +15,7 @@ export const settingsModules = [
   notificationsSettingsModule,
   browserSettingsModule,
   generalSettingsModule,
+  keyboardShortcutsSettingsModule,
   agentsSettingsModule,
   promptsSettingsModule,
   workspacesSettingsModule,

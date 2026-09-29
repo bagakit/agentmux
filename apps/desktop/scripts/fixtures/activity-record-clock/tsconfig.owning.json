@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+  "include": ["../../../src/renderer/src/global.d.ts", "../../../test/activity-record-clock.integration.test.tsx", "./vitest.owning.config.mts"]
+}

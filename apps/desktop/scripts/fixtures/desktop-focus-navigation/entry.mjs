@@ -8,7 +8,6 @@ import { createRendererSessionEvents } from '../../../src/renderer/src/lib/sessi
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { readTerminalViewObservation } from '../../../src/renderer/src/lib/terminal-view-observation'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { openShortcutHelp } from '../../../src/renderer/src/lib/shortcut-help-affordance'
 import { bindingById, chordForPlatform } from '../../../src/renderer/src/lib/shortcut-registry'
 import { isMacPlatform } from '../../../src/renderer/src/lib/host-platform'
 import { REGION_FOCUS_CLASS } from '../../../src/renderer/src/lib/region-focus'
@@ -336,7 +335,7 @@ window.focusProofOpenQuickSwitcher = () => {
   window.dispatchEvent(new KeyboardEvent('keydown', { key: chord.key, metaKey: chord.primary && mac,
     ctrlKey: chord.primary && !mac, shiftKey: chord.shift, altKey: chord.alt, bubbles: true, cancelable: true }))
 }
-window.focusProofOpenShortcuts = () => openShortcutHelp(isMacPlatform())
+window.focusProofOpenShortcuts = () => document.querySelector('.window-status-bar [data-shortcut-help-open]').click()
 window.focusProofBeginInspect = () => {
   const before = useAppStore.getState()
   const originalElement = document.activeElement

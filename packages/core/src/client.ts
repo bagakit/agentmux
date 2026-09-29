@@ -2038,9 +2038,9 @@ export class AgentMuxClient {
       // 拒绝，而运行时引导默认开、`composeAgentLaunchPrompt` 因此几乎总是非空，那等于这个
       // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
+      const composed = composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide, input.agentMuxNote)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
-        provider.catalog,
-        composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide, input.agentMuxNote)
+        provider.catalog, composed.text
       )
       // Sealed launch options resolve to their argv core-side (fails closed on an un-declared choice) and
       // join the caller's args ahead of the prompt, exactly as buildArgs orders every other flag.
@@ -2162,13 +2162,25 @@ export class AgentMuxClient {
       const promptConfirmed = await this.deliverPostLaunchPrompt(
         provider, readySession, run, lifecycleOperationId, deferredPrompt
       )
+      if (composed.systemContext) {
+        await this.recordMessageAfterSideEffect(
+          readySession,
+          `system-context:${lifecycleOperationId}`,
+          'AgentMux context',
+          composed.systemContext,
+          now,
+          'agentmux',
+          { status: promptConfirmed ? 'complete' : 'failed' }
+        )
+      }
       if (input.prompt?.trim()) {
-        await this.recordPromptAfterSideEffect(
+        await this.recordMessageAfterSideEffect(
           readySession,
           `prompt:${lifecycleOperationId}`,
           'Initial prompt',
           input.prompt.trim(),
           now,
+          'user',
           { status: promptConfirmed ? 'complete' : 'failed',
             ...(input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {}) }
         )
@@ -2553,12 +2565,13 @@ export class AgentMuxClient {
         provider, readySession, run, lifecycleOperationId, deferredResumePrompt
       )
       if (prompt) {
-        await this.recordPromptAfterSideEffect(
+        await this.recordMessageAfterSideEffect(
           readySession,
           `prompt:${lifecycleOperationId}`,
           'Resume prompt',
           prompt,
           Date.now(),
+          'user',
           { status: promptConfirmed ? 'complete' : 'failed' }
         )
       }
@@ -2803,12 +2816,13 @@ export class AgentMuxClient {
       await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
         input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte)
     }, renderObservation)
-    await this.recordPromptAfterSideEffect(
+    await this.recordMessageAfterSideEffect(
       session,
       `prompt:${operationId}`,
       'Prompt',
       outbound,
       Date.now(),
+      'user',
       {
         ...(input.authorAgentSessionId
           ? { authorAgentSessionId: input.authorAgentSessionId }
@@ -3831,12 +3845,13 @@ export class AgentMuxClient {
     }
   }
 
-  private async recordPromptAfterSideEffect(
+  private async recordMessageAfterSideEffect(
     session: AgentMuxAgentSession,
     itemId: string,
     title: string,
     content: string,
     observedAt: number,
+    source: 'user' | 'agentmux',
     delivery: { authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
@@ -3845,21 +3860,21 @@ export class AgentMuxClient {
       item: {
         id: itemId,
         agentSessionId: session.agentSessionId,
-        kind: 'user_message',
+        kind: source === 'agentmux' ? 'system_message' : 'user_message',
         status: delivery.status ?? 'complete',
-        source: 'user',
+        source,
         createdAt: observedAt,
         updatedAt: observedAt,
         title,
         content,
-        ...(delivery.authorAgentSessionId
+        ...(source === 'user' && delivery.authorAgentSessionId
           ? { authorAgentSessionId: delivery.authorAgentSessionId }
-          : delivery.authorAgentSessionId === undefined && delivery.authorHuman === true
+          : source === 'user' && delivery.authorAgentSessionId === undefined && delivery.authorHuman === true
             ? { authorHuman: true }
             : {})
       }
     }
-    const evidence = { source: 'user' as const, observedAt, run: { ...session.run } }
+    const evidence = { source, observedAt, run: { ...session.run } }
     try {
       await this.persistAndPublishTimeline(mutation, evidence)
     } catch (error) {

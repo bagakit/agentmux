@@ -15,7 +15,6 @@ import { ResourceUsagePanel } from './components/ResourceUsagePanel'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { QuickSwitcher } from './components/QuickSwitcher'
-import { ShortcutsCheatSheet } from './components/ShortcutsCheatSheet'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
@@ -61,7 +60,6 @@ function DesktopApp() {
   const settingsNavigation = useMemo(() => ({ open: openSettings }), [openSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
-  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
@@ -86,13 +84,13 @@ function DesktopApp() {
     tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
   const mainSurface = useAppStore((state) => state.mainSurface)
   const presentationRef = useRef<DesktopAppPresentationOwner>({ loading: true,
-    overlays: { settings: false, quickSwitcher: false, shortcutsHelp: false },
+    overlays: { settings: false, quickSwitcher: false },
     floating: null })
   useLayoutEffect(() => installDesktopPresentationOwner(() => presentationRef.current), [])
   useLayoutEffect(() => {
     const floating = readPmoTeamsTopicFloatingState()
     presentationRef.current = { loading,
-      overlays: { settings: Boolean(settingsRoute), quickSwitcher: quickSwitchOpen, shortcutsHelp: shortcutsHelpOpen },
+      overlays: { settings: Boolean(settingsRoute), quickSwitcher: quickSwitchOpen },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null } : null }
@@ -266,7 +264,7 @@ function DesktopApp() {
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
         toggleQuickSwitch: () => setQuickSwitchOpen((current) => !current),
-        toggleShortcutsHelp: () => setShortcutsHelpOpen((current) => !current)
+        openShortcuts: () => openSettings('keyboard-shortcuts')
       })
       if (routeWindowShortcut(event, isMac, editableTarget, handlers)) event.preventDefault()
     }
@@ -410,11 +408,6 @@ function DesktopApp() {
         </div>
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
-      <ShortcutsCheatSheet
-        open={shortcutsHelpOpen}
-        onClose={() => setShortcutsHelpOpen(false)}
-        isMac={isMacPlatform()}
-      />
       </div>
       <WindowOverlayHost />
       </RendererResourceOwners>

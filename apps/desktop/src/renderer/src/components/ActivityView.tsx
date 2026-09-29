@@ -21,9 +21,9 @@ import {
   describeReadout,
   describeRulerAxis,
   describeSpan,
+  describeActivityRecordTime,
   formatClock,
   formatDuration,
-  formatOffset,
   rulerBand,
   stepRulerSelection,
   type RulerReadoutText,
@@ -499,6 +499,7 @@ function Row({
   // 折叠起来的一行只有裸工具名时，三行 `Bash` 分不出跑的是哪条命令——而不展开就认得出，
   // 正是折叠的前提。带上那个最具识别性的参数。
   const heading = stepTitle(item.title, item.toolName, item.toolInput, workspaceRoot)
+  const recordedTime = describeActivityRecordTime(item.createdAt, item.createdAt, origin)
 
   return (
     <Fragment>
@@ -509,10 +510,11 @@ function Row({
           data-status={item.status}
           data-expandable=""
           aria-expanded={open}
+          aria-description={recordedTime.offset}
           onClick={() => setOpen((value) => !value)}
         >
           <span className="log-row__node"><Glyph kind={item.kind} /></span>
-          <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
+          <span className="log-row__time" title={recordedTime.offset}>{recordedTime.from}</span>
           <span className="log-row__title">
             {heading}
             {count > 1 ? <span className="log-row__count">×{count}</span> : null}
@@ -525,7 +527,7 @@ function Row({
       ) : (
         <div className={`log-row log-row--${item.kind}`} data-status={item.status}>
           <span className="log-row__node"><Glyph kind={item.kind} /></span>
-          <span className="log-row__time">{formatOffset(item.createdAt, origin)}</span>
+          <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time>
           <span className="log-row__title">
             {heading}
             {count > 1 ? <span className="log-row__count">×{count}</span> : null}
@@ -576,17 +578,11 @@ function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; ori
   const [open, setOpen] = useState(false)
   const rows = useMemo(() => timelineRows(items), [items])
   const failed = items.some((item) => item.status === 'failed')
-  // 折起来的一段机器执行正是最需要"这段花了多久"的地方——它是被藏起来的那部分时间。
-  //
-  // 起点是第一条的 createdAt（PreToolUse，那一步**开始**），终点必须是最后完成的那个 updatedAt
-  // （PostToolUse，那一步**结束**）——不是最后一条的 createdAt。一段执行的末步往往是最贵的那一步
-  // （build、跑测试、大文件操作），用"末步开始"当终点会系统性地把它整段跑的时间漏掉：一个藏着五分钟
-  // 构建的折叠头会宣称自己只有 1 秒。取 max 而不是末条的 updatedAt，是因为并发的几步完成顺序不必
-  // 跟着开始顺序。存储侧保证 updatedAt >= createdAt（session-timeline 建条时就拦），所以差非负。
-  //
-  // 同一时刻的一段（或只有一条且瞬时完成）跨度为零，此时不渲染那一件，不硬报一个 `0s`——与序数轴
-  // 同一条诚实规则。
-  const elapsed = Math.max(...items.map((item) => item.updatedAt)) - items[0]!.createdAt
+  // A group's record range ends at its latest update, not the last step's start.
+  // Concurrent steps can finish out of order; an update does not prove the Session or process ended.
+  const lastRecordedAt = Math.max(...items.map((item) => item.updatedAt))
+  const elapsed = lastRecordedAt - items[0]!.createdAt
+  const recordedTime = describeActivityRecordTime(items[0]!.createdAt, lastRecordedAt, origin)
 
   return (
     <Fragment>
@@ -595,12 +591,15 @@ function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; ori
         className="log-fold"
         data-open={open ? '' : undefined}
         aria-expanded={open}
+        aria-description={recordedTime.offset}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="log-fold__node"><ChevronRight size={12} className="log-fold__chevron" /></span>
-        <span className="log-row__time">{formatOffset(items[0]!.createdAt, origin)}</span>
         <span className="log-fold__label">
-          {items.length} steps
+          <span className="log-fold__time" title={recordedTime.offset}>
+            <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
+          </span>
+          <span className="log-fold__steps">{items.length} steps</span>
           {elapsed > 0 ? <span className="log-fold__elapsed">{formatDuration(elapsed)}</span> : null}
           {rows.length < items.length ? <span className="log-row__count">{rows.length} unique</span> : null}
           {failed ? <span className="log-row__chip log-row__chip--failed">FAILED</span> : null}
@@ -967,6 +966,7 @@ export function ActivityView({
               ) : entry.kind === 'user-message' ? (
                 <ConversationMessage
                   messageId={entry.message.id}
+                  conversationSessionId={sessionId}
                   content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
                   {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
                   {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
@@ -984,6 +984,7 @@ export function ActivityView({
               ) : speaker ? (
                 <ConversationMessage
                   messageId={entry.item.id}
+                  conversationSessionId={sessionId}
                   content={entry.item.content ?? ''}
                   status={entry.item.status}
                   createdAt={entry.item.createdAt}

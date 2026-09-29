@@ -1,5 +1,3 @@
-import { openShortcutHelp } from '../lib/shortcut-help-affordance'
-import { isMacPlatform } from '../lib/host-platform'
 import { Keyboard, Settings2 } from 'lucide-react'
 import type { SettingsSectionId } from './SettingsPanel'
 
@@ -32,10 +30,10 @@ function SettingsButton({
   )
 }
 
-function ShortcutHelpButton() {
+function ShortcutHelpButton({ onOpenSettings }: { onOpenSettings: (section: SettingsSectionId) => void }) {
   return <button type="button" className="icon-button project-rail-toolbar__button"
     aria-label="Keyboard shortcuts" title="Keyboard shortcuts" data-shortcut-help-open
-    onClick={() => openShortcutHelp(isMacPlatform())}><Keyboard size={13} /></button>
+    onClick={() => onOpenSettings('keyboard-shortcuts')}><Keyboard size={13} /></button>
 }
 
 export function ProjectRailToolbar({
@@ -46,7 +44,7 @@ export function ProjectRailToolbar({
     return (
       <div className="project-rail-corner-toolbar" data-project-rail-corner-toolbar>
         <SettingsButton onOpenSettings={onOpenSettings} />
-        <ShortcutHelpButton />
+        <ShortcutHelpButton onOpenSettings={onOpenSettings} />
       </div>
     )
   }
@@ -55,7 +53,7 @@ export function ProjectRailToolbar({
     <footer className="project-rail-toolbar" role="toolbar" aria-label="Project rail tools">
       <div className="project-rail-toolbar__group">
         <SettingsButton onOpenSettings={onOpenSettings} />
-        <ShortcutHelpButton />
+        <ShortcutHelpButton onOpenSettings={onOpenSettings} />
       </div>
     </footer>
   )

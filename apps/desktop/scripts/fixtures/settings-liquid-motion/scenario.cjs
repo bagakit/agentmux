@@ -248,6 +248,5 @@ exports.run = async function run(p) {
 }
 
 async function promptsChecks(p, helpers) {
-  // T2 is filled against its owning product slice after T1 qualification.
-  throw new Error('Prompt liquid scenario is not yet qualified')
+  return require('./scenario-prompts.cjs').run(p, helpers)
 }

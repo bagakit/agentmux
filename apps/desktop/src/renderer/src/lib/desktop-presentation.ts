@@ -4,7 +4,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 
 export type DesktopAppPresentationOwner = {
   loading: boolean
-  overlays: { settings: boolean; quickSwitcher: boolean; shortcutsHelp: boolean }
+  overlays: { settings: boolean; quickSwitcher: boolean }
   floating: { state: 'closed' | 'preview' | 'pinned'; topicId: string | null; tabId: string | null } | null
 }
 // The original App supplies its committed local facts. This is one reader, not a second router,
@@ -30,7 +30,7 @@ function queryIdentity(attribute: string, id: string): HTMLElement | null {
 }
 const unknownInput = (): AgentMuxDesktopInput => ({ provenance: 'unknown', scope: 'unknown', ownerKind: null,
   tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
-const unknownOverlays = (): AgentMuxDesktopOverlays => ({ provenance: 'unknown', settings: null, quickSwitcher: null, shortcutsHelp: null })
+const unknownOverlays = (): AgentMuxDesktopOverlays => ({ provenance: 'unknown', settings: null, quickSwitcher: null })
 export type DesktopInputCapture = { element: HTMLElement | null; fact: AgentMuxDesktopInput }
 
 /** One actual activeElement and its exact projection; no value, draft, selection text or bytes. */
@@ -73,7 +73,6 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
   const blockers: AgentMuxDesktopPresentation['blockers'] = []
   if (overlays.settings) blockers.push('settings')
   if (overlays.quickSwitcher) blockers.push('quick-switcher')
-  if (overlays.shortcutsHelp) blockers.push('shortcuts-help')
   const { tabId = null, regionId = null } = selection.surface === 'space' ? selection.space ?? {} : {}
   const base = { tabId, regionId, blockers }
   let presentation: AgentMuxDesktopPresentation = { ...base, provenance: 'unknown', state: 'unknown' }
