@@ -59,6 +59,12 @@
 .agent-launch-notice { padding-right: var(--region-close-clearance, 0); }
 .agent-body[data-observation-surface='workflow'] { background: radial-gradient(70% 18% at 50% 0, color-mix(in oklab, var(--blue) 5%, transparent), transparent 72%); }
 .agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
+/* One current request belongs to the common reading host, not to a copied history row. */
+.agent-body[data-pending-interaction] { display: grid; grid-template-rows: minmax(0, 1fr) fit-content(min(320px, 55%)); }
+.agent-body[data-pending-interaction] > .agent-terminal-stage { min-height: 0; height: auto; }
+.agent-body > .agent-interaction { min-height: 0; overflow: auto; margin-bottom: var(--sp-3); }
+.agent-interaction__status { margin: 0 0 var(--sp-2); color: var(--amber); font-size: var(--fs-micro); line-height: 1.4; }
+.agent-interaction button[aria-pressed='true'] { color: var(--text); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--focus-line); }
 /* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
@@ -167,6 +173,7 @@
   box-shadow: var(--elev-2), var(--hl);
 }
 .agent-interaction__heading { display: flex; align-items: flex-start; gap:var(--sp-4); color: var(--amber); }
+.agent-interaction__heading > svg { flex: 0 0 auto; }
 .agent-interaction__heading > div { min-width: 0; display: grid; gap:var(--sp-1); }
 .agent-interaction__heading strong { color: var(--text); font-size: var(--fs-body); line-height: 1.35; }
 .agent-interaction__heading span { color: var(--text-2); font-size: var(--fs-meta); }
@@ -196,7 +203,7 @@
   cursor: pointer;
   transition: color 90ms ease, background 90ms ease;
 }
-.agent-interaction__options button { justify-content: start; min-height: 0; padding:var(--sp-3) var(--sp-4); line-height: 1.4; }
+.agent-interaction__options button { display: grid; justify-content: start; min-height: 0; padding:var(--sp-3) var(--sp-4); line-height: 1.4; }
 .agent-interaction button > svg { flex: 0 0 auto; }
 .agent-interaction button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 /* The one affirmative action carries the solid brand fill; everything else stays secondary. */

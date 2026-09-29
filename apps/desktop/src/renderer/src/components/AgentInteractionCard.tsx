@@ -1,5 +1,5 @@
 import { Ban, Check, HelpCircle, ShieldAlert } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse
@@ -7,51 +7,74 @@ import type {
 import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan'
 import { presentError } from '../lib/error-presentation'
 
-/**
- * Agent 卡点的渲染层——只画，不判。
- *
- * 「点了发生什么」全部来自 agent-interaction-plan：每个可点的东西自带一条 `response`，这里原样
- * 交给 onRespond，不在 JSX 里第二次构造响应。这么切是因为本仓测试栈渲不出 handler，而这个组件带
- * useState 故也不能当纯函数直接调——判决留在闭包里就等于没人守。实测过：把 scoped 那两个 allow
- * 的 onClick 换成 cancelled，27 条测试与 tsc 全都沉默，用户点「允许」而 Agent 收到取消。
- */
+/** The single typed plan owns answer semantics; this card owns presentation and submission state. */
 export function AgentInteractionCard({
   request,
   disabled = false,
+  readOnly = false,
   responseUnavailableReason,
   onOpenTerminal,
   onRespond
 }: {
   request: AgentMuxInteractionRequest
   disabled?: boolean
+  readOnly?: boolean
   responseUnavailableReason?: string | undefined
   onOpenTerminal?(): void
   onRespond(response: AgentMuxInteractionResponse): Promise<void>
 }) {
-  const [submitting, setSubmitting] = useState(false)
+  const [phase, setPhase] = useState<'idle' | 'sending' | 'awaiting'>('idle')
+  const submission = useRef(false)
+  const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
-  const unavailable = disabled || submitting || Boolean(responseUnavailableReason)
+  const unavailable = readOnly || disabled || phase !== 'idle' || Boolean(responseUnavailableReason)
   async function respond(response: AgentMuxInteractionResponse): Promise<void> {
-    if (unavailable) return
-    setSubmitting(true)
+    if (unavailable || submission.current) return
+    submission.current = true
+    setPhase('sending')
+    setSelectedOption(response.kind === 'permission'
+      ? response.decision.outcome === 'selected' ? response.decision.optionId : null
+      : response.outcome === 'answered' ? response.answers[0]?.optionId ?? null : null)
     setFailure(null)
     try {
       await onRespond(response)
+      setPhase('awaiting')
     } catch (error) {
       setFailure(presentError(error))
-    } finally {
-      setSubmitting(false)
+      submission.current = false
+      setPhase('idle')
     }
   }
 
   const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
+  const status = readOnly ? 'Read-only · Answer in the original Session'
+    : phase === 'sending' ? 'Sending answer…'
+    : phase === 'awaiting' ? 'Answer sent · Waiting for confirmation'
+    : reason ? 'Native confirmation needed'
+    : disabled ? 'Answer unavailable · Check this Session'
+    : 'Needs your answer'
+  const requestStatus = <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
+
   if (reason) return (
-      <section className="agent-interaction" aria-label="Agent interaction needs native confirmation" data-request-id={request.id} role="status">
+    <section className="agent-interaction" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
+      {requestStatus}
+      {request.kind === 'permission' ? <>
+        <div className="agent-interaction__heading"><div>
+          <strong>{request.title}</strong>
+          {request.toolName ? <span>{request.toolName}</span> : null}
+        </div></div>
+        {request.toolInput ? <pre>{request.toolInput}</pre> : null}
+      </> : request.questions.map(question => (
+        <div className="agent-interaction__heading" key={question.id}><div>
+          {question.title ? <strong>{question.title}</strong> : null}
+          <span>{question.prompt}</span>
+        </div></div>
+      ))}
       <div className="agent-interaction__heading">
         <ShieldAlert size={15} />
         <div><strong>Answer in terminal</strong><span>{reason}</span></div>
       </div>
-      {onOpenTerminal ? <div className="agent-interaction__actions">
+      {!readOnly && onOpenTerminal ? <div className="agent-interaction__actions">
         <button type="button" onClick={onOpenTerminal}>Open terminal</button>
       </div> : null}
     </section>
@@ -65,6 +88,7 @@ export function AgentInteractionCard({
     const { choices, allows, rejects, scoped, dismiss } = permissionPlan(request)
     return (
       <section className="agent-interaction" aria-label="Agent permission request" data-request-id={request.id}>
+        {requestStatus}
         <div className="agent-interaction__heading">
           <ShieldAlert size={15} />
           <div>
@@ -79,6 +103,7 @@ export function AgentInteractionCard({
             {allows.map(({ option, response }) => (
               <button
                 key={option.id}
+                aria-pressed={selectedOption === option.id}
                 type="button"
                 disabled={unavailable}
                 className={option.kind === 'allow-once' ? 'is-primary' : undefined}
@@ -111,6 +136,7 @@ export function AgentInteractionCard({
           {(scoped ? rejects : choices).map(({ option, response }) => (
             <button
               key={option.id}
+              aria-pressed={selectedOption === option.id}
               type="button"
               disabled={unavailable}
               className={option.kind === 'allow-once' ? 'is-primary' : undefined}
@@ -128,6 +154,7 @@ export function AgentInteractionCard({
   const { question, choices, dismiss } = questionPlan(request)
   return (
     <section className="agent-interaction" aria-label="Agent question" data-request-id={request.id}>
+      {requestStatus}
       <div className="agent-interaction__heading">
         <HelpCircle size={15} />
         <div>
@@ -140,6 +167,7 @@ export function AgentInteractionCard({
         {choices.map(({ option, response }) => (
           <button
             key={option.id}
+            aria-pressed={selectedOption === option.id}
             type="button"
             disabled={unavailable}
             onClick={() => void respond(response)}
