@@ -66,6 +66,19 @@ async function protectedFace() {
     assert.ok(await evaluate(`(()=>{const r=${face}.querySelector('header').getBoundingClientRect(),f=${face}.getBoundingClientRect();return r.y>=f.y&&r.bottom<=f.bottom})()`), 'Header and close stay reachable');
     return g;
 }
+async function initialPromptAction() {
+    const observation = await evaluate(`(()=>{const b=${buttons}[0];if(!b)throw new Error('First current Prompt action is absent');const s=(${face}.dataset.compact==='true'?${face}.querySelector('.agent-state-face'):${face}.querySelector('.agent-state-face__body')),clip=s.getBoundingClientRect();return{scrollTop:s.scrollTop,clip:{top:clip.top,bottom:clip.bottom,left:clip.left,right:clip.right},texts:['.agent-status-prompts__label','.agent-status-prompts__intent'].map(selector=>{const e=b.querySelector(selector),range=document.createRange();range.selectNodeContents(e);return{text:e.textContent,rects:Array.from(range.getClientRects()).map(r=>({top:r.top,bottom:r.bottom,left:r.left,right:r.right,hit:b.contains(document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2))}))}})}})()`);
+    assert.equal(observation.scrollTop, 0, 'The initial Prompt action is visible before focus or scrolling');
+    assert.equal(observation.texts.length, 2);
+    for (const text of observation.texts) {
+        assert.ok(text.text.length > 0 && text.rects.length > 0, 'The Prompt label and Send/Queue intent have actual text ranges');
+        for (const rect of text.rects) {
+            assert.ok(rect.top >= observation.clip.top - 1 && rect.bottom <= observation.clip.bottom + 1 && rect.left >= observation.clip.left - 1 && rect.right <= observation.clip.right + 1, 'The complete first Prompt label and intent are inside the initial scroll clip');
+            assert.equal(rect.hit, true, 'The initial Prompt text belongs to the actual clickable action');
+        }
+    }
+    (result.initialPromptActions ??= []).push({ stage: result.stage, ...observation });
+}
 async function frame(width, name) { await painted(); const file = `${width}-${name}.png`, bytes = (await win.webContents.capturePage()).toPNG(); assert.ok(bytes.length > 0); await fs.writeFile(path.join(evidence, file), bytes); result.frames.push({ width, name, file }); }
 async function open() {
     if (!await evaluate(`Boolean(${face})`))
@@ -118,6 +131,7 @@ async function scene(width, height, appearance, draft, mode = 'collapsed', lower
         const actual = await evaluate(`Array.from(${buttons}).map(b=>b.getAttribute('aria-label'))`), expected = await evaluate(`statusPromptActions.prompts.filter(p=>p.states.includes(${JSON.stringify(state)})).map(p=>'Send '+p.label)`);
         assert.ok(actual.length > 0);
         assert.deepEqual(actual, expected);
+        await initialPromptAction();
         await escape();
         stable(baseline, await geometry());
     }
@@ -177,6 +191,7 @@ async function scene(width, height, appearance, draft, mode = 'collapsed', lower
     await protectedFace();
     await escape();
     for (const kind of ['permission', 'question']) {
+        result.stage = { width, height, appearance, state: 'running', pending: kind };
         await evaluate(`statusPromptActions.state('running');statusPromptActions.pending(${JSON.stringify(kind)})`);
         await painted();
         await settledGeometry();
@@ -188,6 +203,7 @@ async function scene(width, height, appearance, draft, mode = 'collapsed', lower
         await protectedFace();
         assert.ok(await evaluate(`(${face}.dataset.compact==='true'?${face}.querySelector('.agent-state-face'): ${face}.querySelector('.agent-state-face__body')).clientHeight>16`), 'Short face has usable scroll body');
         assert.equal(await evaluate(`${buttons}[0].getAttribute('aria-label')`), 'Queue Explain running');
+        await initialPromptAction();
         if (kind === 'question' && height === 430) {
             await frame(width, '430-dark-question-queue-short-face');
             await evaluate(`(()=>{const b=${buttons}[0],s=(${face}.dataset.compact==='true'?${face}.querySelector('.agent-state-face'):${face}.querySelector('.agent-state-face__body'));b.focus();s.scrollTop+=b.getBoundingClientRect().top-s.getBoundingClientRect().top})()`);
@@ -201,7 +217,7 @@ async function scene(width, height, appearance, draft, mode = 'collapsed', lower
             const lineGeometry = line => evaluate(`(()=>{const b=${buttons}[0],small=b.querySelector('small'),text=small.firstChild,s=(${face}.dataset.compact==='true'?${face}.querySelector('.agent-state-face'):${face}.querySelector('.agent-state-face__body')),line=${line},lines=small.textContent.split(${JSON.stringify('\n')}),start=lines.slice(0,line).reduce((n,value)=>n+value.length+1,0),range=document.createRange();range.setStart(text,start);range.setEnd(text,start+lines[line].length);const r=range.getBoundingClientRect(),clip=s.getBoundingClientRect();return{line:lines[line],scrollTop:s.scrollTop,top:r.top,bottom:r.bottom,clipTop:clip.top,clipBottom:clip.bottom,visible:r.top>=clip.top-1&&r.bottom<=clip.bottom+1&&b.contains(document.elementFromPoint(r.x+r.width/2,(r.top+r.bottom)/2))}})()`);
             for (let line = 0; line < bodyLines.length; line++) {
                 let observation = await lineGeometry(line);
-                for (let attempt = 0; (attempt === 0 || !observation.visible) && attempt < 24; attempt++) {
+                for (let attempt = 0; (scrollSteps.length === 0 || !observation.visible) && attempt < 24; attempt++) {
                     const scroll = await evaluate(`(()=>{const s=(${face}.dataset.compact==='true'?${face}.querySelector('.agent-state-face'):${face}.querySelector('.agent-state-face__body')),r=s.getBoundingClientRect();return{scrollTop:s.scrollTop,x:r.x+r.width/2,y:r.y+r.height/2}})()`);
                     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: scroll.x, y: scroll.y, deltaX: 0, deltaY: 8 });
                     await painted();
