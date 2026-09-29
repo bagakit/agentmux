@@ -172,7 +172,10 @@
    所以留在这个文件里而不是跟着对话寄存器搬走。 */
 .log-fold__chevron { transition: transform 120ms ease; }
 .log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }
-.log-fold__label { display: inline-flex; align-items: center; gap:var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+.log-fold__label { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap:var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+.log-fold__time { display: inline-flex; flex-wrap: wrap; align-items: center; max-width: 100%; gap: var(--sp-1); color: var(--text-2); font: 11px/1.45 var(--font-mono); font-variant-numeric: tabular-nums; }
+.log-fold__time > span { white-space: nowrap; }
+.log-fold__steps { white-space: nowrap; }
 /* 折起来那段花了多久。它是被藏起来的那部分时间，所以这个数就摆在"N steps"旁边——展开与否都在同
    一个位置回答"这一段值不值得展开"。 */
 .log-fold__elapsed { color: var(--text-2); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -327,4 +330,12 @@
   .activity-working__dots i { animation: none; opacity: .6; }
   /* 动势退化为静态，但字形差异（Activity vs Radio）不受影响仍在——满足合同「reduced-motion 下字形差异必须保留」。 */
   .semantic-icon--working { animation: none; }
+}
+
+.log-row__time[tabindex]:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
+@media (max-width: 620px) {
+  .activity-ruler { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .activity-ruler__stack { grid-column: 1 / -1; min-width: 0; }
+  .activity-ruler__span { min-width: 0; flex-wrap: wrap; white-space: normal; line-height: 1.4; }
+  .activity-ruler__span-range { flex-wrap: wrap; row-gap: var(--sp-1); }
 }

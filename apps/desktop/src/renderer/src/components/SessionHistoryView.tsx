@@ -378,6 +378,7 @@ export function SessionHistoryView({
             <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
               <ConversationMessage
                 messageId={item.id}
+                conversationSessionId={control.agentSessionId}
                 {...(speaker ? { speaker } : {})}
                 name={displayName}
                 {...(described?.providerId ? { providerId: described.providerId } : reading.source ? { providerId: reading.source.providerId } : {})}

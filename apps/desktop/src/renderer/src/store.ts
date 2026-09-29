@@ -10,6 +10,8 @@ import type { DesktopWorkbenchObservation } from '../../shared/client-observatio
 import { sessionPresentationById } from './lib/session-presentation'
 import { observeFocusHistoryIdentity } from './lib/focus-history-identity'
 import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
+import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from './lib/focus-timeline-name-width'
+import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRulerPreferences } from './lib/focus-timeline-ruler'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
@@ -71,7 +73,7 @@ import type {
 import {
   isScratchTopicId,
   PMO_TEAMS_TOPIC_ID,
-  PMO_TEAMS_TOPIC_ROLE,
+  MOTE_COORDINATION_ROLE,
   SCRATCH_WORKSPACE_ID,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
@@ -320,6 +322,11 @@ export type ErrorNoticeContext = {
   summary?: string
   subject?: SessionControl
   lifecycle?: AgentLifecycleFailure
+  /** Only this producer may settle its original missing-facts notice, never a later error. */
+  startupSessionSnapshot?: {
+    sessionIds: readonly string[]
+    remainingMessage: string | null
+  }
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -454,8 +461,12 @@ type AppState = {
   demandPmoTabIds: Record<string, string>
   /** Global navigation context. Execution and PMO focus are separate lanes and never overwrite one another. */
   agentFocus: AgentFocusContext
+  focusTimelineNameWidth: number
+  setFocusTimelineNameWidth(width: number): void
   focusTimelineHeight: number
   setFocusTimelineHeight(height: number): void
+  focusTimelineRuler: FocusRulerPreferences
+  setFocusTimelineRuler(preferences: FocusRulerPreferences): void
   focusExecutionSession(id: string | null): void
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
@@ -1500,6 +1511,7 @@ type SessionMembershipResync = {
   }>
   overflowed: boolean
   recoverSavedAgents: boolean
+  startupNotice: ErrorNoticeContext | null
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
 let regionCaretFocusNonce = 0
@@ -1517,19 +1529,33 @@ function enqueueSessionMembershipEvent(
   entry.overflowed = true
 }
 
+function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: readonly string[]): boolean {
+  if (sessionIds.length === 0) return false
+  const canonicalById = new Map(snapshot.sessions.map((session) => [session.id, session]))
+  return sessionIds.every((id) => {
+    const session = canonicalById.get(id)
+    return session !== undefined && !(snapshot.runtimeOwnershipWarnings ?? []).includes(session.hostId)
+  })
+}
+
 function startSessionMembershipResync(
   event?: RuntimeEvent,
   options: { reportFailure?: boolean; recoverSavedAgents?: boolean } = {}
 ): void {
+  const currentNotice = useAppStore.getState().errorNoticeContext
+  const startupNotice = currentNotice?.startupSessionSnapshot ? currentNotice : null
   if (sessionMembershipResync) {
     sessionMembershipResync.recoverSavedAgents ||= options.recoverSavedAgents === true
+    // initialize can join the resync already started by a buffered membership event.
+    if (startupNotice) sessionMembershipResync.startupNotice = startupNotice
     if (event) enqueueSessionMembershipEvent(sessionMembershipResync, event)
     return
   }
   const entry: SessionMembershipResync = {
     events: event ? [{ event, pendingLaunchAgentSessionId: null }] : [],
     overflowed: false,
-    recoverSavedAgents: options.recoverSavedAgents === true
+    recoverSavedAgents: options.recoverSavedAgents === true,
+    startupNotice
   }
   sessionMembershipResync = entry
   const attemptedStartupRecovery = new Set<string>()
@@ -1588,7 +1614,21 @@ function startSessionMembershipResync(
             membershipGap ||= reduced.sessionMembershipGap === true
             if (reduced.timelineGapSessionId) timelineGaps.add(reduced.timelineGapSessionId)
           }
-          return { ...projected, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          // The adopted canonical facts settle only the original empty-facts producer. Pending
+          // projections/candidates are not Session facts; an unrelated Host does not own this notice.
+          const notice = entry.startupNotice
+          const source = notice?.startupSessionSnapshot
+          let resolvedStartupNotice: Partial<AppState> = {}
+          if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0) {
+            if (startupSnapshotConfirmsSessions(snapshot, source.sessionIds)) {
+              resolvedStartupNotice = {
+                error: source.remainingMessage,
+                lastError: source.remainingMessage,
+                errorNoticeContext: null
+              }
+            }
+          }
+          return { ...projected, ...resolvedStartupNotice, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
         for (const pending of events) {
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
@@ -1742,7 +1782,9 @@ type PersistedAppState = {
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
   surveyBrowserSelection?: SurveyBrowserSelection | null
+  focusTimelineNameWidth?: number
   focusTimelineHeight?: number
+  focusTimelineRuler?: FocusRulerPreferences
   agentFocus?: AgentFocusContext
   selectedDemandId?: string | null
   demandArrangement?: DemandArrangement
@@ -1774,7 +1816,9 @@ export type RestoredUiState = Pick<
   | 'workspaceTool'
   | 'projectRailWidth'
   | 'toolDockWidth'
+  | 'focusTimelineNameWidth'
   | 'focusTimelineHeight'
+  | 'focusTimelineRuler'
   | 'editorWordWrap'
 >
 
@@ -1849,13 +1893,17 @@ export function restorePersistedUiState(
     | 'workspaceTool'
     | 'projectRailWidth'
   | 'toolDockWidth'
+  | 'focusTimelineNameWidth'
   | 'focusTimelineHeight'
+  | 'focusTimelineRuler'
     | 'editorWordWrap'
   >
 ): RestoredUiState {
   return {
     workbenchSpaceSelection: restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection),
+    focusTimelineNameWidth: clampFocusTimelineNameWidth(persisted.focusTimelineNameWidth),
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
+    focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     surveyBrowserSelection: restoredSurveyBrowserSelection(persisted.surveyBrowserSelection),
@@ -1910,7 +1958,9 @@ function selectPersistedInputs(state: AppState) {
     mainSurface: state.mainSurface,
     surveyBrowserSelection: state.surveyBrowserSelection,
     agentFocus: state.agentFocus,
+    focusTimelineNameWidth: state.focusTimelineNameWidth,
     focusTimelineHeight: state.focusTimelineHeight,
+    focusTimelineRuler: state.focusTimelineRuler,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
     demandPmoTabIds: state.demandPmoTabIds,
@@ -2161,7 +2211,7 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
       (session) => current.agentNames[session.id] ?? session.label
     )
     return [
-      prompt?.trim() || PMO_TEAMS_TOPIC_ROLE,
+      prompt?.trim() || MOTE_COORDINATION_ROLE,
       executionContext
     ].join('\n\n')
   }
@@ -2294,8 +2344,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
+  focusTimelineNameWidth: FOCUS_TIMELINE_NAME_WIDTH_DEFAULT,
+  setFocusTimelineNameWidth(width) {
+    const next = clampFocusTimelineNameWidth(width)
+    if (get().focusTimelineNameWidth !== next) set({ focusTimelineNameWidth: next })
+  },
   focusTimelineHeight: FOCUS_TIMELINE_HEIGHT_DEFAULT,
   setFocusTimelineHeight(height) { set({ focusTimelineHeight: clampFocusTimelineHeight(height) }) },
+  focusTimelineRuler: DEFAULT_FOCUS_RULER,
+  setFocusTimelineRuler(preferences) {
+    if (!sameFocusRuler(preferences, restoreFocusRuler(preferences)) || sameFocusRuler(get().focusTimelineRuler, preferences)) return
+    set({ focusTimelineRuler: preferences })
+  },
   selectedDemandId: null,
   demandArrangement: 'columns',
   projectRailOpen: true,
@@ -2423,6 +2483,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ localHome: initialSnapshotResult.value.localHome })
       }
       const startupWarnings: string[] = []
+      let emptySessionSnapshotWarning: string | null = null
       let snapshot = initialSnapshotResult.status === 'fulfilled'
         ? initialSnapshotResult.value
         : emptyRuntimeSnapshot()
@@ -2483,9 +2544,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         snapshot.recoveryCandidates.length === 0
       ) {
         snapshotVerified = false
-        startupWarnings.push(
-          'Runtime Session snapshot returned no Session facts. The saved Session Regions remain visible until a canonical snapshot confirms their identity.'
-        )
+        emptySessionSnapshotWarning = 'Runtime Session snapshot returned no Session facts. The saved Session Regions remain visible until a canonical snapshot confirms their identity.'
       }
       const recoveryFailures: SessionSnapshot[] = []
       const retiredAgentIds = new Set<string>()
@@ -2567,6 +2626,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!refreshedSnapshot) break
         snapshot = refreshedSnapshot
       }
+      // A canonical read already adopted during startup can finish this producer before publication.
+      // An incomplete read keeps the original scope for the existing membership resync below.
+      if (emptySessionSnapshotWarning && snapshotVerified && startupSnapshotConfirmsSessions(snapshot, [...persistedSessionIds])) {
+        emptySessionSnapshotWarning = null
+      }
       set({ startupProgress: { step: 'layout' } })
       const visibleSessions = [...new Map([
         ...snapshot.sessions,
@@ -2589,7 +2653,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       const observedSessionIds = new Set(visibleSessions.map(session => session.id))
       const unobservedSavedSessions = [...persistedSessionIds].filter(id => !retiredAgentIds.has(id) && !observedSessionIds.has(id))
-      if (snapshotVerified && unobservedSavedSessions.length > 0) startupWarnings.push(
+      if (snapshotVerified && !emptySessionSnapshotWarning && unobservedSavedSessions.length > 0) startupWarnings.push(
         `${unobservedSavedSessions.length} saved Session reference(s) have no current Runtime facts. Their Regions remain visible; retry recovery when the Runtime can confirm them.`
       )
       const restoredAgentFocus = sanitizeAgentFocus(
@@ -2603,13 +2667,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       )
       // 抢救过的持久化 Tab 必须响亮：静默修好等于用户下次发现某一格不见了却无从查证。
       const repairNotice = describePersistedTabRepairs(workbench.repairs)
-      const startupError = [
+      const otherStartupError = [
         ...(persistWarning
           ? [`Saved workspace state could not be restored: ${presentError(persistWarning)}`]
           : []),
         ...(repairNotice ? [repairNotice] : []),
         ...startupWarnings
       ].join(' ')
+      const startupError = [otherStartupError, emptySessionSnapshotWarning].filter(Boolean).join(' ')
       set({
         restoredWorkbench: null,
         config,
@@ -2627,7 +2692,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         loading: false,
         error: startupError || null,
         lastError: startupError || null,
-        errorNoticeContext: null,
+        errorNoticeContext: emptySessionSnapshotWarning ? {
+          kind: 'indeterminate',
+          startupSessionSnapshot: {
+            sessionIds: [...persistedSessionIds],
+            remainingMessage: otherStartupError || null
+          }
+        } : null,
         errorDismissed: false
       })
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
@@ -2703,7 +2774,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
       // Agent recovery candidates remain protected by the same reducer used for event-driven resync.
-      if (!snapshotVerified) startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: true })
+      if (!snapshotVerified || emptySessionSnapshotWarning) startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: true })
       return () => {
         disposeRuntimeSubscriptions()
       }
@@ -6750,6 +6821,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const subject = context?.subject
     if (current.errorDismissed && current.lastError !== null
       && (current.errorNoticeContext?.kind ?? 'indeterminate') === (context?.kind ?? 'indeterminate')
+      && current.errorNoticeContext?.startupSessionSnapshot === context?.startupSessionSnapshot
       && previousSubject?.hostId === subject?.hostId
       && previousSubject?.kind === subject?.kind
       && (previousSubject?.kind === 'agent' ? previousSubject.agentSessionId : undefined)

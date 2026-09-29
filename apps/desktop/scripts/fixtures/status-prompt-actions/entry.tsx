@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { useAppStore } from '../../../src/renderer/src/store'
+import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import { api } from '../../../src/renderer/src/lib/api'
 import { COMPOSER_PROMPT_STATES } from '../../../src/shared/composer-shortcut-library'
 import type { ComposerShortcut } from '../../../src/shared/contracts'
@@ -10,11 +11,12 @@ import type { AgentDisplayState, AgentMuxInteractionRequest, AgentMuxInteraction
 
 // Reuse the ordered-byte/basic-vt scene: real workbench/pane/xterm/input/CSS, private API facts only.
 const base = (window as any).resultReady
+const longBody = '大白话说清楚\n1. 目标与现状：哪些事实已经确认，哪些仍未确认。\n2. 完成的内容：逐项说明实际改动与可见结果。\n3. 质量与品位：给出验证、取舍与仍需改善的细节。\n4. 接下来工作的价值和重点：先解决影响使用的真实问题。\n5. 保留当前 Session、Run、长草稿和终端阅读位置。\n6. 不把状态未知当作空闲，也不把回合结束当作目标完成。\n  原样保留这行缩进与中文标点。\n最后一行：确认这些边界以后，继续推进下一步。'
 const prompts: ComposerShortcut[] = COMPOSER_PROMPT_STATES.map((state) => ({ id: state, keyword: state,
   label: state === 'done' ? '大白话说说做了什么' : `Explain ${state}`, body: `Configured ${state} prompt\n  exact spacing`, states: [state] }))
 prompts.push(...Array.from({ length: 7 }, (_, index) => ({ id: `extra-${index}`, keyword: `extra-${index}`,
   label: index === 6 ? '大白话说清楚目标与现状、完成内容质量品位，以及接下来工作的价值和重点' : `继续优化 ${index + 1}`,
-  body: `User next step ${index + 1}`, states: ['done' as const] })))
+  body: index === 6 ? longBody : `User next step ${index + 1}`, states: ['done' as const] })))
 const submissions: unknown[] = [], responses: unknown[] = [], saved: unknown[] = []
 api.sessions.submitPrompt = async (control, text) => { submissions.push({ control, text }) }
 api.sessions.refresh = async (control) => {
@@ -46,6 +48,15 @@ const probe = {
     flushSync(() => useAppStore.setState((state) => ({ config: { ...state.config!, composerShortcuts: configured ? structuredClone(prompts) : [] },
       agentSteerQueues: {}, agentSteerInFlight: {} })))
   },
+  lowerRegion() {
+    flushSync(() => useAppStore.setState((state) => {
+      const tab = state.tabs[base.tabId]!, layout = tab.layout.root
+      if (layout.type !== 'split') throw new Error('Expected two real Regions')
+      return { tabs: { ...state.tabs, [tab.id]: { ...tab, layout: { ...tab.layout, root: { ...layout, direction: 'vertical', first: layout.second, second: layout.first } } } } }
+    }))
+  },
+  draft(text: string) { flushSync(() => useAppStore.getState().setAgentComposerDraft(base.sessionId, text)) },
+  appearance(mode: 'dark' | 'light') { applyAppAppearance(mode) },
   state(display: AgentDisplayState) {
     // Display-state transitions are controlled observations, not a claim that this private CLI exited.
     flushSync(() => useAppStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === base.sessionId

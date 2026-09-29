@@ -29,7 +29,7 @@ export default defineConfig({
   resolve: { alias: aliases },
   test: {
     setupFiles: [resolve(repository, 'vitest.setup.ts')],
-    include: ['test/mote-navigation-rail.test.tsx', 'test/mote-footer-density.test.tsx',
+    include: ['test/mote-floating-resize.test.tsx', 'test/pmo-teams-topic-floating.test.tsx', 'test/mote-navigation-rail.test.tsx', 'test/mote-footer-density.test.tsx',
       'test/surface-nav-density.test.ts', 'test/mote-hover-settings-ownership.test.tsx', 'test/footer-navigation-density.test.ts'],
     passWithNoTests: false,
     maxWorkers: 1

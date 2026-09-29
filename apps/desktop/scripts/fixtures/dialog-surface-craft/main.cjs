@@ -48,7 +48,7 @@ async function galleryScenes() {
   await call(() => dialogCraft.show('confirm','dark',true)); await paint(); await key('Escape','Escape',27)
   assert.equal(await call(() => !!document.querySelector('.confirmation-dialog')),true,'Busy shared confirmation blocks dismissal')
   await call(() => dialogCraft.show('confirm','dark',false)); await key('Escape','Escape',27)
-  for (const [kind,width,height,theme] of [['confirm',640,480,'dark'],['confirm',320,300,'light'],['icons',640,480,'dark'],['switch',640,480,'light'],['shortcuts',640,480,'dark'],['goal',640,600,'dark']]) {
+  for (const [kind,width,height,theme] of [['confirm',640,480,'dark'],['confirm',320,300,'light'],['icons',640,480,'dark'],['switch',640,480,'light'],['goal',640,600,'dark']]) {
     report.stage = { kind,width,height,theme }
     await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor: 1,mobile: false })
     await call((kind,theme) => dialogCraft.show(kind,theme), kind,theme); await paint()

@@ -441,8 +441,8 @@ function sessionSurface(surface: WorkbenchSurface): surface is SessionWorkbenchS
  * that used to be a silent fall-through: a kind absent from the keep-list was dropped, so a new
  * surface kind would be lost across restart with nothing going red. The switch is exhaustive via
  * `assertUnreachableSurface`, so a 6th kind cannot compile until someone decides — here, in one place
- * — whether it survives. A `Record<kind, boolean>` would not fit: `file` and `launcher` are not
- * constant, they depend on `fileSurvives`/`hasTopic`, and the launching-session leak below needs a
+ * — whether it survives. A `Record<kind, boolean>` would not fit: `file` and `agent` are not
+ * constant, they depend on `fileSurvives`/`spatiallyBound`, and the launching-session leak below needs a
  * real case, not a table cell.
  *
  * Note the `agent`/`terminal` case: `sessionSurface` is a kind-based predicate whose body also gates
@@ -454,7 +454,7 @@ function sessionSurface(surface: WorkbenchSurface): surface is SessionWorkbenchS
  */
 function persistedSurfaceSurvives(
   surface: WorkbenchSurface,
-  ctx: { hasTopic: boolean; spatiallyBound?: boolean; fileSurvives: (surface: FileWorkbenchSurface) => boolean }
+  ctx: { spatiallyBound?: boolean; fileSurvives: (surface: FileWorkbenchSurface) => boolean }
 ): boolean {
   switch (surface.kind) {
     case 'agent':
@@ -462,7 +462,8 @@ function persistedSurfaceSurvives(
     case 'terminal':
       return false
     case 'launcher':
-      return ctx.hasTopic
+      // Project launchers own durable Region identities and unsent inputs just like Topic launchers.
+      return true
     case 'file':
       return ctx.fileSurvives(surface)
     case 'git-diff':
@@ -491,7 +492,7 @@ function sessionOnlyTab(tab: WorkbenchTab): WorkbenchTab | null {
     // 没有运行时内容可剥，且 tab id 本就是 `file:${workspaceId}:${path}`——存 file 面与存路径是同一件事，
     // 分不开。path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。谁若日后以「过时的直接删」为由
     // 把下面这条 file→存 一并删掉，就会原样重犯这个 bug——这个机制不是冗余，删它=回归。
-    if (persistedSurfaceSurvives(surface, { hasTopic: Boolean(tab.topicId), spatiallyBound: Boolean(tab.space), fileSurvives: () => true })) {
+    if (persistedSurfaceSurvives(surface, { spatiallyBound: Boolean(tab.space), fileSurvives: () => true })) {
       continue
     }
     next = next ? removeWorkbenchRegion(next, surface.regionId) : null
@@ -581,7 +582,6 @@ function restoreTab(
       // survive 判据经 `persistedSurfaceSurvives`（同一张 SSOT 表），file 面额外要求其 workspace 仍在配置里。
       if (
         persistedSurfaceSurvives(surface, {
-          hasTopic: Boolean(tab.topicId),
           spatiallyBound: Boolean(tab.space),
           fileSurvives: (file) =>
             config.workspaces.some((workspace) => workspace.id === file.workspaceId)

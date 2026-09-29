@@ -18,10 +18,12 @@
 @import './terminal.css';
 @import './surfaces.css';
 @import './settings-overview.css';
+@import './settings-keyboard-shortcuts.css';
 @import './board.css';
 @import './global-board.css';
 @import './goals.css';
 @import './focus.css';
+@import './focus-timeline-ruler.css';
 @import './pmo-teams-topic.css';
 @import './browser.css';
 @import './browser-operation-surface.css';

@@ -626,7 +626,7 @@ describe('windowShortcutHandlers 覆盖注册表每一条 window 绑定', () => 
     let helpToggled = 0
     const handlers = windowShortcutHandlers(store, {
       toggleQuickSwitch: () => { toggled += 1 },
-      toggleShortcutsHelp: () => { helpToggled += 1 }
+      openShortcuts: () => { helpToggled += 1 }
     })
     const windowIds = SHORTCUT_BINDINGS.filter((b) => b.scope === 'window').map((b) => b.id)
     for (const id of windowIds) {
@@ -646,7 +646,7 @@ describe('windowShortcutHandlers 覆盖注册表每一条 window 绑定', () => 
 
   it('workbench handler 转发到 dispatch：select-tab.2 打到 activateTab', () => {
     const store = spyStore()
-    const handlers = windowShortcutHandlers(store, { toggleQuickSwitch: () => {}, toggleShortcutsHelp: () => {} })
+    const handlers = windowShortcutHandlers(store, { toggleQuickSwitch: () => {}, openShortcuts: () => {} })
     expect(handlers['workbench.select-tab.2']!()).toBe(true)
     expect(store.calls).toEqual(['activateTab:ws:g:t2'])
   })

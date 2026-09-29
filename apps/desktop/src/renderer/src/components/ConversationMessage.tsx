@@ -1,9 +1,9 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentTimelineItemStatus } from '@agentmux/core'
-import { Copy } from 'lucide-react'
-import { memo, useEffect, useRef, useState } from 'react'
+import { ChevronRight, Copy } from 'lucide-react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import { formatClock, formatOffset } from '../lib/activity-ruler'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import type { ConversationSpeaker } from '../lib/conversation-speaker'
+import { speakerForDisplay, type ConversationSpeaker } from '../lib/conversation-speaker'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
@@ -17,11 +17,15 @@ const MemoizedAgentMarkdown = memo(AgentMarkdown)
 export type ConversationMessageProps = {
   messageId?: string
   speaker?: ConversationSpeaker
+  /** Current conversation identity, supplied by its host; never inferred from a name. */
+  conversationSessionId?: string
   name?: string
   providerId?: AgentProviderId
   content: string | readonly AgentSessionHistoryContentPart[]
   status?: AgentTimelineItemStatus | 'unverified'
   createdAt?: number
+  /** Host-selected clock display; the recorded instant remains unchanged. */
+  timeFormatter?: (timestamp: number) => string
   origin?: number
   workspaceRoot?: string
   openWorkspaceFile?: OpenWorkspaceFile
@@ -78,9 +82,10 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  speaker, name, providerId, content, status, createdAt, origin, workspaceRoot = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
+  const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
     ? [{ kind: 'text', text: content }]
@@ -88,11 +93,15 @@ export function ConversationMessage({
   const hasContent = parts.some(partHasRenderableContent)
   const hasCopyContent = parts.some((part) => partText(part).length > 0)
   const isTraceOnly = parts.length > 0 && parts.every((part) => part.kind !== 'text' || part.text.trim().length === 0)
-  const isUnknownInput = speaker?.role === 'unknown'
-  const rawDisplayName = name ?? (speaker?.role === 'human' ? 'You' : isUnknownInput ? 'Input' : speaker ? 'Assistant' : 'Activity')
-  const displayName = isUnknownInput && (rawDisplayName === 'You' || rawDisplayName === 'Human')
-    ? 'Input'
-    : rawDisplayName
+  const speaker = recordedSpeaker ? speakerForDisplay(recordedSpeaker) : undefined
+  const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
+    conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
+  const isSystemContext = speaker?.role === 'system'
+  const [systemContextOpen, setSystemContextOpen] = useState(false)
+  const systemContentId = useId()
+  const displayName = recordedSpeaker?.role === 'unknown'
+    ? 'You'
+    : name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -150,6 +159,8 @@ export function ConversationMessage({
     }
   }
 
+  useEffect(() => { setSystemContextOpen(false) }, [messageId])
+
   const occurrenceCounts = new Map<string, number>()
   function partKey(part: AgentSessionHistoryContentPart): string {
     if (isStringContent) return 'text'
@@ -165,6 +176,7 @@ export function ConversationMessage({
       className="log-turn"
       data-message-id={messageId || undefined}
       data-speaker-role={speaker?.role}
+      data-speaker-relation={isPeerAgent ? 'other-agent' : undefined}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
     >
@@ -178,9 +190,7 @@ export function ConversationMessage({
       </span>
       <div className="log-turn__head">
         <span className="log-turn__who">{displayName}</span>
-        {isUnknownInput ? (
-          <span className="log-row__chip log-row__chip--unverified" role="note">作者未记录</span>
-        ) : null}
+        {isPeerAgent || isSystemContext ? <span className="log-turn__sender-kind">{isSystemContext ? 'System' : 'Agent'}</span> : null}
         {status === 'streaming' ? (
           <span className="log-row__chip" role="status"><SemanticIcon name="working" size={12} />Streaming</span>
         ) : null}
@@ -191,8 +201,8 @@ export function ConversationMessage({
           <span className="log-row__chip log-row__chip--unverified" role="status"><SemanticIcon name="neutral" size={12} />Unverified</span>
         ) : null}
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
-          ? formatClock(createdAt) : `${formatClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
-          {formatClock(createdAt)}
+          ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
+          {renderClock(createdAt)}
         </span>}
         {hasCopyContent ? <span className="log-turn__actions" data-copy-state={copyState}>
           {copyState === 'failed' ? (
@@ -203,8 +213,11 @@ export function ConversationMessage({
           </button>
         </span> : null}
       </div>
-      {hasContent ? (
-        <div ref={bodyRef} className="log-turn__body"
+      {isSystemContext && hasContent ? <button type="button" className="log-turn__system-toggle"
+        aria-expanded={systemContextOpen} aria-controls={systemContentId}
+        onClick={() => setSystemContextOpen(open => !open)}><ChevronRight size={12} aria-hidden="true" />Runtime context</button> : null}
+      {hasContent && (!isSystemContext || systemContextOpen) ? (
+        <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {parts.map((part) => {
             const key = partKey(part)

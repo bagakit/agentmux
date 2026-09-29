@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../test/focus-timeline-ruler-modes.test.tsx", "../../../test/helpers/composer-dom-fixture.tsx", "../../../src/renderer/src/**/*.ts", "../../../src/renderer/src/**/*.tsx", "../../../src/shared/**/*.ts", "../../../src/renderer/src/env.d.ts"]
+}

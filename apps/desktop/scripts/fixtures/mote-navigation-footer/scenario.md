@@ -66,3 +66,31 @@ no compiled JavaScript is manually replaced to represent new TSX Source.
 `--capture footer-only --candidate <manifest.json>` compiles the actual App once and checks 320/420/560/980 widths with zero, one working, one attention and two three-digit counts. Controlled Session facts enter only through the original Store; actual FocusNavigationButton, CSS, number text Range, neighbors and right-side actions determine the result. Five complete frames show both themes at 320 and the other widths in dark.
 
 The same archived compilation is copied privately; the two narrow Focus sizing declarations are removed from one unique complete agent.css block. Actual count containment must fail with AssertionError. The unchanged original compilation must then pass the same sixteen cases. No shared Source mutation or second compilation is used. This covers the existing low-footer contract in density SSOT, not Native/OS/IME/Core Run/restart or the earlier rail/Settings scenarios. All private outputs are cleaned after hashes and evidence are preserved.
+
+# Floating resize and preference memory
+
+`--capture floating-resize --candidate <manifest.json>` runs only the new resize
+scope in the actual App. The formal task gate owns this one private compile and
+bounded process. Five complete dark frames cover wide/narrow card and avatar
+forms plus a real advisory storage failure. Trusted Chromium pointer input must
+grab the actual corner, continue outside its box under capture, and commit on
+release; keyboard input checks arrows and consumed Escape. Explicit DOM-dispatched
+pointercancel and window blur exercise the original termination handlers; this
+does not claim OS focus loss or physical touch input.
+
+The original nonempty navigation, Tab actions and unsent Composer are measured
+and hit-tested. Width/height bounds, viewport smaller than the ordinary minimum,
+unchanged target/input token and protected work facts, no-op/X/Y/both-axis input,
+gesture draft without storage writes, cancellation and cursor/selection cleanup
+are asserted. A controlled Storage API failure leaves the real Panel operable
+with its notice; the next explicit resize clears that notice after a successful
+save. The localStorage seed runs only when absent. A private Renderer reload
+must read back that same saved size and target from the real floating owner.
+
+Every consumed Source/style and compiled byte is archived immutably. Current
+task-owned producers (including the floating lib.ts) must match the candidate.
+Whole-App end freshness is separately reported so unrelated concurrent Source
+drift does not relabel immutable resize proof. Footer modes retain their prior
+freshness semantics. Optional `--reuse-renderer` verifies every archived byte and
+all actual task Renderer producers; it permits only a separately bound capture
+driver correction, never a changed product Source under an old compilation.

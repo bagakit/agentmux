@@ -56,10 +56,10 @@
 .log-turn__action { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .log-turn__action:hover { color: var(--text); background: var(--surface-3); }
 .log-turn__action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
-.log-turn__who { min-width: 0; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-meta); font-weight: 620; }
+.log-turn__who { min-width: 0; overflow-wrap: anywhere; color: var(--text); font-size: var(--fs-body); font-weight: 620; }
+.log-turn__sender-kind { flex-shrink: 0; padding: 0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); line-height: 1.6; }
 .log-turn__head .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .log-turn__time {
-  margin-left:auto;
   color: var(--text-3);
   font: 11px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -307,8 +307,8 @@
 }
 .md-image-attachment--unavailable:hover { color: var(--text-3); }
 
-/* Human and unknown input turns use a right-aligned reading lane without a decorative rail. */
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) {
+/* User input, including the user's unknown-author display default, docks to the right. */
+.log-turn[data-speaker-role='human'] {
   grid-template-columns: minmax(0, 1fr) 20px;
   justify-self: end;
   width: min(78%, 720px);
@@ -319,26 +319,64 @@
 .log-turn[data-speaker-role='human'] {
   background: color-mix(in srgb, var(--blue) 8%, var(--surface-1));
 }
-.log-turn[data-speaker-role='unknown'] {
-  background: var(--surface-2);
-}
 /* 成块之后 body 自己不再需要底：那层底已经在整个 turn 上，再来一层就是浅底叠浅底，边界反而更糊。
    字色降一档——用户自己的话是"我说过什么"的回看，Agent 的答复才是这个视图的主叙述；降档也让两种
    回合在同一屏上有了字色层级，而不是只差底色。 */
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__head,
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__body {
+.log-turn[data-speaker-role='human'] .log-turn__head,
+.log-turn[data-speaker-role='human'] .log-turn__body {
   grid-column: 1;
   padding:0;
   color: var(--text-2);
   background: transparent;
   text-align: right;
 }
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__head { grid-row: 1; }
-.log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) .log-turn__body { grid-row: 2; text-align: left; }
+.log-turn[data-speaker-role='human'] .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
+.log-turn[data-speaker-role='human'] .log-turn__head { grid-row: 1; }
+.log-turn[data-speaker-role='human'] .log-turn__body { grid-row: 2; text-align: left; }
+
+/* An identified collaborator has a message surface, distinct from this Agent's open answer. */
+.log-turn[data-speaker-relation='other-agent'] {
+  width: min(86%, 720px);
+  margin-inline: var(--sp-5);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+.log-turn[data-speaker-relation='other-agent'] .log-turn__node { background: var(--surface-1); }
 
 @media (max-width: 620px) {
-  .log-turn:where([data-speaker-role='human'], [data-speaker-role='unknown']) { width: calc(100% - var(--sp-6)); margin-inline: var(--sp-3); }
+  .log-turn[data-speaker-role='human'], .log-turn[data-speaker-relation='other-agent'] { width: calc(100% - var(--sp-6)); margin-inline: var(--sp-3); }
 }
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }
+
+/* System context comes from a recorded producer fact, with its full text available on demand. */
+.log-turn[data-speaker-role='system'] {
+  margin-inline: var(--sp-5);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+.log-turn[data-speaker-role='system'] .log-turn__node { background: var(--surface-1); }
+.log-turn__system-toggle {
+  grid-column: 2;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.log-turn__system-toggle[aria-expanded='true'] svg { transform: rotate(90deg); }
+.log-turn__system-toggle:hover { color: var(--text); }
+.log-turn__system-toggle:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; }
+@media (max-width: 620px) {
+  .log-turn[data-speaker-role='system'] { margin-inline: var(--sp-3); }
+}

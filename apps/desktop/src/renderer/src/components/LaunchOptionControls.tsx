@@ -1,5 +1,5 @@
 import { SlidersHorizontal, X } from 'lucide-react'
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
@@ -18,9 +18,9 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
   onNameChange?: (field: keyof LauncherNames, value: string) => void
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
-  const content = useRef<HTMLDivElement>(null)
+  const [content, setContent] = useState<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
-    const anchor = trigger.current, panel = content.current
+    const anchor = trigger.current, panel = content
     if (!expanded || !anchor || !panel) return
     let disposed = false
     const position = async () => {
@@ -30,7 +30,7 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
     }
     const stop = autoUpdate(anchor, panel, () => { void position() })
     return () => { disposed = true; stop() }
-  }, [expanded])
+  }, [expanded, content])
   if (!options.length && !names) return null
   const chosen = options.flatMap(option => {
     const choice = option.choices.find(candidate => candidate.id === selection[option.id])
@@ -43,7 +43,7 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
       {chosen.length ? <span className="launch-refine__summary">{chosen.map(choice => <span key={choice.optionId} data-tier={choice.tier ?? 'safe'}>{choice.label}</span>)}</span> : null}
       {names?.agentName || names?.tabName ? <i className="launch-refine__named" aria-label="Custom names set" /> : null}
     </button></Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={content} className="launch-refine__panel" style={{ visibility: 'hidden' }}>
+    <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={setContent} className="launch-refine__panel" style={{ visibility: 'hidden' }}>
       <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options"><X size={14} /></Dialog.Close></header>
       <Dialog.Description>Choices apply to this launch. Unset values use the Agent’s defaults.</Dialog.Description>
       <div className="launch-refine__fields">

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { AgentProviderRegistry, splitLaunchPromptByDelivery } from '../../src/agent-provider.js'
@@ -29,7 +29,7 @@ describe('Kimi provider', () => {
         runId,
         providerId: 'kimi',
         eventName,
-        payload: { hook_event_name: eventName, session_id: 'kimi-session-1', cwd: upstreamFixturePath("tmp/w"), ...payload }
+        payload: { hook_event_name: eventName, session_id: 'kimi-session-1', cwd: fixturePath("tmp/w"), ...payload }
       }, {})
   }
 
@@ -58,7 +58,7 @@ describe('Kimi provider', () => {
       // 于是用户的原话只落进 timeline、永不进入 Kimi 进程，界面上却一切正常。
       let error: AgentMuxError | undefined
       try {
-        kimi.buildLaunch({ workspacePath: upstreamFixturePath("repo"), prompt: 'review this', args: ['--foo'], env: {} })
+        kimi.buildLaunch({ workspacePath: fixturePath("repo"), prompt: 'review this', args: ['--foo'], env: {} })
       } catch (thrown) { error = thrown as AgentMuxError }
       expect(error?.code).toBe('AGENT_LAUNCH_PROMPT_UNSUPPORTED')
       expect(error?.detail).toContain('providerId=kimi')
@@ -72,7 +72,7 @@ describe('Kimi provider', () => {
       let error: AgentMuxError | undefined
       try {
         kimi.buildResumeLaunch({
-          workspacePath: upstreamFixturePath("repo"),
+          workspacePath: fixturePath("repo"),
           nativeHandle: { kind: 'provider', providerId: 'kimi', sessionId: 'kimi-session-1' },
           prompt: 'keep going',
           args: [],
@@ -88,11 +88,11 @@ describe('Kimi provider', () => {
       // 就整个不可用了——而 launchPrompt 在注入运行时引导时几乎总是非空，所以这条很重要：
       // 它钉住"拒绝的边界是 prompt 而不是启动本身"。
       expect(kimi.buildLaunch({
-        workspacePath: upstreamFixturePath("repo"), prompt: '', args: ['--foo'], env: {}
+        workspacePath: fixturePath("repo"), prompt: '', args: ['--foo'], env: {}
       })).toEqual({ command: 'kimi', args: ['--foo'], env: {} })
       // 只有空白也算空——不该因为一个空格就拒绝启动。
       expect(kimi.buildLaunch({
-        workspacePath: upstreamFixturePath("repo"), prompt: '   ', args: [], env: {}
+        workspacePath: fixturePath("repo"), prompt: '   ', args: [], env: {}
       })).toEqual({ command: 'kimi', args: [], env: {} })
     })
 
@@ -104,7 +104,7 @@ describe('Kimi provider', () => {
       //
       // 所以这里必须走**真的组装器**：先确认它非空（否则下面在对空串取胜），再确认分流把它整份
       // 划给 deferred、启动侧拿到空串，且这个空串真的能起来。
-      const composed = composeAgentLaunchPrompt('review this', true)
+      const composed = composeAgentLaunchPrompt('review this', true).text
       expect(composed.length).toBeGreaterThan(100)
       const split = splitLaunchPromptByDelivery(kimi.catalog, composed)
       expect(split.atLaunch).toBe('')
@@ -112,14 +112,14 @@ describe('Kimi provider', () => {
       expect(split.deferred).toBe(composed)
       expect(split.deferred).toContain('review this')
       expect(kimi.buildLaunch({
-        workspacePath: upstreamFixturePath("repo"), prompt: split.atLaunch, args: ['--foo'], env: {}
+        workspacePath: fixturePath("repo"), prompt: split.atLaunch, args: ['--foo'], env: {}
       })).toEqual({ command: 'kimi', args: ['--foo'], env: {} })
     })
 
     it('送得到的 Provider 分流后整份随启动走，没有要补送的', () => {
       // 反面锚点。没有它，把 splitLaunchPromptByDelivery 写成「永远划给 deferred」会全绿，
       // 而那会让另外十个 Provider 的启动 prompt 全部退化成起来之后再键入。
-      const composed = composeAgentLaunchPrompt('review this', true)
+      const composed = composeAgentLaunchPrompt('review this', true).text
       expect(splitLaunchPromptByDelivery(providers.get('claude').catalog, composed))
         .toEqual({ atLaunch: composed, deferred: '' })
     })
@@ -159,7 +159,7 @@ describe('Kimi provider', () => {
     it('unmanaged 意味着 Core 不为它解析任何安装计划', () => {
       // 这条是上面 unmanaged 声明的**行为**面：只断言字段相等，改成 explicit-managed 后
       // 字段断言会红，但「到底会不会去装」没人守。
-      expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/agentmux-kimi"), env: {} }) ?? null)).toBeNull()
+      expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: fixturePath("tmp/agentmux-kimi"), env: {} }) ?? null)).toBeNull()
     })
 
     it('暴露原生会话历史读取接口', () => {
@@ -313,7 +313,7 @@ describe('Kimi provider', () => {
       // 旗标拼错、prompt 混进 argv、多带一个参数都该红。
       // 不带 prompt——带了会依 post-launch-only 被拒（那条边界另有专门用例守）。
       expect(kimi.buildResumeLaunch({
-        workspacePath: upstreamFixturePath("tmp/agentmux-kimi"),
+        workspacePath: fixturePath("tmp/agentmux-kimi"),
         nativeHandle: { kind: 'provider', providerId: 'kimi', sessionId: 'kimi-session-1' },
         args: ['--foo'],
         env: {}
@@ -330,7 +330,7 @@ describe('Kimi provider', () => {
       let error: AgentMuxError | undefined
       try {
         kimi.buildResumeLaunch({
-          workspacePath: upstreamFixturePath("tmp/agentmux-kimi"),
+          workspacePath: fixturePath("tmp/agentmux-kimi"),
           nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'not-kimi' },
           args: [],
           env: {}

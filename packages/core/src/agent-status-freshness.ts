@@ -162,14 +162,15 @@ export function agentEvidenceStale(
  *
  * `terminal-output` 恒为 false 不是遗漏，是本仓的设计红线：AgentMux 绝不从终端字节推断语义活动
  * （见 types.ts 的 AgentMuxEvidenceSource 注释）。`run-process` 是进程投影本身——它不能压过自己。
- * `user` 是用户动作留下的印记，不是 Agent 在干活的证据。
+ * `user` 是用户动作留下的印记；`agentmux` 是 Core 生成的系统上下文。两者都不是 Agent 在干活的证据。
  */
 const AGENT_ACTIVITY_STATUS_SOURCE: Record<AgentMuxEvidenceSource, boolean> = {
   'terminal-output': false,
   'run-process': false,
   'native-hook': true,
   acp: true,
-  user: false
+  user: false,
+  agentmux: false
 }
 
 export function isAgentActivityStatusSource(source: AgentMuxEvidenceSource): boolean {

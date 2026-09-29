@@ -151,17 +151,16 @@ export function NewTabSurface({
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
   const sections = { ...DEFAULT_LAUNCHER_SECTIONS, ...savedSections }
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
-  const [storageIssue, setStorageIssue] = useState(false)
   const saveSection = useLauncherState(state => state.setSection)
   const saveExecutor = useLauncherState(state => state.selectExecutor)
   const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
   const selectedExecutor = executors.find(executor => executor.id === executorId)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
-    if (workspace && !saveSection(workspace.id, section, mode)) setStorageIssue(true)
+    if (workspace) saveSection(workspace.id, section, mode)
   }
   function chooseExecutor(id: string) {
     setExecutorId(id)
-    if (workspace && !saveExecutor(workspace.id, id)) setStorageIssue(true)
+    if (workspace) saveExecutor(workspace.id, id)
   }
   useEffect(() => { if (savedExecutor) setExecutorId(savedExecutor) }, [workspace?.id, savedExecutor])
 
@@ -291,7 +290,7 @@ export function NewTabSurface({
         mode: `${executors.length === 0 ? 'No Agent Executor is configured. ' : ''}Your request has not been sent. ${topicPreparation ? 'The same Topic, Region and complete draft are kept.' : 'The same Region and complete draft are kept.'}`,
         restore: executors.length === 0 ? 'Add an Agent in Settings, then Launch agent here with the preserved request.' : 'Launch agent here to retry preparation for this same Topic, then send the preserved request.'
       } }} /> : null}
-      {storageIssue || persistenceIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: persistenceIssue?.includes('could not be read') ? 'Saved Launcher preferences could not be read' : 'Launcher preferences could not be saved', mode: `${persistenceIssue ?? ''} Current sections and drafts remain usable in this window. They may not survive a restart.`, restore: persistenceIssue?.includes('could not be read') ? 'Copy any new drafts before reopening this window to retry reading saved preferences. The existing saved data is kept.' : 'Restore local storage access, then change a section or edit the draft to retry saving.' } }} /> : null}
+      {persistenceIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: persistenceIssue?.includes('could not be read') ? 'Saved Launcher preferences could not be read' : 'Launcher preferences could not be saved', mode: `${persistenceIssue ?? ''} Current sections and drafts remain usable in this window. They may not survive a restart.`, restore: persistenceIssue?.includes('could not be read') ? 'Copy any new drafts before reopening this window to retry reading saved preferences. The existing saved data is kept.' : 'Restore local storage access, then change a section or edit the draft to retry saving.' } }} /> : null}
 
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
         <span className="launcher-agents-head__identity">{sections.agents === 'collapsed' && selectedExecutor ? <AgentAvatar executorId={selectedExecutor.id} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={16} /> : null}<strong>{sections.agents === 'collapsed' ? selectedExecutor?.label ?? 'Agent' : 'Agent'}</strong>
@@ -346,7 +345,7 @@ export function NewTabSurface({
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
         sections={sections} onSectionChange={setSection} warmSession={warmSession} warmPending={warmPending}
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
-        onRun={run} onStorageIssue={() => setStorageIssue(true)} />
+        onRun={run} />
       {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}
     </section>
   )

@@ -1,4 +1,8 @@
-.pmo-teams-topic-floating { position: fixed; inset: auto; margin: 0; width: min(720px, calc(100vw - 16px)); height: min(520px, calc(100vh - 48px)); padding: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text-2) 36%, var(--line)); border-radius: var(--radius); background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-3) 70%, transparent), 0 4px 12px var(--scrim-1), 0 20px 48px var(--scrim-2); }
+.pmo-teams-topic-floating { position: fixed; inset: auto; margin: 0; width: min(720px, calc(100vw - 16px)); height: min(520px, calc(100vh - 48px)); padding: 10px 10px 0 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text-2) 36%, var(--line)); border-radius: var(--radius); background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-3) 70%, transparent), 0 4px 12px var(--scrim-1), 0 20px 48px var(--scrim-2); }
+.pmo-teams-topic-floating__resize { position: absolute; top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; touch-action: none; color: var(--text-3); }
+.pmo-teams-topic-floating__resize::after { content: ''; position: absolute; top: 3px; right: 3px; width: 4px; height: 4px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; }
+.pmo-teams-topic-floating__resize:hover, .pmo-teams-topic-floating__resize:focus-visible { color: var(--text); background: var(--surface-3); }
+.pmo-teams-topic-floating__resize:focus-visible { outline: 1px solid var(--green-2); outline-offset: -1px; }
 .pmo-teams-topic-floating:popover-open { display: flex; flex-direction: row; }
 .mote-chooser { display: flex; flex-direction: column; flex: 0 0 172px; gap: var(--sp-2); min-width: 0; min-height: 0; padding: var(--sp-2); border-right: 1px solid var(--line); background: var(--surface-2); }
 .mote-chooser__choices { display: flex; flex-direction: column; flex: 1; gap: var(--sp-1); min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
@@ -30,6 +34,7 @@
 .pmo-teams-topic-floating .mote-context-notice { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; }
 .pmo-teams-topic-floating .mote-context-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pmo-teams-topic-floating .mote-context-notice > button { flex: none; white-space: nowrap; }
+.pmo-teams-topic-floating .mote-size-notice { flex: none; padding: var(--sp-1) var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; overflow-wrap: anywhere; }
 .pmo-teams-topic-compact-launcher { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; cursor: pointer; }
 .pmo-teams-topic-compact-launcher__button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
 .pmo-teams-topic-compact-launcher__button:hover { background: transparent; }
