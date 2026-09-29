@@ -6449,8 +6449,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async recoverSession(sessionId, operationId) {
     const before = get()
     if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
-    const current = before.sessions.find((item) => item.id === sessionId)
+    let projected = before.sessions.find((item) => item.id === sessionId)
+    if (!projected) {
+      const candidate = before.recoveryCandidates.find(item => item.agentSessionId === sessionId)
+      if (!candidate) return
+      projected = recoveryCandidateSession(candidate, { kind: 'pending', detail: 'Checking this saved Session for attachment or native resume.' })
+      const projection = projected
+      set(state => ({ sessions: state.sessions.some(item => item.id === sessionId) ? state.sessions : [...state.sessions, projection] }))
+    }
+    const current = projected
     if (!current) return
+    // A candidate can exist only in Core's durable catalogue. Give it a view at its registered
+    // original Host/directory before recovery; the commit below intentionally needs an attached
+    // view owner. Existing durable Regions keep their layout/focus during background resync.
+    if (!hasAttachedSessionView(get().tabs, sessionId)) get().selectSession(sessionId)
     const priorFailure = current.kind === 'agent' && lifecycleFailureBelongsTo(before.errorNoticeContext?.lifecycle, { subject: current.control })
       ? before.errorNoticeContext : null
     try {
@@ -6460,8 +6472,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       } catch (error) {
         // A lost continuity reply is not permission to launch again. First read canonical facts.
         if (!operationId || current.kind !== 'agent') throw error
-        const canonical = await api.sessions.refresh(current.control)
-        if (canonical.kind !== 'agent' || canonical.id !== sessionId || canonical.processState !== 'running') throw error
+        const canonical = await api.sessions.refresh(current.control).catch(() => undefined)
+        if (!canonical || canonical.kind !== 'agent' || canonical.id !== sessionId || canonical.processState !== 'running') throw error
         recovery = { kind: 'reattachable', session: canonical }
       }
       if (recovery.kind === 'retired') {
