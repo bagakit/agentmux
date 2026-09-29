@@ -117,8 +117,8 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
                     <i style={{ background: theme.yellow }} />
                     <i style={{ background: theme.green }} />
                   </span>
-                  <span className="terminal-theme-preview__line"><b style={{ color: theme.green }}>›</b> Working in project</span>
-                  <span className="terminal-theme-preview__composer" style={{ background: theme.black }}><b style={{ color: theme.blue }}>›</b> Ask or steer the agent…</span>
+                  <span className="terminal-theme-preview__line"><b style={{ color: theme.green }}>›</b> project/</span>
+                  <span className="terminal-theme-preview__composer" style={{ background: theme.black }}><b style={{ color: theme.blue }}>›</b> Ask agent…</span>
                 </span>
                 <span className="terminal-theme-choice__copy">
                   <strong>{definition.label}</strong>
