@@ -1,4 +1,4 @@
-import { ChevronDown, LoaderCircle } from 'lucide-react'
+import { Check, ChevronDown, LoaderCircle } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -9,10 +9,11 @@ import { useAppStore } from '../store'
 import { requestPmoTeamsTopicFloatingOpen, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, createPmoTeamsTopicTargetSelector, usePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { presentError } from '../lib/error-presentation'
 import { MoteIcon } from './MoteIcon'
+import { tabGroupForTab } from '../lib/workbench-tabs'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 
-/** The only handoff is an explicit draft preparation. It never invokes Session launch or send. */
+/** An explicit creation request uses the selected Mote's existing input owner. */
 export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegionId, disabled = false }: {
   workspace: WorkspaceRecord | undefined; prompt: string; sourceTabId?: string | undefined; sourceRegionId?: string | undefined; disabled?: boolean
 }) {
@@ -27,55 +28,78 @@ export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegio
   const { topics } = useScratchTopics(SCRATCH_WORKSPACE_ID)
   const motes = scratchMoteTopics(topics)
   const moteName = motes.find(mote => mote.id === topicId)?.title ?? 'Saved Mote'
-  const [pending, setPending] = useState(false), [issue, setIssue] = useState<string | null>(null), [preparedFor, setPreparedFor] = useState<string | null>(null)
-  const scope = JSON.stringify([workspace?.id, sourceTabId, sourceRegionId, topicId, floating.targetTabId])
+  const [pending, setPending] = useState(false), [issue, setIssue] = useState<string | null>(null), [submittedFor, setSubmittedFor] = useState<string | null>(null)
+  const [submission, setSubmission] = useState<'queued' | 'submitted'>('queued')
+  const inFlight = useRef(false)
+  const scope = JSON.stringify([workspace?.id, workspace?.hostId, workspace?.path, sourceTabId, sourceRegionId, topicId, floating.targetTabId])
   const currentScope = useRef(scope); currentScope.current = scope
   const active = useRef(true)
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   useEffect(() => { setIssue(null) }, [scope, prompt])
-  const prepared = preparedFor === JSON.stringify([workspace?.id, prompt, topicId, tabId])
+  const submitted = submittedFor === JSON.stringify([workspace?.id, prompt, topicId, tabId])
   const hasDraft = Boolean(prompt.trim())
-  async function prepare() {
-    if (pending || disabled) return
+  async function createWithMote() {
+    if (inFlight.current || disabled) return
     const capturedScope = scope, requestedTabId = tabId
     const originalTab = tabId ? useAppStore.getState().tabs[tabId] : undefined
     const originalRegion = originalTab?.regions[originalTab.layout.activeRegionId]
     const originalOwner = originalRegion ? { tabId: originalTab!.id, regionId: originalRegion.regionId,
       draftKey: originalRegion.kind === 'agent' ? originalRegion.sessionId : originalRegion.kind === 'launcher' ? originalRegion.regionId : undefined } : null
-    if (!hasDraft || prepared) { requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(requestedTabId ? { targetTabId: requestedTabId } : {}) }); return }
+    if (!hasDraft || submitted) { requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(requestedTabId ? { targetTabId: requestedTabId } : {}) }); return }
+    const sourceStillOwned = () => {
+      if (!active.current || currentScope.current !== capturedScope) return false
+      if (!sourceTabId || !sourceRegionId) return true
+      const source = useAppStore.getState().tabs[sourceTabId]?.regions[sourceRegionId]
+      return source?.kind === 'launcher' && source.workspaceId === workspace?.id
+    }
+    inFlight.current = true
     setPending(true); setIssue(null)
     try {
       await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, topicId)
-      if (!active.current || currentScope.current !== capturedScope) return
+      if (!sourceStillOwned()) return
       await useAppStore.getState().openScratchTopic(topicId, SCRATCH_WORKSPACE_ID, { reveal: false, ...(requestedTabId ? { tabId: requestedTabId } : {}) })
-      if (!active.current || currentScope.current !== capturedScope) return
+      if (!sourceStillOwned()) return
       const state = useAppStore.getState()
       const tabId = pmoTeamsTopicFloatingTargetTabId({ open: false, preview: false, targetTopicId: topicId, ...(requestedTabId ? { targetTabId: requestedTabId } : {}) }, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
       const tab = tabId ? state.tabs[tabId] : undefined
       const region = tab?.regions[tab.layout.activeRegionId]
       const draftKey = region?.kind === 'agent' ? region.sessionId : region?.kind === 'launcher' ? region.regionId : undefined
       if (originalOwner && (tab?.id !== originalOwner.tabId || region?.regionId !== originalOwner.regionId || draftKey !== originalOwner.draftKey)) return
-      if (!tab || tab.topicId !== topicId || !draftKey) throw new Error('The selected Mote has no confirmed Agent input. Your request remains in the Launcher.')
-      const context = `Project: ${workspace?.name ?? 'Unselected'}\nHost: ${workspace?.hostId ?? 'Unknown'}\nWorking directory: ${workspace?.path ?? 'Unknown'}\n\n${prompt}`
-      const existing = state.agentComposerDrafts[draftKey] ?? ''
-      state.setAgentComposerDraft(draftKey, existing ? `${existing}\n\n---\n\n${context}` : context)
+      if (!tab || tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId || !draftKey) throw new Error('The selected Mote has no confirmed Agent input. Your request remains in the Launcher.')
+      const context = `Help me create an Agent for the following task in this project. Use the project's Host and working directory when creating it.\n\nProject: ${workspace?.name ?? 'Unselected'}\nHost: ${workspace?.hostId ?? 'Unknown'}\nWorking directory: ${workspace?.path ?? 'Unknown'}\n\n${prompt}`
+      if (region?.kind === 'agent') {
+        if (!state.send(region.sessionId, context, error => {
+          if (sourceStillOwned()) setIssue(presentError(error))
+        }, 'manual')) throw new Error('The selected Mote could not queue the creation request.')
+        setSubmission('queued')
+      } else if (region?.kind === 'launcher') {
+        const executorId = Object.keys(state.config?.executors ?? {})[0]
+        const layout = state.layouts[SCRATCH_WORKSPACE_ID]
+        const groupId = layout ? tabGroupForTab(layout, tab.id) : null
+        if (!executorId || !groupId) throw new Error('Configure an Agent Executor to start the selected Mote. Both drafts are kept.')
+        await state.launchAgent(executorId, context, groupId, { tabId: tab.id, regionId: region.regionId })
+        const currentTarget = useAppStore.getState().tabs[tab.id]
+        if (!sourceStillOwned() || currentTarget?.topicId !== topicId || currentTarget.layout.activeRegionId !== region.regionId) return
+        setSubmission('submitted')
+      }
+      // Queue admission / initial prompt submission is not proof that a new Agent was created.
+      // Neither Composer draft participates in this request, so both remain independently editable.
       requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, targetTabId: tab.id })
-      setPreparedFor(JSON.stringify([workspace?.id, prompt, topicId, tab.id]))
+      setSubmittedFor(JSON.stringify([workspace?.id, prompt, topicId, tab.id]))
     } catch (error) {
       if (active.current && currentScope.current === capturedScope) {
         setIssue(presentError(error))
-        requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(requestedTabId ? { targetTabId: requestedTabId } : {}) })
       }
-    } finally { if (active.current) setPending(false) }
+    } finally { inFlight.current = false; if (active.current) setPending(false) }
   }
-  // The coordinator already owns this input. Preparing it into itself would recursively duplicate
+  // The coordinator already owns this input. Sending it into itself would recursively duplicate
   // the request; the original floating chooser remains the way to select another Mote.
   if (sourceIsTarget) return null
   return <div className="launcher-mote">
-    <div className="launcher-mote__actions"><button type="button" className="launch-refine__toggle" disabled={disabled || pending} title={`${hasDraft ? 'Prepare the complete request in' : 'Open'} ${moteName}; no request is sent automatically`} onClick={() => { void prepare() }}>
-      {pending ? <LoaderCircle className="spin" size={13} /> : <MoteIcon size={13} />}<span>{pending ? 'Preparing…' : prepared ? `Prepared in ${moteName}` : hasDraft ? `Prepare in ${moteName}` : `Open ${moteName}`}</span>
+    <div className="launcher-mote__actions"><button type="button" className="launch-refine__toggle" disabled={disabled || pending} title={`${hasDraft ? 'Send a creation request to' : 'Open'} ${moteName}; both unsent drafts are kept`} onClick={() => { void createWithMote() }}>
+      {pending ? <LoaderCircle className="spin" size={13} /> : submitted ? <Check size={13} /> : <MoteIcon size={13} />}<span>{pending ? 'Submitting…' : submitted ? `Request ${submission}` : 'Create with Mote'}</span>
     </button>
-    {motes.length > 1 ? <DropdownMenu.Root><DropdownMenu.Trigger className="icon-button" aria-label="Choose Mote" title="Choose Mote" disabled={pending}><ChevronDown size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{motes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => setFloating({ targetTopicId: mote.id, targetTabId: undefined })}><MoteIcon size={13} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote">✓</span> : null}</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : null}</div>
-    {issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Mote draft preparation did not complete', mode: `${issue} Both original drafts and the current project are kept. No request was sent.`, restore: 'Open the selected Mote to restore its Agent input, then prepare the request again.' } }} /> : null}
+    {motes.length > 1 ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`Choose Mote: ${moteName}`} title={moteName} disabled={pending}><span>{moteName}</span><ChevronDown size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{motes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => setFloating({ targetTopicId: mote.id, targetTabId: undefined })}><MoteIcon size={13} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote">✓</span> : null}</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}>{moteName}</span>}</div>
+    {issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: `Creation handoff to ${moteName} is unconfirmed`, mode: `${issue} Both original drafts and the current project are kept.`, restore: 'Open the selected Mote to inspect its request queue and launch status before retrying.' } }} /> : null}
   </div>
 }
