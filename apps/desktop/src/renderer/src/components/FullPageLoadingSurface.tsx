@@ -1,5 +1,5 @@
 import { useEffect, useRef, type PointerEvent, type ReactNode } from 'react'
-import { RotateCcw, SquareTerminal } from 'lucide-react'
+import { ChevronRight, RotateCcw, SquareTerminal } from 'lucide-react'
 import { BrandIcon } from './BrandIcon'
 import bannerUrl from '../../../../resources/settings-banner.png'
 
@@ -79,7 +79,7 @@ export function FullPageLoadingSurface({
         <p className="full-page-loading__eyebrow">{eyebrow}</p>
         {children ?? <><h1>{title}</h1><p className="full-page-loading__detail">{detail}</p></>}
         {busy ? <div className="full-page-loading__activity" aria-hidden="true"><i /><i /><i /></div> : null}
-        {details ? <details className="full-page-loading__details"><summary>{details.summary}</summary>{details.content}</details> : null}
+        {details ? <details className="full-page-loading__details"><summary><ChevronRight size={12} aria-hidden="true" />{details.summary}</summary>{details.content}</details> : null}
         {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
       </div>
     </section>
