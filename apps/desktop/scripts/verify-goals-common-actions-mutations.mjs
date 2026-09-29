@@ -25,7 +25,7 @@ const unitCases = [
   { label: 'management-starts-agent', file: component, before: 'function select(ref: GoalsCommonActionRef) { setSelected(ref);', after: "function select(ref: GoalsCommonActionRef) { void startGoalExploration('management started an Agent'); setSelected(ref);", test: 'creates one authored body', assertion: 'Management and save never start an Agent' }
 ]
 const renderCases = focusOnly ? [
-  { label: 'common-focus-clipped', file: css, before: '.goals-surface .goals-common :is(button,textarea):focus-visible', after: '.goals-entry__actions > button:focus-visible', assertion: 'Common control focus remains inside its scroll-clipped bounds' }
+  { label: 'common-focus-clipped', file: css, before: '.goals-surface .goals-common :is(button,textarea):focus', after: '.goals-entry__actions > button:focus-visible', assertion: 'Common control focus remains inside its scroll-clipped bounds' }
 ] : [
   { label: 'complete-body-unreadable', file: css, before: 'font: var(--fs-prose)/1.5 var(--font-sans);', after: 'font: 8px/1.5 var(--font-sans);', assertion: 'Complete common action body keeps readable prose size' },
   { label: 'unbounded-common-reading', file: css, before: 'max-height: min(240px, 28vh);', after: 'max-height: none;', assertion: 'Initial and expanded actions share a bounded reading budget' }
