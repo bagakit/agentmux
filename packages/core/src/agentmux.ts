@@ -14,6 +14,7 @@ import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   AGENTMUX_DEMAND_PRIORITIES,
   AGENTMUX_DEMAND_STATUSES,
+  agentMuxMessageTargetCandidates,
   type AgentMuxControlCaller,
   type AgentMuxOpenDestination,
   type AgentMuxSpaceDestination,
@@ -771,10 +772,12 @@ async function sendCommand(args: readonly string[]): Promise<number> {
       if (region.kind !== 'agent' || !region.agentSessionId) throw new AgentMuxError('Target Region is not an Agent.', 'MESSAGE_TARGET_NOT_AGENT')
       return region.agentSessionId
     }
-    const regions = (inspected.result as { tab: { regions: Array<{ kind: string; agentSessionId?: string }> } }).tab.regions
-    const candidates = regions.filter((region) => region.kind === 'agent' && region.agentSessionId)
-    if (candidates.length !== 1) throw new AgentMuxError('Target Tab does not contain exactly one Agent Session.', 'MESSAGE_TARGET_NOT_UNIQUE')
-    return candidates[0]!.agentSessionId!
+    if (inspected.operation !== 'inspect.tab') throw new AgentMuxError('Target Tab inspection is unavailable.', 'CONTROL_PROTOCOL_ERROR')
+    const candidates = agentMuxMessageTargetCandidates(inspected.result.tab.regions)
+    if (candidates.length !== 1) throw Object.assign(new AgentMuxError(
+      'Target Tab does not contain exactly one distinct Agent Session.', 'MESSAGE_TARGET_NOT_UNIQUE'
+    ), { candidates })
+    return candidates[0]!.agentSessionId
   })()
   const facts = owner && capability
     ? await withClient((client) => Promise.resolve({

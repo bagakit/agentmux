@@ -22,7 +22,7 @@ import {
   type MoveSessionViewTarget
 } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '@agentmux/layout'
-import { formatMessagingAddress, formatSessionAddress, formatViewAddress } from '../lib/agent-address'
+import { formatMessagingAddress, formatSessionAddress, formatTabAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
@@ -47,7 +47,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
  * 现在 `label` **就是**要画出来的字、必填，id 单独一列。谁也不再兼任对方。
  */
 type WorkbenchTabActionId =
-  | 'copy-view-address'
+  | 'copy-tab-address'
   | 'copy-session-address'
   | 'message-agent'
   | 'copy-path'
@@ -83,7 +83,7 @@ export type WorkbenchTabMenuEntry = { kind: 'action'; action: WorkbenchTabCopyAc
  * 所以只有一套，条件加在这里而不是渲染层。
  */
 export type WorkbenchTabCopyModel = {
-  viewAddress: WorkbenchTabCopyAction
+  tabAddress: WorkbenchTabCopyAction
   /**
    * 按意图命名的交接入口。它排在地址项前面：用户来这个菜单，绝大多数时候想的是"把这个 Agent
    * 交出去"，而不是"我要哪一层身份"——后者是达成前者的手段，不该占据第一位。
@@ -136,11 +136,11 @@ export function createWorkbenchTabCopyModel({
     }
   }
   const actions: Omit<WorkbenchTabCopyModel, 'entries'> = {
-    viewAddress: {
-      id: 'copy-view-address',
-      label: 'Copy View Address',
+    tabAddress: {
+      id: 'copy-tab-address',
+      label: 'Copy Tab Address',
       icon: Crosshair,
-      onSelect: async () => copy(formatViewAddress(tabId), 'Copy View Address')
+      onSelect: async () => copy(formatTabAddress(tabId), 'Copy Tab Address')
     },
     ...(agentSessionId
       ? {
@@ -207,7 +207,7 @@ function workbenchTabMenuEntries(
 ): readonly WorkbenchTabMenuEntry[] {
   const ordered: (WorkbenchTabCopyAction | undefined)[] = [
     model.handoff,
-    model.viewAddress,
+    model.tabAddress,
     model.sessionAddress,
     model.copyPath,
     model.copyRelativePath,

@@ -1,4 +1,5 @@
 import {
+  agentMuxMessageTargetCandidates,
   type AgentMuxArrangeMode,
   type AgentMuxControlCaller,
   type AgentMuxInspectedRegion,
@@ -225,15 +226,10 @@ export function messageTargetCandidates(
   input: WorkbenchControlState,
   tabId: string
 ): AgentMuxMessageTargetCandidate[] {
-  const candidates = new Map<string, string[]>()
   const tab = input.tabs[tabId]
   if (!tab) throw error('TAB_NOT_OPEN', 'Tab target is not currently open.')
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
-  for (const region of projectTabRegions(tab, sessions)) {
-    if (region.kind !== 'agent') continue
-    candidates.set(region.agentSessionId, [...(candidates.get(region.agentSessionId) ?? []), region.regionId])
-  }
-  return [...candidates].map(([agentSessionId, regionIds]) => ({ agentSessionId, regionIds }))
+  return agentMuxMessageTargetCandidates(projectTabRegions(tab, sessions))
 }
 
 export function planControlOpen(
