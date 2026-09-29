@@ -1,232 +1,49 @@
-import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
-import type { LaunchOption } from '@agentmux/core'
-import {
-  CLAUDE_LAUNCH_OPTIONS,
-  CODEX_LAUNCH_OPTIONS,
-  CURSOR_LAUNCH_OPTIONS,
-  describeLaunchOptions
-} from '@agentmux/core'
-import { LaunchRefine } from '../src/renderer/src/components/LaunchOptionControls.js'
+// @vitest-environment happy-dom
+import { act, useState } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRoot, type Root } from 'react-dom/client'
+import { CLAUDE_LAUNCH_OPTIONS, CODEX_LAUNCH_OPTIONS, describeLaunchOptions, type LaunchOption, type LaunchOptionSelection } from '@agentmux/core'
+import { LaunchRefine } from '../src/renderer/src/components/LaunchOptionControls'
 
-const sandbox: LaunchOption = {
-  id: 'sandbox',
-  label: 'Sandbox',
-  description: 'How much of the machine the agent may touch.',
-  choices: [
-    { id: 'read-only', label: 'Read only', tier: 'safe' },
-    { id: 'workspace-write', label: 'Workspace write', tier: 'caution' },
-    { id: 'danger-full-access', label: 'Full access', tier: 'danger' }
-  ]
+const options: LaunchOption[] = [{ id: 'sandbox', label: 'Sandbox', choices: [{ id: 'read', label: 'Read only' }, { id: 'full', label: 'Full access', tier: 'danger' }] }]
+let container: HTMLDivElement, root: Root
+const selected = vi.fn()
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); selected.mockClear() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
+function Fixture({ declarations = options, naming = false }: { declarations?: LaunchOption[]; naming?: boolean }) {
+  const [expanded, setExpanded] = useState(false), [selection, setSelection] = useState<LaunchOptionSelection>({}), [names, setNames] = useState({ agentName: '', tabName: '' })
+  return <LaunchRefine options={declarations} selection={selection} expanded={expanded} onToggle={() => setExpanded(value => !value)} onSelect={(id, choice) => { selected(id, choice); setSelection(choice === null ? {} : { [id]: choice }) }}
+    {...(naming ? { names, onNameChange: (field: 'agentName' | 'tabName', value: string) => setNames(current => ({ ...current, [field]: value })) } : {})} />
 }
+async function mount(declarations = options, naming = false) { await act(async () => root.render(<Fixture declarations={declarations} naming={naming} />)) }
+async function click(selector: string) { const element = document.querySelector<HTMLButtonElement>(selector); expect(element).not.toBeNull(); await act(async () => element!.click()) }
+async function change(selector: string, value: string) { const input = document.querySelector<HTMLSelectElement>(selector); expect(input).not.toBeNull(); await act(async () => { input!.value = value; input!.dispatchEvent(new Event('change', { bubbles: true })) }) }
 
-const approval: LaunchOption = {
-  id: 'approval',
-  label: 'Approval policy',
-  choices: [
-    { id: 'on-request', label: 'On request', tier: 'caution' },
-    { id: 'never', label: 'Never', tier: 'danger' }
-  ]
-}
-
-describe('LaunchRefine', () => {
-  it('renders nothing for a Provider that declares no options', () => {
-    // Absence hides — a Provider with no declaration must draw no toggle, no panel, no placeholder.
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: [],
-      selection: {},
-      expanded: false,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    expect(markup).toBe('')
+describe('compact actual launch options', () => {
+  it('hides an empty Provider declaration and draws no empty panel', async () => { await mount([]); expect(container.textContent).toBe(''); expect(document.querySelector('[role="dialog"]')).toBeNull() })
+  it('uses one compact action without duplicate count/default copy, opening only on explicit click', async () => {
+    await mount(); expect(container.textContent).toBe('Options'); expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await click('[aria-label="Launch options"]'); expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sandbox')
+    expect(document.querySelectorAll('select')).toHaveLength(1); expect(document.querySelector('select')!.value).toBe('')
   })
-
-  it('shows a collapsed toggle with the option count and no panel while collapsed', () => {
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: [sandbox, approval],
-      selection: {},
-      expanded: false,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    // The ghost toggle is always present, labelled, and announces the count for aria/glance.
-    expect(markup).toContain('Launch options')
-    expect(markup).toContain('aria-expanded="false"')
-    expect(markup).toContain('launch-refine__count')
-    // Collapsed = no expanded panel and no per-option controls rendered.
-    expect(markup).not.toContain('launch-refine__panel')
-    expect(markup).not.toContain('launch-option__segment')
+  it('passes the exact choice, keeps dangerous posture in the compact summary, and clears to defaults', async () => {
+    await mount(); await click('[aria-label="Launch options"]'); await change('select', 'full')
+    expect(selected).toHaveBeenLastCalledWith('sandbox', 'full'); expect(document.querySelector('select')?.dataset.tier).toBe('danger')
+    await click('[aria-label="Close launch options"]'); expect(container.querySelector('[data-tier="danger"]')?.textContent).toBe('Full access')
+    await click('[aria-label="Launch options"]'); await change('select', ''); expect(selected).toHaveBeenLastCalledWith('sandbox', null)
+    await click('[aria-label="Close launch options"]'); expect(container.textContent).toBe('Options')
   })
-
-  it('summarises the untouched posture as provider defaults', () => {
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: [sandbox, approval],
-      selection: {},
-      expanded: false,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    // No choice picked => honest empty state that contributes no argv, inviting expansion.
-    expect(markup).toContain('launch-refine__summary--empty')
-    expect(markup).toContain('2 options · provider defaults')
+  it('renders every Provider choice in native compact selectors without exposing argv', async () => {
+    await mount(describeLaunchOptions(CLAUDE_LAUNCH_OPTIONS)); await click('[aria-label="Launch options"]')
+    expect([...document.querySelectorAll('select')].map(element => element.getAttribute('aria-label'))).toEqual(['Model', 'Effort', 'Permission mode'])
+    expect([...document.querySelector('select[aria-label="Effort"]')!.querySelectorAll('option')].map(element => element.textContent)).toContain('Max')
+    expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('--model')
   })
-
-  it('summarises a touched posture with tier-tinted value labels', () => {
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: [sandbox, approval],
-      selection: { sandbox: 'danger-full-access', approval: 'never' },
-      expanded: false,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    // Values only (glanceable), each carrying its tier so a dangerous posture reads without expanding.
-    expect(markup).toContain('Full access')
-    expect(markup).toContain('Never')
-    expect(markup).not.toContain('launch-refine__summary--empty')
-    expect((markup.match(/data-tier="danger"/g) ?? []).length).toBe(2)
+  it('can configure optional names even when the Provider declares no choices', async () => {
+    await mount([], true); await click('[aria-label="Launch options"]'); expect(document.querySelector('[aria-label="Agent name"]')).not.toBeNull(); expect(document.querySelector('[aria-label="Tab name"]')).not.toBeNull()
   })
-
-  it('renders one hairline row per option with every choice as a segment when expanded', () => {
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: [sandbox, approval],
-      selection: {},
-      expanded: true,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    expect(markup).toContain('launch-refine__panel')
-    expect(markup).toContain('Sandbox')
-    expect(markup).toContain('Approval policy')
-    expect(markup).toContain('Read only')
-    expect(markup).toContain('Workspace write')
-    expect(markup).toContain('Full access')
-    expect(markup).toContain('On request')
-    expect(markup).toContain('Never')
-    // Tiers surface as data attributes on the segments for status-colour, never as provider branches.
-    expect(markup).toContain('data-tier="danger"')
-    expect(markup).toContain('data-tier="caution"')
-  })
-
-  it('marks the selected choice pressed and leaves the rest unpressed when expanded', () => {
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: [sandbox],
-      selection: { sandbox: 'workspace-write' },
-      expanded: true,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    expect(markup).toMatch(/Workspace write<\/button>/)
-    expect(markup).toContain('launch-option__segment--selected')
-    // Exactly one segment is pressed.
-    expect((markup.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
-  })
-
-  it('fires onToggle when the collapsed toggle is clicked', () => {
-    const onToggle = vi.fn()
-    const tree = LaunchRefine({
-      options: [sandbox],
-      selection: {},
-      expanded: false,
-      onToggle,
-      onSelect: vi.fn()
-    }) as unknown as { props: { children: [{ props: { onClick(): void } }, unknown] } }
-    tree.props.children[0].props.onClick()
-    expect(onToggle).toHaveBeenCalledTimes(1)
-  })
-
-  it('sends the picked choice id when an unselected choice is clicked', () => {
-    const onSelect = vi.fn()
-    const tree = LaunchRefine({
-      options: [sandbox],
-      selection: {},
-      expanded: true,
-      onToggle: vi.fn(),
-      onSelect
-    }) as unknown as {
-      props: { children: [unknown, { props: { children: Array<{ props: { children: [unknown, { props: { children: Array<{ props: { onClick(): void } }> } }] } }> } }] }
-    }
-    // The expanded panel is the second child; its first row renders the segment group as its second child.
-    const rowNode = tree.props.children[1].props.children[0]
-    const segments = rowNode.props.children[1].props.children
-    segments[2].props.onClick() // "Full access"
-    expect(onSelect).toHaveBeenCalledWith('sandbox', 'danger-full-access')
-  })
-
-  it('clears the option (returns to provider default) when the active choice is clicked again', () => {
-    const onSelect = vi.fn()
-    const tree = LaunchRefine({
-      options: [sandbox],
-      selection: { sandbox: 'read-only' },
-      expanded: true,
-      onToggle: vi.fn(),
-      onSelect
-    }) as unknown as {
-      props: { children: [unknown, { props: { children: Array<{ props: { children: [unknown, { props: { children: Array<{ props: { onClick(): void } }> } }] } }> } }] }
-    }
-    const rowNode = tree.props.children[1].props.children[0]
-    const segments = rowNode.props.children[1].props.children
-    segments[0].props.onClick() // "Read only" — already selected
-    expect(onSelect).toHaveBeenCalledWith('sandbox', null)
-  })
-})
-
-// The launcher (NewTabSurface) reads options purely from the selected Provider's catalog declaration —
-// `providerCatalog.find(entry => entry.id === selectedProviderId)?.launchOptions`, no providerId branch.
-// The catalog carries the DESCRIBE half projected through describeLaunchOptions (agent-provider.ts), so
-// projecting the SAME SSOT constant here reproduces exactly what the launcher hands LaunchRefine when each
-// Provider is selected. This proves the T-001 declaration reaches the launcher through the sealed contract
-// with NO renderer change — and that codex/cursor, declaring no model/effort, grow no such control.
-describe('claude model/effort reach the launcher through the sealed catalog projection', () => {
-  const launcherOptionsFor = (declarations: Parameters<typeof describeLaunchOptions>[0]): LaunchOption[] =>
-    describeLaunchOptions(declarations)
-
-  it('renders model and effort groups when claude is the selected Provider', () => {
-    const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-      options: launcherOptionsFor(CLAUDE_LAUNCH_OPTIONS),
-      selection: {},
-      expanded: true,
-      onToggle: vi.fn(),
-      onSelect: vi.fn()
-    }))
-    // The two new option groups are present by their declared labels, alongside the unchanged permission-mode.
-    expect(markup).toContain('Model')
-    expect(markup).toContain('Effort')
-    expect(markup).toContain('Permission mode')
-    // Each group's enumerated choices render as segments — proving the whole declaration crossed, not a stub.
-    for (const label of ['Fable', 'Opus', 'Sonnet', 'Low', 'Medium', 'High', 'Extra high', 'Max']) {
-      expect(markup).toContain(label)
-    }
-    // argv NEVER reaches the renderer: the DESCRIBE half carries labels only, so the flag tokens the spawn
-    // path uses are absent from what the user's browser ever sees.
-    expect(markup).not.toContain('--model')
-    expect(markup).not.toContain('--effort')
-  })
-
-  it('grows no model or effort control for codex or cursor — absence hides, it never disables', () => {
-    // 钉整份 id 列表，不是 `some(model|effort)===false`——后者对空数组恒成立，而投影一个选项都没
-    // 交出来（这两个 Provider 的面板整个空掉）比多长出一个 Model 组严重得多，却会被它盖住。
-    for (const [declarations, ids] of [
-      [CODEX_LAUNCH_OPTIONS, ['sandbox', 'approval']],
-      [CURSOR_LAUNCH_OPTIONS, ['mode', 'sandbox', 'approvals']]
-    ] as const) {
-      const options = launcherOptionsFor(declarations)
-      // Neither provider declares a model or effort option, so the launcher hands LaunchRefine none.
-      expect(options.map((option) => option.id)).toEqual(ids)
-      const markup = renderToStaticMarkup(createElement(LaunchRefine, {
-        options,
-        selection: {},
-        expanded: true,
-        onToggle: vi.fn(),
-        onSelect: vi.fn()
-      }))
-      // The expanded panel draws these providers' real options but no Model/Effort group heading, and no
-      // launch argv leaks into the markup.
-      expect(markup).not.toContain('>Model<')
-      expect(markup).not.toContain('>Effort<')
-      expect(markup).not.toContain('--model')
-      expect(markup).not.toContain('--effort')
-    }
+  it('does not invent model/effort for a Provider whose declaration has neither', async () => {
+    const declarations = describeLaunchOptions(CODEX_LAUNCH_OPTIONS); expect(declarations.map(option => option.id)).toEqual(['sandbox', 'approval'])
+    await mount(declarations); await click('[aria-label="Launch options"]'); expect([...document.querySelectorAll('select')].map(element => element.getAttribute('aria-label'))).toEqual(['Sandbox', 'Approval policy'])
   })
 })

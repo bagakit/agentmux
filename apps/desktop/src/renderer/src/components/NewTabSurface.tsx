@@ -1,10 +1,9 @@
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '../lib/composer-insertion'
-import { ArrowUpRight, Check, ChevronRight, Globe2, LoaderCircle, NotebookPen, Play, RadioTower, RefreshCw, SquareTerminal } from 'lucide-react'
+import { Check, ChevronRight, ChevronDown, Folder, LoaderCircle, Minus, Play, RadioTower, RefreshCw, SquareTerminal, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
-import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { currentHostCheck, hostCheckLabel } from '../lib/host-check'
@@ -16,14 +15,11 @@ import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
 import { appendFileReferences } from '../lib/composer-file-reference'
 import { expandSemanticReferences } from '../lib/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
-import { formatRelativeAge } from '../lib/relative-age'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { InlineComposer } from './InlineComposer'
-import * as DropdownMenu from './HoverDropdownMenu'
 import { LaunchRefine } from './LaunchOptionControls'
-import { TerminalView } from './TerminalView'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -32,6 +28,10 @@ import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { lifecycleFailureBelongsTo } from '../lib/agent-lifecycle-feedback'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
+import { LauncherMoteAction } from './LauncherMoteAction'
+import { LauncherResumePicker } from './LauncherResumePicker'
+import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 
 export function NewTabSurface({
   tabGroupId,
@@ -101,9 +101,6 @@ export function NewTabSurface({
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
-  const recoveryCandidates = useAppStore((state) => state.recoveryCandidates)
-  const recoverSession = useAppStore((state) => state.recoverSession)
-  const promoteWarmTerminal = useAppStore((state) => state.promoteWarmTerminal)
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null || state.workbenchSpaceSelection !== null)
   const warmTerminal = useAppStore((state) => state.warmTerminal)
@@ -111,8 +108,6 @@ export function NewTabSurface({
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
-  const createBrowser = useAppStore((state) => state.createBrowser)
-  const createNote = useAppStore((state) => state.createNote)
   // 卡片上写「Start in ⟨谁⟩」的那个 Workspace，与五个启动动作真正落进去的那个，必须是**同一次**
   // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
   const workspace = config?.workspaces.find((item) => item.id === resolveLauncherWorkspaceId({
@@ -149,9 +144,26 @@ export function NewTabSurface({
     })),
     [config?.executors, config?.hosts, detections, workspace]
   )
-  const installedExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
-  const unavailableExecutors = executors.filter((executor) => executor.detection?.state !== 'ready')
+  // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
+  const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing').sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
+  const unavailableExecutors = executors.filter(executor => executor.detection?.state === 'missing')
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
+  const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
+  const sections = { ...DEFAULT_LAUNCHER_SECTIONS, ...savedSections }
+  const persistenceIssue = useLauncherState(state => state.persistenceIssue)
+  const [storageIssue, setStorageIssue] = useState(false)
+  const saveSection = useLauncherState(state => state.setSection)
+  const saveExecutor = useLauncherState(state => state.selectExecutor)
+  const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
+  const selectedExecutor = executors.find(executor => executor.id === executorId)
+  function setSection(section: LauncherSection, mode: LauncherSectionMode) {
+    if (workspace && !saveSection(workspace.id, section, mode)) setStorageIssue(true)
+  }
+  function chooseExecutor(id: string) {
+    setExecutorId(id)
+    if (workspace && !saveExecutor(workspace.id, id)) setStorageIssue(true)
+  }
+  useEffect(() => { if (savedExecutor) setExecutorId(savedExecutor) }, [workspace?.id, savedExecutor])
 
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
   // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
@@ -183,8 +195,8 @@ export function NewTabSurface({
     // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
     // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
     // 所以这条 effect 多跑几次不会攒出多余进程。
-    if (workspace && visible && presentationActive && !controlNavigation) prewarmTerminal(workspace.id, launcherId)
-  }, [prewarmTerminal, visible, presentationActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld])
+    if (workspace && visible && presentationActive && !controlNavigation && sections.terminal === 'expanded') prewarmTerminal(workspace.id, launcherId)
+  }, [prewarmTerminal, visible, presentationActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, sections.terminal])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
@@ -258,339 +270,84 @@ export function NewTabSurface({
   }
 
   return (
-    <section className="launch-surface">
-      <div className="launch-surface__heading">
-        <div className="launch-surface__heading-content">
-          <div className="eyebrow">New session</div>
-          <h2>Start in {workspace?.name ?? 'this workspace'}</h2>
-          <p>Pick an Agent and describe the outcome — or open a terminal or browser instead.</p>
+    <section className="launch-surface" data-agent-section={sections.agents}>
+      <details className="launcher-environment">
+        <summary aria-label="Runtime environment">
+          <span className="launcher-environment__project"><Folder size={18} /><h2>{workspace?.name ?? 'Choose a workspace'}</h2></span>
+          <span className="launcher-environment__host">{host?.kind === 'ssh' ? <RadioTower size={13} /> : <SquareTerminal size={13} />}{host?.kind === 'local' ? 'Local' : host?.kind === 'ssh' ? 'SSH' : 'Unknown host'}<span>· {hostLabel}</span><ChevronDown size={12} /></span>
+          <span className="launcher-environment__path" title={workspace?.path}>{workspace?.path ?? 'No working directory selected'}</span>
+        </summary>
+        <div className="launcher-environment__details">
+          <dl><div><dt>Working directory</dt><dd>{workspace?.path ?? 'Not selected'}</dd></div>
+            <div><dt>Host</dt><dd>{hostLabel}{host?.kind === 'ssh' ? ` · ${host.user ? `${host.user}@` : ''}${host.hostname}${host.port ? `:${host.port}` : ''}` : ''}</dd></div>
+            <div><dt>Connection check</dt><dd>{hostCheck ? hostCheckLabel(hostCheck) : 'Not tested'}{hostCheck?.detail ? <small>{hostCheck.detail}</small> : null}</dd></div>
+            <div><dt>Execution environment</dt><dd>Configured host shell<small>Isolated environments are not supported yet.</small></dd></div>
+          </dl>
         </div>
-        <button
-          type="button"
-          className="icon-button launch-surface__refresh"
-          title="Refresh agents on this host"
-          disabled={!workspace || detecting}
-          onClick={() => workspace && void detectExecutors(workspace.hostId)}
-        >
-          {detecting ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
-        </button>
-      </div>
+      </details>
 
       {topicPreparation || (executors.length === 0 && prompt) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: topicPreparation ? 'Mote Topic preparation is unconfirmed' : 'No Agent Executor is configured',
         mode: `${executors.length === 0 ? 'No Agent Executor is configured. ' : ''}Your request has not been sent. ${topicPreparation ? 'The same Topic, Region and complete draft are kept.' : 'The same Region and complete draft are kept.'}`,
         restore: executors.length === 0 ? 'Add an Agent in Settings, then Launch agent here with the preserved request.' : 'Launch agent here to retry preparation for this same Topic, then send the preserved request.'
       } }} /> : null}
+      {storageIssue || persistenceIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: persistenceIssue?.includes('could not be read') ? 'Saved Launcher preferences could not be read' : 'Launcher preferences could not be saved', mode: `${persistenceIssue ?? ''} Current sections and drafts remain usable in this window. They may not survive a restart.`, restore: persistenceIssue?.includes('could not be read') ? 'Copy any new drafts before reopening this window to retry reading saved preferences. The existing saved data is kept.' : 'Restore local storage access, then change a section or edit the draft to retry saving.' } }} /> : null}
 
-      <div className="agent-catalog" aria-label="Agent executors">
-        <div className="agent-catalog__group">
-          <div className="agent-catalog__label">
-            <span><i className="agent-catalog__ready-dot" />Available Agents</span>
-            <div className="agent-catalog__label-actions">
-              <em>{installedExecutors.length}</em>
-              {unavailableExecutors.length > 0 ? (
-                <button
-                  type="button"
-                  className={`agent-catalog__more-btn ${showUnavailable ? 'agent-catalog__more-btn--active' : ''}`}
-                  title={showUnavailable ? 'Hide other agents' : `View ${unavailableExecutors.length} other agents`}
-                  onClick={() => setShowUnavailable((prev) => !prev)}
-                >
-                  <ChevronRight size={12} className={showUnavailable ? 'icon-rotate-90' : ''} />
-                  <span>{showUnavailable ? 'Less' : `+${unavailableExecutors.length} more`}</span>
-                </button>
-              ) : null}
-            </div>
-          </div>
-          <div className="agent-picks">
-            {installedExecutors.map((executor) => (
-              <button
-                type="button"
-                key={executor.id}
-                aria-pressed={executor.id === executorId}
-                className={`agent-pick ${executor.id === executorId ? 'agent-pick--selected' : ''}`}
-                onClick={() => setExecutorId(executor.id)}
-              >
-                <span className="agent-pick__icon"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
-                <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · Ready</small></span>
-                {executor.id === executorId ? <span className="agent-pick__check"><Check size={10} strokeWidth={3} /></span> : null}
-              </button>
-            ))}
-            {installedExecutors.length === 0 ? (
-              detecting ? (
-                <div className="agent-catalog__empty">Checking providers…</div>
-              ) : (
-                <div className="agent-catalog__empty agent-catalog__empty--action">
-                  <strong>No agent providers found on {hostLabel}</strong>
-                  <small>Install a supported CLI (codex, claude, …) on this host, then re-check.</small>
-                  <button
-                    type="button"
-                    className="small-button"
-                    disabled={!workspace || detecting}
-                    onClick={() => workspace && void detectExecutors(workspace.hostId)}
-                  >
-                    <RefreshCw size={12} /> Re-check host
-                  </button>
-                </div>
-              )
-            ) : null}
-          </div>
-        </div>
-
-        {showUnavailable && unavailableExecutors.length > 0 ? (
-          <div className="agent-catalog__group agent-catalog__group--unavailable animate-fade-in">
-            <div className="agent-catalog__label">
-              <span>Other agents on {workspace?.hostId ?? 'this host'}</span>
-              <em>{unavailableExecutors.length}</em>
-            </div>
-            <div className="agent-picks">
-              {unavailableExecutors.map((executor) => (
-                <button type="button" key={executor.id} className="agent-pick agent-pick--unavailable" title={executor.detection?.detail} disabled>
-                  <span className="agent-pick__icon"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
-                  <span className="agent-pick__copy"><strong>{executor.label}</strong><small>{agentProviderLabel(executor.providerId)} · {executorDetectionLabel(executor.detection)}</small></span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="launcher-composer composer"><InlineComposer
-        aria-label="Agent prompt"
-        disabled={false}
-        readPastedImage={(path) => api.ui.readPastedImage(path)}
-        insertionRef={insertionRef}
-        onPasteImage={(file, insert) => { void feedback.run(() => insert(async () => {
-          const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
-          return appendFileReferences('', [path])
-        }, { separate: true })) }}
-        autoFocus={visible && presentationActive && !controlNavigation}
-        value={prompt}
-        onValueChange={setPrompt}
-        // Cmd/Ctrl+Enter 从这里发车。挂在富文本输入上而不是整个 section 上：section 里还嵌着热终端的
-        // 预览（TerminalView），keydown 会从它冒泡上来，挂在外层就会把用户敲进那个终端的 Cmd+Enter
-        // 抢掉。这一格是 prompt 唯一被输入的地方，也正是注册表里 `launcher.submit` 不带 gate 的理由。
-        //
-        // 壳里没有任何条件：要不要发车整条判定在 launcherKeydownLaunches 里（含那道与按钮共用的闸），
-        // 这里只转发。它说不发时也**不** preventDefault——那一下不属于我们，Enter 该照旧换行。
-        onKeyDown={(event) => {
-          if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return
-          event.preventDefault()
-          launchFromLauncher()
-        }}
-        placeholder="Describe the outcome. You can steer the agent after launch."
-      /></div>
-      {/*
-        工具条的直接子元素必须是**一簇**（这里全是左侧工具，没有右侧发送键）。`.composer__toolbar`
-        的 `space-between` 是一份「有几簇」的契约，而 AgentComposerTools 渲染的是 fragment：
-        Capture 只在本机出现、Commands 只在 Provider 声明了命令时出现，于是散着放时直接子元素在
-        2~4 个之间浮动，同一条 CSS 会把它们摊成两端对齐、三等分或四等分——布局随 Provider 而变。
-        包成一个 div 让簇数恒为 1，与 AgentComposer.tsx:144 那处（左右两簇）同一写法。
-      */}
-      <div className="composer__toolbar">
-        <div>
-          <AgentComposerTools key={toolsScope}
-            layoutControl={false}
-            disabled={busy !== null || !workspace}
-            commands={providerCatalog.find((entry) => entry.id === selectedProviderId)?.composer?.commands ?? []}
-            loadSkills={() => workspace && selectedProviderId
-              ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId)
-              : Promise.resolve([])}
-            onChooseSkill={(skill) => appendReference(skill.path)}
-            onCommand={(command) => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
-            {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})}
-            runAction={feedback.run}
-          />
-          <ComposerReferenceTool disabled={busy !== null || !workspace}
-            onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
-        </div>
-      </div>
-
-      <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
-
-      <div className="launch-names">
-        <input
-          className="launch-names__input"
-          value={names.agentName}
-          onChange={(event) => setName('agentName', event.target.value)}
-          placeholder="Agent name (optional)"
-          aria-label="Agent name"
-          disabled={busy !== null}
-        />
-        <input
-          className="launch-names__input"
-          value={names.tabName}
-          onChange={(event) => setName('tabName', event.target.value)}
-          placeholder="Tab name (optional)"
-          aria-label="Tab name"
-          disabled={busy !== null}
-        />
-      </div>
-
-      <LaunchRefine
-        options={launchOptions}
-        selection={launchOptionSelection}
-        expanded={optionsExpanded}
-        onToggle={() => setOptionsExpanded((value) => !value)}
-        disabled={busy !== null}
-        onSelect={(optionId, choiceId) =>
-          setLaunchOptionSelection((current) => {
-            if (choiceId === null) {
-              const { [optionId]: _cleared, ...rest } = current
-              return rest
-            }
-            return { ...current, [optionId]: choiceId }
-          })
-        }
-      />
-
-      <div className="launch-surface__footer">
-        <span>
-          {workspace?.hostId !== 'local' ? <RadioTower size={13} /> : null}
-          {hostLabel}
-          {hostCheck ? <em className={`launch-host-health launch-host-health--${hostCheck.state === 'error' ? hostCheck.result?.outcome ?? 'check-failed' : hostCheck.state}`}>{hostCheck.state === 'checking' ? 'Checking' : hostCheckLabel(hostCheck)}</em> : null}
+      {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
+        <span className="launcher-agents-head__identity">{sections.agents === 'collapsed' && selectedExecutor ? <AgentAvatar executorId={selectedExecutor.id} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={16} /> : null}<strong>{sections.agents === 'collapsed' ? selectedExecutor?.label ?? 'Agent' : 'Agent'}</strong>
+          {sections.agents === 'collapsed' && prompt ? <small title={prompt}>{prompt.split('\n')[0]}</small> : null}</span>
+        <span className="launcher-section-actions">
+          <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!workspace || detecting} onClick={() => workspace && void detectExecutors(workspace.hostId)}>{detecting ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}</button>
+          <button type="button" className="icon-button" aria-label={sections.agents === 'expanded' ? 'Collapse Agents' : 'Expand Agents'} title={sections.agents === 'expanded' ? 'Collapse' : 'Expand'} onClick={() => setSection('agents', sections.agents === 'expanded' ? 'collapsed' : 'expanded')}>{sections.agents === 'expanded' ? <Minus size={13} /> : <ChevronDown size={13} />}</button>
+          <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><X size={13} /></button>
         </span>
-        <button
-          className="primary-button"
-          disabled={!launcherCanLaunch(readiness)}
-          onClick={() => launchFromLauncher()}
-        >
-          {busy === 'agent' ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />} {busy === 'agent' ? 'Launching…' : 'Launch agent'}
-        </button>
-        {/*
-          读数与动作必须指向同一个对象（见 agentmux-desktop-interaction.md「控件报出几个候选，
-          就得让用户挑哪一个」）。此前这里写的是 `Resume (17)` 而 onClick 恒定恢复
-          `recoveryCandidates[0]`：按钮报出 17 个，动作只碰得到 1 个，另外 16 个没有任何入口——
-          而程序认为自己成功了，所以既不报错也没人会发现。
-          于是**恰好一个**候选时才是直接动作（且绝不带计数——没有可选的东西就没有数要报）；
-          多于一个时它是一份清单，用户挑哪一个就恢复哪一个。
-        */}
-        {recoveryCandidates.length === 1 ? <button type="button" className="small-button" disabled={busy !== null}
-          title={`Resume ${recoveryCandidates[0]!.label}`} onClick={() => void recoverSession(recoveryCandidates[0]!.agentSessionId)}>
-          Resume
-        </button> : recoveryCandidates.length > 1 ? <DropdownMenu.Root>
-          <DropdownMenu.Trigger className="small-button" disabled={busy !== null}
-            title="Choose a saved Agent Session to resume">
-            Resume ({recoveryCandidates.length})
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="end" sideOffset={4} collisionPadding={8}>
-            <DropdownMenu.Label className="composer-menu__hint">Choose a saved Agent Session to resume</DropdownMenu.Label>
-            {recoveryCandidates.map((candidate) => <DropdownMenu.Item key={candidate.agentSessionId}
-              className="tab-context-menu__item composer-menu__item"
-              title={`${candidate.label}\n${candidate.workspacePath}`}
-              onSelect={() => void recoverSession(candidate.agentSessionId)}>
-              <AgentAvatar label={candidate.label} providerId={candidate.providerId} size={13} />
-              {/* label 是「执行器 · Workspace」，两个候选同源时它们完全相同——最后活跃时间是那时
-                  唯一能把它们分开的东西，所以它和身份一起列，而不是一个可选的装饰。 */}
-              <span>{candidate.label}<small>{candidate.workspacePath} · {formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</small></span>
-            </DropdownMenu.Item>)}
-          </DropdownMenu.Content></DropdownMenu.Portal>
-        </DropdownMenu.Root> : null}
-      </div>
+      </div> : null}
+
+      {sections.agents === 'expanded' ? <>
+        <div className="agent-catalog" aria-label="Agent executors">
+          <div className="agent-picks">
+            {installedExecutors.map(executor => <button type="button" key={executor.id} aria-pressed={executor.id === executorId}
+              className={`agent-pick ${executor.id === executorId ? 'agent-pick--selected' : ''}`}
+              title={`${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`} onClick={() => chooseExecutor(executor.id)}>
+              <AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /><strong>{executor.label}</strong>
+              {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" aria-label={executorDetectionLabel(executor.detection)}>?</span> : null}
+              {executor.id === executorId ? <Check size={12} className="agent-pick__check" /> : null}
+            </button>)}
+            {unavailableExecutors.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable} onClick={() => setShowUnavailable(value => !value)}>{showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailableExecutors.length}`}<ChevronDown size={12} /></button> : null}
+            {!executors.length ? <div className="agent-catalog__empty">No Agent is configured. Add one in Settings to launch here.</div> : !installedExecutors.length ? <div className="agent-catalog__empty">Configured Agent commands were not found on this host. Recheck after installation.</div> : null}
+          </div>
+          {showUnavailable ? <div className="launcher-unavailable-agents">{unavailableExecutors.map(executor => <span key={executor.id} title={executor.detection?.detail}><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={14} /><strong>{executor.label}</strong><small>{executorDetectionLabel(executor.detection)}</small></span>)}</div> : null}
+        </div>
+        <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}
+          onPasteImage={(file, insert) => { void feedback.run(() => insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return appendFileReferences('', [path]) }, { separate: true })) }}
+          autoFocus={visible && presentationActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
+          onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
+          placeholder="What would you like to work on?" /></div>
+        <div className="composer__toolbar launcher-tools"><div>
+          <AgentComposerTools key={toolsScope} layoutControl={false} disabled={busy !== null || !workspace}
+            commands={providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? []}
+            loadSkills={() => workspace && selectedProviderId ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId) : Promise.resolve([])}
+            onChooseSkill={skill => appendReference(skill.path)} onCommand={command => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
+            {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
+          <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
+        </div></div>
+        <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
+      </> : null}
+      {sections.agents !== 'hidden' ? <div className="launch-surface__footer">
+        <div className="launcher-launch-tools"><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded}
+          onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
+          onSelect={(optionId, choiceId) => setLaunchOptionSelection(current => { if (choiceId === null) { const { [optionId]: _cleared, ...rest } = current; return rest }; return { ...current, [optionId]: choiceId } })} /><LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} /></div>
+        <button className="primary-button" disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch agent'}</button>
+        <LauncherResumePicker workspace={workspace} disabled={busy !== null} />
+      </div> : null}
+      {selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
-
-      <div className="launch-surface__alt">
-        <div className="agent-catalog__label">
-          <span>Quick Surfaces</span>
-        </div>
-
-        {/*
-          热终端在场时它自己占满一行（带实时预览），不在场时退化成 grid 里的一张卡。分支只包住
-          终端这一件东西——Browser / Note 两张卡在**分支之外**只写一次。原先是整个 quick-grid
-          分两份、Browser 卡逐字抄两遍，那种形状下「加一张卡只加进一条分支」会让用户在另一条
-          分支里彻底看不到入口，而组件照旧渲染成功、测试照旧全绿（实测删掉其中一处，7 条全过）。
-        */}
-        <div className="launch-surfaces-stack">
-          {workspace && warmSession && terminalThemeId ? (
-            <div className="launch-terminal">
-              <div className="launch-terminal__head">
-                <span className="launch-terminal__hint">
-                  <SquareTerminal size={13} className="launch-terminal__icon" />
-                  Terminal · Ready for quick commands
-                </span>
-                <button
-                  type="button"
-                  className="small-button launch-terminal__claim"
-                  aria-label="Open reusable Terminal in tab"
-                  data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
-                  data-agentmux-session-id={warmSession.id}
-                  disabled={busy !== null}
-                  onClick={() => void run('terminal', () => promoteWarmTerminal(
-                    tabGroupId,
-                    launcherRef
-                  ))}
-                >
-                  {busy === 'terminal' ? <LoaderCircle className="spin" size={12} /> : <ArrowUpRight size={12} />}
-                  {busy === 'terminal' ? 'Opening…' : 'Open in tab'}
-                </button>
-              </div>
-              <div className="launch-terminal__body">
-                <TerminalView
-                  session={warmSession}
-                  themeId={terminalThemeId}
-                  fontSize={terminalFontSize}
-                  interactiveResize={false}
-                  visible={visible}
-                  autoFocus={false}
-                  linkOrigin={{ workspaceId: workspace.id, tabGroupId }}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          <div className="launch-surface-quick-grid">
-            {workspace && warmSession && terminalThemeId ? null : (
-              <button
-                type="button"
-                className="agent-pick agent-pick--action launch-quick-card launch-terminal__fallback"
-                aria-label="Open Terminal"
-                data-agentmux-action={DESKTOP_ACTIONS.claimReusableTerminal}
-                disabled={!workspace || busy !== null}
-                onClick={() => void run('terminal', () => promoteWarmTerminal(
-                  tabGroupId,
-                  launcherRef
-                ))}
-              >
-                <span className="agent-pick__icon">{warmPending ? <LoaderCircle className="spin" size={16} /> : <SquareTerminal size={16} />}</span>
-                <span className="agent-pick__copy"><strong>Terminal</strong><small>{warmPending ? 'Warming a reusable host shell…' : 'Host shell in a recoverable core session'}</small></span>
-                <span className="agent-pick__go">{busy === 'terminal' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="agent-pick agent-pick--action launch-quick-card"
-              aria-label="Open Browser"
-              data-agentmux-action={DESKTOP_ACTIONS.openBrowser}
-              disabled={!workspace || busy !== null}
-              onClick={() => void run('browser', () => createBrowser(
-                tabGroupId,
-                launcherRef
-              ))}
-            >
-              <span className="agent-pick__icon"><Globe2 size={16} /></span>
-              <span className="agent-pick__copy"><strong>Browser</strong><small>Pages an Agent can read and drive; save one as a bookmark to reopen here</small></span>
-              <span className="agent-pick__go">{busy === 'browser' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
-            </button>
-
-            <button
-              type="button"
-              className="agent-pick agent-pick--action launch-quick-card"
-              aria-label="Create note"
-              data-agentmux-action={DESKTOP_ACTIONS.createNote}
-              disabled={!workspace || busy !== null}
-              onClick={() => void run('note', () => createNote(
-                tabGroupId,
-                launcherRef
-              ))}
-            >
-              <span className="agent-pick__icon"><NotebookPen size={16} /></span>
-              <span className="agent-pick__copy"><strong>Note</strong><small>Date-stamped markdown in this workspace</small></span>
-              <span className="agent-pick__go">{busy === 'note' ? <LoaderCircle className="spin" size={14} /> : <ChevronRight size={14} />}</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
+        sections={sections} onSectionChange={setSection} warmSession={warmSession} warmPending={warmPending}
+        terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
+        onRun={run} onStorageIssue={() => setStorageIssue(true)} />
+      {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}
     </section>
   )
 }
