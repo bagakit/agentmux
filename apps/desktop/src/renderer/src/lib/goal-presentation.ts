@@ -5,15 +5,15 @@ import type { DemandRecord } from './global-demand-board'
 export function goalNextStep(demand: Pick<DemandRecord, 'alignment' | 'grounding' | 'status'>): string {
   const { alignment, grounding } = demand
   if (demand.status === 'done' && !grounding) return 'Results not verified'
-  if (!alignment) return 'Clarify goal'
-  if (alignmentConfirmationIssue(alignment)) return alignment.openQuestions.length ? 'Decision needed' : 'Define success criteria'
-  if (alignment.confirmedAt === null) return 'Confirm goal'
-  if (!grounding) return 'Goal agreed'
+  if (!alignment) return 'Goal needs an outline'
+  if (alignmentConfirmationIssue(alignment)) return alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed'
+  if (alignment.confirmedAt === null) return 'Goal ready for confirmation'
+  if (!grounding) return 'Goal agreed · No result report'
   if (grounding.alignmentRevision !== alignment.revision) return 'Results need updating'
   const gapsAllowed = groundingAcceptanceIssue(alignment, grounding, true) === null
   const hasGaps = grounding.checks.some(check => check.outcome === 'gap')
   if (grounding.acceptedAt !== null && gapsAllowed) return hasGaps ? 'Accepted with gaps' : 'Accepted'
-  if (gapsAllowed) return hasGaps ? 'Review gaps' : 'Review results'
+  if (gapsAllowed) return hasGaps ? 'Results have known gaps' : 'Results ready for review'
   return 'Results need checking'
 }
 
