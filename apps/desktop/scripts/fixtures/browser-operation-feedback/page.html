@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Browser operation feedback</title>
+<link rel="stylesheet" href="/page.css"><script src="/page.js" defer></script>
+<body><header>Private Browser proof</header><h1>A quiet working page</h1>
+<p>The page remains readable while an Agent acts. These controls belong to the original page.</p>
+<button id="target">Continue</button><input id="field" aria-label="Page note" placeholder="Write a page note">
+<small id="result">No page action yet</small>
+<button id="edge" class="edge">Edge action</button>
+<iframe title="Same-process document" src="/frame.html"></iframe>
+<iframe title="Cross-process document" src="__CROSS_FRAME__"></iframe>
+</body></html>

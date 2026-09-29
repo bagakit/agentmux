@@ -69,14 +69,49 @@ for(const path of ['apps/desktop/src/renderer/src/components/SessionPane.tsx','a
 }
 const sourceReview=JSON.parse(await bound(proof.sourceReview)),visualReview=JSON.parse(await bound(proof.visualReview))
 assert.equal(sourceReview.decision,'PASS');assert.equal(visualReview.decision,'PASS')
+for(const [path,identity]of Object.entries(proof.source).filter(([path])=>path.includes('/src/renderer/'))){
+  assert.equal(sourceReview.source[path]?.sha256,identity.sha256,`source review: ${path}`)
+}
+for(const [path,identity]of Object.entries(proof.source)){
+  assert.equal(visualReview.source[path]?.sha256,identity.sha256,`visual review: ${path}`)
+}
 assert.ok(visualReview.images.length>=4,'wide/narrow/readonly/unsupported request review required')
 assert.equal(visualReview.actual_view_tool,'view_image')
+for(const reviewed of visualReview.images)await bound(reviewed)
 const visual=JSON.parse(await bound(proof.visualManifest))
+const correctionReview=JSON.parse(await bound(proof.visualReferenceReview))
+assert.equal(correctionReview.decision,'PASS');assert.equal(correctionReview.newVisualReviewPerformed,false)
+assert.equal(correctionReview.priorVisualReview.sha256,proof.visualReview.sha256)
+assert.equal(correctionReview.priorSourceReview.sha256,proof.sourceReview.sha256)
+assert.equal(correctionReview.correctedManifest.sha256,proof.visualManifest.sha256)
+await bound(correctionReview.retainedIncorrectManifest);await bound(correctionReview.correctionReceipt)
+assert.equal(visualReview.manifest.sha256,correctionReview.retainedIncorrectManifest.sha256,'retain the original visual review provenance')
 assert.equal(visual.passed,true);assert.equal(visual.originalAppRuntimeRunControls,0)
 assert.ok(visual.scenes.some(scene=>scene.name.includes('wide')))
 assert.ok(visual.scenes.some(scene=>scene.name.includes('narrow')))
 for(const [path,identity]of Object.entries(proof.source).filter(([path])=>path.includes('/src/renderer/')))assert.equal(visual.source[path]?.sha256,identity.sha256,path)
 assert.equal(visual.cssImported,true,'actual product CSS must be parsed in the Renderer')
-for(const scene of visual.scenes){await bound(scene.image);assert.ok(scene.requestId,'nonempty actual current request');assert.ok(scene.optionCount>0||scene.unsupported===true)}
+assert.equal(visual.actualLoadedInputs.length,2,'two actual loaded product inputs')
+for(const loaded of visual.actualLoadedInputs){
+  assert.equal(loaded.sha256,proof.source[loaded.path]?.sha256,loaded.path)
+  assert.equal(hash(await bound(loaded.capturedSource)),loaded.sha256,loaded.path)
+}
+const styles=JSON.parse(await bound(visual.actualStyles))
+assert.ok(styles.length>0,'actual Renderer style set must be nonempty')
+const currentCSS=(await bytes('apps/desktop/src/renderer/src/styles/agent.css')).toString()
+assert.ok(styles.some(style=>style.text.includes(currentCSS)),'whole current CSS must be present in actual Renderer styles')
+for(const scene of visual.scenes){
+  await bound(scene.image)
+  assert.ok(visualReview.images.some(reviewed=>reviewed.path===scene.image.path&&reviewed.sha256===scene.image.sha256),'each scene must have actual independent image review')
+  const snapshot=JSON.parse(await bound(scene.producerSnapshot)),request=snapshot.session.pendingInteraction
+  assert.equal(request.id,scene.requestId,'actual current request identity')
+  const kind=request.kind==='permission'?'permission':scene.unsupported?'unsupported':'question'
+  assert.equal(hash(await bytes(`apps/desktop/scripts/fixtures/conversation-chat-identity/pending-inputs/${kind}.json`)),scene.producerSnapshot.sha256,'actual fixture snapshot bytes')
+  // Permission capture counts all response controls, including the typed plan's separate Cancel.
+  const optionCount=request.kind==='question'?request.questions.reduce((count,question)=>count+question.options.length,0):request.options.length+1
+  assert.equal(optionCount,scene.optionCount,'actual captured request choices')
+  assert.ok(scene.optionCount>0||scene.unsupported===true)
+}
+assert.deepEqual(JSON.parse(await bound(visual.actualQuestionBrowserSnapshot)),JSON.parse(await bound(visual.scenes.find(scene=>scene.name==='question-wide-quality-final').producerSnapshot)),'actual Browser snapshot must match the declared producer')
 assert.equal(proof.originalAppRuntimeRunControls,0)
 console.log(JSON.stringify({result:'PASS',owning:17,loadedSemanticMutations:4,boundary:'Current typed request/private public Core producer/Store/DOM/compiled UI; no vendor Writer, installed App, restart or full Terminal qualification'}))
