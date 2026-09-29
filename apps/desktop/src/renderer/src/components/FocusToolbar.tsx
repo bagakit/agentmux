@@ -30,7 +30,9 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
   const menuOriginRef = useRef<HTMLButtonElement | null>(null)
   const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
   const renameCancelledRef = useRef(false)
-  const name = (selected?.kind === 'terminal' ? tab?.name : null) || selected?.name || 'Session awaiting recovery'
+  const originalTerminal = tab && Object.values(tab.regions).some(surface => surface.kind === 'terminal' && surface.sessionId === selectedId)
+  const name = (originalTerminal ? tab.name || 'Terminal' : null) || selected?.name || 'Session awaiting recovery'
+  const statusLabel = selected?.stateLabel ?? (originalTerminal ? 'Terminal' : 'Recovery unknown')
   useEffect(() => {
     if (draft !== null) { renameRef.current?.focus(); renameRef.current?.select() }
     else if (renameCancelledRef.current) { renameCancelledRef.current = false; identityRef.current?.focus() }
@@ -68,7 +70,7 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
   ]
   return <div className="focus-toolbar__context">
     {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Focus context" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; setDraft(null) } }} /> : <ContextMenu.Root>
-      <ContextMenu.Trigger asChild><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${selected?.stateLabel ?? 'Recovery unknown'} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{selected?.stateLabel}</small></button></ContextMenu.Trigger>
+      <ContextMenu.Trigger asChild><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${statusLabel} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{selected?.stateLabel}</small></button></ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>}
     {selected?.actionable ? <button type="button" className="focus-toolbar__review" onClick={onReview}><Inbox size={12} />Review</button> : null}

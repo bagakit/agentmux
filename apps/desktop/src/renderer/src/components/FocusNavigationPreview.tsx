@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { CircleAlert, CircleCheck, CirclePause, CirclePlay, SquareTerminal } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { createTerminalFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
+import { createFocusProjectionSelector, type FocusBucket } from '../lib/focus-context'
 import { useAppStore } from '../store'
 import { AgentProviderIcon } from './AgentProviderIcon'
 
@@ -15,7 +15,7 @@ const priority: Record<FocusBucket, number> = { attention: 0, working: 1, result
 
 /** Mounted only while the footer tooltip is open; no fetching or hidden detail subscription. */
 export function FocusNavigationPreview() {
-  const selectContexts = useMemo(createTerminalFocusProjectionSelector, [])
+  const selectContexts = useMemo(createFocusProjectionSelector, [])
   const contexts = useAppStore(useShallow(state => selectContexts(state).contexts))
   const selectedId = useAppStore(state => state.agentFocus.execution.sessionId)
   const disconnected = contexts.filter(context => context.state === 'disconnected').length

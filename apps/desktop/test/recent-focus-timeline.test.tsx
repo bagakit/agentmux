@@ -11,11 +11,11 @@ import { HOUR_MS, localDateTime } from '../src/renderer/src/lib/focus-time-windo
 
 const NOW = new Date('2026-10-02T12:00:00Z').getTime()
 const baseline = useAppStore.getState()
-function terminal(id: string): SessionSnapshot {
-  return { id, kind: 'terminal', providerId: null, executorId: null, hostId: 'local', workspacePath: '/repo', label: id,
+function agent(id: string): SessionSnapshot {
+  return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '/repo', label: id,
     createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
     status: { state: 'working', source: 'run-process', observedAt: 1 },
-    control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } } } as SessionSnapshot
+    control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id } } } as SessionSnapshot
 }
 function message(id: string, session = 'one', createdAt = NOW - HOUR_MS, kind: AgentTimelineItem['kind'] = 'user_message'): AgentTimelineItem {
   return { id, agentSessionId: session, kind, source: 'user', status: 'complete', createdAt, updatedAt: NOW, title: 'User prompt', content: `Original message ${id}` }
@@ -23,7 +23,7 @@ function message(id: string, session = 'one', createdAt = NOW - HOUR_MS, kind: A
 
 describe('Recent Focus timeline', () => {
   let root: Root, container: HTMLDivElement
-  const contexts = () => createFocusProjectionSelector()({ sessions: [terminal('one'), terminal('two')], config: null, timelines: {}, agentNames: {} }).contexts
+  const contexts = () => createFocusProjectionSelector()({ sessions: [agent('one'), agent('two')], config: null, timelines: {}, agentNames: {}, scratchTopicSnapshots: {} }).contexts
   const render = (onSelect = vi.fn(), entries = [{ sessionId: 'one', focusedAt: NOW - 2 * HOUR_MS }, { sessionId: 'two', focusedAt: NOW - HOUR_MS / 2 }]) => act(async () => root.render(createElement(RecentFocusTimeline, { entries, currentSessionId: 'two', contexts: contexts(), onSelect })))
   const click = (label: string) => act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click())
   const range = () => [Number(container.querySelector<HTMLElement>('.recent-focus')!.dataset.windowStart), Number(container.querySelector<HTMLElement>('.recent-focus')!.dataset.windowEnd)]
@@ -54,7 +54,7 @@ describe('Recent Focus timeline', () => {
     expect(range()).toEqual([old - 18 * HOUR_MS, old + 6 * HOUR_MS])
     await act(async () => vi.advanceTimersByTime(60_000)); expect(range()).toEqual([old - 18 * HOUR_MS, old + 6 * HOUR_MS]); expect(onSelect).not.toHaveBeenCalled()
     await click('Return to current focus window'); expect(range()).toEqual([NOW + 60_000 - 18 * HOUR_MS, NOW + 60_000 + 6 * HOUR_MS])
-    expect(container.querySelector('[aria-label="Focus window size"]')!.textContent).toBe('1h4h12h24h')
+    expect(container.querySelector('[aria-label="Focus window size"]')!.textContent).toBe('30m1h2h4h6h8h12h18h24h1.5d2d')
   })
 
   it('places canonical user messages on their Context at createdAt, previews without focus change and returns to existing work', async () => {

@@ -6,7 +6,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
-import { createTerminalFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
+import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { addWorkbenchRegion, createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
@@ -76,9 +76,9 @@ it('publishes PMO request changes in the mounted Focus without any execution cha
   expect(card).not.toBeNull()
   expect(container.querySelector('.focus-pmo-attention')).toBeNull()
   const cases: Array<[string[], string | null]> = [
-    [['mote-one'], 'Mote · 1 to review'],
-    [['mote-one', 'mote-two'], 'Mote · 2 to review'],
-    [['mote-two'], 'Mote · 1 to review'],
+    [['mote-one'], 'Mote· 1 to review'],
+    [['mote-one', 'mote-two'], 'Mote· 2 to review'],
+    [['mote-two'], 'Mote· 1 to review'],
     [[], null]
   ]
   for (const [pending, label] of cases) {
@@ -118,11 +118,11 @@ it.each([false, true])('opens the original pending Mote tab and closes back to i
   await act(async () => root.render(createElement(Fragment, null, createElement(GlobalFocusSurface), createElement(Floating))))
   const original = useAppStore.getState()
   const entry = container.querySelector<HTMLButtonElement>('.focus-pmo-attention')!
-  expect(entry?.textContent).toContain('Mote · 1 to review')
+  expect(entry?.textContent).toContain('Mote· 1 to review')
   entry.focus()
   await act(async () => entry.click())
   const dialog = container.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')!
-  expect(dialog.getAttribute('aria-hidden')).toBe('false')
+  expect(dialog.getAttribute('data-state')).toBe('open')
   expect(document.activeElement).toBe(dialog)
   expect(container.querySelector('[data-pmo-workbench-target]')?.getAttribute('data-pmo-workbench-target')).toBe(target.id)
   expect(useAppStore.getState().agentFocus.pmo.sessionId).toBe(selectedMote.id)
@@ -134,7 +134,7 @@ it.each([false, true])('opens the original pending Mote tab and closes back to i
   close.focus()
   await act(async () => close.click())
   await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
-  expect(dialog.getAttribute('aria-hidden')).toBe('true')
+  expect(dialog.getAttribute('data-state')).toBe('closed')
   expect(document.activeElement).toBe(entry)
   const state = useAppStore.getState()
   expect(state.agentFocus.execution).toBe(original.agentFocus.execution)
@@ -165,12 +165,12 @@ it('changes only the PMO projection with no execution Tab reads at both input si
     ]))
     let tabReads = 0
     const tabs = new Proxy(records, { get(target, key, receiver) { if (typeof key === 'string' && key in target) tabReads++; return Reflect.get(target, key, receiver) } })
-    const select = createTerminalFocusProjectionSelector()
-    const input = { config, sessions: [...terminals, mote('mote-one')], tabs, timelines: {}, agentNames: {} }
+    const select = createFocusProjectionSelector()
+    const input = { config, sessions: [...terminals, mote('mote-one')], tabs, timelines: {}, agentNames: {}, scratchTopicSnapshots: {} }
     const initial = select(input)
-    expect(initial.contexts.map(row => row.id)).toEqual(terminals.map(terminal => terminal.id))
+    expect(initial.contexts).toEqual([])
     expect(initial.pmoAttention).toEqual([])
-    expect(tabReads).toBeGreaterThan(0)
+    expect(tabReads).toBe(0)
     tabReads = 0
     const pending = select({ ...input, sessions: [...terminals, mote('mote-one', true)] })
     expect(pending.pmoAttention).toEqual(['mote-one'])
