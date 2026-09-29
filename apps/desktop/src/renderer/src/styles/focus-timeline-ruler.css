@@ -32,9 +32,7 @@
 .recent-focus__tick[data-tier='shorter']::after { height: 8px; }
 .recent-focus__tick[data-tier='short']::after { height: 11px; }
 .recent-focus__tick[data-tier='major']::after { height: 15px; border-color: var(--text-3); }
-.recent-focus[data-ruler-mode] .recent-focus__tick time { z-index: 1; padding: 0 2px; white-space: nowrap; background: var(--surface-1); transform: translateX(-50%); }
-.recent-focus[data-ruler-mode] .recent-focus__tick time[data-edge='start'] { transform: none; }
-.recent-focus[data-ruler-mode] .recent-focus__tick time[data-edge='end'] { transform: translateX(-100%); }
+.recent-focus[data-ruler-mode] .recent-focus__tick time { z-index: 1; padding: 0 2px; white-space: nowrap; background: var(--surface-1); transform: translateX(clamp(calc(0px - var(--focus-tick-x)), -50%, calc(var(--focus-time-scale-width) - var(--focus-tick-x) - 100%))); }
 .recent-focus__tick time small { margin-left: 3px; color: var(--text-3); font-size: inherit; }
 .recent-focus__date-error { margin: 0; padding: var(--sp-1) var(--sp-2); color: var(--red); font-size: var(--fs-micro); }
 .recent-focus__date[aria-invalid='true'] { border-color: var(--red); }

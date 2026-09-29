@@ -244,9 +244,9 @@ export function SessionPane({
   // surfaces through reportError — "click opened nothing" is never silent.
   const openWorkspaceFile = useCallback(
     (path: string, location?: { line: number; column?: number }) => {
-      void openFile(path, linkOrigin.tabGroupId, location).catch(reportError)
+      void openFile(path, linkOrigin.tabGroupId, location, linkOrigin.workspaceId).catch(reportError)
     },
-    [openFile, reportError, linkOrigin.tabGroupId]
+    [openFile, reportError, linkOrigin.tabGroupId, linkOrigin.workspaceId]
   )
   // A pasted image cited in the conversation is read back through main (the only place that can reach a
   // file outside the workspace) as an <img>-ready data URI. Main confines the read to the pasted

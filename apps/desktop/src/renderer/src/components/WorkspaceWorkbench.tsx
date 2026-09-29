@@ -102,9 +102,9 @@ const GitBranchDiffPane = lazy(async () => {
   return { default: module.GitBranchDiffPane }
 })
 
-const EditorPane = lazy(async () => {
-  const module = await import('./EditorPane')
-  return { default: module.EditorPane }
+const FileSurfaceView = lazy(async () => {
+  const module = await import('./FileSurfaceView')
+  return { default: module.FileSurfaceView }
 })
 
 type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
@@ -497,8 +497,8 @@ function SurfaceContent({
   }
   if (surface.kind === 'file') {
     return (
-      <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Editor" title="Loading editor" detail="Bringing up the code editor for this file." />}>
-        <EditorPane tabId={tabId} surface={surface} released={monacoReleased} visible={surfaceVisible} />
+      <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
+        <FileSurfaceView tabId={tabId} surface={surface} released={monacoReleased} visible={surfaceVisible} />
       </Suspense>
     )
   }

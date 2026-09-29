@@ -35,6 +35,7 @@ export type FileWorkbenchState = {
 
 export type FileDocumentIssue =
   | { kind: 'changed'; observed: FileDocument }
+  | { kind: 'binary'; revision: string; byteLength: number }
   | { kind: 'deleted' }
   | { kind: 'read-error'; code: string; message: string }
   | { kind: 'write-error'; code: string; message: string }
@@ -72,19 +73,17 @@ function withoutIssue(
   return next
 }
 
-export function reduceFileOpened(
+/** Place every format through the same durable File surface; content is a separate fact. */
+export function reduceFileSurfaceOpened(
   state: FileWorkbenchState,
   workspaceId: string,
   path: string,
-  document: FileDocument,
   preferredTabGroupId?: string,
   topicId?: string
 ): FileWorkbenchState {
   const layout = state.layouts[workspaceId]
   if (!layout) return state
   const tabId = fileTabId(workspaceId, path)
-  const key = documentKey(workspaceId, path)
-  const alreadyOpen = Boolean(state.documents[key])
   const existingTabGroupId = tabGroupForTab(layout, tabId)
   const targetTabGroupId = existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
   const existingTab = state.tabs[tabId]
@@ -100,13 +99,6 @@ export function reduceFileOpened(
   })()
   return {
     ...state,
-    documents: { ...state.documents, [key]: alreadyOpen ? state.documents[key]! : document },
-    documentGenerations: { ...state.documentGenerations, [key]: state.documentGenerations[key] ?? 0 },
-    documentObservationGenerations: {
-      ...state.documentObservationGenerations,
-      [key]: state.documentObservationGenerations[key] ?? 0
-    },
-    documentIssues: alreadyOpen ? state.documentIssues : withoutIssue(state.documentIssues, key),
     tabs: { ...state.tabs, [tab.id]: tab },
     lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
     layouts: {
@@ -115,6 +107,23 @@ export function reduceFileOpened(
         ? activateTab(layout, targetTabGroupId, tabId)
         : addTab(layout, targetTabGroupId, tabId)
     }
+  }
+}
+
+export function reduceFileOpened(
+  state: FileWorkbenchState, workspaceId: string, path: string, document: FileDocument,
+  preferredTabGroupId?: string, topicId?: string
+): FileWorkbenchState {
+  const opened = reduceFileSurfaceOpened(state, workspaceId, path, preferredTabGroupId, topicId)
+  if (opened === state) return state
+  const key = documentKey(workspaceId, path)
+  const alreadyOpen = Boolean(state.documents[key])
+  return {
+    ...opened,
+    documents: { ...state.documents, [key]: alreadyOpen ? state.documents[key]! : document },
+    documentGenerations: { ...state.documentGenerations, [key]: state.documentGenerations[key] ?? 0 },
+    documentObservationGenerations: { ...state.documentObservationGenerations, [key]: state.documentObservationGenerations[key] ?? 0 },
+    documentIssues: alreadyOpen ? state.documentIssues : withoutIssue(state.documentIssues, key)
   }
 }
 
@@ -292,6 +301,14 @@ export function reduceDocumentRead(
     ...state,
     documentObservationGenerations,
     documentIssues: { ...state.documentIssues, [key]: { kind: 'read-error', code: result.code, message: result.message } }
+  }
+  if (result.status === 'binary') return {
+    ...state,
+    documentObservationGenerations,
+    documentIssues: { ...state.documentIssues, [key]: {
+      kind: 'read-error', code: 'WORKSPACE_FILE_BECAME_BINARY',
+      message: 'The file on disk is binary. The existing text buffer is preserved; open it externally to inspect the new file.'
+    } }
   }
   if (result.document.revision === current.revision) {
     const issue = state.documentIssues[key]
