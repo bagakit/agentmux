@@ -61,3 +61,8 @@ remain. The old wide avatar and light images are retained only within their
 original candidate scope; this run does not claim new light-theme screenshots.
 Original Source/style consumption and compiled outputs have a fresh receipt;
 no compiled JavaScript is manually replaced to represent new TSX Source.
+# Footer count clearance supplement
+
+`--capture footer-only --candidate <manifest.json>` compiles the actual App once and checks 320/420/560/980 widths with zero, one working, one attention and two three-digit counts. Controlled Session facts enter only through the original Store; actual FocusNavigationButton, CSS, number text Range, neighbors and right-side actions determine the result. Five complete frames show both themes at 320 and the other widths in dark.
+
+The same archived compilation is copied privately; the two narrow Focus sizing declarations are removed from one unique complete agent.css block. Actual count containment must fail with AssertionError. The unchanged original compilation must then pass the same sixteen cases. No shared Source mutation or second compilation is used. This covers the existing low-footer contract in density SSOT, not Native/OS/IME/Core Run/restart or the earlier rail/Settings scenarios. All private outputs are cleaned after hashes and evidence are preserved.

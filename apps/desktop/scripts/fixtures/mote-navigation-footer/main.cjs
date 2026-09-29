@@ -8,15 +8,18 @@ const narrowFrames = ['narrow-long-names-all-motes-cards', 'narrow-avatars-custo
 const affectedEntryFrames = ['wide-closed-low-footer-circle', 'wide-hover-cards-original-input',
   ...narrowFrames, 'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
 const selectedFrames = frameSelection ? JSON.parse(frameSelection) : null
+const footerFrames = ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
+  'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts']
+const footerOnly = selectedFrames?.[0] === footerFrames[0]
 if (selectedFrames) {
-  const expected = selectedFrames.length === 2 ? narrowFrames : affectedEntryFrames
+  const expected = footerOnly ? footerFrames : selectedFrames.length === 2 ? narrowFrames : affectedEntryFrames
   assert.deepEqual(selectedFrames, expected, 'Capture filtering must retain the reviewed bounded scenario selection')
 }
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, pid: process.pid, frames: [], checks: [],
   replayedFrames: [],
-  scope: selectedFrames?.length === 2 ? 'All original interactions and assertions replayed; two affected narrow Renderer frames captured from an explicitly derived CSS archive.' : selectedFrames ?
+  scope: footerOnly ? 'Only actual Footer count geometry: four widths and four count variants; five actual complete Renderer frames. No rail/Settings/native/OS/Core Run sign-off.' : selectedFrames?.length === 2 ? 'All original interactions and assertions replayed; two affected narrow Renderer frames captured from an explicitly derived CSS archive.' : selectedFrames ?
     'New actual Renderer compile; all original interactions and assertions replayed; six affected Entry/Settings/narrow frames captured.' :
     'Eight actual Renderer frames in one private process. Controlled public data; no native/OS/Core Run sign-off.' }
 let win
@@ -168,6 +171,66 @@ app.whenReady().then(async () => {
     await until('window.motePresentationReview?.ready && window.motePresentationReview.facts().ready', 'actual App/footer ready')
     win.webContents.debugger.attach('1.3')
     await input('Emulation.setFocusEmulationEnabled', { enabled: true })
+    if (footerOnly) {
+      result.stage = 'actual-footer-count-containment'
+      const geometry = () => read(`(() => {
+        const rect = node => { const r = node.getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, height:r.height, right:r.right, bottom:r.bottom } }
+        const footer = document.querySelector('.window-status-bar')
+        const focus = footer.querySelector('.surface-navigation__focus')
+        if (!focus) throw new Error('Actual Focus button is missing')
+        const badges = [...focus.querySelectorAll('[data-focus-count]')].map(node => {
+          const text = [...node.childNodes].find(child => child.nodeType === Node.TEXT_NODE && child.textContent.trim())
+          if (!text) throw new Error('Actual badge number is missing')
+          const range = document.createRange(); range.selectNodeContents(text)
+          return { kind:node.dataset.focusCount, text:text.textContent, rect:rect(node), number:rect(range), icons:[...node.querySelectorAll('svg')].map(rect) }
+        })
+        return { viewport:{ width:innerWidth, height:innerHeight }, footer:rect(footer), focus:rect(focus), badges,
+          focusIcons:[...focus.querySelectorAll('svg')].map(rect),
+          buttons:[...footer.querySelectorAll('button')].filter(node => !node.closest('[popover]'))
+            .map(node => ({ label:node.getAttribute('aria-label'), rect:rect(node) })) }
+      })()`)
+      const within = (part, owner, label) => {
+        assert.ok(part.width > 0 && part.height > 0, label + ' has positive area')
+        assert.ok(part.x >= owner.x - .1 && part.right <= owner.right + .1 && part.y >= owner.y - .1 && part.bottom <= owner.bottom + .1, label + ' fits its original button')
+      }
+      const check = async (width, working, attention) => {
+        await call('footerCounts', working, attention); await paint()
+        const one = await facts(), measured = await geometry()
+        const expected = [...(working ? [{kind:'working', text:String(working)}] : []), ...(attention ? [{kind:'attention', text:String(attention)}] : [])]
+        assert.deepEqual(measured.badges.map(({kind,text}) => ({kind,text})), expected, 'Actual badges match nonzero public facts, including explicit zero absence')
+        assert.equal(measured.viewport.width, width)
+        assert.equal(measured.footer.height, 24)
+        assert.equal(measured.focusIcons.length, 1 + expected.length, 'Original Focus icon and each actual count icon are nonempty')
+        for (const icon of measured.focusIcons) within(icon, measured.focus, 'Focus icon')
+        for (const badge of measured.badges) {
+          within(badge.rect, measured.focus, 'Focus badge'); within(badge.number, measured.focus, 'Focus count text')
+          assert.equal(badge.icons.length, 1)
+        }
+        assert.ok(measured.buttons.length >= 7, 'Actual surface, Settings and right-side consumers are nonempty')
+        for (const button of measured.buttons) {
+          within(button.rect, measured.footer, button.label)
+          assert.equal(button.rect.height, 22, 'Ordinary actions retain the low bar height')
+        }
+        for (let first = 0; first < measured.buttons.length; first++) for (let next = first + 1; next < measured.buttons.length; next++) {
+          const a = measured.buttons[first].rect, b = measured.buttons[next].rect
+          assert.ok(a.right <= b.x + .1 || b.right <= a.x + .1, 'Actual footer buttons do not overlap')
+        }
+        circle(one)
+        assert.equal(forbidden(one).length, 0, 'Footer observation does not launch, stop or send')
+        result.checks.push({ width, working, attention, measured })
+      }
+      for (const width of [320, 420, 560, 980]) {
+        win.setContentSize(width, 740); await paint()
+        for (const [working, attention] of [[0,0], [1,0], [0,1], [123,123]]) await check(width, working, attention)
+        await capture('footer-' + width + '-dark-double-counts')
+      }
+      win.setContentSize(320, 740); await call('theme', 'light'); await paint()
+      await capture('footer-320-light-double-counts')
+      assert.equal(result.checks.length, 16)
+      assert.equal(result.frames.length, footerFrames.length)
+      result.passed = true; result.stage = 'footer-counts-captured-look-pending'
+      return
+    }
     await until('document.querySelector(`[data-workbench-tab-id="${window.motePresentationReview.backgroundId}"] [aria-label="Message Agent"]`) !== null', 'original project Composer ready')
     await call('focusBackground'); await paint()
     const closed = await facts(); circle(closed)

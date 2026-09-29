@@ -11,17 +11,24 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const fixture = join(desktop, 'scripts/fixtures/mote-navigation-footer')
 const require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
-let selectedFrames = null, candidateFile = null
+let selectedFrames = null, candidateFile = null, footerOnly = false, reuseRenderer = null
 if (args[0] === '--reuse') {
   const { recapture } = await import('./fixtures/mote-navigation-footer/recapture.mjs')
   await recapture({ desktop, repository, fixture, driver: import.meta.filename }, args)
   process.exit(0)
 }
 if (args.length) {
-  assert.equal(args.length, 4, 'Use --capture affected-entry --candidate <manifest.json>')
-  assert.deepEqual(args.slice(0, 3), ['--capture', 'affected-entry', '--candidate'])
+  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
+  assert.equal(args[0], '--capture'); assert.equal(args[2], '--candidate')
+  assert.ok(['affected-entry', 'footer-only'].includes(args[1]))
+  footerOnly = args[1] === 'footer-only'
+  if (args.length === 6) {
+    assert.equal(footerOnly, true); assert.equal(args[4], '--reuse-renderer')
+    reuseRenderer = resolve(repository, args[5])
+  }
   candidateFile = resolve(repository, args[3])
-  selectedFrames = ['wide-closed-low-footer-circle', 'wide-hover-cards-original-input',
+  selectedFrames = footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
+    'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts'] : ['wide-closed-low-footer-circle', 'wide-hover-cards-original-input',
     'narrow-long-names-all-motes-cards', 'narrow-avatars-custom-original-draft',
     'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
 }
@@ -83,8 +90,9 @@ const result = {
   ], stage: 'preparation', cleanup: null
 }
 if (selectedFrames) {
-  result.captureSelection = { mode: 'affected-entry', frames: selectedFrames,
-    scope: 'New actual Renderer compilation and six new affected frames; all eight original interactions/assertions replayed. The prior wide avatar and light images retain their original scope, not new candidate screenshots.' }
+  result.captureSelection = { mode: footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
+    scope: footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
+      'New actual Renderer compilation and six new affected frames; all eight original interactions/assertions replayed. The prior wide avatar and light images retain their original scope, not new candidate screenshots.' }
 }
 await mkdir(evidence, { recursive: true })
 try {
@@ -102,7 +110,29 @@ try {
   }
   result.stage = 'private-renderer-compile'
   const outDir = join(privateRoot, 'renderer')
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
+  if (reuseRenderer) {
+    const parentBytes = await readFile(reuseRenderer), parent = JSON.parse(parentBytes)
+    assert.ok(Object.keys(parent.inputs).length > 100 && Object.keys(parent.compiled).length > 0)
+    for (const [file, digest] of Object.entries(parent.inputs)) {
+      const original = await readFile(join(parent.originalInputs, file))
+      assert.equal(hash(original), digest, 'Every original consumed input remains byte-bound')
+      const absolute = join(repository, file)
+      if (!inputs.has(absolute)) { inputs.set(absolute, digest); originalBytes.set(absolute, original) }
+    }
+    for (const [file, digest] of Object.entries(parent.stylesheets)) {
+      assert.equal(parent.inputs[file], digest); styles.add(join(repository, file)); watchedStyles.add(join(repository, file))
+    }
+    for (const [file, digest] of Object.entries(parent.compiled)) {
+      assert.equal(hash(await readFile(join(parent.compiledRenderer, file))), digest, 'Every original compiled byte agrees')
+    }
+    // A corrected Node capture/assertion driver does not change compiled Renderer inputs.
+    for (const row of result.candidate.files.filter(row => /\.(tsx|css)$/.test(row.path))) {
+      assert.equal(parent.inputs[row.path], row.sha256, 'Current Footer Renderer producers agree with the reused compilation')
+    }
+    await cp(parent.compiledRenderer, outDir, { recursive: true })
+    result.reusedCompilation = { receipt: reuseRenderer, sha256: hash(parentBytes), compiled: parent.compiled,
+      scope: 'Unchanged original actual Renderer compilation; current separately bound Node capture/assertion driver. No Renderer recompile.' }
+  } else await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
     esbuild: { jsx: 'automatic' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [sourceBinding], css: { postcss: { plugins: [stylesheetBinding] } },
@@ -158,11 +188,60 @@ try {
   assert.equal(result.exit.timedOut, false, 'The bounded Renderer must publish a result')
   assert.equal(result.exit.exitCode, 0, result.renderer.failure?.message)
   assert.equal(result.renderer.passed, true)
-  assert.equal(result.renderer.frames.length, selectedFrames ? 6 : 8, 'Every selected actual frame must be captured')
+  assert.equal(result.renderer.frames.length, selectedFrames?.length ?? 8, 'Every selected actual frame must be captured')
   if (selectedFrames) assert.deepEqual(result.renderer.frames.map(frame => frame.name), selectedFrames)
-  assert.equal(result.renderer.replayedFrames.length, 8, 'All original actual interactions and assertions are retained')
+  if (footerOnly) assert.equal(result.renderer.checks.length, 16, 'Every actual Footer count case is retained')
+  else assert.equal(result.renderer.replayedFrames.length, 8, 'All original actual interactions and assertions are retained')
   for (const frame of result.renderer.frames) {
     assert.equal(hash(await readFile(join(evidence, frame.file))), frame.sha256, 'Actual frame bytes agree')
+  }
+  if (footerOnly) {
+    const source = join(repository, 'apps/desktop/src/renderer/src/styles/agent.css')
+    const css = originalBytes.get(source).toString('utf8')
+    const rules = [...css.matchAll(/^  \.window-status-bar \.surface-navigation__focus \{[^\n]+\}/gm)]
+    assert.equal(rules.length, 1, 'The actual narrow Focus source rule is unique and nonempty')
+    const declarations = 'width: auto; flex-basis: auto; '
+    assert.equal(rules[0][0].split(declarations).length - 1, 1)
+    const mutatedCss = css.replace(rules[0][0], rules[0][0].replace(declarations, ''))
+    assert.notEqual(mutatedCss, css, 'Two actual producer declarations are removed')
+    const compiledMatches = []
+    for (const file of Object.keys(result.compiled).filter(file => file.endsWith('.css'))) {
+      const contents = await readFile(join(outDir, file), 'utf8')
+      if (contents.includes(css)) compiledMatches.push({ file, contents, occurrences: contents.split(css).length - 1 })
+    }
+    assert.equal(compiledMatches.length, 1, 'One compiled stylesheet consumes the entire original CSS source block')
+    assert.equal(compiledMatches[0].occurrences, 1, 'The complete source anchor must be unique')
+    const changed = compiledMatches[0], mutatedOutput = changed.contents.replace(css, mutatedCss)
+    assert.equal(mutatedOutput.replace(mutatedCss, css), changed.contents, 'All bytes outside the exact source mutation are retained')
+    const mutatedRoot = join(privateRoot, 'mutated-renderer')
+    await cp(outDir, mutatedRoot, { recursive: true })
+    await writeFile(join(mutatedRoot, changed.file), mutatedOutput)
+    const mutationEvidence = join(evidence, 'mutation'), restoredEvidence = join(evidence, 'restored')
+    await mkdir(mutationEvidence); await mkdir(restoredEvidence)
+    await writeFile(join(mutationEvidence, 'agent.css'), mutatedCss)
+    const replay = async (renderer, destination) => {
+      const replayLogs = []
+      const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(renderer, 'index.html'),
+        privateRoot, destination, JSON.stringify(selectedFrames)], { temporaryRoot: privateRoot, cwd: repository, env,
+        timeoutMs: 60000, onLine: line => replayLogs.push(line) })
+      await writeFile(join(destination, 'renderer.log'), replayLogs.join('\n'))
+      return { exit, renderer: JSON.parse(await readFile(join(destination, 'renderer.json'), 'utf8')) }
+    }
+    result.stage = 'actual-source-mutation-red'
+    const red = await replay(mutatedRoot, mutationEvidence)
+    assert.equal(red.exit.timedOut, false); assert.equal(red.exit.exitCode, 1)
+    assert.equal(red.renderer.passed, false); assert.equal(red.renderer.failure?.name, 'AssertionError')
+    assert.match(red.renderer.failure.message, /Focus (icon|badge|count text) (fits its original button|has positive area)/, 'Only actual count geometry RED proves the mutation')
+    result.sourceMutation = { kind: 'exact-whole-source-block-replacement', source: relative(repository, source),
+      originalSourceSha256: hash(Buffer.from(css)), mutatedSourceSha256: hash(Buffer.from(mutatedCss)),
+      compiledCssFile: changed.file, originalCompiledSha256: hash(Buffer.from(changed.contents)),
+      mutatedCompiledSha256: hash(Buffer.from(mutatedOutput)), allOtherCompiledBytesUnchanged: true,
+      originalRendererUnchanged: true, sharedSourceUntouched: true, ...red }
+    result.stage = 'same-original-source-restored-green'
+    result.restored = await replay(outDir, restoredEvidence)
+    assert.equal(result.restored.exit.timedOut, false); assert.equal(result.restored.exit.exitCode, 0)
+    assert.equal(result.restored.renderer.passed, true); assert.equal(result.restored.renderer.checks.length, 16)
+    for (const frame of result.restored.renderer.frames) assert.equal(hash(await readFile(join(restoredEvidence, frame.file))), frame.sha256)
   }
   result.stage = 'source-style-and-compiled-final-binding'
   for (const [file, digest] of inputs) {
@@ -201,7 +280,8 @@ try {
     '# Mote rail / footer / Settings — independent actual look pending', '',
     `Capture passed: ${result.passed}. Stage: ${result.stage}. This is a single private Renderer capture, not native/OS/Core Run sign-off.`, '',
     ...(result.renderer?.frames ?? []).map(frame => `- ${frame.name}: [Actual complete Renderer frame](${frame.file}) — ${frame.sha256}`), '',
-    'Open every frame. Review both rail forms, complete objects and original input, narrow long names, dark/light boundary, low bar and complete circle/status/focus, and Settings operability.',
+    footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
+      'Open every frame. Review both rail forms, complete objects and original input, narrow long names, dark/light boundary, low bar and complete circle/status/focus, and Settings operability.',
     'Original inputs/raw CSS/compiled bytes and actual geometry/events are in receipt.json. Capture success does not constitute aesthetic approval.'
   ].join('\n'))
 }
