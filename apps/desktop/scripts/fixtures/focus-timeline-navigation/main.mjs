@@ -10,7 +10,7 @@ let win
 // evaluation open while waiting for the application's ready event.
 app.whenReady().then(async () => {
 try {
-  win = new BrowserWindow({ width: 1440, height: 540, show: false, webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false } })
+  win = new BrowserWindow({ width: 1200, height: 540, show: false, webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false } })
   await win.loadFile(html, { query: { variant } }); win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   const until = async expression => { for (let i = 0; i < 200; i++) { const result = await win.webContents.executeJavaScript(expression); if (result) return result; await new Promise(resolve => setTimeout(resolve, 20)) } throw new Error(`Did not settle: ${expression}`) }
@@ -83,12 +83,14 @@ try {
     // without text does not exercise the browser's button activation default.
     for (const type of ['rawKeyDown', 'char', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'char' ? { text: '\r', unmodifiedText: '\r' } : {}) })
   }
-  await keyboardZoom('in'); await until('navigationSceneState().hours===1')
+  actual.windowPresets = await win.webContents.executeJavaScript(`Array.from(document.querySelector('[aria-label="Focus window size"]').options, o => [o.value, o.text])`)
+  assert.deepEqual(actual.windowPresets, [['0.5','30m'],['1','1h'],['2','2h'],['4','4h'],['6','6h'],['8','8h'],['12','12h'],['18','18h'],['24','24h'],['36','1.5d'],['48','2d']])
+  for (const hours of [2, 1, .5]) { await keyboardZoom('in'); await until(`navigationSceneState().hours===${hours}`) }
   assert.equal(await win.webContents.executeJavaScript('document.querySelector("[aria-label=\\"Zoom in Focus timeline\\"]").disabled'), true)
-  await keyboardZoom('out'); await until('navigationSceneState().hours===4')
-  actual.keyboard = { trustedEnter: true, zoomInHours: 1, zoomOutHours: 4 }
+  for (const hours of [1, 2, 4]) { await keyboardZoom('out'); await until(`navigationSceneState().hours===${hours}`) }
+  actual.keyboard = { trustedEnter: true, zoomInHours: .5, zoomOutHours: 4 }
   await shot('wide')
-  win.setContentSize(640, 360); await until('innerWidth===640'); await shot('narrow')
+  win.setContentSize(360, 360); await until('innerWidth===360'); await shot('narrow')
   actual.controls = (await state()).controls; assert.deepEqual(actual.controls, [])
   actual.passed = true
 } catch (error) { actual.failure = { name: error.name, message: error.message, stack: error.stack }; if (win && !win.isDestroyed()) await fs.writeFile(path.join(evidence, `${variant}-failure.png`), (await win.webContents.capturePage()).toPNG()) }

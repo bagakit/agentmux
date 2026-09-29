@@ -21,7 +21,7 @@ import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
-import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWorkSegment, localDateTime, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
+import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWindowLabel, focusWorkSegment, localDateTime, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
 
 const describeMessageSpeaker = createSpeakerResolver()
 
@@ -402,7 +402,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         {mode !== 'collapsed' ? <><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} title={`Input records${inputSource ? ` · ${inputSource.name}` : ''}, including inputs without a recorded time`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" value={localDateTime(anchor ?? now)} onChange={event => { const next = new Date(event.target.value).getTime(); if (Number.isFinite(next)) inspectWindow(next) }} />
         <button data-focus-window-control type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ChevronLeft size={12} /></button>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><Minus size={12} /></button>
-        <select data-focus-window-control aria-label="Focus window size" value={hours} onChange={event => setHours(Number(event.target.value))}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{size}h</option>)}</select>
+        <select data-focus-window-control aria-label="Focus window size" value={hours} onChange={event => setHours(Number(event.target.value))}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{focusWindowLabel(size)}</option>)}</select>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom in Focus timeline" title="Zoom in · narrower time window" disabled={zoomIndex === 0} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex - 1]!)}><Plus size={12} /></button>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Next focus window" onClick={() => inspectWindow((anchor ?? now) + hours * HOUR_MS)}><ChevronRight size={12} /></button>
         <button data-focus-window-control type="button" className="recent-focus__now" aria-label="Return to current focus window" aria-pressed={anchor === null} onClick={() => { setNow(Date.now()); inspectWindow(null) }}>Now</button></> : null}
