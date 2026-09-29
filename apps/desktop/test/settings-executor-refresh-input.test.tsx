@@ -124,7 +124,8 @@ it('actual Workspace, launcher and Board consumers ignore same-ID command replac
   const picks = () => [...dom.container.querySelectorAll('.agent-catalog .agent-pick:not(.agent-pick--unavailable) strong')].map(node => node.textContent)
   expect(picks()).toEqual(['Codex', 'Review'])
   await act(async () => useAppStore.setState({ config: changed }))
-  expect(picks()).toEqual(['Review']); expect(useAppStore.getState().agentComposerDrafts.region).toBe('Preserved launcher draft')
+  expect(picks()).toEqual(['Review', 'Codex']);
+  expect(dom.container.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe('Not checked'); expect(useAppStore.getState().agentComposerDrafts.region).toBe('Preserved launcher draft')
   const row: BoardRow = { id: 'main', name: 'Main', path: '/repo', workspace: config.workspaces[0]!, kind: 'branch',
     branch: { name: 'main', worktreePath: '/repo', workspaceId: 'workspace', isCurrent: true },
     runsByColumn: { inbox: [], working: [], 'needs-you': [], done: [] }, sessions: [], searchText: 'main' }

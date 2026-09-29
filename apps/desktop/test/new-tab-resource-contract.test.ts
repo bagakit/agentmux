@@ -48,7 +48,8 @@ const fixture = vi.hoisted(() => {
       },
       activeWorkspaceId: 'workspace',
       providerCatalog: [],
-      tabs: {},
+      tabs: {}, layouts: {}, agentFocus: { pmo: { sessionId: null } }, scratchTopicSnapshots: {},
+      workspaceFileRevisions: {}, refreshScratchTopics: vi.fn(), agentNames: {}, timelines: {}, sessions: [],
       hostChecks: {},
       executorDetections: {},
       detectExecutors: vi.fn(async () => {}),
@@ -114,7 +115,7 @@ describe('New Tab resource action contract', () => {
     // aria-label 在 pending 与冷卡片两态逐字相同，所以上一条分不开这两态——`pending` 整体退化成
     // 常量 false 时它照旧通过。真正的判别器是这句副标题。
     expect(markup, 'shell 还没起好却画成了冷卡片——用户会以为没有热终端').toContain(
-      'Warming a reusable host shell'
+      'Preparing a reusable host shell'
     )
   })
 
@@ -139,8 +140,8 @@ describe('New Tab resource action contract', () => {
     // 冷卡片而不是「正在预热」：pending 的文案会骗人说 shell 还没起好。aria-label 在两态相同
     // （都是 "Open Terminal"），真正分开两态的是这句副标题，所以判据落在它上面。
     expect(markup, '归属不匹配被画成了 pending——shell 已经起好了').toContain(
-      'Host shell in a recoverable core session'
+      'The shell preview is not available.'
     )
-    expect(markup, '同上，这是 pending 的文案').not.toContain('Warming a reusable host shell')
+    expect(markup, '同上，这是 pending 的文案').not.toContain('Preparing a reusable host shell')
   })
 })

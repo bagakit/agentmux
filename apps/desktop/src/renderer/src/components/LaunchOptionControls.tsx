@@ -1,118 +1,69 @@
-import { ChevronRight, Sliders } from 'lucide-react'
+import { SlidersHorizontal, X } from 'lucide-react'
+import { useLayoutEffect, useRef } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { resolveOverlayContainer } from './WindowOverlayHost'
+import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
+import type { LauncherNames } from '../lib/launcher-name-draft'
 
-/**
- * Renders the DESCRIBE half of the sealed launch-option contract as a progressive-disclosure affordance.
- * Every control is drawn purely from the {@link LaunchOption} declaration the Provider shipped through the
- * catalog — this component knows nothing about which Provider it came from and never branches on a provider
- * id. A Provider that declares no option hands down an empty array, so the parent renders nothing; absence
- * hides the control rather than disabling it or leaving an empty region.
- *
- * Collapsed by default, it is a single ghost toggle row carrying a one-line summary of the current posture:
- * an italic "{n} options · provider defaults" while untouched (no argv contributed), or the picked value
- * labels once the user chooses — each tinted by its choice tier so a dangerous posture is visible without
- * expanding. Expanded, it reveals one hairline-divided row per option, reusing the existing segmented
- * control verbatim. These remain launch-time choices, not live switches: the picked ids flow back to Core,
- * which resolves each choice's argv at spawn.
- */
-export function LaunchRefine({
-  options,
-  selection,
-  expanded,
-  onToggle,
-  onSelect,
-  disabled
-}: {
+/** Provider DESCRIBE choices only. Native selects keep even large declarations compact and keyboard usable. */
+export function LaunchRefine({ options, selection, expanded, onToggle, onSelect, disabled, names, onNameChange }: {
   options: LaunchOption[]
   selection: LaunchOptionSelection
   expanded: boolean
   onToggle(): void
   onSelect(optionId: string, choiceId: string | null): void
   disabled?: boolean
+  names?: LauncherNames
+  onNameChange?: (field: keyof LauncherNames, value: string) => void
 }) {
-  // Absence hides: a Provider with no declaration draws no toggle, no panel, no placeholder. The footer's
-  // own margin then supplies the gap under the textarea, so there is no empty region (the common case).
-  if (options.length === 0) return null
-
-  // The summary is derived, never stored: it reads the same selection map that drives the panel below, so
-  // the collapsed line and the expanded controls can never drift. An empty map is the honest untouched
-  // state — nothing is pre-selected, so no value is fabricated and no argv is added until the user picks.
-  const touched = Object.keys(selection).length > 0
-  const chosen = options.flatMap((option) => {
-    const choice = option.choices.find((candidate) => candidate.id === selection[option.id])
-    return choice ? [{ optionId: option.id, label: choice.label, tier: choice.tier ?? 'safe' }] : []
+  const trigger = useRef<HTMLButtonElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const anchor = trigger.current, panel = content.current
+    if (!expanded || !anchor || !panel) return
+    let disposed = false
+    const position = async () => {
+      const result = await computePosition(anchor, panel, { placement: 'top-start', strategy: 'fixed',
+        middleware: [offset(8), flip({ padding: 12 }), shift({ padding: 12 })] })
+      if (!disposed) Object.assign(panel.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
+    }
+    const stop = autoUpdate(anchor, panel, () => { void position() })
+    return () => { disposed = true; stop() }
+  }, [expanded])
+  if (!options.length && !names) return null
+  const chosen = options.flatMap(option => {
+    const choice = option.choices.find(candidate => candidate.id === selection[option.id])
+    return choice ? [{ ...choice, optionId: option.id }] : []
   })
-
-  return (
-    <div className="launch-refine">
-      <button
-        type="button"
-        className={`launch-refine__toggle ${expanded ? 'launch-refine__toggle--expanded' : ''}`}
-        aria-expanded={expanded}
-        aria-controls="launch-refine-panel"
-        onClick={onToggle}
-      >
-        <Sliders className="launch-refine__toggle-icon" size={14} />
-        <span className="launch-refine__toggle-label">Launch options</span>
-        {touched ? (
-          <span className="launch-refine__summary">
-            {chosen.map((entry, index) => (
-              <span key={entry.optionId}>
-                {index > 0 ? <span className="launch-refine__sep"> · </span> : null}
-                <span className="launch-refine__val" data-tier={entry.tier}>{entry.label}</span>
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="launch-refine__summary launch-refine__summary--empty">
-            {options.length} option{options.length === 1 ? '' : 's'} · provider defaults
-          </span>
-        )}
-        <span className="launch-refine__count">{options.length}</span>
-        <ChevronRight className={`launch-refine__chevron ${expanded ? 'icon-rotate-90' : ''}`} size={12} />
-      </button>
-
-      {expanded ? (
-        <div
-          id="launch-refine-panel"
-          className="launch-refine__panel animate-fade-in"
-          role="group"
-          aria-label="Launch options"
-        >
-          {options.map((option) => {
-            const active = selection[option.id]
-            return (
-              <div className="launch-refine__row" key={option.id}>
-                <div className="launch-refine__head">
-                  <strong>{option.label}</strong>
-                  {option.description ? <small>{option.description}</small> : null}
-                </div>
-                <div className="launch-option__segments" role="group" aria-label={option.label}>
-                  {option.choices.map((choice) => {
-                    const selected = active === choice.id
-                    return (
-                      <button
-                        type="button"
-                        key={choice.id}
-                        className={`launch-option__segment ${selected ? 'launch-option__segment--selected' : ''}`}
-                        data-tier={choice.tier ?? 'safe'}
-                        aria-pressed={selected}
-                        disabled={disabled}
-                        title={choice.description ?? choice.label}
-                        // Clicking the active choice clears it, returning to the Provider's own default (no
-                        // argv contributed). Nothing is pre-selected unless the declaration named a default.
-                        onClick={() => onSelect(option.id, selected ? null : choice.id)}
-                      >
-                        {choice.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ) : null}
-    </div>
-  )
+  return <Dialog.Root modal={false} open={expanded} onOpenChange={open => { if (open !== expanded) onToggle() }}>
+    <Dialog.Trigger asChild><button type="button" className="launch-refine__toggle" ref={trigger} disabled={disabled}
+      aria-label="Launch options" title={chosen.length ? chosen.map(choice => choice.label).join(' · ') : 'Launch options and optional names'}>
+      <SlidersHorizontal size={13} /><span>Options</span>
+      {chosen.length ? <span className="launch-refine__summary">{chosen.map(choice => <span key={choice.optionId} data-tier={choice.tier ?? 'safe'}>{choice.label}</span>)}</span> : null}
+      {names?.agentName || names?.tabName ? <i className="launch-refine__named" aria-label="Custom names set" /> : null}
+    </button></Dialog.Trigger>
+    <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={content} className="launch-refine__panel" style={{ visibility: 'hidden' }}>
+      <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options"><X size={14} /></Dialog.Close></header>
+      <Dialog.Description>Choices apply to this launch. Unset values use the Agent’s defaults.</Dialog.Description>
+      <div className="launch-refine__fields">
+        {options.map(option => {
+          const choice = option.choices.find(item => item.id === selection[option.id])
+          return <label key={option.id} className="launch-refine__row">
+            <span><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</span>
+            <select aria-label={option.label} value={selection[option.id] ?? ''} disabled={disabled} data-tier={choice?.tier ?? 'safe'}
+              onChange={event => onSelect(option.id, event.target.value || null)}>
+              <option value="">Agent default</option>
+              {option.choices.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+            {choice?.description ? <small className="launch-refine__choice-description">{choice.description}</small> : null}
+          </label>
+        })}
+        {names && onNameChange ? <fieldset className="launch-refine__names"><legend>Optional names</legend>
+          <label>Agent<input aria-label="Agent name" placeholder="Automatic" value={names.agentName} disabled={disabled} onChange={event => onNameChange('agentName', event.target.value)} /></label>
+          <label>Tab<input aria-label="Tab name" placeholder="Automatic" value={names.tabName} disabled={disabled} onChange={event => onNameChange('tabName', event.target.value)} /></label>
+        </fieldset> : null}
+      </div>
+    </Dialog.Content></Dialog.Portal>
+  </Dialog.Root>
 }

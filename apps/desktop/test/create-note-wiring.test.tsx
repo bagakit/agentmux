@@ -374,7 +374,7 @@ describe('初始页上的笔记入口', () => {
   // 于是这条守卫恰好对它要防的那个缺陷失明。
   it('源码里 create-note 与 open-browser 各只有一处，任何写法都算', () => {
     const source = readFileSync(
-      new URL('../src/renderer/src/components/NewTabSurface.tsx', import.meta.url),
+      new URL('../src/renderer/src/components/LauncherSecondarySurfaces.tsx', import.meta.url),
       'utf8'
     )
     // 自检：这个文件确实在渲染动作属性。没有它，「每个动作只出现一次」在一个**根本不写这个属性**
@@ -391,12 +391,12 @@ describe('初始页上的笔记入口', () => {
     for (const [key, value] of Object.entries(DESKTOP_ACTIONS)) {
       // 终端是**唯一**刻意分支的那一件：热终端在场时它带实时预览独占一行，不在场时退化成 grid
       // 里的一张卡，两种形态差别太大没法合成一个。所以它出现两次是设计，其余每一个都必须只有一次。
-      const expected = key === 'claimReusableTerminal' ? 2 : 1
+      const expected = 1
       expect(occurrencesOf(key, value), `${key} 应出现 ${expected} 次`).toBe(expected)
     }
     // 前提自检：上面那个例外不是随手放宽的——终端确实是两条形态各写一次，
     // 而这两条都在同一个三元里。若哪天终端也收成一张卡，这条会红，届时例外就该删掉。
-    expect(source).toContain('launch-terminal__fallback')
+    expect(source).toContain('function header(kind: UtilityKind)')
   })
 
   // 上一条数的是「卡片没被抄两份」。这一条数的是**承载它们的容器**没被抄两份——
@@ -405,7 +405,7 @@ describe('初始页上的笔记入口', () => {
   // 把这个前提单独钉住，坏掉时读到的就是真正的原因。
   it('quick-grid 与它外层的 stack 各只有一个，卡片不必跟着分支分身', () => {
     const source = readFileSync(
-      new URL('../src/renderer/src/components/NewTabSurface.tsx', import.meta.url),
+      new URL('../src/renderer/src/components/LauncherSecondarySurfaces.tsx', import.meta.url),
       'utf8'
     )
     expect(source.split('className="launch-surfaces-stack"')).toHaveLength(2)
