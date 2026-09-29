@@ -351,7 +351,7 @@ function DesktopApp() {
                   {mountedWorkspaces.map((candidate) => {
                     const visible = workbenchVisible && candidate.id === activeWorkspaceId
                     const focusVisible = Boolean(focusTab && focusTab.workspaceId === candidate.id)
-                    const mounted = visible || focusVisible
+                    const mounted = visible || (focusVisible && !settingsRoute)
                     return (
                       <div
                         key={candidate.id}
