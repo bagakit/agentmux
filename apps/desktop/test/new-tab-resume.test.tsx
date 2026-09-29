@@ -14,19 +14,12 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView:
 import type { AgentSessionRecoveryCandidate, AppConfig } from '../src/shared/contracts.js'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
 
-// ---------------------------------------------------------------------------
-// 「读数与动作指向同一个对象」（docs/design/agentmux-desktop-interaction.md）。
-//
-// 缺陷原形：按钮写着 `Resume (17)`，而 onClick 恒定 `recoverSession(recoveryCandidates[0])`。
-// 控件报出 17 个候选，却只有一个够得着；另外 16 个没有任何入口，而程序认为自己成功了——
-// 既不报错，也没有任何测试会红。此前守这里的是三行 `expect(source).toContain(...)`：
-// 源码里有 'recoveryCandidates' 和 'Resume' 两个字符串，缺陷原形完全满足它。
-//
-// 所以这里真渲染、真点击：判据是**被恢复的那个 id 等于用户点的那一行**。
-// ---------------------------------------------------------------------------
+// Actual NewTabSurface consumer: scope, rows and the executed Session identity must agree.
+// Rich selection remains discoverable even when this project has no saved Sessions.
 
 const config: AppConfig = {
   version: 9,
@@ -65,6 +58,9 @@ beforeEach(() => {
   document.body.append(container)
   root = createRoot(container)
   resumed = []
+  vi.spyOn(api.sessions, 'historyPage').mockImplementation(async identity => ({
+    agentSessionId: identity.agentSessionId, source: { providerId: 'codex', nativeSessionId: identity.agentSessionId }, items: [], nextCursor: null
+  }))
 })
 
 afterEach(async () => {
@@ -90,50 +86,59 @@ async function launcher(candidates: AgentSessionRecoveryCandidate[]) {
   await act(async () => root.render(<NewTabSurface tabGroupId="pane" tabId={tabId} regionId={regionId} />))
 }
 
-/** 页脚里那个 Resume 控件——不论它今天是按钮还是菜单触发器。 */
-function resumeControl(): HTMLElement | null {
-  return [...container.querySelectorAll<HTMLElement>('.launch-surface__footer button')]
-    .find((el) => /resume/i.test(el.textContent ?? '')) ?? null
+function resumeControl(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>('.launcher-resume-trigger')
 }
-
-const menuItems = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-
-/** Radix 的触发器开在 pointerdown 上，不是 click——与 hover-dropdown-menu.test.tsx 同一处理。 */
-async function press(target: Element) {
-  await act(async () => target.dispatchEvent(new PointerEvent('pointerdown', {
-    bubbles: true, cancelable: true, pointerType: 'mouse', button: 0, buttons: 1
-  })))
+const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+async function click(target: HTMLElement) { await act(async () => target.click()) }
+function button(label: RegExp) {
+  const target = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => label.test(item.textContent ?? ''))
+  if (!target) throw new Error(`Missing button: ${label}`)
+  return target
 }
 
 describe('启动页的 Resume 入口', () => {
-  it('没有候选就没有这个入口', async () => {
+  it('没有候选仍能打开项目/全局选择器，明确显示空状态', async () => {
     await launcher([])
-    expect(resumeControl()).toBeNull()
+    expect(resumeControl()).not.toBeNull()
+    await click(resumeControl()!)
+    expect(rows()).toEqual([])
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('No saved Sessions in this project')
+    await click(button(/^All projects/))
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('No saved Sessions yet')
+    expect(resumed).toEqual([])
   })
 
-  it('恰好一个候选：直接恢复它，且不报一个没有可选项的计数', async () => {
+  it('恰好一个候选也先展示真实身份与recap状态，由用户明确选择恢复', async () => {
     await launcher([candidate('only', '/repo')])
-    const control = resumeControl()
-    expect(control, '有一个候选却没有 Resume 入口').not.toBeNull()
-    // 「(1)」是在报一个数，而没有第二个东西可挑——那个数唯一的作用是让人以为可以选。
-    expect(control!.textContent).not.toMatch(/\d/)
-    await act(async () => control!.click())
+    await click(resumeControl()!)
+    expect(rows()).toHaveLength(1)
+    expect(document.querySelector('.launcher-resume__detail')?.textContent).toContain('only')
+    expect(document.querySelector('.launcher-resume__detail')?.textContent).toContain('No recap available')
+    expect(resumed).toEqual([])
+    await click(button(/^Resume Session$/))
     expect(resumed).toEqual(['only'])
   })
 
-  it('多个候选：恢复的是用户点的那一个，不是第一个', async () => {
-    await launcher([candidate('first', '/a'), candidate('second', '/b'), candidate('third', '/c')])
-    const trigger = resumeControl()!
-    expect(trigger.textContent).toContain('3')
-
-    await press(trigger)
-    const items = menuItems()
-    // 三个候选就得列出三行——少一行就是少一个够得着的会话，而这正是缺陷原形（只够得着一个）。
-    expect(items).toHaveLength(3)
-
-    const second = items.find((item) => item.textContent?.includes('/b'))
-    expect(second, '菜单行没有带上能把同源候选区分开的 workspace 路径').toBeDefined()
-    await act(async () => second!.click())
+  it('多个项目内候选：恢复的是用户点的那一个，行数和范围一致', async () => {
+    await launcher([candidate('first', '/repo'), candidate('second', '/repo'), candidate('third', '/repo')])
+    await click(resumeControl()!)
+    expect(rows()).toHaveLength(3)
+    expect(button(/^This project/).textContent).toContain('3')
+    await click(rows().find(row => row.id.endsWith('-second'))!)
+    await click(button(/^Resume Session$/))
     expect(resumed).toEqual(['second'])
+  })
+
+  it('项目无候选不把全局第一项当本项目；切全局后逐项按原归属恢复', async () => {
+    await launcher([candidate('first', '/a'), candidate('second', '/b')])
+    await click(resumeControl()!)
+    expect(rows()).toEqual([])
+    expect(resumed).toEqual([])
+    await click(button(/^All projects/))
+    expect(rows()).toHaveLength(2)
+    await click(rows().find(row => row.id.endsWith('-second'))!)
+    expect(document.querySelector('.launcher-resume__detail')?.textContent).toContain('/b')
+    expect(resumed).toEqual([])
   })
 })
