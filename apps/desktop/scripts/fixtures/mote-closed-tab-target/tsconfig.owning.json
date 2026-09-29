@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../test/mote-closed-tab-target.test.tsx", "../../../src/renderer/src/global.d.ts"]
+}

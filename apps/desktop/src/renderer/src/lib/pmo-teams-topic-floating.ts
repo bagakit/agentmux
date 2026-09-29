@@ -6,6 +6,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { tabGroupForTab } from './workbench-tabs'
 import { layoutForActiveTopic } from './scratch-topic-layout'
 import type { WorkbenchViewTarget } from './workbench-presentation'
+import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
 
 export const PMO_FLOATING_TAB_SLOT_PREFIX = 'mote-floating-tab-slot'
 const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
@@ -32,7 +33,8 @@ export type PmoTeamsTopicFloatingState = {
   open: boolean
   preview: boolean
   targetTopicId?: string | undefined
-  targetTabId?: string | undefined
+  /** null is an explicit empty Topic; a missing string remains an exact recovery target. */
+  targetTabId?: string | null | undefined
   /** Navigation presentation only; unrelated to an Agent's explicit view mode. */
   railMode?: 'cards' | 'avatars' | undefined
   size?: PmoTeamsTopicFloatingSize | undefined
@@ -45,6 +47,7 @@ let state: PmoTeamsTopicFloatingState | undefined
 /** Read the original mounted owner without initializing, opening or retargeting it. */
 export function readPmoTeamsTopicFloatingState(): PmoTeamsTopicFloatingState | null { return state ?? null }
 const listeners = new Set<() => void>()
+let unsubscribeTabRemoved: (() => void) | undefined
 let closeTimer: ReturnType<typeof setTimeout> | undefined
 let returnFocus: { primary: HTMLElement | null; onReturnFocus?: (() => void) | undefined } | null = null
 
@@ -56,7 +59,8 @@ function readState(): PmoTeamsTopicFloatingState {
     const value = JSON.parse(raw) as Partial<PmoTeamsTopicFloatingState>
     return { open: value.open === true, preview: false,
       ...(typeof value.targetTopicId === 'string' && value.targetTopicId.trim() ? { targetTopicId: value.targetTopicId.trim() } : {}),
-      ...(typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}),
+      ...(value.targetTabId === null ? { targetTabId: null } :
+        typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}),
       ...(value.railMode === 'cards' || value.railMode === 'avatars' ? { railMode: value.railMode } : {}),
       ...(validSize(value.size) ? { size: value.size } : {}) }
   } catch { return { ...CLOSED, preferenceIssue: 'Mote preferences could not be read. This window uses the default size; reload the app to retry.' } }
@@ -99,16 +103,17 @@ export function pmoTeamsTopicFloatingTargetTabId(
   layout: WorkspaceLayout | undefined,
   pmoSessionId: string | null
 ): string | undefined {
+  if (floating.targetTabId === null) return undefined
   if (floating.targetTabId) return floating.targetTabId
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
   const belongs = (tab: WorkbenchTab | undefined): tab is WorkbenchTab =>
     tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId
-  const candidates = Object.values(tabs).filter(belongs)
+  const candidates = Object.values(tabs).filter(tab => belongs(tab) && layout && tabGroupForTab(layout, tab.id) !== null)
   const focused = pmoSessionId ? candidates.find(tab => Object.values(tab.regions)
     .some(region => region.kind === 'agent' && region.sessionId === pmoSessionId)) : undefined
   if (focused) return focused.id
   const active = layout?.groups.find(group => group.id === layout.activeGroupId)?.activeTabId
-  if (active && belongs(tabs[active])) return active
+  if (active && candidates.some(tab => tab.id === active)) return active
   return candidates[0]?.id
 }
 
@@ -196,9 +201,24 @@ export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boo
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
+  unsubscribeTabRemoved ??= subscribeWorkbenchTabRemoved(tab => {
+    const current = state
+    if (!current || current.targetTabId !== tab.id || tab.workspaceId !== SCRATCH_WORKSPACE_ID ||
+      current.targetTopicId && current.targetTopicId !== tab.topicId) return
+    const topicId = current.targetTopicId ?? tab.topicId
+    if (!topicId) return
+    const committed = useAppStore.getState()
+    if (committed.tabs[tab.id]) return
+    const nextTabId = pmoTeamsTopicFloatingTargetTabId({ ...current, targetTopicId: topicId, targetTabId: undefined }, committed.tabs,
+      committed.layouts[SCRATCH_WORKSPACE_ID], committed.agentFocus.pmo.sessionId)
+    update({ targetTopicId: topicId, targetTabId: nextTabId ?? null })
+  })
   return () => {
     listeners.delete(listener)
-    if (listeners.size === 0) { cancelClose(); returnFocus = null; state = undefined }
+    if (listeners.size === 0) {
+      unsubscribeTabRemoved?.(); unsubscribeTabRemoved = undefined
+      cancelClose(); returnFocus = null; state = undefined
+    }
   }
 }
 export function usePmoTeamsTopicFloatingState(): [PmoTeamsTopicFloatingState, (next: Partial<PmoTeamsTopicFloatingState>) => void] {

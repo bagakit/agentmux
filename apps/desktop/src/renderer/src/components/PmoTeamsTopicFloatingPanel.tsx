@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { spatialSources } from '../../../shared/space-addresses'
 import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -23,7 +24,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 
 const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity }: {
-  topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | undefined
+  topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | null | undefined
   onSelect(topicId: string, tabId: string | undefined): void
   onIdentity(anchor: HTMLButtonElement | null): void
 }) {
@@ -79,7 +80,7 @@ function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
 }
 
 const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onOpenSpace, onClose }: {
-  topics: readonly ScratchTopicSnapshot[]; topicId: string; tabId: string | undefined
+  topics: readonly ScratchTopicSnapshot[]; topicId: string; tabId: string | null | undefined
   railMode: 'cards' | 'avatars'; onToggleMode(): void
   onSelect(topicId: string, tabId: string | undefined): void; onOpenSpace(): void; onClose(): void
 }) {
@@ -168,9 +169,12 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   useEffect(() => () => { spaceActionRef.current?.abort(); spaceActionRef.current = null },
     [floating.open, floating.preview, target.topicId, target.tabId])
   useEffect(() => {
-    if (floating.open && (!floating.targetTopicId || !floating.targetTabId && target.tabId))
+    if (!floating.open) return
+    if (!floating.targetTopicId || floating.targetTabId === undefined && target.tabId)
       setFloating({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) })
-  }, [floating.open, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, setFloating])
+    else if (floating.targetTabId === undefined && !target.tabId && motes.some(topic => topic.id === target.topicId))
+      setFloating({ targetTabId: null })
+  }, [floating.open, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, motes, setFloating])
   useEffect(() => {
     if (floating.open && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
   }, [floating.open, target.session, focusPmoSession])
@@ -179,9 +183,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     let current = true
     setPreparationIssue(null)
     void api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, target.topicId)
-      .then(() => openScratchTopic(target.topicId, SCRATCH_WORKSPACE_ID, {
-        reveal: false, ...(target.tabId ? { tabId: target.tabId } : {})
-      })).catch(error => {
+      .then(() => {
+        if (!current || !target.tabId) return
+        return openScratchTopic(target.topicId, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: target.tabId })
+      }).catch(error => {
         if (current) {
           setPreparationIssue('Context preparation did not complete. The original work surface remains available.')
           reportError(error)
@@ -255,18 +260,36 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
 
   const selectMote = useCallback((topicId: string, tabId: string | undefined) => {
     spaceActionRef.current?.abort()
-    setFloating({ open: true, preview: false, targetTopicId: topicId, targetTabId: tabId })
+    setFloating({ open: true, preview: false, targetTopicId: topicId, targetTabId: tabId ?? null })
   }, [setFloating])
   const close = useCallback(() => { endResize(false); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [endResize])
   const openSpace = useCallback(() => {
     spaceActionRef.current?.abort()
     const controller = new AbortController(); spaceActionRef.current = controller
-    const opening = openScratchTopic(target.topicId, SCRATCH_WORKSPACE_ID, {
-      ...(target.tabId ? { tabId: target.tabId } : {}), signal: controller.signal
-    })
+    const opening = target.tabId ? openScratchTopic(target.topicId, SCRATCH_WORKSPACE_ID, {
+      tabId: target.tabId, signal: controller.signal
+    }) : (async () => {
+      const topic = await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, target.topicId)
+      if (controller.signal.aborted) return
+      const current = useAppStore.getState()
+      if (!current.config) throw new Error('The Workspace is still restoring')
+      const sources = spatialSources(current.config, [topic], current.spaceZoneBindings)
+      const space = sources.spaces.find(space => space.topicId === target.topicId)
+      const zone = sources.zones.find(zone => zone.spaceId === space?.spaceId && zone.workspaceId === SCRATCH_WORKSPACE_ID)
+      if (!space || !zone) throw new Error('The original Topic Space is not available')
+      const receipt = await current.executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'focus',
+        target: { kind: 'space', spaceId: space.spaceId, zoneId: zone.zoneId }, inputPolicy: 'preserve' }, controller.signal)
+      if (receipt.operation === 'focus' && receipt.navigation.state === 'rejected')
+        throw new Error(receipt.issues[0]?.message ?? 'The original Topic Space could not be selected')
+    })()
     const navigation = useAppStore.getState()
     const unsubscribe = useAppStore.subscribe(state => {
-      if (state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId) controller.abort()
+      if (state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId) {
+        // This action's own successful empty-Space selection is an expected navigation.
+        if (!target.tabId && state.mainSurface === 'workbench' && state.activeWorkspaceId === SCRATCH_WORKSPACE_ID &&
+          state.workbenchSpaceSelection?.topicId === target.topicId) return
+        controller.abort()
+      }
     })
     const disposeNavigation = () => { unsubscribe(); controller.signal.removeEventListener('abort', disposeNavigation) }
     if (controller.signal.aborted) disposeNavigation()
@@ -328,7 +351,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
         setFloating({ size: { width: horizontal ? dimensions.width : preferred.width,
           height: horizontal ? preferred.height : dimensions.height } })
       }} /> : null}
-    {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={target.tabId} railMode={railMode}
+    {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={floating.targetTabId === null ? null : target.tabId} railMode={railMode}
       onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
       onSelect={selectMote} onOpenSpace={openSpace} onClose={close} /> : null}
     <div className="pmo-teams-topic-floating__content">
@@ -340,9 +363,11 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     </div> : null}
     {preparationIssue ? <div role="status" className="workbench-restore-notice mote-context-notice"><span>{preparationIssue}</span><button type="button" className="small-button" onClick={() => setPreparationAttempt(attempt => attempt + 1)}>Retry context</button></div> : null}
     <div className="pmo-teams-topic-floating__body">
-      <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
+      {!target.tabId && !motes.some(topic => topic.id === target.topicId) ?
+        <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
+        <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
         viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX} projectionTabId={target.tabId} visible={visible} interactiveResize={false}
-        onTabSelect={tabId => { if (tabId !== target.tabId) { spaceActionRef.current?.abort(); setFloating({ targetTabId: tabId }) } }} />
+        onTabSelect={tabId => { if (tabId !== target.tabId) { spaceActionRef.current?.abort(); setFloating({ targetTabId: tabId }) } }} />}
     </div>
     </div>
   </div></WorkbenchPresentationContext.Provider>
