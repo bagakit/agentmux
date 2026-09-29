@@ -1,6 +1,6 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
-const [html, profile, evidence, phase] = process.argv.slice(2)
+const [html, profile, evidence, phase, suite = 'full'] = process.argv.slice(2)
 app.setPath('userData', path.join(profile, 'user-data')); app.setPath('sessionData', path.join(profile, 'session-data'))
 let win
 const report = { schema: 'agentmux.launcher-renderer-scenes.v1', passed: false, phase, pid: process.pid, profile, frames: [], scenarios: [], userRunTouched: false }
@@ -12,7 +12,7 @@ async function wait(expression) { const end = Date.now()+11000; while(Date.now()
 async function paint() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); await delay(90) }
 async function viewport(width,height) { await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false}); await paint() }
 async function click(expression) {
-  await evaluate(`${expression}.scrollIntoView({block:'nearest'})`); await paint()
+  await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Actual control absent: '+${JSON.stringify(expression)}+'; visible buttons: '+[...document.querySelectorAll('button')].map(b=>b.getAttribute('aria-label')??b.textContent).join('|'));e.scrollIntoView({block:'nearest'})})()`); await paint()
   const point=await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Actual control absent');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
   for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});await paint()
 }
@@ -43,7 +43,7 @@ async function capture() {
   assert.equal(await evaluate('Boolean(document.querySelector("[data-overlay-host] .launch-refine__panel"))'),true,'Actual Options belongs to the window overlay host')
   await frame('options-dark');await evaluate(`for(const select of [...document.querySelectorAll('.launch-refine__panel select')].slice(0,2)){const choices=[...select.options].filter(o=>o.value).sort((a,b)=>b.text.length-a.text.length);select.value=choices[0].value;select.dispatchEvent(new Event('change',{bubbles:true}))}`);await escape();await wait('!document.querySelector(".launch-refine__panel")')
   await click(element('[aria-label="Expand Note"]'));await evaluate('launchpad.editNote('+JSON.stringify('## Launch review\nKeep the complete note across layout changes and process restart.')+')');await paint()
-  await type(element('[aria-label="Browser address or search"]'),'local agent runtime')
+  await click(element('[aria-label="Expand Browser"]'));await type(element('[aria-label="Browser address or search"]'),'local agent runtime')
   await frame('wide-dark-note')
   await click(element('[aria-label="Collapse Terminal"]'));await wait(`!${element('.launch-terminal__body')}`)
   const collapsed=await evaluate('launchpad.facts()');assert.equal(collapsed.warmRun,before.warmRun);assert.equal(collapsed.calls.stops.length,0)
@@ -65,11 +65,11 @@ async function capture() {
   await click(`[...document.querySelectorAll('.launcher-resume__scope button')].find(e=>e.textContent.includes('All projects'))`)
   assert.equal(await evaluate('document.querySelectorAll(".launcher-resume__row").length'),2);await frame('resume-global-narrow');await escape()
   await viewport(1180,850);await evaluate('launchpad.scene({split:true,theme:"dark"})');await paint()
-  const prepare=`[...${region}.querySelectorAll('button')].find(e=>e.textContent.includes('Prepare in'))`
+  const prepare=`[...${region}.querySelectorAll('button')].find(e=>e.textContent.includes('Create with Mote'))`
   await click(prepare);await wait('launchpad.facts().floating?.open===true');await wait('Boolean(document.querySelector("[data-pmo-teams-topic-floating] .launch-surface"))')
-  const prepared=await evaluate('launchpad.facts()');assert.equal(prepared.activeWorkspaceId,await evaluate('launchpad.workspaceId'));assert.ok(Object.values(prepared.agentDrafts).some(text=>text.includes('Project: AgentMux')&&text.includes(before.sourceDraft)))
-  assert.equal(prepared.sourceDraft,before.sourceDraft);assert.equal(prepared.calls.submissions.length,0);assert.equal(prepared.calls.launches.length,0)
-  await frame('mote-explicit-preparation')
+  const prepared=await evaluate('launchpad.facts()');assert.equal(prepared.activeWorkspaceId,await evaluate('launchpad.workspaceId'));assert.ok(prepared.calls.launches.some(args=>args[0].prompt.includes('Project: AgentMux')&&args[0].prompt.includes(before.sourceDraft)))
+  assert.equal(prepared.sourceDraft,before.sourceDraft);assert.equal(prepared.calls.submissions.length,0);assert.equal(prepared.calls.launches.length,1)
+  await frame('mote-explicit-creation')
   await click('document.querySelector('+JSON.stringify('[data-pmo-teams-topic-floating] [aria-label="Close Mote"]')+')');await escape()
   await click(element('[aria-label="Go to Browser address or search"]'));await wait('launchpad.facts().calls.browsers.length>0');assert.equal((await evaluate('launchpad.facts()')).calls.browsers.at(-1)[1],'local agent runtime')
   await evaluate('launchpad.scene({split:true})');await paint();const completeNote=await evaluate('launchpad.facts().drafts.note')
@@ -83,15 +83,42 @@ async function capture() {
   assert.equal(facts.calls.stops.length,0);report.expectedDurable={sections:facts.sections,drafts:facts.drafts,tab:facts.tab,layout:facts.layout,sourceDraft:facts.sourceDraft,activeWorkspaceId:facts.activeWorkspaceId};report.scenarios.push({name:'Actual utility controls preserve healthy shell and original drafts',passed:true,before,after:facts,collapsed,prepared,reachable})
   await fs.writeFile(path.join(evidence,'expected-durable.json'),JSON.stringify(report.expectedDurable,null,2));await fs.writeFile(path.join(profile,'boot.json'),JSON.stringify(await evaluate('launchpad.bootFacts()')))
 }
+async function captureCreation() {
+  await viewport(1180,850); await wait(`Boolean(${element('.launch-terminal__body .xterm')})`); await assertGeometry()
+  assert.equal(await evaluate(`Boolean(${element('[aria-label="Browser address or search"]')})`),false)
+  assert.ok(await evaluate(`Boolean(${element('[aria-label="Expand Browser"]')}) && Boolean(${element('[aria-label="Expand Note"]')})`))
+  const original = await evaluate('launchpad.facts()'); await frame('default-collapsed-dark')
+  await evaluate('launchpad.motes()'); await paint(); await click(element('[aria-label="Choose Mote: Mote"]'))
+  await wait('Boolean(document.querySelector("[role=menuitem]"))'); await frame('mote-chooser-wide')
+  await click(`[...document.querySelectorAll('[role="menuitem"]')].find(e=>e.textContent.includes('Design & implementation'))`)
+  await viewport(720,660); await evaluate('launchpad.scene({split:true,long:true,theme:"light"})'); await paint(); await assertGeometry(); await frame('selected-mote-narrow-light')
+  const before = await evaluate('launchpad.facts()')
+  await click(`[...${region}.querySelectorAll('button')].find(e=>e.textContent==='Create with Mote')`)
+  await wait('launchpad.facts().calls.launches.length===1'); await wait('launchpad.facts().floating?.open===true')
+  const launched = await evaluate('launchpad.facts()'); const input=launched.calls.launches[0][0]
+  assert.ok(input.prompt.includes(before.sourceDraft)&&input.prompt.includes('Project: AgentMux')&&input.prompt.includes('Host: local'))
+  assert.equal(launched.sourceDraft,before.sourceDraft); assert.equal(launched.activeWorkspaceId,original.activeWorkspaceId)
+  for(const [key,text] of Object.entries(before.agentDrafts))assert.equal(launched.agentDrafts[key],text,'Delegation preserves original unsent draft '+key)
+  await viewport(1180,850);await paint();await frame('creation-submitted-mote')
+  await click('document.querySelector('+JSON.stringify('[data-pmo-teams-topic-floating] [aria-label="Close Mote"]')+')');await escape()
+  await evaluate('launchpad.scene({split:true,theme:"dark"})');await paint()
+  await click(element('[aria-label="Expand Browser"]'));await type(element('[aria-label="Browser address or search"]'),'local agent runtime')
+  await click(element('[aria-label="Close Note"]'));await click(element('[aria-label="Close Terminal"]'));await paint()
+  await evaluate('launchpad.flush()');const facts=await evaluate('launchpad.facts()');assert.equal(facts.sections.browser,'expanded');assert.equal(facts.sections.note,'hidden');assert.equal(facts.sections.terminal,'hidden');assert.equal(facts.calls.stops.length,0)
+  await frame('explicit-preferences-dark')
+  report.expectedDurable={sections:facts.sections,drafts:facts.drafts,tab:facts.tab,layout:facts.layout,sourceDraft:facts.sourceDraft,agentDrafts:facts.agentDrafts,activeWorkspaceId:facts.activeWorkspaceId}
+  report.scenarios.push({name:'Creation request uses exact chosen Mote and preserves both drafts',passed:true,before,launched,input,healthyWarmRun:original.warmRun,stops:facts.calls.stops})
+  await fs.writeFile(path.join(evidence,'expected-durable.json'),JSON.stringify(report.expectedDurable,null,2));await fs.writeFile(path.join(profile,'boot.json'),JSON.stringify(await evaluate('launchpad.bootFacts()')))
+}
 async function restart() {
   const expected=JSON.parse(await fs.readFile(path.join(evidence,'expected-durable.json'),'utf8'))
-  const facts=await evaluate('launchpad.facts()');const beforeSetup=await evaluate('launchpad.readBeforeFixtureSetup');assert.ok(beforeSetup);assert.deepEqual(beforeSetup.tabs[expected.tab.id],expected.tab,'Original Tab/Region split is read before any fixture setup');assert.deepEqual(beforeSetup.layouts[expected.activeWorkspaceId],expected.layout,'Original group and focus are read before any fixture setup');assert.equal(beforeSetup.sourceDraft,expected.sourceDraft);assert.equal(beforeSetup.activeWorkspaceId,expected.activeWorkspaceId);assert.deepEqual(facts.tab,expected.tab);assert.deepEqual(facts.layout,expected.layout);assert.deepEqual(facts.sections,expected.sections,'A new Electron process restores exact section preferences');assert.deepEqual(facts.drafts,expected.drafts,'A new Electron process restores complete Browser/Note drafts')
+  const facts=await evaluate('launchpad.facts()');const beforeSetup=await evaluate('launchpad.readBeforeFixtureSetup');assert.ok(beforeSetup);assert.deepEqual(beforeSetup.tabs[expected.tab.id],expected.tab,'Original Tab/Region split is read before any fixture setup');assert.deepEqual(beforeSetup.layouts[expected.activeWorkspaceId],expected.layout,'Original group and focus are read before any fixture setup');assert.equal(beforeSetup.sourceDraft,expected.sourceDraft);assert.equal(beforeSetup.activeWorkspaceId,expected.activeWorkspaceId);assert.deepEqual(facts.tab,expected.tab);assert.deepEqual(facts.layout,expected.layout);assert.deepEqual(facts.sections,expected.sections,'A new Electron process restores exact section preferences');assert.deepEqual(facts.drafts,expected.drafts,'A new Electron process restores complete Browser/Note drafts');if(expected.agentDrafts){assert.deepEqual(beforeSetup.agentDrafts,expected.agentDrafts,'Both original drafts read before fixture setup');assert.deepEqual(facts.agentDrafts,expected.agentDrafts)}
   assert.equal(facts.persistenceIssue,null);assert.ok(await evaluate(`Boolean(${element('[aria-label="Restore Terminal"]')})`));assert.equal(await evaluate(`${element('[aria-label="Browser address or search"]')}.value`),expected.drafts.browser)
   await frame('renderer-profile-restart');report.durable={passed:true,expected,actual:{sections:facts.sections,drafts:facts.drafts,tab:facts.tab,layout:facts.layout,sourceDraft:facts.sourceDraft,activeWorkspaceId:facts.activeWorkspaceId},beforeFixtureSetup:beforeSetup,boundary:'Two separate Electron processes, same private Renderer profile. Section and utility-draft durability only. Native Core/ctxmux Run continuity is verified separately.'}
 }
 app.whenReady().then(async()=>{try{
   await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1180,height:850,webPreferences:{backgroundThrottling:false,sandbox:false,preload:path.join(__dirname,'preload.cjs'),additionalArguments:phase==='restart'?['--launchpad-boot='+path.join(profile,'boot.json')]:[]}})
   win.webContents.on('console-message',(_e,_level,message)=>console.log('RENDERER '+message));await win.loadFile(html,{query:{phase}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await wait('Boolean(window.launchpad)')
-  if(phase==='restart')await restart();else await capture();report.passed=true
+  if(phase==='restart')await restart();else if(suite==='creation-handoff')await captureCreation();else await capture();report.passed=true
 }catch(error){report.failure={name:error.name,message:error.message,stack:error.stack}}
 finally{await fs.writeFile(path.join(evidence,phase+'-render.json'),JSON.stringify(report,null,2));win?.webContents.session.flushStorageData();win?.destroy();report.passed?app.quit():app.exit(1)}})
