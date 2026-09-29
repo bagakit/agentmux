@@ -6,6 +6,8 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
 import { EMPTY_AGENT_FOCUS } from '../../../src/renderer/src/lib/agent-focus'
+import { applyConfigEdit } from '../../../src/shared/config-edit'
+import type { ComposerShortcut, GoalsCommonActionRef } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
 await useAppStore.getState().initialize()
 const initial = useAppStore.getState()
@@ -37,6 +39,35 @@ const ensureTopic = api.scratch.ensureTopic
 const ensureMote = api.scratch.ensureMote
 let finishPreparation: (() => Promise<void>) | undefined
 let root: ReturnType<typeof createRoot> | undefined
+let configSaveFailure = false
+const commonPrompts: ComposerShortcut[] = [
+  { id: 'common-review', label: '检查当前改动', keyword: 'common-review', body: '帮我检查当前改动，指出具体风险并建议一个最小验证。', providerId: 'codex' },
+  { id: 'common-notes', label: '整理工作笔记', keyword: 'common-notes', body: '读这周的工作笔记，区分已有依据的结论和未知，再建议一次最小检查。' },
+  { id: 'common-explain', label: '解释清楚', keyword: 'common-explain', body: '把当前说明改成普通人能理解的短文，并保留必要事实。' },
+  { id: 'common-plan', label: '准备下次尝试', keyword: 'common-plan', body: '根据已知结果，给出一个可以动手验证的小尝试，说明该观察什么。' }
+]
+
+function seedCommon(mode = 'empty') {
+  seed(mode === 'empty' ? 'empty' : mode === 'project' ? 'recent' : 'many')
+  configSaveFailure = false
+  const base = useAppStore.getState().config!
+  let composerShortcuts = structuredClone(commonPrompts)
+  let items: GoalsCommonActionRef[] | undefined
+  if (['many', 'long'].includes(mode)) items = [{ kind: 'prompt', id: commonPrompts[0]!.id }, { kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }, ...commonPrompts.slice(1).map(prompt => ({ kind: 'prompt' as const, id: prompt.id }))]
+  if (mode === 'long') composerShortcuts = [{ ...commonPrompts[0]!, body: Array.from({ length: 9 }, (_, index) => `${index + 1}. 阅读当前记录，保留原始事实、仍未确认的问题，以及每个结论的出处。下一次只执行最小验证，不编造已完成结果。`).join('\n') }, ...commonPrompts.slice(1)]
+  if (mode === 'unavailable') { composerShortcuts = [{ ...commonPrompts[0]!, providerId: 'unconfigured-provider' }]; items = [{ kind: 'prompt', id: commonPrompts[0]!.id }, { kind: 'builtin', id: 'ideas' }] }
+  if (mode === 'explicit-empty') items = []
+  flushSync(() => {
+    useAppStore.setState({ config: { ...base, composerShortcuts, ...(items ? { goalsCommonActions: { items, collapsed: false } } : {}) }, selectedDemandId: null })
+    root?.render(<App key={`common-${mode}`} />)
+  })
+}
+// Private preview owner: the actual Renderer uses the original expected/conflict merge.
+// Durable ConfigStore, native launch and initial CLI delivery are verified by the owning tests.
+api.config.save = async (next, expected) => {
+  if (configSaveFailure) throw new Error('保存服务暂时不可用。正文草稿和原目录已保留。')
+  return applyConfigEdit(useAppStore.getState().config!, expected, next)
+}
 
 function seed(mode = 'many') {
   const scenario = !['many', 'empty', 'one', 'current', 'recent', 'long-current'].includes(mode)
@@ -51,6 +82,9 @@ function seed(mode = 'many') {
 seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed,
+  seedCommon,
+  failConfigSave: (fail: boolean) => { configSaveFailure = fail },
+  externalPromptBody: (id: string, body: string) => { flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, composerShortcuts: state.config!.composerShortcuts!.map(prompt => prompt.id === id ? { ...prompt, body } : prompt) } }))) },
   appearance: (appAppearance: 'dark' | 'light') => { flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, appAppearance } } }))) },
   project: () => useAppStore.getState().config!.workspaces.find(workspace => workspace.id === project.id),
   holdPreparation: () => { api.scratch.ensureMote = (workspace, id) => new Promise(resolve => { finishPreparation = async () => { resolve(await ensureMote(workspace, id)); api.scratch.ensureMote = ensureMote } }) },
