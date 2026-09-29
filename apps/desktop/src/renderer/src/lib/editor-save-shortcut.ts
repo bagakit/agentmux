@@ -20,7 +20,7 @@ export type EditorSaveContext = {
    * 当前的文件问题类别，没有问题时缺席。
    * `changed`/`deleted` 是磁盘与我们分叉了；`read-error`/`write-error` 是上一次操作没成。
    */
-  issue?: 'changed' | 'deleted' | 'read-error' | 'write-error'
+  issue?: 'changed' | 'deleted' | 'read-error' | 'write-error' | 'binary'
 }
 
 /**
@@ -51,6 +51,6 @@ export type EditorSaveAction =
 export function editorSaveAction(context: EditorSaveContext): EditorSaveAction {
   if (context.issue === 'changed' || context.issue === 'deleted') return 'conflict'
   if (context.saving) return 'none'
-  if (context.issue === 'read-error') return 'none'
+  if (context.issue === 'read-error' || context.issue === 'binary') return 'none'
   return context.dirty ? 'save' : 'none'
 }

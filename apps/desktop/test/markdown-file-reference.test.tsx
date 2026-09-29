@@ -77,6 +77,10 @@ describe('markdown file references', () => {
   })
 
   describe('link href routing', () => {
+    it('recognizes an explicit bare image filename without promoting ordinary dotted prose', () => {
+      expect(classifyMarkdownLinkHref('diagram.png', ROOT)).toMatchObject({ path: 'diagram.png' })
+      expect(splitMarkdownFileReferences('diagram.png e.g. 1.2.3', ROOT)).toEqual([{ kind: 'text', text: 'diagram.png e.g. 1.2.3' }])
+    })
     it('routes an in-workspace href to the file seam', () => {
       expect(classifyMarkdownLinkHref('./src/parse.ts', ROOT)).toMatchObject({ path: 'src/parse.ts' })
     })

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 
-const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', onFeedback: undefined as undefined | (() => void), displayFails: false, displayThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void) }))
+const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void) }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/main/browser-page-dispatch.js')>()
   return { ...actual, createBrowserPageDispatch: (...args: Parameters<typeof actual.createBrowserPageDispatch>) => {
@@ -21,19 +21,20 @@ vi.mock('../src/main/browser-script-runner.js', () => ({ runBrowserScript: async
     const page = await onPageCall('snapshot', [])
     if (native.mode === 'concurrent-observe') native.observe = () => onPageCall('snapshot', [])
     if (native.mode === 'concurrent') await Promise.all([onPageCall('click', [page.nodes[0].ref]), onPageCall('hover', [page.nodes[0].ref])])
-    else await onPageCall(['navigation', 'concurrent-observe'].includes(native.mode) ? 'click' : native.mode, [page.nodes[0].ref, 'private-invocation-value'])
+    else await onPageCall(['navigation', 'concurrent-observe', 'wait'].includes(native.mode) ? 'click' : native.mode, [page.nodes[0].ref, native.key ?? 'private-invocation-value'])
+    if (native.mode === 'wait') await onPageCall('wait', [0])
     if (native.mode === 'navigation') {
       await onPageCall('gotoUrl', ['https://generic.invalid/next'])
       const next = await onPageCall('snapshot', [])
       await onPageCall('click', [next.nodes[0].ref])
     }
     return { completed: true, value: true, logs: [] }
-  } catch (error) { return { completed: false, failure: { kind: 'program-error', message: String(error) }, logs: [] } }
+  } catch (error) { return { completed: false, failure: { kind: 'script-error', message: String(error) }, logs: [] } }
 } }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   class Contents extends EventEmitter {
-    id = 91; url = ''; attached = false; destroyed = false; actions = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []
+    id = 91; url = ''; attached = false; destroyed = false; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []
     readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     readonly mainFrame = { framesInSubtree: [] }
@@ -57,7 +58,7 @@ vi.mock('electron', async () => {
     isDestroyed() { return this.destroyed }; isLoading() { return false }; getURL() { return this.url }; getTitle() { return 'Page' }
     getZoomFactor() { return 1 }; setZoomFactor() {}; setBackgroundThrottling() {}; getBackgroundThrottling() { return true }
     disableDeviceEmulation() {}; enableDeviceEmulation() {}; setWindowOpenHandler() {}
-    executeJavaScriptInIsolatedWorld(_world: number, scripts: any[]) { if (native.displayThrows && scripts.some(s => s.code.includes('\"phase\":\"running\"'))) throw new Error('Synchronous native display failure'); this.scripts.push(...scripts.map(s => s.code)); return Promise.resolve(!(native.displayFails && scripts.some(s => s.code.includes('\"phase\":\"running\"')))) }
+    executeJavaScriptInIsolatedWorld(_world: number, scripts: any[]) { this.displayAttempts++; if (native.displayAllThrows && this.displayAttempts <= 16) throw new Error('Persistent native display failure'); if (native.displayThrows && scripts.some(s => s.code.includes('\"phase\":\"running\"'))) throw new Error('Synchronous native display failure'); this.scripts.push(...scripts.map(s => s.code)); return Promise.resolve(!(native.displayFails && scripts.some(s => s.code.includes('\"phase\":\"running\"')))) }
     async loadURL(url: string) { const previous = this.url; this.url = url; if (previous) this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }) }; close() { this.destroyed = true; this.emit('destroyed') }
   }
   class View { readonly webContents = new Contents(); constructor() { native.views.push(this) }; setVisible() {}; setBounds() {} }
@@ -69,7 +70,7 @@ const roots: string[] = [], managers: BrowserViewManager[] = []
 afterEach(async () => {
   for (const manager of managers.splice(0)) manager.dispose()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  native.views.length = 0; native.mode = 'click'; native.onFeedback = undefined; native.displayFails = false; native.displayThrows = false; native.observe = undefined; native.takeover = undefined
+  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined
 })
 async function managerFixture() {
   const root = await mkdtemp('/tmp/amx-action-feedback-source-'); roots.push(root)
@@ -200,14 +201,14 @@ describe('actual BrowserViewManager consumer', () => {
     expect(f.contents.destroyed).toBe(false); expect(f.sibling.destroyed).toBe(false)
     expect(f.sibling.scripts).toEqual([]); expect(f.sibling.commands).toEqual([])
   })
-  it.each(['false', 'synchronous throw'])('%s display result leaves the actual action completed with a persistent local service warning', async (kind) => {
-    const f = await managerFixture(); native.displayFails = kind === 'false'; native.displayThrows = kind === 'synchronous throw'
+  it.each(['false', 'synchronous throw', 'persistent clear/display throw'])('%s display result leaves the actual action completed with a persistent local service warning', async (kind) => {
+    const f = await managerFixture(); native.displayFails = kind === 'false'; native.displayThrows = kind === 'synchronous throw'; native.displayAllThrows = kind === 'persistent clear/display throw'
     const report = await f.manager.runScript('browser-one', 'actual worker double')
     expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1)
-    expect(f.contents.feedbackCalls).toBe(0); expect(f.contents.destroyed).toBe(false); expect(f.contents.attached).toBe(false)
+    expect(f.contents.feedbackCalls).toBe(0); expect(f.contents.displayAttempts).toBeLessThanOrEqual(4); expect(f.contents.destroyed).toBe(false); expect(f.contents.attached).toBe(false)
     expect(report.runOperation?.warning).toContain('feedback could not be displayed')
     expect(f.events.at(-1).browser.activity.warning).toContain('remain usable')
-    native.displayFails = false; native.displayThrows = false; native.observe = undefined; native.takeover = undefined
+    native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined
     const next = await f.manager.runScript('browser-one', 'second healthy run')
     expect(next.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(2)
     expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
@@ -220,5 +221,51 @@ describe('actual BrowserViewManager consumer', () => {
     native.mode = 'js'; const before = f.contents.feedbackCalls
     await f.manager.runScript('browser-one', 'actual worker double')
     expect(f.contents.feedbackCalls).toBe(before)
+  })
+})
+
+describe('T024 actual Main display semantics', () => {
+  it('new operation and readonly snapshot clear UI with replace while wait/human clear invalidates history', async () => {
+    const f = await managerFixture()
+    const first = await f.manager.runScript('browser-one', 'actual first tool call')
+    expect(first.outcome.kind).toBe('completed')
+    const before = f.contents.scripts.length
+    const second = await f.manager.runScript('browser-one', 'actual next tool call')
+    expect(second.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(2)
+    const payloads = f.contents.scripts.slice(before).map((script: string) => JSON.parse(script.slice(script.lastIndexOf(')(') + 2, -1)))
+    expect(payloads.length).toBeGreaterThan(0)
+    const clears = payloads.filter((p: any) => p.phase === 'clear')
+    expect(clears).toHaveLength(3) // Previous op, next snapshot, next actual action begin.
+    expect(clears.map((p: any) => p.clearReason)).toEqual(['replace', 'replace', 'replace'])
+    native.mode = 'wait'
+    const start = f.contents.scripts.length
+    const waited = await f.manager.runScript('browser-one', 'actual wait call')
+    expect(waited.outcome.kind).toBe('completed')
+    const waiting = f.contents.scripts.slice(start).map((script: string) => JSON.parse(script.slice(script.lastIndexOf(')(') + 2, -1)))
+    expect(waiting.length).toBeGreaterThan(0)
+    expect(waiting.filter((p: any) => p.phase === 'clear').at(-1).clearReason).toBe('invalidate')
+    f.contents.emit('input-event', {}, { type: 'mouseDown' })
+    expect(JSON.parse(f.contents.scripts.at(-1).slice(f.contents.scripts.at(-1).lastIndexOf(')(') + 2, -1)).clearReason).toBe('invalidate')
+    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+  })
+  it.each(['Enter', 'Meta+Enter', 'private-invocation-value'])('pressKey %s consumes actual single-key semantics without fabricating chords or text', async key => {
+    const f = await managerFixture(); native.mode = 'pressKey'; native.key = key
+    const report = await f.manager.runScript('browser-one', 'actual named-key worker')
+    expect(report.outcome.kind).toBe('completed'); expect(f.contents.feedbackPayloads).toHaveLength(1)
+    const payload = f.contents.feedbackPayloads[0]
+    expect(payload.method).toBe('pressKey'); expect(payload.keyLabel).toBe(key === 'Enter' ? 'Enter' : '⌨')
+    expect(payload.label).toBe(key === 'Enter' ? 'Agent · Key Enter' : 'Agent · Key ⌨')
+    expect(f.contents.scripts.join('')).not.toContain('Meta+Enter'); expect(f.contents.scripts.join('')).not.toContain('private-invocation-value')
+    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+  })
+  it.each(['js', 'cdp'])('only actual %s opaque work enables the executor method, with no code or params in display payload', async method => {
+    const f = await managerFixture(); native.mode = method
+    const report = await f.manager.runScript('browser-one', 'actual opaque worker')
+    expect(report.outcome.kind).toBe('completed'); expect(f.contents.feedbackPayloads).toHaveLength(0)
+    const payloads = f.contents.scripts.map((script: string) => JSON.parse(script.slice(script.lastIndexOf(')(') + 2, -1)))
+    const running = payloads.filter((p: any) => p.phase === 'running')
+    expect(running).toHaveLength(1); expect(running[0].method).toBe(method); expect(running[0].kind).toBe('page')
+    expect(f.contents.scripts.join('')).not.toContain('private-invocation-value')
+    expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
   })
 })

@@ -1,0 +1,454 @@
+{
+  "schema": "agentmux.focus-author-public-producer.v1",
+  "boundary": "Private controlled adapter, genuine Composer/manual IPC/Core receipt and fresh FileStore/public projector. No physical human/CLI/Runtime.",
+  "captured": {
+    "agentSessionId": "focus-author-recipient",
+    "revision": 3,
+    "items": [
+      {
+        "id": "prompt:a0ed524b-da39-4337-84a8-01ab52a280ee",
+        "agentSessionId": "focus-author-recipient",
+        "kind": "user_message",
+        "status": "complete",
+        "source": "user",
+        "createdAt": 1791063030000,
+        "updatedAt": 1791063030000,
+        "title": "Prompt",
+        "content": "Same body from independently recorded authors",
+        "authorHuman": true
+      },
+      {
+        "id": "prompt:known-agent",
+        "agentSessionId": "focus-author-recipient",
+        "kind": "user_message",
+        "status": "complete",
+        "source": "user",
+        "createdAt": 1791066600000,
+        "updatedAt": 1791066600000,
+        "title": "Prompt",
+        "content": "Same body from independently recorded authors",
+        "authorAgentSessionId": "focus-author-sender"
+      },
+      {
+        "id": "prompt:unknown-submit",
+        "agentSessionId": "focus-author-recipient",
+        "kind": "user_message",
+        "status": "complete",
+        "source": "user",
+        "createdAt": 1791070200000,
+        "updatedAt": 1791070200000,
+        "title": "Prompt",
+        "content": "Same body from independently recorded authors"
+      }
+    ]
+  },
+  "nativePage": {
+    "agentSessionId": "focus-author-recipient",
+    "source": {
+      "providerId": "claude",
+      "nativeSessionId": "native-author-records"
+    },
+    "items": [
+      {
+        "id": "native-timed",
+        "kind": "user-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "Same body from independently recorded authors"
+          }
+        ],
+        "startedAt": 1791071940000
+      },
+      {
+        "id": "native-untimed",
+        "kind": "user-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "Untimed native input, sender not recorded"
+          }
+        ]
+      }
+    ],
+    "nextCursor": null
+  },
+  "messages": [
+    {
+      "id": "native:claude:native-author-records:native-timed",
+      "rawId": "native-timed",
+      "agentSessionId": "focus-author-recipient",
+      "source": {
+        "kind": "native",
+        "providerId": "claude",
+        "nativeSessionId": "native-author-records",
+        "recordId": "native-timed"
+      },
+      "author": {
+        "kind": "unknown"
+      },
+      "content": "Same body from independently recorded authors",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "Same body from independently recorded authors"
+        }
+      ],
+      "recordedAt": 1791071940000
+    },
+    {
+      "id": "native:claude:native-author-records:native-untimed",
+      "rawId": "native-untimed",
+      "agentSessionId": "focus-author-recipient",
+      "source": {
+        "kind": "native",
+        "providerId": "claude",
+        "nativeSessionId": "native-author-records",
+        "recordId": "native-untimed"
+      },
+      "author": {
+        "kind": "unknown"
+      },
+      "content": "Untimed native input, sender not recorded",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "Untimed native input, sender not recorded"
+        }
+      ]
+    },
+    {
+      "id": "captured:prompt:a0ed524b-da39-4337-84a8-01ab52a280ee",
+      "rawId": "prompt:a0ed524b-da39-4337-84a8-01ab52a280ee",
+      "agentSessionId": "focus-author-recipient",
+      "source": {
+        "kind": "captured",
+        "submissionId": "prompt:a0ed524b-da39-4337-84a8-01ab52a280ee"
+      },
+      "author": {
+        "kind": "human"
+      },
+      "content": "Same body from independently recorded authors",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "Same body from independently recorded authors"
+        }
+      ],
+      "recordedAt": 1791063030000,
+      "deliveryStatus": "complete"
+    },
+    {
+      "id": "captured:prompt:known-agent",
+      "rawId": "prompt:known-agent",
+      "agentSessionId": "focus-author-recipient",
+      "source": {
+        "kind": "captured",
+        "submissionId": "prompt:known-agent"
+      },
+      "author": {
+        "kind": "agent",
+        "agentSessionId": "focus-author-sender"
+      },
+      "content": "Same body from independently recorded authors",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "Same body from independently recorded authors"
+        }
+      ],
+      "recordedAt": 1791066600000,
+      "deliveryStatus": "complete"
+    },
+    {
+      "id": "captured:prompt:unknown-submit",
+      "rawId": "prompt:unknown-submit",
+      "agentSessionId": "focus-author-recipient",
+      "source": {
+        "kind": "captured",
+        "submissionId": "prompt:unknown-submit"
+      },
+      "author": {
+        "kind": "unknown"
+      },
+      "content": "Same body from independently recorded authors",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "Same body from independently recorded authors"
+        }
+      ],
+      "recordedAt": 1791070200000,
+      "deliveryStatus": "complete"
+    }
+  ],
+  "sources": [
+    {
+      "agentSessionId": "focus-author-recipient",
+      "hostId": "local",
+      "state": "active",
+      "history": {
+        "providerId": "claude",
+        "executorId": "claude",
+        "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/focus-author-consumer-9Stknv",
+        "createdAt": 1791057600000,
+        "nativeHandle": {
+          "kind": "provider",
+          "providerId": "claude",
+          "sessionId": "native-author-records",
+          "transcriptPath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/focus-author-consumer-9Stknv/native.jsonl"
+        }
+      }
+    },
+    {
+      "agentSessionId": "focus-author-sender",
+      "hostId": "local",
+      "state": "active",
+      "history": {
+        "providerId": "claude",
+        "executorId": "claude",
+        "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/focus-author-consumer-9Stknv",
+        "createdAt": 1791057600000
+      }
+    }
+  ],
+  "sessionId": "focus-author-recipient",
+  "senderId": "focus-author-sender",
+  "now": 1791072000000,
+  "sessions": [
+    {
+      "id": "focus-author-recipient",
+      "kind": "agent",
+      "providerId": "claude",
+      "executorId": "claude",
+      "hostId": "local",
+      "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/focus-author-consumer-9Stknv",
+      "label": "Recipient worker",
+      "createdAt": 1791057600000,
+      "updatedAt": 1791057600000,
+      "agentSessionUpdatedAt": 1791057600000,
+      "latestOutputBytes": 0,
+      "processState": "running",
+      "promptSubmissionPredecessor": null,
+      "status": {
+        "state": "running",
+        "source": "run-process",
+        "observedAt": 1791057600000
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "control": {
+        "kind": "agent",
+        "hostId": "local",
+        "agentSessionId": "focus-author-recipient",
+        "run": {
+          "runId": "run-focus-author-recipient"
+        }
+      }
+    },
+    {
+      "id": "focus-author-sender",
+      "kind": "agent",
+      "providerId": "claude",
+      "executorId": "claude",
+      "hostId": "local",
+      "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/focus-author-consumer-9Stknv",
+      "label": "Known sender",
+      "createdAt": 1791057600000,
+      "updatedAt": 1791057600000,
+      "agentSessionUpdatedAt": 1791057600000,
+      "latestOutputBytes": 0,
+      "processState": "running",
+      "promptSubmissionPredecessor": null,
+      "status": {
+        "state": "running",
+        "source": "run-process",
+        "observedAt": 1791057600000
+      },
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "control": {
+        "kind": "agent",
+        "hostId": "local",
+        "agentSessionId": "focus-author-sender",
+        "run": {
+          "runId": "run-focus-author-sender"
+        }
+      }
+    }
+  ],
+  "config": {
+    "version": 9,
+    "hosts": [
+      {
+        "id": "local",
+        "kind": "local",
+        "label": "This Mac"
+      }
+    ],
+    "executors": {
+      "codex": {
+        "label": "Codex",
+        "providerId": "codex",
+        "command": "codex",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "claude": {
+        "label": "Claude",
+        "providerId": "claude",
+        "command": "claude",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "traex": {
+        "label": "TraeX",
+        "providerId": "traex",
+        "command": "traex",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "hermes": {
+        "label": "Hermes",
+        "providerId": "hermes",
+        "command": "hermes",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "pi": {
+        "label": "Pi",
+        "providerId": "pi",
+        "command": "pi",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "grok": {
+        "label": "Grok",
+        "providerId": "grok",
+        "command": "grok",
+        "args": [
+          "--permission-mode",
+          "bypassPermissions"
+        ],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "gemini": {
+        "label": "Gemini",
+        "providerId": "gemini",
+        "command": "gemini",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "antigravity": {
+        "label": "Antigravity",
+        "providerId": "antigravity",
+        "command": "agy",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "cursor": {
+        "label": "Cursor",
+        "providerId": "cursor",
+        "command": "cursor-agent",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "kimi": {
+        "label": "Kimi",
+        "providerId": "kimi",
+        "command": "kimi",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "droid": {
+        "label": "Droid",
+        "providerId": "droid",
+        "command": "droid",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "copilot": {
+        "label": "Copilot",
+        "providerId": "copilot",
+        "command": "copilot",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      },
+      "opencode": {
+        "label": "OpenCode",
+        "providerId": "opencode",
+        "command": "opencode",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      }
+    },
+    "workspaces": [
+      {
+        "id": "author-project",
+        "hostId": "local",
+        "name": "Author project",
+        "path": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/focus-author-consumer-9Stknv",
+        "kind": "folder"
+      }
+    ],
+    "appearance": {
+      "appAppearance": "dark",
+      "terminalTheme": "graphite"
+    },
+    "browser": {
+      "agentAutomation": false,
+      "toolbar": {
+        "selectElement": true,
+        "screenshot": true,
+        "devTools": true,
+        "viewport": true,
+        "saveBookmark": true,
+        "more": true
+      }
+    },
+    "notifications": {
+      "mode": "standard"
+    },
+    "composerShortcuts": [
+      {
+        "id": "review-changes",
+        "keyword": "review-changes",
+        "label": "Review changes",
+        "body": "Review the current changes. Identify concrete bugs and missing tests, cite the relevant files, and explain any remaining risks."
+      },
+      {
+        "id": "summarize-progress",
+        "keyword": "summarize-progress",
+        "label": "Summarize progress",
+        "body": "Summarize the goal, completed work, verification results, remaining work, and the next useful action. Distinguish confirmed facts from uncertainty."
+      }
+    ]
+  },
+  "agentNames": {
+    "focus-author-recipient": "Recipient worker",
+    "focus-author-sender": "Known sender"
+  }
+}

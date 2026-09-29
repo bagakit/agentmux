@@ -147,11 +147,13 @@ import {
   reduceDocumentWritten,
   reduceFileDelete,
   reduceFileOpened,
+  reduceFileSurfaceOpened,
   reduceFileRename,
   findFileRenameProjectionCollision,
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
+import { workspaceFilePreviewFormat } from '../../shared/workspace-file-preview'
 import {
   advanceDocumentLifetime,
   disposeClosedFileOwners,
@@ -849,7 +851,8 @@ type AppState = {
     tabGroupId: string,
     launcher?: { tabId: string; regionId: string },
     url?: string,
-    bookmarkOrigin?: { path: string; binary: boolean }
+    bookmarkOrigin?: { path: string; binary: boolean },
+    requestedWorkspaceId?: string
   ): Promise<void>
   openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination): Promise<void>
   /**
@@ -1360,6 +1363,17 @@ async function loadPersistedFileDocument(workspaceId: string, path: string): Pro
       const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
       await api.files.observe(workspaceId, path)
       const result = await api.files.read(workspaceId, path)
+      if (documentLifetime(key) !== openedLifetime) {
+        await api.files.unobserve(workspaceId, path)
+        return false
+      }
+      if (result.status === 'binary') {
+        await api.files.unobserve(workspaceId, path)
+        useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path, {
+          kind: 'binary', revision: result.revision, byteLength: result.byteLength
+        }))
+        return true
+      }
       if (result.status !== 'read') {
         await api.files.unobserve(workspaceId, path)
         // Say which failure it was. A file deleted while the app was closed is the same fact as one
@@ -1430,6 +1444,8 @@ async function enqueueFileSave(
     const surface = fileSurface(tab, regionId)
     if (!surface) return
     const currentKey = documentKey(surface.workspaceId, surface.path)
+    const format = workspaceFilePreviewFormat(surface.path)
+    if (format && !format.sourceEditable) return
     const document = state.documents[currentKey]
     const issue = state.documentIssues[currentKey]
     if (!document) return
@@ -4864,6 +4880,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, topicId))
         return intentVersion === fileOpenIntentVersion
       }
+      // Media has a File identity, but never a UTF-8 buffer. Only its visible pane reads bytes.
+      const format = workspaceFilePreviewFormat(path)
+      if ((format && !format.sourceEditable) || get().documentIssues[key]?.kind === 'binary') {
+        if (!mayReveal()) return false
+        releaseNavigation()
+        const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
+        const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
+        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, topicId))
+        return intentVersion === fileOpenIntentVersion
+      }
       while (!get().documents[key]) {
         let request = fileOpenRequests.get(key)
         const joinedRequest = Boolean(request)
@@ -4879,7 +4905,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 await api.files.unobserve(workspaceId, path)
                 return 'directory' as const
               }
-              if (result.status !== 'read') {
+              if (result.status !== 'read' && result.status !== 'binary') {
                 await api.files.unobserve(workspaceId, path)
                 throw new Error(result.status === 'deleted'
                   ? `File was deleted: ${path}`
@@ -4901,7 +4927,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               // Shared reads own data/placement, never a caller's later navigation. Each caller
               // below decides whether it still owns the latest uncancelled display intent.
               set((state) => {
-                const opened = reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, topicId)
+                const opened = result.status === 'read'
+                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, topicId)
+                  : reduceDocumentLoadFailed(
+                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, topicId),
+                    workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength }
+                  )
                 const placed = opened.layouts[workspaceId]!
                 return {
                   ...opened,
@@ -4915,6 +4946,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   } }
                 }
               })
+              if (result.status === 'binary') await api.files.unobserve(workspaceId, path)
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
                 await refreshFileDocument(workspaceId, path, openedLifetime)
@@ -4940,12 +4972,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         if (!opened) return false
         const state = get(), currentLayout = state.layouts[workspaceId]
-        if (state.documents[key] && currentLayout) {
+        if ((state.documents[key] || state.documentIssues[key]?.kind === 'binary') && currentLayout) {
           if (!mayReveal()) return false
           releaseNavigation()
           const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
           const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
-          set((current) => reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, topicId))
+          set((current) => current.documents[key]
+            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, topicId)
+            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, topicId))
           return intentVersion === fileOpenIntentVersion
         }
         if (!joinedRequest) return false
@@ -5419,6 +5453,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!surface) return
     const key = documentKey(surface.workspaceId, surface.path)
     const issue = get().documentIssues[key]
+    if (!get().documents[key] && (issue?.kind === 'binary' || issue?.kind === 'read-error')) {
+      // Re-read the same existing File owner; changing format must not require closing its Tab.
+      advanceDocumentLifetime(key)
+      set(state => {
+        const issues = { ...state.documentIssues }
+        delete issues[key]
+        return { documentIssues: issues }
+      })
+      await loadPersistedFileDocument(surface.workspaceId, surface.path)
+      return
+    }
     if (issue?.kind === 'changed') {
       set((state) => reduceDocumentReloaded(state, surface.workspaceId, surface.path, issue.observed))
       return
@@ -5916,7 +5961,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     void get().refreshSession(session.id)
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -5925,7 +5970,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (launcher && launcherSurface?.kind !== 'launcher') {
       throw new Error('Launcher Region is no longer available')
     }
-    const workspaceId = resolveLauncherWorkspaceId({
+    const workspaceId = requestedWorkspaceId ?? resolveLauncherWorkspaceId({
       launcherTabWorkspaceId: launcherTab?.workspaceId,
       activeWorkspaceId: state.activeWorkspaceId
     })

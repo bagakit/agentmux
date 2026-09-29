@@ -781,7 +781,7 @@ export class BrowserViewManager {
       throw error
     }
     entry.activity = { operation, control: 'agent' }
-    await entry.feedback?.clear()
+    await entry.feedback?.clear('replace')
     const feedbackView = entry.view
     const feedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
       navigationId: () => entry.navigationId, operatorName: operation.operator.name,
@@ -1682,9 +1682,9 @@ export class BrowserViewManager {
           let action: number | undefined
           if (BROWSER_ACTION_PAGE_CALLS.has(name)) {
             beforeAction(step)
-            action = await feedback?.begin(name)
+            action = await feedback?.begin(name, name === 'pressKey' ? args[1] : undefined)
             beforeAction(step)
-          } else await feedback?.clear()
+          } else await feedback?.clear(BROWSER_WAIT_PAGE_CALLS.has(name) ? 'invalidate' : 'replace')
           value = await dispatch(name, args, { beforeAction: () => beforeAction(step),
             ...(feedback && action !== undefined && entry.visible ? { feedback: async (node: BrowserPageSnapshot['nodes'][number], send: typeof session.sendCommand) => {
               beforeAction(step)

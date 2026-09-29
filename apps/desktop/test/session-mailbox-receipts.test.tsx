@@ -40,8 +40,12 @@ it('persists bounded digests for 200 large messages and restores read status thr
   await show(items)
   await act(async () => { await Promise.all(digest.mock.results.map((result) => result.value)) })
   expect(unread()).toBe('true')
+  expect(trigger().querySelector('.composer-mailbox__unread')!.textContent).toBe('99+')
+  expect(trigger().getAttribute('aria-label')).toContain('200 unread')
+  expect(trigger().title).toContain('200 unread')
   await toggle('open')
   expect(unread()).toBe('false')
+  expect(trigger().querySelector('.composer-mailbox__unread')).toBeNull()
   const receipts = useAppStore.getState().noticeReadReceipts['mail:agent-1']!
   expect(Object.keys(receipts)).toHaveLength(200)
   expect(Object.values(receipts).map((value) => value.length)).toEqual(Array(200).fill(64))

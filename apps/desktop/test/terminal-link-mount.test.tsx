@@ -20,6 +20,7 @@ const renderer = vi.hoisted(() => {
     selectionChanged = () => {}
     scrolled = () => {}
     data = (_data: string) => {}
+    userInput = () => {}
     modes = { mouseTrackingMode: 'none' }
     buffer = { active: { type: 'normal', viewportY: 0, baseY: 0, length: 24, getLine: () => ({ translateToString: () => this.line }) } }
     constructor(options: Terminal['options']) { this.options = options; Terminal.instances.push(this) }
@@ -30,6 +31,7 @@ const renderer = vi.hoisted(() => {
     onScroll(callback: () => void) { this.scrolled = callback; return disposable() }
     onRender() { return disposable() }
     onData(callback: (data: string) => void) { this.data = callback; return disposable() }
+    onUserInput(callback: () => void) { this.userInput = callback; return disposable() }
     onBinary() { return disposable() }
     parser = { registerOscHandler: disposable, registerCsiHandler: disposable }
     attachCustomKeyEventHandler() {}
@@ -201,8 +203,8 @@ describe('mounted passive link readout', () => {
     expect(readout.querySelector('button, kbd, svg')).toBeNull()
     expect(renderer.Terminal.instances).toEqual([terminal])
     expect([terminal.cols, terminal.rows]).toEqual([80, 24])
-    await act(async () => { terminal.data('still usable') })
-    expect(api.sessions.write).toHaveBeenCalledWith(session.control, 'still usable')
+    await act(async () => { terminal.userInput(); terminal.data('still usable') })
+    expect(api.sessions.write).toHaveBeenCalledWith(session.control, 'still usable', 'user')
   })
   it('OSC 8 and file callbacks share the delayed passive readout and leave cleanup', async () => {
     const file = await fileLink()
@@ -214,6 +216,8 @@ describe('mounted passive link readout', () => {
     }
   })
   it('unmount cancels the pending hover timer with the terminal owner', async () => {
+    // Drain the mount's one-time focus animation frame before isolating the hover timer.
+    await act(async () => { vi.advanceTimersByTime(20) })
     await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/path') })
     expect(vi.getTimerCount()).toBeGreaterThan(0)
     await act(async () => { root.unmount() })

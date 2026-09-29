@@ -1,7 +1,7 @@
 import '../monaco'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { AlertTriangle, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, Code, Eye, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
@@ -39,15 +39,20 @@ const MONACO_COMMAND_PALETTE_ACTION_ID = 'editor.action.quickCommand'
 // cannot work, because a button that is guaranteed to error is not an offer.
 export function EditorUnavailableState({
   canReveal,
-  onReveal
+  onReveal,
+  message,
+  onRetry
 }: {
   canReveal: boolean
   onReveal: () => void
+  message?: string
+  onRetry?: () => void
 }) {
   return (
     <section className="pane-state pane-state--error">
-      <strong>File is no longer available</strong>
-      <span>Refresh the explorer and open it again.</span>
+      <strong>{message ? 'File could not be read' : 'File is no longer available'}</strong>
+      <span>{message ?? 'Refresh the explorer and open it again.'}</span>
+      {onRetry ? <button className="small-button" onClick={onRetry}><RefreshCw size={13} /> Retry</button> : null}
       {canReveal ? (
         <button className="small-button" onClick={onReveal}>
           <FolderOpen size={13} /> {revealInFileManagerLabel()}
@@ -78,12 +83,20 @@ export function EditorPane({
   tabId,
   surface,
   released = false,
-  visible = true
+  visible = true,
+  preview,
+  previewing = false,
+  onTogglePreview,
+  extraActions
 }: {
   tabId: string
   surface: FileWorkbenchSurface
   released?: boolean
   visible?: boolean
+  preview?: ReactNode
+  previewing?: boolean
+  onTogglePreview?: () => void
+  extraActions?: ReactNode
 }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore((state) => {
@@ -138,18 +151,16 @@ export function EditorPane({
   // broken file rather than an unloaded one. Asking for it here, from the very pane that would render
   // that state, is what makes a Region in a Workspace the user has not switched back to yet work too.
   //
-  // Hidden Tabs stay mounted by design (that is what keeps terminal instances alive across switches),
-  // so this fires for every restored file Region in the group, not only the visible one. That is the
-  // accepted cost: one read per open file Region, and every restored Tab works on first click.
+  // Retained hidden tabs do not read content. The original surface stays durable and loads when shown.
   //
   // Guarded on `issue`, not just on `document`: a read that failed (the file was deleted while the app
   // was closed, or the read errored) records the reason and leaves `document` null, so without that
   // guard this would re-read a known-unreadable path on every dependency change. The user's route out
   // of that state is the Reveal action below, not a silent retry.
   useEffect(() => {
-    if (document || issue || released) return
+    if (document || issue || released || !visible) return
     void attachPersistedDocument(surface.workspaceId, surface.path)
-  }, [document, issue, released, attachPersistedDocument, surface.workspaceId, surface.path])
+  }, [document, issue, released, visible, attachPersistedDocument, surface.workspaceId, surface.path])
 
   // Consume a one-shot reveal target (set when the file was opened with a :line location, e.g. a
   // terminal path link). Both entry points call this: `onMount` handles the first open (Monaco
@@ -321,8 +332,10 @@ export function EditorPane({
   }
 
   if (!document) {
+    if (!issue) return <FullPageLoadingSurface scope="region" phase="loading" title="Loading file" detail={visible ? 'Reading file content' : 'File content loads when shown'} />
     return (
       <EditorUnavailableState
+        {...(issue.kind === 'read-error' ? { message: issue.message, onRetry: () => { void reload(tabId, surface.regionId) } } : {})}
         canReveal={isLocalWorkspace}
         onReveal={() => void revealFileInFileManager(surface.workspaceId, surface.path, reportError)}
       />
@@ -331,12 +344,14 @@ export function EditorPane({
 
   return (
     <section
-      className={`editor-pane ${issue ? 'editor-pane--issue' : ''}`}
+      className={`editor-pane ${issue ? 'editor-pane--issue' : ''} ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
       data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
     >
       <header className="editor-header">
         <span title={document.path}>{document.path}</span>
         <div className="editor-header__actions">
+          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <Code size={13} /> : <Eye size={13} />}{previewing ? 'Source' : 'Preview'}</button> : null}
+          {extraActions}
           {/* Word wrap: a discoverable entry point for the Alt+Z chord, reflecting the global bit.
               aria-pressed makes the toggle state legible to the behavior test and to screen readers. */}
           <button
@@ -403,12 +418,13 @@ export function EditorPane({
                 ? 'File was deleted on disk. Reload accepts the deletion; Overwrite recreates it.'
                 : issue.kind === 'read-error'
                   ? `Could not refresh the file (${issue.message}). The last buffer is preserved.`
-                  : `Save failed (${issue.message}). Your draft is still unsaved.`}
+                  : issue.kind === 'write-error' ? `Save failed (${issue.message}). Your draft is still unsaved.`
+                    : 'The file is binary. The existing text buffer is preserved.'}
           </span>
         </div>
       ) : null}
       <div className="editor-canvas">
-        {regionMode === 'diff' ? (
+        {previewing ? preview : regionMode === 'diff' ? (
           <GitDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} />
         ) : (
           <Editor

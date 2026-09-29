@@ -239,16 +239,17 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
     if (folder === 'inbox' && receipts.unread.length) receipts.acknowledge(receipts.unread)
     if (folder === 'system' && system.unread.length) system.acknowledge(system.unread)
   }, [open, viewed, folder, receipts, system])
+  const mailboxLabel = `Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending${progressSession ? `. ${progressLabel}` : ''}`
   return <>
     <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
-      aria-label={`Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending${progressSession ? `. ${progressLabel}` : ''}`}
-      title={progressSession ? `Mailbox · ${progressLabel}` : 'Mailbox'} popoverTarget={id} popoverTargetAction="toggle"
+      aria-label={mailboxLabel}
+      title={mailboxLabel} popoverTarget={id} popoverTargetAction="toggle"
       onPointerEnter={enter} onPointerLeave={leave}
       onClick={(event) => { if (preview.current && open) { event.preventDefault(); pin() } }}>
       <Mail size={14} aria-hidden="true" />
       {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={9} className="composer-mailbox__progress" aria-hidden="true" /> : null}
       {pending.length ? <span aria-hidden="true">{pending.length}</span> : null}
-      {unread ? <span className="composer-mailbox__dot" aria-hidden="true" /> : null}
+      {unread ? <span className="composer-mailbox__unread" aria-hidden="true">{unread > 99 ? '99+' : unread}</span> : null}
     </button>
     <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
       data-state={open ? 'open' : 'closed'}

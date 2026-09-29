@@ -28,6 +28,32 @@ const progressLoop = (status: 'active' | 'paused' = 'active'): ContinuousProgres
   loopId: 'mailbox-loop', hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: '/repo',
   intervalMs: 60_000, prompt: 'Continue', nextCheckAt: 60_000, status
 })
+
+it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i unread from the existing Inbox and System owners, separately from pending and Progress', async (count) => {
+  const systemCount = count > 0 ? 1 : 0, incomingCount = count - systemCount
+  vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([progressLoop()])
+  useAppStore.setState({ sessions: [systemCount ? session() : composerSession()], timelines: {
+    'agent-1': { agentSessionId: 'agent-1', revision: 1, items: Array.from({ length: incomingCount }, (_, i) => delivered(`count-${i}`, 'peer')) }
+  }, agentSteerQueues: { 'agent-1': [
+    { operationId: 'pending-a', runId: 'run-agent-1', text: 'First original pending intent', status: 'queued' },
+    { operationId: 'pending-b', runId: 'run-agent-1', text: 'Second original pending intent', status: 'queued' }
+  ] } })
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await vi.waitFor(() => {
+    expect(trigger().dataset.progressState).toBe('active')
+    expect(trigger().getAttribute('aria-label')).toBe(`Mailbox: ${count} unread, ${incomingCount} Agent messages, ${systemCount} notices, 2 pending. Continuous progress: active`)
+  })
+  const badge = trigger().querySelector('.composer-mailbox__unread')
+  if (count === 0) expect(badge).toBeNull()
+  else { expect(badge).not.toBeNull(); expect(badge!.textContent).toBe(count > 99 ? '99+' : String(count)) }
+  expect(trigger().title).toBe(`Mailbox: ${count} unread, ${incomingCount} Agent messages, ${systemCount} notices, 2 pending. Continuous progress: active`)
+  expect(trigger().querySelector('.composer-mailbox__dot')).toBeNull()
+  expect(trigger().querySelector('.composer-mailbox__progress')).not.toBeNull()
+  expect(trigger().querySelector(':scope > span:not([class])')!.textContent).toBe('2')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']!.map(entry => entry.text)).toEqual(['First original pending intent', 'Second original pending intent'])
+  expect(useAppStore.getState().noticeReadReceipts).toEqual({})
+  expect(dom.draft()).toBe('Keep my draft')
+})
 /**
  * 打开之前先把指纹等出来。
  *
@@ -223,11 +249,11 @@ it('uses one right Session mailbox, opens incoming notices to clear the red dot,
   expect(dom.container.querySelector('.composer__toolbar > div:last-child')?.contains(trigger())).toBe(true)
   expect(dom.container.querySelectorAll('.composer__notices, .composer__queued')).toHaveLength(0)
   expect(unread()).toBe('true')
-  expect(trigger().querySelector('.composer-mailbox__dot')).not.toBeNull()
+  expect(trigger().querySelector('.composer-mailbox__unread')!.textContent).toBe('1')
   expect(document.getElementById(trigger().getAttribute('popovertarget')!)).toBe(mailbox())
   await toggle('open')
   expect(unread()).toBe('false')
-  expect(trigger().querySelector('.composer-mailbox__dot')).toBeNull()
+  expect(trigger().querySelector('.composer-mailbox__unread')).toBeNull()
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
   expect(mailbox().textContent).toContain('screen confirmation')
   expect(useAppStore.getState().sessions[0]).toMatchObject({ terminalPromptDelivery: session().terminalPromptDelivery })
@@ -475,7 +501,7 @@ it('separates actual incoming Agent messages, sent user history and system facts
     agentSteerQueues: { 'agent-1': [{ operationId: 'sent', runId: 'run-agent-1', text: 'Body sent', status: 'queued' }] } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect([...mailbox().querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(['Inbox (1)', 'Outbox (1)', 'System (1)', 'Progress'])
-  expect(trigger().textContent).toBe('') // Durable sent item is never shown as pending again.
+  expect(trigger().querySelector(':scope > span:not([class])')).toBeNull() // Durable sent item is never shown as pending again; unread is separate.
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox (1)')
   expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Body in')
