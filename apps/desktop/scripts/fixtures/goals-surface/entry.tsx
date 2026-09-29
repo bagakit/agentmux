@@ -6,13 +6,16 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
 import { EMPTY_AGENT_FOCUS } from '../../../src/renderer/src/lib/agent-focus'
+import { projectWorkspaces } from '../../../src/renderer/src/lib/workspace-projects'
 import { applyConfigEdit } from '../../../src/shared/config-edit'
 import type { ComposerShortcut, GoalsCommonActionRef } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
 await useAppStore.getState().initialize()
 const initial = useAppStore.getState()
 const previewConfig = { ...initial.config!, workspaces: [...initial.config!.workspaces.map(workspace => ({ ...workspace, path: workspace.path.startsWith('/') ? workspace.path : `/preview/${workspace.path}` })), { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/preview/scratch', hostId: 'local', kind: 'folder' as const }] }
-const project = previewConfig.workspaces[0]!
+const projectWorkspace = previewConfig.workspaces[0]!
+const project = projectWorkspaces([projectWorkspace])[0]!
+if (project.id === projectWorkspace.id) throw new Error('Maturity fixture must distinguish Project and Workspace identities')
 const sessions = initial.sessions.slice(0, 2).map(session => ({ ...session, workspacePath: session.workspacePath.startsWith('/') ? session.workspacePath : `/preview/${session.workspacePath}` }))
 const intent = 'When I return to work, I want the same Agents, tabs, splits and draft messages to still be here.\n\nA temporary Runtime outage should tell me what is unavailable and how to recover. It must preserve a healthy Agent and the original work surface.\n\nI should not have to reconstruct the layout or figure out which Session is the original one.'
 const titles = ['Keep every Agent where I left it', 'Make Goals easy to understand', 'Read terminal history without interruptions', 'Give results a clear trail of evidence', 'Clarify the next decision before execution', 'Keep the Browser in the original work surface']
@@ -40,6 +43,8 @@ const ensureMote = api.scratch.ensureMote
 let finishPreparation: (() => Promise<void>) | undefined
 let root: ReturnType<typeof createRoot> | undefined
 let configSaveFailure = false
+let configSaveHold: Promise<void> | null = null
+let releaseConfigSave: (() => void) | undefined
 const commonPrompts: ComposerShortcut[] = [
   { id: 'common-review', label: '检查当前改动', keyword: 'common-review', body: '帮我检查当前改动，指出具体风险并建议一个最小验证。', providerId: 'codex' },
   { id: 'common-notes', label: '整理工作笔记', keyword: 'common-notes', body: '读这周的工作笔记，区分已有依据的结论和未知，再建议一次最小检查。' },
@@ -65,6 +70,7 @@ function seedCommon(mode = 'empty') {
 // Private preview owner: the actual Renderer uses the original expected/conflict merge.
 // Durable ConfigStore, native launch and initial CLI delivery are verified by the owning tests.
 api.config.save = async (next, expected) => {
+  if (configSaveHold) await configSaveHold
   if (configSaveFailure) throw new Error('保存服务暂时不可用。正文草稿和原目录已保留。')
   return applyConfigEdit(useAppStore.getState().config!, expected, next)
 }
@@ -74,19 +80,27 @@ function seed(mode = 'many') {
   const entries = mode === 'empty' ? [] : mode === 'one' ? [goals[0]!] : scenario ? [phase(mode), ...goals.slice(1), finished] : [...goals, finished]
   api.scratch.ensureTopic = mode === 'delivery-failure' ? async () => { throw new Error('The discussion service is unavailable. Your goal and current work are preserved.') } : ensureTopic
   api.demands.confirmAlignment = mode === 'receipt-failure' ? async () => { throw new Error('The current proposal changed in another window. Reload it before confirming.') } : confirm
-  const config = mode === 'long-current' ? { ...previewConfig, workspaces: previewConfig.workspaces.map(workspace => workspace.id === project.id ? { ...workspace, name: '持续保留工作区与真实 Agent 状态的长期项目 / workspace-continuity-and-reliable-delivery' } : workspace) } : previewConfig
-  flushSync(() => { useAppStore.setState({ initialize, config: mode === 'delivery-failure' ? { ...initial.config!, workspaces: [...initial.config!.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID), { ...project, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: '/preview/scratch', kind: 'folder' }] } : config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: ['current', 'long-current'].includes(mode) ? project.id : null,
-    agentFocus: mode === 'recent' ? { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: 1790960000000, identity: { name: sessions[0]!.label, kind: sessions[0]!.kind, providerId: sessions[0]!.providerId, hostId: project.hostId, workspacePath: project.path, project: { id: project.id, name: project.name } } }] }, pmo: { sessionId: null } } : EMPTY_AGENT_FOCUS,
+  const config = mode === 'long-current' ? { ...previewConfig, workspaces: previewConfig.workspaces.map(workspace => workspace.id === projectWorkspace.id ? { ...workspace, name: '持续保留工作区与真实 Agent 状态的长期项目 / workspace-continuity-and-reliable-delivery' } : workspace) } : previewConfig
+  flushSync(() => { useAppStore.setState({ initialize, config: mode === 'delivery-failure' ? { ...initial.config!, workspaces: [...initial.config!.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID), { ...projectWorkspace, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: '/preview/scratch', kind: 'folder' }] } : config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: ['current', 'long-current'].includes(mode) ? projectWorkspace.id : null,
+    agentFocus: mode === 'recent' ? { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: 1790960000000, identity: { name: sessions[0]!.label, kind: sessions[0]!.kind, providerId: sessions[0]!.providerId, hostId: project.hostId, workspacePath: projectWorkspace.path, project: { id: projectWorkspace.id, name: projectWorkspace.name } } }] }, pmo: { sessionId: null } } : EMPTY_AGENT_FOCUS,
     layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true, leaderTopicVisible: false }); root?.render(<App key={mode} />) })
 }
 seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed,
+  seedMaturity: () => {
+    seed('many')
+    const variants = [goals[0]!, phase('questions'), phase('proposal'), phase('confirmed'), phase('results'), phase('unknown')]
+    const mixed = variants.map((entry, index) => ({ ...entry, id: goals[index]!.id, title: goals[index]!.title, description: goals[index]!.description, sessionIds: index === 0 ? goals[0]!.sessionIds : [] }))
+    flushSync(() => { useAppStore.setState({ demands: Object.fromEntries(mixed.map(entry => [entry.id, entry])), selectedDemandId: null }); root?.render(<App key="maturity-mixed" />) })
+  },
   seedCommon,
+  holdConfigSave: () => { configSaveHold = new Promise(resolve => { releaseConfigSave = resolve }) },
+  finishConfigSave: (fail: boolean) => { configSaveFailure = fail; releaseConfigSave?.(); releaseConfigSave = undefined; configSaveHold = null },
   failConfigSave: (fail: boolean) => { configSaveFailure = fail },
   externalPromptBody: (id: string, body: string) => { flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, composerShortcuts: state.config!.composerShortcuts!.map(prompt => prompt.id === id ? { ...prompt, body } : prompt) } }))) },
   appearance: (appAppearance: 'dark' | 'light') => { flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, appAppearance } } }))) },
-  project: () => useAppStore.getState().config!.workspaces.find(workspace => workspace.id === project.id),
+  project: () => useAppStore.getState().config!.workspaces.find(workspace => workspace.id === projectWorkspace.id),
   holdPreparation: () => { api.scratch.ensureMote = (workspace, id) => new Promise(resolve => { finishPreparation = async () => { resolve(await ensureMote(workspace, id)); api.scratch.ensureMote = ensureMote } }) },
   finishPreparation: async () => { await finishPreparation?.(); finishPreparation = undefined },
-  facts: () => ({ selected: useAppStore.getState().selectedDemandId, ids: Object.keys(useAppStore.getState().demands), runs: useAppStore.getState().sessions.filter(session => sessions.some(original => original.id === session.id)).map(session => session.control) }) } })
+  facts: () => { const state = useAppStore.getState(), entries = Object.values(state.demands); return { selected: state.selectedDemandId, ids: Object.keys(state.demands), criteria: entries.reduce((count, goal) => count + (goal.alignment?.criteria.length ?? 0), 0), reports: entries.filter(goal => goal.grounding).length, checks: entries.reduce((count, goal) => count + (goal.grounding?.checks.length ?? 0), 0), runs: state.sessions.filter(session => sessions.some(original => original.id === session.id)).map(session => session.control) } } } })
