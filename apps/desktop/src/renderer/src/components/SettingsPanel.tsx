@@ -1,6 +1,6 @@
 import * as DropdownMenu from './HoverDropdownMenu'
 import { Check, ChevronDown, LayoutDashboard, Search, Settings2, X } from 'lucide-react'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
 import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
@@ -13,7 +13,7 @@ import { settingsModules, visibleSettingsSections, settingsNavGroups, type Setti
 export { visibleSettingsSections, settingsNavGroups } from './settings/settings-modules'
 export type { SettingsSectionId, SettingsPageId } from './settings/settings-modules'
 
-export function SettingsPanel({ onClose, initialSection = 'overview', executorId }: {
+function SettingsPanelView({ onClose, initialSection = 'overview', executorId }: {
   onClose: () => void
   initialSection?: SettingsPageId
   executorId?: string | undefined
@@ -150,3 +150,5 @@ export function SettingsPanel({ onClose, initialSection = 'overview', executorId
     </div>
   )
 }
+
+export const SettingsPanel = memo(SettingsPanelView)

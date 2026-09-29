@@ -10,6 +10,26 @@ vi.hoisted(() => {
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { visibleSettingsSections } from '../src/renderer/src/components/SettingsPanel.js'
 
+function settingsPanelOwner(ast: ts.SourceFile): ts.FunctionDeclaration {
+  const exports = ast.statements.filter(ts.isVariableStatement)
+    .filter(node => node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword))
+    .flatMap(node => [...node.declarationList.declarations])
+    .filter(node => ts.isIdentifier(node.name) && node.name.text === 'SettingsPanel')
+  expect(exports, '公开 SettingsPanel 导出必须非空且唯一').toHaveLength(1)
+  const initializer = exports[0]!.initializer
+  expect(initializer && ts.isCallExpression(initializer), '公开组件必须能定位真实 owner').toBe(true)
+  const call = initializer as ts.CallExpression
+  expect(call.expression.getText(ast)).toBe('memo')
+  expect(call.arguments).toHaveLength(1)
+  const ownerName = call.arguments[0]!
+  expect(ts.isIdentifier(ownerName), 'memo 必须引用原组件函数').toBe(true)
+  const owners = ast.statements.filter(ts.isFunctionDeclaration)
+    .filter(node => node.name?.text === ownerName.getText(ast))
+  expect(owners, '导出引用的实际 SettingsPanel owner 必须非空且唯一').toHaveLength(1)
+  expect(owners[0]!.body?.statements.length).toBeGreaterThan(0)
+  return owners[0]!
+}
+
 /**
  * 守的缺陷（#297）：Agents 这一节的搜索词曾手抄一份 Provider 名单，停在最早的 9 家。内置增到
  * 13 家后，在设置搜索框里打 `kimi` / `droid` / `copilot` / `opencode` 一条都搜不出来——而 Agents
@@ -75,11 +95,7 @@ describe('设置搜索', () => {
       'utf8'
     )
     const ast = ts.createSourceFile('SettingsPanel.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-    let shell: ts.FunctionDeclaration | undefined
-    ast.forEachChild((node) => {
-      if (ts.isFunctionDeclaration(node) && node.name?.text === 'SettingsPanel') shell = node
-    })
-    expect(shell, '找不到 SettingsPanel 这个函数声明——判据的范围落空，这条什么都不检查').toBeDefined()
+    const shell = settingsPanelOwner(ast)
 
     // 前提自检：判据认得出 `.filter(` 这个形状本身。若这段遍历写错，主断言会在「一处都没找到」
     // 上静默通过——正是它要取代的那种失明。
@@ -128,11 +144,7 @@ describe('设置搜索', () => {
       'utf8'
     )
     const ast = ts.createSourceFile('SettingsPanel.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-    let shell: ts.FunctionDeclaration | undefined
-    ast.forEachChild((node) => {
-      if (ts.isFunctionDeclaration(node) && node.name?.text === 'SettingsPanel') shell = node
-    })
-    expect(shell, '找不到 SettingsPanel 这个函数声明——判据的范围落空，这条什么都不检查').toBeDefined()
+    const shell = settingsPanelOwner(ast)
 
     const readsOfQuery: number[] = []
     const walk = (node: ts.Node): void => {
