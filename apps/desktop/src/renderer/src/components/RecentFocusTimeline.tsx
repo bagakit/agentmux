@@ -16,7 +16,7 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { groupFocusTimeline, observeFocusInputTracks, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
+import { createFocusTimelineOrder, extendFocusTimelineOrder, focusTimelineOrderCandidates, groupFocusTimeline, observeFocusInputTracks, orderFocusTimelineProjects, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
 import { FocusTimelineRulerSettings, type FocusDateChoice } from './FocusTimelineRulerSettings'
 import { createFocusTimeFormatters, focusDateCandidates, focusRulerLabels, focusRulerTicks, focusUtcOffset, resolvedFocusTimeZone, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
@@ -499,7 +499,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const observedInputTrack = useMemo(() => inputReference ? resolveFocusInputTrack(observations, inputReference) : undefined, [observations, inputReference?.hostId, inputReference?.agentSessionId])
   const readonlyInputTrack = readonlyInputTrackId ? observedInputTrack : undefined
   const inputTrackKey = readonlyInputTrack?.key
-  const projects = useMemo(() => groupFocusTimeline(contexts, lanes ?? [], tracks, readonlyInputTrack), [contexts, lanes, tracks, readonlyInputTrack])
+  // A window filters facts, not the page's established display order. Read input
+  // candidates depend on actual records, never unvisited catalogue metadata.
+  const orderInputTrack = readonlyReading && inputMessages.length ? observedInputTrack : undefined
+  const orderCandidates = useMemo(() => focusTimelineOrderCandidates(contexts, lanes ?? [], entries, orderInputTrack), [contexts, lanes, entries, orderInputTrack])
+  const [timelineOrder, setTimelineOrder] = useState(() => createFocusTimelineOrder(orderCandidates))
+  useLayoutEffect(() => { setTimelineOrder(before => extendFocusTimelineOrder(before, orderCandidates)) }, [orderCandidates])
+  const projects = useMemo(() => orderFocusTimelineProjects(groupFocusTimeline(contexts, lanes ?? [], tracks, readonlyInputTrack), timelineOrder), [contexts, lanes, tracks, readonlyInputTrack, timelineOrder])
   const ticks = useMemo(() => focusRulerTicks(range, displayedRuler), [range, displayedRuler])
   const tickLabels = useMemo(() => focusRulerLabels(ticks, range, scaleWidth), [ticks, range, scaleWidth])
   const gridPaths = useMemo(() => (['major', 'short', 'shorter', 'fine'] as const).map(tier => ({ tier,
