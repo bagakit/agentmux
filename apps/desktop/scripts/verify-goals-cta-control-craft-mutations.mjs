@@ -22,15 +22,22 @@ const mutations = [
 async function run(label) {
   const output = join(copy, label), runEvidence = join(evidence, label), fixture = join(copiedDesktop, 'scripts/fixtures/goals-surface')
   await mkdir(runEvidence, { recursive: true })
+  let outputBytes = 0
+  try {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, build: { outDir: output, minify: false, sourcemap: true, emptyOutDir: true, commonjsOptions: { include: [/node_modules/, /xterm-locked-925/] } } })
   const compiled = {}
-  for (const entry of await readdir(output, { recursive: true, withFileTypes: true })) if (entry.isFile()) { const file = join(entry.parentPath, entry.name); compiled[file.slice(output.length + 1)] = digest(await readFile(file)) }
+  for (const entry of await readdir(output, { recursive: true, withFileTypes: true })) if (entry.isFile()) { const file = join(entry.parentPath, entry.name), bytes = await readFile(file); outputBytes += bytes.length; compiled[file.slice(output.length + 1)] = digest(bytes) }
   assert.ok(Object.keys(compiled).length > 0); await writeFile(join(runEvidence, 'compiled.json'), JSON.stringify(compiled, null, 2))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'controls.cjs'), join(output, 'index.html'), copy, runEvidence, 'assertions-only'], { temporaryRoot: copy, cwd: repository, env, timeoutMs: 30000, onLine: line => log.push(line) })
   await writeFile(join(runEvidence, 'process.log'), log.join('\n'))
   const render = JSON.parse(await readFile(join(runEvidence, 'render.json'), 'utf8'))
-  return { outcome, render, evidence: runEvidence }
+  return { outcome, render, evidence: runEvidence, compiledOutput: { files: Object.keys(compiled).length, bytes: outputBytes, removedAfterProcessExit: true } }
+  } finally {
+    // runProbeProcess resolves only after exit and owned descendants are reaped.
+    // Keep the saved identities and results; retain at most one compiled build.
+    await rm(output, { recursive: true, force: true })
+  }
 }
 try {
   await mkdir(evidence, { recursive: true }); await mkdir(copiedDesktop, { recursive: true })
