@@ -2079,6 +2079,9 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
   return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: 'unconfirmed', reason }
 }
+function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
+  return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
+}
 function requestWorkbenchStorageCommit(): void {
   void requestWorkbenchStorageFlush().catch(() => {})
 }
@@ -3134,6 +3137,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return session
     }
     requireActive()
+    if (request.operation === 'agent.inspect') {
+      return { operation: request.operation, agentSessionId: request.agentSessionId,
+        override: agentDisplayOverride(get().agentNames, request.agentSessionId) }
+    }
+    if (request.operation === 'agent.rename') {
+      agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
+      const before = agentDisplayOverride(get().agentNames, request.agentSessionId)
+      get().renameAgent(request.agentSessionId, request.name)
+      const override = agentDisplayOverride(get().agentNames, request.agentSessionId)
+      const changed = override !== before
+      const save = await saveWorkbenchSelection(false)
+      return { operation: request.operation, agentSessionId: request.agentSessionId, override, changed,
+        outcome: save.reason !== null ? 'partial' : changed ? 'renamed' : 'unchanged', save }
+    }
+    if (request.operation === 'space.rename') {
+      const tabs = get().tabs
+      const tab = Object.hasOwn(tabs, request.tabId) ? tabs[request.tabId] : undefined
+      if (!tab) throw controlFailure('TAB_NOT_OPEN', 'Tab is not open in the Desktop.')
+      const before = tab.name ?? null
+      get().renameTab(request.tabId, request.name)
+      const renamedTabs = get().tabs
+      const override = Object.hasOwn(renamedTabs, request.tabId) ? renamedTabs[request.tabId]?.name ?? null : null
+      const changed = override !== before
+      const save = await saveWorkbenchSelection(false)
+      return { operation: request.operation, tabId: request.tabId, override, changed,
+        outcome: save.reason !== null ? 'partial' : changed ? 'renamed' : 'unchanged', save }
+    }
     if (request.operation === 'inspect.client') {
       const discoveryWorkspace = get().config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
       let topics: ScratchTopicSnapshot[] = []

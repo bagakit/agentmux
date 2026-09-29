@@ -84,8 +84,17 @@ export type AgentMuxSpaceMutationReport = {
   save: AgentMuxSpatialSave
   issues: AgentMuxSpatialIssue[]
 }
+export type AgentMuxDisplayNameReport = {
+  override: string | null
+  changed: boolean
+  outcome: 'renamed' | 'unchanged' | 'partial'
+  save: AgentMuxSpatialSave
+}
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
+  | { operation: 'agent.rename'; agentSessionId: string; name: string | null }
+  | { operation: 'agent.inspect'; agentSessionId: string }
+  | { operation: 'space.rename'; tabId: string; name: string | null }
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector }
   | { operation: 'space.inspect'; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
@@ -97,6 +106,9 @@ export type AgentMuxSpaceControlRequest = Base & (
       destination: AgentMuxSpaceDestination; focus: boolean }
 )
 export type AgentMuxSpaceControlResult =
+  | ({ operation: 'agent.rename'; agentSessionId: string } & AgentMuxDisplayNameReport)
+  | { operation: 'agent.inspect'; agentSessionId: string; override: string | null }
+  | ({ operation: 'space.rename'; tabId: string } & AgentMuxDisplayNameReport)
   | { operation: 'space.ls'; catalog: AgentMuxSpaceCatalog }
   | { operation: 'space.inspect'; catalog: AgentMuxSpaceCatalog; request?: { requestId: string; known: boolean; report: AgentMuxSpaceMutationReport | null } }
   | ({ operation: 'agent.open' } & AgentMuxSpaceMutationReport)

@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
-  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector
+  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave
 } from './space-control.js'
 
 const MAX_SPATIAL_ID_BYTES = 16 * 1024
@@ -94,16 +94,26 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
 }
 
 export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceControlRequest['operation'] {
-  return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv'
+  return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
+    value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename'
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
-  if (operation === 'space.ls' || operation === 'space.inspect') {
+  if (operation === 'agent.rename') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name'], code)
+    request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code) }
+  } else if (operation === 'space.rename') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'tabId', 'name'], code)
+    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code), name: nullableString(source.name, 'Display name', code) }
+  } else if (operation === 'agent.inspect') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId'], code)
+    request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code) }
+  } else if (operation === 'space.ls' || operation === 'space.inspect') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'target'], code)
     if (operation === 'space.inspect' && source.target && typeof source.target === 'object' && Object.hasOwn(source.target, 'requestId')) {
       const target = fields(source.target, ['requestId'], code)
@@ -185,9 +195,14 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
   return { spaces, zones, tabs, regions }
 }
 
+function save(value: unknown, code: Code): AgentMuxSpatialSave {
+  const saved = fields(value, ['layoutApplied', 'localStorageWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
+  return { layoutApplied: bool(saved.layoutApplied, 'layoutApplied', code), localStorageWritten: bool(saved.localStorageWritten, 'localStorageWritten', code),
+    storageFlushRequested: bool(saved.storageFlushRequested, 'storageFlushRequested', code), diskDurability: member(saved.diskDurability, ['unconfirmed'], 'Disk durability', code),
+    reason: nullableString(saved.reason, 'Save reason', code) }
+}
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
-  const saved = fields(source.save, ['layoutApplied', 'localStorageWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
   const agent = source.agent === null ? null : (() => {
     const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
@@ -202,9 +217,7 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   })()
   return { requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown'], 'Mutation outcome', code),
     from: source.from === null ? null : address(source.from, code), to: source.to === null ? null : address(source.to, code), agent, resource,
-    save: { layoutApplied: bool(saved.layoutApplied, 'layoutApplied', code), localStorageWritten: bool(saved.localStorageWritten, 'localStorageWritten', code),
-      storageFlushRequested: bool(saved.storageFlushRequested, 'storageFlushRequested', code), diskDurability: member(saved.diskDurability, ['unconfirmed'], 'Disk durability', code),
-      reason: nullableString(saved.reason, 'Save reason', code) },
+    save: save(source.save, code),
     issues: list(source.issues, value => {
       const item = fields(value, ['step', 'code', 'message', 'recovery', 'candidates'], code)
       return { step: string(item.step, 'Issue step', code), code: string(item.code, 'Issue code', code), message: string(item.message, 'Issue message', code), recovery: string(item.recovery, 'Issue recovery', code),
@@ -219,7 +232,18 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
-  if (operation === 'space.ls') {
+  if (operation === 'agent.inspect') {
+    const body = fields(source.result, ['agentSessionId', 'override'], code)
+    result = { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), override: nullableString(body.override, 'Display override', code) }
+  } else if (operation === 'agent.rename' || operation === 'space.rename') {
+    const target = operation === 'agent.rename' ? 'agentSessionId' : 'tabId'
+    const body = fields(source.result, [target, 'override', 'changed', 'outcome', 'save'], code)
+    const actual = { override: nullableString(body.override, 'Display override', code), changed: bool(body.changed, 'Changed', code),
+      outcome: member(body.outcome, ['renamed', 'unchanged', 'partial'], 'Rename outcome', code), save: save(body.save, code) }
+    result = operation === 'agent.rename'
+      ? { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), ...actual }
+      : { operation, tabId: spaceControlId(body.tabId, 'Tab', code), ...actual }
+  } else if (operation === 'space.ls') {
     const body = fields(source.result, ['catalog'], code)
     result = { operation, catalog: catalog(body.catalog, code) }
   } else if (operation === 'space.inspect') {

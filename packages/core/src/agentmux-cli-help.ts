@@ -51,8 +51,8 @@ Intents:
   diagnostics Inspect the Desktop crash log or explicitly request it in the file manager.
   pmo         Give PMO Teams a bounded global snapshot and precise drill-downs.
   demand      List and update Board Demands and their explicit Session links.
-  agent       Open a new Agent or an additional view of an existing Session.
-  space       Discover, inspect, or move exact Space/Zone/Tab/Region presentations.
+  agent       Open an Agent, rename its desktop alias, or read that alias.
+  space       Discover, inspect, move presentations, or rename an exact Tab.
   open        Open a Terminal or Browser at one exact spatial destination.
   browser     Drive an already-open Browser by running a program in it.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
@@ -384,12 +384,37 @@ Usage: agentmux deliveries ack --generation <generation> --reader-run <Run from 
 The capability, current Session binding and stored readerRun/generation must match.
 Returns exact acknowledged IDs and the next generation. Wrong/empty/stale batches fail;
 no message body, delivery fact, other recipient cursor or Agent lifecycle is changed.`],
-  ['agent', `Open an Agent through its exact Executor or Session identity
+  ['agent', `Operate an Agent through its exact Executor or Session identity
 
-Usage: agentmux agent open --help
+Usage:
+  agentmux agent open --help
+  agentmux agent rename --session <exact-session-id> (--name <text>|--clear)
+  agentmux agent inspect --session <exact-session-id>
 
 Use agent open to create an Agent in a Zone or add a presentation of an existing Session.
-Discover exact Executor IDs with agentmux list agents and destinations with agentmux space ls.`],
+Discover exact Executor IDs with agentmux list agents and destinations with agentmux space ls.
+agent inspect reads only the Desktop display override; inspect --session reads Core facts.`],
+  ['agent.rename', `Set or clear one exact Agent's Desktop display override
+
+Usage: agentmux agent rename --session <exact-session-id> (--name <text>|--clear)
+
+Exactly one name action is required. Names are raw data, including spaces and --help;
+the existing display-name owner trims text and treats empty text as clearing the override.
+The target must be an Agent currently observed by this Desktop. Missing facts mean unknown,
+not retired. Execution cwd, Session/Run, layout, focus and drafts are preserved.
+--request-id <id> is optional. One JSON receipt returns the actual override or null,
+changed, outcome and save facts. Save failure retains the applied name and exits nonzero
+with outcome partial. diskDurability stays unconfirmed after the platform's void flush.
+After a lost receipt, read the current alias with agent inspect; that read does not certify
+the earlier request or repeat the write.`],
+  ['agent.inspect', `Read one exact Session ID's current Desktop display override
+
+Usage: agentmux agent inspect --session <exact-session-id> [--request-id <id>]
+
+Returns agentSessionId and override (string or null) from the existing Desktop name owner,
+including a saved alias when current Session facts are absent. Null means no display
+override; it does not prove existence, retirement, health or an earlier request's outcome.
+This read does not rename, save, refresh or recover. Core facts use inspect --session.`],
   ['agent.open', `Open a new Agent or an additional presentation of an existing Session
 
 Usage:
@@ -429,6 +454,7 @@ Usage:
   agentmux space inspect --space <id>|--zone <id>|--tab <id>|--region <id>
   agentmux space inspect --request <request-id>
   agentmux space mv --from-region <id> --expect-session <id> <destination>
+  agentmux space rename --tab <exact-tab-id> (--name <text>|--clear)
 
 Space, Zone, Tab and Region IDs are opaque exact strings, including JSON directory keys.
 Space is the working surface owner; Project is a separate repository/directory grouping.
@@ -455,6 +481,17 @@ Exactly one selector is required. --request cannot be combined with another sele
 Request inspection returns known/report facts from the existing owners; it never repeats
 Git creation, Agent spawn, initial prompt delivery, movement or navigation. Unknown Requests
 and reports with partial/unknown outcomes retain their single JSON receipt and exit nonzero.`],
+  ['space.rename', `Set or clear one exact Tab's display override
+
+Usage: agentmux space rename --tab <exact-tab-id> (--name <text>|--clear)
+
+Exactly one name action is required. Names are raw data; the existing owner trims them
+and treats empty text as clearing. The Tab is addressed by its entity ID, including across
+display Workspaces; no current Workspace or resource ownership is guessed. This does not
+rename Space, Zone or Topic titles, or change execution, layout, focus or drafts.
+--request-id <id> is optional. One JSON receipt returns actual override or null, changed,
+outcome and save facts. Save failure keeps the applied name and returns partial/nonzero;
+diskDurability remains unconfirmed. space inspect --tab <id> reads the current Tab name.`],
   ['space.mv', `Move one exact Agent presentation without changing its execution context
 
 Usage:
@@ -940,6 +977,10 @@ agentmux inspect --client
 Session inspection reads only Core Session/Run truth. Tab inspection reads the Desktop
 Control Host's current Region map and normalized bounds. Parse receipts; never infer from
 titles, UI focus, terminal output, or list order.
+agent rename --session <id> (--name <text>|--clear) changes only its Desktop display alias;
+agent inspect --session <id> reads that current override, even when Session facts are absent.
+Null means no override, not a retired Session; a read does not confirm an earlier write.
+space rename --tab <id> (--name <text>|--clear) changes the Tab entity's display name.
 Client inspection is read-only: it observes the current Desktop selection, presentation,
 overlays, floating View and input owner without exposing drafts or terminal input.
 It does not confirm a previous request or authorize repeating an unconfirmed operation.
