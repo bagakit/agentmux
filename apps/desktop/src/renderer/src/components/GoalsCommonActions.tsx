@@ -40,7 +40,7 @@ function DirectoryRow({ action, selected, saving, index, count, dirty, onSelect,
 }
 
 /** The Goals directory points at the same authored prompt library used by Settings and Composer. */
-export function GoalsCommonActions() {
+export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }: { contextCompact?: boolean; onReturnToCommon?: () => void }) {
   const config = useAppStore(state => state.config)
   const focus = useAppStore(state => state.agentFocus)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
@@ -67,6 +67,8 @@ export function GoalsCommonActions() {
   const focusRef = useRef<string | 'add' | null>(null)
   const focusEditor = useRef(false)
   const mounted = useRef(true)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const revealRequested = useRef(false)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const selectedKey = selected ? commonActionKey(selected) : null
   const prompt = selected?.kind === 'prompt' ? resource.value[selected.id] : undefined
@@ -76,15 +78,21 @@ export function GoalsCommonActions() {
   const displayedActions = expanded ? visibleActions : visibleActions.slice(0, 3)
   const available = [...DEFAULT_GOALS_COMMON_ACTIONS.items, ...resolveComposerShortcuts(config).map(prompt => ({ kind: 'prompt' as const, id: prompt.id }))]
     .filter(ref => !directory.items.some(item => commonActionKey(item) === commonActionKey(ref)))
+  const compactFeedback = [saveError ? '保存未完成，正文草稿已保留' : resource.dirty ? '有尚未保存的正文' : null, launchError ? '对话准备未确认' : null, saving ? '正在保存' : null, pending ? '正在准备对话' : null].filter(Boolean).join(' · ')
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useLayoutEffect(() => {
+    if (contextCompact) return
+    if (revealRequested.current) {
+      const target = returnFocus.current?.isConnected ? returnFocus.current : manage && view === 'editor' ? editor.current?.querySelector<HTMLTextAreaElement>('textarea') : manageButton.current
+      target?.focus(); revealRequested.current = false
+    }
     if (focusRef.current && manage && view === 'library') {
       const target = focusRef.current === 'add' ? addButton.current : [...(library.current?.querySelectorAll<HTMLButtonElement>('[data-common-select]') ?? [])].find(button => button.dataset.commonSelect === focusRef.current)
       ;(target ?? addButton.current)?.focus(); focusRef.current = null
     }
     if (focusEditor.current && manage && view === 'editor') { editor.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus(); focusEditor.current = false }
-  }, [manage, view, directory, selectedKey])
+  }, [manage, view, directory, selectedKey, contextCompact])
 
   function closeManage() { setManage(false); setSettingsRequested(false); queueMicrotask(() => manageButton.current?.focus()) }
   function select(ref: GoalsCommonActionRef) { setSelected(ref); setView('editor'); setSettingsRequested(false); focusEditor.current = true }
@@ -162,11 +170,13 @@ export function GoalsCommonActions() {
   }
   function openSettings() { continueToSettings() }
 
-  return <section className={`goals-entry goals-common${manage ? ' goals-common--managing' : ''}`} aria-label="常用操作" aria-busy={saving || pending} onKeyDown={event => {
-    if (event.key === 'Escape' && !event.nativeEvent.isComposing && manage) { event.stopPropagation(); closeManage() }
+  return <section className={`goals-entry goals-common${manage ? ' goals-common--managing' : ''}${contextCompact ? ' goals-common--compact' : ''}${compactFeedback ? ' goals-common--attention' : ''}`} aria-label="常用操作" aria-busy={saving || pending} data-common-context={contextCompact ? 'compact' : 'full'} onFocusCapture={event => { if (!contextCompact) returnFocus.current = event.target as HTMLElement }} onKeyDown={event => {
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing && manage && !contextCompact) { event.stopPropagation(); closeManage() }
   }}>
     <div className="goals-common__column">
-      <header className="goals-common__heading"><h2>常用操作</h2><div><button ref={manageButton} type="button" className="goals-common__text-button" aria-expanded={manage} onClick={() => { setManage(!manage); setView('library'); setSettingsRequested(false); focusRef.current = selectedKey ?? 'add' }}>{manage ? '完成' : '管理'}</button><button type="button" className="goals-common__text-button" disabled={saving} aria-label={directory.collapsed ? '展开常用操作' : '收起常用操作'} aria-expanded={!directory.collapsed} onClick={() => void saveDirectory(directory.items, !directory.collapsed)}>{directory.collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}</button></div></header>
+      <header className="goals-common__heading"><h2>常用操作</h2>{contextCompact ? <button type="button" className="goals-common__text-button" onClick={() => { revealRequested.current = true; onReturnToCommon?.() }}>回到常用操作<ArrowUp size={12} /></button> : <div><button ref={manageButton} type="button" className="goals-common__text-button" aria-expanded={manage} onClick={() => { setManage(!manage); setView('library'); setSettingsRequested(false); focusRef.current = selectedKey ?? 'add' }}>{manage ? '完成' : '管理'}</button><button type="button" className="goals-common__text-button" disabled={saving} aria-label={directory.collapsed ? '展开常用操作' : '收起常用操作'} aria-expanded={!directory.collapsed} onClick={() => void saveDirectory(directory.items, !directory.collapsed)}>{directory.collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}</button></div>}</header>
+      {contextCompact && compactFeedback ? <p className="goals-common__context-feedback" role="status">{compactFeedback}。原操作和草稿仍在。</p> : null}
+      <div className="goals-common__content" hidden={contextCompact}>
       {manage ? <div className="goals-common__manager" data-view={view} aria-label="管理常用操作">
         <p className="goals-common__hint">排序或移出不会删除指令，也不会发起对话。</p>
         <div className="goals-common__manage-body">
@@ -207,6 +217,7 @@ export function GoalsCommonActions() {
       {pending ? <p className="goals-entry__preparing" role="status">正在准备对话…</p> : null}
       {saveError ? <p className="goals-service" role="alert">保存未完成，正文草稿已保留。<span>{saveError}</span></p> : null}
       {launchError ? <p className="goals-service" role="status">对话准备未确认。原请求与工作面保留，请查看对话中的准备状态。<span>{launchError}</span></p> : null}
+      </div>
     </div>
   </section>
 }
