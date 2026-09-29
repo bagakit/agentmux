@@ -23,7 +23,7 @@ beforeEach(() => {
   useAppStore.setState({ sessions: [], hostChecks: {}, checkHost })
   onSave.mockClear()
 })
-const mount = () => dom.render(<HostSettingsPane config={config} onSave={onSave} />)
+const mount = () => dom.render(<HostSettingsPane active={true} config={config} onSave={onSave} />)
 function card(index: number) {
   const found = [...dom.container.querySelectorAll<HTMLElement>('.host-settings-card')]
   expect(found).toHaveLength(2)
@@ -196,9 +196,9 @@ it('does not apply a same-ID committed replacement to old Ready in any of the th
     activeWorkspaceId: 'workspace',
     tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     agentComposerDrafts: { region: 'Preserved launcher draft' } })
-  await dom.render(<HostSettingsPane config={saved} onSave={onSave} />)
+  await dom.render(<HostSettingsPane active={true} config={saved} onSave={onSave} />)
   expect(status(1)).toBe('Ready')
-  await dom.render(<HostSettingsPane config={changed} onSave={onSave} />)
+  await dom.render(<HostSettingsPane active={true} config={changed} onSave={onSave} />)
   expect(status(1)).toBe('Not tested')
 
   await dom.render(<WorkspaceSettingsPane config={saved} onClose={vi.fn()} />)

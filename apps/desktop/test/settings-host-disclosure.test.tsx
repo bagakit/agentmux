@@ -16,7 +16,7 @@ beforeEach(() => {
   useAppStore.setState({ sessions: [], hostChecks: {}, checkHost: vi.fn(async () => {}) })
   onSave.mockClear()
 })
-const render = () => dom.render(<HostSettingsPane config={config} onSave={onSave} />)
+const render = () => dom.render(<HostSettingsPane active={true} config={config} onSave={onSave} />)
 function cards() {
   const found = [...dom.container.querySelectorAll<HTMLElement>('.host-settings-card')]
   expect(found).toHaveLength(3)
