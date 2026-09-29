@@ -269,7 +269,9 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
 
 const activeRequests = new Set<string>()
 /** Scoped intent correlation: repeated IDs and request inspection only read owners, never resume side effects. */
-export async function executeSpatialControl(ports: SpatialControlPorts, request: AgentMuxSpaceControlRequest, signal?: AbortSignal): Promise<AgentMuxSpaceControlResult> {
+export async function executeSpatialControl(ports: SpatialControlPorts,
+  request: Extract<AgentMuxSpaceControlRequest, { operation: 'space.ls' | 'space.inspect' | 'agent.open' | 'space.mv' }>,
+  signal?: AbortSignal): Promise<AgentMuxSpaceControlResult> {
   let topics: readonly ScratchTopicSnapshot[] = []
   try { topics = await ports.topics() } catch { /* durable bindings remain discoverable with an explicit issue */ }
   let catalog = spatialCatalog(ports.get(), topics)

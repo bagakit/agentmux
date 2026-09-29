@@ -561,7 +561,22 @@ function spaceDestination(flags: ParsedFlags): AgentMuxSpaceDestination {
   return target
 }
 async function agentCommand(args: readonly string[]): Promise<number> {
-  if (args[0] !== 'open') throw cliError('agent requires open. Run agentmux agent open --help.')
+  if (args[0] === 'rename' || args[0] === 'inspect') {
+    const action = args[0]
+    const flags = parseFlags(args.slice(1), action === 'rename'
+      ? { '--session': 'data', '--name': 'data', '--clear': 'boolean', '--request-id': 'data' }
+      : { '--session': 'data', '--request-id': 'data' })
+    useSpaceRequestId(flags)
+    const agentSessionId = explicitSelectorId(flags.values.get('--session'), 'Exact Agent Session ID')
+    const request = parseSpaceControlRequest(action === 'rename'
+      ? { ...requestBase(), operation: 'agent.rename', agentSessionId, name: displayName(flags) }
+      : { ...requestBase(), operation: 'agent.inspect', agentSessionId }, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
+    if (receipt.operation !== request.operation) throw new AgentMuxError('Agent display receipt operation is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+    writeJson(receipt)
+    return receipt.operation === 'agent.rename' && receipt.result.outcome === 'partial' ? 1 : 0
+  }
+  if (args[0] !== 'open') throw cliError('agent requires open, rename, or inspect. Run agentmux agent --help.')
   const flags = parseFlags(args.slice(1), { ...SPACE_DESTINATION_FLAGS,
     '--executor': 'data', '--session': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean',
     '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data' })
@@ -581,9 +596,25 @@ async function agentCommand(args: readonly string[]): Promise<number> {
   writeJson(receipt)
   return receipt.result.outcome === 'partial' || receipt.result.outcome === 'unknown' ? 1 : 0
 }
+function displayName(flags: ParsedFlags): string | null {
+  if (Number(flags.values.has('--name')) + Number(flags.booleans.has('--clear')) !== 1) {
+    throw cliError('Rename requires exactly one of --name or --clear.')
+  }
+  return flags.booleans.has('--clear') ? null : requiredData(flags, '--name', 'Display name')
+}
 async function spaceCommand(args: readonly string[]): Promise<number> {
   const action = args[0]
-  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, or mv.')
+  if (action === 'rename') {
+    const flags = parseFlags(args.slice(1), { '--tab': 'data', '--name': 'data', '--clear': 'boolean', '--request-id': 'data' })
+    useSpaceRequestId(flags)
+    const request = parseSpaceControlRequest({ ...requestBase(), operation: 'space.rename',
+      tabId: explicitSelectorId(flags.values.get('--tab'), 'Exact Tab ID'), name: displayName(flags) }, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
+    if (receipt.operation !== 'space.rename') throw new AgentMuxError('Tab rename receipt operation is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+    writeJson(receipt)
+    return receipt.result.outcome === 'partial' ? 1 : 0
+  }
+  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, mv, or rename.')
   const flags = parseFlags(args.slice(1), action === 'mv'
     ? { ...SPACE_DESTINATION_FLAGS, '--from-region': 'data', '--expect-session': 'data' }
     : action === 'inspect' ? { ...SPACE_SELECTOR_FLAGS, '--request': 'data' } : { '--space': 'data', '--zone': 'data' })
@@ -1105,7 +1136,7 @@ function requestsHelp(args: readonly string[]): boolean {
       (args.length === 4 && args[1] === 'executors' && args[2] === 'refresh' && help(args[3]))
   }
   if (args[0] === 'agent' || args[0] === 'space' || args[0] === 'focus') {
-    const data = ['--executor', '--session', '--prompt', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
+    const data = ['--executor', '--session', '--prompt', '--name', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
     return args.some((argument, index) => (argument === '--help' || argument === '-h') && !data.includes(args[index - 1] ?? ''))
   }
   return args.some((argument, index) => (
