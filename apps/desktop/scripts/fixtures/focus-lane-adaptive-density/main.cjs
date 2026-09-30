@@ -54,6 +54,20 @@ app.whenReady().then(async () => { try {
   result.reveal = await read('(()=>{const view=document.querySelector(".focus-disconnected-projects");return{ids:[...view.querySelectorAll(".focus-context")].map(e=>e.dataset.sessionId),active:document.activeElement?.dataset.sessionId,localRows:document.querySelectorAll(".focus-project-board > .focus-project-lanes [data-bucket=disconnected] .focus-context").length,facts:window.laneProof.facts()}})()')
   assert.deepEqual(result.reveal.ids, Array.from({ length: 5 }, (_, i) => 'archived-' + i)); assert.equal(result.reveal.localRows, 0); assert.equal(result.reveal.facts.sameFocus, true)
   await key('Escape'); await until('Return closes exact view', () => read('document.querySelectorAll(".focus-disconnected-projects .focus-context").length===0')); assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry) + ')'), true)
+  await read('window.laneProof.mode("multiple")')
+  await until('three Working cards and three other live states', () => read('document.querySelectorAll(".focus-project-board > .focus-project-lanes [data-bucket=working] .focus-context").length===3'))
+  result.multiple = []
+  for (const width of [640, 1440]) {
+    win.setContentSize(width, 800); await move('[aria-label="Search contexts"]'); await settle()
+    const g = await geometry(); result.multiple.push(g)
+    assert.deepEqual(g.states.map(item => item.state), ['attention', 'working', 'results', 'idle', 'disconnected'])
+    assert.equal(g.overflow, false, 'Populated lanes remain within the actual viewport')
+    const working = g.states.find(item => item.state === 'working'); assert.equal(working.cards.length, 3)
+    assert.equal(g.states.find(item => item.state === 'disconnected').cards.length, 0)
+    for (const item of g.states) for (const card of item.cards) assert.ok(card.rect.width >= 179 && card.rect.width <= 320.5, 'More width keeps cards bounded')
+    if (width === 1440) assert.ok(new Set(working.cards.map(card => Math.round(card.rect.left))).size > 1, 'Wide lanes arrange more Working cards across')
+    const file = 'multiple-' + width + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: 'populated-state-width-' + width, viewport: width })
+  }
   const scratchSelector = '.focus-project-board > .focus-project-lanes [data-project-id=' + JSON.stringify(await read('window.laneProof.scratchProjectId')) + ']'
   win.setContentSize(640, 800); await read('window.laneProof.mode("topics")'); await until('two exact Topic lanes', () => read(`document.querySelectorAll(${JSON.stringify(scratchSelector)}).length===2`))
   result.topics = await read(`(()=>{const lanes=[...document.querySelectorAll(${JSON.stringify(scratchSelector)})];return lanes.map(e=>({laneId:e.dataset.laneId,name:e.querySelector('.focus-project-lanes__heading').textContent,entry:e.querySelector('.focus-disconnected-entry').getAttribute('aria-label')}))})()`)
