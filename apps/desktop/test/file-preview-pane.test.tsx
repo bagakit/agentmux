@@ -128,13 +128,15 @@ describe('real format preview pane', () => {
     await click('Reload file preview'); await render(<FileSurfaceView tabId={id} surface={file} />)
     expect(container.querySelector('textarea')?.value).toBe('Now actual UTF-8 text'); expect(useAppStore.getState().tabs[id]).toBe(tab); expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
   })
-  it('Markdown preview reflects the same unsaved document without executing HTML; source remains the same model', async () => {
+  it('Markdown preview reflects the same unsaved document without executing HTML; source returns to the same File/Region projection', async () => {
     const { file, id, key } = seed('README.md', '# Original')
     await render(<FileSurfaceView tabId={id} surface={file} />)
+    const modelPath = container.querySelector('textarea')?.dataset.monacoPath
+    expect(modelPath).toBeTruthy()
     await act(async () => useAppStore.getState().updateDocument(id, '# Unsaved heading\n\n<script>window.injected = true</script>', file.regionId))
     await click('Preview'); expect(container.querySelector('.file-markdown-preview')?.textContent).toContain('Unsaved heading'); expect(container.querySelector('script')).toBeNull()
     expect(useAppStore.getState().documents[key]?.revision).toBe('original'); expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
-    await click('Source'); expect(container.querySelector('textarea')?.value).toContain('Unsaved heading'); expect(container.querySelector('textarea')?.dataset.monacoPath).toBe('workspace:README.md'); expect(api.files.readPreview).not.toHaveBeenCalled()
+    await click('Source'); expect(container.querySelector('textarea')?.value).toContain('Unsaved heading'); expect(container.querySelector('textarea')?.dataset.monacoPath).toBe(modelPath); expect(api.files.readPreview).not.toHaveBeenCalled()
   })
   it('SVG preview consumes current dirty XML, revokes old bytes, and leaves the original revision/save owner intact', async () => {
     const { file, id, key } = seed('drawing.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="60"></svg>')
