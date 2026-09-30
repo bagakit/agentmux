@@ -7,8 +7,8 @@ import original from '../../../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const pane = resolve(root, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx')
 const mutations = {
-  'settings-keeps-focus-visible': ['apps/desktop/src/renderer/src/App.tsx', 'const mounted = visible || (focusVisible && !settingsRoute)', 'const mounted = visible || focusVisible'],
-  'focus-target-ignores-visible': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', "focusTab?.id === tab.id ? visible : projection?.surface === 'survey' ? projection.visible === true : true", "projection?.surface === 'survey' ? projection.visible === true : true"]
+  'settings-keeps-focus-visible': ['apps/desktop/src/renderer/src/App.tsx', "const focusVisible = mainSurface === 'agents' && !settingsRoute", "const focusVisible = mainSurface === 'agents'"],
+  'focus-target-ignores-visible': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', '(tabProjection?.surface ? tabProjection.visible === true : true)', 'true']
 } as const
 export default defineConfig({ ...original, root,
   plugins: [...(original.plugins ?? []), {
