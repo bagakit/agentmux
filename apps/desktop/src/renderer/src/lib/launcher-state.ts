@@ -1,3 +1,4 @@
+import type { NoteCreationReceipt } from './note-creation'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
@@ -6,7 +7,7 @@ export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
 export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionMode> = {
   agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'
 }
-export type LauncherDraft = { browser: string; note: string }
+export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
 
 type LauncherState = {
@@ -15,7 +16,8 @@ type LauncherState = {
   drafts: Record<string, LauncherDraft>
   executors: Record<string, string>
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
-  setDraft(launcherId: string, field: keyof LauncherDraft, value: string): boolean
+  setDraft(launcherId: string, field: 'browser' | 'note', value: string): boolean
+  setNoteCreation(launcherId: string, receipt: NoteCreationReceipt): boolean
   selectExecutor(workspaceId: string, executorId: string): boolean
 }
 
@@ -34,6 +36,10 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
   setDraft(launcherId, field, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  setNoteCreation(launcherId, receipt) {
+    try { set(state => ({ drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), noteCreation: receipt } } })); return true }
+    catch { reportStorageIssue('The Note creation receipt could not be saved. Its exact target and current draft remain in memory.'); return false }
   },
   selectExecutor(workspaceId, executorId) {
     try { set(state => ({ persistenceIssue: null, executors: { ...state.executors, [workspaceId]: executorId } })); return true }

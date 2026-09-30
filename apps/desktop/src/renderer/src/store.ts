@@ -1,3 +1,12 @@
+import { useLauncherState } from './lib/launcher-state'
+import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
+import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
+import { warmLauncherId } from './lib/warm-terminal-preview'
+import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
+import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
+import type { NoteBlockTarget } from '../../shared/note-document'
+import type { FileOpenPlacement } from './lib/file-workbench-state'
+import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
 import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
@@ -150,12 +159,14 @@ import {
   reduceFileDelete,
   reduceFileOpened,
   reduceFileSurfaceOpened,
+  fileOpenReferenceMatches,
   reduceFileRename,
   findFileRenameProjectionCollision,
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
 import { workspaceFilePreviewFormat } from '../../shared/workspace-file-preview'
+import { noteDirectorySourceKey, type NoteDirectoryRead } from './lib/note-directory-sources'
 import {
   advanceDocumentLifetime,
   disposeClosedFileOwners,
@@ -404,7 +415,9 @@ type AppState = {
   // One-shot reveal targets keyed by documentKey. Set when a file is opened with a :line location
   // (e.g. a terminal path link), consumed once by EditorPane on Monaco mount, then cleared. Never
   // persisted — a reveal is a navigation, not document state.
-  documentRevealTargets: Record<string, { line: number; column?: number } | undefined>
+  documentRevealTargets: Record<string, { line: number; column?: number; noteBlock?: NoteBlockTarget } | undefined>
+  noteBlockSelections: Record<string, NoteBlockTarget>
+  setNoteBlockSelection(presentation: NoteBlockPresentation, target: NoteBlockTarget): void
   lastActiveFileByWorkspace: Record<string, string | undefined>
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
@@ -427,6 +440,8 @@ type AppState = {
   // 意图停在这里是惰性的（下一次投递会覆盖它）。
   regionCaretFocus: { regionId: string; nonce: number } | null
   workspaceFileRevisions: Record<string, number>
+  noteDirectorySources: Record<string, NoteDirectoryRead | undefined>
+  refreshNoteDirectorySources(tabId: string, regionId: string): Promise<NoteDirectoryRead | undefined>
   scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot>
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
@@ -751,9 +766,10 @@ type AppState = {
   openFile(
     path: string,
     tabGroupId?: string,
-    location?: { line: number; column?: number },
+    location?: { line: number; column?: number; noteBlock?: NoteBlockTarget },
     workspaceId?: string,
-    openAsText?: boolean
+    openAsText?: boolean,
+    placement?: FileOpenPlacement
   ): Promise<boolean>
   /**
    * 给一个已在板上、但还没有文档的文件面装上它的文档。
@@ -793,25 +809,9 @@ type AppState = {
    * 所以解析必须只发生一次，然后把结果交给下游，而不是让下游自己再问一遍。
    */
   createPath(input: CreateWorkspacePathInput): Promise<string>
-  /**
-   * 在这个 launcher 的 Workspace 里建一条按日期命名的笔记并打开它，返回真正建出来的文件名。
-   *
-   * 命名判定在 `lib/note-names.ts`：写入面是 `O_CREAT | O_EXCL`（撞名失败而非截断），所以名字必须
-   * 是一个候选序列、由文件系统裁决，不能先列目录再挑（那是 check-then-act，同一 tick 两条笔记会
-   * 挑中同一个名字）。
-   *
-   * 签名与 `launchAgent` / `launchTerminal` / `promoteWarmTerminal` / `createBrowser` 同形，且
-   * 「落在哪个 Workspace」走与它们**完全同一条**判定（`resolveLauncherWorkspaceId`）。此前这里只读
-   * `activeWorkspaceId`，于是 launcher 挂在绑定 A 的 Tab 上而活动 Workspace 是 B 时（切侧栏即可），
-   * 界面写着「Start in A」、其余四个动作都落 A，而笔记建到 B——零报错，看起来一切正常。
-   * `tabGroupId` 这里不消费落点（笔记由 openFile 自己挂 Tab），但仍然收下：它是这一族动作的共同
-   * 形状，缺了它调用方就得为「笔记」记一条特例。
-   */
-  createNote(
-    tabGroupId?: string,
-    launcher?: { tabId: string; regionId: string },
-    initialContent?: string
-  ): Promise<string>
+  createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string): Promise<NoteCreationReceipt>
+  revealCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
+  retryCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   renamePath(path: string, nextPath: string): Promise<void>
   deletePath(path: string): Promise<void>
   updateDocument(tabId: string, content: string, regionId?: string): void
@@ -1350,7 +1350,7 @@ async function refreshFileDocument(
  * also *opens* — it targets the active group, can move the Tab, and writes reveal targets. Here the
  * Tab already exists exactly where the user left it, so only the document is missing.
  */
-async function loadPersistedFileDocument(workspaceId: string, path: string): Promise<void> {
+async function loadPersistedFileDocument(workspaceId: string, path: string, resource?: { hostId: string; path: string }): Promise<void> {
   const key = documentKey(workspaceId, path)
   const state = useAppStore.getState()
   // Three ways this is already answered: the document is here, a read is in flight, or a previous read
@@ -1358,6 +1358,11 @@ async function loadPersistedFileDocument(workspaceId: string, path: string): Pro
   // the calling pane — otherwise every caller would need to remember the stop condition, and a known
   // unreadable path would be re-read once per caller.
   if (state.documents[key] || fileOpenRequests.has(key) || state.documentIssues[key]) return
+  const resourceCurrent = () => {
+    const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+    return !resource || current?.hostId === resource.hostId && current.path === resource.path
+  }
+  if (!resourceCurrent()) return
   const openedLifetime = advanceDocumentLifetime(key)
   const request = Promise.resolve().then(async () => {
     try {
@@ -1368,8 +1373,11 @@ async function loadPersistedFileDocument(workspaceId: string, path: string): Pro
       // the next disk change — the first save would still be caught by the revision check, but the
       // user would be told "changed on disk" about a change that happened before they ever saw the file.
       const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
+      if (!resourceCurrent()) return false
       await api.files.observe(workspaceId, path)
+      if (!resourceCurrent()) { await api.files.unobserve(workspaceId, path); return false }
       const result = await api.files.read(workspaceId, path)
+      if (!resourceCurrent()) { await api.files.unobserve(workspaceId, path); return false }
       if (documentLifetime(key) !== openedLifetime) {
         await api.files.unobserve(workspaceId, path)
         return false
@@ -1512,7 +1520,7 @@ async function enqueueFileSave(
       if (needsReconciliation) await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
       return
     }
-    if (result.status === 'error') {
+    if (result.status === 'error' || result.status === 'unknown') {
       useAppStore.setState((current) => reduceDocumentWriteError(current, surface.workspaceId, surface.path, result.code, result.message))
       return
     }
@@ -1806,6 +1814,7 @@ type PersistedAppState = {
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
   surveyZoneSelection?: SurveyZoneSelection | null
+  noteBlockSelections?: Record<string, NoteBlockTarget>
   focusTimelineNameWidth?: number
   surveySidebarWidth?: number
   focusTimelineHeight?: number
@@ -1832,6 +1841,7 @@ export type RestoredUiState = Pick<
   | 'activeWorkspaceId'
   | 'mainSurface'
   | 'surveyZoneSelection'
+  | 'noteBlockSelections'
   | 'surveySidebarWidth'
   | 'projectRailOpen'
   | 'collapsedProjectGroups'
@@ -1910,6 +1920,7 @@ export function restorePersistedUiState(
     | 'activeWorkspaceId'
     | 'mainSurface'
     | 'surveyZoneSelection'
+  | 'noteBlockSelections'
     | 'surveySidebarWidth'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
@@ -1934,6 +1945,7 @@ export function restorePersistedUiState(
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
+    noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
     surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
@@ -1967,6 +1979,7 @@ function selectPersistedInputs(state: AppState) {
     // 到任何界面（没有对应 session），与上面 agentNames 同一个道理。
     agentSteerQueues: state.agentSteerQueues,
     documents: state.documents,
+    noteBlockSelections: state.noteBlockSelections,
     dirtyDocuments: state.dirtyDocuments,
     tabs: state.tabs,
     layouts: state.layouts,
@@ -2226,6 +2239,15 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
 let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
+/** The existing Space and Survey selection facts captured by file display intents. */
+function fileNavigationSelection(state: AppState): string {
+  const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
+  const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
+  return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
+    tabId ? state.tabs[tabId]?.layout.activeRegionId : undefined,
+    state.agentFocus.execution.sessionId, state.agentFocus.pmo.sessionId, state.surveyZoneSelection])
+}
+
 async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
   const get = useAppStore.getState
   const set = useAppStore.setState
@@ -2345,6 +2367,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   documentIssues: {},
   savingDocuments: {},
   documentRevealTargets: {},
+  noteBlockSelections: {},
+  setNoteBlockSelection(presentation, target) {
+    const state = get(), reference = presentation.reference
+    const region = state.tabs[reference.tabId]?.regions[reference.regionId]
+    const layout = state.layouts[reference.displayWorkspaceId]
+    if (!presentation.tabHostId || region?.kind !== 'file' || !layout ||
+      !groupIds(layout.root).includes(reference.groupId) || !findGroup(layout, reference.groupId)?.tabOrder.includes(reference.tabId)) return
+    const document = state.documents[documentKey(region.workspaceId, region.path)]
+    const read = document ? parseNoteFile(document) : null
+    if (!document || read?.status !== 'valid' || read.note.noteId !== target.noteId ||
+      !noteKnowledge([{ location: { workspaceId: region.workspaceId, path: region.path }, document }]).sources[0]?.blocks.has(target.blockId)) return
+    const key = noteBlockSelectionKey(presentation), held = state.noteBlockSelections[key]
+    if (held?.noteId === target.noteId && held.blockId === target.blockId) return
+    set({ noteBlockSelections: { ...state.noteBlockSelections, [key]: target } })
+  },
   lastActiveFileByWorkspace: {},
   tabs: {},
   layouts: {},
@@ -2353,6 +2390,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   closeRegionRequest: null,
   regionCaretFocus: null,
   workspaceFileRevisions: {},
+  noteDirectorySources: {},
   scratchTopicSnapshots: {},
   fileExplorerStates: {},
   viewModes: {},
@@ -2377,7 +2415,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void saveWorkbenchSelection(false)
   },
   surveyToolsOpen: false,
-  setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
+  setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection }) },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   openSurveyBrowserTools(target) {
     const state = get()
@@ -4944,30 +4982,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
   },
-  async openFile(path, tabGroupId, location, requestedWorkspaceId, openAsText) {
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+  async openFile(path, tabGroupId, location, requestedWorkspaceId, openAsText, placement) {
     // 显式 workspace 优先于活动 workspace。异步动作（建文件、切 diff）必须能把**自己开头那次**
     // 解析结果传进来：否则调用方解析一次、这里再解析一次，两次之间用户切了侧栏就漂移，
     // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
     const navigation = get()
     const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
-    const layout = workspaceId ? navigation.layouts[workspaceId] : undefined
-    if (!workspaceId || !layout) return false
+    const displayId = placement?.displayWorkspaceId ?? workspaceId
+    const layout = displayId ? navigation.layouts[displayId] : undefined
+    if (!workspaceId || !layout || placement && (!tabGroupId || !groupIds(layout.root).includes(tabGroupId) || !layout.groups.some(group => group.id === tabGroupId))) return false
+    const resourceCurrent = () => {
+      const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
+      return !placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path && fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement)
+    }
+    if (!resourceCurrent()) return false
+    if (!placement?.projection && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const intentVersion = ++fileOpenIntentVersion
     fileOpenNavigationUnsubscribe?.()
-    const selectedLayout = navigation.activeWorkspaceId ? navigation.layouts[navigation.activeWorkspaceId] : undefined
-    const selectedGroupId = selectedLayout?.activeGroupId
-    const selectedTabId = selectedLayout ? findGroup(selectedLayout, selectedLayout.activeGroupId)?.activeTabId : undefined
-    const selectedRegionId = selectedTabId ? navigation.tabs[selectedTabId]?.layout.activeRegionId : undefined
+    const selected = fileNavigationSelection(navigation)
     let cancelled = false
     const unsubscribe = useAppStore.subscribe(function observeFileNavigation(state) {
-      const currentLayout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
-      const currentTabId = currentLayout ? findGroup(currentLayout, currentLayout.activeGroupId)?.activeTabId : undefined
-      const currentRegionId = currentTabId ? state.tabs[currentTabId]?.layout.activeRegionId : undefined
-      if (state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId ||
-        state.agentFocus.execution.sessionId !== navigation.agentFocus.execution.sessionId ||
-        state.agentFocus.pmo.sessionId !== navigation.agentFocus.pmo.sessionId ||
-        currentLayout?.activeGroupId !== selectedGroupId || currentTabId !== selectedTabId || currentRegionId !== selectedRegionId) {
+      if (fileNavigationSelection(state) !== selected) {
         cancelled = true
         releaseNavigation()
       }
@@ -4977,7 +5012,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       unsubscribe()
       if (fileOpenNavigationUnsubscribe === unsubscribe) fileOpenNavigationUnsubscribe = undefined
     }
-    const mayReveal = () => intentVersion === fileOpenIntentVersion && !cancelled
+    const mayReveal = () => intentVersion === fileOpenIntentVersion && !cancelled && resourceCurrent()
+    const selectProjection = () => {
+      if (placement?.reference && !placement.projection) {
+        set({ activeWorkspaceId: displayId!, mainSurface: 'workbench' })
+        return
+      }
+      if (!placement?.projection) return
+      if (placement.reference) { placement.projection.onSelect(placement.reference); return }
+      const tabId = fileTabId(workspaceId, path), tab = get().tabs[tabId]
+      if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
+      placement.projection.onSelect({ displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: tab.layout.activeRegionId })
+    }
     const key = documentKey(workspaceId, path)
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
     // 与下面目录分支同一个「不进 Monaco」的形状，但判据是纯字符串（扩展名），所以在读之前就分叉：
@@ -5020,7 +5066,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const targetGroupId = tabGroupId ?? layout.activeGroupId
         const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
         const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, topicId))
+        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? undefined : topicId, placement))
+        selectProjection()
         return intentVersion === fileOpenIntentVersion
       }
       // Media has a File identity, but never a UTF-8 buffer. Only its visible pane reads bytes.
@@ -5030,7 +5077,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         releaseNavigation()
         const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
         const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, topicId))
+        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? undefined : topicId, placement))
+        selectProjection()
         return intentVersion === fileOpenIntentVersion
       }
       while (!get().documents[key]) {
@@ -5040,9 +5088,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const openedLifetime = advanceDocumentLifetime(key)
           request = Promise.resolve().then(async () => {
             try {
+              if (!resourceCurrent()) return false
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
               await api.files.observe(workspaceId, path)
+              if (!resourceCurrent()) return false
               const result = await api.files.read(workspaceId, path)
+              if (!resourceCurrent()) return false
               if (result.status === 'directory') {
                 // The shared producer owns the verdict, not any caller's navigation.
                 await api.files.unobserve(workspaceId, path)
@@ -5058,7 +5109,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 await api.files.unobserve(workspaceId, path)
                 return false
               }
-              const currentLayout = get().layouts[workspaceId]
+              const currentLayout = get().layouts[displayId!]
               if (!currentLayout) {
                 await api.files.unobserve(workspaceId, path)
                 return false
@@ -5070,17 +5121,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               // Shared reads own data/placement, never a caller's later navigation. Each caller
               // below decides whether it still owns the latest uncancelled display intent.
               set((state) => {
+                if (placement?.reference) return result.status === 'read'
+                  ? reduceDocumentAttached(state, workspaceId, path, result.document)
+                  : reduceDocumentLoadFailed(state, workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength })
                 const opened = result.status === 'read'
-                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, topicId)
+                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? undefined : topicId, placement)
                   : reduceDocumentLoadFailed(
-                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, topicId),
+                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? undefined : topicId, placement),
                     workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength }
                   )
-                const placed = opened.layouts[workspaceId]!
+                const placed = opened.layouts[displayId!]!
                 return {
                   ...opened,
                   lastActiveFileByWorkspace: state.lastActiveFileByWorkspace,
-                  layouts: { ...opened.layouts, [workspaceId]: {
+                  layouts: { ...opened.layouts, [displayId!]: {
                     ...placed, activeGroupId: currentLayout.activeGroupId,
                     groups: placed.groups.map((group) => {
                       const selected = findGroup(currentLayout, group.id)
@@ -5114,15 +5168,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return false
         }
         if (!opened) return false
-        const state = get(), currentLayout = state.layouts[workspaceId]
+        const state = get(), currentLayout = state.layouts[displayId!]
         if ((state.documents[key] || state.documentIssues[key]?.kind === 'binary') && currentLayout) {
           if (!mayReveal()) return false
           releaseNavigation()
           const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
           const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
           set((current) => current.documents[key]
-            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, topicId)
-            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, topicId))
+            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? undefined : topicId, placement)
+            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? undefined : topicId, placement))
+          selectProjection()
           return intentVersion === fileOpenIntentVersion
         }
         if (!joinedRequest) return false
@@ -5444,41 +5499,144 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
     return workspaceId
   },
-  async createNote(tabGroupId, launcher, initialContent) {
-    const state = get()
-    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
-    // 「落在哪个 Workspace」与其余四个启动动作走同一条判定。此前这里只读 activeWorkspaceId，
-    // 于是 launcher 绑在 A 而活动 Workspace 是 B 时笔记建到 B——见 resolveLauncherWorkspaceId 的注释。
-    const workspaceId = resolveLauncherWorkspaceId({
-      launcherTabWorkspaceId: launcherTab?.workspaceId,
-      activeWorkspaceId: state.activeWorkspaceId
-    })
-    if (!workspaceId) throw new Error('Select a workspace first')
-    const name = await createNoteWithAvailableName(
-      new Date(),
-      // 刻意不走 createPath：那条路每次失败都 reportError，而撞名重试是这里的**正常**流程，
-      // 会把一串「文件已存在」推到全局错误面上。只有走完全部候选后的那次真失败才该冒出去，
-      // 由调用方（launcher 的 run()）显示。
-      async (candidate) => {
-        if (initialContent === undefined) { await api.files.create(workspaceId, { path: candidate, kind: 'file' }); return }
-        const result = await api.files.write(workspaceId, { path: candidate, content: initialContent, expectedRevision: null })
-        if (result.status === 'error') throw new Error(result.message)
-        if (result.status === 'conflict') throw new Error(`${candidate} already exists`)
+  async refreshNoteDirectorySources(tabId, regionId) {
+    const captured = get(), surface = fileSurface(captured.tabs[tabId], regionId)
+    if (!surface || !surface.path.endsWith(NOTE_FILE_EXTENSION)) return undefined
+    const resource = captured.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)
+    if (!resource) return undefined
+    const key = noteDirectorySourceKey(resource.id, surface.path), directory = surface.path.slice(0, Math.max(0, surface.path.lastIndexOf('/')))
+    const previous = captured.noteDirectorySources[key]
+    let read: NoteDirectoryRead = { workspaceId: resource.id, hostId: resource.hostId, workspacePath: resource.path, directory,
+      fileRevision: captured.workspaceFileRevisions[resource.id] ?? 0, status: 'reading',
+      paths: previous?.hostId === resource.hostId && previous.workspacePath === resource.path ? previous.paths : [] }
+    const resourceCurrent = () => {
+      const current = get().config?.workspaces.find(workspace => workspace.id === resource.id)
+      return current?.hostId === resource.hostId && current.path === resource.path
+    }
+    const publish = () => set(state => ({ noteDirectorySources: { ...state.noteDirectorySources, [key]: read } }))
+    publish()
+    try {
+      if (!resourceCurrent()) throw new Error('The original Note directory resource is unconfirmed; no replacement directory was read.')
+      const entries = await api.files.readDirectory(resource.id, directory)
+      if (!resourceCurrent()) throw new Error('The Note directory resource changed while reading. Its original paths and content are retained.')
+      if (get().noteDirectorySources[key] !== read) return get().noteDirectorySources[key]
+      read = { ...read, paths: [...new Set(entries.filter(entry => !entry.isDirectory && entry.path.endsWith(NOTE_FILE_EXTENSION)).map(entry => entry.path))] }; publish()
+      // Existing File Regions alone grant a content read. Closed sources remain explicit unread facts.
+      for (const path of read.paths) {
+        if (!resourceCurrent()) throw new Error('The original Note directory resource changed; no further source was read.')
+        if (!Object.values(get().tabs).some(tab => workbenchSurfaces(tab).some(candidate => candidate.kind === 'file' && candidate.workspaceId === resource.id && candidate.path === path))) continue
+        await loadPersistedFileDocument(resource.id, path, resource)
+        if (!resourceCurrent()) throw new Error('The Note source resource changed while reading. No replacement directory or content was attached.')
+        if (get().noteDirectorySources[key] !== read) return get().noteDirectorySources[key]
       }
-    )
-    // 让文件树看到新文件。createScratchTopic 等写入面用的是同一个计数器，不另起一套失效机制。
-    set((current) => ({
-      workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId)
-    }))
-    // 显式把开头解析出来的 workspaceId 传下去。create walk 是异步的（远端可达 15s），这期间侧栏
-    // 的 selectWorkspace 完全可点；若让 openFile 自己重读活动 Workspace，笔记建在 A 而打开的是
-    // B 里的同名文件——名字只是当天日期，撞名概率很高，而用户看到的一切都正常。
-    //
-    // `tabGroupId` 同样必须传下去（而不是让 openFile 退到 `layout.activeGroupId`）：请求这条笔记的
-    // 分组才是它该出现的地方。缺了它，从一个非活动分组（分屏的另一半、或将来浮层里的那个 launcher）
-    // 建笔记，Tab 会挂到别的分组上——用户点了「Note」却看不见任何变化。
-    await get().openFile(name, tabGroupId, undefined, workspaceId)
-    return name
+      read = { ...read, status: 'listed' }; publish(); return read
+    } catch (error) {
+      if (get().noteDirectorySources[key] !== read) return get().noteDirectorySources[key]
+      read = { ...read, status: 'unknown', issue: presentError(error) }; publish(); return read
+    }
+  },
+  async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId) {
+    const captured = get(), openingIntent = fileOpenIntentVersion
+    const tab = launcher ? captured.tabs[launcher.tabId] : undefined
+    const workspaceId = resolveLauncherWorkspaceId({ launcherTabWorkspaceId: tab?.workspaceId, activeWorkspaceId: captured.activeWorkspaceId })
+    if (!workspaceId) throw new Error('Select a resource Workspace first')
+    const groupId = tabGroupId ?? captured.layouts[workspaceId]?.activeGroupId
+    if (!groupId) throw new Error('Select an exact Note display Group first')
+    const launcherId = warmLauncherId({ tabGroupId: groupId, regionId: launcher?.regionId })
+    const previous = useLauncherState.getState().drafts[launcherId]?.noteCreation
+    const retrying = previous?.status === 'error' && previous.intentId === retryIntentId
+    if (previous && !previous.revealed && !retrying) return previous
+    if (retrying && (workspaceId !== previous.target.workspaceId || !noteCreationResourceMatches(captured.config, previous.target))) {
+      const retained = { ...previous, issue: 'The original Note resource is unconfirmed. Restore that Workspace, Host and directory before retrying this same intent.' }
+      useLauncherState.getState().setNoteCreation(launcherId, retained)
+      return retained
+    }
+    const originalResource = captured.config?.workspaces.find(item => item.id === workspaceId)
+    if (!originalResource) throw new Error('The Note resource Workspace is unavailable.')
+    const noteId = retrying ? previous.noteId : crypto.randomUUID(), blockId = retrying ? previous.blockIds[0]! : crypto.randomUUID(), draft = retrying ? previous.draft : initialContent ?? ''
+    let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
+      ...(launcher ? { launcher } : {}),
+      target: { workspaceId, hostId: originalResource.hostId, workspacePath: originalResource.path, directoryPath: null, relativeDirectory: null, zoneId: tab?.space?.zoneId ?? null,
+        sourceSpaceId: tab?.space?.spaceId ?? null, displayWorkspaceId: noteCreationDisplayWorkspace(captured, { workspaceId, groupId, ...(projection ? { displayWorkspaceId: projection.displayWorkspaceId } : {}), ...(launcher ? { launcher } : {}) }), groupId },
+      ...(projection && launcher ? { presentation: { presentationId: projection.presentationId, entity: projection.entity,
+        reference: { displayWorkspaceId: projection.displayWorkspaceId, groupId, tabId: launcher.tabId, regionId: launcher.regionId } } } : {}) }
+    const publish = () => useLauncherState.getState().setNoteCreation(launcherId, receipt)
+    publish()
+    let topics: ScratchTopicSnapshot[] = []
+    try { if (captured.config?.workspaces.some(item => item.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) } catch { /* The original birth context remains authoritative; missing discovery cannot choose another directory. */ }
+    try {
+      if (captured.mainSurface === 'survey' && !projection) throw new Error('The Note Survey presentation is unconfirmed. Its draft and original target are retained.')
+      if (projection && (!receipt.presentation || !projection.selection.some(reference => sameWorkbenchProjectionSelection(reference, receipt.presentation!.reference)) ||
+        !projection.catalog.locations.some(location => workbenchProjectionMatches(projection, location) && location.displayWorkspaceId === projection.displayWorkspaceId && location.groupId === groupId && location.tabId === launcher?.tabId && location.regionId === launcher.regionId))) throw new Error('The exact Note presentation reference is unconfirmed. Its original draft is retained.')
+      receipt = { ...receipt, target: noteCreationTarget(captured, topics, { workspaceId, groupId, ...(projection ? { displayWorkspaceId: projection.displayWorkspaceId } : {}), ...(launcher ? { launcher } : {}) }) }
+      if (retrying && previous.target.zoneId && (receipt.target.zoneId !== previous.target.zoneId || previous.target.directoryPath !== null && receipt.target.directoryPath !== previous.target.directoryPath)) throw new Error('The original Note Zone resource is unconfirmed. Its saved target and draft are retained.')
+      const currentResource = get().config?.workspaces.find(item => item.id === workspaceId)
+      if (!currentResource || currentResource.hostId !== originalResource.hostId || currentResource.path !== originalResource.path) throw new Error('The Note resource changed before creation. The original draft is retained.')
+    } catch (error) { receipt = { ...receipt, ...(retrying ? { target: previous.target, path: previous.path } : {}), status: 'error', issue: presentError(error) }; publish(); return receipt }
+    const target = receipt.target
+    const content = JSON.stringify(newNoteDocument(draft, noteId, blockId), null, 2)
+    publish()
+    const named = await createNoteWithAvailableName(new Date(receipt.createdAt), async name => {
+      if (!noteCreationResourceMatches(get().config, target)) return { status: 'error', code: 'NOTE_RESOURCE_CHANGED', message: 'The original Note resource is no longer confirmed. Its draft and target are retained; no further write was issued.' }
+      const path = target.relativeDirectory ? `${target.relativeDirectory}/${name}` : name
+      receipt = { ...receipt, path }; publish()
+      return await api.files.write(workspaceId, { path, content, expectedRevision: null })
+    })
+    receipt = { ...receipt, status: named.result.status, write: named.result, ...(named.result.status === 'written' ? {} : { issue: named.result.message }) }; publish()
+    if (named.result.status !== 'written') return receipt
+    set(current => ({ workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId) }))
+    // Creation belongs to the captured request; a later navigation never grants it a new reveal intent.
+    if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== fileNavigationSelection(captured)) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
+    if (!noteCreationResourceMatches(get().config, target)) { receipt = { ...receipt, issue: 'The Note was written to its captured resource, but the current resource is different. Restore that resource to check or open the same Note.' }; publish(); return receipt }
+    const placement = noteFilePlacement(target, projection)
+    if (!placement) { receipt = { ...receipt, issue: 'The exact Note display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
+    try {
+      receipt = { ...receipt, revealed: await get().openFile(receipt.path, target.groupId, undefined, target.workspaceId, undefined,
+        placement) }
+      if (!receipt.revealed) receipt = { ...receipt, issue: 'The Note was created but could not be displayed. Open this same file; do not create another.' }
+    } catch (error) { receipt = { ...receipt, issue: presentError(error) } }
+    publish(); return receipt
+  },
+  async revealCreatedNote(launcherId, projection) {
+    const retained = useLauncherState.getState().drafts[launcherId]?.noteCreation
+    if (!retained || !retained.path || retained.status === 'error') return retained
+    let receipt: NoteCreationReceipt = retained
+    const publish = () => useLauncherState.getState().setNoteCreation(launcherId, receipt!)
+    const target = receipt.target
+    const selected = fileNavigationSelection(get()), openingIntent = fileOpenIntentVersion
+    if (receipt.presentation && (!projection || projection.presentationId !== receipt.presentation.presentationId || JSON.stringify(projection.entity) !== JSON.stringify(receipt.presentation.entity) || projection.displayWorkspaceId !== target.displayWorkspaceId)) {
+      receipt = { ...receipt, issue: 'Open the same Note from its original presentation. Its captured file and draft are retained.' }; publish(); return receipt
+    }
+    const resourceCurrent = () => noteCreationResourceMatches(get().config, target)
+    if (!resourceCurrent()) { receipt = { ...receipt, issue: 'The original Note resource is unconfirmed. Restore its captured Host and directory before checking this same file; no new target was read or written.' }; publish(); return receipt }
+    if (receipt.status === 'unknown' || receipt.status === 'pending') {
+      receipt = { ...receipt, status: 'unknown' }; publish()
+      try {
+        const observed = await api.files.read(receipt.target.workspaceId, receipt.path)
+        if (!resourceCurrent()) { receipt = { ...receipt, issue: 'The Note resource changed while checking. Its original target and draft are retained; the new directory was not opened.' }; publish(); return receipt }
+        const parsed = observed.status === 'read' ? readNoteDocument(observed.document.content) : undefined
+        if (observed.status !== 'read' || parsed?.status !== 'valid' || parsed.note.noteId !== receipt.noteId) {
+          receipt = { ...receipt, issue: 'The same Note target could not be confirmed. Its identity and draft remain retained; no write was repeated.' }; publish(); return receipt
+        }
+        receipt = { ...receipt, status: 'written', write: { status: 'written', revision: observed.document.revision }, issue: undefined }; publish()
+      } catch (error) { receipt = { ...receipt, issue: presentError(error) }; publish(); return receipt }
+    }
+    if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== selected) {
+      receipt = { ...receipt, issue: 'The same Note was checked. Later navigation was preserved; choose this file when ready.' }; publish(); return receipt
+    }
+    const placement = noteFilePlacement(target, projection)
+    if (!resourceCurrent() || !placement) { receipt = { ...receipt, issue: 'The exact Note resource or display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
+    try {
+      receipt = { ...receipt, revealed: await get().openFile(receipt.path, target.groupId, undefined, target.workspaceId, undefined,
+        placement) }
+      receipt = { ...receipt, issue: receipt.revealed ? undefined : 'The Note exists but its display target is unavailable. Its original file and draft are retained.' }
+    } catch (error) { receipt = { ...receipt, issue: presentError(error) } }
+    publish(); return receipt
+  },
+  async retryCreatedNote(launcherId, projection) {
+    const receipt = useLauncherState.getState().drafts[launcherId]?.noteCreation
+    if (receipt?.status !== 'error') return receipt
+    return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId)
   },
   async renamePath(path, nextPath) {
     const workspaceId = get().activeWorkspaceId
@@ -6202,7 +6360,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }))
         return path
       }
-      if (result.status === 'error') throw new Error(result.message)
+      if (result.status === 'error' || result.status === 'unknown') throw Object.assign(new Error(result.message), { code: result.code })
       // conflict：这个名字被占了，试下一个。
       lastReason = `${path} already exists`
     }

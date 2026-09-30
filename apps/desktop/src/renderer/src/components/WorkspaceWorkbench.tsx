@@ -47,7 +47,7 @@ import {
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { projectWorkbenchProjection, selectWorkbenchProjectionTab, workbenchProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, workbenchHomePresentationReferences, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -1433,6 +1433,7 @@ export function WorkspaceWorkbench({
     for (const group of residentLayout?.groups ?? []) for (const id of group.tabOrder) owners.set(id, group.id)
     return owners
   }, [residentLayout?.groups])
+  const homeReferences = useMemo(() => workbenchHomePresentationReferences(storedLayout, workspaceId, tabs), [storedLayout, workspaceId, tabs])
   const retainedOwners = useRef(new Map<string, string>())
   for (const [id, groupId] of ownerByTab) retainedOwners.current.set(id, groupId)
   for (const id of retainedOwners.current.keys()) if (!tabs[id]) retainedOwners.current.delete(id)
@@ -1592,6 +1593,8 @@ export function WorkspaceWorkbench({
             } }} />
           </div> : undefined}
           onSelectRegion={projection?.onSelectRegion}
+          projection={projection?.projection}
+          reference={targetId === null ? homeReferences.get(tab.id) ?? undefined : projection?.reference}
           retainedRegionId={projection?.retainedRegionId ?? (targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null)}>
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree

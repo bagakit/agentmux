@@ -179,7 +179,7 @@ export function EditorPane({
   // handles a fresh target arriving for an already-mounted editor (re-clicking a link).
   function consumeRevealTarget(editor: MonacoStandaloneEditor): void {
     const target = useAppStore.getState().documentRevealTargets[key]
-    if (!target) return
+    if (!target || target.noteBlock || previewing) return
     editor.revealLineInCenter(target.line)
     editor.setPosition({ lineNumber: target.line, column: target.column ?? 1 })
     editor.focus()
@@ -201,6 +201,7 @@ export function EditorPane({
   // Monaco mounts asynchronously. Keep the intent until a live editor can take it, and read
   // current store state at consumption so a late mount cannot replay an obsolete request.
   function consumeCaretFocus(): void {
+    if (previewing) return
     const request = useAppStore.getState().regionCaretFocus
     if (!regionCaretFocusTargets(request, surface.regionId)) return
     if (!visibleRef.current) { clearRegionCaretFocus(request.nonce); return }
@@ -223,7 +224,7 @@ export function EditorPane({
     })
     observer.observe(window.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
     return () => observer.disconnect()
-  }, [regionCaretFocus, visible, released])
+  }, [regionCaretFocus, visible, released, previewing])
 
   if (released) return <EditorReleasedState />
 
