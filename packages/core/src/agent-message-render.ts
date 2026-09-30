@@ -26,6 +26,8 @@ export type AgentMuxMessagePrefix = {
   declaredAgentSessionId: string | null
   body: string
   packet?: AgentMuxMessagePacket
+  /** Complete input-leading declarations, preserved as original source spans. */
+  declaredContexts?: readonly { raw: string }[]
 }
 
 export type AgentMuxMessagePacket = {
@@ -76,8 +78,44 @@ function parsePacket(text: string): AgentMuxMessagePacket | null {
   }
 }
 
+/** A reading projection only; authored declarations never become System facts. */
+function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
+  const opening = '<amux from="amux">'
+  if (!text.startsWith(opening)) return null
+  const declaredContexts: { raw: string }[] = []
+  let start = 0
+  while (text.startsWith(opening, start)) {
+    const closing = text.indexOf('</amux>', start + opening.length)
+    if (closing < 0) return null
+    const end = closing + '</amux>'.length
+    const raw = text.slice(start, end)
+    if (/<!|<\?/u.test(raw)) return null
+    try {
+      const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
+      const root = document.documentElement
+      if (!root || root.tagName !== 'amux' || !attributes(root, ['from']) || root.getAttribute('from') !== 'amux' ||
+        Array.from(document.childNodes).some(node => node !== root) ||
+        Array.from(root.childNodes).some(node => node.nodeType !== 3)) return null
+    } catch {
+      return null
+    }
+    declaredContexts.push({ raw })
+    // Newline separators join declarations; the next line's indentation is authored tail.
+    const next = end + (/^(?:\r?\n)*/u.exec(text.slice(end))?.[0].length ?? 0)
+    // A partly authored or unknown second declaration keeps the entire input readable.
+    if (/^<amux(?:\s|>|$)/u.test(text.slice(next))) {
+      if (!text.startsWith(opening, next)) return null
+      start = next
+    } else {
+      return { sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
+    }
+  }
+  return null
+}
+
 /** Native inputs and captured deliveries share this reading grammar; copying keeps original bytes. */
 export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix | null {
+  if (text.startsWith('<amux')) return parseDeclaredContexts(text)
   const header = /^\[Message from ([^\]\r\n]+)\]\r?\n([\s\S]+)$/iu.exec(text)
   const authoredBody = header?.[2] ?? text
   const packet = parsePacket(authoredBody)
