@@ -8,6 +8,7 @@ import { joinWorkspacePath } from '../lib/workspace-paths'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { useAppStore } from '../store'
 import { AgentMarkdown } from './AgentMarkdown'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { FilePreviewPane, ImageContent } from './FilePreviewPane'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 
@@ -114,8 +115,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
       {...(markdown || svg || note ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
-        <button className="small-button" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onClick={() => void previewSavedHtml(false)}><Eye size={13} /> Preview saved file</button>
-        {dirty ? <button className="small-button" disabled={saving || !isLocal} onClick={() => void previewSavedHtml(true)}><Save size={13} /> Save & Preview</button> : null}
+        <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><Eye size={13} />Preview saved file</DropdownMenu.Item>
+        {dirty ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving || !isLocal} onSelect={() => void previewSavedHtml(true)}><Save size={13} />Save & Preview</DropdownMenu.Item> : null}
       </> } : {})} />
   </Suspense>
 }

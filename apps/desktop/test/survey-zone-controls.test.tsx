@@ -122,18 +122,18 @@ it('selects the original Zone and opens only the separately supplied resource Wo
   const onSelect = vi.fn(), onOpenWorkspace = vi.fn(), onCollectedChange = vi.fn()
   const resource = { id: 'foreign-resource', name: 'Resource project', hostId: 'remote', path: '/source/worktree', branch: 'resource-branch', kind: 'worktree' as const }
   const render = async (sourceWorkspace: typeof resource | null, relatedTopics: AgentMuxSpaceFact[] | null) => {
-    await act(async () => root.render(<SurveyZoneItem zone={zone} title="Original mixed workface" selected sourceWorkspace={sourceWorkspace}
+    await act(async () => root.render(<SurveyZoneItem zone={zone} title="Original mixed workface" glyph={<span>Mixed</span>} selected sourceWorkspace={sourceWorkspace}
       relatedTopics={relatedTopics} collected={false} onCollectedChange={onCollectedChange} activity="Mixed" activityDetails="Two Browsers: mixed control" onSelect={onSelect} onOpenWorkspace={onOpenWorkspace} />))
   }
   await render(resource, [topicA, topicB, mote])
   const select = container.querySelector<HTMLButtonElement>('[aria-current="true"]')!, details = container.querySelector<HTMLButtonElement>('.survey-item-details')!
   await act(async () => select.click()); expect(onSelect).toHaveBeenCalledExactlyOnceWith('original-zone')
   expect(container.textContent).not.toContain('Resource project')
-  expect(container.querySelector('small')!.textContent).toBe('2')
-  expect(container.querySelector('small')!.getAttribute('aria-label')).toContain('Research · remote · /topics/b')
+  expect(container.textContent).not.toContain('linked Topics')
   await act(async () => details.focus()); await key(details, 'ArrowDown')
   const source = document.querySelector<HTMLElement>('[aria-label="Open resource Workspace: Resource project, remote, /source/worktree"]')!
   expect(source).not.toBeNull()
+  expect(menu()!.textContent).toContain('2 linked Topics'); expect(menu()!.textContent).toContain('Research · remote · /topics/b')
   expect(menu()!.textContent).toContain('Branch: resource-branch')
   expect(menu()!.textContent).not.toContain('Branch: work'); expect(menu()!.textContent).toContain('Two Browsers: mixed control')
   const member = document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!
@@ -141,7 +141,8 @@ it('selects the original Zone and opens only the separately supplied resource Wo
   expect(onCollectedChange).toHaveBeenCalledExactlyOnceWith(true); expect(menu()).not.toBeNull()
   await act(async () => source.click()); expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith('foreign-resource')
   expect(source.getAttribute('aria-label')).toContain('remote, /source/worktree')
-  await render(null, null); expect(container.querySelector('[aria-label="Topic links unknown"]')).not.toBeNull(); expect(container.querySelector('[aria-label="Resource unknown"]')).not.toBeNull()
+  await render(null, null)
   await key(container.querySelector('.survey-item-details')!, 'ArrowDown')
   expect(document.querySelector('[aria-label^="Open resource Workspace:"]')).toBeNull()
+  expect(menu()!.textContent).toContain('Topic links unknown'); expect(menu()!.textContent).toContain('Resource Workspace is not confirmed')
 })

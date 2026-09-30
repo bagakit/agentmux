@@ -5,12 +5,12 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile
 import { dirname, join, resolve } from 'node:path'
 
 /** Run exact Renderer tests against private copied sources; never mutate the shared worktree. */
-export async function verifyRendererSourceMutations({ name, tests, sources, mutations, evidenceRoot }) {
+export async function verifyRendererSourceMutations({ name, tests, sources, mutations, evidenceRoot, owningConfig }) {
   const root = resolve(import.meta.dirname, '../../../..')
   const copy = await realpath(await mkdtemp('/tmp/amx-renderer-mutation-'))
   const evidence = evidenceRoot ? join(evidenceRoot, name) : join(root, '.tmp', name)
   const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-  const inputs = [...new Set([...tests, ...sources])]
+  const inputs = [...new Set([...tests, ...sources, ...(owningConfig ? [owningConfig] : [])])]
   const original = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(root, file))])))
   const hashes = values => Object.fromEntries([...values].map(([file, bytes]) => [file, digest(bytes)]))
   const receipt = { schema: 'agentmux.renderer-source-mutation.v1', passed: false, name,
@@ -50,11 +50,11 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     }
     for (const pkg of ['core', 'layout', 'demand']) await symlink(join(copy, 'packages', pkg), join(desktop, 'node_modules/@agentmux', pkg))
     for (const [file, bytes] of original) { await mkdir(dirname(join(copy, file)), { recursive: true }); await writeFile(join(copy, file), bytes) }
-    await writeFile(join(copy, 'vitest.mutation.config.mts'), `import { defineConfig } from 'vitest/config';
+    await writeFile(join(copy, 'vitest.mutation.config.mts'), `${owningConfig ? `import owning from './${owningConfig}';\n` : 'const owning = {};\n'}import { defineConfig } from 'vitest/config';
 import { readFileSync, writeFileSync } from 'node:fs'; import { createHash } from 'node:crypto';
-export default defineConfig({ define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
-plugins: [{ name: 'actual-private-source-load', enforce: 'pre', transform(source, id) { const target = JSON.parse(readFileSync(${JSON.stringify(join(copy, 'current-load.json'))}, 'utf8')); if (target && id === target.file) writeFileSync(target.load, JSON.stringify({ file: id, sha256: createHash('sha256').update(source).digest('hex') })); } }],
-test: { include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
+export default defineConfig({ ...owning, define: { ...owning.define, __AGENTMUX_WEB_PREVIEW__: 'true' },
+plugins: [...(owning.plugins ?? []), { name: 'actual-private-source-load', enforce: 'pre', transform(source, id) { const target = JSON.parse(readFileSync(${JSON.stringify(join(copy, 'current-load.json'))}, 'utf8')); if (target && id === target.file) writeFileSync(target.load, JSON.stringify({ file: id, sha256: createHash('sha256').update(source).digest('hex') })); } }],
+test: { ...owning.test, include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
     assert.ok(mutations.length > 0, 'A mutation verification must select actual cases.')
     const baseline = await run('baseline-green')
     assert.equal(baseline.code, 0, baseline.output)

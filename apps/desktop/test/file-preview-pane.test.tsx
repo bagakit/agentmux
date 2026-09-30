@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Monaco worker/canvas is a platform boundary; the File router, Editor owner and preview are real.
 vi.mock('../src/renderer/src/monaco', () => ({}))
+vi.mock('monaco-editor', () => ({}))
 vi.mock('@monaco-editor/react', () => ({ default: ({ value, path }: { value: string; path: string }) => <textarea data-monaco-path={path} value={value} readOnly /> }))
 import { FilePreviewPane } from '../src/renderer/src/components/FilePreviewPane'
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
@@ -179,4 +180,60 @@ describe('real format preview pane', () => {
     expect(useAppStore.getState().documents[owner.key]?.revision).toBe('original')
   })
 
+})
+
+async function options() {
+  const trigger = container.querySelector<HTMLElement>('[aria-label="File options"]')!
+  expect(trigger).not.toBeNull()
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowDown',bubbles:true })) })
+  expect(document.querySelector('[role="menu"]')).not.toBeNull()
+}
+async function chooseOption(label: string) {
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"],[role="menuitemcheckbox"]')].find(element => element.textContent?.includes(label))
+  expect(item).toBeDefined()
+  await act(async () => { item!.focus(); item!.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})) })
+}
+it('keeps Wrap and Diff reachable by original keyboard menu without changing the File body or layout', async () => {
+  const {file,id,key} = seed('compact.ts','const original = 1')
+  await render(<FileSurfaceView tabId={id} surface={file} />)
+  const before=useAppStore.getState(), original=before.documents[key]
+  await options(); await chooseOption('Word wrap')
+  expect(useAppStore.getState().editorWordWrap).toBe(!before.editorWordWrap)
+  await chooseOption('Diff against HEAD')
+  expect(useAppStore.getState().editorRegionModes[file.regionId]).toBe('diff')
+  expect(container.textContent).toContain('Could not load diff')
+  expect(container.textContent).toContain('Git is unavailable in this build.')
+  await chooseOption('Diff against HEAD')
+  expect(useAppStore.getState().editorRegionModes[file.regionId]).toBe('edit')
+  expect(container.querySelector('textarea')?.value).toBe('const original = 1')
+  expect(useAppStore.getState().documents[key]).toBe(original)
+  expect(useAppStore.getState().tabs).toBe(before.tabs);expect(useAppStore.getState().layouts).toBe(before.layouts)
+})
+it('keeps the original exact Save and conflict Reload owners accessible in compact header and keyboard overflow', async () => {
+  const {file,id,key}=seed('draft.ts','saved body'),write=vi.spyOn(api.files,'write').mockResolvedValue({status:'written',revision:'saved-current'})
+  await render(<FileSurfaceView tabId={id} surface={file} />)
+  await act(async()=>useAppStore.getState().updateDocument(id,'explicit unsaved draft',file.regionId))
+  await click('Save file')
+  expect(write).toHaveBeenCalledExactlyOnceWith('workspace',{path:'draft.ts',content:'explicit unsaved draft',expectedRevision:'original'})
+  expect(useAppStore.getState().documents[key]?.content).toBe('explicit unsaved draft')
+  expect(useAppStore.getState().documents[key]?.revision).toBe('saved-current')
+  await act(async()=>useAppStore.setState({documentIssues:{[key]:{kind:'changed',observed:{path:file.path,content:'accepted external',revision:'external'}}}}))
+  expect(container.querySelector('[aria-label="Overwrite file with this draft"]')).not.toBeNull()
+  const read=vi.spyOn(api.files,'read').mockResolvedValue({status:'read',document:{path:'draft.ts',content:'accepted external',revision:'external'}})
+  await options();await chooseOption('Reload from disk')
+  expect(read).not.toHaveBeenCalled()
+  expect(container.querySelector('textarea')?.value).toBe('accepted external')
+  expect(useAppStore.getState().documents[key]).toEqual({ path: 'draft.ts', content: 'accepted external', revision: 'external' })
+  expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+})
+it('uses the original HTML saved-preview action from keyboard overflow while preserving the unsaved original File', async () => {
+  const {file,id,key}=seed('page.html','<h1>saved</h1>')
+  const create=vi.spyOn(useAppStore.getState(),'createBrowser').mockResolvedValue(undefined)
+  await render(<FileSurfaceView tabId={id} surface={file} />)
+  await act(async()=>useAppStore.getState().updateDocument(id,'<h1>unsaved source</h1>',file.regionId))
+  const before=useAppStore.getState().documents[key]
+  await options(); await chooseOption('Preview saved file')
+  expect(create).toHaveBeenCalledExactlyOnceWith('group',undefined,'/repo/page.html',undefined,'workspace')
+  expect(useAppStore.getState().documents[key]).toBe(before)
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
 })

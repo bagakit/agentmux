@@ -7,11 +7,14 @@ import { createRequire } from 'node:module'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const fixture = join(root, 'apps/desktop/scripts/fixtures/note-restore')
-const evidence = join(root, `.tmp/note-restore-${Date.now()}`), compiled = join(evidence, 'compiled')
+const args = process.argv.slice(2)
+assert.ok(args.length === 0 || args.length === 1 && args[0] === '--survey-collection', 'Select the original Note restore or --survey-collection')
+const collection = args.length === 1
+const fixture = join(root, `apps/desktop/scripts/fixtures/${collection ? 'survey-collection' : 'note-restore'}`)
+const evidence = join(root, `.tmp/${collection ? 'survey-collection' : 'note'}-restore-${Date.now()}`), compiled = join(evidence, 'compiled')
 const privateResources = await mkdtemp(join(tmpdir(), 'agentmux-note-restore-'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const receipt = { schema: 'agentmux.note-restore.v1', passed: false, boundary: 'Two distinct private Node processes consume current compiled Files/Store, original Document/Launcher/UI metadata and derived knowledge. No rich DOM caret, Native, Session or Run claim.' }
+const receipt = { schema: collection ? 'agentmux.survey-collection-restore.v1' : 'agentmux.note-restore.v1', passed: false, boundary: collection ? 'Two distinct private Node processes consume current compiled Store, original Survey/UI metadata, exact layout/selection and Document/Launcher drafts. Automatic Browser membership is derived from the restored catalog; no Native, DOM caret, Session or Run claim.' : 'Two distinct private Node processes consume current compiled Files/Store, original Document/Launcher/UI metadata and derived knowledge. No rich DOM caret, Native, Session or Run claim.' }
 await mkdir(compiled, { recursive: true })
 async function run(phase) {
   const result = await new Promise((yes, no) => {
@@ -49,7 +52,8 @@ try {
   const result = await build({ absWorkingDir: root, entryPoints: [join(fixture, 'consumer.ts')], bundle: true, platform: 'node', target: 'node24', format: 'esm', outfile, metafile: true,
     plugins: [plugin], define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, logLevel: 'error' })
   const sources = Object.keys(result.metafile.inputs).filter(path => !path.startsWith('node_modules/'))
-  for (const required of ['apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts', 'apps/desktop/src/shared/note-document.ts', 'apps/desktop/src/renderer/src/lib/note-knowledge.ts', 'apps/desktop/src/renderer/src/lib/note-block-selection.ts']) assert.ok(sources.includes(required), `${required} must actually be compiled`)
+  const requiredSources = collection ? ['apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts', 'apps/desktop/src/renderer/src/lib/survey-workface.ts', 'apps/desktop/src/renderer/src/lib/space-agent-control.ts', 'apps/desktop/src/renderer/src/lib/workbench-tabs.ts'] : ['apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts', 'apps/desktop/src/shared/note-document.ts', 'apps/desktop/src/renderer/src/lib/note-knowledge.ts', 'apps/desktop/src/renderer/src/lib/note-block-selection.ts']
+  for (const required of requiredSources) assert.ok(sources.includes(required), `${required} must actually be compiled`)
   assert.ok(sources.length > 0)
   receipt.sourceBefore = Object.fromEntries(await Promise.all(sources.map(async path => [path, hash(await readFile(resolve(root, path)))])))
   receipt.compiledSha256 = hash(await readFile(outfile)); await writeFile(join(evidence, 'metafile.json'), JSON.stringify(result.metafile))

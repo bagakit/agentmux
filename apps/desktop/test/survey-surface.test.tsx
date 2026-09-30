@@ -101,7 +101,7 @@ beforeEach(() => {
     return new DOMRect(survey ? 200 : 250, 48, 600, 500)
   })
   useAppStore.setState({ loading: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench',
-    surveySidebarWidth: 220,
+    surveySidebarWidth: 220, surveySidebarCollapsed: false,
     surveyCollectedZones: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: composerConfig, activeWorkspaceId: workspace.id,
     sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]) },
     agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
@@ -253,7 +253,7 @@ it('groups original Zones by the existing resource Project owner and keeps workt
   expect(grouped[0]!.querySelector('header button')!.textContent).toBe(workspace.name)
   expect(grouped[0]!.querySelector('[data-survey-zone-id]')!.textContent).not.toContain('No Topic links')
   expect(grouped[0]!.querySelector('[data-survey-zone-id]')!.textContent).not.toContain('Human control')
-  expect(grouped.at(-1)!.textContent).toContain('Unknown source'); expect(grouped.at(-1)!.querySelector('[aria-label="Resource unknown"]')).not.toBeNull()
+  expect(grouped.at(-1)!.textContent).toContain('Unknown source'); expect(grouped.at(-1)!.getAttribute('aria-label')).toBe('Survey project: Unknown source')
   expect(grouped.at(-1)!.querySelector('.survey-item strong')!.textContent).toBe('Same title')
   await act(async () => grouped[0]!.querySelector<HTMLButtonElement>('header button')!.click())
   expect(source).toHaveBeenCalledExactlyOnceWith(workspace.id)
@@ -641,4 +641,212 @@ it('keeps the held exact occurrence when the same retained Item is clicked while
   expect(current.surveyZoneSelection?.active).toEqual(held.active)
   expect(current.layouts).toBe(before.layouts); expect(current.tabs).toBe(before.tabs)
   expect(current.surveyCollectedZones).toEqual({ [held.zoneId]: true }); healthy()
+})
+
+it('explicitly collapses and restores the sidebar without changing the original Item composition or selection', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!
+  expect(before.surveySidebarCollapsed).toBe(false)
+  await dom.click('[aria-label="Hide Survey items"]')
+  const hidden = dom.container.querySelector<HTMLElement>('[aria-label="Survey items"]')!
+  expect(hidden.hidden).toBe(true)
+  expect(useAppStore.getState().surveySidebarCollapsed).toBe(true)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original)
+  expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  const saved = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+  expect(saved.surveySidebarCollapsed).toBe(true); expect(saved.surveySidebarWidth).toBe(before.surveySidebarWidth)
+  await dom.click('[aria-label="Show Survey items"]')
+  expect(hidden.hidden).toBe(false); expect(useAppStore.getState().surveySidebarCollapsed).toBe(false)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original); healthy()
+})
+
+it('opens readable same-name panel choices on demand and selects the exact nonfirst original Region by keyboard', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!
+  const selected = before.surveyZoneSelection!
+  await act(async () => useAppStore.setState({ surveyZoneSelection: { ...selected, active: null } }))
+  const context = dom.container.querySelector('.global-survey-surface .survey-context')!
+  expect(context.textContent).toContain('Choose panel')
+  expect(context.textContent).not.toContain('original-group')
+  expect(context.textContent).not.toContain('page-b')
+  expect(dom.container.querySelector('.global-survey-surface')!.textContent).toContain('The active panel is not confirmed')
+  expect(document.querySelector('.survey-panel-menu')).toBeNull()
+  const trigger = context.querySelector<HTMLElement>('[aria-label="Choose original work surface"]')!
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+  const menu = document.querySelector('.survey-panel-menu')!
+  const candidates = [...menu.querySelectorAll<HTMLElement>('.survey-panel-choice')]
+  expect(candidates).toHaveLength(4)
+  expect(candidates.map(candidate => candidate.textContent)).toEqual([
+    expect.stringContaining('Agent'), expect.stringContaining('draft.md'), expect.stringContaining('Same title 1'), expect.stringContaining('Same title 2')
+  ])
+  expect(candidates[3]!.textContent).toContain('Browser')
+  expect(candidates[3]!.textContent).toContain('Group 1 · Tab 1 · Panel 4')
+  expect(menu.textContent).not.toContain('original-group'); expect(menu.textContent).not.toContain('page-b')
+  await act(async () => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Show technical references')!.click())
+  expect(menu.querySelector('.survey-panel-details')!.textContent).toContain('original-group')
+  expect(menu.querySelector('.survey-panel-details')!.textContent).toContain('page-b')
+  await act(async () => { candidates[3]!.focus(); candidates[3]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual({ displayWorkspaceId: workspace.id, groupId: 'original-group', tabId: mixed.id, regionId: pageB.regionId })
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original)
+  expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId); healthy()
+})
+
+it('retains unknown exact panel candidates without printing identities or guessing a first location', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState()
+  const retained = { displayWorkspaceId: 'missing-workspace-uuid', groupId: 'missing-group-uuid', tabId: 'missing-tab-uuid', regionId: 'missing-region-uuid' }
+  const held = { zoneId: originalZoneId(), selection: [retained], active: null }
+  await act(async () => { observation.catalogUnavailable = true; useAppStore.setState({ surveyZoneSelection: held }) })
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Choose original work surface"]')!
+  expect(trigger).not.toBeNull(); expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+  const menu = document.querySelector('.survey-panel-menu')!, candidates = menu.querySelectorAll<HTMLElement>('.survey-panel-choice')
+  expect(candidates).toHaveLength(1)
+  expect(menu.textContent).toContain('Original panel · name unconfirmed')
+  expect(menu.textContent).toContain('Retained reference 1 · original position unconfirmed')
+  expect(menu.textContent).not.toContain('missing-')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  await act(async () => candidates[0]!.click())
+  expect(useAppStore.getState().surveyZoneSelection).toEqual({ ...held, active: retained })
+  expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(dom.container.querySelector('.global-survey-surface')!.textContent).toContain('original Zone reference is retained')
+  healthy()
+})
+
+it('distinguishes same-name display Workspaces with identical visual positions while selecting the untouched foreign tuple', async () => {
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, otherWorkspace] },
+    layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]), [otherWorkspace.id]: createWorkspaceLayout('original-group', [mixed.id]) } })
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), reference = { displayWorkspaceId: otherWorkspace.id, groupId: 'original-group', tabId: mixed.id, regionId: pageB.regionId }
+  await act(async () => useAppStore.setState({ surveyZoneSelection: { zoneId: originalZoneId(), selection: [], active: null } }))
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Choose original work surface"]')!
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+  const candidates = [...document.querySelectorAll<HTMLElement>('.survey-panel-choice')].filter(item => item.textContent?.includes('Same title 2'))
+  expect(candidates).toHaveLength(2)
+  expect(candidates[0]!.textContent).not.toBe(candidates[1]!.textContent)
+  expect(candidates.map(item => item.querySelector('.survey-panel-choice-order')!.getAttribute('aria-label'))).toEqual(['Reference 4', 'Reference 8'])
+  for (const item of candidates) { expect(item.textContent).toContain('Project · Browser'); expect(item.textContent).toContain('Group 1 · Tab 1 · Panel 4') }
+  await act(async () => candidates[1]!.click())
+  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual(reference)
+  expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId); healthy()
+})
+
+it('explicitly views the exact nonfirst Tab and returns all Groups without replacing its original tree or durable selection', async () => {
+  const second = createWorkbenchTab('second', pageC)
+  const layout = createWorkspaceLayout('first-group', [second.id])
+  layout.groups.push({ id: 'second-group', tabOrder: [mixed.id], activeTabId: mixed.id, recentTabIds: [mixed.id] })
+  layout.root = { type: 'split', direction: 'horizontal', ratio: 0.63, first: { type: 'leaf', groupId: 'first-group' }, second: { type: 'leaf', groupId: 'second-group' } }
+  useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second }, layouts: { [workspace.id]: layout } })
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const selected = useAppStore.getState().surveyZoneSelection!, active = { displayWorkspaceId: workspace.id, groupId: 'second-group', tabId: mixed.id, regionId: pageB.regionId }
+  await act(async () => useAppStore.setState({ surveyZoneSelection: { ...selected, active } }))
+  const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!, field = address(), host = slot().id
+  const originalTargets = observation.survey.at(-1)!.viewTargets!, originalCatalog = observation.survey.at(-1)!.projection!.catalog
+  await fill(field, 'Keep original Tab input'); field.setSelectionRange(2, 13)
+  expect(dom.container.querySelectorAll('.global-survey-surface .retained-workbench-view')).toHaveLength(2)
+  await dom.click('[aria-label="View current Survey Tab"]')
+  expect(observation.survey.at(-1)!.projection!.entity).toEqual({ kind: 'tab', tabId: mixed.id })
+  expect(observation.survey.at(-1)!.projection!.selection).toEqual([active])
+  expect(observation.survey.at(-1)!.projection!.catalog.locations).toEqual(originalCatalog.locations)
+  expect(observation.survey.at(-1)!.viewTargets![mixed.id]!.hostId).toBe(originalTargets[mixed.id]!.hostId)
+  expect(dom.container.querySelectorAll('.global-survey-surface .workbench-tab-slot')).toHaveLength(1)
+  expect(slot().id).toBe(host); expect(slot().querySelector('.retained-workbench-view')).toBe(original)
+  expect(address()).toBe(field); expect(field.value).toBe('Keep original Tab input'); expect([field.selectionStart, field.selectionEnd]).toEqual([2, 13])
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(dom.container.querySelector('.survey-context')!.textContent).toContain('Tab view')
+  expect(dom.container.querySelector('.global-survey-surface [title="New tab"]')).toBeNull()
+  await selectRegion(pageA.regionId)
+  const changed = useAppStore.getState().surveyZoneSelection!
+  expect(observation.survey.at(-1)!.projection!.entity).toEqual({ kind: 'tab', tabId: mixed.id })
+  expect(changed.active).toEqual({ ...active, regionId: pageA.regionId })
+  expect(changed.selection).toHaveLength(2)
+  await dom.click('[aria-label="Show full Survey item"]')
+  expect(observation.survey.at(-1)!.projection!.entity).toEqual({ kind: 'zone', zoneId: selected.zoneId })
+  expect(observation.survey.at(-1)!.projection!.selection).toBe(changed.selection)
+  expect(dom.container.querySelectorAll('.global-survey-surface .retained-workbench-view')).toHaveLength(2)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original); expect(field.value).toBe('Keep original Tab input')
+  expect(dom.container.querySelector('.global-survey-surface [title="New tab"]')).not.toBeNull()
+  expect(dom.container.querySelector('.global-survey-surface [aria-label="Split current tab to the right"]')).not.toBeNull()
+  expect(useAppStore.getState().surveyZoneSelection).toBe(changed)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId); healthy()
+})
+
+it('views one explicit foreign same-Tab occurrence while retaining every original Group and its simultaneous-presentation notice on return', async () => {
+  const display = createWorkspaceLayout('foreign-first', [mixed.id])
+  display.groups.push({ id: 'foreign-second', tabOrder: [mixed.id], activeTabId: mixed.id, recentTabIds: [mixed.id] })
+  display.root = { type: 'split', direction: 'horizontal', ratio: 0.37, first: { type: 'leaf', groupId: 'foreign-first' }, second: { type: 'leaf', groupId: 'foreign-second' } }
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, otherWorkspace] }, layouts: { ...useAppStore.getState().layouts, [otherWorkspace.id]: display } })
+  const a = { displayWorkspaceId: otherWorkspace.id, groupId: 'foreign-first', tabId: mixed.id, regionId: pageA.regionId }, b = { ...a, groupId: 'foreign-second', regionId: pageB.regionId }
+  const held = { zoneId: originalZoneId(), selection: [a, b], active: b }
+  useAppStore.setState({ surveyZoneSelection: held })
+  await dom.render(<App />)
+  const original = dom.container.querySelector('.retained-workbench-view')!
+  expect(original).not.toBeNull(); await enterSurvey()
+  expect(dom.container.querySelector('.global-survey-surface')!.textContent).toContain('Simultaneous live presentation is not available')
+  const before = useAppStore.getState(), locations = observation.survey.at(-1)!.projection!.catalog.locations
+  await dom.click('[aria-label="View current Survey Tab"]')
+  expect(slot().dataset.workbenchGroupId).toBe('foreign-second')
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original)
+  expect(observation.survey.at(-1)!.projection!.selection).toEqual([b])
+  expect(observation.survey.at(-1)!.projection!.catalog.locations).toEqual(locations)
+  expect(dom.container.querySelectorAll('.global-survey-surface .workbench-tab-slot')).toHaveLength(1)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  await dom.click('[aria-label="Show full Survey item"]')
+  expect(dom.container.querySelectorAll('.global-survey-surface .workbench-tab-slot')).toHaveLength(2)
+  expect(dom.container.querySelector('.global-survey-surface')!.textContent).toContain('Simultaneous live presentation is not available')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().activeWorkspaceId).toBe(workspace.id); healthy()
+})
+
+it('refuses an unknown or inactive Tab view without selecting a first reference and exits it after a later panel intent', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const selected = useAppStore.getState().surveyZoneSelection!, known = selected.active!, unknown = { ...known, tabId: 'unknown-tab', regionId: 'unknown-region' }
+  for (const active of [null, unknown]) {
+    const held = { ...selected, active }
+    await act(async () => useAppStore.setState({ surveyZoneSelection: held }))
+    const control = dom.container.querySelector<HTMLButtonElement>('[aria-label="View current Survey Tab"]')!
+    expect(control.disabled).toBe(true); expect(control.title).toContain('Choose a confirmed panel')
+    await act(async () => control.click())
+    expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+    expect(observation.survey.at(-1)!.projection!.entity).toEqual({ kind: 'zone', zoneId: selected.zoneId })
+  }
+  await act(async () => useAppStore.setState({ surveyZoneSelection: selected }))
+  await dom.click('[aria-label="View current Survey Tab"]')
+  expect(observation.survey.at(-1)!.projection!.entity.kind).toBe('tab')
+  const held = { ...selected, active: unknown }
+  await act(async () => useAppStore.setState({ surveyZoneSelection: held }))
+  expect(observation.survey.at(-1)!.projection!.entity.kind).toBe('zone')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  await act(async () => useAppStore.setState({ surveyZoneSelection: selected }))
+  expect(observation.survey.at(-1)!.projection!.entity.kind).toBe('zone'); healthy()
+})
+
+it('presents all confirmed mixed-Tab names in the original order instead of a count as the Item title', async () => {
+  const named = { ...mixed, name: 'Reading notes' }, second = { ...createWorkbenchTab('second', pageC), name: 'Interface draft' }
+  useAppStore.setState({ tabs: { [named.id]: named, [second.id]: second }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [named.id, second.id]) } })
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), row = dom.container.querySelector<HTMLElement>('.survey-item-row[data-selected="true"]')!
+  expect(row.querySelector('strong')!.textContent).toBe('Reading notes · Interface draft')
+  expect(row.querySelector('.survey-item')!.getAttribute('title')).toBe('Reading notes · Interface draft')
+  expect(row.querySelector('.survey-item')!.getAttribute('aria-label')).toBe('Show survey item: Reading notes · Interface draft')
+  expect(dom.container.querySelector('.survey-context')!.textContent).toContain('2 tabs')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
+})
+
+it.each([false, true])('uses an unnamed Browser title only for a sole Browser surface (single: %s)', async single => {
+  const tab = single ? createWorkbenchTab(mixed.id, pageA) : addWorkbenchRegion(createWorkbenchTab(mixed.id, agent), agent.regionId, 'right', pageA)
+  const second = createWorkbenchTab('unnamed-file-tab', file)
+  useAppStore.setState({ tabs: single ? { [tab.id]: tab } : { [tab.id]: tab, [second.id]: second },
+    layouts: { [workspace.id]: createWorkspaceLayout('original-group', single ? [tab.id] : [tab.id, second.id]) } })
+  const before = useAppStore.getState()
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const title = dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent
+  expect(title).toBe(single ? browser.title : '1 page')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().documents).toBe(before.documents)
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep my draft'); expect(api.sessions.stop).not.toHaveBeenCalled()
 })
