@@ -34,9 +34,13 @@ async function mount({ path = '/Users/alice/project', home = '/Users/alice', hos
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={visible} />)
 }
 async function openEnvironment() {
+  // A retained Launcher cannot open a Portal. Activate this exact original mount first.
+  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={true} />)
+  const warmCalls = vi.mocked(useAppStore.getState().prewarmTerminal).mock.calls.length
   await dom.click('[aria-label="Runtime environment"]')
   const panel = document.querySelector<HTMLElement>('.launcher-environment__panel')
   expect(panel).not.toBeNull()
+  expect(vi.mocked(useAppStore.getState().prewarmTerminal).mock.calls).toHaveLength(warmCalls)
   return panel!
 }
 async function closeEnvironment() { await act(async () => (document.querySelector('[aria-label="Close runtime environment"]') as HTMLButtonElement).click()) }
@@ -94,7 +98,6 @@ describe('the mounted Launcher entry polish', () => {
     expect(panel.textContent).not.toContain('Ready')
     expect(dom.container.querySelector('.launcher-environment details')).toBeNull()
     expect(useAppStore.getState().config?.workspaces[0]?.path).toBe(input.path)
-    expect(useAppStore.getState().prewarmTerminal).not.toHaveBeenCalled()
     await closeEnvironment()
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(document.activeElement).toBe(dom.container.querySelector('[aria-label="Runtime environment"]'))
@@ -110,7 +113,6 @@ describe('the mounted Launcher entry polish', () => {
     expect(panel.textContent).toContain('Isolated environments are not supported yet.')
     await closeEnvironment()
     expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
-    expect(useAppStore.getState().prewarmTerminal).not.toHaveBeenCalled()
   })
 
   it('an absent Host configuration does not claim a configured shell or abbreviate an unconfirmed local path', async () => {
@@ -148,6 +150,7 @@ describe('the mounted Launcher entry polish', () => {
     vi.useFakeTimers()
     try {
       await dom.click('[aria-label="Expand Browser"]')
+      dom.container.querySelector<HTMLElement>('.launcher-browser')!.style.setProperty('--dur-enter', '120ms')
       await dom.click('[aria-label="Collapse Browser"]')
       expect(useLauncherState.getState().sections.workspace!.browser).toBe('collapsed')
       expect(JSON.parse(window.localStorage.getItem('agentmux-launcher')!).state.sections.workspace.browser).toBe('collapsed')

@@ -213,6 +213,6 @@ async function restart() {
 app.whenReady().then(async()=>{try{
   await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1180,height:850,webPreferences:{backgroundThrottling:false,sandbox:false,preload:path.join(__dirname,'preload.cjs'),additionalArguments:phase==='restart'?['--launchpad-boot='+path.join(profile,'boot.json')]:[]}})
   win.webContents.on('console-message',(_e,_level,message)=>console.log('RENDERER '+message));await win.loadFile(html,{query:{phase}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await wait('Boolean(window.launchpad)')
-  if(phase==='restart')await restart();else if(suite==='entry-polish')await capturePolish();else if(suite==='creation-handoff')await captureCreation();else await capture();report.passed=true
+  if(phase==='restart')await restart();else if(suite==='interaction-motion')await require('./motion.cjs')({win,evaluate,element,delay,wait,paint,viewport,click,escape,type,frame,assertGeometry,report,profile,evidence});else if(suite==='entry-polish')await capturePolish();else if(suite==='creation-handoff')await captureCreation();else await capture();report.passed=true
 }catch(error){report.failure={name:error.name,message:error.message,stack:error.stack}}
 finally{await fs.writeFile(path.join(evidence,phase+'-render.json'),JSON.stringify(report,null,2));win?.webContents.session.flushStorageData();win?.destroy();report.passed?app.quit():app.exit(1)}})

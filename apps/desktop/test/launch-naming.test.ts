@@ -22,6 +22,10 @@ const newTabSurfaceSource = readFileSync(
   new URL('../src/renderer/src/components/NewTabSurface.tsx', import.meta.url),
   'utf8'
 )
+const launchOptionSource = readFileSync(
+  new URL('../src/renderer/src/components/LaunchOptionControls.tsx', import.meta.url),
+  'utf8'
+)
 
 const config: AppConfig = {
   version: 9,
@@ -187,23 +191,26 @@ describe('启动时命名：两个可选输入，落地在 store', () => {
 
   it('启动对话框上真的有这两个输入，且不参与 Launch 的禁用判断', () => {
     // 源码断言只作补充：证明这两个可选输入确实接到了这条已被上面证明过的 store 通路上。
-    expect(newTabSurfaceSource).toContain('aria-label="Agent name"')
-    expect(newTabSurfaceSource).toContain('aria-label="Tab name"')
+    expect(launchOptionSource).toContain('aria-label="Agent name"')
+    expect(launchOptionSource).toContain('aria-label="Tab name"')
+    expect(newTabSurfaceSource).toContain('names={names} onNameChange={setName}')
     expect(newTabSurfaceSource).toContain(
       "{ agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }"
     )
     // 留空不得阻塞启动：Launch 按钮的 disabled 条件里不许出现名字。
     // 按钮上点名，不按 "disabled={!workspace" 这个前缀点名——那个前缀在这份源码里命中六处，
     // 取第一处等于断言了一个跟名字无关的控件，加个名字门禁也不会红。
-    const launchButton = newTabSurfaceSource.slice(
-      newTabSurfaceSource.indexOf('className="primary-button"'),
-      newTabSurfaceSource.indexOf('Launch agent')
-    )
+    const start = newTabSurfaceSource.indexOf('className="primary-button launcher-launch-button"')
+    const end = newTabSurfaceSource.indexOf('</button>', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const launchButton = newTabSurfaceSource.slice(start, end)
     // 只截 disabled 那一段：onClick 里出现 agentName 是正常的（那才是把名字送出去的地方）。
-    const disabledClause = launchButton.slice(
-      launchButton.indexOf('disabled={'),
-      launchButton.indexOf('onClick')
-    )
+    const disabledStart = launchButton.indexOf('disabled={')
+    const disabledEnd = launchButton.indexOf('onClick')
+    expect(disabledStart).toBeGreaterThan(-1)
+    expect(disabledEnd).toBeGreaterThan(disabledStart)
+    const disabledClause = launchButton.slice(disabledStart, disabledEnd)
     expect(disabledClause).toContain('disabled={')
     expect(disabledClause).not.toContain('agentName')
     expect(disabledClause).not.toContain('tabName')

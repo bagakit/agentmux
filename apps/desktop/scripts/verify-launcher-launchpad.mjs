@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve, dirname } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
+import { validateLauncherMotionCssReceipt } from './verify-launcher-interaction-motion-css.mjs'
 const require=createRequire(import.meta.url),{build}=await import('vite'),ts=require('typescript')
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), sourceRoot=join(desktop,'src/renderer/src'),fixture=join(desktop,'scripts/fixtures/launcher-launchpad')
 const arg=name=>process.argv.find(value=>value.startsWith(name+'='))?.slice(name.length+1)
@@ -12,7 +14,7 @@ const evidence=arg('--output')?resolve(repository,arg('--output')):receiptPath?d
 const designRoot=arg('--design-root')?resolve(arg('--design-root')):repository
 const scenes=arg('--scenes')??'full'
 const sha=value=>createHash('sha256').update(value).digest('hex')
-const modules=['components/NewTabSurface.tsx','components/LauncherEnvironment.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','lib/copy-path-display.ts','styles/launcher.css','styles/resume.css']
+const modules=['components/NewTabSurface.tsx','components/LauncherEnvironment.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','components/settings/LiquidSelectionSurface.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','lib/copy-path-display.ts','styles/launcher.css','styles/resume.css','styles/settings-materials.css','styles/tokens.css','styles/surfaces.css','styles/base.css']
 const section=(bytes,start,end)=>{const a=bytes.indexOf(start),b=end?bytes.indexOf(end,a+start.length):bytes.length;assert.ok(a>=0&&b>a,'Source binding has a nonempty exact scope: '+start);return bytes.slice(a,b)}
 async function bindings(){
  const facts={}
@@ -22,8 +24,9 @@ async function bindings(){
   const a=store.indexOf(start);assert.ok(a>=0);let b=store.indexOf('\n  },',a);assert.ok(b>a);facts['store:'+name]=sha(store.slice(a,b+5))
  }
  const index=await readFile(join(sourceRoot,'styles/index.css'),'utf8');facts['style-entry']=sha(index.split('\n').filter(line=>/launcher\.css|resume\.css/.test(line)).join('\n'));assert.ok(index.includes("@import './launcher.css';")&&index.includes("@import './resume.css';"))
- for(const name of ['entry.tsx','main.cjs','preload.cjs','index.html'])facts['fixture:'+name]=sha(await readFile(join(fixture,name)))
+ for(const name of ['entry.tsx','main.cjs','motion.cjs','preload.cjs','index.html'])facts['fixture:'+name]=sha(await readFile(join(fixture,name)))
  facts['oracle']=sha(await readFile(import.meta.filename))
+ facts['css-qualification-producer']=sha(await readFile(join(desktop,'scripts/verify-launcher-interaction-motion-css.mjs')))
  for(const [name,anchor] of [['agentmux-desktop-interaction.md','初始 Launcher'],['agentmux-surface-density.md','初始 Launcher']]){
   const bytes=await readFile(join(designRoot,'docs/design',name),'utf8'),start=bytes.lastIndexOf(anchor);assert.ok(start>=0,'Reviewed Launcher SSOT section must be registered');let heading=bytes.lastIndexOf('\n#',start),end=bytes.indexOf('\n## ',start+anchor.length);if(end<0)end=bytes.length;facts['SSOT:'+name]=sha(bytes.slice(heading>=0?heading:start,end))
  }
@@ -61,8 +64,22 @@ if(receiptPath){
  for(const frame of capture.frames)assert.equal(sha(await readFile(join(evidence,frame.file))),frame.sha256,'PNG bytes have not changed')
  const review=await consume(arg('--review')?resolve(repository,arg('--review')):join(evidence,'independent-visual-review.json'),'Independent visual review',identity,capture)
  const runtime=await consume(arg('--runtime-proof')?resolve(repository,arg('--runtime-proof')):join(evidence,'runtime-restart.json'),'Native restart proof',identity,capture)
+ let interactionMotion
+ if(capture.scenes==='interaction-motion'){
+  const sourcePath=join(evidence,'source-receipt.json'),sourceBytes=await readFile(sourcePath),source=JSON.parse(sourceBytes)
+  const checked=spawnSync(process.execPath,[join(desktop,'scripts/verify-launcher-interaction-motion-source.mjs'),'--receipt','--output='+evidence],{cwd:repository,encoding:'utf8',timeout:10000})
+  assert.equal(checked.status,0,'Consume exact current Source qualification: '+checked.stdout+checked.stderr)
+  assert.equal(source.status,'passed');assert.ok(source.mutations.length>0&&source.callers.length>0)
+  for(const input of source.sourceBindings){
+   const prefix='apps/desktop/src/renderer/src/';assert.ok(input.path.startsWith(prefix))
+   const key=input.path.slice(prefix.length),compiled=input.path.endsWith('.css')?capture.compiled.importedStyles:capture.compiled.loadedSources
+   assert.equal(compiled[key],input.sha256,'Qualified Source actually compiled into these native frames: '+key)
+  }
+  const css=await validateLauncherMotionCssReceipt(join(evidence,'css-mutations.json'),capture)
+  interactionMotion={source:{path:sourcePath,sha256:sha(sourceBytes),proof:source},css,sourceConsumer:checked.stdout.trim()}
+ }
  const receipt={schema:'agentmux.launcher-launchpad-acceptance.v1',passed:true,sourceDigest:identity.digest,identity,callers:realCallers,capture,independentVisualReview:review,nativeRuntimeRestart:runtime,
-  boundary:'Actual production Workbench/Region Renderer behavior and two-process private-profile restore; independent aesthetics review of these exact PNGs; separate native Core/ctxmux original healthy Run proof. No installed user App or Renderer update claim.'}
+  ...(interactionMotion?{interactionMotion}:{}),boundary:'Actual production Workbench/Region Renderer behavior and two-process private-profile restore; independent aesthetics review of these exact PNGs; separate native Core/ctxmux original healthy Run proof. No installed user App or Renderer update claim.'}
  await writeFile(receiptPath,JSON.stringify(receipt,null,2));console.log(JSON.stringify({passed:true,receipt:receiptPath,sourceDigest:identity.digest}));process.exit(0)
 }
 const privateRoot=await mkdtemp('/tmp/amx-launchpad-'),profile=join(privateRoot,'profile'),outDir=join(privateRoot,'out')
@@ -78,7 +95,7 @@ try{
  for(const file of modules.filter(name=>name.endsWith('.css')))assert.equal(styles[file],identity.sources[file],'Actual stylesheet imported: '+file)
  const compiled={};for(const entry of await readdir(outDir,{recursive:true,withFileTypes:true}))if(entry.isFile())compiled[join(entry.parentPath,entry.name).slice(outDir.length+1)]=sha(await readFile(join(entry.parentPath,entry.name)))
  assert.ok(Object.keys(compiled).length>0);result.compiled={files:compiled,loadedSources:loaded,importedStyles:styles}
- const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')))
+ const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')));await writeFile(join(privateRoot,'motion.cjs'),await readFile(join(fixture,'motion.cjs')))
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
  for(const phase of ['capture','restart']){
   const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase,scenes],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})

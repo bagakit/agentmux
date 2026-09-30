@@ -7,10 +7,11 @@ import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
 import type { LauncherNames } from '../lib/launcher-name-draft'
 
 /** Provider DESCRIBE choices only. Native selects keep even large declarations compact and keyboard usable. */
-export function LaunchRefine({ options, selection, expanded, onToggle, onSelect, disabled, names, onNameChange }: {
+export function LaunchRefine({ options, selection, expanded, active, onToggle, onSelect, disabled, names, onNameChange }: {
   options: LaunchOption[]
   selection: LaunchOptionSelection
   expanded: boolean
+  active: boolean
   onToggle(): void
   onSelect(optionId: string, choiceId: string | null): void
   disabled?: boolean
@@ -21,7 +22,7 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
   const [content, setContent] = useState<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
     const anchor = trigger.current, panel = content
-    if (!expanded || !anchor || !panel) return
+    if (!active || !expanded || !anchor || !panel) return
     let disposed = false
     const position = async () => {
       const result = await computePosition(anchor, panel, { placement: 'top-start', strategy: 'fixed',
@@ -30,15 +31,15 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
     }
     const stop = autoUpdate(anchor, panel, () => { void position() })
     return () => { disposed = true; stop() }
-  }, [expanded, content])
+  }, [active, expanded, content])
   if (!options.length && !names) return null
   const chosen = options.flatMap(option => {
     const choice = option.choices.find(candidate => candidate.id === selection[option.id])
     return choice ? [{ ...choice, optionId: option.id }] : []
   })
   const selectedTier = chosen.some(choice => choice.tier === 'danger') ? 'danger' : chosen.some(choice => choice.tier === 'caution') ? 'caution' : 'safe'
-  return <Dialog.Root modal={false} open={expanded} onOpenChange={open => { if (open !== expanded) onToggle() }}>
-    <Dialog.Trigger asChild><button type="button" className="launch-refine__toggle" ref={trigger} disabled={disabled}
+  return <Dialog.Root modal={false} open={expanded && active} onOpenChange={open => { if (open !== expanded) onToggle() }}>
+    <Dialog.Trigger asChild><button type="button" className="launch-refine__toggle" ref={trigger} disabled={disabled || !active}
       aria-label="Launch options" title={chosen.length ? chosen.map(choice => choice.label).join(' · ') : 'Launch options and optional names'}>
       <SlidersHorizontal size={13} /><span>Options</span>
       {chosen.length ? <span className="launch-refine__count" data-tier={selectedTier} aria-label={`${chosen.length} options set${selectedTier === 'safe' ? '' : ` · ${selectedTier}`}`}>
@@ -47,8 +48,9 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
       {chosen.length ? <span className="launch-refine__summary">{chosen.map(choice => <span key={choice.optionId} data-tier={choice.tier ?? 'safe'}>{choice.label}</span>)}</span> : null}
       {names?.agentName || names?.tabName ? <i className="launch-refine__named" aria-label="Custom names set" /> : null}
     </button></Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={setContent} className="launch-refine__panel" style={{ visibility: 'hidden' }}>
-      <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options"><X size={14} /></Dialog.Close></header>
+    {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={setContent} className="launch-refine__panel" inert={!expanded} style={{ visibility: 'hidden' }}
+      onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
+      <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><X size={14} /></Dialog.Close></header>
       <Dialog.Description>Choices apply to this launch. Unset values use the Agent’s defaults.</Dialog.Description>
       <div className="launch-refine__fields">
         {options.map(option => {
@@ -68,6 +70,6 @@ export function LaunchRefine({ options, selection, expanded, onToggle, onSelect,
           <label>Tab<input aria-label="Tab name" placeholder="Automatic" value={names.tabName} disabled={disabled} onChange={event => onNameChange('tabName', event.target.value)} /></label>
         </fieldset> : null}
       </div>
-    </Dialog.Content></Dialog.Portal>
+    </Dialog.Content></Dialog.Portal> : null}
   </Dialog.Root>
 }

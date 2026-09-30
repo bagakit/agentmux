@@ -33,6 +33,7 @@ import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
+import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
@@ -50,6 +51,15 @@ export function NewTabSurface({
   visible?: boolean
 }) {
   const presentationActive = useWorkbenchPresentationActive()
+  const [documentVisible, setDocumentVisible] = useState(() => !document.hidden)
+  const motionActive = visible && presentationActive && documentVisible
+  useEffect(() => {
+    if (!visible || !presentationActive) return
+    const changed = () => setDocumentVisible(!document.hidden)
+    changed()
+    document.addEventListener('visibilitychange', changed)
+    return () => document.removeEventListener('visibilitychange', changed)
+  }, [visible, presentationActive])
   const [executorId, setExecutorId] = useState('codex')
   const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
@@ -95,6 +105,7 @@ export function NewTabSurface({
     writeLocal: (field, value) => setLocalNames((current) => ({ ...current, [field]: value }))
   })
   const [optionsExpanded, setOptionsExpanded] = useState(false)
+  useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showUnavailable, setShowUnavailable] = useState(false)
@@ -288,8 +299,8 @@ export function NewTabSurface({
   }
 
   return (
-    <section className="launch-surface" data-agent-section={sections.agents}>
-      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
+    <section className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}>
+      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive} />
 
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Primary Mote Agent is unconfirmed',
@@ -320,7 +331,8 @@ export function NewTabSurface({
       {sections.agents === 'expanded' ? <>
         <div className="agent-catalog" aria-label="Agent executors">
           <div className="agent-picks">
-            {installedExecutors.map(executor => <button type="button" key={executor.id} aria-pressed={executor.id === displayedExecutorId}
+            <LiquidSelectionSurface selected={displayedExecutorId || null} active={visible && presentationActive} targetAttribute="data-executor-id" />
+            {installedExecutors.map(executor => <button type="button" key={executor.id} data-executor-id={executor.id} aria-pressed={executor.id === displayedExecutorId}
               className={`agent-pick ${executor.id === displayedExecutorId ? 'agent-pick--selected' : ''}`}
               title={`${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`} onClick={() => chooseExecutor(executor.id)}>
               <AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /><strong>{executor.label}</strong>
@@ -344,7 +356,7 @@ export function NewTabSurface({
             onChooseSkill={skill => appendReference(skill.path)} onCommand={command => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
             {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
           <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
-        </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded}
+        </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
           onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
           onSelect={(optionId, choiceId) => setLaunchOptionSelection(current => { if (choiceId === null) { const { [optionId]: _cleared, ...rest } = current; return rest }; return { ...current, [optionId]: choiceId } })} /></div>
         <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />

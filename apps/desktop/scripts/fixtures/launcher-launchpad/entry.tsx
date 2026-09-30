@@ -72,11 +72,12 @@ if (!restarting) {
 }
 if (!restarting) useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID,'terminal','hidden')
 const root = createRoot(document.getElementById('root')!)
+let fixtureVisible = true
 function Shell() {
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const tabs=useAppStore(state=>state.tabs),layouts=useAppStore(state=>state.layouts),agentFocus=useAppStore(state=>state.agentFocus)
   const targets=pmoTeamsTopicFloatingViewTargets(floating,tabs,layouts[SCRATCH_WORKSPACE_ID],agentFocus.pmo.sessionId)
-  return <><div id="fixture-workbench"><WorkspaceWorkbench workspaceId={workspaceId} /></div>
+  return <><div id="fixture-workbench" hidden={!fixtureVisible} inert={!fixtureVisible}><WorkspaceWorkbench workspaceId={workspaceId} visible={fixtureVisible} /></div>
     <footer id="fixture-footer"><span>{useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)?.name}</span><PmoTeamsTopicEntry /></footer>
     <div className="workspace-workbench-slot workspace-workbench-slot--parked" aria-hidden inert><WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} visible={false} viewTargets={targets} /></div>
     <WindowOverlayHost><PmoTeamsTopicFloatingPanel floating={floating} setFloating={setFloating} /></WindowOverlayHost></>
@@ -87,6 +88,13 @@ const probe = {
   flush() { return prepareRendererUpdate('quit') },
   bootFacts() { const state=useAppStore.getState(); return {config:state.config,snapshot:{...snapshot,sessions:state.sessions,timelines:state.timelines,recoveryCandidates:state.recoveryCandidates},warm,neighbor} },
   settings() { flushSync(()=>root.render(<div style={{display:'flex',width:'100%',height:'100%'}}><SettingsPanel onClose={()=>probe.scene()} /></div>)) },
+  visibility(visible: boolean) { fixtureVisible = visible; flushSync(() => root.render(<Shell />)) },
+  documentVisibility(hidden: boolean) {
+    // Controlled browser signals exercise production visibility listeners; this is not an OS window claim.
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  },
   pathStyle(absolute: boolean) {
     const config = useAppStore.getState().config!
     flushSync(() => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: absolute } }))
