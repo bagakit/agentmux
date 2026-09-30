@@ -11,6 +11,7 @@ const native = vi.hoisted(() => {
     setDisplayMediaRequestHandler = vi.fn((handler: ((request: any, callback: (streams: any) => void) => void) | null) => { this.display = handler })
     setPermissionCheckHandler = vi.fn()
     setPermissionRequestHandler = vi.fn()
+    setDevicePermissionHandler = vi.fn()
     on = vi.fn()
     removeListener = vi.fn()
   }

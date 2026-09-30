@@ -43,7 +43,8 @@ const fakeElectron = vi.hoisted(() => {
     readonly session = {
       on: vi.fn(), removeListener: vi.fn(),
       setPermissionCheckHandler: vi.fn(),
-      setPermissionRequestHandler: vi.fn()
+      setPermissionRequestHandler: vi.fn(),
+      setDevicePermissionHandler: vi.fn()
     }
     readonly on = vi.fn((event: string, listener: Listener) => {
       const bucket = this.listeners.get(event) ?? []

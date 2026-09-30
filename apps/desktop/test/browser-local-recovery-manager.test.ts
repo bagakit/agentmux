@@ -13,7 +13,7 @@ vi.mock('electron', async () => {
     url = ''; attached = false; destroyed = false; clicks = 0; loads: string[] = []; resolves = 0; snapshots = 0
     failResolves = 0; rejectAction = false; failLoad = false; onResolve?: () => Promise<void>
     removeTargetOnFailure = false; targetMissing = false
-    readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} })
+    readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     readonly mainFrame = { framesInSubtree: [] }
     readonly debugger = Object.assign(new EventEmitter(), {

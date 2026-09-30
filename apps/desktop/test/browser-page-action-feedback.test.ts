@@ -35,7 +35,7 @@ vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   class Contents extends EventEmitter {
     id = 91; url = ''; attached = false; destroyed = false; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []
-    readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} })
+    readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     readonly mainFrame = { framesInSubtree: [] }
     readonly debugger = Object.assign(new EventEmitter(), {
