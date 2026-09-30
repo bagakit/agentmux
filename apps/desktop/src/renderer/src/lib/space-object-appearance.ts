@@ -1,3 +1,4 @@
+import { isMoteAvatarRef, type MoteAvatarRef, type MoteAvatarTarget } from '../../../shared/mote-avatars'
 import {
   Bot, BookOpen, Bookmark, Brain, Code, Compass, Database, FileText, FlaskConical,
   Folder, Gem, Layers, Library, Lightbulb, NotebookText, Package, Puzzle,
@@ -35,8 +36,9 @@ export const SPACE_ICON_CATALOG = {
 } as const
 
 export type SpaceIconId = keyof typeof SPACE_ICON_CATALOG
-export type SpaceIconOverrides = Record<string, SpaceIconId>
-export type SpaceIconTarget = { key: string; name: string; kind: 'folder' | 'topic' | 'mote' }
+export type SpaceIconChoice = SpaceIconId | MoteAvatarRef
+export type SpaceIconOverrides = Record<string, SpaceIconChoice>
+export type SpaceIconTarget = { key: string; name: string; kind: 'folder' | 'topic' | 'mote'; avatarTarget?: MoteAvatarTarget }
 
 export function isSpaceIconId(candidate: unknown): candidate is SpaceIconId {
   return typeof candidate === 'string' && Object.hasOwn(SPACE_ICON_CATALOG, candidate)
@@ -66,13 +68,15 @@ export function folderSpaceIconTarget(project: Pick<WorkspaceProject, 'hostId' |
 }
 
 export function topicSpaceIconTarget(
-  workspace: Pick<WorkspaceRecord, 'hostId' | 'path'>,
+  workspace: Pick<WorkspaceRecord, 'hostId' | 'path'> & { id?: string },
   topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'title' | 'soul'>
 ): SpaceIconTarget {
+  const key = spaceObjectIdentityKey(workspace.hostId, absoluteDirectory(topic.directoryPath) ? topic.directoryPath : joinWorkspacePath(workspace.path, topic.directoryPath))
   return {
-    key: spaceObjectIdentityKey(workspace.hostId, absoluteDirectory(topic.directoryPath) ? topic.directoryPath : joinWorkspacePath(workspace.path, topic.directoryPath)),
+    key,
     name: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title,
-    kind: topic.id === PMO_TEAMS_TOPIC_ID || topic.soul ? 'mote' : 'topic'
+    kind: topic.id === PMO_TEAMS_TOPIC_ID || topic.soul ? 'mote' : 'topic',
+    ...(workspace.id && (topic.id === PMO_TEAMS_TOPIC_ID || topic.soul) ? { avatarTarget: { workspaceId: workspace.id, topicId: topic.id, objectKey: key } } : {})
   }
 }
 
@@ -80,11 +84,11 @@ export function topicSpaceIconTarget(
 export function restoreSpaceIconOverrides(candidate: unknown): SpaceIconOverrides {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {}
   return Object.fromEntries(Object.entries(candidate).filter(([key, value]) =>
-    isSpaceObjectIdentityKey(key) && isSpaceIconId(value))) as SpaceIconOverrides
+    isSpaceObjectIdentityKey(key) && (isSpaceIconId(value) || isMoteAvatarRef(value)))) as SpaceIconOverrides
 }
 
-export function requireSpaceIconSelection(key: string, icon: unknown): asserts icon is SpaceIconId | null {
-  if (!isSpaceObjectIdentityKey(key) || (icon !== null && !isSpaceIconId(icon))) {
+export function requireSpaceIconSelection(key: string, icon: unknown): asserts icon is SpaceIconChoice | null {
+  if (!isSpaceObjectIdentityKey(key) || (icon !== null && !isSpaceIconId(icon) && !isMoteAvatarRef(icon))) {
     throw new Error('Choose a valid Space object and icon.')
   }
 }

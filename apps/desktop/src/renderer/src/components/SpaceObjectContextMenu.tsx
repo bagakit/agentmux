@@ -39,16 +39,16 @@ export function useSpaceObjectMenu() {
 }
 
 /** A real object menu for Space Motes/Topics; registered Folder menus reuse the same entry. */
-export function SpaceObjectContextMenu({ target, onChangeIcon, children }: {
-  target: SpaceIconTarget; onChangeIcon(target: SpaceIconTarget): void; children: ReactNode
+export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuOpen }: {
+  target: SpaceIconTarget; onChangeIcon(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
 }) {
   const menu = useSpaceObjectMenu()
-  return <ContextMenu.Root onOpenChange={menu.onOpenChange}>
+  return <ContextMenu.Root onOpenChange={open => { if (open) onMenuOpen?.(); menu.onOpenChange(open) }}>
     <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
     <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={menu.onCloseAutoFocus}>
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => onChangeIcon(target))}>
-          <Shapes size={14} /><span>Change icon…</span>
+          <Shapes size={14} /><span>{target.avatarTarget ? 'Change avatar…' : 'Change icon…'}</span>
         </ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>

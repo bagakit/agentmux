@@ -80,7 +80,7 @@ async function menuFor(key: string, overview = false) {
   await act(async () => target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 12, clientY: 80 })))
   const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
   expect(items.length).toBeGreaterThan(0)
-  const item = items.find(node => node.textContent === 'Change icon…')
+  const item = items.find(node => node.textContent === 'Change icon…' || node.textContent === 'Change avatar…')
   expect(item).toBeDefined()
   await act(async () => item!.click())
   await act(async () => new Promise(resolve => setTimeout(resolve, 10)))
@@ -98,7 +98,7 @@ it.each(['F10', 'ContextMenu'] as const)('opens live object menus with %s and re
     await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === 'F10', bubbles: true })))
     const menu = document.querySelector<HTMLElement>('[role="menu"]')
     expect(menu).not.toBeNull()
-    expect(menu!.textContent).toContain('Change icon…')
+    expect(menu!.textContent).toMatch(/Change (icon|avatar)…/)
     await act(async () => menu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     await act(async () => new Promise(resolve => setTimeout(resolve, 10)))
     expect(document.querySelector('[role="menu"]')).toBeNull()
@@ -116,7 +116,7 @@ it('changes real Mote, Topic and Folder rows through their actual menus and shar
     const choices = document.querySelectorAll('[data-space-icon-choice]')
     expect(choices).toHaveLength(Object.keys(SPACE_ICON_CATALOG).length)
     expect(choices.length).toBeGreaterThan(0)
-    await click('Book icon'); await click('Save icon')
+    await click('Book icon'); await click(target.avatarTarget ? 'Save avatar' : 'Save icon')
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(manual(target.key)?.dataset.spaceIcon).toBe('book')
   }

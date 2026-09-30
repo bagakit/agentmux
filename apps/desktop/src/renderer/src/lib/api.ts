@@ -576,6 +576,9 @@ const mockApi: AgentMuxDesktopApi = {
     reveal: async () => {}
   },
   scratch: {
+    previewMoteAvatar: async () => { throw new Error('Avatar image processing is not available in the web preview.') },
+    saveMoteAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },
+    readMoteAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },
     listTopics: async (workspaceId) => {
       const topicIds = [...mockFiles.entries()].flatMap(([path, content]) => {
         if (content !== null || path.includes('/')) return []

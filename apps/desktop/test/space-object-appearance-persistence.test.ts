@@ -106,7 +106,8 @@ it('interleaves awaited selections while concurrent pins/layout survive in the l
   store.setState({ layouts: { ...store.getState().layouts, [workspace.id]: layout } })
   const second = store.getState().setSpaceObjectIcon(topicTarget.key, 'book')
   const third = store.getState().setSpaceObjectIcon(moteTarget.key, 'brain')
-  expect(saved().state.spaceObjectIcons).toEqual({ [folder.key]: 'code', [topicTarget.key]: 'book', [moteTarget.key]: 'brain' })
+  expect(store.getState().spaceObjectIcons).toEqual({})
+  expect(saved().state.spaceObjectIcons).toEqual({ [moteTarget.key]: 'brain' })
   expect(saved().state.pinnedItems).toEqual({ [folder.key]: ['main'] })
   expect(saved().state.restoredWorkbench.layouts[workspace.id]).toEqual(layout)
   release(); await Promise.all([first, second, third])
@@ -114,23 +115,23 @@ it('interleaves awaited selections while concurrent pins/layout survive in the l
   expect(saved().state.spaceObjectIcons).toEqual({ [folder.key]: 'folder', [topicTarget.key]: 'book', [moteTarget.key]: 'brain' })
 })
 
-it('keeps a failed synchronous write pending and saves the same selection on explicit retry', async () => {
+it('keeps confirmed choice after synchronous write failure and saves the draft only on explicit retry', async () => {
   await initialize(); vi.advanceTimersByTime(400)
   vi.mocked(storage.setItem).mockImplementationOnce(() => { throw new Error('quota unavailable') })
   await expect(store.getState().setSpaceObjectIcon(topicTarget.key, 'book')).rejects.toThrow('quota unavailable')
-  expect(store.getState().spaceObjectIcons).toEqual({ [topicTarget.key]: 'book' })
+  expect(store.getState().spaceObjectIcons).toEqual({})
   expect(store.getState().workbenchSaveWarning).toContain('quota unavailable')
   await store.getState().setSpaceObjectIcon(topicTarget.key, 'book')
   expect(saved().state.spaceObjectIcons).toEqual({ [topicTarget.key]: 'book' })
   expect(store.getState().workbenchSaveWarning).toBeNull()
 })
 
-it('retains authored metadata after a platform request failure and clears the service notice after retry', async () => {
+it('retains confirmed metadata after a platform request failure and clears the service notice after retry', async () => {
   await initialize(); vi.advanceTimersByTime(400)
   vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('storage owner unconfirmed'))
   await expect(store.getState().setSpaceObjectIcon(moteTarget.key, 'brain')).rejects.toThrow('storage owner unconfirmed')
-  expect(store.getState().spaceObjectIcons).toEqual({ [moteTarget.key]: 'brain' })
-  expect(saved().state.spaceObjectIcons).toEqual({ [moteTarget.key]: 'brain' })
+  expect(store.getState().spaceObjectIcons).toEqual({})
+  expect(saved().state.spaceObjectIcons).toEqual({})
   expect(store.getState().workbenchSaveWarning).toContain('storage owner unconfirmed')
   vi.mocked(api.ui.requestStorageFlush).mockResolvedValue()
   await store.getState().setSpaceObjectIcon(moteTarget.key, 'brain')

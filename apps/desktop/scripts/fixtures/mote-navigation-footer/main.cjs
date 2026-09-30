@@ -11,10 +11,12 @@ const selectedFrames = frameSelection ? JSON.parse(frameSelection) : null
 const footerFrames = ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
   'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts']
 const resizeFrames = ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue']
+const identityFrames = ['identity-wide-cards', 'identity-wide-avatars', 'identity-narrow-cards', 'identity-narrow-avatars', 'identity-save-unconfirmed', 'identity-full-space']
+const moteIdentity = selectedFrames?.[0] === identityFrames[0]
 const floatingResize = selectedFrames?.[0] === resizeFrames[0]
 const footerOnly = selectedFrames?.[0] === footerFrames[0]
 if (selectedFrames) {
-  const expected = floatingResize ? resizeFrames : footerOnly ? footerFrames : selectedFrames.length === 2 ? narrowFrames : affectedEntryFrames
+  const expected = moteIdentity ? identityFrames : floatingResize ? resizeFrames : footerOnly ? footerFrames : selectedFrames.length === 2 ? narrowFrames : affectedEntryFrames
   assert.deepEqual(selectedFrames, expected, 'Capture filtering must retain the reviewed bounded scenario selection')
 }
 app.setPath('userData', path.join(privateRoot, 'user-data'))
@@ -34,6 +36,7 @@ const selectors = {
   settings: '.surface-navigation__settings[aria-label="Settings"]'
 }
 app.whenReady().then(async () => {
+  if (moteIdentity) return await require('./identity-main.cjs')({ app, BrowserWindow, html, privateRoot, evidence, frames: selectedFrames })
   const read = expression => win.webContents.executeJavaScript(expression)
   const call = (method, ...args) => read(`window.motePresentationReview[${JSON.stringify(method)}](...${JSON.stringify(args)})`)
   const facts = () => call('facts')

@@ -4,7 +4,6 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from '@floatin
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { homeZoneId, spatialSources } from '../../../shared/space-addresses'
-import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
@@ -41,19 +40,20 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const status = moteTargetStatus(tab, session, tabId)
+  const identityStatus = topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' + status : status
   const restoring = Boolean(tabId && (!tab || !region || region.kind === 'agent' && !session))
   return <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
     data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
-    aria-label={topic.title + ' · ' + status} onClick={() => onSelect(topic.id, tabId)}
+    aria-label={topic.title + ' · ' + identityStatus} onClick={() => onSelect(topic.id, tabId)}
     onPointerEnter={event => { if (event.pointerType === 'mouse') onIdentity(event.currentTarget) }}
     onPointerLeave={() => onIdentity(null)} onFocus={event => onIdentity(event.currentTarget)} onBlur={() => onIdentity(null)}>
     <span className="mote-chooser__name">
-      {topic.id === PMO_TEAMS_TOPIC_ID && manualIcon === null ? <img src={pmoTeamsTopicAvatar} alt="" aria-hidden="true" /> :
-        <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon} />}
+      <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon}
+        avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
       <strong>{topic.title}</strong>
     </span><span className="mote-chooser__status">
       {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? '?' : <Circle size={7} />}</span>}
-      <span className="mote-chooser__status-text">{status}</span>
+      <span className="mote-chooser__status-text">{identityStatus}</span>
     </span>
     {selected ? <Check className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
   </button>
@@ -170,11 +170,13 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     [floating.open, floating.preview, target.topicId, target.tabId])
   useEffect(() => {
     if (!floating.open) return
+    // A missing exact Tab has no proven Topic; do not turn a derived default into saved identity.
+    if (!floating.targetTopicId && typeof floating.targetTabId === 'string' && !target.tab) return
     if (!floating.targetTopicId || floating.targetTabId === undefined && target.tabId)
       setFloating({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) })
     else if (floating.targetTabId === undefined && !target.tabId && motes.some(topic => topic.id === target.topicId))
       setFloating({ targetTabId: null })
-  }, [floating.open, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, motes, setFloating])
+  }, [floating.open, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, motes, setFloating])
   useEffect(() => {
     if (floating.open && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
   }, [floating.open, target.session, focusPmoSession])

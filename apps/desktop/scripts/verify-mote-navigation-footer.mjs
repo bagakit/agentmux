@@ -11,16 +11,17 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const fixture = join(desktop, 'scripts/fixtures/mote-navigation-footer')
 const require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
-let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, reuseRenderer = null
+let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, moteIdentity = false, reuseRenderer = null
 if (args[0] === '--reuse') {
   const { recapture } = await import('./fixtures/mote-navigation-footer/recapture.mjs')
   await recapture({ desktop, repository, fixture, driver: import.meta.filename }, args)
   process.exit(0)
 }
 if (args.length) {
-  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only|floating-resize --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
+  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only|floating-resize|mote-identity --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
   assert.equal(args[0], '--capture'); assert.equal(args[2], '--candidate')
-  assert.ok(['affected-entry', 'footer-only', 'floating-resize'].includes(args[1]))
+  assert.ok(['affected-entry', 'footer-only', 'floating-resize', 'mote-identity'].includes(args[1]))
+  moteIdentity = args[1] === 'mote-identity'
   footerOnly = args[1] === 'footer-only'
   floatingResize = args[1] === 'floating-resize'
   if (args.length === 6) {
@@ -28,7 +29,7 @@ if (args.length) {
     reuseRenderer = resolve(repository, args[5])
   }
   candidateFile = resolve(repository, args[3])
-  selectedFrames = floatingResize ? ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue'] : footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
+  selectedFrames = moteIdentity ? ['identity-wide-cards', 'identity-wide-avatars', 'identity-narrow-cards', 'identity-narrow-avatars', 'identity-save-unconfirmed', 'identity-full-space'] : floatingResize ? ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue'] : footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
     'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts'] : ['wide-closed-low-footer-circle', 'wide-hover-cards-original-input',
     'narrow-long-names-all-motes-cards', 'narrow-avatars-custom-original-draft',
     'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
@@ -91,8 +92,8 @@ const result = {
   ], stage: 'preparation', cleanup: null
 }
 if (selectedFrames) {
-  result.captureSelection = { mode: floatingResize ? 'floating-resize' : footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
-    scope: floatingResize ? 'One actual App Renderer compile: bounded resize, both rail forms, narrow viewport, cancel, advisory storage failure/recovery and reload proof. Five complete frames; no old Footer/native or eight-flow replay.' : footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
+  result.captureSelection = { mode: moteIdentity ? 'mote-identity' : floatingResize ? 'floating-resize' : footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
+    scope: moteIdentity ? 'One actual App Renderer compilation, original image picker and real ScratchTopics asset/ordinary initialization owner in a private process, four rail geometries, save failure and Space identity, same-profile Renderer reload. Six complete frames; no Core Run/native claim.' : floatingResize ? 'One actual App Renderer compile: bounded resize, both rail forms, narrow viewport, cancel, advisory storage failure/recovery and reload proof. Five complete frames; no old Footer/native or eight-flow replay.' : footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
       'New actual Renderer compilation and six new affected frames; all eight original interactions/assertions replayed. The prior wide avatar and light images retain their original scope, not new candidate screenshots.' }
 }
 await mkdir(evidence, { recursive: true })
@@ -109,7 +110,7 @@ try {
     await writeFile(join(evidence, 'candidate.json'), bytes)
   }
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'),
-    ...['index.html', 'entry.tsx', 'main.cjs', 'scenario.md'].map(name => join(fixture, name))]) {
+    ...['index.html', 'entry.tsx', 'main.cjs', 'scenario.md', ...(moteIdentity ? ['identity-main.cjs', 'identity-preload.cjs'] : [])].map(name => join(fixture, name))]) {
     const bytes = await readFile(file)
     inputs.set(file, hash(bytes)); originalBytes.set(file, bytes)
   }
@@ -137,11 +138,24 @@ try {
     await cp(parent.compiledRenderer, outDir, { recursive: true })
     result.reusedCompilation = { receipt: reuseRenderer, sha256: hash(parentBytes), compiled: parent.compiled,
       scope: 'Unchanged original actual Renderer compilation; current separately bound Node capture/assertion driver. No Renderer recompile.' }
-  } else await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
+  } else {
+    const aliases = []
+    if (moteIdentity) for (const name of ['core', 'demand', 'layout']) {
+      const manifest = JSON.parse(await readFile(join(repository, 'packages', name, 'package.json'), 'utf8'))
+      const exports = Object.entries(manifest.exports)
+      assert.ok(exports.length > 0)
+      for (const [subpath, target] of exports) {
+        const specifier = '@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))
+        const source = target.import.replace('./dist/', name === 'core' ? './src/' : './').replace(/\.js$/, '.ts')
+        aliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: join(repository, 'packages', name, source) })
+      }
+    }
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases },
     esbuild: { jsx: 'automatic' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [sourceBinding], css: { postcss: { plugins: [stylesheetBinding] } },
     build: { target: 'esnext', outDir, emptyOutDir: true, minify: false } })
+  }
   assert.ok(inputs.size > 0, 'Imported input graph must be nonempty')
   assert.ok(styles.size > 1, 'Original consumed local style graph must be nonempty')
   assert.ok(watchedStyles.size > 1, 'Actual Vite watched style graph must be nonempty')
@@ -152,6 +166,16 @@ try {
   }
   for (const name of ['index.css', 'agent.css', 'pmo-teams-topic.css']) {
     assert.ok([...styles].some(file => file.endsWith('/styles/' + name)), `Actual style missing: ${name}`)
+  }
+  if (moteIdentity) {
+    const producers = result.candidate.files.filter(row => row.path.startsWith('apps/desktop/src/renderer/src/') || row.path === 'apps/desktop/src/shared/mote-avatars.ts' || row.path.endsWith('/mote-navigation-footer/entry.tsx'))
+    assert.ok(producers.length >= 12, 'Avatar production producer set includes the original consumers, picker, state and typed contract')
+    for (const row of producers) assert.equal(inputs.get(join(repository, row.path)), row.sha256, 'Actual compiled avatar producer consumes candidate bytes')
+    for (const name of ['SpaceObjectIcon.tsx', 'SpaceIconPicker.tsx', 'MoteAvatarCrop.tsx']) assert.ok([...inputs.keys()].some(file => file.endsWith('/' + name)), 'Actual avatar owner not compiled: ' + name)
+    assert.ok([...styles].some(file => file.endsWith('/styles/space-object-appearance.css')), 'Original avatar style is consumed')
+    result.sourceScope = 'Actual production App Renderer and current real ScratchTopics/WorkspaceFiles Source owners; controlled external Session facts and typed Main bridge in a private process.'
+    result.limitations[1] = 'Real current Topic initialization, image assets and final file guards; controlled external Session/timeline facts and action sinks do not prove attachment, SDK, Core/ctxmux Run or real CLI survival.'
+    result.limitations[4] = 'Current Core/demand/layout Source is byte-bound to this Renderer compilation; no Core build or runtime lifecycle claim.'
   }
   if (floatingResize) {
     const producers = result.candidate.files.filter(row =>
@@ -202,7 +226,10 @@ try {
   assert.equal(result.renderer.passed, true)
   assert.equal(result.renderer.frames.length, selectedFrames?.length ?? 8, 'Every selected actual frame must be captured')
   if (selectedFrames) assert.deepEqual(result.renderer.frames.map(frame => frame.name), selectedFrames)
-  if (floatingResize) {
+  if (moteIdentity) {
+    assert.ok(result.renderer.checks.length >= 10, 'Identity proof must include actual controls and real directory/assets')
+    assert.equal(result.renderer.reload.passed, true, 'Same-profile choice/asset reload must be proven')
+  } else if (floatingResize) {
     assert.ok(result.renderer.checks.length >= 12, 'Actual resize proof must be nonempty and complete')
     assert.equal(result.renderer.replayedFrames.length, selectedFrames.length, 'Only reviewed resize frames replayed')
   } else if (footerOnly) assert.equal(result.renderer.checks.length, 16, 'Every actual Footer count case is retained')
@@ -294,10 +321,10 @@ try {
   if (!result.cleanup.remaining.length) { await rm(privateRoot, { recursive: true }); result.cleanup.privateRootRemoved = true }
   await writeFile(join(evidence, 'receipt.json'), JSON.stringify(result, null, 2))
   await writeFile(join(evidence, 'review.md'), [
-    '# Mote rail / footer / Settings — independent actual look pending', '',
+    moteIdentity ? '# Mote avatars and primary identity — independent actual look pending' : '# Mote rail / footer / Settings — independent actual look pending', '',
     `Capture passed: ${result.passed}. Stage: ${result.stage}. This is a single private Renderer capture, not native/OS/Core Run sign-off.`, '',
     ...(result.renderer?.frames ?? []).map(frame => `- ${frame.name}: [Actual complete Renderer frame](${frame.file}) — ${frame.sha256}`), '',
-    floatingResize ? 'Open all five complete frames. Review actual corner handle discoverability/hit area, 10px top/right frame, wide/narrow card/avatar original workface, advisory storage failure and usable original input. Only floating resize scope is new.' : footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
+    moteIdentity ? 'Open all six complete frames. Review the same primary/custom images at 980/420 in cards/avatars, the original circle crop and actionable saving-unconfirmed dialog, visible primary identity, retained real input and same full Space identity. Current Source owners and real private filesystem asset proof are bounded in renderer.json; no healthy App/Core Run claim.' : floatingResize ? 'Open all five complete frames. Review actual corner handle discoverability/hit area, 10px top/right frame, wide/narrow card/avatar original workface, advisory storage failure and usable original input. Only floating resize scope is new.' : footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
       'Open every frame. Review both rail forms, complete objects and original input, narrow long names, dark/light boundary, low bar and complete circle/status/focus, and Settings operability.',
     'Original inputs/raw CSS/compiled bytes and actual geometry/events are in receipt.json. Capture success does not constitute aesthetic approval.'
   ].join('\n'))

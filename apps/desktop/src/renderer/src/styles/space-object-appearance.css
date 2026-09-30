@@ -1,5 +1,5 @@
 .space-object-icon { flex-shrink: 0; }
-.space-icon-picker { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 24px)); box-sizing: border-box; padding: var(--sp-5); display: grid; gap: var(--sp-4); overflow-y: auto; }
+.space-icon-picker { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 24px)); box-sizing: border-box; padding: var(--sp-5); display: grid; gap: var(--sp-4); overflow-y: auto; max-height: calc(100vh - 24px); }
 .space-icon-picker__title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 620; overflow-wrap: anywhere; }
 .space-icon-picker__description { margin: 0; font-size: var(--fs-meta); line-height: 1.5; }
 .space-icon-picker__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(32px, 1fr)); gap: var(--sp-2); }
@@ -12,3 +12,17 @@
 .space-icon-picker__error { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .space-icon-picker footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-3); }
 .space-icon-picker__save { color: var(--text); background: var(--surface-3); }
+
+.space-object-icon__avatar { width: 14px; height: 14px; border-radius: 50%; object-fit: cover; }
+.mote-avatar-file { position: relative; justify-self: start; cursor: pointer; }
+.mote-avatar-file input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.mote-avatar-file:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
+.mote-avatar-crop { display: grid; justify-items: center; gap: var(--sp-3); }
+.mote-avatar-crop__preview { width: 128px; height: 128px; border-radius: 50%; touch-action: none; cursor: grab; background: var(--surface-3); }
+.mote-avatar-crop__zoom { width: 100%; display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-meta); }
+.mote-avatar-crop__zoom input { min-width: 0; flex: 1; accent-color: var(--green); }
+.pmo-teams-topic-compact-launcher__surface > .space-object-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
+.pmo-teams-topic-compact-launcher__surface > .space-object-icon > svg { width: 22px; height: 22px; }
+.pmo-teams-topic-compact-launcher__surface > .space-object-icon > .space-object-icon__avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+
+.mote-chooser__name .space-object-icon__avatar { width: 24px; height: 24px; }

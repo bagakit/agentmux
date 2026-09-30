@@ -106,7 +106,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               aria-current={selected ? 'page' : undefined}
               title={[name, topic.readError ?? topic.summary, topic.directoryPath].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
-              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} />
+              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />
               <span className="project-rail-row__identity"><strong>{name}</strong></span>
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
