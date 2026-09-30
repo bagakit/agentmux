@@ -1202,6 +1202,13 @@ const mockApi: AgentMuxDesktopApi = {
     answerAppLink: async () => { throw new Error('App links are not available in Web Preview') },
     cancelElementSelection: async () => {},
     setAnnotationMarkers: async () => {},
+    registerPresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
+    updatePresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
+    removePresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
+    armPresentationCapture: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
+    ackPresentationCapture: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
+    activatePresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
+    onPresentationEvent: () => () => {},
     setBounds: async () => {},
     release: async (id) => {
       // The preview has no native WebContentsView, but keeping the id in the mock map models the
