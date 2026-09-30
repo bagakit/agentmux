@@ -3,15 +3,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence, scope, baselineFile] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope==='goal-main-mote-only' ? 'goal-main-mote' : scope==='direct-goal-only' ? 'direct-goal' : scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
+const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope==='goal-main-mote-only' ? 'goal-main-mote' : ['direct-goal-only','direct-reading-only'].includes(scope) ? 'direct-goal' : scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, readingOnly: scope==='direct-reading-only', frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
 let win
-async function phase(name) { if(['direct-goal-only','goal-main-mote-only'].includes(scope)) await fs.writeFile(path.join(evidence,'phase.json'), JSON.stringify({phase:name,at:Date.now()})) }
+async function phase(name) { if(['direct-goal-only','direct-reading-only','goal-main-mote-only'].includes(scope)) await fs.writeFile(path.join(evidence,'phase.json'), JSON.stringify({phase:name,at:Date.now()})) }
 const evaluate = expression => win.webContents.executeJavaScript(expression)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function waitFor(expression) { for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(25)}throw new Error('Timed out: '+expression) }
 async function paint(){ await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await delay(70) }
 async function size(width){await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:780,deviceScaleFactor:1,mobile:false});await paint()}
-async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();let appearance;if(['direct-goal-only','goal-main-mote-only'].includes(scope)){appearance=await evaluate('({config:goalsVisual.directFacts().appearance,dom:document.documentElement.dataset.appearance,colorScheme:document.documentElement.style.colorScheme})');const expected=name.split('-')[1];assert.deepEqual(appearance,{config:expected,dom:expected,colorScheme:expected},'Frame theme is the actual Config and painted DOM theme')}const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,...(appearance?{appearance}:{}),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
+async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();let appearance;if(['direct-goal-only','direct-reading-only','goal-main-mote-only'].includes(scope)){appearance=await evaluate('({config:goalsVisual.directFacts().appearance,dom:document.documentElement.dataset.appearance,colorScheme:document.documentElement.style.colorScheme})');const expected=name.split('-')[1];assert.deepEqual(appearance,{config:expected,dom:expected,colorScheme:expected},'Frame theme is the actual Config and painted DOM theme')}const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,...(appearance?{appearance}:{}),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
 const button = label => `([...document.querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)} || node.getAttribute('aria-label')===${JSON.stringify(label)}))`
 async function click(expression){const point=await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});await paint()}
 async function insert(selector,text){await click(`document.querySelector(${JSON.stringify(selector)})`);await win.webContents.debugger.sendCommand('Input.insertText',{text});await paint()}
@@ -91,7 +91,7 @@ async function visibleDirectLauncherFooter() {
 async function directScenes() {
  await evaluate('goalsVisual.seedDirect();goalsVisual.appearance("light")');await size(1280)
  assert.equal(await evaluate('document.querySelectorAll("[data-demand-id]").length'),0)
- await capture('1280-light-direct-empty',1280)
+ if(scope!=='direct-reading-only')await capture('1280-light-direct-empty',1280)
  await click(button('Goal filters'));await evaluate(`(()=>{const e=document.querySelector('[aria-label="Filter project"]');e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`);await click(button('Goal filters'))
  await evaluate('goalsVisual.appearance("dark")');await click('document.querySelector("button[data-new-goal]")')
  await waitFor('goalsVisual.directFacts().request===null && Boolean(goalsVisual.directFacts().tabId)')
@@ -108,6 +108,7 @@ async function directScenes() {
  result.observations.push({scene:'direct-preview-native-body',native,wireBoundary:'Exact captured Renderer request; Core guide/Notes and real CLI delivery excluded'})
  await capture('1280-dark-direct-goal-pmo',1280)
  await size(620);assert.equal((await evaluate('goalsVisual.directFacts()')).goal.id,created.goal.id);await visibleDirectPmo(created.tabId);await capture('620-dark-direct-goal-pmo',620)
+ if(scope==='direct-reading-only'){assert.equal(result.frames.length,2);return}
  await click(button('Close Mote'));await evaluate('goalsVisual.appearance("light")');await visibleDetail('direct-returned-goal');await capture('620-light-direct-returned-goal',620)
  await evaluate('goalsVisual.seedDirect("save-unknown");goalsVisual.appearance("light")');await size(1280);await click('document.querySelector("button[data-new-goal]")')
  await waitFor('goalsVisual.directFacts().request?.phase==="save" && !goalsVisual.directFacts().request.pending')
@@ -140,7 +141,7 @@ app.whenReady().then(async()=>{
    await require('./project-links.cjs')({evaluate,size,click,capture,waitFor,result})
   }else if(scope==='goal-main-mote-only'){
    await require('./main-mote.cjs')({evaluate,size,click,capture,waitFor,result,visibleDirectPmo})
-  }else if(scope==='direct-goal-only'){
+  }else if(scope==='direct-goal-only'||scope==='direct-reading-only'){
    await directScenes()
   }else if(scope?.startsWith('density')){
    await densityScenes()
