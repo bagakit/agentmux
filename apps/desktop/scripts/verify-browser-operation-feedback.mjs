@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdir, mkdtemp, readFile, writeFile, readdir, rm, symlink, stat, realpath } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, rm, symlink, stat, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess } from './probe-process.mjs'
+import { feedbackEvidenceBytes as sizeOf, writeFeedbackReceipt } from './browser-operation-feedback-evidence.mjs'
 import { execFileSync } from 'node:child_process'
 
 // A thin actual Main consumer. It never builds/installs Desktop or owns a user Run.
@@ -26,15 +27,6 @@ const receipt = { schema: nativeScope === 'motion' ? 'agentmux.browser-operation
   source: {}, phases: [], cleanup: {}, visual: { captureOnly: true, aestheticReview: 'not-performed' } }
 let server, failure
 await mkdir(out, { recursive: true })
-async function sizeOf(path) {
-  let total = 0
-  for (const entry of await readdir(path, { withFileTypes: true })) {
-    const p = join(path, entry.name)
-    if (entry.isSymbolicLink()) continue
-    total += entry.isDirectory() ? await sizeOf(p) : (await stat(p)).size
-  }
-  return total
-}
 const sourceInputs = new Map()
 const externalInputs = new Map()
 const actualPhases = [] // Raw cases live only in their actual process files, never a second serialized copy.
@@ -110,7 +102,7 @@ try {
   receipt.source.bundleBytes = actualBundle.length
   receipt.source.bundleSha256 = digest(actualBundle)
   await writeFile(receipt.source.bundlePath, actualBundle)
-  for (const path of [resolve(import.meta.filename), join(desktopRoot, 'scripts/probe-process.mjs')]) {
+  for (const path of [resolve(import.meta.filename), join(desktopRoot, 'scripts/probe-process.mjs'), join(desktopRoot, 'scripts/browser-operation-feedback-evidence.mjs')]) {
     const bytes = await readFile(path), relativePath = path.slice(repositoryRoot.length + 1), snapshot = join(out, 'source-inputs', relativePath)
     await mkdir(dirname(snapshot), { recursive: true }); await writeFile(snapshot, bytes)
     sourceInputs.set(path, { path, relativePath, sha256: digest(bytes), bytes: bytes.length, snapshot })
@@ -205,7 +197,7 @@ finally {
   }
   await rm(temporaryRoot, { recursive: true, force: true })
   receipt.cleanup.privateRootRemoved = true
-  await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt))
+  await writeFeedbackReceipt(out, receipt, nativeScope === 'motion' ? 8 * 1024 * 1024 : undefined)
 }
 console.log(JSON.stringify({ receipt: join(out, 'receipt.json'), passed: receipt.passed, taskComplete: false }))
 if (failure || !receipt.passed) process.exitCode = 1
