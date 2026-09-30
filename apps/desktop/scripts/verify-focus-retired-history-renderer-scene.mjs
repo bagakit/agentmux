@@ -37,7 +37,7 @@ try{
   await fs.writeFile(path.join(evidence,'stderr.log'),lines.join('\n'))
   receipt.actual=JSON.parse(await fs.readFile(path.join(evidence,'scene.json'),'utf8'));assert.equal(receipt.exit.timedOut,false);assert.equal(receipt.exit.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true);assert.deepEqual(receipt.actual.controls,[])
   receipt.inputsAfter=await binding();assert.deepEqual(receipt.inputsAfter,receipt.inputs,'Own source and consumed Main IPC bytes remain exact')
-  receipt.images=await Promise.all(receipt.actual.frames.map(async frame=>({path:path.relative(root,path.join(evidence,frame.image)),sha256:hash(await fs.readFile(path.join(evidence,frame.image))),width:frame.width})))
+  receipt.images=await Promise.all(receipt.actual.frames.map(async frame=>({path:path.relative(evidence,path.join(evidence,frame.image)),sha256:hash(await fs.readFile(path.join(evidence,frame.image))),width:frame.width})))
   receipt.passed=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack}}
 finally{
