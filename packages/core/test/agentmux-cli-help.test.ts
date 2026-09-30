@@ -5,24 +5,44 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
-import { defaultAgentMuxControlSocketPath } from '../src/runtime-paths.js'
 
 const execFileAsync = promisify(execFile)
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 const packageManifestUrl = new URL('../package.json', import.meta.url)
+let cliFixtureRoot: string
+let cliFixtureEnvironment: NodeJS.ProcessEnv | undefined
+beforeAll(async () => {
+  cliFixtureRoot = await mkdtemp(join(tmpdir(), 'amx-cli-help-'))
+  cliFixtureEnvironment = Object.fromEntries(Object.entries(process.env)
+    .filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
+  Object.assign(cliFixtureEnvironment, {
+    AGENTMUX_RUNTIME_DIRECTORY: join(cliFixtureRoot, 'r'),
+    AGENTMUX_STATE_DIRECTORY: join(cliFixtureRoot, 's'),
+    AGENTMUX_AGENT_SESSION_STORE: join(cliFixtureRoot, 'sessions.json'),
+    AGENTMUX_MESSAGE_QUEUE_PATH: join(cliFixtureRoot, 'messages.ndjson')
+  })
+})
+afterAll(async () => {
+  if (cliFixtureRoot) await rm(cliFixtureRoot, { recursive: true, force: true })
+})
+function cliChildEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  if (!cliFixtureEnvironment) throw new Error('Private CLI fixture environment is not ready.')
+  return { ...cliFixtureEnvironment, ...overrides }
+}
 async function run(args: readonly string[]): Promise<string> {
-  return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024 })).stdout
+  return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: cliChildEnvironment() })).stdout
 }
 /** 同 {@link run}，但带环境覆盖——`endpoint` 要证明它跟着 AGENTMUX_RUNTIME_DIRECTORY 走。 */
 async function runWithEnv(args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
-  return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: { ...process.env, ...env } })).stdout
+  return (await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: cliChildEnvironment(env) })).stdout
 }
 
 async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
-  try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: { ...process.env, ...env } }) } catch (error) {
+  try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, env: cliChildEnvironment(env) }) } catch (error) {
     const failure = error as { stdout: string; stderr: string; code: number }
     return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code }
   }
@@ -31,7 +51,7 @@ async function fail(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
 
 /** 同 {@link fail}，但从某个目录里跑——`roles` 三条子命令读的是 `process.cwd()`，不是任何选项。 */
 async function failIn(cwd: string, args: readonly string[]) {
-  try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, cwd }) } catch (error) {
+  try { await execFileAsync(cli, args, { timeout: 5_000, maxBuffer: 512 * 1024, cwd, env: cliChildEnvironment() }) } catch (error) {
     const failure = error as { stdout: string; stderr: string; code: number }
     return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code }
   }
@@ -48,7 +68,7 @@ async function runWithStdin(
   stdin: string,
   env: NodeJS.ProcessEnv = {}
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  const child = spawn(cli, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn(cli, args, { env: cliChildEnvironment(env), stdio: ['pipe', 'pipe', 'pipe'] })
   let stdout = ''
   let stderr = ''
   child.stdout.setEncoding('utf8'); child.stdout.on('data', (chunk: string) => { stdout += chunk })
@@ -88,10 +108,10 @@ describe('agentmux CLI discovery', () => {
   /**
    * 端点发现：一个非 Node 客户端要能问出"往哪连、什么协议版本"，而不必读我们的 TS 源码复算哈希。
    *
-   * 期望值取自 `defaultAgentMuxControlSocketPath()` **本身**，不是在这里再拼一遍
-   * `join(runtimeDir, 'control.sock')`：后者是第二份手抄，两份一起漂的时候它自己不会响。
+   * 期望值使用child的独占fixture Runtime根，不读取测试进程继承的生产端点。
+   * 自定义override另测；默认child也必须留在同一隔离根，不能回到共享端点。
    */
-  it('endpoint 报出的路径与内部取值同源，并同时给出协议版本', async () => {
+  it('endpoint 报出本fixture的准确路径，并同时给出协议版本', async () => {
     const printed = JSON.parse(await run(['endpoint'])) as {
       ok: boolean
       operation: string
@@ -99,8 +119,8 @@ describe('agentmux CLI discovery', () => {
     }
     expect(printed.ok, 'endpoint 没能成功作答').toBe(true)
     expect(printed.operation).toBe('endpoint')
-    expect(printed.result.control.path, '报出的路径与 defaultAgentMuxControlSocketPath() 不是同一个值')
-      .toBe(defaultAgentMuxControlSocketPath())
+    expect(printed.result.control.path, '报出的路径不在本fixture的独占Runtime根下')
+      .toBe(join(cliFixtureRoot, 'r', 'control.sock'))
     expect(printed.result.schemaVersion, '协议版本没报，或报的不是当前这一版')
       .toBe(AGENTMUX_CONTROL_SCHEMA_VERSION)
     // 承载方式也要说：客户端拿到一个路径但不知道是 unix socket + NDJSON，还是接不进来。
@@ -115,7 +135,7 @@ describe('agentmux CLI discovery', () => {
     }
     expect(printed.result.control.path, '换了 runtime 根，报出的路径没跟着换').toBe(join(relocated, 'control.sock'))
     // 另一半：它**确实换了**。只判"等于 relocated 下那个"对"两边都返回同一个硬编码值"是瞎的。
-    expect(printed.result.control.path, '覆盖前后报出的是同一个路径').not.toBe(defaultAgentMuxControlSocketPath())
+    expect(printed.result.control.path, '覆盖前后报出的是同一个路径').not.toBe(join(cliFixtureRoot, 'r', 'control.sock'))
   })
 
   it('daemon 没起也答得出端点：发现不等于连接', async () => {
@@ -294,22 +314,26 @@ describe('agentmux CLI discovery', () => {
       [...body.replace(/^[ \t]*\/\/[^\n]*$/gm, '').matchAll(/'([A-Z_]+)'/g)].map((match) => match[1]!)
     const registered = new Set(registryMembers(registry![1]!))
 
-    // 每个 throw 取它实参里的大写串。**不能**用 `new AgentMuxError\(([\s\S]*?)\)`：非贪婪的 `\)`
-    // 停在第一个右括号上，而 message 常是带调用的模板串（``…${file(workspacePath)}``），于是实参被
-    // 截断在码之前——实测 agent-role-directory.ts 的三处 throw 因此一个都取不到。所以从 `(` 起
-    // 数括号配平，取完整实参。
+    // Constructor只取第二实参的结果值；条件中的errno和message里的大写词都不是typed code。
+    // 复用现有TypeScript parser，透明括号与conditional结果分支递归，条件本身不收。
     const codesIn = (source: string): string[] => {
       const found: string[] = []
-      for (const match of source.matchAll(/new AgentMuxError\(/g)) {
-        let depth = 0
-        let index = match.index + match[0].length - 1
-        for (; index < source.length; index += 1) {
-          if (source[index] === '(') depth += 1
-          else if (source[index] === ')') { depth -= 1; if (depth === 0) break }
+      const collectCodeValues = (expression: ts.Expression | undefined): void => {
+        if (!expression) return
+        if (ts.isStringLiteralLike(expression)) found.push(expression.text)
+        else if (ts.isParenthesizedExpression(expression)) collectCodeValues(expression.expression)
+        else if (ts.isConditionalExpression(expression)) {
+          collectCodeValues(expression.whenTrue)
+          collectCodeValues(expression.whenFalse)
         }
-        const args = source.slice(match.index, index)
-        found.push(...[...args.matchAll(/'([A-Z][A-Z_]{3,})'/g)].map((code) => code[1]!))
       }
+      const visitConstructor = (node: ts.Node): void => {
+        if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'AgentMuxError') {
+          collectCodeValues(node.arguments?.[1])
+        }
+        ts.forEachChild(node, visitConstructor)
+      }
+      visitConstructor(ts.createSourceFile('control-errors.ts', source, ts.ScriptTarget.Latest, true))
       // 上面那圈只看得见**字面量直接写在构造里**的码。control-host.ts 不是这么写的：`object` / `id` /
       // `identity` / `text` 各自把 `code: string` 当形参收下，再 `throw new AgentMuxError(message, code)`，
       // 于是真正的码只出现在调用点（`object(v, '…', 'INVALID_CONTROL_REQUEST')`），构造里一个大写字面量
@@ -345,6 +369,12 @@ describe('agentmux CLI discovery', () => {
       }
       return found
     }
+
+    // metrics-watch的真实形态：Node errno只参与条件，结果值才是两个Control码。
+    expect(codesIn("new AgentMuxError(error.message, error.code === 'ENOENT' || error.code === 'ECONNREFUSED' ? 'CONTROL_UNAVAILABLE' : 'CONTROL_PROTOCOL_ERROR')"))
+      .toEqual(['CONTROL_UNAVAILABLE', 'CONTROL_PROTOCOL_ERROR'])
+    expect(codesIn("new AgentMuxError(error.message, (error.code === 'ENOENT' ? ('NEVER_REGISTERED') : (error.code === 'ECONNREFUSED' ? 'CONTROL_UNAVAILABLE' : 'CONTROL_PROTOCOL_ERROR')))"))
+      .toEqual(['NEVER_REGISTERED', 'CONTROL_UNAVAILABLE', 'CONTROL_PROTOCOL_ERROR'])
 
     // 只收值 import：`import type { … } from './x.js'` 与 `import { type A }` 都不产生运行时边。
     // 子句里**不许出现换行**（`[^\n]`）：本仓不写分号，用 `[\s\S]*?` 或 `[^;]*?` 都会一路吞过好几条
@@ -632,7 +662,7 @@ describe('agentmux CLI discovery', () => {
       const relocated = await execFileAsync(
         process.execPath,
         [join(stage, 'dist', 'agentmux.js'), '--version'],
-        { timeout: 10_000, maxBuffer: 512 * 1024 }
+        { timeout: 10_000, maxBuffer: 512 * 1024, env: cliChildEnvironment() }
       )
       expect(relocated.stdout).toBe(`agentmux ${sentinel}\n`)
     } finally {
