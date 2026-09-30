@@ -1,74 +1,61 @@
-import { Copy } from 'lucide-react'
+import type { MouseEvent } from 'react'
+import { MailboxRecordRow, MailboxTime } from './MailboxReading'
 
 export type ComposerQueuedMessage = {
   id: string
   text: string
   enqueuedAt?: number
-  // `deferred` 是「我们这次没投出去，Agent 还好着，还在等下一次机会」。它必须与 `queued` 分开，
-  // 否则角标会照 healthy 路径念「queued for delivery」，把一次降级静默放行（store.ts 的
-  // AgentSteerQueueEntry 记了为什么这一档要在模型里有名字）。
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   deliverable: boolean
   sending?: boolean
   error?: string
 }
 
-export function ComposerOutbox({ queued, onCopy, onRemove, onMove, onSend }: {
+export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove, onMove, onSend }: {
   queued: readonly ComposerQueuedMessage[]
+  selectedId: string | null
+  onSelect: (id: string, event: MouseEvent<HTMLButtonElement>) => void
   onCopy?: (text: string) => void
   onRemove?: (id: string) => void
   onMove?: (id: string, direction: 'up' | 'down') => void
   onSend?: (id: string) => void
 }) {
-  if (!queued.length) return <p>No pending messages.</p>
-  const retryEntry = queued.find((entry) => entry.deliverable)
-  const { sending, label } = summarizeQueue(queued)
-  return (
-    <section className="composer-outbox" aria-label="Queued messages">
-        <h3>{label}</h3>
-        <ol>
-          {queued.map((entry, index) => {
-            const recordedTime = typeof entry.enqueuedAt === 'number' && Number.isFinite(entry.enqueuedAt) && entry.enqueuedAt >= 0
-              ? new Date(entry.enqueuedAt) : undefined
-            const time = recordedTime && !Number.isNaN(recordedTime.getTime()) ? recordedTime : undefined
-            return <li key={entry.id} data-state={entry.status}>
-            <span>{entry.text}</span>
-            <small>{time ? <>Queued <time dateTime={time.toISOString()} title={time.toLocaleString()}>
-              {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </time></> : 'Queued time unknown'}</small>
-            {entry.sending ? <small>{entry.status === 'restoring'
-              ? 'Restoring the Agent. This message has not been dispatched.'
-              : 'Sending. Waiting for delivery confirmation.'}</small>
-              : !entry.deliverable ? <small>Not sent: the bound Run is unavailable or changed. Its delivery result is unknown; it will not be replayed on another Run.</small>
-              : entry.error ? <small>{entry.error}</small> : null}
-            <span className="composer-outbox__actions">
-              {onMove ? <>
-                <button type="button" className="composer-tool" disabled={entry.sending || index === 0 || queued[index - 1]?.sending}
-                  onClick={() => onMove(entry.id, 'up')}>Move up</button>
-                <button type="button" className="composer-tool" disabled={entry.sending || index === queued.length - 1 || queued[index + 1]?.sending}
-                  onClick={() => onMove(entry.id, 'down')}>Move down</button>
-              </> : null}
-              {onRemove ? <button type="button" className="composer-tool" disabled={entry.sending} onClick={() => onRemove(entry.id)}>Remove</button> : null}
-            </span>
-          </li>})}
-        </ol>
-        {onSend && retryEntry ? <button type="button" className="composer-tool" disabled={sending} onClick={() => onSend(retryEntry.id)}>Send queued message</button> : null}
-        <p>Send explicitly steers this message, including during the current turn. It does not send the other queued messages. Messages restored from a previous application session wait for your explicit Send.</p>
-        {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(queued.map((entry) => entry.text).join('\n\n'))}>
-          <Copy size={12} aria-hidden="true" /> Copy {queued.length === 1 ? 'message' : 'all'}
-        </button> : null}
-    </section>
-  )
-}
-
-function summarizeQueue(queued: readonly ComposerQueuedMessage[]) {
-  const unavailable = queued.filter((entry) => !entry.deliverable && !entry.sending).length
-  const deferred = queued.filter((entry) => entry.deliverable && entry.status === 'deferred')
-  const sending = queued.some((entry) => entry.sending)
-  const label = unavailable > 0
-    ? `${unavailable} of ${queued.length} messages cannot be sent to the current Run`
-    : deferred.length > 0
-    ? `${deferred.length} of ${queued.length} messages not delivered yet - still queued`
-    : sending ? `Sending - ${queued.length} queued` : `${queued.length} message${queued.length === 1 ? '' : 's'} queued for delivery`
-  return { sending, label }
+  if (!queued.length) return null
+  const retryEntry = queued.find(entry => entry.deliverable)
+  const sending = queued.some(entry => entry.sending)
+  const selected = selectedId ? queued.find(entry => entry.id === selectedId) : undefined
+  const meaning = (entry: ComposerQueuedMessage) => entry.sending
+    ? entry.status === 'restoring' ? 'Restoring the Agent. This message has not been dispatched.' : 'Sending. Waiting for delivery confirmation.'
+    : !entry.deliverable ? 'Not sent: the bound Run is unavailable or changed. Its delivery result is unknown; it will not be replayed on another Run.'
+    : entry.error ?? (entry.status === 'deferred' ? 'Not delivered yet — still queued.' : entry.status === 'failed' ? 'Delivery failed.' : 'Queued for delivery.')
+  const send = (entry: ComposerQueuedMessage) => onSend && retryEntry?.id === entry.id
+    ? <button type="button" className="composer-tool" disabled={sending} onClick={() => onSend(entry.id)}>Send queued message</button> : null
+  if (selected) {
+    const index = queued.indexOf(selected)
+    return <article className="composer-outbox composer-mailbox__detail" data-state={selected.status} data-record-key={`queue:${selected.id}`}>
+      <header><strong>Pending message</strong><div className="composer-mailbox__metadata"><span>{selected.status}</span><MailboxTime value={selected.enqueuedAt} complete /></div></header>
+      <p className="composer-mailbox__full-text">{selected.text}</p><p>{meaning(selected)}</p>
+      <p>Send explicitly steers this message, including during the current turn. It does not send the other queued messages. Messages restored from a previous application session wait for your explicit Send.</p>
+      <div className="composer-outbox__actions">
+        {send(selected)}
+        {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(selected.text)}>Copy message</button> : null}
+        {onMove ? <>
+          <button type="button" className="composer-tool" disabled={selected.sending || index === 0 || queued[index - 1]?.sending} onClick={() => onMove(selected.id, 'up')}>Move up</button>
+          <button type="button" className="composer-tool" disabled={selected.sending || index === queued.length - 1 || queued[index + 1]?.sending} onClick={() => onMove(selected.id, 'down')}>Move down</button>
+        </> : null}
+        {onRemove ? <button type="button" className="composer-tool" disabled={selected.sending} onClick={() => onRemove(selected.id)}>Remove</button> : null}
+      </div>
+    </article>
+  }
+  return <section className="composer-outbox" aria-label="Queued messages">
+    <h3>Pending ({queued.length})</h3>
+    <ol className="composer-mailbox__messages">
+      {queued.map(entry => <li key={entry.id} data-state={entry.status}><MailboxRecordRow recordKey={`queue:${entry.id}`}
+        label={entry.sending ? entry.status === 'restoring' ? 'Restoring' : 'Sending' : entry.id === retryEntry?.id ? 'Next to send' : 'Pending message'}
+        text={entry.text} metadata={<><span>{entry.status}</span><MailboxTime value={entry.enqueuedAt} />{!entry.deliverable ? <span>Bound Run unavailable</span> : null}</>}
+        onOpen={(_key, event) => onSelect(entry.id, event)} /></li>)}
+    </ol>
+    {retryEntry ? send(retryEntry) : null}
+    {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(queued.map(entry => entry.text).join('\n\n'))}>Copy {queued.length === 1 ? 'message' : 'all'}</button> : null}
+  </section>
 }

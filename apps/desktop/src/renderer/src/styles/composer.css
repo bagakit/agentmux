@@ -194,16 +194,16 @@
 
 /* The hit area is constant across modes; collapsed controls are quieter, never shorter. */
 .composer__toolbar :is(.composer-tool, .composer-send, .composer__identity, .composer__context, .composer__mailbox) { height: var(--sp-7); padding-block: 0; flex-shrink: 0; }
-.composer__mailbox { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --composer-mailbox; }
+.composer__mailbox { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .composer__mailbox:hover { background: var(--surface-3); }
 .composer__mailbox:focus-visible { outline: 1px solid var(--focus-line); }
-.composer-mailbox { position: fixed; position-anchor: --composer-mailbox; position-area: top span-left; position-try-fallbacks: flip-inline, flip-block; margin: 0 0 var(--sp-2); width: min(380px, 90vw); max-height: min(480px, 70vh); overflow-y: auto; padding: var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
+.composer-mailbox { position: fixed; position-anchor: --composer-mailbox; position-area: top span-left; position-try-fallbacks: flip-inline; margin: 0 0 var(--sp-2); width: min(380px, 90vw); max-height: min(480px, 70vh); overflow: hidden; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
 .composer-mailbox h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
 .composer-notice { display: flex; align-items: start; gap: var(--sp-2); padding: var(--sp-3); overflow-wrap: anywhere; }
 .composer-notice__body { flex: 1; min-width: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-micro); color: var(--text-3); }
 .composer-notice__body strong { color: var(--text-2); font-weight: 500; }
 
-.composer { anchor-scope: --composer-mailbox; }
+.composer { anchor-name: --composer-mailbox; anchor-scope: --composer-mailbox; }
 
 .composer-mailbox__dot { display: inline-block; width: var(--sp-2); height: var(--sp-2); flex-shrink: 0; border-radius: 50%; background: var(--red); }
 .composer-mailbox__unread { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: calc(var(--sp-7) / 2); max-width: 100%; height: calc(var(--sp-7) / 2); padding: 0; border-radius: var(--radius); background: var(--red); color: var(--surface-0); font-size: var(--fs-micro); font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
@@ -239,3 +239,29 @@
 .composer-mailbox__messages strong { font-weight: 500; }
 .composer-mailbox__messages time { color: var(--text-3); font-size: var(--fs-micro); }
 .composer-mailbox__messages p { white-space: pre-wrap; margin: var(--sp-2) 0; }
+
+/* Mailbox chrome stays outside the one reading scroll surface. */
+.composer-mailbox:popover-open { display: flex; flex-direction: column; }
+.composer-mailbox__heading, .composer-mailbox__folders, .composer-mailbox__back { flex: 0 0 auto; }
+.composer-mailbox__content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.composer-mailbox__back { margin-bottom: var(--sp-2); }
+.composer-mailbox__back > button { padding: 0 var(--sp-2); min-height: var(--sp-7); }
+.composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
+.composer-mailbox__messages > li { margin: 0; padding: 0; border-top: 1px solid var(--line-soft); }
+.composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; font-size: var(--fs-meta); cursor: pointer; }
+.composer-mailbox__row:hover { background: var(--surface-3); }
+.composer-mailbox__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; background: var(--surface-3); }
+.composer-mailbox__row > strong { font-weight: 600; }
+.composer-mailbox__preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.composer-mailbox__metadata { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.composer-mailbox__metadata > span:last-child { margin-left: auto; }
+.composer-mailbox__detail { padding: var(--sp-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.composer-mailbox__detail header { display: grid; gap: var(--sp-2); }
+.composer-mailbox__full-text { white-space: pre-wrap; user-select: text; overflow-wrap: anywhere; }
+.composer-mailbox__history { margin-top: var(--sp-3); }
+.composer-mailbox__history > h3, .composer-outbox > h3 { margin: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; }
+.composer-outbox ol { list-style: none; padding: 0; }
+.composer-outbox__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.composer-mailbox__boundary, .composer-mailbox__error { padding: var(--sp-3); font-size: var(--fs-meta); }
+
+.composer-mailbox__metadata > .composer-mailbox__notice-restore { flex-basis: 100%; margin-left: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
