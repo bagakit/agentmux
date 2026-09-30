@@ -68,7 +68,7 @@ vi.mock('electron', () => ({
     }
   },
   ipcRenderer: {
-    invoke: (channel: string, ...args: unknown[]) => {
+    invoke: async (channel: string, ...args: unknown[]) => {
       const handler = bridge.handlers.get(channel)
       if (!handler) throw new Error(`No IPC handler registered for: ${channel}`)
       const event = { sender: bridge.lastSender }
@@ -76,6 +76,7 @@ vi.mock('electron', () => ({
     },
     on: vi.fn(),
     off: vi.fn(),
+    removeListener: vi.fn(),
     send: vi.fn()
   },
   webFrame: { getZoomFactor: () => 1 },

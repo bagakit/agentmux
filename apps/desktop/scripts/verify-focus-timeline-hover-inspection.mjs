@@ -23,7 +23,7 @@ function run(label, command, mutation) {
     const tests = JSON.parse(readFileSync(report)), assertions = tests.testResults.flatMap(file => file.assertionResults), failed = assertions.filter(item => item.status === 'failed')
     assert.ok(assertions.length > 0, `${label} has no collected assertions; preparation failures are not semantic RED`)
     const modules = readFileSync(loaded, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); assert.ok(modules.length > 0)
-    const sourceOwner = modules.find(item => item.path === paths[mutation === 'quick-renders-full-body' ? 1 : 0]); assert.ok(sourceOwner); assert.equal(sourceOwner.originalSHA256, receipt.before[sourceOwner.path])
+    const sourceOwner = modules.find(item => item.path === paths[['quick-renders-full-body', 'resource-summary-empty'].includes(mutation) ? 1 : 0]); assert.ok(sourceOwner); assert.equal(sourceOwner.originalSHA256, receipt.before[sourceOwner.path])
     Object.assign(stage, { tests: tests.numTotalTests, passed: tests.numPassedTests, failed: tests.numFailedTests, reportSHA256: hash(readFileSync(report)), loadedSHA256: hash(readFileSync(loaded)), loadedOwner: sourceOwner })
     if (mutation) {
       assert.notEqual(result.status, 0); assert.ok(failed.length > 0)
@@ -42,7 +42,7 @@ try {
   receipt.publicProducer = { path: paths[6], sha256: receipt.before[paths[6]], reference, boundary: producer.boundary }
   if (slice === 'source') {
     const baseline = run('baseline')
-    for (const mutation of ['cancelled-intent-reopens', 'history-uses-current-project', 'quick-renders-full-body']) {
+    for (const mutation of ['cancelled-intent-reopens', 'history-uses-current-project', 'quick-renders-full-body', 'resource-summary-empty']) {
       assert.equal(run(mutation, undefined, mutation).tests, baseline.tests)
       assert.equal(run(`${mutation}-exact-restore`).tests, baseline.tests)
     }

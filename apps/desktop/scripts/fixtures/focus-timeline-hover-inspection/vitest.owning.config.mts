@@ -16,7 +16,8 @@ export default defineConfig({
       const changes: Record<string, [string, string, string]> = {
         'cancelled-intent-reopens': ['components/RecentFocusTimeline.tsx', 'clearTimeout(previewTimers.current.open); clearTimeout(previewTimers.current.close)', 'clearTimeout(previewTimers.current.close)'],
         'history-uses-current-project': ['components/RecentFocusTimeline.tsx', 'context ? lane?.labels[0] ?? context.workspaceName : identity?.project?.name', "context ? lane?.labels[0] ?? context.workspaceName : identity?.project?.name ?? 'Author project'"],
-        'quick-renders-full-body': ['components/FocusMessagePreview.tsx', 'message ? !interactive ? <>', 'message ? false ? <>']
+        'quick-renders-full-body': ['components/FocusMessagePreview.tsx', 'message ? !interactive ? <>', 'message ? false ? <>'],
+        'resource-summary-empty': ['components/FocusMessagePreview.tsx', "message.content.trim() || (resources.length ? resources.join(' · ') : 'Input has no recorded text')", "message.content.trim() || 'Input has no recorded text'"]
       }
       if (mutation) {
         const change = changes[mutation]; if (!change) throw new Error(`Unknown hover mutation ${mutation}`)
