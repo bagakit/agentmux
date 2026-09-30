@@ -9,9 +9,10 @@ import { allStyles } from './helpers/styles.js'
 // `animationName` at close time. An entry animation declared unconditionally is therefore still
 // "running" as far as Presence can tell, so it waits for an event that a close never fires, and the
 // node lives in the DOM forever: stale menu items keep matching queries, and `Escape` closes nothing
-// a test can observe. The fix is to scope every keyframe animation on such a node to
-// `[data-state='open']`, so the closed state computes to `animation-name: none` and Presence unmounts
-// immediately.
+// a test can observe. Each entry must belong to `[data-state='open']`. A deliberate exit may belong
+// to `[data-state='closed']` only with a distinct animation name, defined keyframes and an explicit
+// finite duration; Presence then receives a real completion. Native Renderer qualification proves
+// completion/unmount for those intentional exits, which a static scan alone cannot establish.
 //
 // This reads the real sheet and the real components rather than rendering, because the bug is a
 // static property of the CSS: no jsdom assertion would have caught it (jsdom does not run
@@ -87,19 +88,35 @@ describe('Radix Presence exit animation', () => {
     expect([...classNames.keys()]).toContain('confirmation-dialog')
   })
 
-  it('scopes every animation on a Presence-managed node to the open state', () => {
+  it('scopes Presence animations to open entry or an explicit distinct finite closed exit', () => {
     const classNames = presenceClassNames()
+    expect(classNames.size).toBeGreaterThan(0)
+    const rules = animationRules()
+    expect(rules.length).toBeGreaterThan(0)
     const offenders: string[] = []
-    for (const { selector, declaration } of animationRules()) {
+    for (const { selector: selectors, declaration } of rules) for (const selector of selectors.split(',')) {
       for (const [className, sites] of classNames) {
         // Match the class as a whole token so `.tab-context-menu__item` does not read as
         // `.tab-context-menu`; only the Presence node itself is under this rule.
         if (!new RegExp(`\\.${className}(?![\\w-])`).test(selector)) continue
         if (selector.includes("data-state='open'") || selector.includes('data-state="open"')) continue
+        if (selector.includes("data-state='closed'") || selector.includes('data-state="closed"')) {
+          const name = declaration.split(/\s+/)[0]!
+          const durations = [...declaration.matchAll(/(?:^|\s)(\d+(?:\.\d+)?(?:ms|s))\b|var\((--[\w-]+)\)/g)].map(match => {
+            const value = match[1] ?? new RegExp(`${match[2]}\\s*:\\s*([\\d.]+(?:ms|s))`).exec(styles)?.[1]
+            return value ? Number.parseFloat(value) * (value.endsWith('ms') ? 1 : 1000) : 0
+          })
+          const entries = rules.filter(rule => new RegExp(`\\.${className}(?![\\w-])`).test(rule.selector)
+            && /data-state=['"]open['"]/.test(rule.selector))
+          expect(entries.length).toBeGreaterThan(0)
+          const hasKeyframes = new RegExp(`@keyframes\\s+${name}\\s*\\{`).test(styles)
+          if (hasKeyframes && durations.some(duration => Number.isFinite(duration) && duration > 0) && !/\binfinite\b/.test(declaration)
+            && entries.every(entry => entry.declaration.split(/\s+/)[0] !== name)) continue
+        }
         offenders.push(
           `${selector} { animation: ${declaration} } — .${className} is Presence-managed ` +
-            `(${[...new Set(sites)].join(', ')}). Scope it to [data-state='open'] or Presence will ` +
-            'wait for an animationend that a close never fires, and the node never unmounts.'
+            `(${[...new Set(sites)].join(', ')}). An open entry or distinct, explicitly finite ` +
+            'closed exit is required; otherwise Presence can wait for a completion that never fires.'
         )
       }
     }

@@ -32,7 +32,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   const createNote = useAppStore(state => state.createNote)
   const revealCreatedNote = useAppStore(state => state.revealCreatedNote)
   const retryCreatedNote = useAppStore(state => state.retryCreatedNote)
-  const projection = useWorkbenchBrowserPresentation().projection
+  const { projection, active: presentationActive } = useWorkbenchBrowserPresentation()
   const browserInput = useRef<BrowserAddressInputHandle>(null)
   const [browserClosing, setBrowserClosing] = useState(false)
   const browserCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -46,20 +46,32 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   function collapseBrowser() {
     cancelBrowserClose()
     onSectionChange('browser', 'collapsed')
-    if (!visible || browserRow.current?.closest('[hidden], [inert]') || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!visible || !presentationActive || document.hidden || browserRow.current?.closest('[hidden], [inert]') || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       return
     }
+    const token = getComputedStyle(browserRow.current!).getPropertyValue('--dur-enter').trim()
+    const duration = /^(\d+(?:\.\d+)?|\.\d+)(ms|s)$/.exec(token)
+    const milliseconds = duration ? Number(duration[1]) * (duration[2] === 's' ? 1000 : 1) : 0
+    if (milliseconds <= 0) return
     setBrowserClosing(true)
     browserCloseTimer.current = setTimeout(() => {
       browserCloseTimer.current = null
       setBrowserClosing(false)
-    }, 180)
+    }, milliseconds)
   }
   useEffect(() => {
     cancelBrowserClose()
     return () => { if (browserCloseTimer.current) clearTimeout(browserCloseTimer.current) }
-  }, [workspace?.id, launcherId, visible])
+  }, [workspace?.id, launcherId, visible, presentationActive])
   useEffect(() => { if (sections.browser !== 'collapsed') cancelBrowserClose() }, [sections.browser])
+  useEffect(() => {
+    if (!visible || !presentationActive || (sections.browser !== 'expanded' && !browserClosing)) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const stop = () => { if (document.hidden || reduced.matches) cancelBrowserClose() }
+    reduced.addEventListener('change', stop)
+    document.addEventListener('visibilitychange', stop)
+    return () => { reduced.removeEventListener('change', stop); document.removeEventListener('visibilitychange', stop) }
+  }, [visible, presentationActive, sections.browser, browserClosing])
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
   const disabled = !workspace || busy !== null

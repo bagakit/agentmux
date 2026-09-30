@@ -8,7 +8,7 @@ const sameBounds = (a: Bounds | null, b: Bounds) => a !== null && (['x', 'y', 'w
 export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
   selected: string | null
   active: boolean
-  targetAttribute: 'data-settings-target' | 'data-prompt-id'
+  targetAttribute: 'data-settings-target' | 'data-prompt-id' | 'data-executor-id'
 }) {
   const surface = useRef<HTMLSpanElement>(null)
   const painted = useRef<Bounds | null>(null)
