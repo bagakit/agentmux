@@ -12,6 +12,7 @@ import { useSidebarResize } from '../hooks/useSidebarResize'
 import { AgentAvatar } from './AgentAvatar'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { createSpeakerResolver, speakerOfUserMessage } from '../lib/conversation-speaker'
+import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -673,9 +674,23 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
   const describePreviewSpeaker = useMemo(() => createSpeakerResolver({ lookupAgent: id => {
-    const context = contexts.find(item => item.id === id && item.kind === 'agent')
-    return context ? { label: context.name, ...(context.providerId ? { providerId: context.providerId } : {}) } : undefined
-  } }), [contexts])
+    const state = useAppStore.getState()
+    const metadata = currentConversationSpeakerMetadata(id, {
+      sessions: state.sessions, workspaces: state.config?.workspaces ?? [],
+      agentNames: state.agentNames, timelines: state.timelines
+    })
+    return metadata ? {
+      label: metadata.label, providerId: metadata.providerId,
+      ...(metadata.project ? { project: metadata.project } : {}),
+      readDetails: () => {
+        const current = useAppStore.getState()
+        return currentConversationSenderDetails(id, {
+          sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
+          agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
+        })
+      }
+    } : undefined
+  } }), [contexts, config])
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null); setDateDraft(null); setDateError(null); setDateChoice(null) }
   const inspectDate = (value: string) => {
     setDateDraft(value); setDateChoice(null)
