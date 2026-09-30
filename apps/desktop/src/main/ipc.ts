@@ -4,6 +4,10 @@ import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@ag
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
+import { ToolkitOwner } from './toolkit-owner.js'
+import { performanceLaunch } from './toolkit-asset.js'
+import { registerToolkitIpc } from './toolkit-ipc.js'
+import { resolvePerformancePreferences } from '../shared/toolkit-preferences.js'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
 import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
@@ -654,6 +658,10 @@ export async function registerIpc(args: {
   const stopUsageSubscription = (webContentsId: number): void => {
     usageSubscriptions.get(webContentsId)?.()
   }
+  const toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
+    enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
+  const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
+
   handleWithEvent('resourceUsage:subscribe', (event) => {
     const sender = event.sender
     stopUsageSubscription(sender.id)
@@ -1096,6 +1104,7 @@ export async function registerIpc(args: {
   const control = new AgentMuxControlServer({
     execute: executeControl,
     metrics,
+    toolkit,
     /**
      * 进度订阅直接接到 journal 上，**不经过 Renderer**。
      *
@@ -1128,6 +1137,7 @@ export async function registerIpc(args: {
   await control.start()
   return async () => {
     await runOwnerDisposals([
+      async () => { acceptingControl = false; disposeToolkitIpc(); await toolkit.dispose() },
       () => {
         acceptingControl = false
         args.window.webContents.off('destroyed', closeMetrics)

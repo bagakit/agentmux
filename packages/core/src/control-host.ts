@@ -55,6 +55,8 @@ import {
 } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseMetricsObservation, type MetricsObservation, type MetricsSubscription } from './metrics.js'
+import { isToolkitOperation, parseToolkitResult } from './toolkit.js'
+import { serveToolkitControl } from './toolkit-control.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
@@ -260,6 +262,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
+  if (isToolkitOperation(source.operation)) {
+    settingsFields(source, ['schemaVersion','requestId','operation','toolId'], 'INVALID_CONTROL_REQUEST')
+    if (source.toolId !== 'performance') throw new AgentMuxError('Toolkit tool is unknown.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, toolId: 'performance' }
+  }
   if (source.operation === 'metrics.get' || source.operation === 'metrics.watch') {
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
       throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
@@ -885,6 +892,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (isToolkitOperation(operation)) {
+    const parsed = parseToolkitResult(operation, result)
+    const { operation: _operation, ...payload } = parsed
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: payload } as AgentMuxControlSuccessReceipt
+  }
   if (operation === 'metrics.get') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
@@ -1398,6 +1410,9 @@ export class AgentMuxControlServer {
       raw = await readMessage(socket)
       const request = parseAgentMuxControlRequest(raw)
       socket.setTimeout(agentMuxControlTimeoutMs(request.operation))
+      if (isToolkitOperation(request.operation)) {
+        await serveToolkitControl(socket, request as import('./toolkit.js').ToolkitRequest, this.control.toolkit, this.streams); return
+      }
       if (request.operation === 'metrics.get' || request.operation === 'metrics.watch') { await this.metrics(socket, request); return }
       if (request.operation === 'browser.subscribe') { await this.stream(socket, request); return }
       receipt = successReceipt(request, await this.control.execute(request))

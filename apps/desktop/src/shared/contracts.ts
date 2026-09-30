@@ -1,3 +1,4 @@
+import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
@@ -1524,6 +1525,7 @@ export type AgentMuxDesktopApi = {
    * 做成订阅而不是"查一次"，是因为零开销这件事必须由生命周期本身保证：给一个查询接口，
    * 调用方一开定时器就又回到了常驻轮询，而那不会让任何测试变红。
    */
+  toolkit: ToolkitDesktopApi
   resourceUsage: {
     /** 开始采样并接收快照，返回退订函数；最后一个订阅者离开时采样停止。 */
     subscribe(listener: (snapshot: UsageSnapshot) => void): () => void

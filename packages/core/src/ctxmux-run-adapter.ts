@@ -1247,6 +1247,11 @@ export class CtxmuxRunAdapter {
     }
   }
 
+  async remove(runId: string): Promise<void> {
+    try { await this.requireClient().remove(runId) }
+    catch (error) { throw translateCtxmuxError(error) }
+  }
+
   async stop(operation: CtxmuxAdapterStopOperation): Promise<void> {
     let recovery: Awaited<ReturnType<CtxmuxClient['attachRecoverableStop']>> | null = null
     try {

@@ -4,6 +4,8 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from '../shared/toolkit.js'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -292,6 +294,32 @@ const api: AgentMuxPreloadApi = {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)
       ipcRenderer.on(SESSION_EVENT_CHANNEL, wrapped)
       return () => ipcRenderer.off(SESSION_EVENT_CHANNEL, wrapped)
+    }
+  },
+  toolkit: {
+    list: async () => (await ipcRenderer.invoke('toolkit:list')).tools,
+    get: async () => (await ipcRenderer.invoke('toolkit:get')).snapshot,
+    script: async () => (await ipcRenderer.invoke('toolkit:script')).script,
+    run: async () => (await ipcRenderer.invoke('toolkit:run')).snapshot,
+    stop: async () => (await ipcRenderer.invoke('toolkit:stop')).snapshot,
+    observe(onSnapshot, onEnd) {
+      const id = randomUUID()
+      let closed = false
+      const snapshot = (_event: Electron.IpcRendererEvent, value: any) => {
+        if (!closed && value.id === id) onSnapshot(value.snapshot)
+      }
+      const end = (_event: Electron.IpcRendererEvent, value: any) => { if (!closed && value.id === id) { dispose(); onEnd?.(value.reason) } }
+      const dispose = () => {
+        if (closed) return
+        closed = true
+        ipcRenderer.off(TOOLKIT_CHANGED_CHANNEL, snapshot); ipcRenderer.off(TOOLKIT_ENDED_CHANNEL, end)
+        void ipcRenderer.invoke('toolkit:release', id).catch(() => {})
+      }
+      ipcRenderer.on(TOOLKIT_CHANGED_CHANNEL, snapshot); ipcRenderer.on(TOOLKIT_ENDED_CHANNEL, end)
+      void ipcRenderer.invoke('toolkit:observe', id).catch(error => {
+        if (!closed) { dispose(); onEnd?.(String(error instanceof Error ? error.message : error)) }
+      })
+      return { dispose }
     }
   },
   resourceUsage: {

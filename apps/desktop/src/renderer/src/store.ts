@@ -3162,6 +3162,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal) {
+    if (request.operation === 'toolkit.list' || request.operation === 'toolkit.get' ||
+        request.operation === 'toolkit.script' || request.operation === 'toolkit.run' ||
+        request.operation === 'toolkit.stop' || request.operation === 'toolkit.watch') {
+      throw Object.assign(new Error('Toolkit requests belong to the Main execution owner.'), { code: 'CONTROL_FAILED' })
+    }
     if (request.operation === 'metrics.get' || request.operation === 'metrics.watch') {
       throw Object.assign(new Error('Metrics queries belong to the Main observation owner.'), { code: 'CONTROL_FAILED' })
     }
