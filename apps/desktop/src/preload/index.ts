@@ -4,7 +4,6 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
-import { randomUUID } from 'node:crypto'
 import { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from '../shared/toolkit.js'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
@@ -303,7 +302,7 @@ const api: AgentMuxPreloadApi = {
     run: async () => (await ipcRenderer.invoke('toolkit:run')).snapshot,
     stop: async () => (await ipcRenderer.invoke('toolkit:stop')).snapshot,
     observe(onSnapshot, onEnd) {
-      const id = randomUUID()
+      const id = globalThis.crypto.randomUUID()
       let closed = false
       const snapshot = (_event: Electron.IpcRendererEvent, value: any) => {
         if (!closed && value.id === id) onSnapshot(value.snapshot)
