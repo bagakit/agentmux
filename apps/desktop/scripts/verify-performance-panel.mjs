@@ -10,7 +10,7 @@ import { capturePerformancePanel } from './fixtures/performance-panel/capture.mj
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const args = process.argv.slice(2), mode = args[0]
-assert.ok(['--interaction', '--mutations', '--callers'].includes(mode), '必须选择一个非空验证模式')
+assert.ok(['--interaction', '--mutations', '--callers', '--placement'].includes(mode), '必须选择一个非空验证模式')
 assert.ok(args.length === 1 || args.length === 2 && mode === '--interaction' && args[1] === '--capture-only', '只接受明确模式及首次采图开关')
 const execute = promisify(execFile), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const base = resolve(root, '.bagakit/design/toolkit-performance-20261004/ui-evidence', mode.slice(2))
@@ -48,7 +48,8 @@ async function callers() {
   const jsx = name => (node, ast) => (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(ast) === name
   const app = await collect(productPaths[0], jsx('PerformancePanel')); assert.equal(app.length, 1)
   await collect(productPaths[2], (node, ast) => ts.isJsxExpression(node) && node.expression?.getText(ast) === 'toolkit')
-  await collect(productPaths[2], (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'settings.open' && node.arguments[0]?.getText(ast) === "'overview'")
+  const settings = await collect(productPaths[1], (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'settings.open' && node.arguments[0]?.getText(ast) === "'overview'")
+  assert.equal(settings.length, 1, '唯一普通 Settings 产品入口')
   await collect(component + 'PerformancePanel.tsx', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'usePerformanceObservation' && node.arguments[0]?.getText(ast) === 'api.toolkit')
   for (const name of ['PerformancePopover', 'PerformanceOverview', 'PerformanceScript']) await collect(component + 'PerformancePanel.tsx', jsx(name))
   await collect('apps/desktop/src/renderer/src/lib/use-performance-observation.ts', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'api.observe')
@@ -109,7 +110,12 @@ try {
         ['selected Run 来源时间', 'Cached available source must not append a duplicate point after the gap', component + 'PerformanceOverview.tsx'],
         ['source 自身年龄', 'Pausing this UI leaves an App gap even while another consumer continues', component + 'PerformanceOverview.tsx'],
         ['source 自身年龄', 'App source watermark must remain independent from the envelope gap time', component + 'PerformanceOverview.tsx']])
+      await run('placement', 'placement', [['通过 actual App Settings', 'Settings remains in the left navigation', productPaths[1]]])
       await run('restored', 'baseline')
+    } else if (mode === '--placement') {
+      native = await capturePerformancePanel({ root, evidence: resolve(evidence, 'native'), captureScope: 'placement' })
+      assert.equal(native.captureScope, 'placement')
+      assert.equal(native.completed, true, '本次 placement 有限 Renderer 交互必须通过')
     } else {
       const captureOnly = args[1] === '--capture-only'
       native = captureOnly ? await capturePerformancePanel({ root, evidence: resolve(evidence, 'native') })
@@ -131,7 +137,7 @@ finally {
   try {
     for (const [path, hash] of Object.entries({ ...products, ...proof, ...inventory })) assert.equal(sha(await readFile(resolve(root, path))), hash, '结束 actual Source/proof 不得漂移: ' + path)
   } catch (error) { completed = false; integrityFailure = String(error); process.exitCode = 1 }
-  const receipt = { schema: 'agentmux.performance-ui-verification.v1', completed, mode, captureOnly: args[1] === '--capture-only', products, proof, loadedSource: inventory,
+  const receipt = { schema: 'agentmux.performance-ui-verification.v1', completed, mode, captureOnly: args[1] === '--capture-only', qualificationScope: mode === '--placement' ? 'settings-left-placement-only' : 'original-task-verification', products, proof, loadedSource: inventory,
     sourceIdentity: sha(JSON.stringify(products)), failure, integrityFailure, results, native, evidence,
     productSourceWriterUsed: false, mutationsInPrivateTransformOnly: true,
     boundary: '局部实际 App/UI owning 成本与私有 Renderer 交互；官方 Toolkit/ctxmux 链须 joined Backend 收据，不签用户现场卡顿或全 Native。' }

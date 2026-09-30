@@ -8,7 +8,19 @@ import original from '../settings-overview/vitest.config.mts'
 const root = resolve(import.meta.dirname, '../../../../..')
 const evidence = resolve(process.env.AGENTMUX_PERFORMANCE_UI_EVIDENCE ?? resolve(root, '.bagakit/design/toolkit-performance-20261004/ui-implementation/unit-direct'))
 const mutant = process.env.AGENTMUX_PERFORMANCE_UI_MUTANT ?? 'baseline'
+const settingsButton = `        <button
+          type="button"
+          className="surface-navigation__slot"
+          aria-label="Settings"
+          title="Settings"
+          aria-expanded={settingsOpen}
+          data-settings-section="overview"
+          onClick={() => settingsOpen ? onCloseSettings?.() : settings.open('overview')}
+        >
+          <Settings2 className="surface-navigation__icon" size={14} aria-hidden="true" />
+        </button>`
 const changes: Record<string, [string, string, string]> = {
+  placement: ['apps/desktop/src/renderer/src/components/TopRowChrome.tsx', settingsButton, `<WindowOverlayPortal layer={OVERLAY_LAYER_BANDS.windowChrome}>${settingsButton}</WindowOverlayPortal>`],
   consumption: ['apps/desktop/src/renderer/src/lib/use-performance-observation.ts', 'if (!active) { setPending(false); return }', 'if (true) { setPending(false); return }'],
   release: ['apps/desktop/src/renderer/src/lib/use-performance-observation.ts', 'return () => { connected = false; lease?.dispose() }', 'return () => { connected = false }'],
   focus: ['apps/desktop/src/renderer/src/components/performance/PerformancePopover.tsx', "origin.current = 'hover'; setOpen(true)", "origin.current = 'hover'; setOpen(true); trigger.current?.focus()"],

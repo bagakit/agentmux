@@ -41,10 +41,12 @@ function SettingsFixture() {
   return <div className="app-shell app-shell--project-rail-collapsed">
     <main className="main-shell main-shell--merged" aria-label="Controlled empty workbench" />
     {open && <SettingsPanel initialSection="appearance" onClose={() => setOpen(false)} />}
+    <SettingsNavigation.Provider value={{ open: () => setOpen(true) }}>
     <footer className="window-status-bar">
-      <div className="window-status-bar__surface-switch"><SurfaceSwitch onCloseSettings={() => setOpen(false)} /></div>
-      <div className="window-status-bar__right"><span>Controlled status facts</span><SettingsNavigation.Provider value={{ open: () => setOpen(true) }}><WindowUtilityBar settingsOpen={open} onCloseSettings={() => setOpen(false)} /></SettingsNavigation.Provider></div>
+      <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={open} onCloseSettings={() => setOpen(false)} /></div>
+      <div className="window-status-bar__right"><span>Controlled status facts</span><WindowUtilityBar /></div>
     </footer>
+    </SettingsNavigation.Provider>
   </div>
 }
 

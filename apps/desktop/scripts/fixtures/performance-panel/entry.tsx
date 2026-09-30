@@ -36,7 +36,7 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 const state = useAppStore.getState(), session = state.sessions.find(s => s.id === 'session-codex')!
 if (!session) throw Error('原 preview Session 非空正控缺失')
 const workspace = state.config!.workspaces.find(workspace => workspace.path === session.workspacePath) ?? state.config!.workspaces[0]!
-if (setup.phase === 'control') {
+if (setup.phase === 'control' || setup.phase === 'placement') {
   const tab = createWorkbenchTab('performance-original-tab', { regionId: 'performance-original-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('performance-original-group', [tab.id]) },
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
@@ -51,7 +51,7 @@ const surface = () => {
     sessions: current.sessions.map(s => ({ id: s.id, control: s.control, processState: s.processState })) }
 }
 w.performanceScene = {
-  ready: true, phase: setup.phase, snapshot, writes, attachments, events, surface,
+  ready: true, phase: setup.phase, snapshot, writes, attachments, events, surface, mainSurface: () => useAppStore.getState().mainSurface,
   publish: (next: typeof snapshot) => bridge.publish(next),
   theme: async (appearance: 'light' | 'dark') => { const current = await api.config.get(); return api.config.save({ ...current, appearance: { ...current.appearance, appAppearance: appearance } }, current) },
   preferences: async (enabled: boolean, statusBar: 'icon' | 'label') => { const current = await api.config.get(); return api.config.save({ ...current, toolkit: { ...current.toolkit, performance: { enabled, statusBar } } }, current) },

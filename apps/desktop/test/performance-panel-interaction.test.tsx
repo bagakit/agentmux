@@ -65,12 +65,17 @@ async function mountApp() { await act(async () => root.render(<App />)) }
 async function hover() { await act(async () => { node('.performance-trigger').dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 140)) }) }
 function draft() { return node<HTMLTextAreaElement>('[data-prompt-editor] textarea') }
 
-it('通过 actual App Settings 右侧工具入口消费 Toolkit，并让 script、Pause/Resume 与原 Toolkit 配置可达', async () => {
+it('通过 actual App Settings 左侧入口与右侧 Toolkit，并让 script、Pause/Resume 与原 Toolkit 配置可达', async () => {
   await mountApp()
   expect(vi.mocked(api.toolkit.observe).mock.calls).toHaveLength(0)
-  const trigger = node('.performance-trigger'), settings = node('[aria-label="Settings"]', container)
-  expect(trigger.closest('.window-status-bar__toolkits')?.nextElementSibling).toBe(settings)
+  const trigger = node('.performance-trigger'), settings = node('[aria-label="Settings"]')
+  expect(document.querySelectorAll('[aria-label="Settings"]')).toHaveLength(1)
+  expect(settings.closest('.surface-navigation'), 'Settings remains in the left navigation').toBe(node('.surface-navigation'))
+  expect(settings.previousElementSibling).toBe(node('.surface-navigation__surfaces'))
+  expect(settings.hasAttribute('aria-current')).toBe(false)
+  expect(node('.window-status-bar__right').querySelector('[aria-label="Settings"]')).toBeNull()
   expect(node('.window-status-bar__right').contains(trigger)).toBe(true)
+  expect(trigger.closest('.window-status-bar__toolkits')).not.toBeNull()
   expect(node('.surface-navigation__surfaces').querySelector('[aria-label="Settings"], .performance-trigger')).toBeNull()
   expect(trigger.textContent).toContain('Performance')
   await click('.performance-trigger')
