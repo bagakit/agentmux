@@ -1,8 +1,45 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
+
+/** Explicit, reviewed Timeline CSS scope; every other scene input stays exact. */
+export function assertFocusTimelineSceneInputs({ root, sceneBytes, paths, expectedInputs, styleScopeFile, acceptedMainCssBytes }) {
+  const hash = value => createHash('sha256').update(value).digest('hex')
+  const scene = JSON.parse(sceneBytes)
+  const cssPath = 'apps/desktop/src/renderer/src/styles/focus.css'
+  assert.ok(paths.length > 0, 'Nonempty actual scene input set')
+  if (styleScopeFile) assert.ok(paths.includes(cssPath), 'Explicit style scope must have its actual CSS owner')
+  let consumedScope = null
+  for (const file of paths) {
+    assert.match(expectedInputs[file], /^[a-f0-9]{64}$/u)
+    assert.match(scene.inputs[file], /^[a-f0-9]{64}$/u)
+    if (file !== cssPath || !styleScopeFile) { assert.equal(scene.inputs[file], expectedInputs[file]); continue }
+    const scopeBytes = readFileSync(resolve(root, styleScopeFile)), scope = JSON.parse(scopeBytes)
+    assert.equal(scope.schema, 'agentmux.timeline-style-own-scope-join.v1')
+    assert.equal(scope.sceneReceiptSHA256, hash(sceneBytes), 'Exact original scene receipt')
+    assert.equal(scope.sceneFullCssInputSHA256, scene.inputs[file], 'Exact CSS loaded by the scene')
+    assert.ok(acceptedMainCssBytes?.length > 0, 'Nonempty actual accepted Main CSS blob')
+    assert.equal(hash(acceptedMainCssBytes), scope.acceptedMainCssSHA256, 'Exact accepted Main CSS blob')
+    const css = readFileSync(resolve(root, file), 'utf8')
+    assert.equal(hash(css), expectedInputs[file], 'Actual current CSS owner')
+    const marker = '/* One scroll canvas keeps ruler, clip lanes and fixed identity gutters aligned. */'
+    assert.equal(scope.ownMarker, marker); assert.equal(scope.ownMarkerCount, 1); assert.equal(scope.ownSuffixExact, true)
+    const acceptedCss = acceptedMainCssBytes.toString('utf8')
+    assert.equal(acceptedCss.split(marker).length, 2, 'Unique accepted Main Timeline CSS anchor')
+    const acceptedSuffix = acceptedCss.slice(acceptedCss.indexOf(marker))
+    assert.equal(Buffer.byteLength(acceptedSuffix), scope.ownBytes, 'Accepted Main Timeline suffix bytes')
+    assert.equal(hash(acceptedSuffix), scope.ownSuffixSHA256, 'Accepted Main Timeline suffix SHA256')
+    assert.equal(css.split(marker).length, 2, 'Unique actual Timeline CSS anchor')
+    const index = css.indexOf(marker); assert.ok(index >= 0)
+    const suffix = css.slice(index); assert.ok(Buffer.byteLength(suffix) > marker.length, 'Nonempty actual Timeline CSS selectors')
+    assert.equal(Buffer.byteLength(suffix), scope.ownBytes, 'Timeline suffix bytes')
+    assert.equal(hash(suffix), scope.ownSuffixSHA256, 'Timeline suffix SHA256')
+    consumedScope = { file: relative(root, resolve(root, styleScopeFile)), sha256: hash(scopeBytes), sceneWholeCssSHA256: scene.inputs[file], acceptedWholeCssSHA256: hash(acceptedMainCssBytes), physicalWholeCssSHA256: expectedInputs[file], timelineSuffixSHA256: hash(suffix), timelineBytes: Buffer.byteLength(suffix), boundary: 'Only the nonempty Timeline CSS suffix is identical; other surfaces in the scene and physical CSS prefixes are outside this qualification.' }
+  }
+  return consumedScope
+}
 
 /** The two outcomes share one Timeline owner and one lightweight visual receipt. */
 export function qualifyFocusReading(kind) {
@@ -69,7 +106,10 @@ export function qualifyFocusReading(kind) {
       const sceneBytes = readFileSync(sceneFile), reviewBytes = readFileSync(reviewFile)
       const scene = JSON.parse(sceneBytes), review = JSON.parse(reviewBytes)
       assert.equal(scene.schema, 'agentmux.focus-timeline-read-coverage-scene.v1'); assert.equal(scene.passed, true)
-      for (const file of product) assert.equal(scene.inputs[file], receipt.before[file])
+      const styleScopeFile = process.env.AGENTMUX_FOCUS_TIMELINE_STYLE_SCOPE
+      const acceptedMainRef = process.env.AGENTMUX_FOCUS_TIMELINE_STYLE_COMMIT ?? 'HEAD'
+      receipt.styleScope = assertFocusTimelineSceneInputs({ root, sceneBytes, paths: product, expectedInputs: receipt.before, styleScopeFile, acceptedMainCssBytes: styleScopeFile ? execFileSync('git', ['show', `${acceptedMainRef}:apps/desktop/src/renderer/src/styles/focus.css`], { cwd: root }) : undefined })
+      if (receipt.styleScope) receipt.styleScope.acceptedMainRef = acceptedMainRef
       assert.deepEqual(scene.actual.controls, []); assert.equal(scene.cleanup.privateRootRemoved, true)
       assert.ok(scene.images.length >= 2); assert.ok(scene.images.some(image => image.width === 320)); assert.ok(scene.images.some(image => image.width >= 1100))
       assert.equal(review.verdict, 'pass'); assert.ok(review.reviewerAgentId?.trim().length > 0); assert.equal(review.sceneReceiptSHA256, hash(sceneBytes))
