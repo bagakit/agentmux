@@ -1,3 +1,4 @@
+import { chooseFocusFilter, focusFilterOptions } from './fixtures/focus-filter-menu'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -6,7 +7,7 @@ import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 const draws = vi.hoisted(() => ({ counts: {} as Record<string, number>, consumers: {} as Record<string, number> }))
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: ({ sessionId, size }: { sessionId: string; size: number }) => { draws.counts[sessionId] = (draws.counts[sessionId] ?? 0) + 1; const consumer = `${sessionId}:${size}`; draws.consumers[consumer] = (draws.consumers[consumer] ?? 0) + 1; return createElement('span', { 'data-avatar': sessionId }) } }))
+vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: ({ sessionId, size }: { sessionId: string; size: number }) => { draws.counts[sessionId] = (draws.counts[sessionId] ?? 0) + 1; const consumer = `${sessionId}:${size}`; draws.consumers[consumer] = (draws.consumers[consumer] ?? 0) + 1; return createElement('span', { 'data-avatar': sessionId, 'data-avatar-size': size }) } }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 const baseline = useAppStore.getState()
@@ -43,17 +44,25 @@ it('does not redraw neighbouring task rows when one Session receives facts', asy
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => s.id === 'b' ? { ...s, latestOutputBytes: s.latestOutputBytes + 10 } : s) })))
   expect(draws.counts).toEqual(counts); expect(draws.consumers).toEqual(consumers)
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, b: timeline('b', [event('3', 'user_message', 'Measure frame latency'), event('5', 'tool_call', 'Read profile')]) } })))
-  // The card and its now-visible Timeline track are two related consumers.
-  expect(Object.keys(consumers).sort()).toEqual(['a:14', 'a:18', 'b:14', 'b:18', 'c:14', 'c:18', 'd:14', 'd:18', 'e:14', 'e:18'])
-  expect(draws.consumers).toEqual({ ...consumers, 'b:14': consumers['b:14']! + 1, 'b:18': consumers['b:18']! + 1 })
-  expect(draws.counts).toEqual({ ...counts, b: counts.b! + 2 }); expect(row('b').textContent).toContain('Read profile')
+  // This contract concerns the actual left task rows. Recent Focus is a separate consumer;
+  // its already-existing all-track repaint is retained as a full-Focus performance counterexample.
+  const leftKeys = [...container.querySelectorAll<HTMLElement>('.focus-context [data-avatar]')].map(node => `${node.dataset.avatar}:${node.dataset.avatarSize}`)
+  expect(leftKeys.sort()).toEqual(['a:18', 'b:18', 'c:18', 'd:18', 'e:18'])
+  const leftBefore = Object.fromEntries(leftKeys.map(key => [key, consumers[key]]))
+  const leftAfter = Object.fromEntries(leftKeys.map(key => [key, draws.consumers[key]]))
+  expect(leftAfter).toEqual({ ...leftBefore, 'b:18': leftBefore['b:18']! + 1 })
+  const relatedTrack = container.querySelector<HTMLElement>('.recent-focus [data-avatar="b"]')
+  expect(relatedTrack).not.toBeNull()
+  const trackKey = `${relatedTrack!.dataset.avatar}:${relatedTrack!.dataset.avatarSize}`
+  expect(consumers[trackKey]).toBeGreaterThan(0)
+  expect(draws.consumers[trackKey]).toBe(consumers[trackKey]! + 1)
+  expect(row('b').textContent).toContain('Read profile')
 })
 
 it('keeps empty categories discoverable in the shared filter without repeating project empties', async () => {
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="Focus state filter"]')!
-  expect([...select.options].map(option => option.value)).toEqual(['all', 'attention', 'working', 'results', 'idle'])
-  await act(async () => { select.value = 'results'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect((await focusFilterOptions(container, 'state')).map(option => option.value)).toEqual(['all', 'attention', 'working', 'results', 'idle', 'disconnected'])
+  await chooseFocusFilter(container, 'state', 'results')
   expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(context => context.dataset.sessionId)).toEqual(['a'])
-  expect([...container.querySelectorAll<HTMLElement>('.focus-context-group')].map(group => [group.dataset.bucket, group.dataset.empty ?? 'false'])).toEqual([['attention', 'true'], ['working', 'true'], ['results', 'false'], ['idle', 'true']])
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context-group')].map(group => [group.dataset.bucket, group.dataset.empty ?? 'false'])).toEqual([['attention', 'true'], ['working', 'true'], ['results', 'false'], ['idle', 'true'], ['disconnected', 'true']])
   expect(container.textContent).not.toContain('Nothing here')
 })

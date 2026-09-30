@@ -6,7 +6,24 @@
 .focus-filters { display: flex; flex: none; align-items: center; min-width: 0; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
 .focus-filters .global-board-toolbar__controls { display: flex; width: 100%; min-width: 0; gap: var(--sp-2); }
 .focus-filters .global-board-search { flex: 1 1 auto; min-width: 0; width: auto; }
-.focus-filters .global-board-select { flex: 0 1 auto; min-width: 0; font-size: var(--fs-micro); }
+.focus-filters .global-board-search { min-width: 70px; }
+.focus-filter-trigger { display: inline-flex; align-items: center; flex: 0 1 auto; gap: 4px; min-width: 28px; max-width: 220px; height: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.focus-filter-trigger > svg, .focus-filter-trigger__count { flex: none; }
+.focus-filter-trigger__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-filter-trigger__count { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.focus-filter-trigger:hover, .focus-filter-trigger[data-state='open'] { background: var(--surface-3); }
+.focus-filter-trigger[data-active='true'] { color: var(--green); }
+.focus-filter-trigger:focus-visible { outline: 1px solid var(--green); outline-offset: 1px; }
+.focus-filter-menu { width: min(320px, calc(100vw - 16px)); min-width: 0; max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; }
+.focus-filter-menu__label { padding: 4px 8px; font-size: var(--fs-micro); color: var(--text-3); }
+.focus-filter-menu__projects { max-height: 224px; overflow-y: auto; overscroll-behavior: contain; }
+.focus-filter-menu__item { white-space: normal; overflow-wrap: anywhere; align-items: flex-start; }
+.focus-filter-menu__item > span:last-child { white-space: normal; overflow: visible; text-overflow: clip; }
+.focus-filter-menu__check { flex: 0 0 13px; min-height: 16px; }
+@container focus-filter-area (max-width: 280px) {
+  .focus-filter-trigger__summary { display: none; }
+  .focus-filter-trigger { flex: none; }
+}
 .focus-project-lanes { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .focus-project-board { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .focus-project-lanes__rows { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
@@ -211,7 +228,6 @@
 .focus-filters--mac { padding-left: 80px; min-height: 36px; -webkit-app-region: drag; }
 .focus-filters .global-board-toolbar__controls { -webkit-app-region: no-drag; }
 
-.focus-filters .global-board-select select { max-width: 130px; min-width: 0; }
 
 .focus-recovery-toggle { display: flex; align-items: center; gap: var(--sp-1); width: 100%; min-height: 26px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
 .focus-recovery-toggle:hover, .focus-recovery-toggle:focus-visible { background: var(--surface-2); color: var(--text-2); }
@@ -220,8 +236,8 @@
 .focus-hierarchy-warning { margin: 0; padding: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 
 .focus-toolbar { flex: none; display: flex; align-items: center; min-width: 0; height: 36px; background: var(--surface-1); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
-.focus-toolbar__filters { flex: 1 1 auto; min-width: 0; }
-.focus-toolbar__context { display: flex; align-items: center; flex: 0 0 var(--focus-workspace-width, calc(61.8% - 6px)); min-width: 0; gap: var(--sp-1); padding: 0 var(--sp-2); -webkit-app-region: no-drag; }
+.focus-toolbar__filters { flex: 1 1 auto; min-width: min(100%, 204px); container: focus-filter-area / inline-size; }
+.focus-toolbar__context { display: flex; align-items: center; flex: 0 1 var(--focus-workspace-width, calc(61.8% - 6px)); min-width: 0; gap: var(--sp-1); padding: 0 var(--sp-2); -webkit-app-region: no-drag; }
 .focus-toolbar__identity { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-2); border: 0; background: transparent; color: var(--text-2); padding: 3px 0; text-align: left; cursor: default; }
 .focus-toolbar__identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 500; }
 .focus-toolbar__identity small { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
@@ -233,8 +249,6 @@
 .focus-toolbar__region-slot .agent-region-header { min-height: 24px; padding: 0; }
 @media (max-width: 900px) {
   .focus-filters .global-board-toolbar__controls { gap: 3px; }
-  .focus-filters .global-board-select { flex: 0 1 64px; }
-  .focus-filters .global-board-select select { width: 100%; }
   .focus-toolbar__identity small { display: none; }
 }
 
