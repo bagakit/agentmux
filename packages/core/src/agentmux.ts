@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { subscribeAgentMuxToolkit } from './toolkit-control.js'
+import type { ToolkitRequest } from './toolkit.js'
 import { parseAlignmentProposal, parseGroundingProposal } from '@agentmux/demand/goals'
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
@@ -1144,6 +1146,7 @@ async function readAllStdin(): Promise<string> {
 }
 
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'toolkit') return args[1] && !args[1].startsWith('-') ? 'toolkit.' + args[1] : 'toolkit'
   if (args[0] === 'metrics' && (args[1] === 'get' || args[1] === 'watch')) return `metrics.${args[1]}`
   if (args[0] === 'diagnostics' && args[1] === 'crash-log') return args[2] === 'reveal' ? 'diagnostics.crash-log.reveal' : 'diagnostics.crash-log.get'
   if (args[0] === 'settings' && args[1] === 'workspaces') {
@@ -1276,6 +1279,39 @@ async function endpointCommand(args: readonly string[]): Promise<number> {
   return 0
 }
 
+async function toolkitCommand(args: readonly string[]): Promise<number> {
+  const [verb, tool] = args
+  if (!verb || !['list','get','script','run','stop','watch'].includes(verb) ||
+    (verb === 'list' ? args.length !== 1 : args.length !== 2 || tool !== 'performance')) {
+    throw cliError('Run agentmux toolkit --help for official tool operations.')
+  }
+  const request: ToolkitRequest = { ...requestBase(), operation: ('toolkit.' + verb) as ToolkitRequest['operation'], toolId: 'performance' }
+  if (verb !== 'watch') {
+    const receipt = await requestAgentMuxControl(request)
+    printSuccess(receipt.operation, receipt.result); return 0
+  }
+  const controller = new AbortController()
+  let resolveEnd: (error?: Error) => void = () => {}
+  let error: Error | undefined
+  const ended = new Promise<void>(resolve => { resolveEnd = value => { error = value; resolve() } })
+  const interrupted = () => { controller.abort(); resolveEnd() }
+  const broken = (error: Error) => { controller.abort(); resolveEnd(error) }
+  process.once('SIGINT', interrupted); process.once('SIGTERM', interrupted); process.stdout.once('error', broken)
+  let subscription: { dispose(): void } | undefined
+  try {
+    subscription = await subscribeAgentMuxToolkit(request, {
+      onFrame: frame => { if (!process.stdout.write(JSON.stringify(frame) + '\n')) broken(new AgentMuxError('Toolkit output consumer is too slow.', 'CONTROL_FAILED')) },
+      onEnd: value => resolveEnd(value && (value as AgentMuxError).code !== 'CONTROL_CANCELLED' ? value : undefined)
+    }, { signal: controller.signal })
+    await ended
+    if (error) throw error
+    return 0
+  } finally {
+    subscription?.dispose(); controller.abort()
+    process.off('SIGINT', interrupted); process.off('SIGTERM', interrupted); process.stdout.off('error', broken)
+  }
+}
+
 async function metricsCommand(args: readonly string[]): Promise<number> {
   if (args.length !== 1 || (args[0] !== 'get' && args[0] !== 'watch')) throw cliError('Run agentmux metrics --help for resource queries.')
   if (args[0] === 'get') {
@@ -1328,6 +1364,7 @@ async function main(): Promise<number> {
   if (args[0] === 'doctor') return await doctorCommand(args.slice(1))
   if (args[0] === 'endpoint') return await endpointCommand(args.slice(1))
   if (args[0] === 'inspect') return await inspectCommand(args.slice(1))
+  if (args[0] === 'toolkit') return await toolkitCommand(args.slice(1))
   if (args[0] === 'metrics') return await metricsCommand(args.slice(1))
   if (args[0] === 'list') return await listCommand(args.slice(1))
   if (args[0] === 'diagnostics') {
