@@ -4,6 +4,8 @@ export type AgentMuxSpaceSelector = {
   zoneId?: string
   tabId?: string
   regionId?: string
+  displayWorkspaceId?: string
+  groupId?: string
 }
 export type AgentMuxSpaceDestination = AgentMuxSpaceSelector & {
   newTab?: boolean
@@ -13,9 +15,11 @@ export type AgentMuxSpaceDestination = AgentMuxSpaceSelector & {
     | { kind: 'directory'; path: string }
 }
 export type AgentMuxSpaceAddress = {
-  spaceId: string
-  zoneId: string
+  spaceId: string | null
+  zoneId: string | null
   workspaceId: string
+  displayWorkspaceId: string
+  groupId: string
   tabId: string
   regionId: string
 }
@@ -31,29 +35,51 @@ export type AgentMuxSpaceFact = {
 }
 export type AgentMuxZoneFact = {
   zoneId: string
-  spaceId: string
+  /** Resource context, independent of every display binding. */
   workspaceId: string
-  kind: 'directory' | 'worktree' | 'home'
-  hostId: string
-  directoryPath: string
+  kind: 'directory' | 'worktree' | 'home' | 'unknown'
+  hostId: string | null
+  directoryPath: string | null
   branch: string | null
+  issue?: string
 }
-export type AgentMuxSpaceTabFact = Omit<AgentMuxSpaceAddress, 'regionId'> & {
-  groupId: string
+export type AgentMuxSpaceTabFact = {
+  tabId: string
+  zoneId: string | null
+  workspaceId: string
   name: string | null
   regionIds: string[]
+  issue?: string
 }
-export type AgentMuxSpaceRegionFact = AgentMuxSpaceAddress & {
+export type AgentMuxSpaceRegionFact = {
+  regionId: string
+  tabId: string
   kind: 'agent' | 'terminal' | 'browser' | 'file' | 'git-diff' | 'launcher'
   agentSessionId: string | null
   runId: string | null
   execution: { hostId: string; cwd: string } | null
 }
+export type AgentMuxSpaceBindingFact = { zoneId: string; spaceId: string }
+/** Navigable references, not a claim that a Native surface is mounted. */
+export type AgentMuxSpaceLocation = AgentMuxSpaceAddress
 export type AgentMuxSpaceCatalog = {
   spaces: AgentMuxSpaceFact[]
   zones: AgentMuxZoneFact[]
   tabs: AgentMuxSpaceTabFact[]
   regions: AgentMuxSpaceRegionFact[]
+  bindings: AgentMuxSpaceBindingFact[]
+  locations: AgentMuxSpaceLocation[]
+}
+export type AgentMuxSpaceBindingTarget =
+  | { kind: 'zone-space'; zoneId: string; spaceId: string }
+  | { kind: 'tab-group'; tabId: string; displayWorkspaceId: string; groupId: string }
+export type AgentMuxSpaceBindingReport = {
+  requestId: string
+  outcome: 'linked' | 'unlinked' | 'unchanged' | 'unknown'
+  binding: AgentMuxSpaceBindingTarget
+  catalog: AgentMuxSpaceCatalog
+  save: AgentMuxSpatialSave
+  issues: AgentMuxSpatialIssue[]
 }
 export type AgentMuxSpatialSave = {
   layoutApplied: boolean
@@ -102,7 +128,10 @@ export type AgentMuxSpaceControlRequest = Base & (
       | { kind: 'agent-session'; agentSessionId: string };
       destination: AgentMuxSpaceDestination; focus: boolean;
       caller?: { agentSessionId: string; capability?: string } }
+  | { operation: 'space.bind'; binding: AgentMuxSpaceBindingTarget }
+  | { operation: 'space.unbind'; binding: AgentMuxSpaceBindingTarget }
   | { operation: 'space.mv'; fromRegionId: string; expectedAgentSessionId: string;
+      fromLocation?: Pick<AgentMuxSpaceSelector, 'spaceId' | 'displayWorkspaceId' | 'groupId'>;
       destination: AgentMuxSpaceDestination; focus: boolean }
 )
 export type AgentMuxSpaceControlResult =
@@ -111,5 +140,7 @@ export type AgentMuxSpaceControlResult =
   | ({ operation: 'space.rename'; tabId: string } & AgentMuxDisplayNameReport)
   | { operation: 'space.ls'; catalog: AgentMuxSpaceCatalog }
   | { operation: 'space.inspect'; catalog: AgentMuxSpaceCatalog; request?: { requestId: string; known: boolean; report: AgentMuxSpaceMutationReport | null } }
+  | ({ operation: 'space.bind' } & AgentMuxSpaceBindingReport)
+  | ({ operation: 'space.unbind' } & AgentMuxSpaceBindingReport)
   | ({ operation: 'agent.open' } & AgentMuxSpaceMutationReport)
   | ({ operation: 'space.mv' } & AgentMuxSpaceMutationReport)

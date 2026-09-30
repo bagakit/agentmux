@@ -13,7 +13,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   return { state: {
-    projectRailOpen: true, toolsOpen: true, mainSurface: 'survey', surveyBrowserSelection: null, surveyToolsOpen: true,
+    projectRailOpen: true, toolsOpen: true, mainSurface: 'survey', surveyZoneSelection: null, surveyToolsOpen: true,
     setSurveyBrowserSelection: vi.fn(), setSurveyToolsOpen: vi.fn(), openLauncher: vi.fn(),
     activeWorkspaceId: 'workspace-tools', toggleProjectRail: vi.fn(), toggleTools: vi.fn(),
     layouts: {} as Record<string, WorkspaceLayout>, config: null as AppConfig | null,
@@ -27,7 +27,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
     { getState: () => fixture.state, getInitialState: () => fixture.state, subscribe: () => () => {} })
 }))
-import { GlobalSurveySurface } from '../src/renderer/src/components/GlobalSurveySurface.js'
+import { SurveyBrowserTools } from '../src/renderer/src/components/SurveyBrowserTools.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
@@ -82,7 +82,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
-async function mount() { await act(async () => root.render(<GlobalSurveySurface />)) }
+async function mount() { await act(async () => root.render(<SurveyBrowserTools workspace={workspace} visible />)) }
 async function click(element: Element | null) {
   expect(element).not.toBeNull(); await act(async () => (element as HTMLElement).click())
 }
@@ -96,12 +96,10 @@ async function input(element: HTMLInputElement, value: string) {
   })
 }
 
-it('mounts one creation entry beside the current Workspace and nonempty flat sections without an introduction or cards', async () => {
+it('mounts original resource management with nonempty flat sections and no introduction or cards', async () => {
   await mount()
   const content = container.querySelector('.browser-tools-panel')!
   expect(content).not.toBeNull()
-  expect(container.querySelectorAll('[aria-label="New Browser"]')).toHaveLength(1)
-  expect(container.querySelector('[aria-label="New Browser"]')?.closest('.survey-tabs')).not.toBeNull()
   expect(content.querySelector('h2')).toBeNull()
   expect(content.textContent).not.toContain('Open a browser tab')
   expect(content.textContent).not.toContain('Main-owned')
@@ -124,22 +122,6 @@ it('mounts one creation entry beside the current Workspace and nonempty flat sec
   expect(settings.querySelector('summary')?.getAttribute('aria-label')).toBe('Browser bar settings')
   fixture.state.projectRailOpen = false
   await mount()
-  expect(container.querySelectorAll('[aria-label="New Browser"]')).toHaveLength(1)
-})
-
-it('creates in the focused pane once, preserves busy state, and shows a persistent failure in the visible body', async () => {
-  let release!: () => void
-  fixture.state.createBrowser.mockImplementationOnce(() => new Promise<void>(done => { release = done }))
-  await mount()
-  const create = container.querySelector<HTMLButtonElement>('[aria-label="New Browser"]')!
-  await click(create)
-  expect(fixture.state.createBrowser).toHaveBeenCalledExactlyOnceWith('pane-tools', { tabId: 'new-page', regionId: 'new-page-region' }, 'about:blank')
-  expect(create.disabled).toBe(true)
-  await act(async () => release())
-  expect(create.disabled).toBe(false)
-  fixture.state.createBrowser.mockRejectedValueOnce(new Error('Browser could not open; retry here'))
-  await click(create)
-  expect(container.querySelector('.survey-error[role="alert"]')?.textContent).toContain('Browser could not open; retry here')
 })
 
 it('keeps explicit save and its CAS expectation; failure and dirty draft remain visible when settings collapse', async () => {

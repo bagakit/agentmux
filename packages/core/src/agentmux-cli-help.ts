@@ -434,12 +434,14 @@ Usage:
 
 Destination selectors:
   --space <space-id>  --zone <zone-id>  --tab <tab-id>  --region <region-id>
+  --display-workspace <workspace-id>  --group <group-id>
   --new-tab          --split <left|right|above|below>
 
-A Region implies its parents; --split adds a neighbor. Without split it must be empty.
+A Region identifies its Tab/Zone; --split adds a neighbor. Without split it must be empty.
 A Tab requires exactly one empty Region. Space/Zone without Tab/Region creates a new Tab,
 including the first Tab. A Space with multiple Zones returns exact candidates; no default
-Zone is guessed. All supplied parents must agree. A target is required; run agentmux space ls.
+Zone is guessed. Multiple Space bindings or display occurrences require the exact Space,
+display Workspace and Group. All supplied references must agree. Run agentmux space ls.
 
 Create a Zone in an exact Space:
   --space <id> --new-zone --worktree --path <absolute-path> --new-branch <branch>
@@ -466,12 +468,30 @@ Usage:
   agentmux space inspect --request <request-id>
   agentmux space mv --from-region <id> --expect-session <id> <destination>
   agentmux space rename --tab <exact-tab-id> (--name <text>|--clear)
+  agentmux space bind|unbind --zone <id> --space <id>
+  agentmux space bind|unbind --tab <id> --display-workspace <id> --group <id>
 
 Space, Zone, Tab and Region IDs are opaque exact strings, including JSON directory keys.
 Space is the working surface owner; Project is a separate repository/directory grouping.
 Zone is a general execution resource, which may be a worktree, directory or Topic/Mote home.
 Discovery does not focus, read terminal bodies or probe every Session's readiness.
 Run each subcommand with --help for its exact grammar.`],
+  ['space.bind', `Link an existing Zone to a Space or one Tab to an exact display Group.
+
+Usage:
+  agentmux space bind --zone <zone-id> --space <space-id>
+  agentmux space bind --tab <tab-id> --display-workspace <workspace-id> --group <group-id>
+
+Resources and selection remain unchanged. No directory, Session or Run is created.
+The receipt includes current relations, navigable locations and the original save facts.`],
+  ['space.unbind', `Remove only one exact relation or display occurrence.
+
+Usage:
+  agentmux space unbind --zone <zone-id> --space <space-id>
+  agentmux space unbind --tab <tab-id> --display-workspace <workspace-id> --group <group-id>
+
+The final unbind retains the entity and healthy content. Explicit Close remains separate.
+Same-value requests and absent bindings do not write or save. Unknown targets return issues.`],
   ['space.ls', `Discover exact spatial IDs without changing focus
 
 Usage:
@@ -480,7 +500,10 @@ Usage:
   agentmux space ls --zone <zone-id>
 
 No filter returns all Space summaries; a Space returns its Zones; a Zone returns its
-Tab/Region metadata. IDs can be copied unchanged into agent open, space inspect or space mv.
+Tab/Region metadata, effective Zone/Space bindings and all navigable locations.
+Locations include the exact display Workspace and Group; they do not assert mounted Native
+surfaces. Entity IDs remain unchanged across binding changes. --display-workspace and --group
+qualify an existing destination; ambiguous references require an exact location.
 This read does not enumerate terminal bodies, timelines or readiness probes.`],
   ['space.inspect', `Inspect one exact spatial object or reconcile a Request
 
@@ -488,7 +511,8 @@ Usage:
   agentmux space inspect --space <id>|--zone <id>|--tab <id>|--region <id>
   agentmux space inspect --request <request-id>
 
-Exactly one selector is required. --request cannot be combined with another selector.
+An exact entity is required. --display-workspace and --group may qualify its location.
+--request cannot be combined with another selector.
 Request inspection returns known/report facts from the existing owners; it never repeats
 Git creation, Agent spawn, initial prompt delivery, movement or navigation. Unknown Requests
 and reports with partial/unknown outcomes retain their single JSON receipt and exit nonzero.`],
@@ -518,6 +542,9 @@ not merged or removed. Self move is unchanged. No stop, resume, spawn or send is
 Background is the default; --focus explicitly navigates. --request-id <id> is optional.
 The single final JSON receipt reports from/to, partial/unknown and separate save facts;
 partial/unknown exits nonzero. diskDurability remains unconfirmed after a void flush request.
+Use --from-display-workspace <id> --from-group <id> [--from-space <id>] to qualify an
+exact source. Moving a Region whose Tab has multiple Group occurrences is unsupported;
+all references and the healthy Agent are retained before any creation or admission.
 After a lost reply, use space inspect --request; do not repeat the move blindly.`],
   ['dispatch', `Supervise an already recorded Agent message
 
@@ -872,9 +899,10 @@ Usage:
   agentmux focus --region <region-id> --input target
   agentmux focus --tab <tab-id> --input target
 
-Space/Zone/Tab/Region form one hierarchy; exact children infer parents and supplied parents
-must agree. Multi-Zone or ambiguous Tab targets return exact candidates. Goal and Surface
-selectors are exclusive with that hierarchy. Goal navigation never launches a discussion.
+Zone/Tab/Region identify content; Space bindings and display Workspace/Group identify locations.
+Use --display-workspace <id> --group <id> to qualify an existing entity. All supplied references
+must agree; multiple bindings or occurrences return exact candidates. Goal and Surface selectors
+are exclusive with these entity selectors. Goal navigation never launches a discussion.
 Default --input preserve never steals conversation input. --input target requires the exact
 existing Tab/Region input owner. Selection, actual presentation, overlays, floating View,
 and before/after input are separate facts; inspect --client observes their current snapshot.
@@ -998,8 +1026,9 @@ It does not confirm a previous request or authorize repeating an unconfirmed ope
 
 ## Open an Agent in a Space
 
-\`Space\` owns working surfaces, \`Zone\` binds their execution resource, \`Tab\` is a work
-surface and \`Region\` is one leaf. Project groups code resources and is not a Space alias.
+\`Space\` binds working surfaces, \`Zone\` retains their resource context, \`Tab\` is a work
+surface and \`Region\` is one leaf. Each entity may have multiple display locations. Project
+groups code resources and is not a Space alias.
 
 \`\`\`bash
 agentmux list agents

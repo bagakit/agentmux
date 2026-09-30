@@ -25,7 +25,7 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
@@ -45,6 +45,7 @@ import {
   type RegionFocusExpression
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
+import { projectWorkbenchProjection, selectWorkbenchProjectionTab, workbenchProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
@@ -137,6 +138,7 @@ function SortableWorkbenchTab({
   group: TabGroup
   workspaceId: string
 }) {
+  const projection = useContext(WorkbenchProjectionContext)
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
@@ -203,7 +205,7 @@ function SortableWorkbenchTab({
   const moveSessionView = moveSessionViewMenu({
     surface,
     workspaces: config?.workspaces ?? [],
-    currentWorkspaceId: workspaceId,
+    currentWorkspaceId: tab.workspaceId,
     move: moveSessionViewToWorkspace
   })
   const dirty =
@@ -220,6 +222,44 @@ function SortableWorkbenchTab({
     agentSessionCount: number
   } | null>(null)
   const [closing, setClosing] = useState(false)
+  const [displayTargets, setDisplayTargets] = useState<{
+    displayWorkspaceId: string; groupId: string; label: string; linked: boolean
+  }[]>([])
+  const [bindingPending, setBindingPending] = useState(false)
+  const [bindingMenuOpen, setBindingMenuOpen] = useState(false)
+  // Inspect display metadata only when this menu opens; terminal output and unrelated tab renders
+  // do not enumerate all layouts. A binding result refreshes the same controlled facts.
+  function refreshDisplayTargets(): void {
+    const state = useAppStore.getState()
+    setDisplayTargets(Object.entries(state.layouts).flatMap(([displayWorkspaceId, layout]) => {
+      const name = state.config?.workspaces.find(workspace => workspace.id === displayWorkspaceId)?.name ?? displayWorkspaceId
+      return groupIds(layout.root).flatMap((groupId, index) => {
+        const target = layout.groups.find(group => group.id === groupId)
+        return target ? [{ displayWorkspaceId, groupId, label: `${name} · Group ${index + 1}`, linked: target.tabOrder.includes(tab.id) }] : []
+      })
+    }))
+  }
+  useEffect(() => {
+    if (!bindingMenuOpen) return
+    refreshDisplayTargets()
+    return useAppStore.subscribe((state, previous) => {
+      if (state.layouts !== previous.layouts || state.config !== previous.config) refreshDisplayTargets()
+    })
+    // This subscription exists only for the open menu and reads no Session/output facts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bindingMenuOpen, tab.id])
+  async function changeDisplayBinding(displayWorkspaceId: string, groupId: string, linked: boolean): Promise<void> {
+    if (bindingPending) return
+    setBindingPending(true)
+    try {
+      await useAppStore.getState().setTabDisplayPlacement(tab.id, displayWorkspaceId, groupId, linked)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      refreshDisplayTargets()
+      setBindingPending(false)
+    }
+  }
   // Inline rename reuses the topic-row pattern: a right-click menu entry flips the tab into an input, no
   // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
   const [rename, setRename] = useState<{ target: 'tab' | 'agent'; value: string } | null>(null)
@@ -346,9 +386,13 @@ function SortableWorkbenchTab({
         // 重排的是**这张**被右键点中的 Tab，不是当前活动的那张——非活动 Tab 上右键时，
         // 用活动 Tab 的格数会按错的容量过滤预设（列出摆不成的档，或藏掉摆得成的档）。
         regionCount={Object.keys(tab.regions).length}
-        onArrange={(mode) => arrangeTabRegions(workspaceId, tab.id, mode)}
+        onArrange={(mode) => arrangeTabRegions(tab.workspaceId, tab.id, mode)}
         moveSessionViewTargets={moveSessionView.targets}
         onMoveSessionView={moveSessionView.onSelect}
+        displayTargets={displayTargets}
+        bindingPending={bindingPending}
+        onOpenChange={(open) => { if (open) refreshDisplayTargets(); setBindingMenuOpen(open) }}
+        onDisplayBindingChange={(displayWorkspaceId, groupId, linked) => void changeDisplayBinding(displayWorkspaceId, groupId, linked)}
       >
         <button
           ref={setNodeRef}
@@ -364,7 +408,7 @@ function SortableWorkbenchTab({
               ? sessionTabTooltip(session, displayName, regionSummary)
               : surfaceTabTooltip(displayName, regionSummary)
           }
-          onClick={() => activateTab(workspaceId, group.id, tab.id)}
+          onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : activateTab(workspaceId, group.id, tab.id)}
           {...attributes}
           {...listeners}
         >
@@ -746,7 +790,8 @@ function WorkbenchRegionLeaf({
       onPointerDown={(event) => {
         // A Region portal keeps React ancestry. Survey browser input does not navigate Space;
         // the original floating pointer path still owns actual Mote/Agent/Terminal interaction.
-        if (!(browserPresentation.survey && surface?.kind === 'browser')) focusRegion(tab.workspaceId, tab.id, node.regionId,
+        if (browserPresentation.onSelectRegion) browserPresentation.onSelectRegion(node.regionId)
+        else if (!(browserPresentation.survey && surface?.kind === 'browser')) focusRegion(tab.workspaceId, tab.id, node.regionId,
           event.currentTarget.closest('[data-pmo-teams-topic-floating]') ? 'floating-pointer' : 'pointer')
       }}
     >
@@ -913,7 +958,10 @@ function PaneGroup({
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
-  const tabsById = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
+  const projection = useContext(WorkbenchProjectionContext)
+  const tabsById = useAppStore(useShallow((state) => projection
+    ? Object.fromEntries(group.tabOrder.flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
+    : workspaceTabs(state.tabs, workspaceId)))
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
   const splitRegion = useAppStore((state) => state.splitRegion)
@@ -941,7 +989,7 @@ function PaneGroup({
   const hasOriginalTopicTab = emptySpaceSelection && Object.values(tabsById).some(tab => tab.topicId === emptySpaceSelection.topicId)
   const showEmptySpace = emptySpaceSelection && !activeTab
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
-  const focusMoved = retainedSpatialFocus?.workspaceId === workspaceId && layout.activeGroupId === group.id &&
+  const focusMoved = retainedSpatialFocus?.displayWorkspaceId === workspaceId && layout.activeGroupId === group.id &&
     (!activeTab || !activeTab.regions[retainedSpatialFocus.regionId])
   // Pane 组的焦点环同样只在「有得选」时才有内容：不分屏时唯一那组铺满整个工作区且恒等于
   // activeGroupId，画出来就是整个界面镶一圈绿边（用户原话：「整个界面也有」）。
@@ -954,7 +1002,7 @@ function PaneGroup({
     group.id,
     groupIds(layout.root).length
   )
-  const activeRegionId = activeTab ? logicalRegionId(activeTab, retainedSpatialFocus?.regionId) : null
+  const activeRegionId = activeTab ? logicalRegionId(activeTab, projection?.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId ?? retainedSpatialFocus?.regionId) : null
   const activeSurface = activeTab && activeRegionId ? activeTab.regions[activeRegionId] : null
   // Route through isSessionSurface (SSOT in workbench-surface-kinds.ts). This site was invisible
   // to the exhaustiveness guard for months because it read `.kind` off a nullable receiver
@@ -988,7 +1036,9 @@ function PaneGroup({
         isOver ? 'pane-group--drop-over' : ''
       }`}
       data-pane-group-id={group.id}
-      onPointerDown={() => focusTabGroup(workspaceId, group.id)}
+      onPointerDown={() => projection ? activeTab && selectWorkbenchProjectionTab(projection, group.id, activeTab,
+        projection.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId)
+        : focusTabGroup(workspaceId, group.id)}
     >
       <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
         {showWindowChrome ? (
@@ -1023,11 +1073,11 @@ function PaneGroup({
             regionCount={activeTab ? Object.keys(activeTab.regions).length : 0}
             onSplit={(direction) => {
               if (activeTab && activeSurface) {
-                splitRegion(workspaceId, activeTab.id, activeSurface.regionId, direction)
+                splitRegion(activeTab.workspaceId, activeTab.id, activeSurface.regionId, direction)
               }
             }}
             onArrange={(mode) => {
-              if (activeTab) arrangeTabRegions(workspaceId, activeTab.id, mode)
+              if (activeTab) arrangeTabRegions(activeTab.workspaceId, activeTab.id, mode)
             }}
           />
           <button
@@ -1073,10 +1123,15 @@ function PaneGroup({
             // 隐藏的格子退出可交互树：它仍在 DOM 里，但不该被 Tab 键走到、不该被搜索命中。
             inert={tab.id !== group.activeTabId}
           >
-            <div id={`${viewHostPrefix}:${tab.id}`} data-workbench-tab-id={tab.id} className="workbench-tab-slot" />
+            <div id={projection ? workbenchProjectionSlotId(viewHostPrefix, { displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id }) : `${viewHostPrefix}:${tab.id}`}
+              data-workbench-tab-id={tab.id} data-workbench-group-id={group.id} className="workbench-tab-slot">
+              {projection && group.activeTabId === tab.id && projection.unsupportedTabIds.has(tab.id)
+                ? <div role="status" className="workbench-restore-notice">This exact Tab is selected in more than one Group. Simultaneous live display is not available; its original content and references are kept.</div> : null}
+            </div>
           </div>
         )) : !focusMoved && !showEmptySpace ? (
-          <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
+          projection ? <div role="status" className="workbench-restore-notice">Select a Tab in this Zone to display its original content.</div>
+            : <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
         ) : null}
       </div>
       <ConfirmationDialog
@@ -1291,7 +1346,8 @@ export function WorkspaceWorkbench({
   viewTargets,
   onBrowserControlConfirmation,
   projectionTabId,
-  onTabSelect
+  onTabSelect,
+  projection
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1317,10 +1373,20 @@ export function WorkspaceWorkbench({
   projectionTabId?: string | undefined
   /** Explicit navigation inside this projection may retain its own selected Tab. */
   onTabSelect?: ((tabId: string) => void) | undefined
+  /** Controlled exact Zone projection; the original workface keeps entity/content ownership. */
+  projection?: WorkbenchProjection | undefined
 }) {
   const workbenchRef = useRef<HTMLDivElement>(null)
+  const projectionEntity = projection?.entity
+  const projectionKey = projectionEntity ? `${projection?.presentationId}:${projectionEntity.kind}:${projectionEntity.kind === 'zone' ? projectionEntity.zoneId : projectionEntity.kind === 'tab' ? projectionEntity.tabId : projectionEntity.regionId}` : null
+  const [projectionActiveGroupId, setProjectionActiveGroupId] = useState<string | null>(null)
+  useEffect(() => setProjectionActiveGroupId(null), [projectionKey])
+  const effectiveViewHostPrefix = projection ? `${projection.presentationId}-slot` : viewHostPrefix
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
-  const tabs = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
+  const projectedMemberIds = useMemo(() => projection ? workbenchProjectionTabIds(projection) : null, [projection?.entity, projection?.catalog])
+  const tabs = useAppStore(useShallow((state) => projection
+    ? Object.fromEntries([...projectedMemberIds ?? []].flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
+    : workspaceTabs(state.tabs, workspaceId)))
   const retainedLayout = useRef(storedLayout)
   if (storedLayout) retainedLayout.current = storedLayout
   const residentLayout = storedLayout ?? retainedLayout.current
@@ -1329,11 +1395,16 @@ export function WorkspaceWorkbench({
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const focusTab = focusTabId ? tabs[focusTabId] : null
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
+  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(residentLayout, tabs, projection, projectionActiveGroupId) : null,
+    [residentLayout, tabs, projection, projectionActiveGroupId])
+  const projectionContext = useMemo(() => projection && zoneLayout
+    ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => group.activeTabId && viewTargets?.[group.activeTabId] && viewTargets[group.activeTabId]!.hostId !== workbenchProjectionSlotId(effectiveViewHostPrefix, { displayWorkspaceId: workspaceId, groupId: group.id, tabId: group.activeTabId }) ? [group.activeTabId] : []) ?? []]),
+      onSelect: (reference: Parameters<WorkbenchProjection['onSelect']>[0]) => { setProjectionActiveGroupId(reference.groupId); projection.onSelect(reference) } } : null, [projection, zoneLayout, viewTargets, effectiveViewHostPrefix, workspaceId])
   const layout = useMemo(
-    () => residentLayout
-      ? layoutForLogicalRegionFocus(layoutForActiveTopic(residentLayout, tabs, topicId ?? (retainedSpatialFocus?.workspaceId === workspaceId ? retainedSpatialFocus.topicId : undefined) ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId), tabs, retainedSpatialFocus?.workspaceId === workspaceId ? retainedSpatialFocus : null)
+    () => zoneLayout ? zoneLayout.layout : residentLayout
+      ? layoutForLogicalRegionFocus(layoutForActiveTopic(residentLayout, tabs, topicId ?? (retainedSpatialFocus?.displayWorkspaceId === workspaceId ? retainedSpatialFocus.topicId : undefined) ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId), tabs, retainedSpatialFocus?.displayWorkspaceId === workspaceId ? retainedSpatialFocus : null)
       : residentLayout,
-    [residentLayout, tabs, topicId, topicIsolation, projectionTabId, retainedSpatialFocus, workspaceId]
+    [zoneLayout, residentLayout, tabs, topicId, topicIsolation, projectionTabId, retainedSpatialFocus, workspaceId]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
@@ -1368,7 +1439,7 @@ export function WorkspaceWorkbench({
 
   useEffect(() => {
     const element = workbenchRef.current
-    if (!element || !visible || !onTabSelect) return
+    if (!element || !visible || !onTabSelect || projection) return
     // Retained View contents arrive through a portal owned by another Workbench.
     // Native events follow the visible DOM host, so both Tab clicks and a Region
     // focus inside that moved View identify the projection the person selected.
@@ -1393,7 +1464,7 @@ export function WorkspaceWorkbench({
       element.removeEventListener('click', select)
       element.removeEventListener('focusin', select)
     }
-  }, [visible, onTabSelect, workspaceId, topicId, layout])
+  }, [visible, onTabSelect, workspaceId, topicId, layout, projection])
 
   function onDragStart(event: DragStartEvent): void {
     const data = event.active.data.current as DragTabData | undefined
@@ -1430,13 +1501,25 @@ export function WorkspaceWorkbench({
   }
 
   function newTab(groupId: string): void {
+    if (projection) {
+      const zone = workbenchProjectionZone(projection)
+      const state = useAppStore.getState()
+      if (!zone) {
+        state.reportError(new Error('The exact Zone resource Group is unavailable here. Existing content is kept; create its Tab from the original resource workface.'))
+        return
+      }
+      const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, tabGroupId: groupId, zoneId: zone.zoneId, reveal: false })
+      const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
+      if (tab) projection.onSelect({ displayWorkspaceId: workspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId })
+      return
+    }
     const projectedTopicId = topicId ?? (layout ? activeTopicIdFromLayout(layout, tabs) : undefined)
     const tabId = openLauncher({ workspaceId, tabGroupId: groupId,
       ...(projectedTopicId ? { topicId: projectedTopicId } : {}), reveal: viewOwnership === 'owner' })
     if (tabId) onTabSelect?.(tabId)
   }
 
-  if (viewOwnership === 'projection' && !projectionTabId) {
+  if (viewOwnership === 'projection' && !projectionTabId && !projection) {
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
       {layout ? <div className="pane-state">
         <strong role="status">No Tab in this context</strong>
@@ -1446,17 +1529,21 @@ export function WorkspaceWorkbench({
     </div>
   }
   const projectedTab = projectionTabId ? tabs[projectionTabId] : undefined
-  if (viewOwnership === 'projection' && projectionTabId && (!projectedTab || projectedTab.workspaceId !== workspaceId ||
+  if (viewOwnership === 'projection' && !projection && projectionTabId && (!projectedTab || projectedTab.workspaceId !== workspaceId ||
     topicId && projectedTab.topicId !== topicId || !ownerByTab.has(projectionTabId))) {
     return <div ref={workbenchRef} className="workspace-workbench">
       <div role="status" className="workbench-restore-notice">Original Tab retained · Its placement in this context is not available · Reopen this context in Space to continue recovery</div>
       <div id={`${viewHostPrefix}:${projectionTabId}`} data-workbench-tab-id={projectionTabId} className="workbench-tab-slot" />
     </div>
   }
-  if (!layout) return null
+  const projectionNotice = zoneLayout?.issues.length ? <ServiceWindowNotice
+    notice={{ kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: zoneLayout.issues.join(' '),
+      restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }} /> : null
+  if (!layout) return projection ? <div className="workspace-workbench" data-workbench-pending-owner>{projectionNotice}</div> : null
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
   const workbench = (
+    <WorkbenchProjectionContext.Provider value={projectionContext}>
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
@@ -1470,6 +1557,7 @@ export function WorkspaceWorkbench({
       autoScroll={false}
     >
       <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-source' : ''}`}>
+        {projectionNotice}
         <SplitNode
           node={layout.root}
           nodePath=""
@@ -1482,7 +1570,7 @@ export function WorkspaceWorkbench({
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={viewOwnership === 'owner'}
-          viewHostPrefix={viewHostPrefix}
+          viewHostPrefix={effectiveViewHostPrefix}
           onNewTab={newTab}
         />
       </div>
@@ -1503,7 +1591,8 @@ export function WorkspaceWorkbench({
               restore: 'Close Mote to return this View to Space.'
             } }} />
           </div> : undefined}
-          retainedRegionId={targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null}>
+          onSelectRegion={projection?.onSelectRegion}
+          retainedRegionId={projection?.retainedRegionId ?? (targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null)}>
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
@@ -1520,6 +1609,7 @@ export function WorkspaceWorkbench({
         {activeTab ? <DragPreview tab={activeTab} /> : null}
       </DragOverlay>
     </DndContext>
+    </WorkbenchProjectionContext.Provider>
   )
   return workbench
 }

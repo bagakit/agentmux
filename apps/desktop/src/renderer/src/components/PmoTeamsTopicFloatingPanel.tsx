@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { spatialSources } from '../../../shared/space-addresses'
+import { homeZoneId, spatialSources } from '../../../shared/space-addresses'
 import pmoTeamsTopicAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -275,7 +275,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       if (!current.config) throw new Error('The Workspace is still restoring')
       const sources = spatialSources(current.config, [topic], current.spaceZoneBindings)
       const space = sources.spaces.find(space => space.topicId === target.topicId)
-      const zone = sources.zones.find(zone => zone.spaceId === space?.spaceId && zone.workspaceId === SCRATCH_WORKSPACE_ID)
+      const zone = space && sources.zones.find(zone => zone.zoneId === homeZoneId(space.spaceId) && zone.workspaceId === SCRATCH_WORKSPACE_ID &&
+        sources.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === space.spaceId))
       if (!space || !zone) throw new Error('The original Topic Space is not available')
       const receipt = await current.executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'focus',
         target: { kind: 'space', spaceId: space.spaceId, zoneId: zone.zoneId }, inputPolicy: 'preserve' }, controller.signal)

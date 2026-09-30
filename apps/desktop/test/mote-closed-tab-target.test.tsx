@@ -6,6 +6,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { subscribeWorkbenchTabRemoved } from '../src/renderer/src/lib/workbench-tab-removal'
+import { directoryIdentity, homeZoneId, spatialSources } from '../src/shared/space-addresses'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customMoteId, customTab, defaultAgent, defaultTab, moteTopics, neighborTab, savedMoteKey } from './fixtures/mote-workface'
@@ -112,6 +113,54 @@ it('empty Open Mote Space selects the same Topic without preparing a launcher', 
   expect(created[0]!.id).not.toBe(defaultTab.id)
   expect(created[0]!.regions[created[0]!.layout.activeRegionId]!.kind).toBe('launcher')
   expect(useAppStore.getState().tabs[customTab.id]).toBe(before.tabs[customTab.id])
+  expect(useAppStore.getState().agentFocus.execution).toEqual(before.agentFocus.execution)
+  expect(app.launch).not.toHaveBeenCalled()
+})
+
+it('empty Mote follows its exact original home while multiple Zones bind the same Topic', async () => {
+  removeNeighbor(); await openSavedTarget(); await closeSelected()
+  expect(Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === PMO_TEAMS_TOPIC_ID)).toEqual([])
+  const before = useAppStore.getState()
+  const sources = spatialSources(before.config, moteTopics, before.spaceZoneBindings)
+  const space = sources.spaces.find(one => one.topicId === PMO_TEAMS_TOPIC_ID)!
+  expect(space).toBeDefined()
+  const originalHome = homeZoneId(space.spaceId)
+  const decoy = 'retained-mote-foreign-zone'
+  useAppStore.setState({ spaceZoneBindings: { ...before.spaceZoneBindings,
+    [decoy]: { spaceId: space.spaceId, workspaceId: SCRATCH_WORKSPACE_ID,
+      relations: { [space.spaceId]: true } },
+    [originalHome]: { spaceId: space.spaceId, workspaceId: SCRATCH_WORKSPACE_ID,
+      relations: { [space.spaceId]: true, [directoryIdentity(space.hostId, '/other-topic')]: true } }
+  } })
+  const open = app.panel().querySelector<HTMLButtonElement>('button[aria-label="Open Mote Space"]')
+  expect(open).not.toBeNull(); await moteClick(open!)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({
+    spaceId: space.spaceId, zoneId: originalHome, topicId: PMO_TEAMS_TOPIC_ID, tabId: null
+  })
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentFocus.execution).toEqual(before.agentFocus.execution)
+  expect(app.launch).not.toHaveBeenCalled()
+})
+
+it('an unbound original Mote home stays unknown instead of borrowing another Topic binding', async () => {
+  await openSavedTarget(null)
+  const before = useAppStore.getState()
+  const space = spatialSources(before.config, moteTopics, before.spaceZoneBindings).spaces.find(one => one.topicId === PMO_TEAMS_TOPIC_ID)!
+  expect(space).toBeDefined()
+  useAppStore.setState({ spaceZoneBindings: { ...before.spaceZoneBindings,
+    [homeZoneId(space.spaceId)]: { spaceId: space.spaceId, workspaceId: SCRATCH_WORKSPACE_ID,
+      relations: { [space.spaceId]: false } },
+    'retained-mote-other-binding': { spaceId: space.spaceId, workspaceId: SCRATCH_WORKSPACE_ID,
+      relations: { [space.spaceId]: true } }
+  } })
+  const execute = vi.spyOn(useAppStore.getState(), 'executeControl')
+  const report = useAppStore.getState().reportError
+  const open = app.panel().querySelector<HTMLButtonElement>('button[aria-label="Open Mote Space"]')
+  expect(open).not.toBeNull(); await moteClick(open!)
+  expect(execute).not.toHaveBeenCalled()
+  expect(report).toHaveBeenCalledWith(expect.objectContaining({ message: 'The original Topic Space is not available' }))
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
   expect(useAppStore.getState().agentFocus.execution).toEqual(before.agentFocus.execution)
   expect(app.launch).not.toHaveBeenCalled()
 })

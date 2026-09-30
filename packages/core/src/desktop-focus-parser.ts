@@ -44,9 +44,9 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'goalId', 'surface'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface'], code)
   if (source.kind === 'space') {
-    fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId'], code)
+    fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
     const target = parseSpaceControlSelector(raw, code)
     if (!Object.keys(target).length) fail('Focus requires a Space/Zone/Tab/Region identity.', code)
@@ -80,7 +80,7 @@ export function parseDesktopFocusRequest(value: unknown, code: Code = 'INVALID_C
 function spaceSelection(value: unknown, code: Code): AgentMuxDesktopSpaceSelection | null {
   if (value === null) return null
   const source = fields(value, ['spaceId', 'zoneId', 'workspaceId', 'tabId', 'groupId', 'regionId', 'topicId'], code)
-  const result = { spaceId: spaceControlId(source.spaceId, 'Space', code, true), zoneId: spaceControlId(source.zoneId, 'Zone', code, true),
+  const result = { spaceId: nullableId(source.spaceId, 'Space', code, true), zoneId: nullableId(source.zoneId, 'Zone', code, true),
     workspaceId: spaceControlId(source.workspaceId, 'Workspace', code), tabId: nullableId(source.tabId, 'Tab', code),
     groupId: nullableId(source.groupId, 'Tab Group', code), regionId: nullableId(source.regionId, 'Region', code), topicId: nullableId(source.topicId, 'Topic', code) }
   if ((result.tabId === null) !== (result.groupId === null) || (result.regionId !== null && result.tabId === null)) {
