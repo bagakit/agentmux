@@ -39,15 +39,21 @@
 .focus-project-lanes__row[data-recovery='removed'] { border-top-style: dashed; }
 .focus-project-lanes__axis:hover { color: var(--text); }
 .focus-project-lanes__track { min-width: 0; overflow: hidden; }
-.focus-project-lanes__groups { min-width: 0; display: grid; grid-template-columns: var(--focus-state-columns); align-content: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
-.focus-context-group { min-width: 0; }
+.focus-project-lanes__groups { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
+.focus-context-group { min-width: min(100%, 180px); flex: var(--focus-column-weight, 1) 1 180px; }
+.focus-context-group[data-empty='true'] { flex: 0 0 24px; min-width: 24px; }
+.focus-context-group[data-bucket='disconnected'] { flex: 0 0 32px; min-width: 32px; }
+.focus-context-group[data-bucket='disconnected'] .focus-context-group__header { padding: 0; }
 .focus-context-group__cards, .focus-disconnected-projects__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); align-content: start; gap: var(--sp-1); }
 .focus-context-group__cards > .focus-context, .focus-disconnected-projects__cards > .focus-context { max-width: 320px; }
 .focus-context-group__cards > .focus-recovery-toggle { grid-column: 1 / -1; }
 .focus-context-group__header { display: flex; min-height: 24px; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-group__header strong { font-weight: 500; }
 .focus-context-group__header span { font-variant-numeric: tabular-nums; }
+.focus-context-group__bucket { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; }
 .focus-context-group[data-empty='true'] .focus-context-group__header strong { display: none; }
+.focus-context-group[data-empty='true'] .focus-context-group__header { justify-content: center; padding: 4px 0; }
+.focus-context-group[data-empty='true'] .focus-context-group__bucket { flex-direction: column; gap: 3px; }
 .focus-context-group[data-bucket='attention'] > .focus-context-group__header { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
 .focus-context-group[data-bucket='working'] > .focus-context-group__header { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
 .focus-context-group[data-bucket='results'] > .focus-context-group__header { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
@@ -68,16 +74,31 @@
 .focus-project-lanes__axis .project-rail-row__icon { flex: none; }
 .focus-project-lanes__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-3); }
 .focus-context__detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-micro); line-height: 1.4; }
+.focus-context__detail--recap { display: flex; flex-direction: column; }
+.focus-context__recap { display: flex; align-items: baseline; min-width: 0; gap: 4px; }
+.focus-context__recap > svg { flex: none; }
+.focus-context__recap > span, .focus-context__activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-context__recap > span { min-width: 0; }
+.focus-context__activity { color: var(--text-3); }
 .focus-context__open { flex: none; opacity: 0; color: var(--text-3); }
 .focus-context:hover .focus-context__open, .focus-context:focus-visible .focus-context__open { opacity: 1; }
-@container (max-width: 800px) {
-  .focus-project-lanes__row { grid-template-columns: minmax(0, 1fr); }
-  .focus-project-lanes__groups { display: flex; flex-direction: column; }
-}
+.focus-disconnected-entry { width: 32px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; cursor: pointer; }
+.focus-disconnected-entry:hover { background: var(--surface-2); color: var(--text); }
+.focus-disconnected-entry:disabled { cursor: default; }
+.focus-disconnected-entry:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+.focus-disconnected-summary { position: fixed; visibility: hidden; box-sizing: border-box; width: min(280px, calc(100vw - 16px)); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
+.focus-disconnected-summary > strong { color: var(--text); }
+.focus-disconnected-summary > div { display: flex; flex-direction: column; gap: 3px; margin-top: var(--sp-2); }
+.focus-disconnected-summary > div strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.focus-disconnected-summary > div span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: var(--text-3); }
+.focus-disconnected-summary > small { display: block; margin-top: var(--sp-2); color: var(--text-3); }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .focus-disconnected-projects { flex: none; min-height: 0; max-height: 45%; overflow: auto; border-top: 1px solid var(--line); }
 .focus-disconnected-projects .focus-project-lanes__rows { overflow: visible; }
 .focus-disconnected-projects__cards { padding: var(--sp-1); }
+.focus-disconnected-projects__heading { display: flex; align-items: center; }
+.focus-disconnected-projects__heading .focus-recovery-toggle { flex: 1; min-width: 0; }
+.focus-disconnected-projects__return { flex: none; margin-right: var(--sp-2); padding: 3px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .focus-workspace-resize-handle { position: relative; z-index: 3; flex: 0 0 6px; min-width: 6px; cursor: col-resize; background: var(--surface-0); touch-action: none; }
 .focus-workspace-resize-handle::after { position: absolute; inset: 0 2px; background: transparent; content: ''; }
 .focus-workspace-resize-handle:hover, .focus-workspace-resize-handle:focus-visible { background: var(--line); outline: none; }

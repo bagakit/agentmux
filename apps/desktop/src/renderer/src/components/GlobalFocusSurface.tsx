@@ -69,6 +69,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const [project, setProject] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<FocusColumn | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)
+  const [disconnectedReveal, setDisconnectedReveal] = useState<{ laneId: string; trigger: HTMLElement } | null>(null)
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const closeWorkspaceReturnRef = useRef(false)
@@ -101,7 +102,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const search = trimmedQuery.toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   const matching = executionRows.filter(row => (project === 'all' || laneByContext.get(row.id)?.projectId === project) &&
-    ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
+    ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.recap?.text ?? ''} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
   const filtered = matching.filter(row => bucketFilter === 'all' || columnFor(row) === bucketFilter)
   const selected = executionRows.find(row => row.id === selectedId)
   const filteredIds = new Set(filtered.map(row => row.id))
@@ -109,7 +110,8 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const rowsById = new Map(filtered.map(row => [row.id, row]))
   // Qualification uses the original project membership, before state/search filters.
   const liveProjects = new Set(executionRows.filter(row => columnFor(row) !== 'disconnected').map(row => laneByContext.get(row.id)?.projectId))
-  const disconnectedLanes = focusProjectLanes.filter(lane => !liveProjects.has(lane.projectId))
+  const disconnectedContexts = new Map(executionRows.filter(row => columnFor(row) === 'disconnected').map(row => [row.id, row]))
+  const disconnectedLanes = allLanes.filter(lane => lane.contextIds.some(id => disconnectedContexts.has(id)))
   const boardLanes = focusProjectLanes.filter(lane => liveProjects.has(lane.projectId))
   const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: 'Idle / Recovery', icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
   const buckets = Object.keys(bucketMeta) as FocusColumn[]
@@ -118,16 +120,14 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const filterCount = Number(project !== 'all') + Number(bucketFilter !== 'all')
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
-    const columnStyle = { '--focus-state-columns': buckets.map(bucket => {
-      const count = rows.filter(row => columnFor(row) === bucket).length
-      return count ? bucket === 'disconnected' ? 'minmax(128px, 1fr)' : `minmax(160px, ${Math.min(count, 3)}fr)` : '36px'
-    }).join(' ') } as CSSProperties
-    return <>{heading}<div className="focus-project-lanes__groups" style={columnStyle}>
+    return <>{heading}<div className="focus-project-lanes__groups">
       {buckets.map(bucket => {
         const meta = bucketMeta[bucket], Icon = meta.icon, grouped = rows.filter(row => columnFor(row) === bucket)
-        return <section className="focus-context-group global-agents-group" aria-label={meta.label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} key={bucket}>
-          <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></span></header>
-          <div className="focus-context-group__cards">{bucket === 'disconnected' ? <FocusDisconnectedGroup contexts={grouped} selectedId={selectedId} searching={Boolean(search)} onSelect={focusExecutionSession} /> : grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
+        return <section className="focus-context-group global-agents-group" aria-label={meta.label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} style={{ '--focus-column-weight': Math.min(grouped.length, 3) } as CSSProperties} key={bucket}>
+          {bucket === 'disconnected' ? <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><FocusDisconnectedGroup contexts={grouped} laneId={lane.id} onReveal={(laneId, trigger) => setDisconnectedReveal({ laneId, trigger })} /></header> : <>
+            <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></span></header>
+            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
+          </>}
         </section>
       })}
     </div></>
@@ -189,7 +189,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         <div className="focus-project-board">
           {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} /> : null}
           {filtered.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
-          <FocusDisconnectedProjects lanes={disconnectedLanes} contexts={rowsById} selectedId={selectedId} projectId={project} searching={Boolean(search)} onProject={setProject} onSelect={focusExecutionSession} />
+          <FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} selectedId={selectedId} projectId={project} reveal={disconnectedReveal} onProject={setProject} onSelect={focusExecutionSession} />
         </div>
       </div>}
       </div>
