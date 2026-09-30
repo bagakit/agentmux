@@ -147,6 +147,7 @@
 .recent-focus__message-preview { position: fixed; visibility: hidden; box-sizing: border-box; width: min(332px, calc(100vw - 16px)); max-height: min(440px, 60vh); overflow: auto; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); font-size: var(--fs-micro); animation: recent-focus-inspect-in .12s ease-out; }
 .recent-focus__message-preview[data-interactive='false'] { pointer-events: auto; }
 .recent-focus__message-preview header { display: flex; align-items: center; gap: var(--sp-2); }
+.recent-focus__message-preview[data-interactive='true'] > header { position: sticky; top: 0; z-index: 1; background: var(--surface-2); }
 .recent-focus__message-preview header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .recent-focus__message-preview header > svg { flex: none; color: var(--green); }
 .recent-focus__message-preview header .icon-button { flex: none; }
