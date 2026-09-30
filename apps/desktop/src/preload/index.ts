@@ -144,6 +144,8 @@ const api: AgentMuxPreloadApi = {
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
   scratch: {
+    setMoteArchived: (workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string) =>
+      ipcRenderer.invoke('scratch:setMoteArchived', workspaceId, topicId, archived, objectKey, expectedVersion),
     previewMoteAvatar: (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) => ipcRenderer.invoke('scratch:previewMoteAvatar', workspaceId, topicId, input, objectKey),
     saveMoteAvatar: (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) => ipcRenderer.invoke('scratch:saveMoteAvatar', workspaceId, topicId, input, objectKey),
     readMoteAvatar: (workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string) => ipcRenderer.invoke('scratch:readMoteAvatar', workspaceId, topicId, ref, objectKey),

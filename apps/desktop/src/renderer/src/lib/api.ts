@@ -576,6 +576,7 @@ const mockApi: AgentMuxDesktopApi = {
     reveal: async () => {}
   },
   scratch: {
+    setMoteArchived: async () => { throw new Error('Mote archive writes require the original desktop filesystem owner. The current Mote is kept.') },
     previewMoteAvatar: async () => { throw new Error('Avatar image processing is not available in the web preview.') },
     saveMoteAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },
     readMoteAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },

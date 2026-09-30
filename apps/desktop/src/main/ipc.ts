@@ -616,6 +616,8 @@ export async function registerIpc(args: {
   handle('scratch:ensureMote', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.ensureMote(workspace(config, workspaceId), topicId)
   )
+  handle('scratch:setMoteArchived', async (workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string) =>
+    await args.scratchTopics.setMoteArchived(workspace(config, workspaceId), topicId, archived, objectKey, expectedVersion))
   handle('scratch:previewMoteAvatar', async (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) =>
     await args.scratchTopics.previewAvatar(workspace(config, workspaceId), topicId, input, objectKey))
   handle('scratch:saveMoteAvatar', async (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) =>

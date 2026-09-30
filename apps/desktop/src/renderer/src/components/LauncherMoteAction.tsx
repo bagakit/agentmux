@@ -12,6 +12,7 @@ import { MoteIcon } from './MoteIcon'
 import { tabGroupForTab } from '../lib/workbench-tabs'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 
 /** An explicit creation request uses the selected Mote's existing input owner. */
 export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegionId, disabled = false }: {
@@ -27,6 +28,10 @@ export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegio
   })
   const { topics } = useScratchTopics(SCRATCH_WORKSPACE_ID)
   const motes = scratchMoteTopics(topics)
+  const selectedMote = motes.find(mote => mote.id === topicId)
+  const availableMotes = motes.filter(mote => mote.moteArchive?.state !== 'archived')
+  const scratch = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
+  const archive = useMoteArchiveAction(scratch)
   const moteName = motes.find(mote => mote.id === topicId)?.title ?? 'Saved Mote'
   const [pending, setPending] = useState(false), [issue, setIssue] = useState<string | null>(null), [submittedFor, setSubmittedFor] = useState<string | null>(null)
   const [submission, setSubmission] = useState<'queued' | 'submitted'>('queued')
@@ -99,7 +104,12 @@ export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegio
     <div className="launcher-mote__actions"><button type="button" className="launch-refine__toggle" disabled={disabled || pending} title={`${hasDraft ? 'Send a creation request to' : 'Open'} ${moteName}; both unsent drafts are kept`} onClick={() => { void createWithMote() }}>
       {pending ? <LoaderCircle className="spin" size={13} /> : submitted ? <Check size={13} /> : <MoteIcon size={13} />}<span>{pending ? 'Submitting…' : submitted ? `Request ${submission}` : 'Create with Mote'}</span>
     </button>
-    {motes.length > 1 ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`Choose Mote: ${moteName}`} title={moteName} disabled={pending}><span>{moteName}</span><ChevronDown size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{motes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => setFloating({ targetTopicId: mote.id, targetTabId: undefined })}><MoteIcon size={13} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote">✓</span> : null}</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}>{moteName}</span>}</div>
+    {availableMotes.length > 1 || selectedMote?.moteArchive?.state === 'archived' ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`Choose Mote: ${moteName}`} title={moteName} disabled={pending}><span>{moteName}</span><ChevronDown size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{availableMotes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => setFloating({ targetTopicId: mote.id, targetTabId: undefined })}><MoteIcon size={13} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote">✓</span> : null}</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}>{moteName}</span>}</div>
+    {selectedMote?.moteArchive?.state === 'archived' ? <div className="workbench-restore-notice mote-context-notice" role="status">
+      <span>{moteName} · Archived. This request keeps its original Mote.</span>
+      <button type="button" className="small-button" disabled={archive.pending === topicId} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
+    </div> : null}
+    <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} />
     {issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: `Creation handoff to ${moteName} is unconfirmed`, mode: `${issue} Both original drafts and the current project are kept.`, restore: 'Open the selected Mote to inspect its request queue and launch status before retrying.' } }} /> : null}
   </div>
 }

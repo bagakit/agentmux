@@ -1,4 +1,4 @@
-import { Check, Circle, X, Maximize2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Archive, Check, Circle, X, Maximize2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
@@ -21,11 +21,14 @@ import { WorkbenchPresentationContext } from '../lib/workbench-presentation'
 import { StatusDot } from './StatusDot'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
+import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
+import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 
-const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity }: {
+const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId }: {
   topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | null | undefined
   onSelect(topicId: string, tabId: string | undefined): void
   onIdentity(anchor: HTMLButtonElement | null): void
+  onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<void>; pending: string | null; container(): HTMLElement | null; currentTopicId: string
 }) {
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
     targetTopicId: topic.id, ...(selected ? { targetTabId: savedTabId } : {}) }), [topic.id, selected, savedTabId])
@@ -40,9 +43,9 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const status = moteTargetStatus(tab, session, tabId)
-  const identityStatus = topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' + status : status
+  const identityStatus = (topic.moteArchive?.state === 'archived' ? 'Archived · ' : '') + (topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' : '') + status
   const restoring = Boolean(tabId && (!tab || !region || region.kind === 'agent' && !session))
-  return <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
+  const choice = <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
     data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
     aria-label={topic.title + ' · ' + identityStatus} onClick={() => onSelect(topic.id, tabId)}
     onPointerEnter={event => { if (event.pointerType === 'mouse') onIdentity(event.currentTarget) }}
@@ -57,6 +60,16 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
     </span>
     {selected ? <Check className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
   </button>
+  return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} moteArchive={{
+    archived: topic.moteArchive?.state === 'archived', disabled: pending === topic.id || topic.id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
+    ...(topic.id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),
+    onChange: () => onArchive(topic, topic.moteArchive?.state !== 'archived'),
+    returnFocus: () => {
+      const panel = container(), resource = useAppStore.getState().config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+      if (!panel?.matches(':popover-open') || panel.dataset.moteTargetTopic !== currentTopicId || resource?.hostId !== workspace?.hostId || resource?.path !== workspace?.path) return null
+      return panel.querySelector<HTMLButtonElement>(`[data-mote-archived="${topic.id}"] button`) ?? panel.querySelector<HTMLButtonElement>('[aria-label="Show archived Motes"]')
+    }
+  }}>{choice}</SpaceObjectContextMenu> : choice
 })
 function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -79,11 +92,13 @@ function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
   return <div ref={ref} role="tooltip" className="mote-chooser__identity">{label}</div>
 }
 
-const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onOpenSpace, onClose }: {
+const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onOpenSpace, onClose, onArchive, pending, container }: {
   topics: readonly ScratchTopicSnapshot[]; topicId: string; tabId: string | null | undefined
   railMode: 'cards' | 'avatars'; onToggleMode(): void
   onSelect(topicId: string, tabId: string | undefined): void; onOpenSpace(): void; onClose(): void
+  onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<void>; pending: string | null; container(): HTMLElement | null
 }) {
+  const [showArchived, setShowArchived] = useState(false)
   const [identityAnchor, setIdentityAnchor] = useState<HTMLButtonElement | null>(null)
   const showIdentity = useCallback((anchor: HTMLButtonElement | null) => {
     const name = anchor?.querySelector<HTMLElement>('.mote-chooser__name > strong')
@@ -91,9 +106,10 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
   }, [railMode])
   return <div className="mote-chooser">
     <div className="mote-chooser__choices" role="group" aria-label="Motes">
-      {topics.map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} />)}
+      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} />)}
     </div>
     <div className="mote-chooser__actions">
+      <button type="button" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><Archive size={13} /></button>
       <button type="button" aria-label="Show Mote avatars only" aria-pressed={railMode === 'avatars'} title={railMode === 'cards' ? 'Show avatars only' : 'Show Mote cards'} onClick={onToggleMode}>
         {railMode === 'cards' ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
       </button>
@@ -122,10 +138,13 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   const refreshTopics = useAppStore(state => state.refreshScratchTopics)
   const { topics, error: directoryError } = useScratchTopics(SCRATCH_WORKSPACE_ID)
   const motes = useMemo(() => scratchMoteTopics(topics), [topics])
+  const archive = useMoteArchiveAction(scratch)
   const target = usePmoTeamsTopicTarget(floating)
   const visible = floating.open || floating.preview
   const railMode = floating.railMode ?? 'cards'
   const panelRef = useRef<HTMLDivElement>(null)
+  const menuContainer = useCallback(() => panelRef.current, [])
+  const selectedMote = motes.find(topic => topic.id === target.topicId)
   const floatingRef = useRef(floating); floatingRef.current = floating
   const spaceActionRef = useRef<AbortController | null>(null)
   const [preparationAttempt, setPreparationAttempt] = useState(0)
@@ -356,9 +375,14 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       }} /> : null}
     {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={floating.targetTabId === null ? null : target.tabId} railMode={railMode}
       onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
-      onSelect={selectMote} onOpenSpace={openSpace} onClose={close} /> : null}
+      onSelect={selectMote} onOpenSpace={openSpace} onClose={close} onArchive={archive.change} pending={archive.pending} container={menuContainer} /> : null}
     <div className="pmo-teams-topic-floating__content">
     {floating.preferenceIssue ? <div role="status" className="workbench-restore-notice mote-size-notice">{floating.preferenceIssue}</div> : null}
+    {selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
+      <span>{selectedMote.title} · Archived. The original work surface remains available.</span>
+      <button type="button" className="small-button" disabled={archive.pending === selectedMote.id} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
+    </div> : null}
+    <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} />
     {!scratch ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
     {visible && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>
