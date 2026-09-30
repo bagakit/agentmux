@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "types": ["node", "vite/client", "vitest/globals"] },
+  "include": [
+    "../../../src/main/browser-input-history.ts", "../../../src/shared/browser-input-history.ts",
+    "../../../src/main/ipc.ts", "../../../src/main/ipc-sender-trust.ts", "../../../src/main/browser-view-manager.ts",
+    "../../../src/preload/index.ts", "../../../src/renderer/src/lib/api.ts", "../../../src/renderer/src/global.d.ts",
+    "../../../test/browser-input-history-store.test.ts", "../../../test/browser-input-history-ipc.test.ts"
+  ]
+}
