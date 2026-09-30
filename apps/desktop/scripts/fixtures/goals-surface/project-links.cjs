@@ -14,8 +14,16 @@ module.exports = async function projectLinksScenes({ evaluate, size, click, capt
   const fileTab = Object.values(opened.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file'))
   assert.ok(fileTab, 'Actual File Region exists')
   assert.ok(opened.layouts["__scratch__"].groups.find(group => group.id === opened.originalGroup).tabOrder.includes(fileTab.id))
+  const displayed = await evaluate(`(() => {
+    const tabId = ${JSON.stringify(fileTab.id)}, groupId = ${JSON.stringify(opened.originalGroup)}, regionId = ${JSON.stringify(fileTab.layout.activeRegionId)};
+    const slots = [...document.querySelectorAll('.workbench-tab-slot')].filter(slot => slot.dataset.workbenchTabId === tabId && slot.dataset.workbenchGroupId === groupId);
+    const bodies = [...document.querySelectorAll('[data-workbench-region-id]')].filter(body => body.dataset.workbenchRegionId === regionId);
+    return { slotCount: slots.length, bodyCount: bodies.length, containsBody: slots[0]?.contains(bodies[0]) ?? false,
+      monacoCount: slots[0]?.querySelectorAll('.monaco-editor').length ?? 0, sourceVisible: slots[0]?.textContent.includes('Project Alpha') ?? false };
+  })()`)
+  assert.deepEqual(displayed, { slotCount: 1, bodyCount: 1, containsBody: true, monacoCount: 1, sourceVisible: true })
   assert.deepEqual(opened.session.control, original)
-  result.observations.push({ scene: 'actual-project-file', facts: opened })
+  result.observations.push({ scene: 'actual-project-file', facts: opened, displayed })
   await capture('1280-dark-project-file-original-group', 1280)
   await evaluate('goalsProjectLinks.seed("remote")'); await size(620)
   await waitFor('document.querySelectorAll("button.md-link--file").length===2')
