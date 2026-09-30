@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.identity.json",
+  "include": ["./paperdoll-entry.tsx", "../../../test/mote-paperdoll-avatar.test.tsx", "../../../test/mote-paperdoll-state.test.tsx", "../../../src/renderer/src/global.d.ts"]
+}

@@ -44,6 +44,8 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
       >
       <span className={className + '__surface'} data-state="open">
         <SpaceObjectIcon kind="mote" name={target.moteName} manualIcon={manualIcon}
+          moteSessionId={target.region?.kind === 'agent' ? target.region.sessionId : undefined} moteHostId={workspace?.hostId}
+          moteAvailability={topic && (!target.tabId || target.region?.kind === 'launcher') ? 'no-agent' : target.region && target.region.kind !== 'agent' ? 'static' : 'restoring'}
           avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId ?? (identityConfirmed ? target.topicId : undefined)} />
         {target.session ? <span className={className + '__status'} aria-hidden="true"><StatusDot status={target.session.status} /></span> : null}
       </span>

@@ -32,11 +32,23 @@ import { isSessionSurface } from './workbench-surface-kinds'
 
 export type SessionViewMode = 'terminal' | 'activity'
 
+/** Renderer-only live provenance on the original timeline slot. Never persisted or transported by Core. */
+export type RendererAgentTimelineSnapshot = AgentTimelineSnapshot & {
+  liveTool?: { itemId: string; hostId: string; runId: string; epoch: number; observedAt: number; startedAt: number }
+}
+
+function clearLiveTool(timelines: SessionProjectionState['timelines'], sessionId: string): SessionProjectionState['timelines'] {
+  const original = timelines[sessionId]
+  if (!original?.liveTool) return timelines
+  const { liveTool: _liveTool, ...history } = original
+  return { ...timelines, [sessionId]: history }
+}
+
 export type SessionProjectionState = {
   displacedAgentSessionIds?: string[]
   noticeReadReceipts?: Record<string, Record<string, string>>
   sessions: SessionSnapshot[]
-  timelines: Record<string, AgentTimelineSnapshot>
+  timelines: Record<string, RendererAgentTimelineSnapshot>
   pendingAgentLaunches: Record<string, PendingAgentLaunch>
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
@@ -202,6 +214,38 @@ function applyTimelineEvent(
   }
 }
 
+function workingToolEpoch(session: SessionSnapshot): number | undefined {
+  return session.kind === 'agent' && session.status.state === 'working' && !session.pendingInteraction &&
+    session.semanticStatus?.state === 'working' ? session.semanticStatus.stateEnteredAt : undefined
+}
+
+function acceptsCurrentToolEvent(session: SessionSnapshot, event: AgentTimelineRuntimeEvent, epoch: number | undefined, observedAt = 0): boolean {
+  const { evidence, mutation, agentSessionId } = event.event
+  const updateAt = mutation.type === 'update' ? mutation.updatedAt : mutation.item.updatedAt
+  return epoch !== undefined && event.hostId === session.hostId && agentSessionId === session.id && mutation.agentSessionId === session.id &&
+    evidence.run?.runId === session.control.run.runId && ['native-hook', 'acp'].includes(evidence.source) &&
+    evidence.observedAt >= epoch && evidence.observedAt >= observedAt && updateAt >= epoch &&
+    (mutation.type === 'update' || mutation.item.createdAt >= epoch)
+}
+
+function projectLiveTool(previous: RendererAgentTimelineSnapshot | undefined, session: SessionSnapshot, event: AgentTimelineRuntimeEvent): RendererAgentTimelineSnapshot['liveTool'] {
+  const live = previous?.liveTool, epoch = workingToolEpoch(session)
+  const retained = epoch !== undefined && live?.hostId === session.hostId && live.runId === session.control.run.runId && live.epoch === epoch ? live : undefined
+  const core = event.event, evidence = core.evidence, mutation = core.mutation
+  if (!acceptsCurrentToolEvent(session, event, epoch, retained?.observedAt)) return retained
+  const updateAt = mutation.type === 'update' ? mutation.updatedAt : mutation.item.updatedAt
+  if (mutation.type === 'update') {
+    // Updates cannot promote an unknown historical item into a live tool. Its exact admitted start is required.
+    if (!retained || retained.itemId !== mutation.itemId || updateAt < retained.startedAt) return retained
+    return mutation.status === 'complete' || mutation.status === 'failed' ? undefined : { ...retained, observedAt: evidence.observedAt }
+  }
+  const item = mutation.item
+  if (item.agentSessionId !== session.id || item.kind !== 'tool_call') return retained
+  if (item.status !== 'streaming') return retained?.itemId === item.id && item.createdAt === retained.startedAt && updateAt >= retained.startedAt ? undefined : retained
+  if (item.createdAt < epoch!) return retained
+  return { itemId: item.id, hostId: session.hostId, runId: session.control.run.runId, epoch: epoch!, observedAt: evidence.observedAt, startedAt: item.createdAt }
+}
+
 function eventAgentSessionId(event: RuntimeEvent['event']): string | null {
   if (event.type === 'agent-timeline' || event.type === 'agent-status') return event.agentSessionId
   if (event.type === 'interaction') return event.request.agentSessionId
@@ -339,8 +383,8 @@ export function reduceTimelineSnapshot(
   const failures = pending?.projectionFailures?.filter(failure => failure.step !== 'timeline')
   return {
     ...state,
-    ...(current && snapshot.revision <= current.revision ? {} : {
-      timelines: { ...state.timelines, [snapshot.agentSessionId]: snapshot }
+    ...(current && (snapshot.revision < current.revision || snapshot.revision === current.revision && !current.liveTool) ? {} : {
+      timelines: { ...state.timelines, [snapshot.agentSessionId]: { agentSessionId: snapshot.agentSessionId, revision: snapshot.revision, items: snapshot.items } }
     }),
     ...(pending?.created && failures ? { pendingAgentLaunches: failures.length > 0
       ? { ...state.pendingAgentLaunches, [snapshot.agentSessionId]: { ...pending, projectionFailures: failures } }
@@ -551,6 +595,7 @@ export function projectRuntimeEvent(
       : CONNECTION_LOST_DETAIL
     return { state: {
       ...state,
+      timelines: state.sessions.reduce((timelines, item) => item.kind === 'agent' && item.hostId === event.hostId ? clearLiveTool(timelines, item.id) : timelines, state.timelines),
       sessions: state.sessions.map((item) => item.kind === 'agent' &&
         item.hostId === event.hostId
         ? {
@@ -599,6 +644,8 @@ export function projectRuntimeEvent(
     })
     return { state: {
       ...state,
+      ...(core.state !== 'running' && existingEventSession && ownsRunEvent(existingEventSession, core.agentSessionId, core.run) && core.evidence.observedAt >= existingEventSession.status.observedAt
+        ? { timelines: clearLiveTool(state.timelines, existingEventSession.id) } : {}),
       sessions: state.sessions.map((item) =>
         ownsRunEvent(item, core.agentSessionId, core.run) &&
         core.evidence.observedAt >= item.status.observedAt
@@ -642,7 +689,7 @@ export function projectRuntimeEvent(
       statusKeys.every((key) => Object.is(item.status[key], status[key]))) return { state }
     const sessions = state.sessions.slice()
     sessions[state.sessions.indexOf(item)] = { ...item, updatedAt, status }
-    return { state: { ...state, sessions } }
+    return { state: { ...state, sessions, ...(status.state !== 'working' || item.status.state !== 'working' ? { timelines: clearLiveTool(state.timelines, item.id) } : {}) } }
   }
   if (core.type === 'agent-session') {
     const item = existingEventSession
@@ -719,13 +766,16 @@ export function projectRuntimeEvent(
     if (configValuesEqual(item, next)) return { state }
     const sessions = state.sessions.slice()
     sessions[state.sessions.indexOf(item)] = next
-    return { state: { ...state, sessions } }
+    return { state: { ...state, sessions, ...(next.status.state !== 'working' || next.pendingInteraction ||
+      !sameRun(item.control.run, next.control.run) || next.semanticStatus?.stateEnteredAt !== item.semanticStatus?.stateEnteredAt
+      ? { timelines: clearLiveTool(state.timelines, item.id) } : {}) } }
   }
   // Interaction events announce observations, including additional native requests.
   // Only the authoritative agent-session record chooses the current answerable request.
   if (core.type === 'agent-timeline') {
     const session = state.sessions.find((item) => item.id === core.agentSessionId)
     if (!session) return { state }
+    const previous = state.timelines[core.agentSessionId]
     const applied = applyTimelineEvent(
       state.timelines[core.agentSessionId] ?? {
         agentSessionId: core.agentSessionId,
@@ -734,8 +784,17 @@ export function projectRuntimeEvent(
       },
       core
     )
-    if (applied.gap) return { state, timelineGapSessionId: core.agentSessionId }
+    if (applied.gap) {
+      // Any admitted current-round gap could conceal completion, even when this event is readable history.
+      // Foreign/old-Run/old-epoch events retain the current tool; history, gap repair and healthy input stay unchanged.
+      const live = previous?.liveTool, epoch = workingToolEpoch(session)
+      const currentGap = live?.hostId === session.hostId && live.runId === session.control.run.runId && live.epoch === epoch &&
+        acceptsCurrentToolEvent(session, event as AgentTimelineRuntimeEvent, epoch, live.observedAt)
+      return { state: currentGap ? { ...state, timelines: clearLiveTool(state.timelines, session.id) } : state,
+        timelineGapSessionId: core.agentSessionId }
+    }
     if (applied.snapshot === state.timelines[core.agentSessionId]) return { state }
+    const liveTool = projectLiveTool(previous, session, event as AgentTimelineRuntimeEvent)
     return { state: {
       ...state,
       sessions: state.sessions.map((item) => item.id === core.agentSessionId
@@ -743,7 +802,7 @@ export function projectRuntimeEvent(
         : item),
       timelines: {
         ...state.timelines,
-        [core.agentSessionId]: applied.snapshot
+        [core.agentSessionId]: { ...applied.snapshot, ...(liveTool ? { liveTool } : {}) }
       }
     } }
   }
