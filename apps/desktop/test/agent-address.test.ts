@@ -288,6 +288,8 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'CONTROL_CANCELLED',
       'CONTROL_REQUEST_CONFLICT',
       'CONTROL_OWNER_LOST',
+      // Control owner未提供可选资源观测接口；换Agent/Tab地址不能补出能力，保留原始message。
+      'METRICS_UNSUPPORTED',
       // 文件诊断及设置冲突/资源约束不由换Agent地址恢复，保留各owner的原始message。
       'CRASH_LOG_NOT_FILE',
       'UNSUPPORTED_SETTING',
