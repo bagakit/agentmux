@@ -78,7 +78,7 @@ export function PerformancePopover({ children, label = false, onVisibleChange, f
   return <>
     <button ref={trigger} type="button" className="performance-trigger" aria-label="Performance" aria-expanded={open}
       aria-haspopup="dialog" onPointerEnter={enter} onPointerLeave={leave} onClick={promote}>
-      <Activity size={13} aria-hidden="true" />{label ? <span>Performance</span> : null}
+      <Activity size={14} aria-hidden="true" />{label ? <span>Performance</span> : null}
     </button>
     {open && visible ? <WindowOverlayPortal><div ref={panel} className="performance-popover" role="dialog" aria-label="Performance"
       style={{ visibility: 'hidden' }} onPointerEnter={() => clearTimeout(closeTimer.current)} onPointerLeave={leave}

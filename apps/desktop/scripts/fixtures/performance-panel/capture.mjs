@@ -7,8 +7,9 @@ import { createRequire } from 'node:module'
 import { isBuiltin } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
-export async function capturePerformancePanel({ root, evidence, captureScope = 'full' }) {
-  assert.ok(['full','placement'].includes(captureScope),'已知明确 capture scope')
+export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline' }) {
+  assert.ok(['full','placement','buttons'].includes(captureScope),'已知明确 capture scope')
+  assert.ok(['baseline','state','focus'].includes(cssMutant)&& (captureScope==='buttons'||cssMutant==='baseline'),'明确有界私有CSS变异')
   const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures/performance-panel')
   const require=createRequire(path.join(desktop,'package.json')),sha=bytes=>createHash('sha256').update(bytes).digest('hex')
   const {build,loadConfigFromFile}=await import(pathToFileURL(require.resolve('vite')).href)
@@ -18,8 +19,8 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const {config}=await loadConfigFromFile({command:'build',mode:'production'},configFile,root)
   const privateRoot=await fs.mkdtemp(path.join(os.tmpdir(),'amx-performance-ui-'))
   await fs.mkdir(evidence,{recursive:true})
-  const compiled=path.join(evidence,'compiled'),inputs=new Map(),artifacts=[]
-  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,evidence,privateRoot,processes:[],frames:[],
+  const compiled=path.join(evidence,'compiled'),inputs=new Map(),artifacts=[],cssInputs=[]
+  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,cssMutant,evidence,privateRoot,processes:[],frames:[],
     actualApp:true,actualSettings:true,actualTerminalView:true,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
@@ -66,15 +67,39 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
           const bytes=await bind(args.path);return{contents:bytes.toString(),loader:args.path.endsWith('tsx')?'tsx':'ts'}
         })
       }}]})
+    const cssRules=[
+      ['agent.css',".surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):is([aria-current='page'], [aria-expanded='true'])",'background','state'],
+      ['agent.css','.surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):focus-visible, .window-status-bar__utilities > .window-status-bar__utility-button:focus-visible','outline','focus'],
+      ['performance-toolkit.css','.performance-trigger[aria-expanded=true]','background','state'],
+      ['performance-toolkit.css','.performance-trigger:focus-visible','outline','focus']]
+    const cssPlugin={postcssPlugin:'bind-performance-button-owning-css',OnceExit(sheet){
+      sheet.walkRules(rule=>{
+        const matched=cssRules.find(([file,selector])=>rule.source?.input.file===path.join(desktop,'src/renderer/src/styles',file)&&rule.selector===selector)
+        if(!matched)return
+        const [file,selector,property,kind]=matched,originalRule=rule.toString(),declarations=rule.nodes.filter(node=>node.type==='decl'&&node.prop===property)
+        assert.equal(declarations.length,1,'唯一非空owning CSS属性: '+selector)
+        if(cssMutant===kind)declarations[0].value=kind==='state'?'transparent':'none'
+        assert.ok(!cssInputs.some(item=>item.selector===selector),'实际owning CSS规则只消费一次: '+selector)
+        cssInputs.push({path:'apps/desktop/src/renderer/src/styles/'+file,selector,property,kind,originalRule,consumedRule:rule.toString(),
+          originalSHA256:sha(originalRule),consumedSHA256:sha(rule.toString()),mutated:cssMutant===kind})
+      })
+    }}
     await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{...config.resolve,alias:[
       ...aliases.entries()].map(([name,replacement])=>({find:new RegExp('^'+name.replace(/[.*+?^$()|[\]\\]/g,'\\$&')+'$'),replacement})).concat(config.resolve.alias??[])},
       esbuild:{jsx:'automatic'},define:{...config.define,'process.env.NODE_ENV':'"production"'},
+      ...(captureScope==='buttons'?{css:{postcss:{plugins:[cssPlugin]}}}:{}),
       plugins:[{name:'bind-actual-mounted-renderer-source',enforce:'pre',async transform(_code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/'))await bind(file)}}],
       build:{target:'esnext',outDir:path.join(compiled,'renderer'),sourcemap:false,emptyOutDir:false}})
-    const env={...process.env,AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD:path.join(compiled,'fixture-preload.cjs'),
+    if(captureScope==='buttons'){
+      assert.equal(cssInputs.length,4,'实际PostCSS owning规则四个非空唯一')
+      assert.equal(cssInputs.filter(item=>item.mutated).length,cssMutant==='baseline'?0:2,'只有实际两处状态或焦点owning声明变异')
+      await fs.writeFile(path.join(evidence,'css-input.json'),JSON.stringify(cssInputs,null,2)+'\n')
+      receipt.cssInputs=cssInputs
+    }
+    const env={...process.env,AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD:path.join(compiled,'fixture-preload.cjs'),AGENTMUX_PERFORMANCE_BUTTON_MUTANT:cssMutant,
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
-    for(const phase of captureScope==='placement'?['placement']:['control','restart','joined']){
+    for(const phase of captureScope==='full'?['control','restart','joined']:[captureScope]){
       const process=await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs')],
         {temporaryRoot:privateRoot,cwd:root,env,timeoutMs:90000})
       receipt.processes.push({...process,phase})
@@ -86,6 +111,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       if(phase==='joined'){assert.equal(raw.joined.officialExecution,true);receipt.officialOwnerQualification=true;receipt.joined=raw.joined}
     }
     if(captureScope==='placement')receipt.boundary='仅本次 Settings 左归属修正：实际 App 9 geometry、7 native keyboard、Settings toggle/Escape/snapshot retention、完整 Footer 图；不运行或签原full hidden/restart/joined/T004。'
+    if(captureScope==='buttons')receipt.boundary='仅T005底栏七常规按钮actual App样式/几何/原生焦点与原工作面保持；私有CSS输入变异。无旧full hidden/restart/joined、Backend或用户FPS资格。'
     receipt.completed=true
   } catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack}}
   finally {

@@ -10,8 +10,8 @@ import { capturePerformancePanel } from './fixtures/performance-panel/capture.mj
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const args = process.argv.slice(2), mode = args[0]
-assert.ok(['--interaction', '--mutations', '--callers', '--placement'].includes(mode), '必须选择一个非空验证模式')
-assert.ok(args.length === 1 || args.length === 2 && mode === '--interaction' && args[1] === '--capture-only', '只接受明确模式及首次采图开关')
+assert.ok(['--interaction', '--mutations', '--callers', '--placement', '--buttons'].includes(mode), '必须选择一个非空验证模式')
+assert.ok(args.length === 1 || args.length === 2 && ['--interaction','--buttons'].includes(mode) && args[1] === '--capture-only', '只接受明确模式及首次采图开关')
 const execute = promisify(execFile), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const base = resolve(root, '.bagakit/design/toolkit-performance-20261004/ui-evidence', mode.slice(2))
 await mkdir(base, { recursive: true }); const evidence = await mkdtemp(resolve(base, 'run-'))
@@ -54,8 +54,64 @@ async function callers() {
   for (const name of ['PerformancePopover', 'PerformanceOverview', 'PerformanceScript']) await collect(component + 'PerformancePanel.tsx', jsx(name))
   await collect('apps/desktop/src/renderer/src/lib/use-performance-observation.ts', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'api.observe')
   await collect(component + 'PerformanceScript.tsx', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'api.script')
+  if(mode==='--buttons') {
+    await collect(productPaths[0], jsx('SurfaceSwitch'));await collect(productPaths[0], jsx('WindowUtilityBar'))
+    const source=await readFile(resolve(root,'apps/desktop/src/renderer/src/styles/index.css'),'utf8')
+    const imports=[...source.matchAll(/^\s*@import\s+['"]([^'"]+)['"];\s*$/gm)].map(match=>match[1]);assert.ok(imports.length>0,'产品stylesheet入口扫描非空')
+    for(const file of ['./agent.css','./performance-toolkit.css'])assert.ok(imports.includes(file),'普通按钮owning stylesheet实际被产品入口消费: '+file)
+    calls.push({path:'apps/desktop/src/renderer/src/styles/index.css',source:imports.filter(file=>file==='./agent.css'||file==='./performance-toolkit.css')})
+  }
   await writeFile(resolve(evidence, 'callers.json'), JSON.stringify({ passed: true, calls, definitionsImportsTestsFixturesExcluded: true, source: products }, null, 2) + '\n')
   console.log(`callers: ${calls.length} 个非空产品调用点`)
+}
+
+async function buttons() {
+  await callers()
+  const sealedPath=resolve(base,'product/receipt.json')
+  if(args[1]!=='--capture-only') {
+    const sealed=await json(sealedPath)
+    assert.equal(sealed.mode,'--buttons');assert.equal(sealed.captureOnly,true);assert.equal(sealed.completed,true,'先完成本候选有限正控/变异与精确恢复采图')
+    assert.deepEqual(sealed.products,products,'封存的产品Source精确不变');assert.deepEqual(sealed.proof,proof,'封存的验证输入精确不变')
+    assert.equal(sealed.results.length,4,'有限control/state/focus/restored四个实际入口')
+    for(const result of sealed.results){
+      const captured=await json(resolve(result.evidence,'receipt.json'));assert.equal(sha(await readFile(resolve(result.evidence,'receipt.json'))),result.receiptSHA256)
+      for(const [path,input]of Object.entries(captured.inputs))assert.equal(sha(await readFile(resolve(root,path))),input.sha256,'sealed实际Source不漂移: '+path)
+      for(const item of [...captured.compiled,...captured.frames])assert.equal(sha(await readFile(resolve(captured.evidence,item.file))),item.sha256,'sealed实际compiled/PNG读回')
+    }
+    native=sealed.native;results.push(...sealed.results)
+    const review=await json(resolve(native.evidence,'independent-visual-review.json'))
+    assert.equal(review.sourceIdentity,native.sourceIdentity);assert.equal(review.verdict,'PASS');assert.deepEqual(review.mustFix,[])
+    assert.ok(review.images.length>0,'独立亲看实际图片非空')
+    for(const frame of native.frames)assert.equal(review.images.find(item=>item.file===frame.file)?.sha256,frame.sha256,'图审精确消费本候选完整图/关键态')
+    return
+  }
+  let originalInputs,originalCss
+  for(const [name,cssMutant,message]of [['control','baseline'],['state','state','真实状态面与 idle 不同'],['focus','focus','键盘焦点有完整可见轮廓'],['restored','baseline']]){
+    const captured=await capturePerformancePanel({root,evidence:resolve(evidence,name),captureScope:'buttons',cssMutant})
+    assert.equal(captured.sourceCurrentReadbackExact,true,'有限actual App输入不得漂移')
+    assert.deepEqual(captured.remainingPrivateProcesses,[]);assert.equal(captured.cssInputs.length,4,'actual PostCSS owning rules非空')
+    const inputs=Object.fromEntries(Object.entries(captured.inputs).map(([path,value])=>[path,value.sha256]))
+    if(!originalInputs){originalInputs=inputs;originalCss=captured.cssInputs}
+    else assert.deepEqual(inputs,originalInputs,'control/mutant/exact restored实际original输入字节不变')
+    const raw=await json(resolve(captured.evidence,'buttons-render.json'))
+    if(message){
+      assert.equal(captured.completed,false,'实际CSS mutant不得白绿');assert.equal(captured.processes.length,1);assert.equal(captured.processes[0].timedOut,false)
+      assert.notEqual(captured.processes[0].exitCode,0);assert.equal(raw.failure?.name,'AssertionError');assert.ok(raw.failure.message.includes(message),'owning SpecificAssertionRED，不收setup/build/旁支错误: '+message)
+      assert.equal(captured.cssInputs.filter(rule=>rule.mutated&&rule.originalSHA256!==rule.consumedSHA256).length,2,'两处owning CSS input真实变异')
+    } else {
+      assert.equal(captured.completed,true,'有限按钮actual App正控必须通过，见 '+captured.evidence)
+      assert.equal(raw.qualified,true);assert.equal(raw.statusbarGeometry.length,9);assert.equal(raw.buttonPointer.length,7);assert.equal(raw.statusbarKeyboard.length,3);assert.ok(raw.buttonFocus.length>0)
+      assert.equal(raw.buttonReduced.matchMedia,true);assert.equal(raw.afterDisposalLeases,0);assert.ok(captured.frames.length>=5)
+      if(name==='control')native=captured
+      else {
+        assert.deepEqual(captured.cssInputs,originalCss,'exact restored实际owning CSS consumption精确一致')
+        assert.deepEqual(captured.compiled.filter(item=>item.file.endsWith('.css')),native.compiled.filter(item=>item.file.endsWith('.css')),'exact restored实际compiled CSS精确一致')
+      }
+    }
+    results.push({name,cssMutant,completed:captured.completed,specificAssertion:message??null,evidence:captured.evidence,
+      receiptSHA256:sha(await readFile(resolve(captured.evidence,'receipt.json'))),sourceIdentity:captured.sourceIdentity})
+    console.log(name+': '+(message?'loaded CSS SpecificAssertionRED':'有限按钮GREEN'))
+  }
 }
 
 async function run(name, mutant, expected = []) {
@@ -98,7 +154,8 @@ async function run(name, mutant, expected = []) {
 }
 
 try {
-  if (mode === '--callers') await callers()
+  if(mode==='--buttons')await buttons()
+  else if (mode === '--callers') await callers()
   else {
     await run('control', 'baseline')
     if (mode === '--mutations') {
@@ -137,10 +194,11 @@ finally {
   try {
     for (const [path, hash] of Object.entries({ ...products, ...proof, ...inventory })) assert.equal(sha(await readFile(resolve(root, path))), hash, '结束 actual Source/proof 不得漂移: ' + path)
   } catch (error) { completed = false; integrityFailure = String(error); process.exitCode = 1 }
-  const receipt = { schema: 'agentmux.performance-ui-verification.v1', completed, mode, captureOnly: args[1] === '--capture-only', qualificationScope: mode === '--placement' ? 'settings-left-placement-only' : 'original-task-verification', products, proof, loadedSource: inventory,
+  const receipt = { schema: 'agentmux.performance-ui-verification.v1', completed, mode, captureOnly: args[1] === '--capture-only', qualificationScope: mode === '--buttons' ? 'statusbar-seven-buttons-only' : mode === '--placement' ? 'settings-left-placement-only' : 'original-task-verification', products, proof, loadedSource: inventory,
     sourceIdentity: sha(JSON.stringify(products)), failure, integrityFailure, results, native, evidence,
     productSourceWriterUsed: false, mutationsInPrivateTransformOnly: true,
     boundary: '局部实际 App/UI owning 成本与私有 Renderer 交互；官方 Toolkit/ctxmux 链须 joined Backend 收据，不签用户现场卡顿或全 Native。' }
   await writeFile(resolve(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
+  if(mode==='--buttons'&&args[1]==='--capture-only'&&completed){await mkdir(resolve(base,'product'),{recursive:true});await writeFile(resolve(base,'product/receipt.json'),JSON.stringify(receipt,null,2)+'\n')}
   console.log('receipt: ' + resolve(evidence, 'receipt.json'))
 }

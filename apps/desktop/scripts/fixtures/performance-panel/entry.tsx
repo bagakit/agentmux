@@ -36,7 +36,7 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 const state = useAppStore.getState(), session = state.sessions.find(s => s.id === 'session-codex')!
 if (!session) throw Error('原 preview Session 非空正控缺失')
 const workspace = state.config!.workspaces.find(workspace => workspace.path === session.workspacePath) ?? state.config!.workspaces[0]!
-if (setup.phase === 'control' || setup.phase === 'placement') {
+if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons') {
   const tab = createWorkbenchTab('performance-original-tab', { regionId: 'performance-original-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('performance-original-group', [tab.id]) },
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
