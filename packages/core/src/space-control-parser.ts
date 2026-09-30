@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
-  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport
+  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact
 } from './space-control.js'
 
 const MAX_SPATIAL_ID_BYTES = 16 * 1024
@@ -16,7 +16,7 @@ function string(value: unknown, name: string, code: Code, max = AGENTMUX_CONTROL
   if (typeof value !== 'string' || Buffer.byteLength(value) > max) return fail(`${name} is invalid.`, code)
   return value
 }
-/** Space/Zone keys contain JSON-encoded absolute directories, including an escaped parent key. */
+/** Spatial IDs may contain a directory or canonical File path; Session/Run IDs retain their smaller bound. */
 export function spaceControlId(value: unknown, name: string, code: Code, spatial = false): string {
   const result = string(value, name, code, spatial ? MAX_SPATIAL_ID_BYTES : 512)
   if (!result.trim() || result === 'self' || /[\0\r\n]/u.test(result)) return fail(`${name} requires an exact ID.`, code)
@@ -57,7 +57,7 @@ export function parseSpaceControlSelector(value: unknown, code: Code): AgentMuxS
   const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
   const target: AgentMuxSpaceSelector = {}
   for (const key of ['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'] as const) {
-    if (Object.hasOwn(source, key)) target[key] = spaceControlId(source[key], key, code, key === 'spaceId' || key === 'zoneId')
+    if (Object.hasOwn(source, key)) target[key] = spaceControlId(source[key], key, code, key === 'spaceId' || key === 'zoneId' || key === 'tabId' || key === 'regionId')
   }
   return target
 }
@@ -96,21 +96,42 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
 export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceControlRequest['operation'] {
   return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
     value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename' ||
-    value === 'space.bind' || value === 'space.unbind'
+    value === 'space.bind' || value === 'space.unbind' || value === 'open.file' ||
+    value === 'agent.view' || value === 'space.view' || value === 'space.swap'
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'fromLocation', 'binding'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
-  if (operation === 'agent.rename') {
+  if (operation === 'agent.view' || operation === 'space.view') {
+    const target = operation === 'agent.view' ? 'agentSessionId' : 'regionId'
+    fields(source, ['schemaVersion', 'requestId', 'operation', target, 'mode'], code)
+    const mode = Object.hasOwn(source, 'mode') ? (operation === 'agent.view'
+      ? member(source.mode, ['terminal', 'activity'] as const, 'Agent view mode', code)
+      : member(source.mode, ['source', 'diff', 'preview'] as const, 'File view mode', code)) : undefined
+    request = operation === 'agent.view'
+      ? { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), ...(mode === undefined ? {} : { mode: mode as 'terminal' | 'activity' }) }
+      : { ...base, operation, regionId: spaceControlId(source.regionId, 'File Region', code, true), ...(mode === undefined ? {} : { mode: mode as 'source' | 'diff' | 'preview' }) }
+  } else if (operation === 'space.swap') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'regionId', 'withRegionId'], code)
+    request = { ...base, operation, regionId: spaceControlId(source.regionId, 'Region', code, true), withRegionId: spaceControlId(source.withRegionId, 'Other Region', code, true) }
+  } else if (operation === 'open.file') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'focus'], code)
+    const path = string(source.path, 'Zone-relative file path', code, MAX_SPATIAL_ID_BYTES)
+    if (!path.length || /[\0\r\n]/u.test(path)) fail('File path requires literal Zone-relative data.', code)
+    if (Object.hasOwn(source, 'displayWorkspaceId') !== Object.hasOwn(source, 'groupId')) fail('File display placement requires both Workspace and Group IDs.', code)
+    request = { ...base, operation, path, zoneId: spaceControlId(source.zoneId, 'Zone', code, true), focus: bool(source.focus, 'focus', code),
+      ...(Object.hasOwn(source, 'spaceId') ? { spaceId: spaceControlId(source.spaceId, 'Space', code, true) } : {}),
+      ...(Object.hasOwn(source, 'displayWorkspaceId') ? { displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) } : {}) }
+  } else if (operation === 'agent.rename') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name'], code)
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code) }
   } else if (operation === 'space.rename') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'tabId', 'name'], code)
-    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code), name: nullableString(source.name, 'Display name', code) }
+    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code, true), name: nullableString(source.name, 'Display name', code) }
   } else if (operation === 'agent.inspect') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId'], code)
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code) }
@@ -152,7 +173,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     fields(source, ['schemaVersion', 'requestId', 'operation', 'fromRegionId', 'expectedAgentSessionId', 'destination', 'focus', 'fromLocation'], code)
     const target = destination(source.destination, code)
     if (target.newZone) fail('Space move cannot create a Zone.', code)
-    request = { ...base, operation, fromRegionId: spaceControlId(source.fromRegionId, 'Source Region', code),
+    request = { ...base, operation, fromRegionId: spaceControlId(source.fromRegionId, 'Source Region', code, true),
       expectedAgentSessionId: spaceControlId(source.expectedAgentSessionId, 'Expected Session', code), destination: target, focus: bool(source.focus, 'focus', code),
       ...(Object.hasOwn(source, 'fromLocation') ? { fromLocation: selector(fields(source.fromLocation, ['spaceId', 'displayWorkspaceId', 'groupId'], code), code) } : {}) }
   }
@@ -168,7 +189,7 @@ function bindingTarget(value: unknown, code: Code): AgentMuxSpaceBindingTarget {
   }
   if (source.kind === 'tab-group') {
     fields(source, ['kind', 'tabId', 'displayWorkspaceId', 'groupId'], code)
-    return { kind: 'tab-group', tabId: spaceControlId(source.tabId, 'Tab', code),
+    return { kind: 'tab-group', tabId: spaceControlId(source.tabId, 'Tab', code, true),
       displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) }
   }
   return fail('Binding target is invalid.', code)
@@ -178,7 +199,18 @@ function address(value: unknown, code: Code): AgentMuxSpaceAddress {
   return { spaceId: nullableId(source.spaceId, 'Space', code, true), zoneId: nullableId(source.zoneId, 'Zone', code, true),
     workspaceId: spaceControlId(source.workspaceId, 'Resource Workspace', code),
     displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code),
-    tabId: spaceControlId(source.tabId, 'Tab', code), regionId: spaceControlId(source.regionId, 'Region', code) }
+    tabId: spaceControlId(source.tabId, 'Tab', code, true), regionId: spaceControlId(source.regionId, 'Region', code, true) }
+}
+function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
+    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution'], code)
+    const execution = item.execution === null ? null : (() => {
+      const location = fields(item.execution, ['hostId', 'cwd'], code)
+      return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code) }
+    })()
+    return { tabId: spaceControlId(item.tabId, 'Tab', code, true), regionId: spaceControlId(item.regionId, 'Region', code, true),
+      kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'], 'Region kind', code),
+      agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution }
+
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
   const source = fields(value, ['spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations'], code)
@@ -200,19 +232,10 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
   const tabs = unique(list(source.tabs, value => {
     const item = fields(value, ['zoneId', 'workspaceId', 'tabId', 'name', 'regionIds', 'issue'], code)
     return { zoneId: nullableId(item.zoneId, 'Zone', code, true), workspaceId: spaceControlId(item.workspaceId, 'Workspace', code),
-      tabId: spaceControlId(item.tabId, 'Tab', code), name: nullableString(item.name, 'Tab name', code),
-      regionIds: unique(list(item.regionIds, value => spaceControlId(value, 'Region', code), 'Region IDs', code), value => value, 'Region IDs', code), ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Tab issue', code) } : {}) }
+      tabId: spaceControlId(item.tabId, 'Tab', code, true), name: nullableString(item.name, 'Tab name', code),
+      regionIds: unique(list(item.regionIds, value => spaceControlId(value, 'Region', code, true), 'Region IDs', code), value => value, 'Region IDs', code), ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Tab issue', code) } : {}) }
   }, 'Tabs', code), item => item.tabId, 'Tabs', code)
-  const regions = unique(list(source.regions, value => {
-    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution'], code)
-    const execution = item.execution === null ? null : (() => {
-      const location = fields(item.execution, ['hostId', 'cwd'], code)
-      return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code) }
-    })()
-    return { tabId: spaceControlId(item.tabId, 'Tab', code), regionId: spaceControlId(item.regionId, 'Region', code),
-      kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'], 'Region kind', code),
-      agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution }
-  }, 'Regions', code), item => item.regionId, 'Regions', code)
+  const regions = unique(list(source.regions, value => regionFact(value, code), 'Regions', code), item => item.regionId, 'Regions', code)
   const bindings = unique(list(source.bindings, value => {
     const item = fields(value, ['zoneId', 'spaceId'], code)
     return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), spaceId: spaceControlId(item.spaceId, 'Space', code, true) }
@@ -258,6 +281,59 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
     }, 'Issues', code) }
 }
 
+function locations(value: unknown, code: Code) {
+  return unique(list(value, item => address(item, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
+}
+function workfaceCommon(body: Record<string, unknown>, code: Code) {
+  return { changed: bool(body.changed, 'Changed', code), save: body.save === null ? null : save(body.save, code), issues: issues(body.issues, code) }
+}
+const WORKFACE_FIELDS = ['outcome', 'changed', 'save', 'issues']
+const VIEW_OUTCOMES = ['read', 'changed', 'unchanged', 'partial', 'unknown', 'refused'] as const
+function workfaceReport(operation: 'agent.view' | 'space.view' | 'space.swap' | 'open.file', value: unknown, code: Code): AgentMuxSpaceControlResult {
+  if (operation === 'agent.view') {
+    const body = fields(value, [...WORKFACE_FIELDS, 'scope', 'agentSessionId', 'storedOverride', 'effectiveMode', 'sessionFacts', 'regions', 'locations'], code)
+    return { operation, scope: member(body.scope, ['agent-session'], 'View scope', code), agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code),
+      storedOverride: body.storedOverride === null ? null : member(body.storedOverride, ['terminal', 'activity'] as const, 'Stored view mode', code),
+      effectiveMode: body.effectiveMode === null ? null : member(body.effectiveMode, ['terminal', 'activity'] as const, 'Effective view mode', code),
+      sessionFacts: member(body.sessionFacts, ['known', 'unconfirmed'], 'Session facts', code),
+      regions: unique(list(body.regions, item => regionFact(item, code), 'Regions', code), item => item.regionId, 'Regions', code),
+      locations: locations(body.locations, code), outcome: member(body.outcome, VIEW_OUTCOMES, 'View outcome', code), ...workfaceCommon(body, code) }
+  }
+  if (operation === 'space.view') {
+    const body = fields(value, [...WORKFACE_FIELDS, 'scope', 'regionId', 'tabId', 'workspaceId', 'storedOverride', 'effectiveMode', 'supportedModes', 'data', 'content', 'locations'], code)
+    const content = fields(body.content, ['status', 'reason'], code)
+    return { operation, scope: member(body.scope, ['file-region'], 'View scope', code), regionId: spaceControlId(body.regionId, 'File Region', code, true),
+      tabId: nullableId(body.tabId, 'Tab', code, true), workspaceId: nullableId(body.workspaceId, 'Workspace', code),
+      storedOverride: body.storedOverride === null ? null : member(body.storedOverride, ['source', 'diff', 'preview'] as const, 'Stored view mode', code),
+      effectiveMode: body.effectiveMode === null ? null : member(body.effectiveMode, ['source', 'diff', 'preview'] as const, 'Effective view mode', code),
+      supportedModes: body.supportedModes === null ? null : unique(list(body.supportedModes, item => member(item, ['source', 'diff', 'preview'] as const, 'Supported mode', code), 'Supported modes', code), item => item, 'Supported modes', code),
+      data: member(body.data, ['text', 'media-preview', 'binary-preview', 'failed', 'unconfirmed'], 'File data', code),
+      content: { status: member(content.status, ['available', 'loading', 'failed', 'unconfirmed'], 'Content status', code), reason: nullableString(content.reason, 'Content reason', code) },
+      locations: locations(body.locations, code), outcome: member(body.outcome, VIEW_OUTCOMES, 'View outcome', code), ...workfaceCommon(body, code) }
+  }
+  if (operation === 'space.swap') {
+    const body = fields(value, [...WORKFACE_FIELDS, 'scope', 'regionId', 'withRegionId', 'tabId', 'workspaceId', 'beforeOrder', 'afterOrder', 'activeRegionId', 'locations'], code)
+    const order = (value: unknown) => unique(list(value, item => spaceControlId(item, 'Region', code, true), 'Region order', code), item => item, 'Region order', code)
+    return { operation, scope: member(body.scope, ['tab-layout'], 'Swap scope', code), regionId: spaceControlId(body.regionId, 'Region', code, true), withRegionId: spaceControlId(body.withRegionId, 'Other Region', code, true),
+      tabId: nullableId(body.tabId, 'Tab', code, true), workspaceId: nullableId(body.workspaceId, 'Workspace', code), beforeOrder: order(body.beforeOrder), afterOrder: order(body.afterOrder),
+      activeRegionId: nullableId(body.activeRegionId, 'Active Region', code, true), locations: locations(body.locations, code),
+      outcome: member(body.outcome, ['swapped', 'unchanged', 'partial', 'unknown', 'refused'], 'Swap outcome', code), ...workfaceCommon(body, code) }
+  }
+  const body = fields(value, [...WORKFACE_FIELDS, 'requestedPath', 'resource', 'placement', 'data', 'navigation'], code)
+  const resource = body.resource === null ? null : (() => {
+    const item = fields(body.resource, ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path'], code)
+    return { hostId: spaceControlId(item.hostId, 'Host', code), workspaceId: spaceControlId(item.workspaceId, 'Workspace', code), workspacePath: string(item.workspacePath, 'Workspace path', code),
+      zoneId: spaceControlId(item.zoneId, 'Zone', code, true), zonePath: string(item.zonePath, 'Zone path', code), path: string(item.path, 'Workspace-relative path', code) }
+  })()
+  const placement = fields(body.placement, ['status', 'tabId', 'regionId', 'locations'], code)
+  const data = fields(body.data, ['kind', 'reason'], code)
+  return { operation, requestedPath: string(body.requestedPath, 'Requested file path', code), resource,
+    placement: { status: member(placement.status, ['created', 'reused', 'none', 'unconfirmed'], 'File placement', code), tabId: nullableId(placement.tabId, 'Tab', code, true), regionId: nullableId(placement.regionId, 'File Region', code, true), locations: locations(placement.locations, code) },
+    data: { kind: member(data.kind, ['text', 'media-preview', 'binary-preview', 'not-file', 'failed', 'unconfirmed'], 'File data', code), reason: nullableString(data.reason, 'Data reason', code) },
+    navigation: member(body.navigation, ['background', 'applied', 'cancelled', 'unconfirmed'], 'File navigation', code),
+    outcome: member(body.outcome, ['opened', 'unchanged', 'partial', 'unknown', 'refused'], 'File outcome', code), ...workfaceCommon(body, code) }
+}
+
 export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControlSuccessReceipt {
   const code = 'CONTROL_PROTOCOL_ERROR'
   const source = fields(value, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
@@ -265,7 +341,9 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
-  if (operation === 'agent.inspect') {
+  if (operation === 'agent.view' || operation === 'space.view' || operation === 'space.swap' || operation === 'open.file') {
+    result = workfaceReport(operation, source.result, code)
+  } else if (operation === 'agent.inspect') {
     const body = fields(source.result, ['agentSessionId', 'override'], code)
     result = { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), override: nullableString(body.override, 'Display override', code) }
   } else if (operation === 'agent.rename' || operation === 'space.rename') {
@@ -275,7 +353,7 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
       outcome: member(body.outcome, ['renamed', 'unchanged', 'partial'], 'Rename outcome', code), save: save(body.save, code) }
     result = operation === 'agent.rename'
       ? { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), ...actual }
-      : { operation, tabId: spaceControlId(body.tabId, 'Tab', code), ...actual }
+      : { operation, tabId: spaceControlId(body.tabId, 'Tab', code, true), ...actual }
   } else if (operation === 'space.ls') {
     const body = fields(source.result, ['catalog'], code)
     result = { operation, catalog: catalog(body.catalog, code) }

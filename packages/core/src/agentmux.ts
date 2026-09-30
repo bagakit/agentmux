@@ -517,7 +517,17 @@ function openDestination(flags: ParsedFlags): { destination: AgentMuxOpenDestina
 }
 
 async function openCommand(args: readonly string[]): Promise<number> {
-  if (args[0] !== 'terminal' && args[0] !== 'browser') throw cliError('open requires terminal or browser. Use agentmux agent open for an Agent.')
+  if (args[0] === 'file') {
+    const flags = parseFlags(args.slice(1), { '--path': 'data', '--zone': 'data', '--space': 'data', '--display-workspace': 'data', '--group': 'data', '--focus': 'boolean', '--request-id': 'data' })
+    useSpaceRequestId(flags)
+    const request = parseSpaceControlRequest({ ...requestBase(), operation: 'open.file',
+      path: requiredData(flags, '--path', 'Zone-relative file path'), ...spaceSelector(flags), focus: flags.booleans.has('--focus') }, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
+    if (receipt.operation !== 'open.file' || request.operation !== 'open.file' || (receipt.result.requestedPath !== request.path || receipt.result.resource !== null && receipt.result.resource.zoneId !== request.zoneId)) throw new AgentMuxError('File open receipt target is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+    writeJson(receipt)
+    return workfaceExit(receipt.result.outcome)
+  }
+  if (args[0] !== 'terminal' && args[0] !== 'browser') throw cliError('open requires file, terminal, or browser. Use agentmux agent open for an Agent.')
   const flags = parseFlags(args.slice(1), {
     ...(args[0] === 'terminal' ? { '--command': 'data' as const } : { '--url': 'value' as const }),
     '--left-of': 'value', '--right-of': 'value', '--above': 'value', '--below': 'value',
@@ -536,7 +546,7 @@ const SPACE_SELECTOR_FLAGS = { '--space': 'data', '--zone': 'data', '--tab': 'da
 const SPACE_DESTINATION_FLAGS = { ...SPACE_SELECTOR_FLAGS, '--new-tab': 'boolean', '--split': 'value', '--focus': 'boolean', '--request-id': 'data' } as const
 function spaceSelector(flags: ParsedFlags): AgentMuxSpaceSelector {
   return Object.fromEntries(['space', 'zone', 'tab', 'region'].filter(key => flags.values.has(`--${key}`))
-    .map(key => [`${key}Id`, spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT', key === 'space' || key === 'zone')])
+    .map(key => [`${key}Id`, spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT', true)])
     .concat(['display-workspace', 'group'].filter(key => flags.values.has(`--${key}`)).map(key => [key === 'group' ? 'groupId' : 'displayWorkspaceId', spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT')])) )
 }
 function useSpaceRequestId(flags: ParsedFlags): void {
@@ -562,7 +572,20 @@ function spaceDestination(flags: ParsedFlags): AgentMuxSpaceDestination {
   }
   return target
 }
+function workfaceExit(outcome: string): number {
+  return outcome === 'partial' || outcome === 'unknown' || outcome === 'refused' ? 1 : 0
+}
 async function agentCommand(args: readonly string[]): Promise<number> {
+  if (args[0] === 'view') {
+    const flags = parseFlags(args.slice(1), { '--session': 'data', '--mode': 'value', '--request-id': 'data' })
+    useSpaceRequestId(flags)
+    const request = parseSpaceControlRequest({ ...requestBase(), operation: 'agent.view', agentSessionId: explicitSelectorId(flags.values.get('--session'), 'Exact Agent Session ID'),
+      ...(flags.values.has('--mode') ? { mode: flags.values.get('--mode') } : {}) }, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
+    if (receipt.operation !== 'agent.view' || request.operation !== 'agent.view' || receipt.result.agentSessionId !== request.agentSessionId) throw new AgentMuxError('Agent view receipt target is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+    writeJson(receipt)
+    return workfaceExit(receipt.result.outcome)
+  }
   if (args[0] === 'rename' || args[0] === 'inspect') {
     const action = args[0]
     const flags = parseFlags(args.slice(1), action === 'rename'
@@ -578,7 +601,7 @@ async function agentCommand(args: readonly string[]): Promise<number> {
     writeJson(receipt)
     return receipt.operation === 'agent.rename' && receipt.result.outcome === 'partial' ? 1 : 0
   }
-  if (args[0] !== 'open') throw cliError('agent requires open, rename, or inspect. Run agentmux agent --help.')
+  if (args[0] !== 'open') throw cliError('agent requires open, view, rename, or inspect. Run agentmux agent --help.')
   const flags = parseFlags(args.slice(1), { ...SPACE_DESTINATION_FLAGS,
     '--executor': 'data', '--session': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean',
     '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data' })
@@ -606,6 +629,21 @@ function displayName(flags: ParsedFlags): string | null {
 }
 async function spaceCommand(args: readonly string[]): Promise<number> {
   const action = args[0]
+  if (action === 'view' || action === 'swap') {
+    const flags = parseFlags(args.slice(1), action === 'view'
+      ? { '--region': 'data', '--mode': 'value', '--request-id': 'data' }
+      : { '--region': 'data', '--with': 'data', '--request-id': 'data' })
+    useSpaceRequestId(flags)
+    const regionId = explicitSelectorId(flags.values.get('--region'), 'Exact Region ID')
+    const request = parseSpaceControlRequest(action === 'view'
+      ? { ...requestBase(), operation: 'space.view', regionId, ...(flags.values.has('--mode') ? { mode: flags.values.get('--mode') } : {}) }
+      : { ...requestBase(), operation: 'space.swap', regionId, withRegionId: explicitSelectorId(flags.values.get('--with'), 'Exact other Region ID') }, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
+    if ((receipt.operation !== 'space.view' && receipt.operation !== 'space.swap') || receipt.operation !== request.operation || receipt.result.regionId !== regionId ||
+        (receipt.operation === 'space.swap' && request.operation === 'space.swap' && receipt.result.withRegionId !== request.withRegionId)) throw new AgentMuxError('Region control receipt target is mismatched.', 'CONTROL_PROTOCOL_ERROR')
+    writeJson(receipt)
+    return workfaceExit(receipt.result.outcome)
+  }
   if (action === 'rename') {
     const flags = parseFlags(args.slice(1), { '--tab': 'data', '--name': 'data', '--clear': 'boolean', '--request-id': 'data' })
     useSpaceRequestId(flags)
@@ -630,7 +668,7 @@ async function spaceCommand(args: readonly string[]): Promise<number> {
     writeJson(receipt)
     return (receipt.operation === 'space.bind' || receipt.operation === 'space.unbind') && receipt.result.outcome === 'unknown' ? 1 : 0
   }
-  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, mv, bind, unbind, or rename.')
+  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, view, swap, mv, bind, unbind, or rename.')
   const flags = parseFlags(args.slice(1), action === 'mv'
     ? { ...SPACE_DESTINATION_FLAGS, '--from-region': 'data', '--expect-session': 'data', '--from-space': 'data', '--from-display-workspace': 'data', '--from-group': 'data' }
     : action === 'inspect' ? { ...SPACE_SELECTOR_FLAGS, '--request': 'data' } : { '--space': 'data', '--zone': 'data' })
@@ -1122,7 +1160,7 @@ function operationPath(args: readonly string[]): string | null {
     return ['list', 'get', 'add', 'update', 'remove'].includes(args[2] ?? '') ? `settings.resource.${args[2]}`
       : args[2] === undefined || args[2].startsWith('-') ? `settings.${args[1]}` : `settings.${args[1]}.${args[2]}`
   }
-  if (args[0] === 'open' && ['agent', 'terminal', 'browser'].includes(args[1] ?? '')) {
+  if (args[0] === 'open' && ['file', 'terminal', 'browser'].includes(args[1] ?? '')) {
     return `${args[0]}.${args[1]}`
   }
   // browser run → browser.run。与上面 open.* 同形：两级动词的 help 路径就是它的 operation 名。
@@ -1153,8 +1191,8 @@ function requestsHelp(args: readonly string[]): boolean {
       (args.length === 4 && (args[1] === 'executors' || args[1] === 'prompts') && args[2] === 'list' && help(args[3])) ||
       (args.length === 4 && args[1] === 'executors' && args[2] === 'refresh' && help(args[3]))
   }
-  if (args[0] === 'agent' || args[0] === 'space' || args[0] === 'focus') {
-    const data = ['--display-workspace', '--group', '--from-space', '--from-display-workspace', '--from-group', '--executor', '--session', '--prompt', '--name', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
+  if (args[0] === 'agent' || args[0] === 'space' || args[0] === 'focus' || args[0] === 'open' && args[1] === 'file') {
+    const data = ['--with', '--display-workspace', '--group', '--from-space', '--from-display-workspace', '--from-group', '--executor', '--session', '--prompt', '--name', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
     return args.some((argument, index) => (argument === '--help' || argument === '-h') && !data.includes(args[index - 1] ?? ''))
   }
   return args.some((argument, index) => (

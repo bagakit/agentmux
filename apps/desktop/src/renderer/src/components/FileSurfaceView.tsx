@@ -5,6 +5,7 @@ import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-previ
 import { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
 import { documentKey, tabGroupForTab, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { joinWorkspacePath } from '../lib/workspace-paths'
+import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { useAppStore } from '../store'
 import { AgentMarkdown } from './AgentMarkdown'
 import { FilePreviewPane, ImageContent } from './FilePreviewPane'
@@ -46,9 +47,11 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const svg = format?.sourceEditable === true
   const html = extension === 'html' || extension === 'htm'
   const note = surface.path.endsWith(NOTE_FILE_EXTENSION)
-  const [previewing, setPreviewing] = useState(svg || note)
-  useEffect(() => setPreviewing(svg || note), [key, svg, note])
-  useEffect(() => { if (note && noteReveal) setPreviewing(true) }, [note, noteReveal])
+  const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
+  const setRegionMode = useAppStore(state => state.setEditorRegionMode)
+  const previewing = regionMode === 'preview'
+  useEffect(() => { if (note && noteReveal) void setRegionMode(surface.regionId, surface.workspaceId, surface.path, 'preview') },
+    [note, noteReveal, setRegionMode, surface.regionId, surface.workspaceId, surface.path])
   const overBudget = useMemo(() => {
     if (!visible || released || !previewing || !doc || !(markdown || svg || note)) return false
     if (doc.content.length > WORKSPACE_FILE_MAX_BYTES) return true
@@ -109,7 +112,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
       }} /> : null
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
-      {...(markdown || svg || note ? { preview, previewing, onTogglePreview: () => setPreviewing(value => !value) } : {})}
+      {...(markdown || svg || note ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
         <button className="small-button" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onClick={() => void previewSavedHtml(false)}><Eye size={13} /> Preview saved file</button>
         {dirty ? <button className="small-button" disabled={saving || !isLocal} onClick={() => void previewSavedHtml(true)}><Save size={13} /> Save & Preview</button> : null}

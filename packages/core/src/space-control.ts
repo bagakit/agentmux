@@ -116,8 +116,63 @@ export type AgentMuxDisplayNameReport = {
   outcome: 'renamed' | 'unchanged' | 'partial'
   save: AgentMuxSpatialSave
 }
+export type AgentMuxAgentViewMode = 'terminal' | 'activity'
+export type AgentMuxFileViewMode = 'source' | 'diff' | 'preview'
+/** Applied state and save acknowledgement are separate from content availability. */
+export type AgentMuxWorkfaceReport = {
+  changed: boolean
+  save: AgentMuxSpatialSave | null
+  issues: AgentMuxSpatialIssue[]
+}
+export type AgentMuxAgentViewReport = AgentMuxWorkfaceReport & {
+  scope: 'agent-session'
+  agentSessionId: string
+  storedOverride: AgentMuxAgentViewMode | null
+  effectiveMode: AgentMuxAgentViewMode | null
+  sessionFacts: 'known' | 'unconfirmed'
+  regions: AgentMuxSpaceRegionFact[]
+  locations: AgentMuxSpaceLocation[]
+  outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
+}
+export type AgentMuxFileViewReport = AgentMuxWorkfaceReport & {
+  scope: 'file-region'
+  regionId: string
+  tabId: string | null
+  workspaceId: string | null
+  storedOverride: AgentMuxFileViewMode | null
+  effectiveMode: AgentMuxFileViewMode | null
+  supportedModes: AgentMuxFileViewMode[] | null
+  data: 'text' | 'media-preview' | 'binary-preview' | 'failed' | 'unconfirmed'
+  content: { status: 'available' | 'loading' | 'failed' | 'unconfirmed'; reason: string | null }
+  locations: AgentMuxSpaceLocation[]
+  outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
+}
+export type AgentMuxRegionSwapReport = AgentMuxWorkfaceReport & {
+  scope: 'tab-layout'
+  regionId: string
+  withRegionId: string
+  tabId: string | null
+  workspaceId: string | null
+  beforeOrder: string[]
+  afterOrder: string[]
+  activeRegionId: string | null
+  locations: AgentMuxSpaceLocation[]
+  outcome: 'swapped' | 'unchanged' | 'partial' | 'unknown' | 'refused'
+}
+export type AgentMuxFileOpenReport = AgentMuxWorkfaceReport & {
+  requestedPath: string
+  resource: { hostId: string; workspaceId: string; workspacePath: string; zoneId: string; zonePath: string; path: string } | null
+  placement: { status: 'created' | 'reused' | 'none' | 'unconfirmed'; tabId: string | null; regionId: string | null; locations: AgentMuxSpaceLocation[] }
+  data: { kind: 'text' | 'media-preview' | 'binary-preview' | 'not-file' | 'failed' | 'unconfirmed'; reason: string | null }
+  navigation: 'background' | 'applied' | 'cancelled' | 'unconfirmed'
+  outcome: 'opened' | 'unchanged' | 'partial' | 'unknown' | 'refused'
+}
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
+  | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
+  | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
+  | { operation: 'space.swap'; regionId: string; withRegionId: string }
+  | { operation: 'open.file'; path: string; zoneId: string; spaceId?: string; displayWorkspaceId?: string; groupId?: string; focus: boolean }
   | { operation: 'agent.rename'; agentSessionId: string; name: string | null }
   | { operation: 'agent.inspect'; agentSessionId: string }
   | { operation: 'space.rename'; tabId: string; name: string | null }
@@ -135,6 +190,10 @@ export type AgentMuxSpaceControlRequest = Base & (
       destination: AgentMuxSpaceDestination; focus: boolean }
 )
 export type AgentMuxSpaceControlResult =
+  | ({ operation: 'agent.view' } & AgentMuxAgentViewReport)
+  | ({ operation: 'space.view' } & AgentMuxFileViewReport)
+  | ({ operation: 'space.swap' } & AgentMuxRegionSwapReport)
+  | ({ operation: 'open.file' } & AgentMuxFileOpenReport)
   | ({ operation: 'agent.rename'; agentSessionId: string } & AgentMuxDisplayNameReport)
   | { operation: 'agent.inspect'; agentSessionId: string; override: string | null }
   | ({ operation: 'space.rename'; tabId: string } & AgentMuxDisplayNameReport)

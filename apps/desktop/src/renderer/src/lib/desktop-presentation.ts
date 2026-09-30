@@ -118,5 +118,6 @@ export async function awaitDesktopPresentation(ready: () => boolean, signal?: Ab
 
 export function desktopInputPreserved(before: DesktopInputCapture, after: DesktopInputCapture): boolean {
   return before.element !== null && before.element === after.element && after.fact.provenance === 'observed' &&
-    after.fact.connected === true && after.fact.visible === true && after.fact.inert === false
+    after.fact.connected === true && after.fact.visible === true && after.fact.inert === false &&
+    before.fact.tabId === after.fact.tabId && before.fact.regionId === after.fact.regionId && before.fact.sessionId === after.fact.sessionId
 }
