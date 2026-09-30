@@ -80,7 +80,11 @@ try {
     { name: 'archive-focus-later-input-cancels', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
       mutate: source => source.replace("            document.addEventListener('focusin', onFocus, true)\n", '') },
     { name: 'archive-focus-exact-disabled-control', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
-      mutate: source => source.replace("                      readiness.observe(next, { attributes: true, attributeFilter: ['disabled'] })", '                      void next.disabled') }
+      mutate: source => source.replace("                      readiness.observe(next, { attributes: true, attributeFilter: ['disabled'] })", '                      void next.disabled') },
+    { name: 'archive-narrow-menu-original-pin-owner', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
+      mutate: source => source.replace('onSelect={moteActions.onTogglePin}', 'onSelect={() => {}}') },
+    { name: 'archive-narrow-menu-original-soul-owner', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
+      mutate: source => source.replace('menu.changeIcon(moteActions.onEdit)', 'menu.changeIcon(() => {})') }
   ]
   assert.ok(variants.length > 0)
   for (const variant of variants) {
