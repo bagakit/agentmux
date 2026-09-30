@@ -336,6 +336,14 @@ describe('Focus consumes accepted public message authors without inventing ident
   it('keeps pinned human body/Range/draft and source counts across pan, zoom and unrelated output', async () => {
     await click(element.querySelector('[aria-label="Previous focus window"]')); await click(element.querySelector('[aria-label="Next focus window"]'))
     await wait(() => expect(page.mock.calls.length).toBeGreaterThan(1))
+    await wait(() => {
+      const admitted = projector.mock.calls.at(-1)?.[0] as Parameters<typeof UserMessages.projectSessionUserMessages>[0] | undefined
+      expect(admitted?.agentSessionId).toBe(SESSION_ID)
+      expect(admitted?.historyPage?.source).toEqual(nativePage.source)
+      expect(admitted?.historyPage?.items.map(item => item.id)).toEqual(['native-timed', 'native-untimed'])
+      expect(element.querySelector<HTMLElement>('.recent-focus')?.dataset.nativeRecordCount).toBe('2')
+      expect(element.querySelector<HTMLElement>('.recent-focus__message[data-message-source="native"]')?.dataset.messageRawId).toBe('native-timed')
+    })
     const human = marker('human'); await click(human); const original = body()
     const text = original.querySelector('.log-turn__body')!.firstChild!; expect(text.textContent).toContain(BODY)
     const range = document.createRange(); range.selectNodeContents(text); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); const selected = selection.toString(); expect(selected).toContain(BODY)

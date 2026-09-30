@@ -292,7 +292,15 @@ it('known captured Agent inspection stays read-only and navigation resolves the 
   const h = await fixture([record('one', 'Native input')], true)
   await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(A)), agentSessionId: A, prompt: 'Known Agent input', operationId: 'sender-core', authorAgentSessionId: B, allowUncertainTurn: true })
   await h.render(); await h.wait(() => expect(h.element.querySelector('[data-message-id="captured:prompt:sender-core"]')).not.toBeNull())
-  await act(async () => useAppStore.getState().focusExecutionSession(B)); await h.wait(() => expect(h.reads.map(read => read.id)).toEqual([A, B]))
+  await act(async () => useAppStore.getState().focusExecutionSession(B))
+  await h.wait(() => {
+    expect(h.history.mock.calls.map(([control]) => control.agentSessionId)).toEqual([A, B])
+    expect(h.reads).toHaveLength(2)
+  })
+  expect(h.reads.map(read => ({ id: read.id, source: read.page.source, ids: read.page.items.map(item => item.id) })).sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+    { id: A, source: { providerId: 'claude', nativeSessionId: `native-${A}` }, ids: ['one'] },
+    { id: B, source: { providerId: 'claude', nativeSessionId: `native-${B}` }, ids: ['other'] }
+  ])
   const origin = useAppStore.getState().agentFocus
   const marker = h.element.querySelector<HTMLButtonElement>('[data-message-id="captured:prompt:sender-core"]')!
   await act(async () => marker.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: null })))
