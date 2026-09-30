@@ -5,6 +5,7 @@ import { useAppStore } from '../store'
 import { EMPTY_LAUNCHER_DRAFT, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { InlineComposer } from './InlineComposer'
 import { TerminalView } from './TerminalView'
+import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 
 type UtilityKind = 'terminal' | 'browser' | 'note'
 export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, sections, onSectionChange, warmSession, warmPending, terminalThemeId, terminalFontSize, visible, busy, onRun }: {
@@ -27,15 +28,26 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   const promoteWarmTerminal = useAppStore(state => state.promoteWarmTerminal)
   const createBrowser = useAppStore(state => state.createBrowser)
   const createNote = useAppStore(state => state.createNote)
+  const revealCreatedNote = useAppStore(state => state.revealCreatedNote)
+  const retryCreatedNote = useAppStore(state => state.retryCreatedNote)
+  const projection = useWorkbenchBrowserPresentation().projection
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
   const disabled = !workspace || busy !== null
   function openTerminal() { void onRun('terminal', () => promoteWarmTerminal(tabGroupId, launcherRef)) }
   function openBrowser() { void onRun('browser', () => createBrowser(tabGroupId, launcherRef, draft.browser.trim() || 'about:blank')) }
   function openNote(content?: string) {
     void onRun('note', async () => {
-      await createNote(tabGroupId, launcherRef, content)
+      const references = projection?.selection.filter(reference => reference.displayWorkspaceId === projection.displayWorkspaceId && reference.tabId === launcherRef?.tabId && reference.regionId === launcherRef.regionId)
+      if (projection && references?.length !== 1) throw new Error('The exact Note display Group is unconfirmed. Its original draft is retained.')
+      const receipt = await createNote(projection ? references![0]!.groupId : tabGroupId, launcherRef, content, projection)
       // A late result must not consume an edit the user made while the note was saving.
-      if (content !== undefined && useLauncherState.getState().drafts[launcherId]?.note === content) setDraft('note', '')
+      if (receipt.status === 'written' && receipt.revealed && content !== undefined && useLauncherState.getState().drafts[launcherId]?.note === content) setDraft('note', '')
+    })
+  }
+  function recoverNote(retry: boolean) {
+    void onRun('note', async () => {
+      const receipt = await (retry ? retryCreatedNote(launcherId, projection) : revealCreatedNote(launcherId, projection))
+      if (receipt?.status === 'written' && receipt.revealed && useLauncherState.getState().drafts[launcherId]?.note === receipt.draft) setDraft('note', '')
     })
   }
   const labels = { terminal: 'Terminal', browser: 'Browser', note: 'Note' }
@@ -66,7 +78,8 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
             {sections.browser === 'expanded' ? <form className="launcher-browser-input" onSubmit={event => { event.preventDefault(); if (!disabled) openBrowser() }}><Globe2 size={14} /><input aria-label="Browser address or search" value={draft.browser} disabled={busy === 'browser'} placeholder="Search or enter a URL" onChange={event => setDraft('browser', event.target.value)} /><button type="submit" className="icon-button" disabled={disabled} data-agentmux-action={DESKTOP_ACTIONS.openBrowser} aria-label="Go to Browser address or search" title="Open address or search"><ArrowUpRight size={14} /></button></form> : null}
           </section> : null}
           {sections.note !== 'hidden' ? <section className="launcher-utility" data-section="note" data-mode={sections.note}>{header('note')}
-            {sections.note === 'expanded' ? <><div className="composer launcher-note-composer"><InlineComposer aria-label="Note draft" value={draft.note} onValueChange={value => setDraft('note', value)} disabled={false} autoFocus={false} onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.isComposing && !disabled) { event.preventDefault(); openNote(draft.note) } }} placeholder="Capture a thought…" /></div><footer className="launcher-note-actions"><span>Markdown · {workspace?.name ?? 'Current workspace'}</span><button type="button" className="small-button" disabled={disabled} onClick={() => openNote(draft.note)}>{busy === 'note' ? 'Saving…' : 'Save & open note'}<ArrowUpRight size={12} /></button></footer></> : null}
+            {sections.note === 'expanded' ? <><div className="composer launcher-note-composer"><InlineComposer aria-label="Note draft" value={draft.note} onValueChange={value => setDraft('note', value)} disabled={false} autoFocus={false} onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.isComposing && !disabled) { event.preventDefault(); openNote(draft.note) } }} placeholder="Capture a thought…" /></div><footer className="launcher-note-actions"><span>Note · {workspace?.name ?? 'Current workspace'}</span><button type="button" className="small-button" disabled={disabled} onClick={() => openNote(draft.note)}>{busy === 'note' ? 'Saving…' : 'Save & open note'}<ArrowUpRight size={12} /></button></footer></> : null}
+            {draft.noteCreation && !draft.noteCreation.revealed ? <div role="status" className="launcher-persistence-notice"><span>{draft.noteCreation.issue ?? 'The Note creation result is awaiting confirmation. Its original identity and draft remain retained.'}</span>{draft.noteCreation.status === 'error' ? <button type="button" className="small-button" disabled={disabled} onClick={() => recoverNote(true)}>Retry same Note</button> : draft.noteCreation.path ? <button type="button" className="small-button" disabled={disabled} onClick={() => recoverNote(false)}>Check / open same Note</button> : null}</div> : null}
           </section> : null}
         </div>
       </div>

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, children }: {
+export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, children }: {
   homeId: string
   targetId: string | null
   active: boolean
@@ -12,6 +12,8 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
   controlsOpen?: boolean | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
   onSelectRegion?: ((regionId: string) => void) | undefined
+  projection?: import('../lib/workbench-projection').WorkbenchProjection | undefined
+  reference?: import('../lib/workbench-projection').WorkbenchProjectionSelection | undefined
   /** The existing projection owner describes a borrowed View at its original slot. */
   homeNotice?: ReactNode
   children: ReactNode
@@ -21,8 +23,8 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     element.className = 'retained-workbench-view'
     return element
   })
-  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion }),
-    [active, retainedRegionId, targetId, homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion])
+  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference }),
+    [active, retainedRegionId, targetId, homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)

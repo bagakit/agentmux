@@ -45,7 +45,7 @@ type LocalWorkerRequest =
       expectedRevision: string | null
       exclusive?: true
       textOnly?: true
-      fault?: 'temporary-write' | 'replace'
+      fault?: 'temporary-write' | 'replace' | 'receipt' | 'occupy'
     }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
   | { action: 'delete'; name: string }
@@ -70,7 +70,7 @@ export type WorkspaceFilesOptions = {
   /** Read the existing config owner; no parallel protected-directory registry. */
   primaryMoteWorkspace?: () => Promise<WorkspaceRecord | undefined>
   beforeWrite?: (input: WorkspaceFileWriteInput) => Promise<void>
-  localWriteFault?: 'temporary-write' | 'replace' | (() => 'temporary-write' | 'replace' | undefined)
+  localWriteFault?: 'temporary-write' | 'replace' | 'receipt' | 'occupy' | (() => 'temporary-write' | 'replace' | 'receipt' | 'occupy' | undefined)
   localMoveHelperPath?: string
   beforeLocalMoveCommit?: () => Promise<void>
   afterLocalMoveCommit?: () => Promise<void>
@@ -114,6 +114,7 @@ ${fileBytesAreBinary.toString()}
 
 const request = JSON.parse(process.argv[1] ?? '')
 const expectedRoot = process.argv[2]
+let writePublished = false
 
 async function currentDirectory() {
   const cwd = await realpath('.')
@@ -305,9 +306,15 @@ try {
           if (request.fault === 'replace') {
             throw Object.assign(new Error('Injected atomic replace failure'), { code: 'INJECTED_REPLACE' })
           }
+          if (request.fault === 'occupy') {
+            const competitor = await open(request.name, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+            try { await competitor.writeFile('competing bytes') } finally { await competitor.close() }
+          }
           if (request.exclusive) {
             try {
               await link(temporaryName, request.name)
+              writePublished = true
+              if (request.fault === 'receipt') throw Object.assign(new Error('Write was published but its receipt failed'), { code: 'INJECTED_WRITE_RECEIPT' })
               process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
             } catch (error) {
               if (error?.code !== 'EEXIST') throw error
@@ -316,6 +323,8 @@ try {
           } else {
             await rename(temporaryName, request.name)
             temporaryExists = false
+            writePublished = true
+            if (request.fault === 'receipt') throw Object.assign(new Error('Write was published but its receipt failed'), { code: 'INJECTED_WRITE_RECEIPT' })
             process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
           }
         }
@@ -342,7 +351,8 @@ try {
 } catch (error) {
   process.stderr.write('${LOCAL_WORKER_ERROR}' + JSON.stringify({
     message: error instanceof Error ? error.message : String(error),
-    code: error && typeof error === 'object' && 'code' in error ? error.code : null
+    code: error && typeof error === 'object' && 'code' in error ? error.code : null,
+    writeOutcomeUnknown: writePublished
   }) + '\n')
   process.exitCode = 1
 }
@@ -488,12 +498,14 @@ async function runLocalWorker(
     const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {
       message: string
       code: string | null
+      writeOutcomeUnknown?: boolean
     }
-    throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {})
+    throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {},
+      detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {})
   }
-  throw new Error(
+  throw Object.assign(new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
-  )
+  ), request.action === 'write' && inputSent ? { code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true } : {})
 }
 
 type AtomicMoveError = Error & {
@@ -1223,7 +1235,7 @@ export class WorkspaceFiles {
     workspace: WorkspaceRecord,
     input: WorkspaceFileWriteInput
   ): Promise<WorkspaceFileWriteResult> {
-    return await this.writeContent(workspace, input, () => this.options.beforeWrite?.(input))
+    return await this.writeContent(workspace, { ...input, ...(input.expectedRevision === null ? { exclusive: true } : {}) }, () => this.options.beforeWrite?.(input))
   }
 
   /** Publish a new binary file through the same atomic, root-confined owner as editor saves. */
@@ -1319,7 +1331,9 @@ export class WorkspaceFiles {
               ...(fault ? { fault } : {})
             }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
           } catch (error) {
-            return resultError(error)
+            const detail = resultError(error)
+            return typeof error === 'object' && error !== null && 'writeOutcomeUnknown' in error && error.writeOutcomeUnknown === true
+              ? { ...detail, status: 'unknown' } : detail
           }
         })
       } catch (error) {
