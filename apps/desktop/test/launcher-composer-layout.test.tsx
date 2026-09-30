@@ -6,6 +6,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { useAppStore } from '../src/renderer/src/store'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { allStyleRules } from './helpers/styles.js'
@@ -18,6 +19,7 @@ import { allStyleRules } from './helpers/styles.js'
 const dom = composerDOM()
 
 async function mountLauncher() {
+  useLauncherState.setState({ sections: { workspace: { agents: 'expanded' } } })
   useAppStore.setState({
     tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     activeWorkspaceId: 'workspace', agentComposerDrafts: { region: '' }

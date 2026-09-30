@@ -31,7 +31,8 @@ describe('compact actual launch options', () => {
   it('passes the exact choice, keeps dangerous posture in the compact summary, and clears to defaults', async () => {
     await mount(); await click('[aria-label="Launch options"]'); await change('select', 'full')
     expect(selected).toHaveBeenLastCalledWith('sandbox', 'full'); expect(document.querySelector('select')?.dataset.tier).toBe('danger')
-    await click('[aria-label="Close launch options"]'); expect(container.querySelector('[data-tier="danger"]')?.textContent).toBe('Full access')
+    await click('[aria-label="Close launch options"]'); expect(container.querySelector('.launch-refine__summary [data-tier="danger"]')?.textContent).toBe('Full access')
+    expect(container.querySelector('.launch-refine__count')?.getAttribute('data-tier')).toBe('danger'); expect(container.querySelector('.launch-refine__count')?.textContent).toBe('1Risk'); expect(container.querySelector('.launch-refine__count')?.getAttribute('aria-label')).toBe('1 options set · danger')
     await click('[aria-label="Launch options"]'); await change('select', ''); expect(selected).toHaveBeenLastCalledWith('sandbox', null)
     await click('[aria-label="Close launch options"]'); expect(container.textContent).toBe('Options')
   })
