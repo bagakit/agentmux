@@ -113,6 +113,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     const id = directGoalRequest()!.id
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(useAppStore.getState().demands).toEqual({})
     expect(container.querySelector('.goals-creation')?.textContent).toContain('目标保存结果尚未确认'); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+    expect(container.querySelector('.goals-empty')?.textContent).toBe('')
     await act(async () => root.render(null)); await mount(); await click('重新读取目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.demands.list).toHaveBeenCalledTimes(2)
@@ -154,6 +155,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const id = directGoalRequest()!.id, tabId = useAppStore.getState().demandPmoTabIds[id]!, tab = useAppStore.getState().tabs[tabId]!, regionId = tab.layout.activeRegionId
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(tab.regions[regionId]?.kind).toBe('launcher')
+    expect(tab.name).toBe('PMO · Untitled goal')
     expect(useAppStore.getState().agentComposerDrafts[regionId]).toContain(`existing Goal ${id}`)
     expect(useAppStore.getState().errorNoticeContext?.lifecycle).toMatchObject({ regionId, tabId, step: 'launch' })
     expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tabId)

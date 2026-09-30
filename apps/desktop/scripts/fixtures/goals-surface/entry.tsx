@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
+import { projectLinksPreview } from './project-links'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
@@ -57,7 +58,7 @@ function seedDirect(mode?: 'save-unknown' | 'pmo') {
 function directFacts() {
   const state = useAppStore.getState(), id = state.selectedDemandId ?? directGoalRequest()?.id, goal = id ? state.demands[id] : undefined
   const tabId = id ? state.demandPmoTabIds[id] : undefined, tab = tabId ? state.tabs[tabId] : undefined
-  return { request: directGoalRequest(), goal, tabId, regionId: tab?.layout.activeRegionId, surface: tab?.regions[tab.layout.activeRegionId], topicId: tab?.topicId,
+  return { request: directGoalRequest(), goal, tabId, tabName: tab?.name, appearance: state.config?.appearance.appAppearance, regionId: tab?.layout.activeRegionId, surface: tab?.regions[tab.layout.activeRegionId], topicId: tab?.topicId,
     draft: tab ? state.agentComposerDrafts[tab.layout.activeRegionId] : undefined, creates: [...directCreates], launches: [...directLaunches], floating: readPmoTeamsTopicFloatingState(), pmoTopic: PMO_TEAMS_TOPIC_ID }
 }
 let finishPreparation: (() => Promise<void>) | undefined
@@ -126,3 +127,5 @@ Object.assign(window, { goalsVisual: { seed,
   holdPreparation: () => { api.scratch.ensureMote = (workspace, id) => new Promise(resolve => { finishPreparation = async () => { resolve(await ensureMote(workspace, id)); api.scratch.ensureMote = ensureMote } }) },
   finishPreparation: async () => { await finishPreparation?.(); finishPreparation = undefined },
   facts: () => { const state = useAppStore.getState(), entries = Object.values(state.demands); return { selected: state.selectedDemandId, ids: Object.keys(state.demands), criteria: entries.reduce((count, goal) => count + (goal.alignment?.criteria.length ?? 0), 0), reports: entries.filter(goal => goal.grounding).length, checks: entries.reduce((count, goal) => count + (goal.grounding?.checks.length ?? 0), 0), runs: state.sessions.filter(session => sessions.some(original => original.id === session.id)).map(session => session.control) } } } })
+
+Object.assign(window, { goalsProjectLinks: projectLinksPreview(initial, mode => root?.render(<App key={`project-links-${mode}`} />)) })
