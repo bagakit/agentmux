@@ -38,7 +38,7 @@ const renderer = vi.hoisted(() => {
     attachCustomKeyEventHandler() {}
     getSelection() { return this.selection }
     hasSelection() { return this.selection.length > 0 }
-    write(_data: unknown, callback: () => void) { callback() }
+    write = vi.fn((_data: unknown, callback: () => void) => { callback() })
     focus = vi.fn()
     dispose = vi.fn()
     refresh() {}
@@ -75,7 +75,7 @@ import { TerminalView } from '../src/renderer/src/components/TerminalView.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners.js'
-import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 
 const initial = useAppStore.getState()
 const origin = { workspaceId: 'private-workspace', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }
@@ -93,6 +93,8 @@ let terminal: InstanceType<typeof renderer.Terminal>
 let web: InstanceType<typeof renderer.WebLinksAddon>
 let openHttp: ReturnType<typeof vi.fn>
 let openFile: ReturnType<typeof vi.fn>
+let receive: (event: RuntimeEvent) => void
+let resized: () => void
 
 async function installCells(text: string, cols = 80) {
   const { Terminal: NativeTerminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
@@ -122,11 +124,18 @@ beforeEach(async () => {
     currentSize: { cols: 80, rows: 24 }, gap: null
   })
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
-  vi.spyOn(api.sessions, 'onEvent').mockReturnValue(() => {})
+  vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => { receive = listener; return () => {} })
   vi.spyOn(api.sessions, 'write').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined)
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-    x: 0, y: 0, left: 0, top: 0, width: 240, height: 480, right: 240, bottom: 480, toJSON: () => ({})
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { resized = callback }
+    observe() {}; unobserve() {}; disconnect() {}
+  })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const readout = this.classList.contains('terminal-link-preview')
+    const x = readout ? 4 : 0, y = readout ? (this.dataset.placement === 'top' ? 4 : 436) : 0
+    const width = readout ? 200 : 240, height = readout ? 40 : 480
+    return { x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }
   })
   openHttp = vi.fn().mockResolvedValue(undefined); openFile = vi.fn().mockResolvedValue(undefined)
   useAppStore.setState({ openHttpLink: openHttp, openFile, config: {
@@ -258,6 +267,7 @@ describe('mounted passive link readout', () => {
   })
   it('OSC 8 and file callbacks share the delayed passive readout and leave cleanup', async () => {
     const file = await fileLink()
+    await installCells('\r\n'.repeat(12) + 'src/example.ts:3')
     for (const link of [terminal.options.linkHandler!, file]) {
       await act(async () => { link.hover!(new MouseEvent('mousemove', { clientX: 50, clientY: 400 }), link === file ? file.text : 'https://example.test/path', range); vi.advanceTimersByTime(500) })
       expect(element.querySelector<HTMLElement>('[role="tooltip"]')?.dataset.placement).toBe('top')
@@ -274,7 +284,64 @@ describe('mounted passive link readout', () => {
     expect(vi.getTimerCount()).toBe(0)
     expect(terminal.dispose).toHaveBeenCalledOnce()
   })
-  for (const action of ['leave', 'press', 'selection', 'wheel', 'scroll', 'hide'] as const) {
+  it('suppresses a readout over real dense corner cells without changing the link exit or grid', async () => {
+    await installCells(Array.from({ length: 24 }, (_, y) => `history ${y} src/example.ts`).join('\r\n'))
+    await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/path'); vi.advanceTimersByTime(500) })
+    expect(element.querySelector('[role="tooltip"]')).toBeNull()
+    expect(terminal.cellLines).toHaveLength(24)
+    expect(terminal.cellLines[23]!.getCell(0)!.getChars()).toBe('h')
+    await act(async () => web.activate(new MouseEvent('mouseup', { metaKey: true }), 'https://example.test/path'))
+    expect(openHttp).toHaveBeenCalledWith(origin, 'https://example.test/path', 'system')
+    expect(renderer.Terminal.instances).toEqual([terminal]); expect([terminal.cols, terminal.rows]).toEqual([80, 24])
+    expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
+  it('clears before live bytes paint and blocks a new readout throughout a deferred in-flight write', async () => {
+    await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/path'); vi.advanceTimersByTime(500) })
+    const oldReadout = element.querySelector<HTMLElement>('[role="tooltip"]')!
+    expect(oldReadout.style.visibility).toBe('visible')
+    let complete!: () => void
+    terminal.write.mockImplementation((_data, callback) => { expect(oldReadout.style.visibility).toBe('hidden'); complete = callback })
+    const data = new TextEncoder().encode('later bytes')
+    await act(async () => {
+      receive({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
+        data: 'later bytes', dataBytes: data, evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+          outputByteRange: { startByte: 0, endByte: data.byteLength } } } })
+      await vi.advanceTimersByTimeAsync(50)
+    })
+    expect(terminal.write).toHaveBeenCalledOnce(); expect(complete).toBeTypeOf('function')
+    expect(element.querySelector('[role="tooltip"]')).toBeNull()
+    await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/path'); vi.advanceTimersByTime(500) })
+    expect(element.querySelector('[role="tooltip"]')).toBeNull()
+    await act(async () => { complete(); await vi.advanceTimersByTimeAsync(1) })
+    await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/path'); vi.advanceTimersByTime(500) })
+    expect(element.querySelector<HTMLElement>('[role="tooltip"]')?.style.visibility).toBe('visible')
+    expect(renderer.Terminal.instances).toEqual([terminal])
+  })
+  it('a disposed owner with an unresolved write cannot suppress or clear the new Terminal owner readout', async () => {
+    let completeOldWrite!: () => void
+    const oldTerminal = terminal
+    oldTerminal.write.mockImplementation((_data, callback) => { completeOldWrite = callback })
+    const dataBytes = new TextEncoder().encode('pending old bytes')
+    await act(async () => {
+      receive({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
+        data: 'pending old bytes', dataBytes, evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+          outputByteRange: { startByte: 0, endByte: dataBytes.byteLength } } } })
+      await vi.advanceTimersByTimeAsync(50)
+    })
+    expect(oldTerminal.write).toHaveBeenCalledOnce(); expect(completeOldWrite).toBeTypeOf('function')
+    await act(async () => { root.render(<TerminalView session={session} themeId="catppuccin-mocha" interactiveResize={false} linkOrigin={origin} autoFocus={false} />) })
+    expect(oldTerminal.dispose).toHaveBeenCalledOnce(); expect(renderer.Terminal.instances).toHaveLength(2)
+    terminal = renderer.Terminal.instances[1]!; web = renderer.WebLinksAddon.instances[1]!
+    await installCells('new owner')
+    await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/new'); vi.advanceTimersByTime(500) })
+    const readout = element.querySelector<HTMLElement>('[role="tooltip"]')!
+    expect(readout?.style.visibility).toBe('visible'); expect(readout.textContent).toContain('https://example.test/new')
+    // Real xterm disposal may drop this callback forever. If it arrives, it still belongs to the old owner.
+    await act(async () => { completeOldWrite(); await vi.advanceTimersByTimeAsync(1) })
+    expect(element.querySelector('[role="tooltip"]')).toBe(readout)
+    expect(readout.style.visibility).toBe('visible')
+  })
+  for (const action of ['leave', 'press', 'selection', 'wheel', 'scroll', 'hide', 'font', 'resize'] as const) {
     it(`${action} clears both shown readout and pending hover`, async () => {
       for (const shown of [false, true]) {
         await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/path'); if (shown) vi.advanceTimersByTime(500) })
@@ -286,11 +353,14 @@ describe('mounted passive link readout', () => {
           if (action === 'wheel') element.querySelector('.terminal-view__xterm')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true }))
           if (action === 'scroll') terminal.scrolled()
           if (action === 'hide') root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} visible={false} autoFocus={false} />)
+          if (action === 'font') root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} fontSize={18} autoFocus={false} />)
+          if (action === 'resize') resized()
           vi.advanceTimersByTime(500)
         })
         expect(element.querySelector('[role="tooltip"]')).toBeNull()
         terminal.selection = ''
         if (action === 'hide') await act(async () => { root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} visible autoFocus={false} />) })
+        if (action === 'font') await act(async () => { root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />) })
       }
     })
   }
