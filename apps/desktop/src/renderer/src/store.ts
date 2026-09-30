@@ -2353,7 +2353,7 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
   await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID)
   const current = get()
   const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
-  const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
+  const tab = { ...newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID), name: `PMO · ${demand.title}` }
   const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
   if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
   const contextPrompt = [
