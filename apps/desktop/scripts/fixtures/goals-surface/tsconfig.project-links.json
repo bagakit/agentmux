@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": ["project-links.ts", "../../../test/session-pane-project-file-links.test.tsx", "../../../src/renderer/src/global.d.ts"]
+}
