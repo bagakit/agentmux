@@ -44,7 +44,7 @@ async function compiled(dir) {
   for(const file of files) if(file.isFile()){const path=join(file.parentPath,file.name);out[path.slice(dir.length+1)]=hash(await readFile(path))}
   assert.ok(Object.keys(out).length>0);return out
 }
-async function native(label, badGeometry=false) {
+async function native(label, oldSize=false) {
   const {build}=await import('vite'),fixture=join(desktop,'scripts/fixtures/mailbox-badge'),directory=join(evidence,label),processRoot=join(privateRoot,label),outDir=join(processRoot,'out')
   await mkdir(directory,{recursive:true});await mkdir(processRoot,{recursive:true})
   const wrapper=join(processRoot,'record-xterm.mjs'),main=join(processRoot,'probe-main.cjs'),mainBytes=await readFile(join(fixture,'main.cjs'))
@@ -60,20 +60,21 @@ async function native(label, badGeometry=false) {
     if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(desktop,'scripts/fixtures')+'/')||id.startsWith(join(root,'packages/core/src')+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(root.length+1)]=hash(source)
   },async generateBundle(){for(const file of this.getWatchFiles())if(file.startsWith(join(desktop,'src')+'/')&&file.endsWith('.css'))importedStyleInputs[file.slice(root.length+1)]=hash(await readFile(file))}}],
   css:{postcss:{plugins:[{postcssPlugin:'mailbox-badge-actual-imported-css',async Once(sheet){
-    if(!badGeometry)return
+    if(!oldSize)return
     const file=join(root,productPaths[1]),declarations=[]
     // CSS @imports are consumed by PostCSS rather than a separate Rollup transform.
-    sheet.walkDecls('left',d=>{if(d.source?.input.file===file&&d.parent.selector==='.composer-mailbox__unread')declarations.push(d)})
+    sheet.walkDecls('height',d=>{if(d.source?.input.file===file&&d.parent.selector==='.composer-mailbox__unread')declarations.push(d)})
     if(!declarations.length)return
-    assert.equal(declarations.length,1,'The actual imported badge position declaration is unique and nonempty')
-    assert.equal(declarations[0].value,'0')
-    const source=await readFile(file,'utf8'),from='.composer-mailbox__unread { position: absolute; top: 0; left: 0;',to='.composer-mailbox__unread { position: absolute; top: 0; right: -4px;'
-    assert.equal(source.split(from).length,2);const changed=source.replace(from,to)
-    declarations[0].prop='right';declarations[0].value='-4px'
+    assert.equal(declarations.length,1,'The actual imported badge height declaration is unique and nonempty')
+    const originalValue=declarations[0].value;assert.match(originalValue,/^var\(--fs-(micro|meta)\)$/)
+    const source=await readFile(file,'utf8'),blocks=source.match(/\.composer-mailbox__unread\s*\{[^}]*\}/g)
+    assert.ok(blocks?.length);assert.equal(blocks.length,1)
+    const from=`height: ${originalValue};`,to='height: 12px;';assert.equal(blocks[0].split(from).length,2)
+    const changed=source.replace(blocks[0],blocks[0].replace(from,to));declarations[0].value='12px'
     await writeFile(join(directory,'original.css'),source);await writeFile(join(directory,'mutated.css'),changed)
-    mutationRecords.push({file:productPaths[1],originalSha256:hash(source),mutatedSha256:hash(changed),astDeclaration:{selector:'.composer-mailbox__unread',originalProperty:'left',originalValue:'0',mutatedProperty:'right',mutatedValue:'-4px'},sharedSourceWritten:false})
+    mutationRecords.push({file:productPaths[1],originalSha256:hash(source),mutatedSha256:hash(changed),astDeclaration:{selector:'.composer-mailbox__unread',property:'height',originalValue,mutatedValue:'12px'},sharedSourceWritten:false})
   }}]}},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
-  assert.equal(mutationRecords.length,badGeometry?1:0,'A requested production CSS mutation must be applied exactly once')
+  assert.equal(mutationRecords.length,oldSize?1:0,'A requested production CSS mutation must be applied exactly once')
   for(const path of ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/AgentAvatar.tsx','packages/core/src/control.ts','packages/core/src/errors.ts'])assert.ok(loadedSourceInputs[path],'Actual source consumed: '+path)
   for(const path of ['apps/desktop/src/renderer/src/styles/composer.css','apps/desktop/src/renderer/src/styles/agent-avatar.css'])assert.equal(importedStyleInputs[path],hash(await readFile(join(root,path))))
   const identity={loadedSourceInputs,importedStyleInputs,compiledFiles:await compiled(outDir),privateMainSha256:hash(mainBytes),terminalWrapperSha256:hash(await readFile(wrapper)),electronVersion:require('electron/package.json').version,exactCoreControlSourceAlias:true,otherRuntimeEntries:'existing compiled package; private preview does not certify real Runtime',mutationRecords}
@@ -91,9 +92,9 @@ try {
   if(mode==='--mutations')await mutations()
   else {
     result.candidate=await native('candidate');assert.equal(result.candidate.outcome.exitCode,0,result.candidate.rendered.failure?.message);assert.equal(result.candidate.rendered.passed,true)
-    const red=await native('geometry-red',true);assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,/Unread badge.*(bounds|overlap)/)
+    const red=await native('geometry-red',true);assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,/Unread badge.*(compact|area)/)
     const restored=await native('geometry-restored');assert.equal(restored.outcome.exitCode,0,restored.rendered.failure?.message);assert.equal(restored.rendered.passed,true)
-    result.mutations.push({name:'badge-overlaps-right-neighbor',red,restored,sharedSourceWritten:false})
+    result.mutations.push({name:'badge-restores-old-12px-height',red,restored,sharedSourceWritten:false})
   }
   for(const [path,bytes]of Object.entries(originals))assert.equal(hash(await readFile(join(root,path))),hash(bytes),'Owned source unchanged by private proof: '+path)
   result.passed=true
