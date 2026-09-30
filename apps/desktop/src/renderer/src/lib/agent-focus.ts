@@ -1,5 +1,6 @@
 import type { ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
 import { scratchTopicKind } from './scratch-topic-snapshots'
+import type { WorkbenchProjectionSelection } from './workbench-projection'
 
 export const MAX_EXECUTION_FOCUS_HISTORY = 12
 export const MAX_EXECUTION_FOCUS_EVENTS = 2000
@@ -27,6 +28,8 @@ export type AgentFocusContext = {
   execution: {
     sessionId: string | null
     history: AgentFocusHistoryEntry[]
+    /** The last explicitly selected occurrence; Session identity is not a spatial address. */
+    reference?: WorkbenchProjectionSelection
   }
   pmo: {
     sessionId: string | null
@@ -98,17 +101,24 @@ export function focusExecution(
   context: AgentFocusContext,
   sessionId: string | null,
   focusedAt = Date.now(),
-  identity?: AgentFocusHistoryIdentity
+  identity?: AgentFocusHistoryIdentity,
+  reference?: WorkbenchProjectionSelection
 ): AgentFocusContext {
-  if (sessionId === context.execution.sessionId) return context
+  if (sessionId === context.execution.sessionId) {
+    const held = context.execution.reference
+    if (!reference || held && held.displayWorkspaceId === reference.displayWorkspaceId && held.groupId === reference.groupId &&
+      held.tabId === reference.tabId && held.regionId === reference.regionId) return context
+    return { ...context, execution: { ...context.execution, reference } }
+  }
   if (!sessionId) return {
     ...context,
-    execution: { ...context.execution, sessionId: null }
+    execution: { sessionId: null, history: context.execution.history }
   }
   return {
     ...context,
     execution: {
       sessionId,
+      ...(reference ? { reference } : {}),
       history: recordExecutionFocus(context.execution.history, sessionId, focusedAt, MAX_EXECUTION_FOCUS_EVENTS, identity)
     }
   }
@@ -164,9 +174,16 @@ export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
   const pmoSessionId = typeof pmo.sessionId === 'string' && pmo.sessionId.length > 0
     ? pmo.sessionId
     : null
+  const rawReference = execution.reference && typeof execution.reference === 'object' && !Array.isArray(execution.reference)
+    ? execution.reference as Record<string, unknown> : null
+  const reference = sessionId && rawReference && ['displayWorkspaceId', 'groupId', 'tabId', 'regionId']
+    .every(key => typeof rawReference[key] === 'string' && rawReference[key].length > 0)
+    ? { displayWorkspaceId: rawReference.displayWorkspaceId as string, groupId: rawReference.groupId as string,
+        tabId: rawReference.tabId as string, regionId: rawReference.regionId as string } : null
   return {
     execution: {
       sessionId,
+      ...(reference ? { reference } : {}),
       history: retainExecutionFocusHistory(history)
     },
     pmo: { sessionId: pmoSessionId }
@@ -186,12 +203,14 @@ export function sanitizeAgentFocus(
   const pmoSession = context.pmo.sessionId
     ? byId.get(context.pmo.sessionId)
     : undefined
+  const executionSessionId = executionSession && laneForSession(executionSession) !== 'pmo'
+    ? executionSession.id
+    : !executionSession && context.execution.sessionId && retainedUnknownSessionIds?.has(context.execution.sessionId)
+      ? context.execution.sessionId : null
   return {
     execution: {
-      sessionId: executionSession && laneForSession(executionSession) !== 'pmo'
-        ? executionSession.id
-        : !executionSession && context.execution.sessionId && retainedUnknownSessionIds?.has(context.execution.sessionId)
-          ? context.execution.sessionId : null,
+      sessionId: executionSessionId,
+      ...(executionSessionId && context.execution.reference ? { reference: context.execution.reference } : {}),
       // Removing a current projection cannot erase an earlier execution focus fact.
       history: context.execution.history
     },

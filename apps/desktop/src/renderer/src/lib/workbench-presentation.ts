@@ -11,7 +11,7 @@ export function useWorkbenchPresentationActive(): boolean { return useContext(Wo
 /** The existing View owner supplies only the retained hint applicable to this presentation. */
 export function useWorkbenchRetainedRegionId(): string | null { return useContext(WorkbenchPresentationContext).retainedRegionId }
 export function useWorkbenchBrowserPresentation() { return useContext(WorkbenchPresentationContext) }
-export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'survey'; controlsOpen?: boolean; retainedRegionId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
+export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'survey' | 'focus'; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
 
 /** A shared entity in multiple Groups has no uniquely proven ordinary home occurrence. */
 export function workbenchHomePresentationReferences(layout: WorkspaceLayout | undefined, displayWorkspaceId: string, tabs: Readonly<Record<string, WorkbenchTab>>): ReadonlyMap<string, WorkbenchProjectionSelection | null> {

@@ -32,7 +32,7 @@ import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
-import { tabForFocusedSession } from './lib/focus-tab-projection'
+import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { api } from './lib/api'
 import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
@@ -122,13 +122,14 @@ function DesktopApp() {
     return () => window.removeEventListener('resize', resized)
   }, [])
   const surveyVisible = mainSurface === 'survey' && !settingsRoute
+  const focusVisible = mainSurface === 'agents' && !settingsRoute
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
   const surveyTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const surveySessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     Object.values(tab.regions).flatMap(surface => isSessionSurface(surface) ? [surface.sessionId] : [])))], [tabs])
   // The spatial directory reads execution identity, never status/output clocks.
   const surveySessions = useAppStore(useShallow(state => {
-    if (!surveyVisible || surveySessionIds.length === 0) return []
+    if ((!surveyVisible && !focusVisible) || surveySessionIds.length === 0) return []
     const byId = sessionPresentationById(state.sessions)
     return surveySessionIds.flatMap(id => {
       const session = byId.get(id)
@@ -138,12 +139,30 @@ function DesktopApp() {
   const topicsWorkspace = config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
   const surveyTopics = scratchTopicsForWorkspace(surveyTopicSnapshots, topicsWorkspace)
   const retainedSurveyCatalog = useRef<AgentMuxSpaceCatalog | null>(null)
-  const surveyCatalog = useMemo(() => {
-    if (!surveyVisible) return retainedSurveyCatalog.current
-    const catalog = spatialCatalog(useAppStore.getState(), surveyTopics ?? [])
-    retainedSurveyCatalog.current = catalog
-    return catalog
-  }, [surveyVisible, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
+  const spatialDirectory = useMemo(() => {
+    if (!surveyVisible && !focusVisible) return { catalog: retainedSurveyCatalog.current, issue: null }
+    try {
+      const catalog = spatialCatalog(useAppStore.getState(), surveyTopics ?? [])
+      retainedSurveyCatalog.current = catalog
+      return { catalog, issue: null }
+    } catch (error) {
+      // Directory validation is a presentation failure, never a reason to stop a healthy Session.
+      return { catalog: null, issue: `The work surface directory could not be confirmed: ${error instanceof Error ? error.message : String(error)}` }
+    }
+  }, [surveyVisible, focusVisible, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
+  const surveyCatalog = spatialDirectory.catalog
+  const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
+    const state = useAppStore.getState()
+    if (state.mainSurface !== 'agents') return
+    const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
+    if (surface && isSessionSurface(surface)) state.focusExecutionSession(surface.sessionId, reference)
+  }, [])
+  const focusPresentation = useMemo(() => mainSurface === 'agents'
+    ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference)
+    : { projection: null, issue: null, references: [] },
+  [mainSurface, agentFocus.execution, tabs, surveyCatalog, selectFocusReference])
+  const focusProjection = focusPresentation.projection
+  const focusTab = focusProjection?.entity.kind === 'tab' ? tabs[focusProjection.entity.tabId] : null
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
     if (!state.surveyZoneSelection || state.surveyZoneSelection.zoneId !== surveySelection?.zoneId) return
@@ -178,8 +197,18 @@ function DesktopApp() {
           retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) }
       }
     }
+    if (focusVisible && focusProjection && focusTab) {
+      const reference = focusProjection.selection[0]!
+      if (!targets[focusTab.id]) targets[focusTab.id] = {
+        hostId: workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
+        active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId,
+        headerPortalTargetId: 'focus-workspace-slot-header',
+        onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
+      }
+    }
     return targets
-  }, [moteViewTargets, surveyVisible, surveyProjection, surveyProjectedLayout, surveyToolsOpen, narrowControls, selectSurveyReference])
+  }, [moteViewTargets, surveyVisible, surveyProjection, surveyProjectedLayout, surveyToolsOpen, narrowControls, selectSurveyReference,
+    focusVisible, focusProjection, focusTab, selectFocusReference])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
   useEffect(() => {
     if (mainSurface === 'survey') setSurveyVisited(true)
@@ -235,8 +264,6 @@ function DesktopApp() {
     publish()
     return () => { unsubscribeStore(); unsubscribeRejectedLoads() }
   }, [fileEditingProbe])
-  const focusSessionId = mainSurface === 'agents' ? executionFocusSessionId(agentFocus) : null
-  const focusTab = tabForFocusedSession(tabs, focusSessionId)
   const projectedVisibleTabIds = useMemo(() => new Set([
     ...Object.entries(viewTargets).flatMap(([tabId, target]) => target.visible === false ? [] : [tabId]), ...(focusTab ? [focusTab.id] : [])
   ]), [viewTargets, focusTab?.id])
@@ -396,7 +423,7 @@ function DesktopApp() {
                 </section>
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} viewTargets={viewTargets} /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div
@@ -406,12 +433,12 @@ function DesktopApp() {
                   >
                   {mountedWorkspaces.map((candidate) => {
                     const visible = workbenchVisible && candidate.id === activeWorkspaceId
-                    const focusVisible = Boolean(focusTab && focusTab.workspaceId === candidate.id)
-                    const mounted = visible || (focusVisible && !settingsRoute)
+                    const focusSource = Boolean(focusVisible && focusTab && focusTab.workspaceId === candidate.id)
+                    const mounted = visible || focusSource
                     return (
                       <div
                         key={candidate.id}
-                        className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'} ${focusVisible ? 'workspace-workbench-slot--focus-source' : ''}`}
+                        className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'} ${focusSource ? 'workspace-workbench-slot--focus-source' : ''}`}
                         data-workspace-id={candidate.id}
                         data-desktop-zone-id={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.zoneId : undefined}
                         data-visible={mounted ? 'true' : 'false'}
@@ -423,8 +450,6 @@ function DesktopApp() {
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
                             ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}
                           visible={mounted}
-                          focusTabId={focusVisible && focusTab ? focusTab.id : null}
-                          focusPortalTargetId={focusVisible ? 'focus-workspace-slot' : null}
                           viewTargets={viewTargets}
                           onBrowserControlConfirmation={onBrowserControlConfirmation}
                           interactiveResize={windowResizeActive || isResizing}
