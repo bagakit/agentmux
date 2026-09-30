@@ -2,7 +2,7 @@
 import { act, createElement, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, defineAgentProvider, agentPromptCondition, loadAgentSessions } from '@agentmux/core'
@@ -119,6 +119,13 @@ it('built-in Provider → public Core → Store → mounted Focus keeps exact na
   expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Sender not recorded')
   expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain('Human')
   expect(useAppStore.getState().agentFocus).toBe(before)
+  const proof = '.bagakit/feature-tracker/conversation-input-cards-artifacts/T006'
+  await mkdir(proof, { recursive: true })
+  await writeFile(join(proof, 'public-captured-reader.json'), JSON.stringify({ now: NOW,
+    config: useAppStore.getState().config, sessions: h.sessions, agentFocus: useAppStore.getState().agentFocus,
+    timeline: await h.client.sessionTimeline(A), nativePage: await h.client.sessionHistoryPage(A), historySources: await h.client.sessionHistorySources(),
+    writes: h.writes, boundary: 'Actual public submitAgentPrompt with a declared private input adapter; accepted captured ID and author remain distinct from built-in Claude native IDs. No vendor CLI or physical Terminal.'
+  }, null, 2) + '\n')
 })
 
 it('unknown-time native inputs stay accessible in Focus and ordered parts use the real shared message component', async () => {
@@ -199,11 +206,11 @@ it('explicit continuation rotates at ninety raw records while retaining the exac
   expect(document.getSelection()!.toString()).toBe('Input')
   expect([...floating().querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)).toHaveLength(90)
   expect(floating().querySelector(`[data-input-message-id="${nativeId('row-159')}"]`)).not.toBeNull()
-  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Newer records are outside this reading window')
+  expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Some records are outside this bounded reading window')
   expect(h.reads.slice(1).map(read => read.page.items.length)).toEqual([30, 30, 30, 30, 30, 10]); h.verifyNoRuntime()
 })
 
-it('Focus bounds its own native bodies even when another real shared consumer has accumulated more than ninety inputs', async () => {
+it('Focus shares the same ninety-record native window and another mounted consumer does not reread it', async () => {
   const h = await fixture(Array.from({ length: 130 }, (_, index) => record(`shared-${index}`, `Shared input ${index}`)))
   const control = h.sessions[0]!.control
   expect(control.kind).toBe('agent')
@@ -211,13 +218,15 @@ it('Focus bounds its own native bodies even when another real shared consumer ha
   function OtherConsumer() { const value = useSessionUserMessages(control.kind === 'agent' ? control : undefined); useEffect(() => { shared = value }, [value]); return createElement('output', { 'data-other-consumer-count': value.messages.length }) }
   const node = document.createElement('div'); document.body.append(node); nodes.push(node); const root = createRoot(node); roots.push(root)
   await act(async () => root.render(createElement(OtherConsumer))); await h.wait(() => expect(shared?.messages).toHaveLength(30))
-  for (const expected of [60, 90, 120, 130]) { await act(async () => { await shared!.loadEarlier() }); await h.wait(() => expect(shared?.messages).toHaveLength(expected)) }
-  expect(h.reads).toHaveLength(5)
+  for (const expected of [60, 90]) { await act(async () => { await shared!.loadEarlier() }); await h.wait(() => expect(shared?.messages).toHaveLength(expected)) }
+  expect(h.reads).toHaveLength(3)
+  await act(async () => shared!.loadEarlier())
+  expect(h.reads).toHaveLength(3)
   await h.render(); await h.readInputs()
-  expect(shared!.messages).toHaveLength(130)
+  expect(shared!.messages).toHaveLength(90)
   const listed = [...floating().querySelectorAll<HTMLElement>('[data-input-source="native"][data-input-message-id]')].map(item => item.dataset.inputMessageId)
   expect(listed).toEqual(Array.from({ length: 90 }, (_, index) => nativeId(`shared-${index + 40}`)))
-  expect(h.reads).toHaveLength(5)
+  expect(h.reads).toHaveLength(3)
   expect(floating().querySelector('[role="dialog"]')!.textContent).toContain('Earlier coverage is unknown')
   expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain('Beginning of this available snapshot reached'); h.verifyNoRuntime()
 })

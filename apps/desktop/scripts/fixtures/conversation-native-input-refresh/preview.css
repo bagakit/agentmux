@@ -1,0 +1,13 @@
+html, body, #root { min-height: 100%; }
+body { margin: 0; padding: 18px; background: var(--app-bg); color: var(--text); }
+.native-refresh-preview { margin: 0 auto; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel-bg); }
+.native-refresh-preview__header { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; border-bottom: 1px solid var(--border); }
+.native-refresh-preview__header span { color: var(--muted); font-size: var(--fs-caption); }
+.native-refresh-preview__actions { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border); }
+.native-refresh-preview__actions button { font-size: var(--fs-caption); }
+.native-refresh-preview__conversation { height: 290px; }
+.native-refresh-preview__draft { display: flex; padding: 8px 16px 12px; }
+.native-refresh-preview__draft textarea { width: 100%; min-height: 46px; resize: vertical; }
+.native-refresh-preview__focus { min-height: 340px; }
+.native-refresh-preview__focus .global-board-surface { min-height: 340px; height: 400px; }
+.native-refresh-preview__paused { padding: 14px 16px; color: var(--muted); }

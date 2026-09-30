@@ -1,16 +1,17 @@
 import {EventEmitter} from 'node:events'
 import {expect,it,vi} from 'vitest'
-import {AgentMuxMemoryAgentSessionStore,type AgentMuxClient,type AgentSessionHistoryPage} from '@agentmux/core'
+import {AgentMuxMemoryAgentSessionStore,type AgentMuxClient,type AgentSessionHistoryPage,type AgentSessionHistoryObservationHandle} from '@agentmux/core'
 import type {BrowserWindow,IpcMainInvokeEvent} from 'electron'
 import type {AgentMuxPreloadApi,AgentSessionControl,AppConfig} from '../src/shared/contracts'
+import {SESSION_HISTORY_OBSERVATION_CHANNEL} from '../src/shared/contracts'
 import type {ConfigStore} from '../src/main/config-store'
 import type {ScratchTopics} from '../src/main/scratch-topics'
 import type {WorkspaceFiles} from '../src/main/workspace-files'
 import {RuntimeController} from '../src/main/runtime-controller'
-const preload=vi.hoisted(()=>({api:null as AgentMuxPreloadApi|null,invoke:vi.fn(),handlers:new Map<string,Function>()}))
+const preload=vi.hoisted(()=>({api:null as AgentMuxPreloadApi|null,invoke:vi.fn(),handlers:new Map<string,Function>(),receivers:new Map<string,Function>()}))
 vi.mock('electron',()=>({
  contextBridge:{exposeInMainWorld:(_name:string,api:AgentMuxPreloadApi)=>{preload.api=api}},
- ipcRenderer:{invoke:preload.invoke,on:vi.fn(),off:vi.fn(),send:vi.fn()},webFrame:{getZoomFactor:()=>1},
+ ipcRenderer:{invoke:preload.invoke,on:(channel:string,listener:Function)=>preload.receivers.set(channel,listener),removeListener:(channel:string,listener:Function)=>{if(preload.receivers.get(channel)===listener)preload.receivers.delete(channel)},off:vi.fn(),send:vi.fn()},webFrame:{getZoomFactor:()=>1},
  app:{getPath:()=>'/isolated-history-ipc-test'},
  ipcMain:{handle:(channel:string,handler:Function)=>preload.handlers.set(channel,handler),removeHandler:(channel:string)=>preload.handlers.delete(channel),on:vi.fn(),removeListener:vi.fn()},
  clipboard:{},dialog:{},nativeImage:{},shell:{}
@@ -35,7 +36,7 @@ async function owner(){
  workspacePath:'/synthetic',run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
  nativeHandle:{kind:'provider',providerId:'codex',sessionId:'native-main'}})
  const controller=new RuntimeController(store)
- const client={sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
+ const client={observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
  controller.commit({hosts:[{id:control.hostId,client:client as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const config:AppConfig={...structuredClone(DEFAULT_CONFIG),executors:{
  'specific-codex':{providerId:'codex',label:'Specific Codex',command:'/synthetic/specific-codex',args:['--config','model="specific"'],env:{CODEX_HOME:'/synthetic/specific-home'},injectAgentMuxGuide:false},
@@ -112,4 +113,67 @@ it('keeps host reconfiguration reservations and rejects a response from a retire
  resolve(page)
  await expect(read).rejects.toThrow('host configuration changed')
  expect(client.connect).not.toHaveBeenCalled()
+})
+
+it('actual trusted IPC/preload observation owns its token, filters other notices and releases pending/late resources',async()=>{
+ const {controller,client,config}=await owner()
+ vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ const sender=Object.assign(new EventEmitter(),{id:88,isDestroyed:()=>false,send:vi.fn((channel:string,payload:unknown)=>preload.receivers.get(channel)?.({},payload))})
+ const disposeIpc=await registerIpc({window:{webContents:sender} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{} as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
+ let deliver!:(event:unknown)=>void
+ let ready!:(handle:AgentSessionHistoryObservationHandle)=>void
+ client.observeSessionHistory.mockImplementation(async(_id,listener)=>{deliver=listener;return await new Promise(resolve=>{ready=resolve})})
+ const calls:Array<{channel:string,args:unknown[]}>=[]
+ preload.invoke.mockImplementation(async(channel:string,...args:unknown[])=>{
+  calls.push({channel,args});const handler=preload.handlers.get(channel);expect(handler).toBeTypeOf('function')
+  return handler!({sender} as unknown as IpcMainInvokeEvent,...args)
+ })
+ try{
+  const receive=vi.fn(),abort=new AbortController()
+  const pending=preload.api!.sessions.observeHistory(control,receive,{signal:abort.signal})
+  await vi.waitFor(()=>expect(client.observeSessionHistory).toHaveBeenCalledTimes(1))
+  expect(client.observeSessionHistory.mock.calls[0]).toEqual([control.agentSessionId,expect.any(Function),{
+   commandOverride:'/synthetic/specific-codex',args:['--config','model="specific"'],env:{CODEX_HOME:'/synthetic/specific-home'},signal:expect.any(AbortSignal)
+  }])
+  const token=calls[0]!.args[0]
+  const receiveWire=preload.receivers.get(SESSION_HISTORY_OBSERVATION_CHANNEL)!
+  expect(receiveWire).toBeTypeOf('function')
+  const notice={kind:'invalidated',agentSessionId:control.agentSessionId,source:page.source}
+  receiveWire({}, {token:'another-token',observation:notice})
+  receiveWire({}, {token,observation:{...notice,agentSessionId:'foreign-session'}})
+  expect(receive).toHaveBeenCalledTimes(0)
+  deliver(notice);expect(receive).toHaveBeenCalledExactlyOnceWith(notice)
+  const observeHandler=preload.handlers.get('sessions:observeHistory')!
+  await expect(observeHandler({sender:Object.assign(new EventEmitter(),{id:999,isDestroyed:()=>false})},'foreign',control)).rejects.toThrow('Untrusted history observation sender')
+  expect(client.observeSessionHistory).toHaveBeenCalledTimes(1)
+  const rejected=pending.catch(error=>error)
+  const disposeHandle=vi.fn()
+  abort.abort(new Error('Visible consumer left'))
+  await vi.waitFor(()=>expect(calls.map(call=>call.channel)).toEqual(['sessions:observeHistory','sessions:releaseHistoryObservation']))
+  expect(preload.receivers.has(SESSION_HISTORY_OBSERVATION_CHANNEL)).toBe(false)
+  ready({source:page.source,dispose:disposeHandle})
+  expect((await rejected).message).toBe('Visible consumer left')
+  expect(disposeHandle).toHaveBeenCalledTimes(1)
+  deliver(notice);expect(receive).toHaveBeenCalledTimes(1)
+  expect(client.connect).toHaveBeenCalledTimes(0)
+  expect(client.writeAgent).toHaveBeenCalledTimes(0)
+ }finally{await disposeIpc()}
+})
+
+it('retiring the exact observed Host reports unavailable and releases its watch while healthy replacement input remains available',async()=>{
+ const {controller,client,config}=await owner()
+ const dispose=vi.fn()
+ client.observeSessionHistory.mockResolvedValue({source:page.source,dispose})
+ const receive=vi.fn()
+ const handle=await controller.observeSessionHistory(control,receive,config,new AbortController().signal)
+ const replacement={...client,writeAgent:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
+ controller.commit({hosts:[{id:control.hostId,client:replacement as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ expect(receive).toHaveBeenCalledExactlyOnceWith({kind:'unavailable',agentSessionId:control.agentSessionId,code:'AGENT_SESSION_HISTORY_SOURCE_CHANGED',message:'History host configuration changed. The current window is kept; refresh its source.'})
+ expect(dispose).toHaveBeenCalledTimes(1)
+ handle.dispose();expect(dispose).toHaveBeenCalledTimes(1)
+ expect(replacement.connect).toHaveBeenCalledTimes(0)
+ await controller.write(control,'healthy replacement input','user')
+ expect(replacement.writeAgent).toHaveBeenCalledTimes(1)
+ expect(replacement.connect).toHaveBeenCalledTimes(1)
 })

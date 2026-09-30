@@ -522,7 +522,7 @@ describe('T036 共享消息读取与视图可见性集成测试', () => {
     expect(host.textContent).toContain('Refreshed native text')
   })
 
-  it('复显语义 (resume): 从暂停恢复为 enabled:true 保持同一节点，不产生重复网络请求', async () => {
+  it('复显语义 (resume): 从暂停恢复为 enabled:true 保持同一节点并有界重新验证同一来源', async () => {
     const historyPage: AgentSessionHistoryPage = {
       agentSessionId: controlA.agentSessionId,
       source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
@@ -560,7 +560,7 @@ describe('T036 共享消息读取与视图可见性集成测试', () => {
 
     const bodyAfterResume = host.querySelector('.log-turn__body')
     expect(bodyAfterResume).toBe(bodyBefore)
-    expect(historyPageSpy).toHaveBeenCalledTimes(1)
+    expect(historyPageSpy).toHaveBeenCalledTimes(2)
   })
 
   it('晚到结果不刷新已暂停者: 请求在途时暂停，晚到结果不刷新已暂停视图', async () => {
