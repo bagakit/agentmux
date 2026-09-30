@@ -94,13 +94,28 @@
 .log-turn[data-trace-only='true'] .log-turn__node { display: none; }
 .log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
 .log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
-.log-turn__annotation { display: grid; gap: var(--sp-2); width: min(300px, 100%); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-1); overflow: auto; pointer-events: auto; }
-.log-turn__annotation-quote { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; border-left: 2px solid var(--blue); padding-left: var(--sp-2); }
-.log-turn__annotation textarea { min-height: 58px; width: 100%; resize: vertical; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-meta); }
+.log-turn__annotation { display: grid; gap: var(--sp-3); width: min(300px, 100%); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); overflow: auto; pointer-events: auto; }
+.conversation-annotation-note__passage { min-width: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-0); }
+.conversation-annotation-note__passage > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1); list-style: none; cursor: pointer; color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-annotation-note__passage > summary::-webkit-details-marker { display: none; }
+.conversation-annotation-note__passage > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); border-radius: var(--radius-sm); }
+.conversation-annotation-note__passage[open] > summary > svg { transform: rotate(180deg); }
+.conversation-annotation-note__preview { grid-column: 1 / -1; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.conversation-annotation-note__passage[open] .conversation-annotation-note__preview { display: none; }
+.log-turn__annotation-quote { max-height: 6em; overflow: auto; margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-turn__annotation-quote:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); }
+.conversation-annotation-note__field { display: grid; min-width: 0; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
+.log-turn__annotation textarea { min-height: 68px; width: 100%; resize: vertical; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-1); font: inherit; font-size: var(--fs-meta); line-height: 1.5; }
 .log-turn__annotation textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
-.log-turn__annotation-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.log-turn__annotation-actions { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-2); }
+.log-turn__annotation-actions .primary-button { flex: 1; min-width: 0; font-size: var(--fs-meta); }
 .conversation-annotation-note__header { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-meta); gap: var(--sp-3); }
 .conversation-annotation-note__header strong { font-weight: 500; }
+.conversation-annotation-note__close { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.conversation-annotation-note__close:hover { color: var(--text); background: var(--wash-2); }
+.conversation-annotation-note__close:focus-visible, .conversation-annotation-note__discard:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); }
+.conversation-annotation-note__discard { flex: none; padding: var(--sp-2) 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.conversation-annotation-note__discard:hover { color: var(--red-text); }
 .conversation-annotation-underline { height: 2px; background: var(--blue); pointer-events: none; }
 .conversation-annotation-note__location, .conversation-annotation-note__error { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
 .conversation-annotation-note__error { color: var(--red-text); }
@@ -307,46 +322,43 @@
 }
 .md-image-attachment--unavailable:hover { color: var(--text-3); }
 
-/* User input, including the user's unknown-author display default, docks to the right. */
-.log-turn[data-speaker-role='human'] {
+/* Inputs share the right-hand side. Agent replies retain the open reading surface. */
+.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {
   grid-template-columns: minmax(0, 1fr) 20px;
   justify-self: end;
-  width: min(78%, 720px);
-  padding:var(--sp-3) var(--sp-4);
-  margin:var(--sp-4) var(--sp-5);
-  border-radius: var(--radius);
-}
-.log-turn[data-speaker-role='human'] {
-  background: color-mix(in srgb, var(--blue) 8%, var(--surface-1));
-}
-/* 成块之后 body 自己不再需要底：那层底已经在整个 turn 上，再来一层就是浅底叠浅底，边界反而更糊。
-   字色降一档——用户自己的话是"我说过什么"的回看，Agent 的答复才是这个视图的主叙述；降档也让两种
-   回合在同一屏上有了字色层级，而不是只差底色。 */
-.log-turn[data-speaker-role='human'] .log-turn__head,
-.log-turn[data-speaker-role='human'] .log-turn__body {
-  grid-column: 1;
-  padding:0;
-  color: var(--text-2);
-  background: transparent;
-  text-align: right;
-}
-.log-turn[data-speaker-role='human'] .log-turn__node { grid-column: 2; grid-row: 1; background: var(--surface-1); }
-.log-turn[data-speaker-role='human'] .log-turn__head { grid-row: 1; }
-.log-turn[data-speaker-role='human'] .log-turn__body { grid-row: 2; text-align: left; }
-
-/* An identified collaborator has a message surface, distinct from this Agent's open answer. */
-.log-turn[data-speaker-relation='other-agent'] {
-  width: min(86%, 720px);
-  margin-inline: var(--sp-5);
+  width: min(84%, 720px);
   padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--line);
+  margin: var(--sp-4) var(--sp-5);
+  margin-inline-start: auto;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  background: var(--surface-1);
+  background: color-mix(in srgb, var(--blue) 5%, var(--surface-1));
 }
-.log-turn[data-speaker-relation='other-agent'] .log-turn__node { background: var(--surface-1); }
+.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__head,
+.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__body {
+  grid-column: 1;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+}
+.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node {
+  grid-column: 2;
+  grid-row: 1;
+  background: transparent;
+}
+.log-turn[data-speaker-relation='other-agent'], .log-turn[data-declared-source] {
+  background: var(--surface-1);
+  border-color: var(--line);
+}
+.log-turn__source-caption { color: var(--text-3); font-weight: 400; }
+.log-turn__declared-source { flex-basis: 100%; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 
 @media (max-width: 620px) {
-  .log-turn[data-speaker-role='human'], .log-turn[data-speaker-relation='other-agent'] { width: calc(100% - var(--sp-6)); margin-inline: var(--sp-3); }
+  .log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {
+    width: calc(100% - var(--sp-6));
+    margin-inline: var(--sp-3);
+    column-gap: var(--sp-3);
+  }
 }
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }

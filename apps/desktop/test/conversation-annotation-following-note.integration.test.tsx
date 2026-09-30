@@ -40,7 +40,7 @@ let host: HTMLDivElement, root: Root, writers: MockInstance[], read: MockInstanc
 let rectTop = 100
 async function flush() { await act(async () => { for (let n = 0; n < 15; n++) await Promise.resolve() }) }
 async function render(node: ReactNode) { await act(async () => root.render(node)); await flush() }
-function button(label: string, scope: ParentNode = document) { const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label); expect(found, label).toBeDefined(); return found! }
+function button(label: string, scope: ParentNode = document) { const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => (node.getAttribute('aria-label') ?? node.textContent?.trim()) === label); expect(found, label).toBeDefined(); return found! }
 async function click(el: HTMLButtonElement) { await act(async () => { el.focus(); el.click() }); await flush() }
 function body(scope: ParentNode = host) { const found = scope.querySelector<HTMLElement>('.log-turn__body'); expect(found).not.toBeNull(); return found! }
 async function select(el: HTMLElement, start = 28, end = 43) {
@@ -81,6 +81,40 @@ afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear()
 })
 describe('Actual conversation Range -> following note -> original reply draft', () => {
+  it('expands the complete selected passage without retargeting its Range or replacing the note input', async () => {
+    await render(pane()); const text = body(); const start = text.querySelector('p')!.firstChild!; const end = text.querySelector('strong')!.firstChild!
+    const range = document.createRange(); range.setStart(start, 28); range.setEnd(end, end.textContent!.length)
+    const quote = range.toString(); expect(quote).toContain('real emphasis')
+    const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+    await act(async () => text.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))); await flush(); await typeNote('Keep the whole passage')
+    const passage = document.querySelector<HTMLDetailsElement>('.conversation-annotation-note__passage')!
+    const textarea = document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
+    expect(passage).not.toBeNull(); expect(passage.open).toBe(false)
+    expect(passage.querySelector('summary')!.textContent).toContain('Selected passage')
+    await act(async () => passage.querySelector('summary')!.click()); await flush()
+    expect(passage.open).toBe(true)
+    expect(passage.querySelector('.log-turn__annotation-quote')!.textContent).toBe(quote)
+    expect(document.querySelector('.log-turn__annotation textarea')).toBe(textarea); expect(textarea.value).toBe('Keep the whole passage')
+    expect(body()).toBe(text); expect(text.querySelector('p')!.firstChild).toBe(start); expect(text.querySelector('strong')!.firstChild).toBe(end)
+    expect(range.toString()).toBe(quote); expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
+    expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
+    await click(button('Add to reply draft'))
+    expect(useAppStore.getState().agentComposerDrafts.a).toContain(`> ${quote.replace(/\n/gu, '\n> ')}\n\nNote: Keep the whole passage`)
+  })
+  it('discards only this note and its underline, including an empty note, without clearing the existing reply draft', async () => {
+    await render(pane()); const originalBody = body(); await select(originalBody)
+    expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
+    expect(button('Discard note').disabled).toBe(false); expect(button('Add to reply draft').disabled).toBe(true)
+    await click(button('Discard note'))
+    expect(document.querySelector('.log-turn__annotation')).toBeNull(); expect(document.querySelector('.conversation-annotation-recovery')).toBeNull()
+    expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(0)
+    expect(body()).toBe(originalBody); expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
+    await select(originalBody); await typeNote('Discard this local note'); await click(button('Close note')); await click(button('Resume note'))
+    expect(document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!.value).toBe('Discard this local note')
+    await click(button('Discard note'))
+    expect(document.querySelector('.conversation-annotation-recovery')).toBeNull(); expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(0)
+    expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
+  })
   it('uses the second actual occurrence, paints every nonempty Range rect and keeps the original nodes', async () => {
     await render(pane()); const text = body(); const selected = await select(text)
     const lines = [...document.querySelectorAll<HTMLElement>('.conversation-annotation-underline')]
@@ -115,7 +149,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     const other = document.createElement('input'); document.body.append(other); other.focus()
     await scrollTo(900); await scrollTo(130)
     expect(document.activeElement).toBe(other); expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
-    await click(button('Cancel')); expect(document.querySelector('.log-turn__annotation')).toBeNull()
+    await click(button('Close note')); expect(document.querySelector('.log-turn__annotation')).toBeNull()
     expect(document.activeElement).toBe(selected.node.parentElement!.closest('.log-turn__text'))
     await scrollTo(170); expect(document.querySelector('.log-turn__annotation')).toBeNull()
     await click(button('Resume note'))
@@ -189,7 +223,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(lines.map(line => line.style.top)).toEqual(['227px', '249px'])
     expect(document.activeElement).toBe(other)
     expect(body().querySelector('p')!.firstChild).toBe(selected.node)
-    await click(button('Cancel')); expect(positioning.referenceUpdates.size).toBe(0)
+    await click(button('Close note')); expect(positioning.referenceUpdates.size).toBe(0)
     expect(document.querySelector('.log-turn__annotation')).toBeNull(); other.remove()
   })
   it('does not silently retarget a written note to the other repeated occurrence or another row', async () => {
@@ -209,7 +243,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     await render(pane()); const selected = await select(body()); await typeNote()
     const context = selected.node.parentElement!.closest<HTMLElement>('.log-turn__text')!
     expect(context.tabIndex).toBe(-1)
-    await click(button('Cancel'))
+    await click(button('Close note'))
     expect(document.activeElement).toBe(context)
     expect(document.querySelector('.log-turn__annotation')).toBeNull()
     expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
