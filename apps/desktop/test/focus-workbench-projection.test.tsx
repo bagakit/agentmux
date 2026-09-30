@@ -38,7 +38,7 @@ describe('mounted existing Tab Focus projection', () => {
     useAppStore.setState(baseline, true)
     vi.restoreAllMocks()
   })
-  const mount = () => root.render(createElement(WorkspaceWorkbench, { workspaceId: 'workspace-demo', visible: true, focusTabId: 'selected-tab', focusPortalTargetId: 'fixture-focus-target' }))
+  const mount = () => root.render(createElement(WorkspaceWorkbench, { workspaceId: 'workspace-demo', visible: true, viewTargets: { 'selected-tab': { hostId: 'fixture-focus-target', active: true, visible: true, surface: 'focus', headerPortalTargetId: 'fixture-focus-target-header' } } }))
   function addTarget() {
     target = document.createElement('div')
     target.id = 'fixture-focus-target'

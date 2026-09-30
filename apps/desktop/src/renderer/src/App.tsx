@@ -202,7 +202,7 @@ function DesktopApp() {
       if (!targets[focusTab.id]) targets[focusTab.id] = {
         hostId: workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
         active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId,
-        headerPortalTargetId: 'focus-workspace-slot-header',
+        headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
       }
     }
@@ -449,7 +449,7 @@ function DesktopApp() {
                           workspaceId={candidate.id}
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
                             ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}
-                          visible={mounted}
+                          visible={visible}
                           viewTargets={viewTargets}
                           onBrowserControlConfirmation={onBrowserControlConfirmation}
                           interactiveResize={windowResizeActive || isResizing}

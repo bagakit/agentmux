@@ -1,6 +1,5 @@
 import { workbenchSurfaces, type WorkbenchTab } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
-import type { WorkspaceLayout } from '@agentmux/layout'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { AgentFocusContext } from './agent-focus'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
@@ -61,15 +60,4 @@ export function tabForFocusedSession(
   return Object.values(tabs).find((tab) => workbenchSurfaces(tab).some((surface) => (
     isSessionSurface(surface) && surface.sessionId === sessionId
   ))) ?? null
-}
-
-/** Render the selected Tab through the normal Workbench tree without creating a second Run owner. */
-export function focusLayoutForTab(tab: WorkbenchTab, layout: WorkspaceLayout): WorkspaceLayout | null {
-  const owner = layout.groups.find((group) => group.tabOrder.includes(tab.id))
-  if (!owner) return null
-  return {
-    root: { type: 'leaf', groupId: owner.id },
-    groups: [{ ...owner, activeTabId: tab.id, tabOrder: [tab.id] }],
-    activeGroupId: owner.id
-  }
 }
