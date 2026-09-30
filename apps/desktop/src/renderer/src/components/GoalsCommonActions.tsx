@@ -10,6 +10,9 @@ import { commonActionKey, commonActionsDirectory, createCommonActionPrompt, DEFA
 import { saveGoalsCommonActions } from '../lib/goals-common-actions-config'
 import { goalExplorationPending, goalExplorationProject, startGoalExploration, subscribeGoalExploration } from '../lib/goals-entry-actions'
 import { useAppStore } from '../store'
+import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
+import { useLauncherState } from '../lib/launcher-state'
+import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { ComposerTextarea } from './ComposerTextarea'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useResourceDrafts } from './settings/use-resource-drafts'
@@ -22,7 +25,7 @@ function RequestBody({ action }: { action: GoalsCommonAction }) {
 function TargetFacts({ action }: { action: GoalsCommonAction }) {
   return <span className="goals-common__facts">
     {action.project ? <small title={`${action.project.id} · ${action.project.hostId} · ${action.project.path}`}>{action.project.source === 'recent' ? '最近项目' : '当前项目'} · {action.project.name}</small> : null}
-    <small>{action.executor ? `Agent · ${action.executor.label}` : action.reason ?? '在对话中选择 Agent'}</small>
+    <small>{action.executor ? `${action.initialExecutor ? '首次选择' : '主 Mote'} · ${action.executor.label}` : action.reason ?? '主 Mote 的 Agent 待确认'}</small>
   </span>
 }
 function DirectoryRow({ action, selected, saving, index, count, dirty, onSelect, onMove, onRemove }: {
@@ -43,12 +46,15 @@ function DirectoryRow({ action, selected, saving, index, count, dirty, onSelect,
 export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }: { contextCompact?: boolean; onReturnToCommon?: () => void }) {
   const config = useAppStore(state => state.config)
   const focus = useAppStore(state => state.agentFocus)
+  const savedExecutor = useLauncherState(state => state.executors[SCRATCH_WORKSPACE_ID])
+  const primaryExecutorId = useAppStore(state => primaryMoteExecutorId(state, savedExecutor))
+  const initialExecutor = !useAppStore(primaryMoteHasBot)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const project = useMemo(() => goalExplorationProject(config, focus, activeWorkspaceId), [config, focus, activeWorkspaceId])
   const directory = commonActionsDirectory(config)
   const savedPrompts = useMemo(() => Object.fromEntries(resolveComposerShortcuts(config).map(prompt => [prompt.id, prompt])), [config?.composerShortcuts])
   const resource = useResourceDrafts(savedPrompts)
-  const actions = useMemo(() => directory.items.map(ref => resolveGoalsCommonAction(ref, config, project)), [directory, config, project])
+  const actions = useMemo(() => directory.items.map(ref => resolveGoalsCommonAction(ref, config, project, primaryExecutorId, initialExecutor)), [directory, config, project, primaryExecutorId, initialExecutor])
   const visibleActions = actions.filter(action => !action.conditional)
   const pending = useSyncExternalStore(subscribeGoalExploration, goalExplorationPending, goalExplorationPending)
   const [manage, setManage] = useState(false)
@@ -72,7 +78,7 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const selectedKey = selected ? commonActionKey(selected) : null
   const prompt = selected?.kind === 'prompt' ? resource.value[selected.id] : undefined
-  const selectedAction = selected ? resolveGoalsCommonAction(selected, config, project) : null
+  const selectedAction = selected ? resolveGoalsCommonAction(selected, config, project, primaryExecutorId, initialExecutor) : null
   const existing = selected?.kind === 'prompt' && Object.hasOwn(resource.expected, selected.id)
   const promptDirty = Boolean(prompt && (!existing || prompt.body !== resource.expected[prompt.id]?.body))
   const displayedActions = expanded ? visibleActions : visibleActions.slice(0, 3)
@@ -194,10 +200,10 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
           </div>
           <div ref={editor} className="goals-common__editor">
             <button type="button" className="goals-common__text-button goals-common__back" onClick={back}><ArrowLeft size={13} />返回目录</button>
-            {view === 'add' ? <section className="goals-common__available" aria-label="引用已有指令"><h3>添加到常用</h3><p className="goals-common__hint">正文继续保存在同一指令库。</p>{available.map(ref => { const action = resolveGoalsCommonAction(ref, config, project); return <button key={action.key} type="button" disabled={saving} onClick={() => void saveDirectory([...directory.items, ref], directory.collapsed, action.key)}><span>{action.label}</span><small>{action.body}</small><Plus size={13} /></button> })}{!available.length ? <p className="goals-common__hint">已有指令都在常用操作中了。</p> : null}</section> : prompt ? <section data-common-editor={prompt.id}>
+            {view === 'add' ? <section className="goals-common__available" aria-label="引用已有指令"><h3>添加到常用</h3><p className="goals-common__hint">正文继续保存在同一指令库。</p>{available.map(ref => { const action = resolveGoalsCommonAction(ref, config, project, primaryExecutorId, initialExecutor); return <button key={action.key} type="button" disabled={saving} onClick={() => void saveDirectory([...directory.items, ref], directory.collapsed, action.key)}><span>{action.label}</span><small>{action.body}</small><Plus size={13} /></button> })}{!available.length ? <p className="goals-common__hint">已有指令都在常用操作中了。</p> : null}</section> : prompt ? <section data-common-editor={prompt.id}>
               <label className="goals-common__body-label">想让 Agent 做什么？<ComposerTextarea value={prompt.body} onValueChange={body => resource.setValue(value => ({ ...value, [prompt.id]: { ...value[prompt.id]!, body } }))} rows={5} disabled={saving} placeholder="写下你会经常使用的一句指令…" /></label>
               <p className="goals-common__hint">{existing ? '编辑会同步更新这条指令在 Composer 和设置中的正文。' : '只需填写正文，名称和关键词会自动生成。'}</p>
-              <div className="goals-common__preview"><small>保存后使用的完整请求</small><p>{prompt.body || '你的指令会显示在这里。'}</p><TargetFacts action={resolveGoalsCommonAction({ kind: 'prompt', id: prompt.id }, { ...config!, composerShortcuts: Object.values(resource.value) }, project)} /></div>
+              <div className="goals-common__preview"><small>保存后使用的完整请求</small><p>{prompt.body || '你的指令会显示在这里。'}</p><TargetFacts action={resolveGoalsCommonAction({ kind: 'prompt', id: prompt.id }, { ...config!, composerShortcuts: Object.values(resource.value) }, project, primaryExecutorId, initialExecutor)} /></div>
               {settingsRequested ? <p className="goals-common__hint" role="status">先保存或取消尚未提交的正文，再进入指令库设置。</p> : null}
               <footer className="goals-common__editor-footer"><button type="button" className="goals-common__text-button" disabled={saving} onClick={cancelPrompt}>取消编辑</button><button type="button" className="goals-button goals-button--primary" disabled={saving || !prompt.body.trim() || !promptDirty} onClick={() => void savePrompt()}>{saving ? '正在保存…' : '保存操作'}</button></footer>
             </section> : selectedAction ? <section className="goals-common__builtin-preview"><h3>{selectedAction.label}</h3><p>{selectedAction.body || selectedAction.reason}</p><p className="goals-common__hint">{selectedAction.ref.kind === 'builtin' ? '默认请求可移出、排序，或在“引用已有”中恢复。' : selectedAction.reason}</p></section> : <p className="goals-common__hint">选择一条操作查看正文，或新增自己的指令。</p>}
