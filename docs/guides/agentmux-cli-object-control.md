@@ -51,6 +51,21 @@ agentmux inspect --client
 
 `space bind|unbind` 操作 Zone／Space 关系或 Tab／display Workspace／Group 的准确展示关系。解除最后一处绑定仍保留实体与健康内容；显式 Close 是另一件事。具体参数以各命令 `--help` 为准。
 
+## 打开文件，切换正文，交换格子
+
+```sh
+agentmux open file --zone '<zone-id>' --path 'docs/设计.md'
+agentmux agent view --session '<session-id>' --mode activity
+agentmux space view --region '<file-region-id>' --mode diff
+agentmux space swap --region '<region-a>' --with '<region-b>'
+```
+
+文件路径相对 Zone 的真实目录。默认后台打开或复用原 File Tab；`--focus` 才导航到它，多个展示位置用准确 `--display-workspace`／`--group` 指定。目录不会顺带打开 Explorer；媒体与二进制沿原预览，书签文件按源码打开。回执分别报告 `resource`、`placement`、`data`、`navigation`、`save`。读取或导航失败后，已打开的原工作面仍保留；不能用非零退出判断“什么都没创建”，也不能在回执未知时自动重试。
+
+`agent view` 的 `terminal|activity` 偏好属于 Session，会作用于它的全部展示位置。`space view` 的 `source|diff|preview` 偏好属于准确 File Region；同一文件的另一格可以保持自己的模式。省略 `--mode` 只读当前事实，不加载正文、保存或聚焦。File 回执的 `supportedModes` 来自实际格式和读取事实，未知时为 `null`；模式已应用和正文已读到是两件事。File 模式是临时偏好，重启后按原格式默认恢复。
+
+`space swap` 交换同一 Tab 的两个 Region 位置，作用于这个 Tab 的全部展示位置；它保留原 Session、Run、执行目录、文档、草稿、分割比例和逻辑活动 Region。跨 Tab、正在关闭或不唯一的目标会在改动前拒绝，自己与自己交换返回 `unchanged`。这四个入口都不默认抢输入；操作完成后原输入失去资格，回执会如实返回 `partial` 和输入问题，保留已应用结果。保存回执仍不能当作磁盘确认。
+
 ## 改显示名，再读取当前值
 
 ```sh
@@ -73,9 +88,12 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 | 发现空间、准确查询、绑定、解绑、移动、改名 | `space ls/inspect/bind/unbind/mv/rename` |
 | 导航 Space／Goal／工作面，观察选择与输入归属 | `focus`、`inspect --client` |
 | 打开 Terminal／Browser，操作已开的 Browser | `open terminal/browser`、`browser` |
+| 按 Zone 目录后台打开或复用文件 | `open file` |
+| 读取或切换 Agent／File Region 正文模式 | `agent view`、`space view` |
+| 交换同一 Tab 的两个 Region 位置 | `space swap` |
 | 提升 Region 为 Tab、调整布局 | `promote`、`arrange` |
 | PMO 观察、Demand 和显式 Session 关系 | `pmo`、`demand` |
 | 已支持的偏好、诊断与资源观察 | `settings`、`diagnostics`、`metrics` |
 | Session 消息、输出、生命周期 | `send`、`deliveries`、`dispatch`、`output`、`interrupt/resume/stop` |
 
-“全部桌面操作”还没有完成。文件／Editor 打开、Region 展示模式切换与交换，以及共享投影在各界面的完整输入／可见性闭环仍需补齐。上述入口也不保证全部 UI 控件已可操作；不在 help 中的能力不要猜命令。共享实体／展示关系继续由同一 Store owner 提供，CLI 消费它，不另建一套空间模型。
+“全部桌面操作”还没有完成。共享投影在各界面的完整输入／可见性闭环仍需补齐，上述入口也不保证全部 UI 控件已可操作；不在 help 中的能力不要猜命令。共享实体／展示关系继续由同一 Store owner 提供，CLI 消费它，不另建一套空间模型。

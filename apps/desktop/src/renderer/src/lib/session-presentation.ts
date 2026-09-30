@@ -17,13 +17,19 @@ export function sessionPresentationById(sessions: readonly SessionSnapshot[]): R
   return index
 }
 
+/** Only a valid own preference is explicit; opaque Session IDs also name Object properties. */
+export function storedSessionViewMode(viewModes: Readonly<Record<string, SessionViewMode>>, sessionId: string): SessionViewMode | null {
+  const mode = Object.hasOwn(viewModes, sessionId) ? viewModes[sessionId] : undefined
+  return mode === 'terminal' || mode === 'activity' ? mode : null
+}
+
 /** An explicit choice wins; known Motes have one read-only Activity default in every consumer. */
 export function effectiveSessionViewMode(state: {
   viewModes: Readonly<Record<string, SessionViewMode>>; sessions: readonly SessionSnapshot[]
   config: AppConfig | null; scratchTopicSnapshots: Readonly<Record<string, ScratchTopicsSnapshot>>
 }, sessionId: string): SessionViewMode {
-  const explicit = state.viewModes[sessionId]
-  if (explicit !== undefined) return explicit
+  const explicit = storedSessionViewMode(state.viewModes, sessionId)
+  if (explicit !== null) return explicit
   const session = sessionPresentationById(state.sessions).get(sessionId)
   return session && focusLaneForSession(topicIdForSession(state.config, session),
     scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session))) === 'pmo'

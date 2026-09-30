@@ -104,10 +104,10 @@ afterEach(async () => {
 })
 
 async function mount({ preview = false, neighbor = true, released = false, leftSurface = left }: { preview?: boolean; neighbor?: boolean; released?: boolean; leftSurface?: FileWorkbenchSurface } = {}) {
-  await act(async () => root.render(<>
-    <div data-view="left"><EditorPane tabId="left" surface={leftSurface} previewing={preview} preview={<p>Preview of current source</p>} released={released} /></div>
+  await act(async () => { useAppStore.setState(state => ({ editorRegionModes: { ...state.editorRegionModes, [leftSurface.regionId]: preview ? 'preview' : 'edit' } })); root.render(<>
+    <div data-view="left"><EditorPane tabId="left" surface={leftSurface} preview={<p>Preview of current source</p>} released={released} /></div>
     {neighbor ? <div data-view="right"><EditorPane tabId="right" surface={right} /></div> : null}
-  </>))
+  </>) })
   // The actual loader resolves asynchronously, then the installed wrapper mounts its editor.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
