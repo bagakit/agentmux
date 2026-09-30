@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
-  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave
+  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport
 } from './space-control.js'
 
 const MAX_SPATIAL_ID_BYTES = 16 * 1024
@@ -54,17 +54,17 @@ function nullableId(value: unknown, name: string, code: Code, spatial = false): 
 }
 
 export function parseSpaceControlSelector(value: unknown, code: Code): AgentMuxSpaceSelector {
-  const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId'], code)
+  const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
   const target: AgentMuxSpaceSelector = {}
-  for (const key of ['spaceId', 'zoneId', 'tabId', 'regionId'] as const) {
+  for (const key of ['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'] as const) {
     if (Object.hasOwn(source, key)) target[key] = spaceControlId(source[key], key, code, key === 'spaceId' || key === 'zoneId')
   }
   return target
 }
 const selector = parseSpaceControlSelector
 function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
-  const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId', 'newTab', 'split', 'newZone'], code)
-  const selected = Object.fromEntries(['spaceId', 'zoneId', 'tabId', 'regionId'].filter(key => Object.hasOwn(source, key)).map(key => [key, source[key]]))
+  const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'newTab', 'split', 'newZone'], code)
+  const selected = Object.fromEntries(['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'].filter(key => Object.hasOwn(source, key)).map(key => [key, source[key]]))
   const result: AgentMuxSpaceDestination = selector(selected, code)
   if (Object.hasOwn(source, 'newTab') && bool(source.newTab, 'newTab', code)) result.newTab = true
   if (Object.hasOwn(source, 'split')) result.split = member(source.split, ['left', 'right', 'above', 'below'], 'split', code)
@@ -95,11 +95,12 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
 
 export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceControlRequest['operation'] {
   return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
-    value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename'
+    value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename' ||
+    value === 'space.bind' || value === 'space.unbind'
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'fromLocation', 'binding'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -120,10 +121,13 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       request = { ...base, operation, target: { requestId: spaceControlId(target.requestId, 'Inspected Request ID', code) } }
     } else {
       const target = selector(source.target, code)
-      if (operation === 'space.inspect' && Object.keys(target).length !== 1) fail('Space inspect requires one exact Space, Zone, Tab, Region, or Request.', code)
+      if (operation === 'space.inspect' && !['spaceId', 'zoneId', 'tabId', 'regionId'].some(key => Object.hasOwn(target, key))) fail('Space inspect requires one exact Space, Zone, Tab, Region, or Request.', code)
       if (operation === 'space.ls' && (target.tabId || target.regionId || Object.keys(target).length > 1)) fail('Space ls accepts one Space or Zone filter.', code)
       request = { ...base, operation, target }
     }
+  } else if (operation === 'space.bind' || operation === 'space.unbind') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'binding'], code)
+    request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller'], code)
     const input = fields(source.content, ['kind', 'executorId', 'prompt', 'agentSessionId'], code)
@@ -145,23 +149,39 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     })() : undefined
     request = { ...base, operation, content, destination: target, focus: bool(source.focus, 'focus', code), ...(caller ? { caller } : {}) }
   } else {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'fromRegionId', 'expectedAgentSessionId', 'destination', 'focus'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'fromRegionId', 'expectedAgentSessionId', 'destination', 'focus', 'fromLocation'], code)
     const target = destination(source.destination, code)
     if (target.newZone) fail('Space move cannot create a Zone.', code)
     request = { ...base, operation, fromRegionId: spaceControlId(source.fromRegionId, 'Source Region', code),
-      expectedAgentSessionId: spaceControlId(source.expectedAgentSessionId, 'Expected Session', code), destination: target, focus: bool(source.focus, 'focus', code) }
+      expectedAgentSessionId: spaceControlId(source.expectedAgentSessionId, 'Expected Session', code), destination: target, focus: bool(source.focus, 'focus', code),
+      ...(Object.hasOwn(source, 'fromLocation') ? { fromLocation: selector(fields(source.fromLocation, ['spaceId', 'displayWorkspaceId', 'groupId'], code), code) } : {}) }
   }
   budget(request, code)
   return request
 }
 
+function bindingTarget(value: unknown, code: Code): AgentMuxSpaceBindingTarget {
+  const source = fields(value, ['kind', 'zoneId', 'spaceId', 'tabId', 'displayWorkspaceId', 'groupId'], code)
+  if (source.kind === 'zone-space') {
+    fields(source, ['kind', 'zoneId', 'spaceId'], code)
+    return { kind: 'zone-space', zoneId: spaceControlId(source.zoneId, 'Zone', code, true), spaceId: spaceControlId(source.spaceId, 'Space', code, true) }
+  }
+  if (source.kind === 'tab-group') {
+    fields(source, ['kind', 'tabId', 'displayWorkspaceId', 'groupId'], code)
+    return { kind: 'tab-group', tabId: spaceControlId(source.tabId, 'Tab', code),
+      displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) }
+  }
+  return fail('Binding target is invalid.', code)
+}
 function address(value: unknown, code: Code): AgentMuxSpaceAddress {
-  const source = fields(value, ['spaceId', 'zoneId', 'workspaceId', 'tabId', 'regionId'], code)
-  return { spaceId: spaceControlId(source.spaceId, 'Space', code, true), zoneId: spaceControlId(source.zoneId, 'Zone', code, true),
-    workspaceId: spaceControlId(source.workspaceId, 'Workspace', code), tabId: spaceControlId(source.tabId, 'Tab', code), regionId: spaceControlId(source.regionId, 'Region', code) }
+  const source = fields(value, ['spaceId', 'zoneId', 'workspaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
+  return { spaceId: nullableId(source.spaceId, 'Space', code, true), zoneId: nullableId(source.zoneId, 'Zone', code, true),
+    workspaceId: spaceControlId(source.workspaceId, 'Resource Workspace', code),
+    displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code),
+    tabId: spaceControlId(source.tabId, 'Tab', code), regionId: spaceControlId(source.regionId, 'Region', code) }
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
-  const source = fields(value, ['spaces', 'zones', 'tabs', 'regions'], code)
+  const source = fields(value, ['spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations'], code)
   const spaces = unique(list(source.spaces, value => {
     const item = fields(value, ['spaceId', 'kind', 'name', 'hostId', 'directoryPath', 'projectId', 'topicId', 'issue'], code)
     return { spaceId: spaceControlId(item.spaceId, 'Space', code, true), kind: member(item.kind, ['folder', 'topic', 'mote', 'container'], 'Space kind', code),
@@ -171,28 +191,41 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Space issue', code) } : {}) }
   }, 'Spaces', code), item => item.spaceId, 'Spaces', code)
   const zones = unique(list(source.zones, value => {
-    const item = fields(value, ['spaceId', 'zoneId', 'workspaceId', 'kind', 'hostId', 'directoryPath', 'branch'], code)
-    return { spaceId: spaceControlId(item.spaceId, 'Space', code, true), zoneId: spaceControlId(item.zoneId, 'Zone', code, true),
-      workspaceId: spaceControlId(item.workspaceId, 'Workspace', code), kind: member(item.kind, ['directory', 'worktree', 'home'], 'Zone kind', code),
-      hostId: spaceControlId(item.hostId, 'Host', code), directoryPath: string(item.directoryPath, 'Directory', code), branch: nullableString(item.branch, 'Branch', code) }
+    const item = fields(value, ['zoneId', 'workspaceId', 'kind', 'hostId', 'directoryPath', 'branch', 'issue'], code)
+    return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), workspaceId: spaceControlId(item.workspaceId, 'Workspace', code),
+      kind: member(item.kind, ['directory', 'worktree', 'home', 'unknown'], 'Zone kind', code), hostId: nullableId(item.hostId, 'Host', code),
+      directoryPath: nullableString(item.directoryPath, 'Directory', code), branch: nullableString(item.branch, 'Branch', code),
+      ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Zone issue', code) } : {}) }
   }, 'Zones', code), item => item.zoneId, 'Zones', code)
   const tabs = unique(list(source.tabs, value => {
-    const item = fields(value, ['spaceId', 'zoneId', 'workspaceId', 'tabId', 'groupId', 'name', 'regionIds'], code)
-    return { spaceId: spaceControlId(item.spaceId, 'Space', code, true), zoneId: spaceControlId(item.zoneId, 'Zone', code, true),
-      workspaceId: spaceControlId(item.workspaceId, 'Workspace', code), tabId: spaceControlId(item.tabId, 'Tab', code), groupId: spaceControlId(item.groupId, 'Group', code),
-      name: nullableString(item.name, 'Tab name', code), regionIds: unique(list(item.regionIds, value => spaceControlId(value, 'Region', code), 'Region IDs', code), value => value, 'Region IDs', code) }
+    const item = fields(value, ['zoneId', 'workspaceId', 'tabId', 'name', 'regionIds', 'issue'], code)
+    return { zoneId: nullableId(item.zoneId, 'Zone', code, true), workspaceId: spaceControlId(item.workspaceId, 'Workspace', code),
+      tabId: spaceControlId(item.tabId, 'Tab', code), name: nullableString(item.name, 'Tab name', code),
+      regionIds: unique(list(item.regionIds, value => spaceControlId(value, 'Region', code), 'Region IDs', code), value => value, 'Region IDs', code), ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Tab issue', code) } : {}) }
   }, 'Tabs', code), item => item.tabId, 'Tabs', code)
   const regions = unique(list(source.regions, value => {
-    const item = fields(value, ['spaceId', 'zoneId', 'workspaceId', 'tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution'], code)
+    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution'], code)
     const execution = item.execution === null ? null : (() => {
       const location = fields(item.execution, ['hostId', 'cwd'], code)
       return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code) }
     })()
-    const ids = Object.fromEntries(['spaceId', 'zoneId', 'workspaceId', 'tabId', 'regionId'].map(key => [key, item[key]]))
-    return { ...address(ids, code), kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'], 'Region kind', code),
+    return { tabId: spaceControlId(item.tabId, 'Tab', code), regionId: spaceControlId(item.regionId, 'Region', code),
+      kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'], 'Region kind', code),
       agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution }
   }, 'Regions', code), item => item.regionId, 'Regions', code)
-  return { spaces, zones, tabs, regions }
+  const bindings = unique(list(source.bindings, value => {
+    const item = fields(value, ['zoneId', 'spaceId'], code)
+    return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), spaceId: spaceControlId(item.spaceId, 'Space', code, true) }
+  }, 'Bindings', code), item => JSON.stringify([item.zoneId, item.spaceId]), 'Bindings', code)
+  const locations = unique(list(source.locations, value => address(value, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
+  return { spaces, zones, tabs, regions, bindings, locations }
+}
+function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
+  return list(value, value => {
+    const item = fields(value, ['step', 'code', 'message', 'recovery', 'candidates'], code)
+    return { step: string(item.step, 'Issue step', code), code: string(item.code, 'Issue code', code), message: string(item.message, 'Issue message', code), recovery: string(item.recovery, 'Issue recovery', code),
+      ...(Object.hasOwn(item, 'candidates') ? { candidates: list(item.candidates, value => selector(value, code), 'Spatial candidates', code) } : {}) }
+  }, 'Issues', code)
 }
 
 function save(value: unknown, code: Code): AgentMuxSpatialSave {
@@ -257,6 +290,11 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
       return { requestId: id, known, report: actual }
     })() : undefined
     result = { operation, catalog: catalog(body.catalog, code), ...(request ? { request } : {}) }
+  } else if (operation === 'space.bind' || operation === 'space.unbind') {
+    const body = fields(source.result, ['requestId', 'outcome', 'binding', 'catalog', 'save', 'issues'], code)
+    if (body.requestId !== requestId) fail('Binding receipt Request ID is mismatched.', code)
+    result = { operation, requestId, outcome: member(body.outcome, ['linked', 'unlinked', 'unchanged', 'unknown'], 'Binding outcome', code),
+      binding: bindingTarget(body.binding, code), catalog: catalog(body.catalog, code), save: save(body.save, code), issues: issues(body.issues, code) }
   } else {
     const actual = report(source.result, code)
     if (actual.requestId !== requestId) fail('Mutation receipt Request ID is mismatched.', code)

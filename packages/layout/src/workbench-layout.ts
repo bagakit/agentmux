@@ -202,6 +202,15 @@ export function findGroupForTab(layout: WorkspaceLayout, tabId: string): TabGrou
   return layout.groups.find((group) => group.tabOrder.includes(tabId)) ?? null
 }
 
+/** Add one display occurrence, preserving selection and every other occurrence. */
+export function addTabOccurrence(layout: WorkspaceLayout, groupId: string, tabId: string): WorkspaceLayout | null {
+  const group = findGroup(layout, groupId)
+  if (!group) return null
+  if (group.tabOrder.includes(tabId)) return layout
+  return { ...layout, groups: layout.groups.map(candidate => candidate.id === groupId
+    ? { ...candidate, tabOrder: [...candidate.tabOrder, tabId] } : candidate) }
+}
+
 export function addTab(layout: WorkspaceLayout, groupId: string, tabId: string): WorkspaceLayout {
   const existing = findGroupForTab(layout, tabId)
   if (existing) return activateTab(layout, existing.id, tabId)

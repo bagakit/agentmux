@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, survey, controlsOpen, onBrowserControlConfirmation, children }: {
+export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, children }: {
   homeId: string
   targetId: string | null
   active: boolean
@@ -11,6 +11,7 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
   survey?: boolean | undefined
   controlsOpen?: boolean | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
+  onSelectRegion?: ((regionId: string) => void) | undefined
   /** The existing projection owner describes a borrowed View at its original slot. */
   homeNotice?: ReactNode
   children: ReactNode
@@ -20,8 +21,8 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     element.className = 'retained-workbench-view'
     return element
   })
-  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, survey, controlsOpen, onBrowserControlConfirmation }),
-    [active, retainedRegionId, targetId, homeId, survey, controlsOpen, onBrowserControlConfirmation])
+  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion }),
+    [active, retainedRegionId, targetId, homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
@@ -43,7 +44,7 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     const observer = new MutationObserver(() => { if (attach()) observer.disconnect() })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [homeId, targetId, host, showHomeNotice])
+  }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
   return <WorkbenchPresentationContext.Provider value={presentation}>
     <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(children, host)}

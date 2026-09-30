@@ -69,6 +69,12 @@ export const RadioItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typ
   }
 )
 
+export const CheckboxItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.CheckboxItem>>(
+  function CheckboxItem(props, ref) {
+    return <Menu.CheckboxItem {...props} {...useItemPointerHandlers(props)} ref={ref} />
+  }
+)
+
 export function Root({ open: controlled, onOpenChange, children }: ComponentPropsWithoutRef<typeof Menu.Root>) {
   const [local, setLocal] = useState(false)
   const open = controlled ?? local

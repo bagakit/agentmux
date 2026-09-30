@@ -1,5 +1,5 @@
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
-import { executeSpatialControl, spatialCatalog } from './lib/space-agent-control'
+import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
 import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
@@ -22,7 +22,7 @@ import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
-import { restoredSurveyBrowserSelection, sameSurveyBrowserSelection, surveyBrowserSurface, surveySelectionAfterClose, type SurveyBrowserSelection } from './lib/survey-browser'
+import { restoredSurveyZoneSelection, surveySelectReference, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type SurveyBrowserTarget } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -31,7 +31,7 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxExecutorAvailability,
-  type AgentMuxSpaceAddress
+  type AgentMuxSpaceAddress, type AgentMuxZoneFact, type AgentMuxSpaceBindingReport
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
@@ -114,6 +114,7 @@ import {
   addTabOrThrow,
   addTabPlacement,
   createWorkspaceLayout,
+  groupIds,
   findGroup,
   findGroupForTab,
   focusGroup,
@@ -453,11 +454,11 @@ type AppState = {
   agentNames: Record<string, string>
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
-  surveyBrowserSelection: SurveyBrowserSelection | null
+  surveyZoneSelection: SurveyZoneSelection | null
   surveyToolsOpen: boolean
-  setSurveyBrowserSelection(selection: SurveyBrowserSelection | null): void
+  setSurveyZoneSelection(selection: SurveyZoneSelection | null): void
   setSurveyToolsOpen(open: boolean): void
-  openSurveyBrowserTools(selection: SurveyBrowserSelection): void
+  openSurveyBrowserTools(target: SurveyBrowserTarget): void
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
   demands: Record<string, DemandRecord>
   /** Editor-owned binding from a Demand to its dedicated PMO Teams Tab. */
@@ -631,7 +632,10 @@ type AppState = {
     signal?: AbortSignal
   ): Promise<AgentMuxControlResult>
   selectSession(id: string, tabGroupId?: string): void
-  openLauncher(target: { workspaceId: string; tabGroupId?: string; topicId?: string; reveal: boolean }): string | undefined
+  createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
+  setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
+  setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
+  openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean }): string | undefined
   closeTab(
     workspaceId: string,
     tabGroupId: string,
@@ -655,7 +659,7 @@ type AppState = {
   // `cause` 决定这次落焦除了搬绿环要不要把 DOM caret 也搬进去（键盘导航要，指针点击不要——原生 mousedown
   // 已把焦点放对）。判定是纯的（regionFocusClaimsCaret），这里只按它的结果投/不投 caret 意图。默认 'pointer'：
   // 调用方不显式说明时按最保守的一路走，不夺焦。
-  focusRegion(workspaceId: string, tabId: string, regionId: string, cause?: RegionFocusCause): void
+  focusRegion(workspaceId: string, tabId: string, regionId: string, cause?: RegionFocusCause, groupId?: string): void
   // 被点名那格的表面消费完 caret 意图后调它清除（只清自己那条 nonce，避免抹掉更晚一次导航投的新意图）。
   clearRegionCaretFocus(nonce: number): void
   // Explicitly relocate one Session projection (the Region named by regionId) into another
@@ -1798,7 +1802,7 @@ type PersistedAppState = {
   viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
-  surveyBrowserSelection?: SurveyBrowserSelection | null
+  surveyZoneSelection?: SurveyZoneSelection | null
   focusTimelineNameWidth?: number
   focusTimelineHeight?: number
   focusTimelineRuler?: FocusRulerPreferences
@@ -1823,7 +1827,7 @@ export type RestoredUiState = Pick<
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
-  | 'surveyBrowserSelection'
+  | 'surveyZoneSelection'
   | 'projectRailOpen'
   | 'collapsedProjectGroups'
   | 'explorerCollapsed'
@@ -1900,7 +1904,7 @@ export function restorePersistedUiState(
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
-    | 'surveyBrowserSelection'
+    | 'surveyZoneSelection'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
     | 'explorerCollapsed'
@@ -1923,7 +1927,7 @@ export function restorePersistedUiState(
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
-    surveyBrowserSelection: restoredSurveyBrowserSelection(persisted.surveyBrowserSelection),
+    surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
@@ -1973,7 +1977,7 @@ function selectPersistedInputs(state: AppState) {
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
-    surveyBrowserSelection: state.surveyBrowserSelection,
+    surveyZoneSelection: state.surveyZoneSelection,
     agentFocus: state.agentFocus,
     focusTimelineNameWidth: state.focusTimelineNameWidth,
     focusTimelineHeight: state.focusTimelineHeight,
@@ -2356,11 +2360,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
-  surveyBrowserSelection: null,
+  surveyZoneSelection: null,
   surveyToolsOpen: false,
-  setSurveyBrowserSelection(surveyBrowserSelection) { set({ surveyBrowserSelection, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
+  setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
-  openSurveyBrowserTools(surveyBrowserSelection) { set({ mainSurface: 'survey', surveyBrowserSelection, surveyToolsOpen: true, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
+  openSurveyBrowserTools(target) {
+    const state = get()
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    const catalog = spatialCatalog(state, topics)
+    const tab = catalog.tabs.find(tab => tab.tabId === target.tabId && tab.workspaceId === target.workspaceId && tab.regionIds.includes(target.regionId))
+    const held = state.surveyZoneSelection
+    const locations = catalog.locations.filter(location => location.tabId === target.tabId && location.regionId === target.regionId)
+    const exact = held?.active && locations.find(location => location.displayWorkspaceId === held.active!.displayWorkspaceId && location.groupId === held.active!.groupId)
+    const distinct = new Map(locations.map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId]), location]))
+    const reference = exact ?? (distinct.size === 1 ? [...distinct.values()][0] : undefined)
+    if (!tab?.zoneId || !reference) {
+      state.reportError(new Error('The exact Browser workface occurrence is unconfirmed or has multiple locations. Original content is kept; choose its Zone and Group in Survey.'))
+      set({ mainSurface: 'survey', surveyToolsOpen: true, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+      return
+    }
+    const selected = held?.zoneId === tab.zoneId ? held : { zoneId: tab.zoneId, selection: [], active: null }
+    set({ mainSurface: 'survey', surveyZoneSelection: surveySelectReference(selected, reference), surveyToolsOpen: true,
+      workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+  },
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
@@ -3042,14 +3064,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
-    if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv') {
+    if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv' || request.operation === 'space.bind' || request.operation === 'space.unbind') {
       return await executeSpatialControl({
         get,
         patch: patch => set(state => {
           const choice = state.workbenchSpaceSelection, held = state.retainedSpatialFocus
-          if (!patch.tabs || !choice || !held || choice.workspaceId !== held.workspaceId ||
+          if (!patch.tabs || !choice || !held || choice.workspaceId !== held.displayWorkspaceId ||
             choice.tabId !== held.tabId || choice.regionId !== held.regionId) return patch
-          const sourceTab = patch.tabs[held.tabId], sourceLayout = (patch.layouts ?? state.layouts)[held.workspaceId]
+          const sourceTab = patch.tabs[held.tabId], sourceLayout = (patch.layouts ?? state.layouts)[held.displayWorkspaceId]
           const sourceGroup = sourceLayout?.groups.find(group => group.id === choice.groupId)
           const sourceRemains = sourceTab?.workspaceId === held.workspaceId && sourceGroup?.tabOrder.includes(held.tabId)
           if (sourceRemains && sourceTab.regions[held.regionId]) return patch
@@ -3085,26 +3107,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         },
         save: saveWorkbenchSelection,
         preserveMovedFocus: from => {
-          const state = get(), tab = state.tabs[from.tabId], layout = state.layouts[from.workspaceId]
-          const group = layout && findGroupForTab(layout, from.tabId)
-          if (state.activeWorkspaceId === from.workspaceId && layout?.activeGroupId === group?.id &&
+          const state = get(), tab = state.tabs[from.tabId], layout = state.layouts[from.displayWorkspaceId]
+          const group = layout?.groups.find(group => group.id === from.groupId)
+          if (state.activeWorkspaceId === from.displayWorkspaceId && layout?.activeGroupId === from.groupId &&
             group?.activeTabId === from.tabId && tab?.layout.activeRegionId === from.regionId) set({ regionCaretFocus: null,
               retainedSpatialFocus: { ...from, ...(tab.topicId ? { topicId: tab.topicId } : {}) } })
         },
-        focus: (tabId, regionId) => {
-          const tab = get().tabs[tabId], layout = tab && get().layouts[tab.workspaceId]
-          const group = layout && findGroupForTab(layout, tabId)
+        focus: address => {
+          const tab = get().tabs[address.tabId], layout = get().layouts[address.displayWorkspaceId]
+          const group = layout?.groups.find(group => group.id === address.groupId && group.tabOrder.includes(address.tabId))
           if (!tab || !group) return
-          void get().selectWorkspace(tab.workspaceId)
-          get().activateTab(tab.workspaceId, group.id, tabId)
-          get().focusRegion(tab.workspaceId, tabId, regionId, 'keyboard')
+          void get().selectWorkspace(address.displayWorkspaceId)
+          get().activateTab(address.displayWorkspaceId, address.groupId, address.tabId)
+          get().focusRegion(address.displayWorkspaceId, address.tabId, address.regionId, 'keyboard', address.groupId)
         },
-        isFocused: (tabId, regionId) => {
-          const state = get(), tab = state.tabs[tabId], layout = tab && state.layouts[tab.workspaceId]
-          const group = layout && findGroupForTab(layout, tabId)
+        isFocused: address => {
+          const state = get(), tab = state.tabs[address.tabId], layout = state.layouts[address.displayWorkspaceId]
+          const group = layout?.groups.find(group => group.id === address.groupId)
           return Boolean(tab && state.mainSurface === 'workbench' && state.retainedSpatialFocus === null &&
-            state.activeWorkspaceId === tab.workspaceId && layout?.activeGroupId === group?.id &&
-            group?.activeTabId === tabId && tab.layout.activeRegionId === regionId)
+            state.activeWorkspaceId === address.displayWorkspaceId && layout?.activeGroupId === address.groupId &&
+            group?.activeTabId === address.tabId && tab.layout.activeRegionId === address.regionId)
         },
         notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)),
         closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId)
@@ -3464,7 +3486,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({ mainSurface: desktopMainSurface[request.target.surface], regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
         } else {
           const resolved = resolveDesktopSpaceSelection(get(), catalog, request.target)
-          if (resolved.tabId && resolved.regionId) get().focusRegion(resolved.workspaceId, resolved.tabId, resolved.regionId)
+          if (resolved.tabId && resolved.regionId) get().focusRegion(resolved.workspaceId, resolved.tabId, resolved.regionId, 'pointer', resolved.groupId ?? undefined)
           set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
         }
@@ -3563,7 +3585,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => ({
         ...(current.mainSurface === 'survey' ? {} : { retainedSpatialFocus: null,
           activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
-        ...(sameSurveyBrowserSelection(current.surveyBrowserSelection, region) ? { surveyBrowserSelection: result.target } : {}),
+        surveyZoneSelection: surveySelectionAfterPromote(current.surveyZoneSelection, region, result.target),
         tabs: result.tabs,
         layouts: result.layouts
       }))
@@ -3958,22 +3980,62 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
   },
-  openLauncher({ workspaceId, tabGroupId, topicId: requestedTopicId, reveal }) {
-    // Only an explicit main-surface navigation authorizes its launcher activation.
-    // A floating/background launcher leaves the current exact Space and input policy intact.
-    if (reveal) set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    if (reveal && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+  createWorkbenchZone(input) {
+    return createSpatialZone({ get, patch: patch => set(patch),
+      topics: async () => get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+        ? await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) : [],
+      save: saveWorkbenchSelection,
+      notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)) }, input)
+  },
+  async setZoneSpaceRelation(zoneId, spaceId, linked) {
+    const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${crypto.randomUUID()}`,
+      operation: linked ? 'space.bind' : 'space.unbind', binding: { kind: 'zone-space', zoneId, spaceId } })
+    if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
+    return result
+  },
+  async setTabDisplayPlacement(tabId, displayWorkspaceId, groupId, present) {
+    const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${crypto.randomUUID()}`,
+      operation: present ? 'space.bind' : 'space.unbind', binding: { kind: 'tab-group', tabId, displayWorkspaceId, groupId } })
+    if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
+    return result
+  },
+  openLauncher({ workspaceId, displayWorkspaceId, tabGroupId, topicId: requestedTopicId, zoneId, reveal }) {
     const state = get()
-    const layout = state.layouts[workspaceId]
+    const displayId = displayWorkspaceId ?? workspaceId
+    const layout = state.layouts[displayId]
     if (!layout) {
       get().reportError(new Error('The Workspace layout is still restoring'))
       return
     }
     const targetTabGroupId = tabGroupId ?? layout.activeGroupId
-    const topicId = isScratchWorkspaceId(workspaceId)
-      ? requestedTopicId ?? inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
-      : undefined
-    const tab = newLauncherTab(workspaceId, topicId)
+    if (!groupIds(layout.root).includes(targetTabGroupId) || !findGroup(layout, targetTabGroupId)) {
+      get().reportError(new Error('The exact display Tab Group is no longer available'))
+      return
+    }
+    let space: WorkbenchTab['space']
+    let topicId: string | undefined
+    if (zoneId) {
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID) ?? null) ?? []
+      const catalog = spatialCatalog(state, topics)
+      const zone = catalog.zones.find(zone => zone.zoneId === zoneId)
+      if (!zone || zone.workspaceId !== workspaceId || zone.kind === 'unknown') {
+        get().reportError(new Error('The exact Zone resource context is unavailable. Its original reference is retained.'))
+        return
+      }
+      try {
+        const spaceId = zoneContext(state, topics, zone)
+        space = { zoneId, spaceId }
+        // Topic home is a resource context. A temporary Zone linked to that Topic still uses its
+        // original Workspace root and never inherits the active Group's unrelated Topic.
+        topicId = zone.kind === 'home' ? catalog.spaces.find(item => item.spaceId === spaceId)?.topicId : undefined
+      } catch (error) { get().reportError(error); return }
+    } else {
+      topicId = isScratchWorkspaceId(workspaceId)
+        ? requestedTopicId ?? inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
+        : undefined
+    }
+    const created = newLauncherTab(workspaceId, topicId)
+    const tab = space ? { ...created, space } : created
     // Placement failure is visible without leaving an orphan View or throwing from a UI handler.
     const nextLayout = addTabPlacement(layout, targetTabGroupId, tab.id)
     if (!nextLayout) {
@@ -3981,9 +4043,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     set((state) => ({
-      ...(reveal ? { activeWorkspaceId: workspaceId, mainSurface: 'workbench' as const, regionCaretFocus: null } : {}),
+      // Only a successful explicit main-surface navigation changes global selection.
+      ...(reveal ? { activeWorkspaceId: displayId, mainSurface: 'workbench' as const, regionCaretFocus: null,
+        workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}),
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: { ...state.layouts, [workspaceId]: reveal ? nextLayout : {
+      layouts: { ...state.layouts, [displayId]: reveal ? nextLayout : {
         ...nextLayout,
         activeGroupId: layout.activeGroupId,
         groups: nextLayout.groups.map(group => {
@@ -4017,7 +4081,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
         const committed = { ...reconcileWorkbenchFileProjection(current, topology),
-          surveyBrowserSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyBrowserSelection),
+          surveyZoneSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyZoneSelection),
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
@@ -4148,11 +4212,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }))
   },
-  focusRegion(workspaceId, tabId, regionId, cause = 'pointer') {
+  focusRegion(workspaceId, tabId, regionId, cause = 'pointer', exactGroupId) {
     const tab = get().tabs[tabId]
     const layout = get().layouts[workspaceId]
-    const tabGroupId = layout ? tabGroupForTab(layout, tabId) : null
-    if (!tab || tab.workspaceId !== workspaceId || !tabGroupId || !tab.regions[regionId]) return
+    const candidates = layout?.groups.filter(group => group.tabOrder.includes(tabId)) ?? []
+    const tabGroupId = exactGroupId && candidates.some(group => group.id === exactGroupId) ? exactGroupId
+      : !exactGroupId && candidates.some(group => group.id === layout?.activeGroupId) ? layout!.activeGroupId
+      : !exactGroupId && candidates.length === 1 ? candidates[0]!.id : null
+    if (!tab || !tabGroupId || !tab.regions[regionId]) return
     const surface = tab.regions[regionId]
     const focusedSessionId = isSessionSurface(surface) ? surface.sessionId : null
     if (cause === 'floating-pointer') {
@@ -4296,7 +4363,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       ...(state.mainSurface === 'survey' ? {} : { retainedSpatialFocus: null,
         activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
-      ...(sameSurveyBrowserSelection(state.surveyBrowserSelection, { workspaceId, tabId, regionId }) ? { surveyBrowserSelection: result.target } : {}),
+      surveyZoneSelection: surveySelectionAfterPromote(state.surveyZoneSelection, { workspaceId, tabId, regionId }, result.target),
       tabs: result.tabs,
       layouts: result.layouts
     }))
@@ -4330,7 +4397,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { ...(obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
         : { tabs }),
-        surveyBrowserSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyBrowserSelection),
+        surveyZoneSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection),
         workbenchSpaceSelection: desktopSpaceSelectionAfterClose(state.workbenchSpaceSelection, { tabs, layouts: state.layouts },
           { workspaceId, tabId, regionId }) }
     })
@@ -6231,8 +6298,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   applyBrowserEvent(event) {
     set((state) => ({
       ...reduceBrowserEvent(state, event),
-      ...(event.type === 'closed' && surveyBrowserSurface(state.tabs, state.surveyBrowserSelection)?.browserId === event.id
-        ? { surveyBrowserSelection: null } : {}),
       ...(event.type === 'closed'
         ? {
             browserAnnotationsByBrowserId: Object.fromEntries(
