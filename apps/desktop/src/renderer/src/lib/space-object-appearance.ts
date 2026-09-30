@@ -1,4 +1,4 @@
-import { isMoteAvatarRef, type MoteAvatarRef, type MoteAvatarTarget } from '../../../shared/mote-avatars'
+import { isMoteAvatarRef, isMoteFace, type MoteAvatarRef, type MoteAvatarTarget, type MoteFace } from '../../../shared/mote-avatars'
 import {
   Bot, BookOpen, Bookmark, Brain, Code, Compass, Database, FileText, FlaskConical,
   Folder, Gem, Layers, Library, Lightbulb, NotebookText, Package, Puzzle,
@@ -36,7 +36,7 @@ export const SPACE_ICON_CATALOG = {
 } as const
 
 export type SpaceIconId = keyof typeof SPACE_ICON_CATALOG
-export type SpaceIconChoice = SpaceIconId | MoteAvatarRef
+export type SpaceIconChoice = SpaceIconId | MoteAvatarRef | MoteFace
 export type SpaceIconOverrides = Record<string, SpaceIconChoice>
 export type SpaceIconTarget = { key: string; name: string; kind: 'folder' | 'topic' | 'mote'; avatarTarget?: MoteAvatarTarget }
 
@@ -84,11 +84,11 @@ export function topicSpaceIconTarget(
 export function restoreSpaceIconOverrides(candidate: unknown): SpaceIconOverrides {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {}
   return Object.fromEntries(Object.entries(candidate).filter(([key, value]) =>
-    isSpaceObjectIdentityKey(key) && (isSpaceIconId(value) || isMoteAvatarRef(value)))) as SpaceIconOverrides
+    isSpaceObjectIdentityKey(key) && (isSpaceIconId(value) || isMoteAvatarRef(value) || isMoteFace(value)))) as SpaceIconOverrides
 }
 
 export function requireSpaceIconSelection(key: string, icon: unknown): asserts icon is SpaceIconChoice | null {
-  if (!isSpaceObjectIdentityKey(key) || (icon !== null && !isSpaceIconId(icon) && !isMoteAvatarRef(icon))) {
+  if (!isSpaceObjectIdentityKey(key) || (icon !== null && !isSpaceIconId(icon) && !isMoteAvatarRef(icon) && !isMoteFace(icon))) {
     throw new Error('Choose a valid Space object and icon.')
   }
 }

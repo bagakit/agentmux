@@ -415,7 +415,7 @@ type AppState = {
   // Session projection until the user claims it.
   warmTerminal: WarmTerminal | null
   unclaimedTerminalSessionIds: string[]
-  timelines: Record<string, AgentTimelineSnapshot>
+  timelines: Record<string, import('./lib/session-state').RendererAgentTimelineSnapshot>
   pendingAgentLaunches: Record<string, PendingAgentLaunch>
   activeWorkspaceId: string | null
   /** 用户拖出来的 Topic 顺序。是一份偏好，不是真相来源——磁盘上没有的不会因它出现。 */

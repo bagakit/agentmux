@@ -2,11 +2,12 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { ImagePlus, RotateCcw } from 'lucide-react'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconId, type SpaceIconTarget } from '../lib/space-object-appearance'
-import { MOTE_AVATAR_INPUT_MAX_BYTES, type MoteAvatarInput } from '../../../shared/mote-avatars'
+import { DEFAULT_MOTE_FACE, isMoteFace, MOTE_AVATAR_INPUT_MAX_BYTES, type MoteAvatarInput } from '../../../shared/mote-avatars'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
 import { useAppStore } from '../store'
 import { MoteAvatarCrop } from './MoteAvatarCrop'
+import { MoteFaceEditor } from './MoteFaceEditor'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** Shared chooser; drafts stay local until Save, authored metadata has the existing store owner. */
@@ -20,6 +21,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errorStep, setErrorStep] = useState<'prepare' | 'save'>('save')
+  const [editingFace, setEditingFace] = useState(false)
   const canvas = useRef<HTMLCanvasElement>(null)
   const returnKey = useRef<string | null>(null)
   const editor = useRef<object>({}), inputRequest = useRef<object>({})
@@ -28,6 +30,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     editor.current = {}; inputRequest.current = {}
     if (target) returnKey.current = target.key
     setDraft(target ? useAppStore.getState().spaceObjectIcons[target.key] ?? null : null)
+    setEditingFace(Boolean(target?.avatarTarget && isMoteFace(useAppStore.getState().spaceObjectIcons[target.key])))
     setPreview(null); setPreviewReady(false); setPreparing(false); setBusy(false); setError(null)
     return () => { editor.current = {}; inputRequest.current = {} }
   }, [target?.key])
@@ -45,7 +48,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file)
       })
       const value = await api.scratch.previewMoteAvatar(original.avatarTarget.workspaceId, original.avatarTarget.topicId, { mimeType: file.type, dataUrl } as MoteAvatarInput, original.avatarTarget.objectKey)
-      if (current()) { setPreviewReady(false); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1 })) }
+      if (current()) { setEditingFace(false); setPreviewReady(false); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1 })) }
     } catch (cause) { if (current()) { setErrorStep('prepare'); setError(presentError(cause)) } }
     finally { if (current()) setPreparing(false) }
   }
@@ -82,8 +85,13 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           row?.focus()
         }}>
         <Dialog.Title className="space-icon-picker__title">{target?.avatarTarget ? 'Avatar' : 'Icon'} for {target?.name}</Dialog.Title>
-        <Dialog.Description className="space-icon-picker__description">{target?.avatarTarget ? 'Choose an image or icon. Your current avatar stays until you save.' : 'Choose an icon. Restore automatic to use the default.'}</Dialog.Description>
+        <Dialog.Description className="space-icon-picker__description">{target?.avatarTarget ? 'Make a face, choose an image or icon. Your avatar stays until you save.' : 'Choose an icon. Restore automatic to use the default.'}</Dialog.Description>
         {target?.avatarTarget ? <>
+          <div className="mote-avatar-source" role="group" aria-label="Mote avatar style">
+            <button className="small-button" type="button" aria-pressed={editingFace} disabled={busy} onClick={() => { select(isMoteFace(draft) ? draft : { ...DEFAULT_MOTE_FACE }); setEditingFace(true) }}>Make a face</button>
+            <button className="small-button" type="button" aria-pressed={!editingFace} disabled={busy} onClick={() => setEditingFace(false)}>Icons & image</button>
+          </div>
+          {editingFace && isMoteFace(draft) ? <MoteFaceEditor face={draft} disabled={busy} onChange={select} /> : <>
           <label className="small-button mote-avatar-file"><ImagePlus size={14} />Choose image
             <input aria-label="Choose Mote image" type="file" accept="image/png,image/jpeg" disabled={busy}
               onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void prepare(file) }} />
@@ -91,15 +99,16 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           {preparing ? <p className="space-icon-picker__description" role="status">Preparing image…</p> : null}
           {preview ? <MoteAvatarCrop key={preview.revision} source={preview.dataUrl} canvasRef={canvas} disabled={busy || preparing}
             onReady={() => setPreviewReady(true)} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : null}
+          </>}
         </> : null}
-        <div className="space-icon-picker__choices" role="group" aria-label="Icon choices">
+        {!editingFace ? <div className="space-icon-picker__choices" role="group" aria-label="Icon choices">
           {(Object.entries(SPACE_ICON_CATALOG) as Array<[SpaceIconId, typeof SPACE_ICON_CATALOG[SpaceIconId]]>).map(([id, { Icon, label }]) =>
             <button key={id} type="button" className="space-icon-picker__choice" aria-label={`${label} icon`}
               title={label} aria-pressed={!preview && draft === id} data-space-icon-choice={id} disabled={busy}
               onClick={() => select(id)}><Icon size={18} /></button>)}
-        </div>
+        </div> : null}
         <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={!preview && draft === null}
-          disabled={busy} onClick={() => select(null)}><RotateCcw size={13} />Restore automatic</button>
+          disabled={busy} onClick={() => { select(null); setEditingFace(false) }}><RotateCcw size={13} />Restore automatic</button>
         {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; retry saving.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         <footer>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
