@@ -306,7 +306,7 @@ app.whenReady().then(async () => {
       const originalCompact = await read(`(() => {const rule=${compactRule};return {style:rule.style.cssText,display:rule.style.display,parent:rule.parentRule.cssText};})()`)
       assert.equal(originalCompact.display, 'none'); assert.match(originalCompact.parent, /@container space-navigation\s/)
       const compactActions = async () => read(`(() => {const entry=${spaceRow}.closest('.space-mote-entry'),actions=[...entry.querySelectorAll('.space-pin,.space-mote-edit')];
-        if(actions.length!==2)throw new Error('Exactly the original Pin and SOUL actions are required');return actions.map(n=>{const r=n.getBoundingClientRect();return {label:n.getAttribute('aria-label'),display:getComputedStyle(n).display,width:r.width,height:r.height};});})()`)
+        if(actions.length!==2)throw new Error('Exactly the original Pin and SOUL actions are required');return actions.map(n=>{const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {label:n.getAttribute('aria-label'),display:getComputedStyle(n).display,width:r.width,height:r.height,hit:n===hit||n.contains(hit)};});})()`)
       const separator = node('[role="separator"][aria-label="Resize Projects"]')
       const originalWidth = Number(await read(`${separator}.getAttribute('aria-valuenow')`))
       assert.ok(Number.isFinite(originalWidth) && originalWidth > 0)
@@ -341,9 +341,12 @@ app.whenReady().then(async () => {
         try {
           await read(`${compactRule}.style.display='inline-flex'`)
           await read('new Promise(resolve=>requestAnimationFrame(resolve))')
+          proof.compactActionsMutation.declaration = await read(`${compactRule}.style.display`)
           proof.compactActionsMutation.actions = await compactActions()
+          assert.equal(proof.compactActionsMutation.declaration, 'inline-flex', 'The exact owning rule receives the intended display mutation')
           for (const action of proof.compactActionsMutation.actions) {
-            assert.equal(action.display, 'inline-flex'); assert.ok(action.width > 0 && action.height > 0, 'The exact two original actions really regain their row area')
+            assert.equal(action.display, 'flex', 'Each original flex child blockifies the inline-flex declaration')
+            assert.ok(action.width > 0 && action.height > 0 && action.hit, 'The exact two original actions really regain their reachable row area')
           }
           proof.compactActionsMutation.mutated = await labelGeometry()
           assert.equal(proof.compactActionsMutation.mutated.fits, false, 'Removing the compact actions Source rule reproduces the crowded original Mote identity')
