@@ -62,7 +62,7 @@ assert.equal(actions.copyFailure.text, 'Copy failed'); assert.deepEqual(actions.
 assert.equal(sourceReview.verdict, 'approved'); assert.ok(sourceReview.sources.length > 0)
 for (const source of sourceReview.sources) assert.equal(source.sha256, proof.sources[source.path])
 assert.equal(visual.passed, true); assert.ok(visual.reviewer && visual.reviewer !== '/root')
-assert.equal(visual.sourceReceiptSha256, hash(proof.compiled)); assert.equal(visual.actionsConsumed.sha256, hash(proof.actions))
+assert.equal(visual.sourceReceiptSHA256, hash(proof.compiled)); assert.equal(visual.actionsConsumed.sha256, hash(proof.actions))
 assert.equal(visual.images.length, 7)
 for (const image of visual.images) { assert.equal(image.passed, true); assert.equal(hash(image.path), image.sha256) }
 console.log(JSON.stringify({ passed: true, owning: 6, adjacent: 32, mutations: 4, images: 7,
