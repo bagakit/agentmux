@@ -10,6 +10,11 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: ({ s
   useEffect(() => { lifetime.mounts[sessionId] = (lifetime.mounts[sessionId] ?? 0) + 1; return () => { lifetime.unmounts[sessionId] = (lifetime.unmounts[sessionId] ?? 0) + 1 } }, [sessionId])
   return createElement('div', { 'data-session': sessionId, 'data-owner': linkOrigin.tabGroupId })
 } }))
+// Load the installed browser primary so original real Panel registration precedes layout effects.
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 const baseline = useAppStore.getState()
 let root: Root, home: HTMLDivElement, target: HTMLDivElement
@@ -23,7 +28,7 @@ beforeEach(async () => {
   useAppStore.setState({ config, sessions: [...snapshot.sessions, { ...snapshot.sessions[0]!, id: 'session-parked' }], providerCatalog: [], tabs, layouts: { 'workspace-demo': { root: { type: 'split', direction: 'horizontal', ratio: .45, first: { type: 'leaf', groupId: 'left' }, second: { type: 'leaf', groupId: 'right' } }, groups: [{ id: 'left', tabOrder: ['a', 'parked'], activeTabId: 'a', recentTabIds: ['a', 'parked'] }, { id: 'right', tabOrder: ['b'], activeTabId: 'b', recentTabIds: ['b'] }], activeGroupId: 'left' } } })
 })
 afterEach(async () => { await act(async () => root.unmount()); home.remove(); target.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
-const render = (focusTabId: string | null) => act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: 'workspace-demo', visible: true, focusTabId, focusPortalTargetId: 'focus-fixture' })))
+const render = (focusTabId: string | null) => act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: 'workspace-demo', visible: true, viewTargets: focusTabId ? { [focusTabId]: { hostId: 'focus-fixture', active: true, visible: true, surface: 'focus' } } : {} })))
 it('moves existing DOM between Space and selected Focus tabs without touching split identity or lifetime', async () => {
   const layout = useAppStore.getState().layouts['workspace-demo']
   await render(null)

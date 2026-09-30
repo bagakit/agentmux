@@ -1339,8 +1339,6 @@ export function WorkspaceWorkbench({
   visible = true,
   topicId,
   topicIsolation = 'default',
-  focusTabId = null,
-  focusPortalTargetId = null,
   viewOwnership = 'owner',
   viewHostPrefix = 'workbench-tab-slot',
   viewTargets,
@@ -1360,9 +1358,6 @@ export function WorkspaceWorkbench({
    * this seam to stop fit/bounds work until the slot is visible again.
   */
   visible?: boolean
-  /** When Focus owns a Session, keep this Workbench instance alive but project one complete Tab into Focus. */
-  focusTabId?: string | null
-  focusPortalTargetId?: string | null
   /** Projection chrome supplies slots; the window registry remains the single View owner. */
   viewOwnership?: 'owner' | 'projection'
   viewHostPrefix?: string
@@ -1393,7 +1388,6 @@ export function WorkspaceWorkbench({
   // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
-  const focusTab = focusTabId ? tabs[focusTabId] : null
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(residentLayout, tabs, projection, projectionActiveGroupId) : null,
     [residentLayout, tabs, projection, projectionActiveGroupId])
@@ -1557,7 +1551,7 @@ export function WorkspaceWorkbench({
       }}
       autoScroll={false}
     >
-      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-source' : ''}`}>
+      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`}>
         {projectionNotice}
         <SplitNode
           node={layout.root}
@@ -1566,8 +1560,8 @@ export function WorkspaceWorkbench({
           layout={layout}
           allLayout={viewOwnership === 'owner' ? storedLayout ?? layout : layout}
           splitTarget={splitTarget}
-          surfaceVisible={visible && !focusTab}
-          nativeSurfacesVisible={visible && !focusTab && activeDrag === null}
+          surfaceVisible={visible}
+          nativeSurfacesVisible={visible && activeDrag === null}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={viewOwnership === 'owner'}
@@ -1579,13 +1573,13 @@ export function WorkspaceWorkbench({
         const ownerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const projection = viewTargets?.[tab.id]
-        const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
-        const tabVisible = (targetId !== null && (focusTab?.id === tab.id ? visible : projection?.surface === 'survey' || projection?.surface === 'focus' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
+        const targetId = projection?.hostId ?? null
+        const tabVisible = (targetId !== null && (projection?.surface === 'survey' || projection?.surface === 'focus' ? projection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
-          active={focusTab?.id === tab.id ? true : projection?.active ?? true}
+          active={projection?.active ?? true}
           survey={projection?.surface === 'survey'} controlsOpen={projection?.controlsOpen ?? false}
           onBrowserControlConfirmation={onBrowserControlConfirmation}
-          homeNotice={projection && focusTab?.id !== tab.id && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
+          homeNotice={projection && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
               step: projection.surface === 'focus' ? 'Selected View is in Focus' : projection.surface === 'survey' ? 'Selected View is in Survey' : 'Selected View is in Mote',
               mode: projection.surface === 'focus' || projection.surface === 'survey'
@@ -1602,7 +1596,7 @@ export function WorkspaceWorkbench({
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
-            headerPortalTargetId={(focusTab?.id === tab.id || projection?.surface === 'focus') && targetId && storedLayout && ownerByTab.has(tab.id) &&
+            headerPortalTargetId={projection?.surface === 'focus' && targetId && storedLayout && ownerByTab.has(tab.id) &&
               tab.layout.root.type === 'leaf' && tab.regions[tab.layout.root.regionId]?.kind === 'agent'
               ? projection?.headerPortalTargetId ?? `${targetId}-header` : null}
             surfaceVisible={tabVisible}
