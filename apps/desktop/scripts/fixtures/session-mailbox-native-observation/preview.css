@@ -1,0 +1,7 @@
+body { margin: 0; padding: 18px; background: var(--app-bg); color: var(--text); }
+.mailbox-native-preview { margin: 0 auto; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-bg); }
+.mailbox-native-preview header, .mailbox-native-preview nav, .mailbox-native-preview__entry { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); }
+.mailbox-native-preview header span { color: var(--muted); font-size: var(--fs-caption); }
+.mailbox-native-preview label { display: flex; padding: 14px 16px; }
+.mailbox-native-preview textarea { width: 100%; min-height: 55px; }
+.mailbox-native-preview__region { padding-top: 440px; }

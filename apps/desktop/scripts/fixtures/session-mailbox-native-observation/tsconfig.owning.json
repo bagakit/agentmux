@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../test/session-mailbox-native-observation.integration.test.tsx",
+    "vitest.owning.config.mts",
+    "entry.tsx"
+  ]
+}
