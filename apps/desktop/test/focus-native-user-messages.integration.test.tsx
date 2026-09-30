@@ -287,10 +287,20 @@ it('known captured Agent inspection stays read-only and navigation resolves the 
   const origin = useAppStore.getState().agentFocus
   const marker = h.element.querySelector<HTMLButtonElement>('[data-message-id="captured:prompt:sender-core"]')!
   await act(async () => marker.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: null })))
-  expect(floating().querySelector('[role="tooltip"]')!.textContent).toContain('Sender Run not recorded')
-  expect(floating().querySelector('[role="tooltip"]')!.textContent).toContain(B)
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    expect(floating().querySelector('[role="tooltip"]')).not.toBeNull()
+  })
+  const summary = floating().querySelector<HTMLElement>('[role="tooltip"]')!
+  expect(summary.dataset.messageAuthor).toBe('agent')
+  expect(summary.textContent).toContain('Same worker name')
+  expect(summary.textContent).toContain('Known Agent input')
   expect(useAppStore.getState().agentFocus).toBe(origin)
   await act(async () => { marker.focus(); marker.click() })
+  const senderDetails = floating().querySelector('.recent-focus__sender-details')
+  expect(senderDetails).not.toBeNull()
+  expect(senderDetails!.textContent).toContain('Sender Run not recorded')
+  expect(senderDetails!.textContent).toContain(B)
   expect(floating().querySelector('[role="dialog"]')!.textContent).not.toContain(`${B}-original-run`)
   const knownBody = floating().querySelector<HTMLElement>('[data-input-preview-id="captured:prompt:sender-core"] .log-turn')
   expect(knownBody).not.toBeNull(); expect(knownBody!.dataset.speakerRole).toBe('agent')

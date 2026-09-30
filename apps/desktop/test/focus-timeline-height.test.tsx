@@ -7,11 +7,23 @@ import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store'
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 const baseline = useAppStore.getState()
-let root: Root, container: HTMLDivElement, resizeCallback: () => void, available = 800, headerHeight = 28
+let root: Root, container: HTMLDivElement, available = 800, headerHeight = 28
 const observed: Element[] = []
+const resizeObservers = new Map<object, { callback: () => void; targets: Set<Element> }>()
+function resizeCallback() {
+  const header = container.querySelector('.recent-focus__header')
+  expect(header).not.toBeNull()
+  const matching = [...resizeObservers.values()].filter(observer => observer.targets.has(header!))
+  expect(matching.length).toBeGreaterThan(0)
+  for (const observer of matching) observer.callback()
+}
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resizeCallback = callback } observe(target: Element) { observed.push(target) } disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { resizeObservers.set(this, { callback, targets: new Set() }) }
+    observe(target: Element) { resizeObservers.get(this)!.targets.add(target); observed.push(target) }
+    disconnect() { resizeObservers.delete(this) }
+  })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const height = this.classList.contains('recent-focus__header') ? headerHeight : available
     return { x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: height, width: 1200, height, toJSON() {} }
@@ -21,7 +33,7 @@ beforeEach(async () => {
   useAppStore.setState({ config, sessions, timelines: {}, tabs: {}, agentNames: {}, focusTimelineHeight: 96, agentFocus: { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: Date.now() - 60_000 }] }, pmo: { sessionId: null } } })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); available = 800; headerHeight = 28; observed.length = 0 })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); available = 800; headerHeight = 28; observed.length = 0; resizeObservers.clear() })
 const handle = () => container.querySelector<HTMLElement>('[aria-label="Resize Focus timeline"]')!
 const timeline = () => container.querySelector<HTMLElement>('.recent-focus')!
 const key = (value: string) => act(async () => handle().dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })))
