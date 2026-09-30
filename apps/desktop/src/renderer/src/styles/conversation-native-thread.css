@@ -1,0 +1,7 @@
+.conversation-native-thread { min-width: 0; padding: var(--sp-3) var(--sp-4) 0; }
+.conversation-native-thread__source, .activity-feed__observation-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.6; }
+.conversation-native-thread__source { margin-bottom: var(--sp-3); }
+.conversation-native-thread__source > span:last-child { margin-left: auto; }
+.conversation-native-thread__record { min-width: 0; }
+.activity-feed__observation-source { margin: var(--sp-3) var(--sp-4) var(--sp-1); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+@media (max-width: 560px) { .conversation-native-thread { padding-inline: var(--sp-3); } .activity-feed__observation-source { margin-inline: var(--sp-3); } }

@@ -39,7 +39,7 @@ import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from './ConversationMessage'
-import { ConversationNativeReasoning } from './ConversationNativeReasoning'
+import { ConversationNativeThread } from './ConversationNativeThread'
 import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
@@ -617,21 +617,26 @@ function WorkingIndicator(): JSX.Element {
 type UserMessageReadState = {
   loading: boolean
   error: Error | null
+  observationError?: Error | null
+  windowFrozen?: boolean
   hasMore: boolean
   onRetry: () => void
   onReadEarlier: (trigger: HTMLButtonElement) => void
 }
 
 function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefined }) {
-  if (!read || (!read.loading && !read.error && !read.hasMore)) return null
+  if (!read || (!read.loading && !read.error && !read.observationError && !read.windowFrozen && !read.hasMore)) return null
   return (
     <div className="activity-feed__read-notice" role="status">
       <span>
         {read.loading ? <><LoaderCircle size={12} className="spin" /> Reading native inputs…</> : read.error
           ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
+          : read.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.'
+          : read.observationError ? `Automatic native updates are unavailable: ${read.observationError.message}. The current reading window is kept; Refresh retries the source.`
           : 'Earlier conversation records are available in History.'}
       </span>
       {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
+      {!read.error && (read.windowFrozen || read.observationError) ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>{read.windowFrozen ? 'Read latest records' : 'Refresh'}</button> : null}
       {read.hasMore ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
     </div>
   )
@@ -682,10 +687,16 @@ export function ActivityView({
    */
   describeSpeaker?: DescribeSpeaker
 }) {
-  const { unifiedItems, segments } = useMemo(
-    () => buildActivityEntries(items, userMessages),
-    [items, userMessages]
-  )
+  const { unifiedItems, segments } = useMemo(() => {
+    const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
+    const nativeIds = new Set(page?.items.filter((item) => item.kind === 'user-message').map((item) => item.id))
+    // Only move an input into the source thread when that exact record is present there.
+    // A missing page prop cannot erase already observed native input facts.
+    const observedMessages = userMessages?.filter((message) => message.source.kind !== 'native' || !page ||
+      message.source.providerId !== page.source.providerId || message.source.nativeSessionId !== page.source.nativeSessionId ||
+      !nativeIds.has(message.rawId))
+    return buildActivityEntries(items, observedMessages)
+  }, [items, userMessages, nativeHistoryPage, sessionId])
   const placed = useMemo(() => placeSegments(segments), [segments])
   const origin = useMemo(() => {
     for (const it of unifiedItems) {
@@ -831,13 +842,11 @@ export function ActivityView({
   }, [placed])
 
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
-  const hasNativeReasoning = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.some(
-    (item) => item.kind !== 'user-message' && item.contentParts.some((part) => part.kind === 'reasoning')
-  )
+  const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = items.length > 0
   const readNotice = <UserMessageReadNotice read={userMessageRead} />
 
-  if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeReasoning) {
+  if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
@@ -848,7 +857,7 @@ export function ActivityView({
       </div>
     )
   }
-  if (!hasUserMessages && !hasNativeReasoning && showEmptyState(displayState, items)) {
+  if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, items)) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
@@ -861,7 +870,7 @@ export function ActivityView({
   }
   // 正在想、但首行还没落地：显示"在进行"而不是空状态。一个正在工作的东西显示成空，
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
-  if (!hasUserMessages && !hasItems && !hasNativeReasoning) {
+  if (!hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
@@ -889,7 +898,20 @@ export function ActivityView({
           This executor does not provide structured activity. Terminal remains available.
         </div>
       ) : null}
-      <Ruler
+      {nativeHistoryPage ? <ConversationNativeThread
+        page={nativeHistoryPage}
+        sessionId={sessionId}
+        {...(onContinue ? { onContinue } : {})}
+        workspaceRoot={workspaceRoot}
+        homeDir={homeDir}
+        {...(describeSpeaker ? { describeSpeaker } : {})}
+        {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+        {...(readPastedImage ? { readPastedImage } : {})}
+        {...(openHttpLink ? { openHttpLink } : {})}
+        {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+      /> : null}
+      {placed.length > 0 ? <div className="activity-feed__observation-source">Submitted messages &amp; Hook observations · Separate recorded source</div> : null}
+      {unifiedItems.length > 0 ? <Ruler
         items={unifiedItems}
         scale={scale}
         selectedIndex={selectedIndex}
@@ -923,7 +945,7 @@ export function ActivityView({
             </Fragment>
           ) : null
         }
-      />
+      /> : null}
       <div className="activity-log" ref={logRef}>
         {placed.map(({ entry, key, from }) => {
           // Identity is resolved once here; the shared message only renders that verdict.
@@ -991,16 +1013,6 @@ export function ActivityView({
           )
         })}
       </div>
-      {nativeHistoryPage ? <ConversationNativeReasoning
-        page={nativeHistoryPage}
-        sessionId={sessionId}
-        workspaceRoot={workspaceRoot}
-        homeDir={homeDir}
-        {...(describeSpeaker ? { describeSpeaker } : {})}
-        {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-        {...(readPastedImage ? { readPastedImage } : {})}
-        {...(openHttpLink ? { openHttpLink } : {})}
-      /> : null}
       {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump ? (
         <button

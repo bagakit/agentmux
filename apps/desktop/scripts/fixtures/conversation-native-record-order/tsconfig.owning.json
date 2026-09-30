@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../test/conversation-native-record-order.integration.test.tsx",
+    "vitest.owning.config.mts",
+    "entry.tsx"
+  ],
+  "compilerOptions": { "allowImportingTsExtensions": true }
+}
