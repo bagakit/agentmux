@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { build } from 'vite'
 import { listProbeProcesses, runProbeProcess } from './probe-process.mjs'
 
@@ -27,7 +27,7 @@ if (args.length) {
   footerOnly = args[1] === 'footer-only'
   floatingResize = args[1] === 'floating-resize'
   if (args.length === 6) {
-    assert.ok(footerOnly || floatingResize || moteArchive); assert.equal(args[4], '--reuse-renderer')
+    assert.ok(footerOnly || floatingResize || moteArchive || motePaperdoll); assert.equal(args[4], '--reuse-renderer')
     reuseRenderer = resolve(repository, args[5])
   }
   candidateFile = resolve(repository, args[3])
@@ -39,6 +39,42 @@ if (args.length) {
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-presentation-'))
 const evidence = join(repository, '.tmp/mote-navigation-footer', `attempt-${Date.now()}`)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
+const sharedRendererEntries = ['archive.html', 'paperdoll.html']
+const sharedRendererInputs = sharedRendererEntries.flatMap(name => [
+  relative(repository, join(fixture, name)), relative(repository, join(fixture, name.replace('.html', '-entry.tsx')))
+]).concat(['apps/desktop/src/shared/mote-avatars.ts', 'apps/desktop/src/renderer/src/lib/session-events.ts'])
+const sharedRenderer = moteArchive || motePaperdoll
+const profilingFiles = sharedRenderer ? [require.resolve('react-dom/profiling'),
+  join(resolve(require.resolve('react-dom/profiling'), '..'), 'cjs/react-dom-profiling.profiling.js')] : []
+const profilingInputs = new Map()
+async function verifySharedRendererReuse(parent, candidateFiles) {
+  assert.equal(parent.stage, 'compiled-only', 'Reuse consumes an original compiled receipt')
+  assert.deepEqual(parent.rendererEntries, sharedRendererEntries, 'Both original entry points belong to this compilation')
+  assert.equal(parent.instrumentation?.renderer, 'react-dom/profiling', 'Shared compilation uses the maintained profiling renderer')
+  assert.equal(parent.instrumentation.sources.length, profilingFiles.length, 'Both profiling original sources are nonempty and bound')
+  for (const file of profilingFiles) {
+    const matches = parent.instrumentation.sources.filter(row => basename(row.path) === basename(file))
+    assert.equal(matches.length, 1, 'Each actual profiling source has one original identity')
+    const row = matches[0], original = await readFile(row.preserved), current = await readFile(file)
+    assert.ok(original.length > 0 && current.length > 0, 'Profiling source bytes are nonempty')
+    assert.equal(row.consumed, true, 'The original Vite graph consumed this profiling source')
+    assert.equal(hash(original), row.sha256, 'Original profiling bytes remain bound')
+    assert.equal(hash(current), row.sha256, 'Current maintained profiling source agrees with the compilation')
+  }
+  for (const entry of sharedRendererEntries) {
+    assert.ok(Object.hasOwn(parent.compiled, entry), 'The actual compiled HTML exists: ' + entry)
+    const bytes = await readFile(join(parent.compiledRenderer, entry))
+    assert.ok(bytes.length > 0, 'The compiled HTML is nonempty: ' + entry)
+    assert.equal(hash(bytes), parent.compiled[entry], 'The compiled entry original SHA agrees')
+  }
+  const producers = candidateFiles.filter(row => row.path.startsWith('apps/desktop/src/renderer/src/') || sharedRendererInputs.includes(row.path))
+  assert.ok(producers.length >= 6, 'Current task Renderer producer set is nonempty')
+  for (const file of new Set([...sharedRendererInputs, ...producers.map(row => row.path)])) {
+    const current = hash(await readFile(join(repository, file)))
+    assert.equal(parent.inputs[file], current, 'All current shared/task Renderer producers agree with reused original inputs: ' + file)
+  }
+  for (const row of producers) assert.equal(parent.inputs[row.path], row.sha256, 'Current candidate producers agree with the reused compilation')
+}
 const inputs = new Map(), originalBytes = new Map(), styles = new Set(), watchedStyles = new Set()
 const local = file => file?.startsWith(repository + '/') && !file.includes('/node_modules/')
 const localStyle = file => local(file) && file.endsWith('.css')
@@ -46,6 +82,10 @@ const sourceBinding = {
   name: 'bind-mote-presentation-original-inputs', enforce: 'pre',
   async load(id) {
     const file = id.split('?')[0]
+    if (profilingFiles.includes(file) && !profilingInputs.has(file)) {
+      const bytes = await readFile(file)
+      profilingInputs.set(file, { bytes, sha256: hash(bytes) })
+    }
     if (local(file) && !inputs.has(file)) {
       const bytes = await readFile(file)
       inputs.set(file, hash(bytes)); originalBytes.set(file, bytes)
@@ -55,9 +95,11 @@ const sourceBinding = {
     if (!id.includes('?') && originalBytes.has(file) && /\.[cm]?[jt]sx?$/.test(file)) {
       return { code: originalBytes.get(file).toString('utf8'), map: null }
     }
+    if (!id.includes('?') && profilingInputs.has(file)) return { code: profilingInputs.get(file).bytes.toString('utf8'), map: null }
     return null
   },
   buildEnd() {
+    if (sharedRenderer) assert.equal(profilingInputs.size, profilingFiles.length, 'Actual Vite graph consumes both maintained profiling sources')
     for (const file of this.getWatchFiles()) if (localStyle(file)) {
       watchedStyles.add(file)
       assert.ok(styles.has(file), `No consumed original CSS: ${relative(repository, file)}`)
@@ -104,15 +146,18 @@ try {
     const bytes = await readFile(candidateFile), candidate = JSON.parse(bytes)
     assert.ok(candidate.files.length > 0, 'The coherent Source candidate must be nonempty')
     for (const row of candidate.files) assert.equal(hash(await readFile(join(repository, row.path))), row.sha256, 'Candidate inputs agree before actual compilation')
-    if ((floatingResize || moteArchive) && candidate.compiledReuse && !reuseRenderer) {
-      reuseRenderer = resolve(repository, candidate.compiledReuse.path)
+    if ((floatingResize || sharedRenderer) && candidate.compiledReuse) {
+      const requestedReuse = resolve(repository, candidate.compiledReuse.path)
+      if (reuseRenderer) assert.equal(reuseRenderer, requestedReuse, 'CLI and candidate name the same explicit reuse receipt')
+      else reuseRenderer = requestedReuse
       assert.equal(hash(await readFile(reuseRenderer)), candidate.compiledReuse.sha256, 'Explicit candidate reuse receipt identity agrees')
     }
     result.candidate = { path: candidateFile, sha256: hash(bytes), files: candidate.files, ...(candidate.compiledReuse ? { compiledReuse:candidate.compiledReuse } : {}) }
     await writeFile(join(evidence, 'candidate.json'), bytes)
   }
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'),
-    ...(motePaperdoll ? ['paperdoll.html', 'paperdoll-entry.tsx', 'paperdoll-main.cjs', 'paperdoll-preload.cjs'] : moteArchive ? ['archive.html', 'archive-entry.tsx', 'archive-main.cjs', 'archive-preload.cjs'] : ['index.html', 'entry.tsx', 'main.cjs', 'scenario.md', ...(moteIdentity ? ['identity-main.cjs', 'identity-preload.cjs'] : [])]).map(name => join(fixture, name))]) {
+    ...(sharedRenderer ? ['archive.html', 'archive-entry.tsx', 'paperdoll.html', 'paperdoll-entry.tsx',
+      ...(motePaperdoll ? ['paperdoll-main.cjs', 'paperdoll-preload.cjs'] : ['archive-main.cjs', 'archive-preload.cjs'])] : ['index.html', 'entry.tsx', 'main.cjs', 'scenario.md', ...(moteIdentity ? ['identity-main.cjs', 'identity-preload.cjs'] : [])]).map(name => join(fixture, name))]) {
     const bytes = await readFile(file)
     inputs.set(file, hash(bytes)); originalBytes.set(file, bytes)
   }
@@ -121,6 +166,12 @@ try {
   if (reuseRenderer) {
     const parentBytes = await readFile(reuseRenderer), parent = JSON.parse(parentBytes)
     assert.ok(Object.keys(parent.inputs).length > 100 && Object.keys(parent.compiled).length > 0)
+    if (sharedRenderer) {
+      await verifySharedRendererReuse(parent, result.candidate.files)
+      for (const file of profilingFiles) {
+        const bytes = await readFile(file); profilingInputs.set(file, { bytes, sha256: hash(bytes) })
+      }
+    }
     for (const [file, digest] of Object.entries(parent.inputs)) {
       const original = await readFile(join(parent.originalInputs, file))
       assert.equal(hash(original), digest, 'Every original consumed input remains byte-bound')
@@ -134,7 +185,7 @@ try {
       assert.equal(hash(await readFile(join(parent.compiledRenderer, file))), digest, 'Every original compiled byte agrees')
     }
     // A corrected Node capture/assertion driver does not change compiled Renderer inputs.
-    for (const row of result.candidate.files.filter(row => floatingResize || moteArchive ? /^(apps\/desktop\/src\/renderer\/src\/|apps\/desktop\/scripts\/fixtures\/mote-navigation-footer\/(?:archive-)?entry\.tsx$)/.test(row.path) && /\.(?:[jt]sx?|css)$/.test(row.path) : /\.(tsx|css)$/.test(row.path))) {
+    for (const row of result.candidate.files.filter(row => !sharedRenderer && (floatingResize ? /^(apps\/desktop\/src\/renderer\/src\/|apps\/desktop\/scripts\/fixtures\/mote-navigation-footer\/(?:archive-)?entry\.tsx$)/.test(row.path) && /\.(?:[jt]sx?|css)$/.test(row.path) : /\.(tsx|css)$/.test(row.path)))) {
       assert.equal(parent.inputs[row.path], row.sha256, 'Current task Renderer producers, including floating size/persistence lib.ts, agree with the reused compilation')
     }
     await cp(parent.compiledRenderer, outDir, { recursive: true })
@@ -152,13 +203,13 @@ try {
         aliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: join(repository, 'packages', name, source) })
       }
     }
-    if (motePaperdoll) aliases.push({ find: /^react-dom\/client$/, replacement: require.resolve('react-dom/profiling') })
+    if (sharedRenderer) aliases.push({ find: /^react-dom\/client$/, replacement: require.resolve('react-dom/profiling') })
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases },
     esbuild: { jsx: 'automatic' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [sourceBinding], css: { postcss: { plugins: [stylesheetBinding] } },
     build: { target: 'esnext', outDir, emptyOutDir: true, minify: false,
-      ...(motePaperdoll ? { rollupOptions: { input: join(fixture, 'paperdoll.html') } } : moteArchive ? { rollupOptions: { input: join(fixture, 'archive.html') } } : {}) } })
+      ...(sharedRenderer ? { rollupOptions: { input: sharedRendererEntries.map(name => join(fixture, name)) } } : {}) } })
   }
   assert.ok(inputs.size > 0, 'Imported input graph must be nonempty')
   assert.ok(styles.size > 1, 'Original consumed local style graph must be nonempty')
@@ -205,16 +256,22 @@ try {
     assert.ok(producers.length >= 12, 'Paperdoll candidate includes original editor/consumers/state/event provenance')
     for (const row of producers) assert.equal(inputs.get(join(repository, row.path)), row.sha256, 'Every actual paperdoll producer consumes exact candidate Source')
     for (const name of ['MoteFace.tsx', 'MoteFaceEditor.tsx', 'MoteIdentityMotion.tsx', 'mote-expression.ts', 'SpaceObjectIcon.tsx', 'SpaceIconPicker.tsx', 'session-state.ts', 'session-events.ts']) assert.ok([...inputs.keys()].some(file => file.endsWith('/' + name)), 'Actual face owner not compiled: ' + name)
-    const profileSource = require.resolve('react-dom/profiling'), implementation = join(resolve(profileSource, '..'), 'cjs/react-dom-profiling.profiling.js')
-    result.instrumentation = { renderer: 'react-dom/profiling', sources: [], observation: 'Maintained React profiling renderer; actual MoteIdentityMotion fiber actualDuration/startTime within the original App Profiler current commit start/end. Stale bailout timing excluded. Hook/Profiler are private in byte-bound paperdoll.html/entry; product components are not replaced.' }
-    for (const file of [profileSource, implementation]) {
-      const bytes = await readFile(file), preserved = join(evidence, 'instrumentation', file === profileSource ? 'profiling.js' : 'react-dom-profiling.profiling.js')
-      await mkdir(resolve(preserved, '..'), { recursive: true }); await writeFile(preserved, bytes)
-      result.instrumentation.sources.push({ path: file, sha256: hash(bytes), preserved, bytes: bytes.length })
-    }
     result.limitations[0] = 'One private Renderer compilation and two private Electron phases. No formal Core/desktop build, package, install or user App/Run control.'
     result.limitations[1] = 'Real private avatar assets and ordinary durable appearance writer; controlled typed event transport/Session snapshots do not prove Core/ctxmux Run or real CLI survival.'
     result.limitations[4] = 'Public Core/demand/layout exports resolve current Source; no formal build or runtime lifecycle claim.'
+  }
+  if (sharedRenderer) {
+    result.rendererEntries = sharedRendererEntries
+    for (const file of sharedRendererInputs) assert.equal(inputs.get(join(repository, file)), hash(await readFile(join(repository, file))), 'Both shared entry points and original appearance/event owners are byte-bound')
+    result.instrumentation = { renderer: 'react-dom/profiling', sources: [], observation: 'Maintained profiling renderer for the one archive/paperdoll compilation. Face observations run only in paperdoll: actual MoteIdentityMotion duration/start within the original App Profiler current commit. Stale bailout timing excluded; product components are not replaced.' }
+    for (const file of profilingFiles) {
+      const consumed = profilingInputs.get(file)
+      assert.ok(consumed?.bytes.length > 0, 'Original consumed profiling source is nonempty')
+      assert.equal(hash(await readFile(file)), consumed.sha256, 'Profiling source stays unchanged after original consumption')
+      const preserved = join(evidence, 'instrumentation', basename(file))
+      await mkdir(resolve(preserved, '..'), { recursive: true }); await writeFile(preserved, consumed.bytes)
+      result.instrumentation.sources.push({ path: file, sha256: consumed.sha256, preserved, bytes: consumed.bytes.length, consumed: true })
+    }
   }
   result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
@@ -239,6 +296,7 @@ try {
     stylesheets: result.stylesheets, watchedStylesheets: result.watchedStylesheets,
     compiled: result.compiled, compiledRenderer: result.compiledRenderer, originalInputs: result.originalInputs,
     sourceScope: result.sourceScope, limitations: result.limitations,
+    ...(sharedRenderer ? { rendererEntries: result.rendererEntries, instrumentation: result.instrumentation } : {}),
     ...(result.candidate ? { candidate: result.candidate, captureSelection: result.captureSelection } : {})
   }, null, 2))
   console.log(JSON.stringify({ stage: 'compiled-only', compiledRenderer: result.compiledRenderer,
