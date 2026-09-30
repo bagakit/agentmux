@@ -61,6 +61,7 @@ module.exports = async function captureMotion({ win, evaluate, element, delay, w
   assert.equal(await evaluate('Boolean(document.querySelector(".launcher-environment__panel"))'), false, 'Finite Host exit really unmounts')
   assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), 'Runtime environment', 'Escape immediately returns to the trigger')
 
+  await click(element('[aria-label="Collapse Agents"]'))
   await trace('motion-agent-enter', '[data-workbench-region-id="launchpad-input"] .launcher-composer', () => rawClick(element('[aria-label="Expand Agents"]')))
   const picks = await evaluate(`${element('.agent-picks')} && [...${element('.agent-picks')}.querySelectorAll(':scope > button[data-executor-id]')].map(e=>({id:e.dataset.executorId,selected:e.getAttribute('aria-pressed')}))`)
   assert.ok(picks.length > 2, 'Actual catalog has alternative targets')

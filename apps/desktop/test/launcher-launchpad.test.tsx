@@ -23,7 +23,7 @@ async function mount(state: 'ready' | 'error' | 'missing' = 'ready') {
 describe('actual Launcher work start', () => {
   it('anchors the real bound workspace, host and directory without welcome copy or fabricated connection', async () => {
     await mount(); const environment = dom.container.querySelector('.launcher-environment')!
-    expect(environment.textContent).toContain('Project'); expect(environment.textContent).toContain('This Mac'); expect(environment.textContent).toContain('/repo'); expect(environment.textContent).not.toContain('Ready'); await dom.click('[aria-label="Runtime environment"]'); expect(document.querySelector('.launcher-environment__panel')?.textContent).toContain('Not tested'); await act(async () => (document.querySelector('[aria-label="Close runtime environment"]') as HTMLButtonElement).click())
+    expect(environment.textContent).toContain('Project'); expect(environment.textContent).toContain('This Mac'); expect(environment.textContent).toContain('/repo'); expect(environment.textContent).not.toContain('Ready'); await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={true} />); await dom.click('[aria-label="Runtime environment"]'); expect(document.querySelector('.launcher-environment__panel')?.textContent).toContain('Not tested'); await act(async () => (document.querySelector('[aria-label="Close runtime environment"]') as HTMLButtonElement).click())
     expect(dom.container.textContent).not.toContain('Available Agents'); expect(dom.container.textContent).not.toContain('New session')
     expect(dom.container.querySelector('.agent-pick[aria-pressed="true"] strong')?.textContent).toBe('Codex')
     expect(dom.container.querySelector('[aria-label="Agent name"]')).toBeNull()

@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HostConfig } from '../src/shared/contracts'
+import type { AppConfig, HostConfig } from '../src/shared/contracts'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-warm-run /> }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
-import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
+import { executorDetectionKey, useAppStore, warmTerminalKey, type ExecutorDetectionState } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -20,17 +20,21 @@ beforeEach(async () => {
 })
 afterEach(async () => { await act(async () => useLauncherState.setState(original, true)) })
 
-async function mount({ path = '/Users/alice/project', home = '/Users/alice', host = composerConfig.hosts[0], absolute = false, visible = false }: {
+async function mount({ path = '/Users/alice/project', home = '/Users/alice', host = composerConfig.hosts[0], absolute = false, visible = false,
+  executors = composerConfig.executors, detectionStates = {} }: {
   path?: string; home?: string; host?: HostConfig; absolute?: boolean; visible?: boolean
+  executors?: AppConfig['executors']; detectionStates?: Record<string, ExecutorDetectionState['state']>
 } = {}) {
   const session = { ...composerSession('warm-shell'), kind: 'terminal' as const, providerId: null,
     control: { kind: 'terminal' as const, hostId: host!.id, runId: 'original-shell', run: { runId: 'original-shell' } } }
-  useAppStore.setState({ config: { ...composerConfig, copyPathsAsAbsolute: absolute, hosts: [host!],
+  useAppStore.setState({ config: { ...composerConfig, executors, copyPathsAsAbsolute: absolute, hosts: [host!],
     workspaces: [{ ...composerConfig.workspaces[0]!, path, hostId: host!.id }] }, localHome: home,
     tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     activeWorkspaceId: 'workspace', agentComposerDrafts: { region: 'Complete task\nPreserve this second line.' },
     warmTerminal: { key: warmTerminalKey(host!.id, path), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) },
-    recoveryCandidates: [], executorDetections: {}, hostChecks: {}, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn() })
+    recoveryCandidates: [], executorDetections: Object.fromEntries(Object.entries(detectionStates).map(([id, state]) => [
+      executorDetectionKey(host!.id, id), { state, input: { executorId: id, providerId: executors[id]!.providerId, command: executors[id]!.command, host: host! } }
+    ])), hostChecks: {}, detectExecutors: vi.fn().mockResolvedValue(undefined), prewarmTerminal: vi.fn() })
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={visible} />)
 }
 async function openEnvironment() {
@@ -46,22 +50,55 @@ async function openEnvironment() {
 async function closeEnvironment() { await act(async () => (document.querySelector('[aria-label="Close runtime environment"]') as HTMLButtonElement).click()) }
 
 describe('the mounted Launcher entry polish', () => {
-  it('a fresh Space shows the same warm Terminal and compact Agent/Resume while other tools remain collapsed', async () => {
+  it('a fresh Space shows the Agent catalog and the same warm Terminal while Browser and Note remain collapsed', async () => {
     await mount()
-    expect(dom.container.querySelector('.launch-surface')?.getAttribute('data-agent-section')).toBe('collapsed')
+    expect(dom.container.querySelector('.launch-surface')?.getAttribute('data-agent-section')).toBe('expanded')
     expect([...dom.container.querySelectorAll('[data-section]')].map(node => [node.getAttribute('data-section'), node.getAttribute('data-mode')])).toEqual([
       ['terminal', 'expanded'], ['browser', 'collapsed'], ['note', 'collapsed']
     ])
     expect(dom.container.querySelector('[data-warm-run]')).not.toBeNull()
-    expect(dom.container.querySelector('[aria-label="Expand Agents"]')?.textContent).toContain('Codex')
+    expect([...dom.container.querySelectorAll<HTMLElement>('.agent-picks > button[data-executor-id]')].map(node => node.dataset.executorId)).toEqual(['codex'])
     expect(dom.container.querySelector('.launcher-resume-trigger')).not.toBeNull()
-    expect(dom.container.querySelector('.launcher-composer')).toBeNull()
-    expect(dom.container.querySelector('[aria-label="Launch options"]')).toBeNull()
-    expect(dom.container.querySelector('.launcher-mote')).toBeNull()
-    expect(dom.container.querySelector('.launcher-launch-button')).toBeNull()
+    expect(dom.container.querySelector('.launcher-composer')).not.toBeNull()
+    expect(dom.container.querySelector('[aria-label="Launch options"]')).not.toBeNull()
+    expect(dom.container.querySelector('.launcher-mote')).not.toBeNull()
+    expect(dom.container.querySelector('.launcher-launch-button')).not.toBeNull()
     expect(dom.container.querySelector('[aria-label="Browser address or search"]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Note draft"]')).toBeNull()
     expect(useLauncherState.getState().sections).toEqual({})
+    expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
+  })
+
+  it('the recent choice only highlights its item in the full default catalog, including unconfirmed Executors', async () => {
+    await act(async () => useLauncherState.setState({ executors: { workspace: 'review' }, sections: { workspace: { browser: 'collapsed' } } }))
+    const executor = composerConfig.executors.codex!
+    await mount({ executors: {
+      codex: executor, research: { ...executor, label: 'Research' }, review: { ...executor, label: 'Review' }, missing: { ...executor, label: 'Missing' }
+    }, detectionStates: { codex: 'ready', review: 'error', missing: 'missing' } })
+    const picks = [...dom.container.querySelectorAll<HTMLButtonElement>('.agent-picks > button[data-executor-id]')]
+    expect(picks.map(button => button.dataset.executorId)).toEqual(['codex', 'research', 'review'])
+    expect(picks.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true'])
+    expect(picks[1]!.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe('Not checked')
+    expect(picks[2]!.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe('Check failed')
+    expect(dom.container.querySelector('.launcher-other-agents')?.textContent).toContain('Unavailable · 1')
+    expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')?.disabled).toBe(false)
+    expect(useLauncherState.getState().sections.workspace).toEqual({ browser: 'collapsed' })
+    expect(useLauncherState.getState().executors.workspace).toBe('review')
+  })
+
+  it.each(['collapsed', 'hidden'] as const)('an explicit %s Agent preference survives rehydration and restores the full catalog with its choice', async mode => {
+    const saved = { sections: { workspace: { agents: mode } }, drafts: {}, executors: { workspace: 'review' } }
+    window.localStorage.setItem('agentmux-launcher', JSON.stringify({ state: saved, version: 0 }))
+    await act(async () => { await useLauncherState.persist.rehydrate() })
+    await mount({ executors: { codex: composerConfig.executors.codex!, review: { ...composerConfig.executors.codex!, label: 'Review' } } })
+    expect(dom.container.querySelector('.launch-surface')?.getAttribute('data-agent-section')).toBe(mode)
+    expect(dom.container.querySelector('.agent-catalog')).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('agentmux-launcher')!).state).toEqual(saved)
+    await dom.click(mode === 'collapsed' ? '[aria-label="Expand Agents"]' : '.launcher-restore')
+    const picks = [...dom.container.querySelectorAll<HTMLButtonElement>('.agent-picks > button[data-executor-id]')]
+    expect(picks.map(button => button.dataset.executorId)).toEqual(['codex', 'review'])
+    expect(picks.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'true'])
+    expect(dom.draft('region')).toBe('Complete task\nPreserve this second line.')
     expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
   })
 
@@ -126,11 +163,10 @@ describe('the mounted Launcher entry polish', () => {
     expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
   })
 
-  it('expanding the real editing context locates Options with input tools and groups Launch/Resume without altering the original resource parameters', async () => {
+  it('the default editing context locates Options with input tools and groups Launch/Resume without altering the original resource parameters', async () => {
     await mount()
     const launch = vi.fn().mockResolvedValue(undefined)
     await act(async () => useAppStore.setState({ launchAgent: launch }))
-    await dom.click('[aria-label="Expand Agents"]')
     expect(dom.container.querySelector('.launcher-tools [aria-label="Launch options"]')).not.toBeNull()
     expect(dom.container.querySelector('.launch-surface__footer .launcher-mote__create')).not.toBeNull()
     const actions = dom.container.querySelector('.launcher-primary-actions')!

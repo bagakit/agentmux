@@ -24,7 +24,7 @@ let reduced = false, style: HTMLStyleElement
 beforeEach(() => {
   reduced = false
   mediaListeners.clear()
-  useLauncherState.setState({ sections: {}, drafts: { 'region:region': { browser: 'kept browser', note: 'kept note' } }, executors: {}, persistenceIssue: null })
+  useLauncherState.setState({ sections: { workspace: { agents: 'collapsed' } }, drafts: { 'region:region': { browser: 'kept browser', note: 'kept note' } }, executors: {}, persistenceIssue: null })
   // happy-dom does not expand animation shorthand. Derive supported longhands from the actual
   // product rules so the original Radix Presence still owns retention/completion; no native frames
   // are claimed here. Native Renderer qualification separately proves real timing and pixels.
