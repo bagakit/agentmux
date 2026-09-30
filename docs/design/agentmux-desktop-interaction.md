@@ -18,6 +18,8 @@
 
 用户反馈“Focus 里加载的 Browser 切 Settings 不消失，Space→Settings 正常”。沿用户最新“实体与工作面解耦、同一 Zone／Tab／Region 可多处显示”的约束，设置只遮住当前背景呈现绑定：该绑定的原生 Browser 画面与输入不可见／不可命中，其他合法可见绑定继续按其实际目标呈现。Focus、Space、Survey、Mote 不赋予实体独占归属；关闭设置返回原绑定，不销毁实体、不重建原页面、不改变共享 Tab／Region／布局、Session／Run、导航、页面输入或草稿。不通过 CSS 遮盖、全实体隐藏或把实体回迁唯一宿主代替局部遮挡；Mote 明确显示在设置之上的绑定继续可操作。
 
+同一原生 Browser 的多处画面跟随其活体页面正常导航，媒体请求者 App 文档失效、原生来源资源替换／释放或最后可见绑定撤去时收其媒体资源，局部撤去不损其他合法绑定，媒体流程未确认时保原 Browser 可工作并明确说明，媒体撤销不解释为关闭实体。
+
 ### Survey、临时 Zone 工作面与知识入口
 
 用户提出「Survey item 是尚未找到 Topic 的临时 Zone」，右侧复用 Space 已接入的 Tab / Region 结构，以 Browser 为默认起点，并支持「一键放进 Topic」。用户随后明确：同一个 Zone、Tab、Region 可以显示在多个地方；归属只是绑定关系，与 Survey、Focus、Space、Mote 的当前展示和焦点解耦。因此，关联 Topic 增加的是一条关系，原工作面继续存在。实体、组成、资源来源、绑定、位置和展示的公共合同唯一见《Zone→Tabs→Regions 的实体与展示绑定》；本节只定义 Survey 的入口与行为。搜索和知识库是后续方向，本批不宣称已有索引或全文检索。
