@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { defineConfig } from 'vitest/config'
 import original from '../../../../../vitest.config'
 import { appendFileSync } from 'node:fs'
@@ -5,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../../../..')
 export default defineConfig({
+  server: { fs: { allow: [root, ...['core', 'demand', 'layout'].map(name => realpathSync(resolve(root, 'node_modules/@agentmux', name)))] } },
   ...original, root,
   cacheDir: resolve(root, '.tmp/focus-timeline-ruler-cache'),
   plugins: [...(original.plugins ?? []), {
