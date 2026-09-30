@@ -39,8 +39,9 @@ export function GlobalFocusSurface() {
     const workspace = session && workspaceForSession(state.config, session)
     const id = session && topicIdForSession(state.config, session)
     const topic = id && scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(item => item.id === id)
-    const key = workspace && topic && !topic.readError ? topicSpaceIconTarget(workspace, topic).key : null
-    return { name: topic && !topic.readError ? topic.title || 'Mote' : 'Mote', icon: key ? state.spaceObjectIcons[key] ?? null : null }
+    const target = workspace && topic && !topic.readError ? topicSpaceIconTarget(workspace, topic) : null
+    const key = target?.key
+    return { name: topic && !topic.readError ? topic.title || 'Mote' : 'Mote', icon: key ? state.spaceObjectIcons[key] ?? null : null, avatarWorkspaceId: target?.avatarTarget?.workspaceId, avatarTopicId: target?.avatarTarget?.topicId, avatarObjectKey: key }
   }))
   const config = useAppStore((state) => state.config)
   const topicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
@@ -146,7 +147,7 @@ export function GlobalFocusSurface() {
         requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), onReturnFocus: () => {
           if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
         } })
-      }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
+      }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} /> : null}

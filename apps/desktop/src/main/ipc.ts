@@ -127,6 +127,7 @@ import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
+import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
@@ -199,7 +200,9 @@ export async function registerIpc(args: {
       if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
-  const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id))
+  const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id), {
+    primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+  })
   const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const git = new GitService((id) => args.runtime.executionHost(id))
@@ -591,6 +594,12 @@ export async function registerIpc(args: {
   handle('scratch:ensureMote', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.ensureMote(workspace(config, workspaceId), topicId)
   )
+  handle('scratch:previewMoteAvatar', async (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) =>
+    await args.scratchTopics.previewAvatar(workspace(config, workspaceId), topicId, input, objectKey))
+  handle('scratch:saveMoteAvatar', async (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) =>
+    await args.scratchTopics.saveAvatar(workspace(config, workspaceId), topicId, input, objectKey))
+  handle('scratch:readMoteAvatar', async (workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string) =>
+    await args.scratchTopics.readAvatar(workspace(config, workspaceId), topicId, ref, objectKey))
   handle('scratch:renameTitle', async (workspaceId: string, topicId: string, title: string) =>
     await args.scratchTopics.renameTitle(workspace(config, workspaceId), topicId, title)
   )

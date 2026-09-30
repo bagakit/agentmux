@@ -15,6 +15,7 @@ import { registerIpc } from './ipc.js'
 import { hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from './login-shell-environment.js'
 import { RuntimeController } from './runtime-controller.js'
 import { ScratchTopics } from './scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
 import { reportStartupFailureAndExit, startupFailureExitIo } from './startup-failure-exit.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
@@ -206,7 +207,9 @@ function startPrimaryInstance(): void {
     const fileEditingProbeControl = new WorkspaceFileEditingProbeControl()
     const workspaceFiles = new WorkspaceFiles(
       (id) => runtime.executionHost(id),
-      process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
+      {
+        primaryMoteWorkspace: async () => (await configStore.get()).workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID),
+        ...(process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
         ? {
             beforeWrite: async (input) => await fileEditingProbeControl.beforeWrite(input),
             localWriteFault: () => fileEditingProbeControl.consumeFault(),
@@ -215,7 +218,8 @@ function startPrimaryInstance(): void {
               fileEditingProbeControl.recordDirectoryRead(workspace.id, path)
             }
           }
-        : {}
+        : {})
+      }
     )
     registerWindowResizeEvents(window)
     registerWindowStatePersistence(window, windowGeometryStore)

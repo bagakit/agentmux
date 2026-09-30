@@ -439,7 +439,7 @@ export function WorkspaceTopicsPanel({
                         spinner「只在有话说时才占用」的规矩。 */}
                     <SelectorRow
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
-                        : <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcons[target.key] ?? null} />}
+                        : <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */

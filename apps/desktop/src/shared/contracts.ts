@@ -1377,6 +1377,9 @@ export type AgentMuxDesktopApi = {
     reveal(workspaceId: string, path: string): Promise<void>
   }
   scratch: {
+    previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>
+    saveMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef>
+    readMoteAvatar(workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage>
     listTopics(workspaceId: string): Promise<ScratchTopicSnapshot[]>
     readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
     ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
@@ -1670,3 +1673,4 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     createPullRequest(workspaceId: string, input: CreatePullRequestInput): Promise<CreatePullRequestResult>
   }
 }
+import type { MoteAvatarInput, MoteAvatarRef, MoteAvatarImage } from './mote-avatars.js'

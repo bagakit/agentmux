@@ -142,6 +142,9 @@ const api: AgentMuxPreloadApi = {
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
   scratch: {
+    previewMoteAvatar: (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) => ipcRenderer.invoke('scratch:previewMoteAvatar', workspaceId, topicId, input, objectKey),
+    saveMoteAvatar: (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) => ipcRenderer.invoke('scratch:saveMoteAvatar', workspaceId, topicId, input, objectKey),
+    readMoteAvatar: (workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string) => ipcRenderer.invoke('scratch:readMoteAvatar', workspaceId, topicId, ref, objectKey),
     listTopics: (workspaceId: string) => ipcRenderer.invoke('scratch:listTopics', workspaceId),
     readTopic: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:readTopic', workspaceId, topicId),
@@ -357,3 +360,4 @@ const api: AgentMuxPreloadApi = {
 }
 
 contextBridge.exposeInMainWorld('agentmux', api)
+import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
