@@ -224,7 +224,9 @@ describe('Renderer persistence boundary', () => {
       toolsOpen: true,
       workspaceTool: 'files-branches',
       toolDockWidth: 440,
+      focusTimelineNameWidth: 112,
       focusTimelineHeight: 96,
+      focusTimelineRuler: { mode: 'daily', timeZone: 'system', intervalMinutes: 120, phaseMinutes: 1380 },
       editorWordWrap: false
     })
   })
