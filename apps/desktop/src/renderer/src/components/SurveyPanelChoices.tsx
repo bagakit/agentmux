@@ -1,12 +1,13 @@
 import { groupIds, regionIds } from '@agentmux/layout'
-import { Bot, ChevronDown, FileText, Globe2, PanelsTopLeft, Plus, Terminal } from 'lucide-react'
-import { useState } from 'react'
+import { Bot, ChevronDown, ChevronRight, FileText, Globe2, PanelsTopLeft, Plus, Terminal } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { regionDisplayNames, regionSurfaceLabel } from '../lib/region-display-name'
 import { useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import type { WorkbenchSurface } from '../lib/workbench-tabs'
 import type { useAppStore } from '../store'
-import * as DropdownMenu from './HoverDropdownMenu'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 
 type State = ReturnType<typeof useAppStore.getState>
 type Facts = Pick<State, 'config' | 'layouts' | 'tabs'>
@@ -56,23 +57,41 @@ function PanelChoice<T extends WorkbenchProjectionSelection>({ reference, facts,
   </DropdownMenu.Item>
 }
 
-/** Labels only describe the original facts. Selection passes the untouched owner reference. */
-export function SurveyPanelChoices<T extends WorkbenchProjectionSelection>({ choices, facts, topic = false, open, onOpenChange, onSelect }: {
-  choices: readonly T[]; facts: Facts; topic?: boolean; open?: boolean; onOpenChange?(open: boolean): void; onSelect(reference: T): void
+/** One content projection serves the Item submenu and the explicit recovery entry. */
+function PanelChoiceItems<T extends WorkbenchProjectionSelection>({ choices, facts, topic, onSelect }: {
+  choices: readonly T[]; facts: Facts; topic: boolean; onSelect(reference: T): void
 }) {
   const [details, setDetails] = useState(false)
-  return <DropdownMenu.Root {...(open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}>
-    <DropdownMenu.Trigger asChild><button type="button" className="survey-topic-trigger" aria-label={topic ? 'Choose Topic location' : 'Choose original work surface'}>
-      <PanelsTopLeft size={14} aria-hidden="true" /><span>{topic ? 'Topic locations' : 'Choose panel'}</span><ChevronDown size={12} aria-hidden="true" />
+  return <>
+    <DropdownMenu.Label className="survey-topic-menu__label">{topic ? 'Open an original Topic location' : 'Select an original panel'}</DropdownMenu.Label>
+    {choices.map((reference, ordinal) => <PanelChoice key={JSON.stringify(reference)} reference={reference} facts={facts} ordinal={ordinal} onSelect={onSelect} />)}
+    <DropdownMenu.Separator className="tab-context-menu__separator" />
+    <DropdownMenu.Item className="tab-context-menu__item" onSelect={event => { event.preventDefault(); setDetails(!details) }}>{details ? 'Hide technical references' : 'Show technical references'}</DropdownMenu.Item>
+    {details ? <div className="survey-panel-details">{choices.map((reference, ordinal) => <div key={JSON.stringify(reference)}><strong>Reference {ordinal + 1}</strong>
+      <dl><dt>Workspace</dt><dd>{reference.displayWorkspaceId}</dd><dt>Group</dt><dd>{reference.groupId}</dd><dt>Tab</dt><dd>{reference.tabId}</dd><dt>Region</dt><dd>{reference.regionId}</dd></dl>
+    </div>)}</div> : null}
+  </>
+}
+
+/** Labels describe original facts. Both real entries pass the untouched owner reference. */
+export function SurveyPanelChoices<T extends WorkbenchProjectionSelection>({ choices, facts, mode, visible = true, topic = false, open: controlled, onOpenChange, onSelect }: {
+  choices: readonly T[]; facts: Facts; mode: 'submenu' | 'button'; visible?: boolean; topic?: boolean
+  open?: boolean; onOpenChange?(open: boolean): void; onSelect(reference: T): void
+}) {
+  const [localOpen, setLocalOpen] = useState(false)
+  useEffect(() => { if (!visible) setLocalOpen(false) }, [visible])
+  const open = visible && (controlled ?? localOpen)
+  function change(next: boolean) { setLocalOpen(next); onOpenChange?.(next) }
+  const label = topic ? 'Choose Topic location' : 'Choose original work surface'
+  const contents = <PanelChoiceItems choices={choices} facts={facts} topic={topic} onSelect={onSelect} />
+  return mode === 'submenu' ? <DropdownMenu.Sub>
+    <DropdownMenu.SubTrigger className="tab-context-menu__item" aria-label={label}><PanelsTopLeft size={14} aria-hidden="true" /><span>Choose panel</span><ChevronRight size={12} aria-hidden="true" /></DropdownMenu.SubTrigger>
+    <DropdownMenu.Portal container={resolveOverlayContainer()}><DropdownMenu.SubContent className="tab-context-menu survey-topic-menu survey-panel-menu" sideOffset={4} collisionPadding={8}>{contents}</DropdownMenu.SubContent></DropdownMenu.Portal>
+  </DropdownMenu.Sub> : <DropdownMenu.Root modal={false} open={open} onOpenChange={change}>
+    <DropdownMenu.Trigger asChild><button type="button" className="survey-topic-trigger" aria-label={label}>
+      <span>{topic ? 'Topic locations' : 'Choose panel…'}</span><ChevronDown size={12} aria-hidden="true" />
     </button></DropdownMenu.Trigger>
-    <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu survey-topic-menu survey-panel-menu" align="end" sideOffset={4} collisionPadding={8}>
-      <DropdownMenu.Label className="survey-topic-menu__label">{topic ? 'Open an original Topic location' : 'Select an original panel'}</DropdownMenu.Label>
-      {choices.map((reference, ordinal) => <PanelChoice key={JSON.stringify(reference)} reference={reference} facts={facts} ordinal={ordinal} onSelect={onSelect} />)}
-      <DropdownMenu.Separator className="tab-context-menu__separator" />
-      <DropdownMenu.Item className="tab-context-menu__item" onSelect={event => { event.preventDefault(); setDetails(!details) }}>{details ? 'Hide technical references' : 'Show technical references'}</DropdownMenu.Item>
-      {details ? <div className="survey-panel-details">{choices.map((reference, ordinal) => <div key={JSON.stringify(reference)}><strong>Reference {ordinal + 1}</strong>
-        <dl><dt>Workspace</dt><dd>{reference.displayWorkspaceId}</dd><dt>Group</dt><dd>{reference.groupId}</dd><dt>Tab</dt><dd>{reference.tabId}</dd><dt>Region</dt><dd>{reference.regionId}</dd></dl>
-      </div>)}</div> : null}
-    </DropdownMenu.Content></DropdownMenu.Portal>
+    <DropdownMenu.Portal container={resolveOverlayContainer()}><DropdownMenu.Content className="tab-context-menu survey-topic-menu survey-panel-menu" align="end" sideOffset={4} collisionPadding={8}
+      onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>{contents}</DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>
 }
