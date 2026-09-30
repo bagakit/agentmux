@@ -4,7 +4,6 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
-import { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from '../shared/toolkit.js'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -14,7 +13,8 @@ import {
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
-  RESOURCE_USAGE_CHANNEL,
+  TOOLKIT_CHANGED_CHANNEL,
+  TOOLKIT_ENDED_CHANNEL,
   SESSION_EVENT_CHANNEL,
   SESSION_HISTORY_OBSERVATION_CHANNEL,
   WINDOW_RESIZE_EVENT_CHANNEL,
@@ -57,7 +57,6 @@ import type {
   SessionHistoryObservationReady,
   SessionControl,
   TerminalLaunchInput,
-  UsageSnapshot,
   WorkspaceFileInvalidated,
   WorkspaceFileWriteInput,
   WindowResizeEvent
@@ -353,18 +352,6 @@ const api: AgentMuxPreloadApi = {
         if (!closed) { dispose(); onEnd?.(String(error instanceof Error ? error.message : error)) }
       })
       return { dispose }
-    }
-  },
-  resourceUsage: {
-    subscribe(listener: (snapshot: UsageSnapshot) => void) {
-      const wrapped = (_event: Electron.IpcRendererEvent, value: UsageSnapshot): void => listener(value)
-      ipcRenderer.on(RESOURCE_USAGE_CHANNEL, wrapped)
-      void ipcRenderer.invoke('resourceUsage:subscribe')
-      return () => {
-        ipcRenderer.off(RESOURCE_USAGE_CHANNEL, wrapped)
-        // 退订必须一路传到主进程：只摘掉监听器会让采样继续跑，而面板已经关了。
-        void ipcRenderer.invoke('resourceUsage:unsubscribe')
-      }
     }
   },
   browser: {

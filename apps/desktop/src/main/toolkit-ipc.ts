@@ -2,7 +2,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitResult, parseToolkitSnapshot, type ToolkitRequest, type ToolkitResult, type AgentMuxToolkitPort } from '@agentmux/core/control'
-import { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from '../shared/toolkit.js'
+import { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from '../shared/contracts.js'
 
 export function registerToolkitIpc(port: AgentMuxToolkitPort,
   handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) => void): () => void {

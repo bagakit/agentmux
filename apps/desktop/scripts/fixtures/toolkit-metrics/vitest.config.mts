@@ -32,7 +32,7 @@ const changes: Record<string, [string, string, string]> = {
   'callback-cancel': ['packages/core/src/control-host.ts', 'handlers.onFrame(frame)\n          if (closed) return', 'handlers.onFrame(frame)'],
   age: ['apps/desktop/src/main/process-resource-sampler.ts', 'processObservedAt: unavailable ? this.latest?.processObservedAt ?? null : observedAt', 'processObservedAt: observedAt'],
   nullable: ['apps/desktop/src/renderer/src/lib/resource-owner-counts.ts', 'if (!getter) return null', 'if (!getter) return 0'],
-  panel: ['apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx', "rendererOwners.monacoEditors ?? '—'", 'rendererOwners.monacoEditors']
+  panel: ['apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx', "observation.renderer.data.counts.monacoEditors ?? '—'", 'observation.renderer.data.counts.monacoEditors']
 }
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
   cacheDir: resolve(evidence, 'cache'), resolve: { alias: aliases },

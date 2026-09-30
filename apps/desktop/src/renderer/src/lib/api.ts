@@ -1043,11 +1043,6 @@ const mockApi: AgentMuxDesktopApi = {
     stop: async () => { throw new Error('Toolkit execution requires the Desktop Main owner.') },
     observe: () => { throw new Error('Toolkit observation requires the Desktop Main owner.') }
   },
-  resourceUsage: {
-    // Web 预览没有真实进程可采。返回一个不做任何事的退订函数，面板因此渲染"不可用"
-    // 而不是编造数字——预览里显示一个假的 CPU 读数，比不显示更糟。
-    subscribe: () => () => {}
-  },
   browser: {
     forgetAppLinkScheme: async (scheme, expected) => {
       const next = applyAppLinkForget(mockConfig, scheme, expected)

@@ -228,7 +228,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
 
     useAppStore.setState({ mainSurface: 'survey' })
     await act(async () => {
-      root?.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }))
+      root?.render(createElement(SurfaceSwitch))
     })
 
     const searchBtn = container?.querySelector('button[aria-label^="Survey"]') as HTMLButtonElement

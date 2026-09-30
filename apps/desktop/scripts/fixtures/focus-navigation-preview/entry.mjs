@@ -35,4 +35,4 @@ window.previewGeometry = () => {
 }
 createRoot(document.getElementById('root')).render(createElement('div', { style: { height: '100vh', display: 'flex', flexDirection: 'column' } },
   createElement('div', { style: { flex: 1, padding: 24 } }, 'Private fixture · real Focus footer components'),
-  createElement('footer', { className: 'window-status-bar' }, createElement('div', { className: 'window-status-bar__surface-switch' }, createElement(SurfaceSwitch, { onOpenSettings: () => {} })))))
+  createElement('footer', { className: 'window-status-bar' }, createElement('div', { className: 'window-status-bar__surface-switch' }, createElement(SurfaceSwitch)))))
