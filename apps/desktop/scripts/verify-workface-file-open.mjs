@@ -9,6 +9,7 @@ const background = read(reducer).replaceAll('placement.focus === false', 'false'
 if (background === read(reducer)) throw new Error('Nonempty background placement consumption is required.')
 verifyWorkfaceMutations({ operation: 'file-open', testPath: 'apps/desktop/test/workface-file-open-control.test.tsx',
   sourcePaths: [open, mapper, reducer, store, 'apps/desktop/src/renderer/src/lib/note-creation.ts',
+    'apps/desktop/src/renderer/src/components/GitDiffCanvas.tsx', 'apps/desktop/test/helpers/workface-monaco-fixture.ts',
     'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx', 'apps/desktop/src/renderer/src/components/EditorPane.tsx',
     'apps/desktop/src/renderer/src/lib/file-region-presentation.ts', 'apps/desktop/src/renderer/src/lib/desktop-presentation.ts',
     'apps/desktop/test/helpers/workface-file-fixture.ts', 'packages/core/bin/agentmux', 'packages/core/dist/agentmux.js', 'packages/core/dist/control-host.js'],
