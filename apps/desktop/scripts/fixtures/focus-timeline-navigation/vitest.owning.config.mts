@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, realpathSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import original from '../../../../../vitest.config'
 export default defineConfig({
   ...original,
+  // Exact immutable public package producers reused by this private proof.
+  server: { fs: { allow: [resolve(import.meta.dirname, '../../../../..'), ...['core', 'demand', 'layout'].map(name => realpathSync(resolve(import.meta.dirname, '../../../../..', 'node_modules/@agentmux', name)))] } },
   plugins: [...(original.plugins ?? []), {
     name: 'focus-timeline-navigation-loaded-source', enforce: 'pre',
     transform(code, id) {

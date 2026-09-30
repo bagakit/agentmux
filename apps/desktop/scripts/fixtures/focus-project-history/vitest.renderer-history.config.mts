@@ -8,7 +8,7 @@ export default defineConfig({
   define: { ...original.define, __AGENTMUX_WEB_PREVIEW__: 'false' },
   // Public workspace package links can target a bounded, read-only producer outside
   // this proof root. Permit only those exact package roots; resolution is unchanged.
-  server: { fs: { allow: [resolve(import.meta.dirname, '../../../../..'), ...['core', 'demand', 'layout'].map(name => realpathSync(resolve(import.meta.dirname, '../../../../..', 'packages', name)))] } },
+  server: { fs: { allow: [resolve(import.meta.dirname, '../../../../..'), ...['core', 'demand', 'layout'].map(name => realpathSync(resolve(import.meta.dirname, '../../../../..', 'node_modules/@agentmux', name)))] } },
   root: resolve(import.meta.dirname, '../../../../..'),
   plugins: [...(original.plugins ?? []), {
     name: 'focus-retired-history-loaded-source', enforce: 'pre',
