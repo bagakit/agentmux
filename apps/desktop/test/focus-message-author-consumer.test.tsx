@@ -288,7 +288,8 @@ describe('Focus consumes accepted public message authors without inventing ident
     await click(marker('human'))
     expect(body().querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
     expect(body().querySelector('.log-turn__who')?.textContent).toBe('You')
-    expect(dialog().textContent).toContain('Human message · You')
+    expect(dialog().querySelector('.recent-focus__message-caption')!.textContent).toContain('Human message')
+    expect(dialog().querySelectorAll('.log-turn__who')).toHaveLength(1)
     expect(dialog().querySelector('.recent-focus__sender')).toBeNull(); expect(dialog().querySelector('.recent-focus__sender-run')).toBeNull(); expect(dialog().querySelector('.recent-focus__sender-link')).toBeNull()
     expect(body().textContent).toContain(BODY); noWrites(); expect(onSelect.mock.calls).toEqual([])
   })
@@ -306,22 +307,27 @@ describe('Focus consumes accepted public message authors without inventing ident
 
   it('keeps native and programmatic unknown inputs unknown and makes untimed records reachable without a false marker', async () => {
     await click(marker('unknown'))
-    expect(body().querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('unknown'); expect(body().querySelector('.log-turn__who')?.textContent).toContain('Input')
+    // conversation-chat-clarity/T001 changes display only; the Focus record and public author stay unknown.
+    expect(dialog().dataset.messageAuthor).toBe('unknown')
+    expect(body().querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human'); expect(body().querySelector('.log-turn__who')?.textContent).toBe('You')
     expect(dialog().textContent).toContain('Sender not recorded'); expect(dialog().textContent).not.toContain('Human message'); expect(dialog().querySelector('.recent-focus__sender-link')).toBeNull()
     await close(); await readInputs()
     const untimed = dialog().querySelector<HTMLElement>(`[data-input-message-id="${publicIds[1]}"]`)!
     expect(untimed.textContent).toContain('Time unknown'); await click(untimed)
-    expect(body().querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('unknown'); expect(body().textContent).toContain('Untimed native input')
+    expect(dialog().dataset.messageAuthor).toBe('unknown')
+    expect(body().querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human'); expect(body().textContent).toContain('Untimed native input')
     expect(element.querySelector(`[data-message-id="${publicIds[1]}"]`)).toBeNull(); noWrites(); expect(onSelect.mock.calls).toEqual([])
   })
 
   it('hover and keyboard focus use the shared author and pinned Escape returns to the original marker', async () => {
     const human = marker('human')
     await act(async () => human.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-    await wait(() => expect(document.querySelector('[role="tooltip"] .log-turn')?.getAttribute('data-speaker-role')).toBe('human'))
+    await wait(() => expect(document.querySelector('.recent-focus__message-preview[role="tooltip"]')?.getAttribute('data-message-author')).toBe('human'))
+    expect(document.querySelector('[role="tooltip"] .conversation-avatar--human')).not.toBeNull()
     await act(async () => human.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
     await act(async () => marker('unknown').focus())
-    await wait(() => expect(document.querySelector('[role="tooltip"] .log-turn')?.getAttribute('data-speaker-role')).toBe('unknown'))
+    await wait(() => expect(document.querySelector('.recent-focus__message-preview[role="tooltip"]')?.getAttribute('data-message-author')).toBe('unknown'))
+    expect(document.querySelector('[role="tooltip"] .conversation-avatar--unknown')).not.toBeNull()
     await act(async () => human.focus()); await click(human); await wait(() => expect(document.activeElement).toBe(dialog()))
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(dialog()).toBeNull(); expect(document.activeElement).toBe(human); noWrites()
@@ -355,15 +361,18 @@ describe('Focus consumes accepted public message authors without inventing ident
       await act(async () => node.focus())
       expect(document.activeElement).toBe(node)
       const tooltip = document.querySelector<HTMLElement>('.recent-focus__message-preview[role="tooltip"]')!
-      expect(tooltip).not.toBeNull(); expect(tooltip.querySelector<HTMLElement>('[data-input-preview-id]')!.dataset.inputPreviewId).toBe(node.dataset.messageId)
-      expect(tooltip.querySelector('.log-turn')!.getAttribute('data-speaker-role')).toBe(node.dataset.messageAuthor)
+      expect(tooltip).not.toBeNull(); expect(tooltip.dataset.previewMessageId).toBe(node.dataset.messageId)
+      expect(tooltip.dataset.messageAuthor).toBe(node.dataset.messageAuthor)
+      expect(tooltip.querySelector(`.conversation-avatar--${node.dataset.messageAuthor}`)).not.toBeNull()
+      expect(tooltip.querySelector('.recent-focus__message-excerpt')!.textContent).toContain(BODY)
     }
     await readInputs()
     for (const id of publicIds) {
       const record = dialog().querySelector<HTMLElement>(`[data-input-message-id="${id}"]`)!
       expect(record).not.toBeNull(); await click(record)
       expect(body().dataset.inputPreviewId).toBe(id)
-      expect(body().querySelector('.log-turn')!.getAttribute('data-speaker-role')).toBe(record.dataset.messageAuthor)
+      expect(dialog().dataset.messageAuthor).toBe(record.dataset.messageAuthor)
+      expect(body().querySelector('.log-turn')!.getAttribute('data-speaker-role')).toBe(record.dataset.messageAuthor === 'unknown' ? 'human' : record.dataset.messageAuthor)
       expect(body().textContent).toContain(id === publicIds[1] ? 'Untimed native input' : BODY)
     }
     expect(onSelect.mock.calls).toEqual([]); noWrites()
