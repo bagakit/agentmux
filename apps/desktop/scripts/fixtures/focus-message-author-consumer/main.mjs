@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { app, BrowserWindow } from 'electron'
 const [html, privateRoot, evidence, variant = 'authors', mode = 'authors'] = process.argv.slice(2)
@@ -17,15 +18,25 @@ try {
   const state = () => win.webContents.executeJavaScript('navigationSceneState()')
   const point = selector => win.webContents.executeJavaScript(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node)throw new Error('Missing actual target');const r=node.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
   const painted = () => win.webContents.executeJavaScript('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+  const settledPopup = async bodyName => await win.webContents.executeJavaScript(`(async()=>{const p=document.querySelector('.recent-focus__message-preview[role="dialog"]');if(!p)throw new Error('Actual pinned popup required');const animations=p.getAnimations(),before=animations.map(a=>({type:a.constructor.name,playState:a.playState,currentTime:a.currentTime}));await Promise.all(animations.map(a=>a.finished));await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));return{count:animations.length,before,after:animations.map(a=>({type:a.constructor.name,playState:a.playState,currentTime:a.currentTime})),popup:p.getBoundingClientRect().toJSON(),sameBody:window[${JSON.stringify(bodyName)}]===document.querySelector('[data-input-preview-id]'),selection:window.getSelection().toString()}})()`)
   const moveTo = async selector => { await painted(); const position = await point(selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...position }); await painted(); return point(selector) }
   const click = async selector => { const position = await moveTo(selector); const hit = await win.webContents.executeJavaScript(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),h=document.elementFromPoint(${position.x},${position.y});return !!h&&(n===h||n.contains(h))})()`); assert.equal(hit,true,`Actual pointer target: ${selector}`); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...position, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 }) }
   const wheel = async (deltaX, deltaY = 0, modifiers = 0) => { const position = await moveTo('.recent-focus__time-scale'); return win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...position, deltaX, deltaY, modifiers }) }
   const shot = async name => {
-    await win.webContents.executeJavaScript('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+    const entrance = await win.webContents.executeJavaScript(`(async()=>{const p=document.querySelector('.recent-focus__message-preview'),animations=p?.getAnimations({subtree:true})??[],before=animations.map(a=>({type:a.constructor.name,playState:a.playState,currentTime:a.currentTime}));await Promise.all(animations.map(a=>a.finished));await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));return{before,after:animations.map(a=>({type:a.constructor.name,playState:a.playState,currentTime:a.currentTime})),opacity:p?getComputedStyle(p).opacity:null}})()`)
+    if (entrance.opacity !== null) assert.equal(entrance.opacity,'1')
+    const cameraDom = () => win.webContents.executeJavaScript(`(()=>{const p=document.querySelector('.recent-focus__message-preview'),b=document.querySelector('[data-input-preview-id]');return{state:navigationSceneState(),range:document.querySelector('.recent-focus__range').textContent,date:document.querySelector('.recent-focus__date')?.value,markerIDs:[...document.querySelectorAll('[data-message-id]')].map(n=>n.dataset.messageId),preview:p?{opacity:getComputedStyle(p).opacity,role:p.dataset.messageAuthor,bodyID:b?.dataset.inputPreviewId,bodyText:b?.textContent}:null,selection:window.getSelection().toString()}})()`)
+    const cameraBefore = await cameraDom(), prime = await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true}), primeBytes = prime.toPNG()
+    assert.equal(prime.isEmpty(),false); const cameraAfterPrime = await cameraDom(); assert.deepEqual(cameraAfterPrime,cameraBefore)
+    const primeFile = name === 'wide' ? `${variant}-${name}-camera-prime.png` : null
+    if (primeFile) await fs.writeFile(path.join(evidence,primeFile),primeBytes)
+    const primeFact = { size:prime.getSize(),sha256:createHash('sha256').update(primeBytes).digest('hex'),file:primeFile }
+    await painted()
     const header = await win.webContents.executeJavaScript(`(()=>{const h=document.querySelector('.recent-focus__header'),r=h.getBoundingClientRect(),v=document.querySelector('.recent-focus__viewport').getBoundingClientRect();const controls=[...h.querySelectorAll('button,select,input')].map(n=>({name:n.getAttribute('aria-label'),r:n.getBoundingClientRect().toJSON()}));return{height:r.height,viewportHeight:v.height,controls}})()`)
     assert.equal(header.height, 28); assert.ok(header.viewportHeight >= 66)
-    const image = `${variant}-${name}.png`; await fs.writeFile(path.join(evidence, image), (await win.webContents.capturePage()).toPNG())
-    actual.frames.push({ image, width: await win.webContents.executeJavaScript('innerWidth'), header, state: await state() })
+    const image = `${variant}-${name}.png`, finalFrame = await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true}); assert.equal(finalFrame.isEmpty(),false); await fs.writeFile(path.join(evidence, image),finalFrame.toPNG())
+    const cameraAfter = await cameraDom(); assert.deepEqual(cameraAfter,cameraBefore)
+    actual.frames.push({ image, width: await win.webContents.executeJavaScript('innerWidth'), header, state: await state(), camera:{entrance,before:cameraBefore,afterPrime:cameraAfterPrime,prime:primeFact,after:cameraAfter} })
   }
   if (variant === 'authors-crowded') {
     await until('window.navigationSceneState && navigationSceneState().markers.length===4')
@@ -61,6 +72,7 @@ try {
     await click('.recent-focus__message[data-message-author="human"]'); await until('!!document.querySelector("[data-input-preview-id]")')
     actual.selection = await win.webContents.executeJavaScript(`(()=>{window.originalAuthorMarker=document.querySelector('.recent-focus__message[data-message-author="human"]');window.originalAuthorBody=document.querySelector('[data-input-preview-id]');const walker=document.createTreeWalker(window.originalAuthorBody,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){if(node.textContent.includes('Same body'))break}if(!node)throw new Error('No actual task body');const range=document.createRange();range.selectNodeContents(node);window.getSelection().removeAllRanges();window.getSelection().addRange(range);return window.getSelection().toString()})()`)
     assert.ok(actual.selection.includes('Same body from independently recorded authors'))
+    actual.detachedEntrance = await settledPopup('originalAuthorBody'); assert.equal(actual.detachedEntrance.sameBody,true); assert.equal(actual.detachedEntrance.selection,actual.selection)
     actual.beforeDetach = await state(); await wheel(1000)
     await until('!window.originalAuthorMarker.isConnected&&!document.querySelector(".recent-focus__message[data-message-author=human]")')
     actual.afterDetach = await state()
@@ -68,6 +80,7 @@ try {
     assert.equal(actual.detached.markerConnected,false); assert.equal(actual.detached.sameBody,true); assert.equal(actual.detached.selection,actual.selection); assert.equal(actual.detached.bodyVisible,true); assert.ok(actual.detached.popup.bottom<=actual.detached.header.top-6)
     assert.deepEqual(actual.afterDetach.counts,actual.beforeDetach.counts); assert.equal(actual.detached.draft,'Keep the original draft'); await shot('detached-body')
     win.setContentSize(320,360); await until('innerWidth===320')
+    actual.narrowDetachedEntrance = await settledPopup('originalAuthorBody'); assert.equal(actual.narrowDetachedEntrance.sameBody,true); assert.equal(actual.narrowDetachedEntrance.selection,actual.selection)
     const scrollMetrics = () => win.webContents.executeJavaScript(`(()=>{const c=document.querySelector('.recent-focus__controls'),s=getComputedStyle(c);return{container:{bounds:c.getBoundingClientRect().toJSON(),clientHeight:c.clientHeight,offsetHeight:c.offsetHeight,clientWidth:c.clientWidth,scrollHeight:c.scrollHeight,scrollWidth:c.scrollWidth,scrollLeft:c.scrollLeft,scrollTop:c.scrollTop,height:s.height,overflowX:s.overflowX,overflowY:s.overflowY,scrollbarWidth:s.scrollbarWidth},controls:['Next focus window','Return to current focus window'].map(name=>{const n=document.querySelector('[aria-label="'+name+'"]'),r=n.getBoundingClientRect();return{name,bounds:r.toJSON(),hits:[r.top+2,r.top+r.height/2,r.bottom-2].map(y=>{const hit=document.elementFromPoint(r.x+r.width/2,y);return{x:r.x+r.width/2,y,tag:hit?.tagName,className:hit?.className,label:hit?.getAttribute('aria-label'),targetHit:!!hit&&(n===hit||n.contains(hit))}})}})}})()`)
     actual.beforeNarrowScrollMetrics = await scrollMetrics()
     const scrollPoint = await moveTo('.recent-focus__controls')
@@ -103,13 +116,21 @@ try {
     const keyboard = async key => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: key === 'Escape' ? 27 : 13 }) }
     for (const role of ['human', 'agent', 'unknown']) {
       const selector = `.recent-focus__message[data-message-author="${role}"]`
+      const beforeHover = await state()
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...await point(selector) })
-      await until(`document.querySelector('.recent-focus__message-preview[role="tooltip"] .log-turn')?.dataset.speakerRole===${JSON.stringify(role)}`)
+      await until(`document.querySelector('.recent-focus__message-preview[role="tooltip"]')?.dataset.messageAuthor===${JSON.stringify(role)}`)
+      const hover = await win.webContents.executeJavaScript(`(()=>{const p=document.querySelector('.recent-focus__message-preview[role="tooltip"]'),a=p.querySelector('.conversation-avatar'),t=p.querySelector('.recent-focus__message-meta time');return{role:p.dataset.messageAuthor,avatarClass:a.className,name:a.getAttribute('aria-label'),context:p.querySelector('.recent-focus__message-caption').textContent,excerpt:p.querySelector('.recent-focus__message-excerpt').textContent,source:p.querySelector('.recent-focus__message-meta span').textContent,time:t.textContent,timeTitle:t.title}})()`)
+      assert.equal(hover.role, role); assert.ok(hover.avatarClass.split(' ').includes(`conversation-avatar--${role}`)); assert.ok(hover.name.trim().length > 0)
+      assert.equal(hover.context, 'To Recipient worker'); assert.ok(hover.excerpt.includes('Same body from independently recorded authors'))
+      assert.equal(hover.source, role === 'unknown' ? 'Native record' : 'Submission record'); assert.ok(hover.time.trim().length > 0); assert.equal(hover.timeTitle, 'Record time, not a verified sender time')
+      assert.deepEqual((await state()).controls, beforeHover.controls); actual[`${role}HoverFacts`] = hover
       actual[`${role}Hover`] = true
-      await click(selector); await until(`document.querySelector('.recent-focus__message-preview[role="dialog"] .log-turn')?.dataset.speakerRole===${JSON.stringify(role)}`)
+      const displayRole = role === 'unknown' ? 'human' : role
+      await click(selector); await until(`document.querySelector('.recent-focus__message-preview[role="dialog"] .log-turn')?.dataset.speakerRole===${JSON.stringify(displayRole)}`)
       if (role === 'agent') { if (variant === 'authors') await shot('agent-details'); const r = await win.webContents.executeJavaScript(`document.querySelector('.recent-focus__message-preview').getBoundingClientRect().toJSON()`); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type:'mouseWheel', x:r.left+4, y:r.top+r.height/2, deltaX:0, deltaY:8000 }); await until(`(()=>{const r=document.querySelector('[data-input-preview-id]').getBoundingClientRect(),p=document.querySelector('.recent-focus__message-preview').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom})()`) }
-      const author = await win.webContents.executeJavaScript(`(()=>{const p=document.querySelector('.recent-focus__message-preview');const r=p.querySelector('[data-input-preview-id]').getBoundingClientRect(),v=p.getBoundingClientRect();return{role:p.querySelector('.log-turn').dataset.speakerRole,name:p.querySelector('.log-turn__who').textContent,body:p.querySelector('[data-input-preview-id]').textContent,senderAction:!!p.querySelector('.recent-focus__sender-link'),width:v.width,bodyVisible:r.top>=v.top&&r.bottom<=v.bottom}})()`)
-      assert.equal(author.role, role); assert.ok(author.body.includes('Same body from independently recorded authors')); assert.equal(author.width, 332); assert.equal(author.bodyVisible, true)
+      const author = await win.webContents.executeJavaScript(`(()=>{const p=document.querySelector('.recent-focus__message-preview');const r=p.querySelector('[data-input-preview-id]').getBoundingClientRect(),v=p.getBoundingClientRect();return{role:p.dataset.messageAuthor,displayRole:p.querySelector('.log-turn').dataset.speakerRole,name:p.querySelector('.log-turn__who').textContent,metadata:p.querySelector('.recent-focus__message-caption').textContent,body:p.querySelector('[data-input-preview-id]').textContent,senderAction:!!p.querySelector('.recent-focus__sender-link'),width:v.width,bodyVisible:r.top>=v.top&&r.bottom<=v.bottom}})()`)
+      assert.equal(author.role, role); assert.equal(author.displayRole, displayRole); assert.ok(author.body.includes('Same body from independently recorded authors')); assert.equal(author.width, 332); assert.equal(author.bodyVisible, true)
+      if (role === 'unknown') { assert.equal(author.name, 'You'); assert.ok(author.metadata.includes('Prompt · Sender not recorded')) }
       assert.equal(author.senderAction, role === 'agent'); actual[`${role}Preview`] = author
       await shot(`${role}-preview`)
       await keyboard('Escape'); await until('!document.querySelector(".recent-focus__message-preview[role=dialog]")')
@@ -121,6 +142,8 @@ try {
     assert.deepEqual((await state()).controls, ['focus-author-sender']); actual.explicitSender = true
     await click('.recent-focus__message[data-message-author="human"]'); await until('!!document.querySelector("[data-input-preview-id]")')
     actual.selection = await win.webContents.executeJavaScript(`(()=>{const node=document.querySelector('[data-input-preview-id]');window.authorPinned=node;const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while(text=walker.nextNode()){if(text.textContent.includes('Same body'))break}if(!text)throw new Error('No actual task text');const range=document.createRange();range.selectNodeContents(text);window.getSelection().removeAllRanges();window.getSelection().addRange(range);return window.getSelection().toString()})()`)
+    actual.pinnedEntrance = await settledPopup('authorPinned')
+    assert.equal(actual.pinnedEntrance.sameBody, true); assert.equal(actual.pinnedEntrance.selection, actual.selection)
     actual.pinnedGeometry = await win.webContents.executeJavaScript(`(()=>{const p=document.querySelector('.recent-focus__message-preview').getBoundingClientRect(),h=document.querySelector('.recent-focus__header').getBoundingClientRect();return{popup:p.toJSON(),header:h.toJSON(),controls:[...document.querySelectorAll('[data-focus-window-control]')].map(n=>{const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{name:n.getAttribute('aria-label'),bounds:r.toJSON(),hitClass:hit?.className,targetHit:!!hit&&(n===hit||n.contains(hit))}})}})()`)
     assert.ok(actual.pinnedGeometry.controls.length >= 7)
     assert.ok(actual.pinnedGeometry.controls.every(control => control.targetHit), 'Every actual 640px window control centre is physically reachable while a message is pinned')
@@ -142,6 +165,24 @@ try {
     assert.equal(actual.preservation.sameBody, true); assert.equal(actual.preservation.selection, actual.selection); assert.equal(actual.preservation.draft, 'Keep the original draft')
     win.setContentSize(320, 360); await until('innerWidth===320')
     await until(`document.querySelector('.recent-focus__message-preview').getBoundingClientRect().width===304`)
+    actual.narrowBrowse = { before: await state(), steps: [] }
+    const narrowControls = await win.webContents.executeJavaScript(`[...document.querySelectorAll('.recent-focus__controls button,.recent-focus__controls select,.recent-focus__controls input')].map(n=>n.getAttribute('aria-label'))`)
+    assert.ok(narrowControls.length >= actual.pinnedGeometry.controls.length); assert.ok(narrowControls.every(name=>name && name.trim().length > 0))
+    for (const name of narrowControls) {
+      const selector = `[aria-label="${name}"]`
+      const metrics = () => win.webContents.executeJavaScript(`(()=>{const c=document.querySelector('.recent-focus__controls'),n=document.querySelector(${JSON.stringify(selector)}),r=n.getBoundingClientRect(),v=c.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{name:${JSON.stringify(name)},scrollLeft:c.scrollLeft,clip:v.toJSON(),target:r.toJSON(),inClip:x>=v.left&&x<=v.right&&y>=v.top&&y<=v.bottom,targetHit:!!hit&&(n===hit||n.contains(hit))}})()`)
+      const beforeScroll = await metrics()
+      if (!beforeScroll.inClip) {
+        const direction = beforeScroll.target.x + beforeScroll.target.width/2 < beforeScroll.clip.left ? -1 : 1
+        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...await moveTo('.recent-focus__controls'),deltaX:800*direction,deltaY:0})
+        await until(`document.querySelector('.recent-focus__controls').scrollLeft!==${beforeScroll.scrollLeft}`); await painted()
+      }
+      const afterScroll = await metrics(); assert.equal(afterScroll.inClip,true, `${name} centre is within the actual horizontal toolbar clip`); assert.equal(afterScroll.targetHit,true, `${name} is physically reachable after original toolbar browsing`)
+      assert.equal(await win.webContents.executeJavaScript('window.getSelection().toString()'),actual.selection)
+      assert.equal(await win.webContents.executeJavaScript('window.authorPinned===document.querySelector("[data-input-preview-id]")'),true)
+      actual.narrowBrowse.steps.push({ before: beforeScroll, after: afterScroll })
+    }
+    actual.narrowBrowse.after = await state(); assert.deepEqual(actual.narrowBrowse.after.counts,actual.narrowBrowse.before.counts); assert.deepEqual(actual.narrowBrowse.after.controls,actual.narrowBrowse.before.controls)
     await hitTarget('[aria-label="Zoom in Focus timeline"]', 'narrow-zoom', 200)
     actual.narrowPreview = await win.webContents.executeJavaScript(`(()=>{const p=document.querySelector('.recent-focus__message-preview'),r=p.getBoundingClientRect(),b=p.querySelector('[data-input-preview-id]').getBoundingClientRect();return{popup:r.toJSON(),body:b.toJSON(),bodyVisible:b.top>=r.top&&b.bottom<=r.bottom,selection:window.getSelection().toString()}})()`)
     assert.equal(actual.narrowPreview.bodyVisible, true); assert.equal(actual.narrowPreview.selection, actual.selection); if (variant === 'authors') await shot('human-320-preview')
