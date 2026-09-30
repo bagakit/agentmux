@@ -46,6 +46,10 @@ module.exports = async ({evaluate,size,click,capture,waitFor,result,visibleDirec
  await visibleDirectPmo(unknown.tabId)
  const expand=await evaluate(`Boolean(${selector('[data-pmo-teams-topic-floating] [aria-label="Expand Agents"]')})`)
  if(expand)await click(selector('[data-pmo-teams-topic-floating] [aria-label="Expand Agents"]'))
+ assert.ok(await evaluate('document.querySelector("[data-pmo-teams-topic-floating] .launch-surface").textContent.includes("Primary Mote Agent is unconfirmed")'))
+ assert.ok(await evaluate('document.querySelector("[data-pmo-teams-topic-floating] .launch-surface").textContent.includes("Your request has not been sent")'))
+ assert.equal(await evaluate('document.querySelectorAll("[data-pmo-teams-topic-floating] .agent-pick[aria-pressed=true]").length'),0)
+ assert.equal(await evaluate('document.querySelector("[data-pmo-teams-topic-floating] .launcher-launch-button").disabled'),true)
  await capture('1280-light-primary-mote-unknown',1280);await size(620);await visibleDirectPmo(unknown.tabId);await capture('620-light-primary-mote-unknown',620)
  result.observations.push({scene:'actual-unknown-primary-owner',facts:unknown});assert.equal(result.frames.length,15)
 }
