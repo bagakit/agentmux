@@ -547,6 +547,7 @@ export type WorkspaceFileWriteResult =
   | { status: 'written'; revision: string }
   | { status: 'conflict'; observedRevision: string | null }
   | { status: 'error'; code: string; message: string }
+  | { status: 'unknown'; code: string; message: string }
 
 export type WorkspaceFileInvalidated = {
   workspaceId: string

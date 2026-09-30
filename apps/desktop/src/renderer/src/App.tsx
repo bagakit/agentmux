@@ -174,6 +174,7 @@ function DesktopApp() {
         if (!tabId || !reference || surveyProjectedLayout.unsupportedTabIds.has(tabId) || moteViewTargets?.[tabId]) continue
         targets[tabId] = { hostId: workbenchProjectionSlotId(`${surveyProjection.presentationId}-slot`, reference),
           active: !(surveyToolsOpen && narrowControls), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', controlsOpen: surveyToolsOpen,
+          projection: surveyProjection, reference,
           retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) }
       }
     }

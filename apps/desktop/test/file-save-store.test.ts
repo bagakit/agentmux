@@ -128,6 +128,35 @@ function seed(document: FileDocument = {
 }
 
 describe('revision-aware file save Store', () => {
+  it('keeps the original dirty document when a published save has no confirmed receipt', async () => {
+    const { tab, key } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const save = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    fileApi.writes[0]!.resolve({ status: 'unknown', code: 'WORKSPACE_FILE_RESULT_UNKNOWN', message: 'Write result is unconfirmed' })
+    await save
+    expect(fileApi.writes).toHaveLength(1)
+    expect(fileApi.reads).toHaveLength(0)
+    expect(useAppStore.getState().documents[key]).toEqual({ path: tab.path, content: 'bravo', revision: 'revision-alpha' })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().documentIssues[key]).toMatchObject({ code: 'WORKSPACE_FILE_RESULT_UNKNOWN', message: 'Write result is unconfirmed' })
+  })
+
+  it('does not create another bookmark candidate after an unknown write', async () => {
+    const { workspace } = seed()
+    const saving = useAppStore.getState().saveBrowserBookmark(workspace.id, 'https://example.org/page', 'Page')
+    const rejected = expect(saving).rejects.toMatchObject({ code: 'WORKSPACE_FILE_RESULT_UNKNOWN' })
+    await waitFor(() => fileApi.writes.length === 1)
+    fileApi.writes[0]!.resolve({ status: 'unknown', code: 'WORKSPACE_FILE_RESULT_UNKNOWN', message: 'Unconfirmed bookmark' })
+    // Settle an erroneously issued next candidate so the assertion reports the wrong verdict,
+    // rather than leaving an unresolved write and letting a timeout masquerade as mutation proof.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    fileApi.writes[1]?.resolve({ status: 'error', code: 'UNEXPECTED_CANDIDATE', message: 'A second write was issued' })
+    await rejected
+    expect(fileApi.writes).toHaveLength(1)
+    expect(fileApi.writes[0]?.input.path).toBe('Page.webloc')
+  })
+
   it('admits a move before waiting for saves and prevents a racing save from recreating the source', async () => {
     const { workspace, tab } = seed()
     useAppStore.getState().updateDocument(tab.id, 'bravo')

@@ -18,6 +18,7 @@ import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface.js'
 import { createWorkspaceLayout, findGroupForTab, moveTabToNewGroup } from '@agentmux/layout'
 import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
 import { noteStemForDate, NOTE_FILE_EXTENSION } from '../src/renderer/src/lib/note-names.js'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store.js'
 
 const initialState = useAppStore.getState()
@@ -97,6 +98,7 @@ function assertStoreStateInvisibleToStaticMarkup(): void {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  useLauncherState.setState({drafts:{}})
   useAppStore.setState(initialState, true)
 })
 
@@ -110,237 +112,48 @@ afterEach(() => {
 //   2. 初始页上真有那个入口，两条分支（有热终端 / 兜底）都有。
 // ---------------------------------------------------------------------------
 describe('createNote 接线', () => {
-  it('把候选名喂给真正的写入面，撞名就往后走，并打开实际建出来的那一个', async () => {
+  it('使用真实typed写入候选，并保已创建文件与准确分组', async () => {
     workspaceFixture()
-    const stem = noteStemForDate(new Date())
-    const taken = `${stem}${NOTE_FILE_EXTENSION}`
-    const attempted: string[] = []
-    // 模拟磁盘上已经有今天的第一条笔记：写入面是 O_EXCL，撞名**失败**而不是截断。
-    const create = vi.spyOn(api.files, 'create').mockImplementation(async (_workspaceId, input) => {
-      attempted.push(input.path)
-      if (input.path === taken) throw new Error('EEXIST: file already exists')
+    const paths: string[] = []
+    const write = vi.spyOn(api.files, 'write').mockImplementation(async (_workspaceId, input) => {
+      paths.push(input.path)
+      return paths.length === 1 ? {status:'conflict', observedRevision:'occupied'} : {status:'written',revision:'created'}
     })
-    const opened: string[] = []
-    // openFile 自己有一整套读文件/挂 Tab 的路，这里只关心它被喂了哪个名字。
-    const openFile = vi.fn(async (path: string) => { opened.push(path) })
-    useAppStore.setState({ openFile: openFile as never })
-
-    const name = await useAppStore.getState().createNote()
-
-    // 承重：撞名后返回并打开的是 -2 那个，不是算出来的第一个。整条路只解析一次 workspace，
-    // 所以 create 与 open 必然落在同一个 Workspace 上。
-    expect(name).toBe(`${stem}-2${NOTE_FILE_EXTENSION}`)
-    expect(attempted).toEqual([taken, `${stem}-2${NOTE_FILE_EXTENSION}`])
-    expect(opened).toEqual([`${stem}-2${NOTE_FILE_EXTENSION}`])
-    expect(create.mock.calls.every(([workspaceId]) => workspaceId === 'workspace')).toBe(true)
-    // 建的是文件不是目录——kind 传错的话笔记会变成一个打不开的空目录。
-    expect(create.mock.calls.map(([, input]) => input.kind)).toEqual(['file', 'file'])
-  })
-
-  it('让文件树看见新文件：写入后 workspace 的失效计数前进', async () => {
-    workspaceFixture()
-    vi.spyOn(api.files, 'create').mockResolvedValue(undefined)
-    useAppStore.setState({ openFile: (async () => {}) as never })
-    const before = useAppStore.getState().workspaceFileRevisions.workspace ?? 0
-
-    await useAppStore.getState().createNote()
-
-    expect(useAppStore.getState().workspaceFileRevisions.workspace).toBe(before + 1)
-  })
-
-  it('没有活动 Workspace 时响亮失败，绝不静默无事发生', async () => {
-    useAppStore.setState({ config, activeWorkspaceId: null })
-    const create = vi.spyOn(api.files, 'create').mockResolvedValue(undefined)
-
-    await expect(useAppStore.getState().createNote()).rejects.toThrow(/workspace/i)
-    expect(create).not.toHaveBeenCalled()
-  })
-
-  it('候选全部失败时把真实原因抛给调用方，而不是当成建好了', async () => {
-    workspaceFixture()
-    vi.spyOn(api.files, 'create').mockRejectedValue(new Error('EACCES: permission denied'))
-    const openFile = vi.fn(async () => {})
-    useAppStore.setState({ openFile: openFile as never })
-
-    await expect(useAppStore.getState().createNote()).rejects.toThrow(/EACCES/)
-    // 没建出来就绝不能去打开一个不存在的文件——那会给用户一个「不可用」的空编辑器。
-    expect(openFile).not.toHaveBeenCalled()
-  })
-
-  // -------------------------------------------------------------------------
-  // 建的时候在 A、打开的时候已经切到 B。
-  //
-  // 缺陷原形：createNote 捕获一次 workspaceId，而 `openFile` 签名里没有 workspace 参数、
-  // 自己重读 activeWorkspaceId。create walk 是异步的（本地一次子进程、远端 host.run 可达 15s），
-  // 这期间侧栏的 selectWorkspace 完全可点——它不受卡片那个组件本地 busy 约束。
-  //
-  // 于是笔记建在 A，打开的却按 B 解析。而名字只是今天的日期，B 里有同名文件的概率很高，
-  // 那时用户在静默地编辑另一个项目里的另一个文件，界面上一切正常。
-  // 修法是给 openFile 加显式 workspace 参数，让整条路只解析一次。
-  // -------------------------------------------------------------------------
-  it('走到一半用户切了 Workspace：绝不按新 Workspace 去打开，也绝不静默无事发生', async () => {
-    workspaceFixture()
-    // 两个 Workspace 都有 layout：否则 openFile 会在「没有 layout」那一支静默 return，
-    // 缺陷会退化成「什么都没发生」，测不出更坏的那一种（真的把 B 的同名文件打开了）。
-    useAppStore.setState({
-      config: {
-        ...config,
-        workspaces: [
-          ...config.workspaces,
-          { id: 'other', name: 'Other', hostId: 'local', path: '/other', kind: 'folder' }
-        ]
-      },
-      layouts: {
-        workspace: createWorkspaceLayout('pane'),
-        other: createWorkspaceLayout('other-pane')
-      }
-    })
-    const stem = noteStemForDate(new Date())
-    const name = `${stem}${NOTE_FILE_EXTENSION}`
-    // 写入面**真的**建出文件（call through），只是在它 resolve 之前把 activeWorkspaceId
-    // 切走——模拟用户在等待期间点了侧栏。必须 call through：读侧的 mock 只按 path 索引，
-    // 于是「文件在盘上」这个前提对两个 Workspace 都成立，openFile 会在它自己解析出来的那个
-    // Workspace 下真的开出一份文档。这正是缺陷的锋利形态——不是「打不开」，而是**开错了**。
-    // 这里刻意不替换 openFile：判据必须落在它真正解析出来的 Workspace 上，
-    // 而不是一个只会回显 activeWorkspaceId 的桩（那测的是桩，不是产品）。
-    const realCreate = api.files.create
-    const created: Array<string | undefined> = []
-    vi.spyOn(api.files, 'create').mockImplementation(async (workspaceId, input) => {
-      created.push(workspaceId)
-      await realCreate(workspaceId, input)
-      useAppStore.setState({ activeWorkspaceId: 'other' })
-    })
-
-    const outcome = await useAppStore.getState().createNote().then(
-      (value) => ({ ok: true as const, value }),
-      (error: unknown) => ({ ok: false as const, error })
-    )
-
-    // 前提自检：文件确实是建在 workspace 而不是 other 上的，否则下面判的不是这个缺陷。
-    expect(created).toEqual(['workspace'])
-    const documents = useAppStore.getState().documents
-    // 承重：**绝不能**在 other 里开出一份文档——那是另一个项目里的同名文件，
-    // 用户会以为自己在编辑刚建的笔记，而界面上一切正常。
-    expect(documents[documentKey('other', name)]).toBeUndefined()
-    if (outcome.ok) {
-      // 报成功就必须真的把建出来的那一份打开了。
-      expect(outcome.value).toBe(name)
-      expect(documents[documentKey('workspace', name)]).toBeDefined()
-    } else {
-      // 也可以选择不打开，但那必须响亮失败并说清笔记在哪，不能静默什么都没发生。
-      expect(String(outcome.error)).toMatch(new RegExp(stem))
-    }
-  })
-
-  // -------------------------------------------------------------------------
-  // launcher 绑着 A，而活动 Workspace 是 B。
-  //
-  // 缺陷原形：五个启动动作各自手抄一遍「落在哪个 Workspace」，其中四个写
-  // `launcherTab?.workspaceId ?? activeWorkspaceId`，而 createNote **只读** activeWorkspaceId。
-  // 组件侧决定卡片标题的那一份（NewTabSurface :83）与前四个一致。于是 launcher 挂在绑定 A 的
-  // Tab 上、用户切了侧栏（Tab 不动，B 成为活动）之后：标题写「Start in A」，点 Launch / Terminal /
-  // Browser 都落 A，点 Note **建到 B**。零报错，界面一切正常。
-  //
-  // 上一条测的是「一次动作内两次解析漂移」；这一条测的是「不同动作之间解析不一致」——
-  // 完全不同的形状：这里 activeWorkspaceId 全程不变，没有任何 await 期间的切换。
-  // -------------------------------------------------------------------------
-  it('launcher 绑着 A 而活动 Workspace 是 B：笔记建在 A，与其余四个启动动作一致', async () => {
-    const tabId = 'launcher-tab'
-    const regionId = initialWorkbenchRegionId(tabId)
-    const launcher = createWorkbenchTab(tabId, { regionId, kind: 'launcher', workspaceId: 'workspace' })
-    useAppStore.setState({
-      config: {
-        ...config,
-        workspaces: [
-          ...config.workspaces,
-          { id: 'other', name: 'Other', hostId: 'local', path: '/other', kind: 'folder' }
-        ]
-      },
-      // 活动 Workspace 是 B，而 launcher 那张 Tab 绑的是 A。这是「切了一下侧栏」的状态，
-      // 不需要任何异步窗口——缺陷在同步路径上就已经成立。
-      activeWorkspaceId: 'other',
-      tabs: { [launcher.id]: launcher },
-      layouts: {
-        workspace: createWorkspaceLayout('pane', [launcher.id]),
-        other: createWorkspaceLayout('other-pane')
-      },
-      documents: {},
-      workspaceFileRevisions: {},
-      error: null
-    })
-    const created: Array<string | undefined> = []
-    vi.spyOn(api.files, 'create').mockImplementation(async (workspaceId) => { created.push(workspaceId) })
-    const openedWorkspaces: Array<string | undefined> = []
-    useAppStore.setState({
-      openFile: (async (_path: string, _group?: string, _loc?: unknown, workspaceId?: string) => {
-        openedWorkspaces.push(workspaceId)
-      }) as never
-    })
-
-    await useAppStore.getState().createNote('pane', { tabId, regionId })
-
-    // 承重：建与打开都必须落在 launcher 绑定的那个 Workspace 上。落到 'other' 就是这个缺陷——
-    // 笔记出现在另一个项目里，而名字只是当天日期，那边有同名文件的概率还很高。
-    expect(created).toEqual(['workspace'])
-    expect(openedWorkspaces).toEqual(['workspace'])
-    // 前提自检：活动 Workspace 确实是**另一个**。若两者相同，上面两条对错误实现也成立。
-    expect(useAppStore.getState().activeWorkspaceId).toBe('other')
-    // 失效计数也必须记在 A 上：记到 B 会让 A 的文件树看不到新笔记（要等别的写入面碰巧 bump）。
+    const open = vi.fn(async () => true)
+    useAppStore.setState({openFile:open})
+    const receipt = await useAppStore.getState().createNote('pane')
+    expect(receipt.status).toBe('written'); expect(receipt.revealed).toBe(true)
+    expect(paths).toEqual([`${noteStemForDate(new Date())}${NOTE_FILE_EXTENSION}`, `${noteStemForDate(new Date())}-2${NOTE_FILE_EXTENSION}`])
+    expect(write.mock.calls.map(([workspaceId])=>workspaceId)).toEqual(['workspace','workspace'])
+    expect(open).toHaveBeenCalledWith(receipt.path,'pane',undefined,'workspace',undefined,expect.objectContaining({displayWorkspaceId:'workspace'}))
     expect(useAppStore.getState().workspaceFileRevisions.workspace).toBe(1)
-    expect(useAppStore.getState().workspaceFileRevisions.other).toBeUndefined()
   })
-
-  // 请求这条笔记的分组才是它该出现的地方。此前 createNote 给 openFile 传的是 undefined，于是
-  // openFile 退到 `layout.activeGroupId`——从一个**非活动**分组（分屏的另一半、或浮层里的 launcher）
-  // 建笔记，Tab 会挂到别的分组上：用户点了「Note」，自己眼前这一半什么都没变。
-  it('笔记 Tab 落在请求它的那个分组，而不是活动分组', async () => {
-    const tabId = 'launcher-tab'
-    const regionId = initialWorkbenchRegionId(tabId)
-    const launcher = createWorkbenchTab(tabId, { regionId, kind: 'launcher', workspaceId: 'workspace' })
-    // 两个分组，活动的是 other-pane；launcher 在 pane 里。
-    const split = moveTabToNewGroup(
-      createWorkspaceLayout('pane', [launcher.id, 'placeholder']),
-      'placeholder',
-      'pane',
-      'pane',
-      'right',
-      'other-pane'
-    )
-    useAppStore.setState({
-      config,
-      activeWorkspaceId: 'workspace',
-      tabs: { [launcher.id]: launcher },
-      layouts: { workspace: split },
-      documents: {},
-      workspaceFileRevisions: {},
-      error: null
-    })
-    // 前提自检：活动分组确实**不是** launcher 所在的那个，否则下面判不出这个缺陷。
-    expect(useAppStore.getState().layouts.workspace!.activeGroupId).toBe('other-pane')
-    vi.spyOn(api.files, 'create').mockResolvedValue(undefined)
-
-    // 这里刻意不替换 openFile：判据要落在它真正把 Tab 挂到哪个分组上。
-    const name = await useAppStore.getState().createNote('pane', { tabId, regionId })
-
-    const layout = useAppStore.getState().layouts.workspace!
-    const noteTabId = findGroupForTab(layout, fileTabId('workspace', name))?.id
-    expect(noteTabId).toBe('pane')
+  it('没有资源Workspace就不发写入', async () => {
+    useAppStore.setState({config,activeWorkspaceId:null})
+    const write=vi.spyOn(api.files,'write')
+    await expect(useAppStore.getState().createNote()).rejects.toThrow(/workspace/i)
+    expect(write).not.toHaveBeenCalled()
   })
-
-
-  // 与正确实现在第一条笔记上完全无法区分。真实症状出在**第二**条——计数不前进，
-  // 文件树的失效键不变，新笔记要等到别的写入面碰巧 bump 才会出现在树里。
-  it('连着建两条笔记，失效计数每次都前进（不是恒等于 1）', async () => {
+  it('保真实permission code，不把失败当成已创建', async () => {
     workspaceFixture()
-    vi.spyOn(api.files, 'create').mockResolvedValue(undefined)
-    useAppStore.setState({ openFile: (async () => {}) as never })
-
-    await useAppStore.getState().createNote()
-    const afterFirst = useAppStore.getState().workspaceFileRevisions.workspace
-    await useAppStore.getState().createNote()
-    const afterSecond = useAppStore.getState().workspaceFileRevisions.workspace
-
-    expect(afterSecond).toBe((afterFirst ?? 0) + 1)
+    const write=vi.spyOn(api.files,'write').mockResolvedValue({status:'error',code:'EACCES',message:'permission denied'})
+    const open=vi.fn(async()=>true);useAppStore.setState({openFile:open})
+    const receipt=await useAppStore.getState().createNote('pane',undefined,'draft')
+    expect(receipt.status).toBe('error'); expect(receipt.draft).toBe('draft')
+    expect(write).toHaveBeenCalledTimes(1); expect(open).not.toHaveBeenCalled()
+  })
+  it('launcher绑定A且活动Workspace是B，正文仍写A的Files owner', async () => {
+    workspaceFixture()
+    useAppStore.setState({config:{...config,workspaces:[...config.workspaces,{id:'b',name:'B',hostId:'local',path:'/b',kind:'folder'}]},activeWorkspaceId:'b',layouts:{...useAppStore.getState().layouts,b:createWorkspaceLayout('other')}})
+    const write=vi.spyOn(api.files,'write').mockResolvedValue({status:'written',revision:'created'})
+    useAppStore.setState({openFile:vi.fn(async()=>true)})
+    const receipt=await useAppStore.getState().createNote('pane',{tabId:'launcher-tab',regionId:initialWorkbenchRegionId('launcher-tab')})
+    expect(receipt.target.workspaceId).toBe('workspace');expect(write.mock.calls.map(([workspaceId])=>workspaceId)).toEqual(['workspace'])
+  })
+  it('每个新意图各增加原失效计数，普通Markdown不参与迁移', async () => {
+    workspaceFixture();vi.spyOn(api.files,'write').mockResolvedValue({status:'written',revision:'created'});useAppStore.setState({openFile:vi.fn(async()=>true)})
+    const first=await useAppStore.getState().createNote('pane'), second=await useAppStore.getState().createNote('pane')
+    expect(first.noteId).not.toBe(second.noteId);expect(useAppStore.getState().workspaceFileRevisions.workspace).toBe(2)
   })
 })
 

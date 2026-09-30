@@ -65,6 +65,9 @@ importers:
       '@tiptap/core':
         specifier: ^3.31.3
         version: 3.31.3(@tiptap/pm@3.31.3)
+      '@tiptap/extension-unique-id':
+        specifier: 3.31.3
+        version: 3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)
       '@tiptap/react':
         specifier: ^3.31.3
         version: 3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -2037,6 +2040,17 @@ packages:
     resolution:
       integrity: sha512-Kyybo5/BaJp76z7gDWGk2J6Hthl4NIPsE+swgraEjy3IY6r5zIR02wAs1OJH4XtJp1y3puj3Onp5eMGS0z7nUA==
 
+  '@tiptap/extension-unique-id@3.31.3':
+    resolution: {integrity: sha512-ztX6wWurh8PLseQ+CfaX+QNKM6ARUSMxkGXUmQPWBiOwwRLGctGc4rhaFIaTsCyQlDl3tXA8Po8H2PQZ9AsqDQ==}
+    peerDependencies:
+      '@tiptap/core': 3.31.3
+      '@tiptap/pm': 3.31.3
+
+  uuid@14.0.2:
+    resolution: {integrity: sha512-xZe/16rV4aa+HGSOCiY2YeLT1OybRLrrkL/Rqaq7p7GMVXjFh+6wN4oMYgjFmnSnhY8t6Xpdl2l9qmnHYuMHwQ==}
+    hasBin: true
+
+
 snapshots:
 
   luxon@3.7.2: {}
@@ -3928,3 +3942,12 @@ snapshots:
   "@bufbuild/protobuf@1.10.1": {}
 
   wa-sqlite@1.0.0: {}
+
+  '@tiptap/extension-unique-id@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)':
+    dependencies:
+      '@tiptap/core': 3.31.3(@tiptap/pm@3.31.3)
+      '@tiptap/pm': 3.31.3
+      uuid: 14.0.2
+
+  uuid@14.0.2: {}
+
