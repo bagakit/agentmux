@@ -24,6 +24,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
+import { newNoteDocument } from '../src/shared/note-document'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), session = composerSession()
@@ -45,8 +46,9 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => useLauncherState.setState({ drafts: {}, sections: {} })) })
 async function mountSurvey(multipleGroups = false) {
   if (multipleGroups) useAppStore.setState({ layouts: { workspace: moveTabToNewGroup(useAppStore.getState().layouts.workspace!, second.id, 'g', 'g', 'right', 'second-group') } })
-  await dom.render(<App />); await dom.click('[aria-label="Survey: browse and manage pages"]')
   const zoneId = spatialCatalog(useAppStore.getState(), []).tabs.find(tab => tab.tabId === first.id)!.zoneId!
+  expect(useAppStore.getState().setSurveyZoneCollected(zoneId, true)).toBe(true)
+  await dom.render(<App />); await dom.click('[aria-label="Survey: browse and manage pages"]')
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)
   expect(row).toBeDefined(); await act(async () => row!.querySelector<HTMLButtonElement>('.survey-item')!.click())
   await dom.click('.global-survey-surface button.workbench-tab[data-workbench-tab-id="first"]')
@@ -97,4 +99,37 @@ it('offers an explicit same-intent retry after a known creation failure', async 
   expect(button).toBeDefined(); await act(async () => button!.click())
   expect(receipt()).toMatchObject({ intentId: failed.intentId, noteId: failed.noteId, blockIds: failed.blockIds, path: failed.path, status: 'written', revealed: true })
   expect(api.files.write).toHaveBeenCalledTimes(2); expect(useLauncherState.getState().drafts['region:first-region']?.note).toBe('')
+})
+
+it('collects the original Zone through the actual Note creation caller, without moving the original Space selection', async () => {
+  const before = await mountSurvey(), zoneId = useAppStore.getState().surveyZoneSelection!.zoneId
+  await act(async () => { useAppStore.getState().setSurveyZoneCollected(zoneId, false) })
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({})
+  expect(dom.container.querySelector('[data-survey-zone-id]')).toBeNull()
+  expect(dom.container.querySelector('.global-survey-surface')!.textContent).toContain('outside the Survey list')
+  await save()
+  expect(receipt()).toMatchObject({ status: 'written', revealed: true })
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({ [zoneId]: true })
+  expect(snapshot()).toEqual(before)
+  await act(async () => useAppStore.getState().setSurveyZoneSelection(null))
+  expect(dom.container.querySelectorAll('[data-survey-zone-id]')).toHaveLength(1)
+})
+it('collects an explicitly opened valid Note through the original File owner and excludes an ordinary File', async () => {
+  await mountSurvey()
+  const state = useAppStore.getState(), zoneId = state.surveyZoneSelection!.zoneId
+  const projection = observed.projections.filter(projection => projection?.presentationId === 'survey-workbench').at(-1)!
+  const zone = projection!.catalog.zones.find(zone => zone.zoneId === zoneId)!
+  const spaceId = projection!.catalog.bindings.find(binding => binding.zoneId === zoneId)!.spaceId
+  const placement = { displayWorkspaceId: 'workspace', space: { spaceId, zoneId }, resource: { hostId: zone.hostId!, path: '/repo' }, projection }
+  content = JSON.stringify(newNoteDocument('Original Note', 'opened-note', 'opened-block')); path = 'opened.note.json'
+  await act(async () => {
+    state.setSurveyZoneCollected(zoneId, false)
+    expect(await state.openFile(path, 'g', undefined, 'workspace', undefined, placement)).toBe(true)
+  })
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({ [zoneId]: true })
+  await act(async () => {
+    useAppStore.getState().setSurveyZoneCollected(zoneId, false); path = 'ordinary.md'; content = 'Ordinary file'
+    expect(await state.openFile(path, 'g', undefined, 'workspace', undefined, placement)).toBe(true)
+  })
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({})
 })

@@ -119,11 +119,11 @@ it('lets Radix keyboard selection toggle only the chosen relation and Escape res
 })
 
 it('selects the original Zone and opens only the separately supplied resource Workspace', async () => {
-  const onSelect = vi.fn(), onOpenWorkspace = vi.fn()
+  const onSelect = vi.fn(), onOpenWorkspace = vi.fn(), onCollectedChange = vi.fn()
   const resource = { id: 'foreign-resource', name: 'Resource project', hostId: 'remote', path: '/source/worktree', branch: 'resource-branch', kind: 'worktree' as const }
   const render = async (sourceWorkspace: typeof resource | null, relatedTopics: AgentMuxSpaceFact[] | null) => {
     await act(async () => root.render(<SurveyZoneItem zone={zone} title="Original mixed workface" selected sourceWorkspace={sourceWorkspace}
-      relatedTopics={relatedTopics} activity="Mixed" activityDetails="Two Browsers: mixed control" onSelect={onSelect} onOpenWorkspace={onOpenWorkspace} />))
+      relatedTopics={relatedTopics} collected={false} onCollectedChange={onCollectedChange} activity="Mixed" activityDetails="Two Browsers: mixed control" onSelect={onSelect} onOpenWorkspace={onOpenWorkspace} />))
   }
   await render(resource, [topicA, topicB, mote])
   const select = container.querySelector<HTMLButtonElement>('[aria-current="true"]')!, details = container.querySelector<HTMLButtonElement>('.survey-item-details')!
@@ -136,6 +136,9 @@ it('selects the original Zone and opens only the separately supplied resource Wo
   expect(source).not.toBeNull()
   expect(menu()!.textContent).toContain('Branch: resource-branch')
   expect(menu()!.textContent).not.toContain('Branch: work'); expect(menu()!.textContent).toContain('Two Browsers: mixed control')
+  const member = document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!
+  await act(async () => member.focus()); await key(member, 'Enter')
+  expect(onCollectedChange).toHaveBeenCalledExactlyOnceWith(true); expect(menu()).not.toBeNull()
   await act(async () => source.click()); expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith('foreign-resource')
   expect(source.getAttribute('aria-label')).toContain('remote, /source/worktree')
   await render(null, null); expect(container.querySelector('[aria-label="Topic links unknown"]')).not.toBeNull(); expect(container.querySelector('[aria-label="Resource unknown"]')).not.toBeNull()

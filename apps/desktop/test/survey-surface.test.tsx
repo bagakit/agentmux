@@ -19,6 +19,7 @@ vi.mock('react-resizable-panels', async () => {
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: (props: { session: { id: string }; visible?: boolean }) => <div data-terminal-probe={props.session.id} data-visible={props.visible}><textarea defaultValue="Original terminal input" /></div> }))
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => <textarea data-file-probe defaultValue="Original file input" /> }))
 const observation = vi.hoisted(() => ({
+  catalogUnavailable: false,
   survey: [] as Parameters<typeof import('../src/renderer/src/components/GlobalSurveySurface').GlobalSurveySurface>[0][],
   memory: [] as { input: SurfaceMemoryCollectionInput; candidates: { id: string; kind: string; visible: boolean; navigationContextActive: boolean }[] }[],
   terminals: [] as { workbenchVisible: boolean; projectedVisibleTabIds?: ReadonlySet<string> | undefined }[],
@@ -27,7 +28,7 @@ const observation = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/components/GlobalSurveySurface', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/GlobalSurveySurface')>()
   return { ...actual, GlobalSurveySurface: (props: Parameters<typeof actual.GlobalSurveySurface>[0]) => {
-    observation.survey.push(props); return <actual.GlobalSurveySurface {...props} />
+    observation.survey.push(props); return <actual.GlobalSurveySurface {...props} catalog={observation.catalogUnavailable ? { spaces: [], zones: [], bindings: [], tabs: [], regions: [], locations: [] } : props.catalog} />
   } }
 })
 vi.mock('../src/renderer/src/lib/surface-memory-budget-candidates', async (importOriginal) => {
@@ -93,6 +94,7 @@ beforeEach(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
   Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true })
   savedStorage = localStorage.getItem('agentmux-workbench-v1')
+  observation.catalogUnavailable = false;
   observation.memory = []; observation.terminals = []; observation.stages = []; observation.survey = []
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const survey = this.closest('.global-survey-surface') !== null
@@ -100,7 +102,7 @@ beforeEach(() => {
   })
   useAppStore.setState({ loading: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench',
     surveySidebarWidth: 220,
-    surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: composerConfig, activeWorkspaceId: workspace.id,
+    surveyCollectedZones: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: composerConfig, activeWorkspaceId: workspace.id,
     sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]) },
     agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
     projectRailOpen: true, toolsOpen: true, workspaceTool: 'agents', demands: {}, browserAnnotationsByBrowserId: {},
@@ -318,6 +320,7 @@ it('creates an original temporary Zone from raw central input and navigates the 
   const selection = useAppStore.getState().surveyZoneSelection!, reference = selection.active!
   expect(createZone).toHaveBeenCalledExactlyOnceWith({ workspaceId: workspace.id, spaceIds: [] })
   expect(selection.zoneId).not.toBe(originalZoneId())
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({ [selection.zoneId]: true })
   expect(useAppStore.getState().tabs[reference.tabId]!.space?.zoneId).toBe(selection.zoneId)
   expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(reference.regionId, '  protocol notes  ', workspace.id)
   expect(useAppStore.getState().layouts[workspace.id]!.groups[0]!.activeTabId).toBe(mixed.id)
@@ -598,4 +601,44 @@ it('retains an unsupported direct Region reference without painting its parent T
   expect(dom.container.querySelector('[data-workbench-region-id]')).toBeNull()
   expect(projection.selection).toEqual([reference]); expect(projection.onSelect).not.toHaveBeenCalled()
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
+})
+
+it('removes automatic discovery after the last Browser closes without discarding the selected mixed workface', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), selected = before.surveyZoneSelection!, layout = before.layouts[workspace.id]
+  expect(before.surveyCollectedZones).toEqual({})
+  await act(async () => {
+    await useAppStore.getState().closeRegion(workspace.id, mixed.id, pageB.regionId)
+    await useAppStore.getState().closeRegion(workspace.id, mixed.id, pageA.regionId)
+  })
+  const current = useAppStore.getState()
+  expect(current.surveyZoneSelection).toEqual(selected)
+  expect(current.surveyCollectedZones).toEqual({})
+  expect(dom.container.querySelectorAll('[data-survey-zone-id]')).toHaveLength(0)
+  expect(dom.container.querySelector('.global-survey-surface')!.textContent).toContain('outside the Survey list')
+  expect(current.layouts[workspace.id]).toBe(layout)
+  expect(Object.keys(current.tabs[mixed.id]!.regions)).toEqual(['agent-region', 'file-region'])
+  expect(dom.container.querySelector('.global-survey-surface [data-file-probe]')).not.toBeNull(); healthy()
+  await dom.click('.global-survey-surface .survey-relation-notice .small-button')
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({ [selected.zoneId]: true })
+  expect(dom.container.querySelectorAll('[data-survey-zone-id]')).toHaveLength(1)
+})
+
+it('keeps the held exact occurrence when the same retained Item is clicked while its catalog is unconfirmed', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose(originalZoneId())
+  await selectRegion(pageB.regionId)
+  const before = useAppStore.getState(), held = before.surveyZoneSelection!
+  expect(held.active).toEqual({ displayWorkspaceId: workspace.id, groupId: 'original-group', tabId: mixed.id, regionId: pageB.regionId })
+  await act(async () => {
+    before.setSurveyZoneCollected(held.zoneId, true)
+    observation.catalogUnavailable = true
+    useAppStore.setState({ config: { ...composerConfig } })
+  })
+  expect(dom.container.querySelector('[aria-label="Show retained survey item"]')).not.toBeNull()
+  await dom.click('[aria-label="Show retained survey item"]')
+  const current = useAppStore.getState()
+  expect(current.surveyZoneSelection).toBe(held)
+  expect(current.surveyZoneSelection?.active).toEqual(held.active)
+  expect(current.layouts).toBe(before.layouts); expect(current.tabs).toBe(before.tabs)
+  expect(current.surveyCollectedZones).toEqual({ [held.zoneId]: true }); healthy()
 })

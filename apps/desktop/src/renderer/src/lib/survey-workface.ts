@@ -11,9 +11,20 @@ export type SurveyZoneSelection = {
 }
 export type SurveyBrowserTarget = { workspaceId: string; tabId: string; regionId: string }
 
-export function surveyZoneItems(catalog: AgentMuxSpaceCatalog, selected: SurveyZoneSelection | null): AgentMuxZoneFact[] {
-  const occupied = new Set(catalog.tabs.flatMap(tab => tab.zoneId && tab.regionIds.length ? [tab.zoneId] : []))
-  return catalog.zones.filter(zone => occupied.has(zone.zoneId) || selected?.zoneId === zone.zoneId && selected.selection.length > 0)
+/** Explicit Survey display references. Entity, resource, Topic and content facts stay at their owners. */
+export type SurveyCollection = Readonly<Record<string, true>>
+
+export function restoredSurveyCollection(candidate: unknown): Record<string, true> {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {}
+  return Object.fromEntries(Object.entries(candidate).filter(([id, collected]) => id.length > 0 && collected === true))
+}
+
+export function surveyZoneItems(catalog: AgentMuxSpaceCatalog, collected: SurveyCollection): AgentMuxZoneFact[] {
+  const browserRegions = new Set(catalog.regions.filter(region => region.kind === 'browser')
+    .map(region => JSON.stringify([region.tabId, region.regionId])))
+  const discovered = new Set(catalog.tabs.flatMap(tab => tab.zoneId && tab.regionIds.some(regionId =>
+    browserRegions.has(JSON.stringify([tab.tabId, regionId]))) ? [tab.zoneId] : []))
+  return catalog.zones.filter(zone => discovered.has(zone.zoneId) || collected[zone.zoneId] === true)
 }
 
 /** Original active/recent references, with no first-member or resource-workspace fallback. */
