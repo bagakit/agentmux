@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { chooseFocusFilter } from './fixtures/focus-filter-menu'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -107,7 +108,7 @@ async function projectStates() {
     ], timelines: {}, agentNames: { a: 'Current repair', 'mixed-offline': 'Retained neighbour', 'old-one': 'Earlier experiment', 'old-two': 'Design notes', 'other-one': 'Old review' }
   })))
 }
-const changeFilter = (value: string) => act(async () => { const select = container.querySelector<HTMLSelectElement>('[aria-label="Focus state filter"]')!; select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })) })
+const changeFilter = (value: string) => chooseFocusFilter(container, 'state', value)
 it('keeps five stable status positions with zero counts and no repeated row empty state', async () => {
   await mount()
   const columns = [...container.querySelectorAll<HTMLElement>('.focus-context-group__header')]
