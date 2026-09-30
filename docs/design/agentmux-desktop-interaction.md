@@ -221,6 +221,18 @@ fixture 只定义场景数据、操作、观察点与模拟边界，并引用当
 
 命令扩展、缺省建议、现有 source 缺口与实施验收见 [桌面语义导航 CLI 合同](../plans/desktop-focus-navigation-cli-design.md)。本项与 Agent 创建／空间移动、Mote 快捷面 hover 各有独立交付边界，复用各自已有 owner，不重做它们的生命周期。
 
+### Agent 通过 CLI 打开文件与控制原工作面
+
+用户要求继续补齐「文件／Editor 打开、Region 展示模式切换、Region 交换」，让 Agent 能用本产品既有 CLI 操作原工作面。文件资源、Agent 的 Session 展示偏好与 Region 的空间表现必须按原 owner 分清，不复制文件服务、catalog、布局或 Runtime。
+
+- 文件按精确 Zone 的真实目录与字面目录相对路径打开，再沿原资源关系映射到既有 filesAPI 的 Workspace 相对路径；Topic 目录不能偷换成隐藏容器根。显示落点使用原 Space／Zone／display Workspace／group 身份，不能按 caller cwd、标题或当前主面猜位置。目录与原资源根映射未确认时如实未知，不改执行事实。文件入口打开或复用原 canonical File Tab／Region；零 Tab 的已有 Zone 可打开第一张 File Tab，不新建 Zone、Agent／Run，不替换 Launcher 或别人的内容。显式显示落点不能把资源根改成显示目录，也不能静默重归属已有 File Tab。
+- 文件默认后台放置，显式导航也默认保留仍合资格的现有 Mote／Terminal／Editor 输入、草稿和组字；旧输入因显示变化失去资格须如实未确认，不能 focus／blur 后恢复来补签。资源创建、读取、实际格式、精确落点与导航是否仍获授权分别说明；异步读取完成前用户已经导航，不能抢回主面或把晚回执指向替换者。文件面已建立但读取失败仍保留原面与准确原因，不能从未获导航授权推断未打开。目录不作为 File 打开，书签源码不顺带开 Browser；媒体和二进制沿真实预览，不冒可编辑 Editor。
+- Terminal／Activity 是 exact SID 的展示偏好，影响该 SID 的全部原投影；File 的 source／diff／preview 是 exact Region 的互斥模式，影响同一 Region 的全部呈现，不影响另一 Region 的同文件视图。合法 opaque ID 按原 own-entry 读取，不把继承属性当实际覆盖。暂缺 Core 快照不能阻断原 durable AgentRegion 的显示选择，不探测 readiness、不猜另一个 Session。CLI 改展示偏好不改主面选择、逻辑 lane、Session／Run 或 cwd，不隐式授权 caret 转移；输入资格变化如实未确认，原 GUI 明确操作保持其既有行为。
+- File 模式由同一个原 Region owner 决定真正正文与菜单状态，不能同时保留 local preview 与 diff 让明确选择被遮盖。Markdown／SVG／Note 文本支持源码、diff 与预览，普通文本／HTML 源码不冒同 Region 的 HTML Browser 预览；媒体与已知二进制只读预览。支持范围来自实际格式与读取事实，未知如实未知；模式已应用与 preview／diff 数据可用分别说明。切换保同一原文档、未保存内容及每 Region view state，projection 模型沿原生命周期可释放／重建；仍合资格的原输入不被抢，失去资格如实未确认，不保存文件或阻断健康 Run。
+- 交换只换同一 Tab entity 内两个 exact Region 在原分割树中的位置，比例、逻辑活动 ID、内容身份及其执行事实保持。同一实体的所有显示 occurrences 共用该布局，回执明确共同作用范围，不因多个位置误报实体歧义，也不宣称只改其中一次呈现。主面保留的源焦点与借出浮窗的局部选择仍按原 presentation 事实，不以复制 surface／内容身份或新建 Run 换位。DOM 与模型依原呈现生命周期，仍合资格输入不被抢；不以 Store ID 代签同 DOM／caret，未知如实未知。
+- 只读模式查询与观察不触发读取、diff、持久写、refresh、Launcher 预热或生命周期。操作回执分别给出已应用、未确认和真实 save 事实；掉回执不能按未执行自动重放，尤其交换不能再执行一次。保存失败保已应用工作面与健康内容，持续服务窗说明哪步失败、当前状态和恢复动作；flush request 不能冒充磁盘 ACK。
+- 普通进程重启先恢复原 File／Agent Region、Tab／group／布局与 Session 引用。Agent 展示偏好沿原持久 owner；File Region 模式沿原临时策略恢复到格式默认，不另建持久模式 Map。读取与握手失败保原面，不把缺快照当已关闭。现有内容的观测与消费成本只随相关实体／occurrences 增长，不读取全量终端输出或为无关会话增加工作。
+
 ### 打包、安装与启动事实
 
 - 候选包在签名、身份和安装前启动验证任一步失败时，保留旧的 canonical 安装并明确报告失败阶段，不能把旧包或半成品误报为最新版。
