@@ -1,6 +1,6 @@
 import { ChevronRight, Info, LoaderCircle } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
-import type { AgentDisplayState, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
   initFollowState,
@@ -40,6 +40,7 @@ import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from './ConversationMessage'
+import { ConversationNativeReasoning } from './ConversationNativeReasoning'
 import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { SemanticIcon } from './semantic-icons'
 
@@ -674,6 +675,7 @@ export function ActivityView({
   sessionId,
   items,
   userMessages,
+  nativeHistoryPage,
   userMessageRead,
   capability,
   displayState,
@@ -688,6 +690,7 @@ export function ActivityView({
   sessionId: string
   items: AgentTimelineItem[]
   userMessages?: readonly AgentSessionUserMessage[]
+  nativeHistoryPage?: AgentSessionHistoryPage | null
   userMessageRead?: UserMessageReadState
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
@@ -858,10 +861,13 @@ export function ActivityView({
   }, [placed])
 
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
+  const hasNativeReasoning = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.some(
+    (item) => item.kind !== 'user-message' && item.contentParts.some((part) => part.kind === 'reasoning')
+  )
   const hasItems = items.length > 0
   const readNotice = <UserMessageReadNotice read={userMessageRead} />
 
-  if (capability === 'unavailable' && !hasUserMessages && !hasItems) {
+  if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeReasoning) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
@@ -871,7 +877,7 @@ export function ActivityView({
       </div>
     )
   }
-  if (!hasUserMessages && showEmptyState(displayState, items)) {
+  if (!hasUserMessages && !hasNativeReasoning && showEmptyState(displayState, items)) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
@@ -883,7 +889,7 @@ export function ActivityView({
   }
   // 正在想、但首行还没落地：显示"在进行"而不是空状态。一个正在工作的东西显示成空，
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
-  if (!hasUserMessages && !hasItems) {
+  if (!hasUserMessages && !hasItems && !hasNativeReasoning) {
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
@@ -1005,6 +1011,15 @@ export function ActivityView({
           )
         })}
       </div>
+      {nativeHistoryPage ? <ConversationNativeReasoning
+        page={nativeHistoryPage}
+        sessionId={sessionId}
+        workspaceRoot={workspaceRoot}
+        {...(describeSpeaker ? { describeSpeaker } : {})}
+        {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+        {...(readPastedImage ? { readPastedImage } : {})}
+        {...(openHttpLink ? { openHttpLink } : {})}
+      /> : null}
       {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump ? (
         <button

@@ -177,6 +177,7 @@ export function SessionPane({
     startupDecision.reason === 'idle-over-day'
   const {
     messages: userMessages,
+    nativeHistoryPage,
     loading: userMessagesLoading,
     error: userMessagesError,
     hasMore: hasEarlierUserRecords,
@@ -440,6 +441,7 @@ export function SessionPane({
       sessionId={session.id}
       items={timeline}
       userMessages={userMessages}
+      nativeHistoryPage={nativeHistoryPage}
       userMessageRead={{
         loading: userMessagesLoading,
         error: userMessagesError,

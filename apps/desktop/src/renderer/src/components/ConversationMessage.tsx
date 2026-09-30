@@ -1,4 +1,5 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentTimelineItemStatus } from '@agentmux/core'
+import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ChevronRight, Copy } from 'lucide-react'
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { formatClock, formatOffset } from '../lib/activity-ruler'
@@ -97,6 +98,9 @@ export function ConversationMessage({
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
   const isSystemContext = speaker?.role === 'system'
+  const isIncoming = speaker?.role === 'human' || isPeerAgent
+  const prefix = isIncoming && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null
+  const isDeclaredSender = prefix !== null && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
   const displayName = recordedSpeaker?.role === 'unknown'
@@ -177,6 +181,8 @@ export function ConversationMessage({
       data-message-id={messageId || undefined}
       data-speaker-role={speaker?.role}
       data-speaker-relation={isPeerAgent ? 'other-agent' : undefined}
+      data-message-direction={isIncoming ? 'incoming' : 'outgoing'}
+      data-declared-source={prefix?.sourceLabel}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
     >
@@ -189,7 +195,8 @@ export function ConversationMessage({
         /> : <SemanticIcon name="neutral" size={12} />}
       </span>
       <div className="log-turn__head">
-        <span className="log-turn__who">{displayName}</span>
+        <span className="log-turn__who">{isDeclaredSender ? <><span className="log-turn__source-caption">Message from </span>{prefix.sourceLabel}</> : displayName}</span>
+        {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {isPeerAgent || isSystemContext ? <span className="log-turn__sender-kind">{isSystemContext ? 'System' : 'Agent'}</span> : null}
         {status === 'streaming' ? (
           <span className="log-row__chip" role="status"><SemanticIcon name="working" size={12} />Streaming</span>
@@ -212,6 +219,7 @@ export function ConversationMessage({
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button>
         </span> : null}
+        {prefix && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
       </div>
       {isSystemContext && hasContent ? <button type="button" className="log-turn__system-toggle"
         aria-expanded={systemContextOpen} aria-controls={systemContentId}
@@ -219,10 +227,10 @@ export function ConversationMessage({
       {hasContent && (!isSystemContext || systemContextOpen) ? (
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
-          {parts.map((part) => {
+          {parts.map((part, index) => {
             const key = partKey(part)
             return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}><MemoizedAgentMarkdown
-              content={part.text}
+              content={index === 0 && prefix ? prefix.body : part.text}
               workspaceRoot={workspaceRoot}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
               {...(readPastedImage ? { readPastedImage } : {})}

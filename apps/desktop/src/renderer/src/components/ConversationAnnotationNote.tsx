@@ -1,4 +1,5 @@
 import { autoUpdate, computePosition, inline, offset, shift, size } from '@floating-ui/dom'
+import { ChevronDown, X } from 'lucide-react'
 import { useEffect, useImperativeHandle, useRef, useState, type Ref, type RefObject } from 'react'
 import type { ConversationAnnotation } from './ConversationMessage'
 import { ComposerTextarea } from './ComposerTextarea'
@@ -210,12 +211,20 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
     data-anchor-state={docked ? rects.length ? 'range-docked' : 'unavailable' : 'range'}
     style={docked ? undefined : { position: 'fixed', left: position?.x, top: position?.y, visibility: position ? 'visible' : 'hidden' }}
     onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() } }}>
-    <header className="conversation-annotation-note__header"><strong>Note</strong><button type="button" className="small-button" onClick={close}>Cancel</button></header>
-    {docked ? <span className="conversation-annotation-note__location" role="status">{rects.length ? 'Note beside the reading area; your passage stays underlined.' : 'Original selection position is unavailable. Your note is retained.'}</span> : null}
-    <div className="log-turn__annotation-quote">{edit.target.quote}</div>
-    <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="Leave a note…" rows={3} />
+    <header className="conversation-annotation-note__header">
+      <strong>Note</strong>
+      <button type="button" className="conversation-annotation-note__close" aria-label="Close note" title="Close note · keep draft" onClick={close}><X size={14} aria-hidden="true" /></button>
+    </header>
+    {docked && !rects.length ? <span className="conversation-annotation-note__location" role="status">Original selection position is unavailable. Your note is retained.</span> : null}
+    <details className="conversation-annotation-note__passage">
+      <summary><span>Selected passage</span><ChevronDown size={12} aria-hidden="true" /><span className="conversation-annotation-note__preview">{edit.target.quote}</span></summary>
+      <blockquote className="log-turn__annotation-quote" tabIndex={0} aria-label="Selected passage">{edit.target.quote}</blockquote>
+    </details>
+    <label className="conversation-annotation-note__field"><span>Your note</span>
+      <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="What would you like to add?" rows={3} />
+    </label>
     {error ? <div className="conversation-annotation-note__error" role="alert">{error}</div> : null}
-    <div className="log-turn__annotation-actions"><button type="button" className="small-button" onClick={discard}>Discard note</button><button type="button" className="primary-button" disabled={!note.trim()} onClick={add}>Add to reply draft</button></div>
+    <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" onClick={discard}>Discard note</button><button type="button" className="primary-button" disabled={!note.trim()} onClick={add}>Add to reply draft</button></div>
   </div>
 
   return <>
