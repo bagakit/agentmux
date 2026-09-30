@@ -83,7 +83,7 @@ export async function verifyBrowserSettingsNative() {
   const receipt = { schema: 'agentmux.focus-browser-settings-native.v1', passed: false, capturedPass: false,
     captureOnly: true, aestheticReview: 'not-performed', evidence, userAppRunRuntimeControlled: false,
     limitations: [
-      'A bounded compiled App fixture isolates only Focus destination, PTY/Agent painting and Settings content. App route/SurfaceSwitch/Workspace/Stable/BrowserPane, their real desktop bounds owner and the existing native Browser manager remain actual product.',
+      'A bounded compiled App fixture isolates only adjacent Timeline paint/read, PTY/Agent painting and Settings content. App route/SurfaceSwitch/Workspace/Stable/BrowserPane, their real desktop bounds owner and the existing native Browser manager remain actual product.',
       'The sole API export selects the maintained typed factory for non-Browser controlled facts; native Browser/UI use the mature sandboxed private bridge with exact WebContents/mainFrame checks. No main public ABI, original product source or Core/Runtime is changed.',
       'Renderer and original native page images are separate WebContents captures, never an OS composition. Trusted CDP input is not physical mouse/OS focus qualification. Controlled Session/Run references do not certify real healthy Runs.',
       'The current same-entity simultaneous native multi-binding engine is outside this existing other-Tab Mote/local Settings proof.'
@@ -93,9 +93,9 @@ export async function verifyBrowserSettingsNative() {
       if (!path.startsWith(repository + '/') || path.includes('/node_modules/')) return
       const source = await readFile(path, 'utf8'); inputs.set(path, digest(source))
       const component = path.slice(path.lastIndexOf('/') + 1)
-      if (component === 'GlobalFocusSurface.tsx') {
-        transformations.push({ path: relative(repository, path), isolated: 'Focus destination only' })
-        return { contents: `import {createElement as h} from 'react';export function GlobalFocusSurface(){return h('div',{style:{height:'100%',display:'flex',minHeight:0}},h('div',{id:'focus-workspace-slot',style:{flex:1,minHeight:0}}))}`, loader: 'js' }
+      if (component === 'RecentFocusTimeline.tsx') {
+        transformations.push({ path: relative(repository, path), isolated: 'Adjacent Timeline paint/read only; actual GlobalFocusSurface and its exact Workbench projection remain' })
+        return { contents: 'export function RecentFocusTimeline(){return null}', loader: 'js' }
       }
       if (component === 'SessionPane.tsx') {
         transformations.push({ path: relative(repository, path), isolated: 'PTY/Agent paint only' })

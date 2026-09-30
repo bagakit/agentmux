@@ -9,15 +9,17 @@ import { expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 // Same installed browser primary used by the existing owning ratio/Header fixtures.
 // Node primary registers Panels after the parent's layout effect and cannot own this DOM mount.
-vi.mock('react-resizable-panels', async () => await vi.importActual(
-  '../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.esm.js'))
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
 // Only heavyweight adjacent presentation leaves are isolated. Actual App route state,
 // WorkspaceWorkbench, StableWorkbenchView, BrowserPane and Store remain production modules.
-vi.mock('../src/renderer/src/components/GlobalFocusSurface', () => ({
-  GlobalFocusSurface: () => createElement('div', { id: 'focus-workspace-slot' })
-}))
+// Actual GlobalFocusSurface supplies the current exact Workbench projection slot.
+// Only the adjacent Timeline paint/read scope is isolated for this one Settings counter.
+vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({
-  SessionPane: ({ sessionId }: { sessionId: string }) => createElement('div', { 'data-fixture-agent': sessionId })
+  SessionPane: ({ sessionId }: { sessionId: string }) => createElement('div', { 'data-fixture-agent': sessionId }, 'Original retained reading body')
 }))
 vi.mock('../src/renderer/src/components/SettingsPanel', () => ({
   SettingsPanel: ({ onClose }: { onClose: () => void }) => createElement('section', { 'data-fixture-settings': true },
@@ -56,10 +58,15 @@ it.each(['workbench', 'agents'] as const)('actual %s → Settings hides the reta
   const sourceBefore = identity()
   const originalConfig = await api.config.get()
   const scratch = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: '/private/settings-topics', name: 'Topics', kind: 'folder' as const }
-  const config = { ...originalConfig, workspaces: [...originalConfig.workspaces, scratch] }
+  // Current spatial catalog requires an explicit absolute resource; WebPreview's old relative demo path is not a confirmed directory.
+  const originalResource = originalConfig.workspaces.find(workspace => workspace.id === 'workspace-demo')!
+  expect(originalResource).toBeDefined()
+  const resource = { ...originalResource, path: '/private/settings-proof-project' }
+  const config = { ...originalConfig, workspaces: [...originalConfig.workspaces.map(workspace => workspace.id === resource.id ? resource : workspace), scratch] }
   const snapshot = await api.sessions.snapshot()
-  const session = snapshot.sessions.find(session => session.id === 'session-codex')!
-  expect(session).toBeDefined()
+  const originalSession = snapshot.sessions.find(session => session.id === 'session-codex')!
+  expect(originalSession).toBeDefined()
+  const session = { ...originalSession, workspacePath: resource.path }
   const browserId = 'settings-visibility-browser'
   const tab = createWorkbenchTab('settings-visibility-tab', { regionId: 'agent-region', workspaceId: 'workspace-demo',
     kind: 'agent', phase: 'attached', sessionId: session.id })
@@ -86,12 +93,14 @@ it.each(['workbench', 'agents'] as const)('actual %s → Settings hides the reta
   useAppStore.setState({ ...initial, initialize: async () => () => {}, loading: false, config,
     sessions: [session], tabs: { [tab.id]: tab, [mote.id]: mote }, layouts: { 'workspace-demo': createWorkspaceLayout('original-group', [tab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('foreground-mote-group', [mote.id]) },
     mainSurface, activeWorkspaceId: 'workspace-demo', toolsOpen: false, projectRailOpen: false,
-    agentFocus: { execution: { sessionId: session.id, history: [] }, pmo: { sessionId: null } },
+    agentFocus: { execution: { sessionId: session.id, history: [], reference: { displayWorkspaceId: 'workspace-demo', groupId: 'original-group', tabId: tab.id, regionId: 'agent-region' } }, pmo: { sessionId: null } },
     agentComposerDrafts: { [session.id]: 'Original draft' } }, true)
+  const fixtureReference = useAppStore.getState().agentFocus.execution.reference
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)
   let hidden: boolean | undefined
   let restored: boolean | undefined
+  let hiddenFacts: unknown = null
   const controlCalls = {
     create: vi.spyOn(api.browser, 'create'), close: vi.spyOn(api.browser, 'close'),
     release: vi.spyOn(api.browser, 'release'), restore: vi.spyOn(api.browser, 'restore'),
@@ -123,6 +132,18 @@ it.each(['workbench', 'agents'] as const)('actual %s → Settings hides the reta
     const retainedHost = browserStage.closest('.retained-workbench-view')!
     expect(retainedHost).not.toBeNull()
     const originalParent = retainedHost.parentElement
+    expect(originalParent).not.toBeNull()
+    if (mainSurface === 'agents') expect(retainedHost.closest('.global-session-workspace')).not.toBeNull()
+    const originalBody = retainedHost.querySelector<HTMLElement>('[data-fixture-agent]')!
+    expect(originalBody).not.toBeNull()
+    const text = originalBody.firstChild!
+    expect(text).not.toBeNull()
+    expect(text.nodeType).toBe(Node.TEXT_NODE)
+    const reading = document.createRange()
+    reading.setStart(text, 2); reading.setEnd(text, 19)
+    document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(reading)
+    const originalSelection = document.getSelection()!.toString()
+    expect(originalSelection.length).toBeGreaterThan(0)
     expect(frames.filter(frame => frame.browserId === browserId).at(-1)).toMatchObject({ browserId, visible: true })
     const readsBefore = Object.fromEntries(Object.entries(reads).map(([key, read]) => [key, read.mock.calls.length]))
     const settings = container.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')!
@@ -133,6 +154,22 @@ it.each(['workbench', 'agents'] as const)('actual %s → Settings hides the reta
     expect(container.querySelector('.app-shell__workspace')?.getAttribute('aria-hidden')).toBe('true')
     expect(container.querySelector(`[data-native-browser-stage="${browserId}"]`)).toBe(browserStage)
     hidden = frames.filter(frame => frame.browserId === browserId).at(-1)!.visible
+    const hiddenHost = browserStage.closest('.retained-workbench-view')!
+    const hiddenSelection = document.getSelection()!
+    hiddenFacts = { nonempty: true, originalParentId: originalParent!.id, hiddenParentId: hiddenHost.parentElement?.id,
+      sameStage: container.querySelector(`[data-native-browser-stage="${browserId}"]`) === browserStage,
+      sameHost: hiddenHost === retainedHost, sameParent: hiddenHost.parentElement === originalParent,
+      stillFocusWorkspace: !!hiddenHost.closest('.global-session-workspace'), visible: hidden,
+      bodySame: hiddenHost.querySelector('[data-fixture-agent]') === originalBody, originalSelection,
+      selection: hiddenSelection.toString(), rangeCount: hiddenSelection.rangeCount,
+      originalStartRetained: hiddenSelection.rangeCount > 0 && hiddenSelection.getRangeAt(0).startContainer === text,
+      originalEndRetained: hiddenSelection.rangeCount > 0 && hiddenSelection.getRangeAt(0).endContainer === text }
+    expect(hiddenHost.parentElement, 'Settings hides this binding; it must not move the original host home').toBe(originalParent)
+    expect(hiddenHost.querySelector('[data-fixture-agent]')).toBe(originalBody)
+    expect(hiddenSelection.rangeCount).toBe(1)
+    expect(hiddenSelection.getRangeAt(0).startContainer).toBe(text)
+    expect(hiddenSelection.getRangeAt(0).endContainer).toBe(text)
+    expect(hiddenSelection.toString()).toBe(originalSelection)
     expect(foreground.matches(':popover-open')).toBe(true)
     expect(moteStage.closest('.retained-workbench-view')).toBe(moteHost)
     expect(moteHost.parentElement).toBe(moteParent)
@@ -163,14 +200,14 @@ it.each(['workbench', 'agents'] as const)('actual %s → Settings hides the reta
     expect(hidden, `${mainSurface} → Settings still tells the real BrowserPane it is visible`).toBe(false)
   } finally {
     const sourceAfter = identity()
-    reports.push({ mainSurface, candidateCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-      hidden, restored, foregroundMote: { browserId: moteId, frames: frames.filter(frame => frame.browserId === moteId), residency: residency.filter(frame => frame.browserId === moteId) }, frames: [...frames], residencyBeforeCleanup: [...residency], sourceBefore, sourceAfter,
+    reports.push({ mainSurface, candidateInputPin: '02a76b8c29ab91dec67faf1c75bc7abb693fb6a0', rootObservedCommitOnly: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+      hidden, restored, hiddenFacts, fixtureResource: { originalDemoPath: originalResource.path, currentAbsoluteResourcePath: resource.path, exactReference: fixtureReference }, focusRecoveryText: container.querySelector('.focus-location-recovery')?.textContent ?? null, foregroundMote: { browserId: moteId, frames: frames.filter(frame => frame.browserId === moteId), residency: residency.filter(frame => frame.browserId === moteId) }, frames: [...frames], residencyBeforeCleanup: [...residency], sourceBefore, sourceAfter,
       sourceUnchanged: JSON.stringify(sourceBefore) === JSON.stringify(sourceAfter),
       controls: Object.fromEntries(Object.entries(controlCalls).map(([key, fn]) => [key, fn.mock.calls.length])),
       historyReads: Object.fromEntries(Object.entries(reads).map(([key, fn]) => [key, fn.mock.calls.length])),
-      conditions: { actualAppAndOriginalRetainedTree: true, settingsEnteredViaActualSurfaceSwitch: true,
+      conditions: { actualAppAndOriginalRetainedTree: true, settingsEnteredViaActualSurfaceSwitch: hiddenFacts !== null,
         observedBrowserPanePropViaAddedPassiveEffect: true, webPreviewApi: true,
-        isolatedLeaves: ['GlobalFocusSurface destination DOM', 'SessionPane PTY/Agent painting', 'SettingsPanel content'],
+        isolatedLeaves: ['RecentFocusTimeline adjacent paint/read scope only; actual GlobalFocusSurface/Workbench projection remains', 'SessionPane PTY/Agent painting only; added retained reading text for DOM Range', 'SettingsPanel content'],
         nativeWebContentsViewCreated: false, actualNativeHideMeasured: false, sharedRuntimeControlled: false } })
     phase = 'cleanup'; await act(async () => root.unmount()); container.remove(); restorePopover()
     useAppStore.setState(initial, true); window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()

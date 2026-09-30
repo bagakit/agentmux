@@ -235,11 +235,11 @@ function DesktopApp() {
           retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) }
       }
     }
-    if (focusVisible && focusProjection && focusTab) {
+    if (mainSurface === 'agents' && focusProjection && focusTab) {
       const reference = focusProjection.selection[0]!
       if (!targets[focusTab.id]) targets[focusTab.id] = {
         hostId: focusProjection.entity.kind === 'region' ? workbenchRegionProjectionSlotId(`${focusProjection.presentationId}-slot`, reference) : workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
-        active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId,
+        active: focusVisible, visible: focusVisible, surface: 'focus', retainedRegionId: reference.regionId,
         headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
       }

@@ -14,10 +14,11 @@ import '../../../src/renderer/src/styles/index.css'
 Object.assign(api.browser, window.moteNative.browser)
 Object.assign(api.ui, window.moteNative.ui)
 const config = await api.config.get()
-const session = (await api.sessions.snapshot()).sessions.find(item => item.kind === 'agent')
-if (!session) throw new Error('A nonempty controlled Session reference is required')
+const originalSession = (await api.sessions.snapshot()).sessions.find(item => item.kind === 'agent')
+if (!originalSession) throw new Error('A nonempty controlled Session reference is required')
 const scratch = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: '/private/settings-proof/topics', name: 'Topics', kind: 'folder' }
 const project = { id: 'workspace-demo', hostId: 'local', path: '/private/settings-proof/project', name: 'Browser Settings proof', kind: 'folder' }
+const session = { ...originalSession, workspacePath: project.path }
 const actualConfig = { ...config, workspaces: [project, scratch] }
 const topicId = 'launcher:settings-proof'
 const path = scratch.path + '/' + scratchTopicDirectoryName(topicId)
@@ -41,11 +42,11 @@ for (const [id, workspaceId, foreground] of [['background-browser', project.id, 
 useAppStore.setState({ loading: false, initialize: async () => () => {}, config: actualConfig,
   activeWorkspaceId: project.id, mainSurface: 'agents', tabs, sessions: [session], toolsOpen: false, projectRailOpen: false,
   layouts: { [project.id]: createWorkspaceLayout('background-group', ['background-tab']), [scratch.id]: createWorkspaceLayout('mote-group', ['foreground-mote-tab']) },
-  agentFocus: { execution: { sessionId: session.id, history: [] }, pmo: { sessionId: null } },
+  agentFocus: { execution: { sessionId: session.id, history: [], reference: { displayWorkspaceId: project.id, groupId: 'background-group', tabId: 'background-tab', regionId: 'controlled-agent-region' } }, pmo: { sessionId: null } },
   agentComposerDrafts: { [session.id]: 'The original unsent draft' } })
 const root = createRoot(document.getElementById('root'))
 root.render(createElement(App))
-let originalStage, originalHost, originalParent, originalState
+let originalStage, originalHost, originalParent, originalState, originalBody, originalText, originalReading
 window.browserSettingsProof = {
   ready: true,
   captureOriginal() {
@@ -53,6 +54,13 @@ window.browserSettingsProof = {
     originalHost = originalStage?.closest('.retained-workbench-view'); originalParent = originalHost?.parentElement
     originalState = useAppStore.getState()
     if (!originalStage || !originalHost || !originalParent) throw new Error('The actual retained Browser binding must exist')
+    if (!originalHost.closest('.global-session-workspace')) throw new Error('The original nonempty Browser must be in the actual exact Focus projection before Settings')
+    originalBody = originalHost.querySelector('[data-controlled-session]'); originalText = originalBody?.firstChild
+    if (!originalText || originalText.nodeType !== Node.TEXT_NODE || !originalText.textContent?.length) throw new Error('Original retained reading text is nonempty')
+    const range = document.createRange(); range.setStart(originalText, 2); range.setEnd(originalText, 19)
+    const selection = document.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    originalReading = selection.toString()
+    if (!originalReading.length) throw new Error('Original actual DOM Range must be nonempty')
   },
   openMote() { requestPmoTeamsTopicFloatingOpen({ targetTabId: 'foreground-mote-tab', targetTopicId: topicId }) },
   facts() {
@@ -63,6 +71,9 @@ window.browserSettingsProof = {
       sameParent: originalHost?.parentElement === originalParent,
       sameTabs: state.tabs === originalState?.tabs, sameLayouts: state.layouts === originalState?.layouts,
       sameSessions: state.sessions === originalState?.sessions, sameDrafts: state.agentComposerDrafts === originalState?.agentComposerDrafts,
+      originalParentId: originalParent?.id, currentParentId: originalHost?.parentElement?.id,
+      sameReadingBody: originalHost?.querySelector('[data-controlled-session]') === originalBody,
+      reading: (() => { const s=document.getSelection();const r=s?.rangeCount ? s.getRangeAt(0) : null;return { nonempty: Boolean(originalReading?.length), text: s?.toString(), originalText: originalReading, rangeCount: s?.rangeCount, sameStart: r?.startContainer===originalText, sameEnd:r?.endContainer===originalText, startOffset:r?.startOffset,endOffset:r?.endOffset,collapsed:r?.collapsed,rangeText:r?.toString(),bodyText:originalBody?.textContent,inert:!!originalBody?.closest('[inert]') } })(),
       moteOpen: document.querySelector('[data-pmo-teams-topic-floating]')?.matches(':popover-open') ?? false }
   }
 }
