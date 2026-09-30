@@ -18,6 +18,5 @@ export const confirmed: boolean = state.setSurveyZoneCollected(zone.zoneId, true
 export const retainedNoteIntent = state.createNote
 export const originalFileOpen = state.openFile
 export const inputs = <><GlobalSurveySurface catalog={catalog} projection={null} />
-  <SurveyZoneItem zone={zone} title="Original page" glyph={<Globe2 size={16} />} selected={false} sourceWorkspace={null}
-    relatedTopics={null} activity={null} activityDetails="Control unknown" collected={false}
-    onCollectedChange={value => { state.setSurveyZoneCollected(zone.zoneId, value) }} onSelect={() => {}} onOpenWorkspace={() => {}} /></>
+  <SurveyZoneItem zone={zone} title="Original page" glyph={<Globe2 size={16} />} selected={false}
+    activity={null} onSelect={() => {}} /></>
