@@ -30,6 +30,30 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); useAppStore.setState(initial, true); await rm(root, { recursive: true, force: true }) })
 
 describe('actual durable owner to Renderer projection', () => {
+  it('passes the frozen caller ID to the durable owner without inventing definition or acceptance', async () => {
+    vi.mocked(api.demands.create).mockImplementationOnce(input => owner.create(input))
+    await expect(useAppStore.getState().createDemand({ id: 'caller-owned', title: 'Untitled goal', description: '', status: 'backlog' })).resolves.toBe('caller-owned')
+    expect(api.demands.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'caller-owned' }))
+    const saved = await owner.get('caller-owned')
+    expect(saved).toMatchObject({ id: 'caller-owned', description: '', status: 'backlog' })
+    expect(saved!.alignment).toBeUndefined(); expect(saved!.grounding).toBeUndefined()
+    expect(Object.keys(useAppStore.getState().demands)).toEqual(['caller-owned'])
+  })
+
+  it('keeps a later selection when a second save publication follows an awaited activity receipt', async () => {
+    let finish!: (receipt: Awaited<ReturnType<typeof owner.addActivity>>) => void
+    let saved!: Awaited<ReturnType<typeof owner.addActivity>>
+    vi.mocked(api.demands.activity).mockImplementationOnce(async (id, activity) => { saved = await owner.addActivity(id, activity); return await new Promise(resolve => { finish = resolve }) })
+    const creating = useAppStore.getState().createDemand({ title: 'Goal', activityLog: ['Already saved activity'] })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect(useAppStore.getState().selectedDemandId).toBe('goal')
+    useAppStore.setState({ selectedDemandId: 'later-goal' })
+    finish(saved); await creating
+    expect(useAppStore.getState().selectedDemandId).toBe('later-goal')
+    expect(useAppStore.getState().demands.goal?.activityLog).toEqual(['board: Already saved activity'])
+    expect((await owner.list()).map(value => value.id)).toEqual(['goal'])
+  })
+
   it('reloads a changed owner proposal after CAS rejection without retrying unread acknowledgement', async () => {
     await useAppStore.getState().createDemand({ title: 'Goal', source: 'session', sessionIds: ['healthy-run'], decisionLog: [decision] })
     await useAppStore.getState().updateDemand('goal', { alignment: proposal })
