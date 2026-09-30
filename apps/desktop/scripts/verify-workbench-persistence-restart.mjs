@@ -121,7 +121,7 @@ async function launch(label) {
   if (goalsCtaProof && label === 'second') {
     goalsEntryRestored = await restoreGoalsEntryBeforeSpace({ cdp, fixture: goalsEntryFixture, activateButton, waitFor,
       focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: randomUUID(), operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
+        requestId: randomUUID(), operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
         assert.equal(reply.ok, true, JSON.stringify(reply)) } })
   }
   if (goalsAlignmentProof && label === 'second') {
@@ -392,17 +392,22 @@ try {
     return true
   })()`)
   const producerPath = join(root, 'status-producer.mjs')
+  // Goals ordinary recovery sends one HTTP request through the real owner drain at a time.
+  // Client cancellation does not remove queued server delivery; the response budget must
+  // outlast Core's 2s per-delivery deadline rather than build a second backlog after 1s.
+  const pressureInFlightLimit = goalsDirectPmoProof ? 1 : 4
+  const pressureTimeoutMs = goalsDirectPmoProof ? 30_000 : 1_000
   const producerSource = ordinaryRecoveryProof ? `import {readFile} from 'node:fs/promises';
 const binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));
 let receipts=0,inFlight=0,maximumInFlight=0,skippedTicks=0;
 function tick(){
-  if(inFlight>=4){skippedTicks++;return;}
+  if(inFlight>=${pressureInFlightLimit}){skippedTicks++;return;}
   const receipt=++receipts;
   inFlight++;
   maximumInFlight=Math.max(maximumInFlight,inFlight);
   void(async()=>{
     let status;
-    try{const response=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+receipt,eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(1000)});status=response.status;}
+    try{const response=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+receipt,eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(${pressureTimeoutMs})});status=response.status;}
     catch{status='unavailable';}
     finally{inFlight--;process.stdout.write(JSON.stringify({at:Date.now(),status,receipts:receipt,launchedRequests:receipts,inFlight,maximumInFlight,skippedTicks})+'\\n');}
   })();
@@ -410,7 +415,7 @@ function tick(){
 tick();
 setInterval(tick,100);
 ` : `import {readFile} from 'node:fs/promises';\nconst binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));\nlet receipts=0;\nfor(;;){const start=Date.now();try {const r=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+(++receipts),eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(1000)});process.stdout.write(JSON.stringify({at:Date.now(),status:r.status,receipts})+'\\n');}catch{process.stdout.write(JSON.stringify({at:Date.now(),status:'unavailable',receipts})+'\\n');}await new Promise(r=>setTimeout(r,Math.max(0,100-(Date.now()-start))));}\n`
-  if (ordinaryRecoveryProof) pressureProducer = { mode: 'fixed-cadence-bounded-in-flight', intervalMs: 100, inFlightLimit: 4, timeoutMs: 1_000,
+  if (ordinaryRecoveryProof) pressureProducer = { mode: 'fixed-cadence-bounded-in-flight', intervalMs: 100, inFlightLimit: pressureInFlightLimit, timeoutMs: pressureTimeoutMs,
     observedMaximumInFlight: 0, completedRequests: 0, launchedRequests: 0, skippedTicks: 0 }
   await writeFile(producerPath, producerSource, { mode: 0o600 })
   producer = spawn(process.execPath, [producerPath], { detached: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env } })
