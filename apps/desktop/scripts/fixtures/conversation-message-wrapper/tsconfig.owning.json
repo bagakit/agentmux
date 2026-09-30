@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../src/renderer/src/global.d.ts", "../../../test/conversation-message-wrapper.integration.test.tsx", "vitest.owning.config.mts", "entry.tsx"],
+  "compilerOptions": { "allowImportingTsExtensions": true }
+}
