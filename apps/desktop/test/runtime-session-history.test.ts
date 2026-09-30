@@ -177,3 +177,29 @@ it('retiring the exact observed Host reports unavailable and releases its watch 
  expect(replacement.writeAgent).toHaveBeenCalledTimes(1)
  expect(replacement.connect).toHaveBeenCalledTimes(1)
 })
+
+it('retiring a Host during observer acquisition aborts it and disposes a late handle without another notice',async()=>{
+ const {controller,client,config}=await owner()
+ let ready!:(handle:AgentSessionHistoryObservationHandle)=>void
+ let deliver!:(event:unknown)=>void
+ let signal!:AbortSignal
+ client.observeSessionHistory.mockImplementation(async(_id,listener,options)=>{
+  deliver=listener;signal=options.signal
+  return await new Promise(resolve=>{ready=resolve})
+ })
+ const receive=vi.fn()
+ const pending=controller.observeSessionHistory(control,receive,config,new AbortController().signal)
+ const rejected=pending.catch(error=>error)
+ await vi.waitFor(()=>expect(client.observeSessionHistory).toHaveBeenCalledTimes(1))
+ const replacement={...client,onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
+ controller.commit({hosts:[{id:control.hostId,client:replacement as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ expect(signal.aborted).toBe(true)
+ expect(receive.mock.calls.map(([event])=>[event.kind,event.code])).toEqual([['unavailable','AGENT_SESSION_HISTORY_SOURCE_CHANGED']])
+ const dispose=vi.fn();ready({source:page.source,dispose})
+ expect(await rejected).toBeInstanceOf(Error)
+ expect(dispose).toHaveBeenCalledTimes(1)
+ deliver({kind:'invalidated',agentSessionId:control.agentSessionId,source:page.source})
+ expect(receive).toHaveBeenCalledTimes(1)
+ expect(client.connect).toHaveBeenCalledTimes(0)
+ expect(client.writeAgent).toHaveBeenCalledTimes(0)
+})
