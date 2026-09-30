@@ -14,10 +14,13 @@ import { BrowserCdpSession } from '../../../src/main/browser-cdp-session.js'
 import { captureBrowserPageSnapshot } from '../../../src/main/browser-page-snapshot.js'
 import { discoverBrowserFrameDocuments } from '../../../src/main/browser-frame-documents.js'
 import { parseBrowserSnapshotQuery } from '../../../src/main/browser-snapshot-query.js'
+import { runMotionProbe } from './motion.js'
 
 const probeRoot = process.env.AGENTMUX_FEEDBACK_PROBE_ROOT!, out = process.env.AGENTMUX_FEEDBACK_OUT!
 const phase = process.env.AGENTMUX_FEEDBACK_PHASE!, phaseFile = process.env.AGENTMUX_FEEDBACK_PHASE_FILE!
 const retainedFile = process.env.AGENTMUX_FEEDBACK_RETAINED!, url = process.env.AGENTMUX_FEEDBACK_URL!
+const nativeScope = process.env.AGENTMUX_FEEDBACK_NATIVE_SCOPE ?? 'full'
+assert.ok(['full', 'motion'].includes(nativeScope), 'An explicit supported Native scope is required')
 assert.ok(probeRoot.startsWith('/tmp/amx-feedback-native-'), 'Only an owned private root is allowed')
 app.setPath('userData', join(probeRoot, 'userdata'))
 app.commandLine.appendSwitch('site-per-process')
@@ -29,14 +32,14 @@ const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 const exec = promisify(execFile)
 const receipt: any = { schema: 'agentmux.browser-feedback-private-process.v1', phase, pid: process.pid, versions: process.versions,
-  author: '/root/browser_source_closeout', passed: false, cases: [], visual: { captureOnly: true, aestheticReview: 'not-performed', nativePages: [], osWindows: [] },
+  author: '/root/browser_surfaces', actualExecutor: '/root', passed: false, cases: [], visual: { captureOnly: true, aestheticReview: 'not-performed', nativePages: [], osWindows: [] },
   desktopTabRegionFocusRestore: 'not-tested', healthyCoreRunRestore: 'not-tested' }
 let manager: BrowserViewManager | undefined, profiles: BrowserProfileManager | undefined, window: BrowserWindow | undefined
 const id = 'private-original-feedback-page'
 const operator = { id: 'private-native-operator', name: 'Private operator' }
 const actualChildSessions = new Map<string, any>()
 // Read-only serialization of the actual closed shadow in its owning world. No geometry is assigned.
-const stateExpression = `(()=>{const s=globalThis.__agentMuxBrowserOperationFeedback;if(!s)return null;const read=selector=>{const el=s.shadow?.querySelector(selector);if(!el)return null;const c=getComputedStyle(el),r=el.getBoundingClientRect();return {text:el.textContent,rect:{x:r.x,y:r.y,width:r.width,height:r.height},pointerEvents:c.pointerEvents,animationName:c.animationName,transitionDuration:c.transitionDuration,opacity:c.opacity}};return {revision:s.revision,operationId:s.operationId,navigationId:s.navigationId,phase:s.phase,kind:s.kind,point:s.point,expiresAt:s.expiresAt,hostConnected:!!s.host?.isConnected,hostPointerEvents:s.host?getComputedStyle(s.host).pointerEvents:null,pointer:read('.pointer'),glow:read('.glow'),label:read('.label'),now:Date.now(),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches}})()`
+const stateExpression = `(()=>{const s=globalThis.__agentMuxBrowserOperationFeedback;if(!s)return null;const read=selector=>{const el=s.shadow?.querySelector(selector);if(!el)return null;const c=getComputedStyle(el),r=el.getBoundingClientRect();const animations=el.getAnimations().map(a=>({currentTime:a.currentTime,playState:a.playState,duration:a.effect?.getComputedTiming().duration,keyframes:a.effect?.getKeyframes().map(k=>({offset:k.computedOffset,transform:k.transform}))}));return {text:el.textContent,rect:{x:r.x,y:r.y,width:r.width,height:r.height},pointerEvents:c.pointerEvents,animationName:c.animationName,transitionDuration:c.transitionDuration,opacity:c.opacity,fill:c.fill,animations}};return {revision:s.revision,operationId:s.operationId,navigationId:s.navigationId,token:s.token,phase:s.phase,kind:s.kind,clearReason:s.clearReason,point:s.point,history:s.history,expiresAt:s.expiresAt,hostConnected:!!s.host?.isConnected,hostPointerEvents:s.host?getComputedStyle(s.host).pointerEvents:null,pointer:read('.pointer'),arrow:read('.pointer svg'),executor:read('.executor'),glow:read('.glow'),label:read('.label'),viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},now:Date.now(),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches}})()`
 const pageState = (contents: Electron.WebContents) => contents.executeJavaScriptInIsolatedWorld(1209, [{ code: stateExpression }])
 async function waitFor(label: string, read: () => Promise<any>, budget = 6000) {
   const deadline = Date.now() + budget
@@ -52,7 +55,7 @@ async function nativePage(contents: Electron.WebContents, label: string) {
     image = frame; presentation = { at: Date.now(), dirtyRect, size: frame.getSize() }; frames.push(presentation)
   })
   try {
-    capture = await contents.capturePage(undefined, { stayHidden: false, stayAwake: true })
+    capture = await contents.capturePage(undefined, { stayHidden: true, stayAwake: true })
     // Keep the newest real frame, not the first cached frame delivered when subscription begins.
     await pause(120)
     if (!image) await waitFor('actual native presentation', async () => image, 350)
@@ -60,7 +63,7 @@ async function nativePage(contents: Electron.WebContents, label: string) {
   const bytes = image!.toPNG(), path = join(out, `${phase}-${label}-native.png`)
   assert.ok(bytes.length > 8); await writeFile(path, bytes)
   const row = { phase, label, path, sha256: digest(bytes), size: image!.getSize(), webContentsId: contents.id, source: 'original-webcontents-native-page',
-    captureMethod: 'actual-beginFrameSubscription-full-presentation', capturePageRequest: { stayHidden: false, stayAwake: true, actualBytes: capture!.toPNG().length },
+    captureMethod: 'actual-beginFrameSubscription-full-presentation', capturePageRequest: { stayHidden: true, stayAwake: true, actualBytes: capture!.toPNG().length },
     presentation, observedPresentationFrames: frames, startedAt, returnedAt: Date.now() }
   receipt.visual.nativePages.push(row); return row
 }
@@ -71,7 +74,7 @@ async function osWindow(label: string) {
     try { ({ stdout } = await exec('/usr/local/bin/orca', ['computer', ...args, '--json'], { timeout: 15000, maxBuffer: 12 * 1024 * 1024 })) }
     catch (error: any) {
       const rawPath = join(out, `${phase}-${label}-os-failure.json`)
-      await writeFile(rawPath, JSON.stringify({ args, pid: process.pid, code: error.code, signal: error.signal, stdout: error.stdout, stderr: error.stderr, message: error.message }, null, 2))
+      await writeFile(rawPath, JSON.stringify({ args, pid: process.pid, code: error.code, signal: error.signal, stdout: error.stdout, stderr: error.stderr, message: error.message }))
       receipt.visual.osFailures ??= []; receipt.visual.osFailures.push({ label, path: rawPath, code: error.code, message: error.message })
       throw error
     }
@@ -88,7 +91,7 @@ async function osWindow(label: string) {
   assert.deepEqual(bytes.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
   const path = join(out, `${phase}-${label}-os.png`), metadata = join(out, `${phase}-${label}-os.json`)
   await writeFile(path, bytes)
-  await writeFile(metadata, JSON.stringify({ listed, captured: { ...captured, result: { ...captured.result, screenshot: { ...shot, data: undefined } } } }, null, 2))
+  await writeFile(metadata, JSON.stringify({ listed, captured: { ...captured, result: { ...captured.result, screenshot: { ...shot, data: undefined } } } }))
   const metadataBytes = await readFile(metadata)
   receipt.visual.osWindows.push({ phase, label, path, metadata, metadataSha256: digest(metadataBytes), metadataBytes: metadataBytes.length, pid: process.pid, windowId: selected.id, sha256: digest(bytes), source: 'actual-exact-pid-os-window' })
   } catch (error: any) {
@@ -97,7 +100,7 @@ async function osWindow(label: string) {
     receipt.visual.osObservationNotice = 'OS capture failed. Original native page and further product checks continue; this receipt remains RED.'
   }
 }
-async function inspectTarget(contents: Electron.WebContents, target: any, evidence: any) {
+async function inspectTarget(contents: Electron.WebContents, target: any, evidence: any, requireCue = true) {
   const session = BrowserCdpSession.attach(contents)
   try {
     await session.sendCommand('Page.enable')
@@ -128,7 +131,7 @@ async function inspectTarget(contents: Electron.WebContents, target: any, eviden
       expression: '({events:globalThis.fixtureEvents,hidden:document.hidden,visibility:document.visibilityState,scrollX,scrollY,width:innerWidth,height:innerHeight,at:Date.now()})', returnByValue: true })
     assert.equal(pageFacts.exceptionDetails, undefined)
     evidence.target = { hud, geometry, document: { frameId: document.frameId, loaderId: document.loaderId, sessionId: document.sessionId },
-      actualDocumentFacts: { ...pageFacts.result?.value, defaultContextId: actualContextId, actualFrameId: document.frameId }, observedAt: Date.now() }
+      actualDocumentFacts: { ...pageFacts.result?.value, defaultContextId: actualContextId, actualFrameId: document.frameId }, feedbackContextId: world.executionContextId, observedAt: Date.now() }
     const mainFrameId = discovery.documents.find(d => d.depth === 0)!.frameId
     const leafScope = document.frameId === mainFrameId
     const snapshot = await captureBrowserPageSnapshot({ send: leafScope ? send : session.sendCommand,
@@ -141,14 +144,16 @@ async function inspectTarget(contents: Electron.WebContents, target: any, eviden
     evidence.target.node = { ...node, ...(document.sessionId ? { sessionId: document.sessionId } : {}) }; evidence.target.mainFrameId = mainFrameId
     evidence.target.axHudBefore = hud; evidence.target.axHudAfter = afterAx.result?.value
     evidence.target.actualSourceSnapshotNodes = snapshot.nodes.length
-    assert.ok(hud?.hostConnected && afterAx.result?.value?.hostConnected, 'AX decoration exclusion is observed while the real HUD exists, not after an empty expiry')
-    const decorativeRefs = snapshot.nodes.filter(n => n.name === hud?.label?.text)
-    assert.equal(decorativeRefs.length, 0, 'Display-only HUD must not produce actionable AX refs')
+    if (requireCue) assert.ok(hud?.hostConnected && afterAx.result?.value?.hostConnected, 'AX decoration exclusion is observed while the real HUD exists, not after an empty expiry')
+    const decorativeRefs = requireCue ? snapshot.nodes.filter(n => n.name === hud?.label?.text) : null
+    if (requireCue) assert.equal(decorativeRefs!.length, 0, 'Display-only HUD must not produce actionable AX refs')
+    evidence.target.decorativeRefs = decorativeRefs
+    evidence.target.axDecorationProof = requireCue ? 'actual-present-HUD-excluded' : 'not-tested-absent-HUD-history-observation'
     return { node: { ...node, ...(document.sessionId ? { sessionId: document.sessionId } : {}) }, hud: afterAx.result.value, geometry, mainFrameId,
       document: { frameId: document.frameId, loaderId: document.loaderId, sessionId: document.sessionId },
       axHudBefore: hud, axHudAfter: afterAx.result.value,
-      observation: snapshot.observation,
-      actualDocumentFacts: { ...pageFacts.result?.value, defaultContextId: actualContextId, actualFrameId: document.frameId }, actualSourceSnapshotNodes: snapshot.nodes.length, missingFrames: snapshot.missingFrames ?? [], decorativeRefs: [] }
+      scopeFacts: snapshot.scopeFacts,
+      actualDocumentFacts: { ...pageFacts.result?.value, defaultContextId: actualContextId, actualFrameId: document.frameId }, feedbackContextId: world.executionContextId, requireCue, actualSourceSnapshotNodes: snapshot.nodes.length, missingFrames: snapshot.missingFrames ?? [], decorativeRefs }
   } finally { session.detach() }
 }
 async function clearedChild(contents: Electron.WebContents, original: any, label: string, originalManagerOwnsDebugger = false) {
@@ -222,7 +227,7 @@ async function nativeChildClick(contents: Electron.WebContents, original: any) {
       boundary: passed ? 'Actual native child input was read back.' : 'Not proven: Electron 43.7.7 sendInputEvent forwards to the main RenderWidgetHost. Real OS OOPIF input awaits reachable OS window service.',
       source: 'https://raw.githubusercontent.com/electron/electron/v43.7.7/shell/browser/api/electron_api_web_contents.cc#L3684-L3700' })
     if (!passed) receipt.nativeOopifInputIncomplete = true
-    else receipt.cases.push({ ...receipt.cases.find(c => c.label === 'oopif-cue-cleared-by-attempted-main-widget-input'), label: 'oopif-completed-cue-cleared-by-native-human-click', passed: true, verifiedBy: 'trusted original child click and actual counter increment' })
+    else receipt.cases.push({ ...receipt.cases.find((c: any) => c.label === 'oopif-cue-cleared-by-attempted-main-widget-input'), label: 'oopif-completed-cue-cleared-by-native-human-click', passed: true, verifiedBy: 'trusted original child click and actual counter increment' })
   } finally { fresh.detach() }
 }
 async function action(contents: Electron.WebContents, label: string, method: 'click' | 'hover' | 'fillInput', name: string, prefix = '') {
@@ -320,7 +325,7 @@ try {
   await app.whenReady()
   app.setAccessibilitySupportEnabled(true)
   receipt.privateAccessibilityCondition = { requested: true, actual: app.isAccessibilitySupportEnabled(), productDefaultCertified: false }; await mkdir(out, { recursive: true })
-  window = new BrowserWindow({ width: 960, height: 780, title: `Private feedback proof ${phase} ${process.pid}`, show: true,
+  window = new BrowserWindow({ width: 960, height: 780, title: `Private feedback proof ${phase} ${process.pid}`, show: false,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
   await window.loadURL('data:text/html,<body style="background:%23e9eeeb;font:13px system-ui;padding:12px">Private original Browser proof</body>')
   profiles = new BrowserProfileManager(new BrowserProfileStore(join(probeRoot, 'profiles.json')))
@@ -357,13 +362,15 @@ try {
     return !receipt.bootstrapObservation.loading && actual.frames === 2 && actual.target === 'Continue'
   })
   await pause(180)
-  app.focus({ steal: true }); window.focus()
-  contents.focus()
+  window.showInactive() // Never activate a private probe or take the user's keyboard focus.
   receipt.originalNativeVisibility = { windowVisible: window.isVisible(), windowFocused: window.isFocused(), windowMinimized: window.isMinimized(),
     bounds: manager.nativeOwner(id)!.view.getBounds(), webContentsFocused: contents.isFocused(), domVisibility: await contents.executeJavaScript('document.visibilityState') }
   receipt.original = { browserId: id, profileId: created.profileId, contentsId: contents.id, url: contents.getURL(), processId: contents.getOSProcessId(),
     frameProcesses: contents.mainFrame.framesInSubtree.map(f => ({ processId: f.processId, osProcessId: f.osProcessId, routingId: f.routingId, detached: f.detached })) }
-  if (phase === 'second') {
+  if (nativeScope === 'motion') {
+    await runMotionProbe({ manager, contents, id, operator, phase, out, url, retainedFile, receipt, created, retained,
+      stateExpression, pageState, action, inspectTarget, nativePage, osWindow })
+  } else if (phase === 'second') {
     assert.equal(created.profileId, retained.profileId); assert.equal(contents.getURL(), retained.url)
     const profileState = await contents.executeJavaScript('localStorage.getItem("proofClicks")')
     assert.equal(profileState, retained.profileClicks)
@@ -432,10 +439,12 @@ try {
     const workReport = await asyncWork
     receipt.asyncWorkCapture.actualReport = workReport
     assert.equal(workReport.outcome.kind, 'completed')
+    const workResult = workReport.result as { startedAt: number; finishedAt: number }
+    assert.ok(workResult && Number.isFinite(workResult.startedAt) && Number.isFinite(workResult.finishedAt), 'The actual finite fixture job reports its own times')
     assert.equal(afterImage.workSettled, false, 'The actual page RPC was unfinished at native capture return')
-    assert.ok(workReport.result.startedAt <= busyImage.startedAt && busyImage.presentation.at <= busyImage.returnedAt && busyImage.returnedAt < workReport.result.finishedAt, 'Actual page job completion is later than the entire original native capture; a late DOM read cannot relabel that frame')
+    assert.ok(workResult.startedAt <= busyImage.startedAt && busyImage.presentation.at <= busyImage.returnedAt && busyImage.returnedAt < workResult.finishedAt, 'Actual page job completion is later than the entire original native capture; a late DOM read cannot relabel that frame')
     if (afterImage.job.phase === 'working') assert.ok(afterImage.hud?.glow && afterImage.hud.phase === 'running')
-    else assert.ok(afterImage.jobReadReturnedAt >= workReport.result.finishedAt && afterImage.job.finishedAt === workReport.result.finishedAt, 'Late completed read is preserved with its actual time, never rewritten as working')
+    else assert.ok(afterImage.jobReadReturnedAt >= workResult.finishedAt && afterImage.job.finishedAt === workResult.finishedAt, 'Late completed read is preserved with its actual time, never rewritten as working')
     receipt.cases.push({ label: 'actual-async-page-work', actualReport: workReport, beforeImage: working, afterImage, native: busyImage,
       heldAction: false, boundary: 'A separate genuine unfinished page job proves running feedback; it does not replace ordinary single click/hover cues.' })
     manager.setBounds(id, { x: 16, y: 52, width: 234.5, height: 616 })
@@ -532,7 +541,7 @@ try {
     if (afterGoto.passed !== false) assert.equal(afterGoto.target.hud.navigationId, (await manager.create(id, url)).navigationId)
     const snapshot = await manager.create(id, url)
     receipt.retained = { browserId: snapshot.id, profileId: snapshot.profileId, url: contents.getURL(), profileClicks: await contents.executeJavaScript('localStorage.getItem("proofClicks")') }
-    await writeFile(retainedFile, JSON.stringify(receipt.retained, null, 2))
+    await writeFile(retainedFile, JSON.stringify(receipt.retained))
   }
   assert.ok(receipt.cases.length > 0, 'Actual process exercised a nonempty case set')
   for (const completedCase of receipt.cases) completedCase.passed ??= true
@@ -546,11 +555,11 @@ try {
 } catch (error: any) {
   receipt.failure = { message: error.message, stack: error.stack }
 } finally {
-  await writeFile(phaseFile, JSON.stringify(receipt, null, 2))
+  await writeFile(phaseFile, JSON.stringify(receipt))
   manager?.dispose(); await profiles?.dispose()
   if (receipt.phaseCompleted) app.quit()
   else { process.stderr.write(`file_editing_probe_failed=${receipt.failure?.message}\n`); app.exit(1) }
 }
 
 }
-void main().catch(async error => { receipt.failure = { message: error.message, stack: error.stack }; await writeFile(phaseFile, JSON.stringify(receipt, null, 2)); app.exit(1) })
+void main().catch(async error => { receipt.failure = { message: error.message, stack: error.stack }; await writeFile(phaseFile, JSON.stringify(receipt)); app.exit(1) })

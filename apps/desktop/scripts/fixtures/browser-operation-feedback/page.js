@@ -1,7 +1,9 @@
 globalThis.fixtureEvents = []
 for (const type of ['click', 'input', 'wheel', 'keydown']) {
   document.addEventListener(type, event => {
-    fixtureEvents.push({ type, target: event.target.id ?? '', trusted: event.isTrusted, at: Date.now() })
+    fixtureEvents.push({ type, target: event.target.id ?? '', trusted: event.isTrusted, at: Date.now(),
+      key: type === 'keydown' && ['Enter', 'Tab', 'Escape', 'Meta+Enter'].includes(event.key) ? event.key : undefined,
+      modifiers: type === 'keydown' ? { ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey, shift: event.shiftKey } : undefined })
     if (type === 'click' && event.target.id === 'target') {
       const prior = Number(localStorage.getItem('proofClicks') ?? 0)
       localStorage.setItem('proofClicks', String(prior + 1))

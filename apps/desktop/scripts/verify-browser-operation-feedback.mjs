@@ -13,13 +13,16 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const fixtures = join(desktopRoot, 'scripts/fixtures/browser-operation-feedback')
 const require = createRequire(join(desktopRoot, 'package.json'))
+const nativeScope = process.env.AGENTMUX_FEEDBACK_NATIVE_SCOPE ?? 'full'
+assert.ok(['full', 'motion'].includes(nativeScope), 'AGENTMUX_FEEDBACK_NATIVE_SCOPE must be full or motion')
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const out = resolve(process.env.AGENTMUX_FEEDBACK_EVIDENCE_ROOT ?? join(repositoryRoot, '.tmp/browser-operation-feedback-native', `attempt-${Date.now()}`))
 const temporaryRoot = await mkdtemp('/tmp/amx-feedback-native-')
 const projectionRoot = join(await realpath(temporaryRoot), 'projection')
-const receipt = { schema: 'agentmux.browser-operation-feedback-native.v1', passed: false, taskComplete: false,
-  author: '/root/browser_source_closeout', scope: 'stock Electron / actual BrowserViewManager / original native pages / private profile',
+const receipt = { schema: nativeScope === 'motion' ? 'agentmux.browser-operation-feedback-native.v2' : 'agentmux.browser-operation-feedback-native.v1', passed: false, taskComplete: false,
+  author: '/root/browser_surfaces', actualExecutor: '/root', scope: 'stock Electron / actual BrowserViewManager / original native pages / private profile',
   desktopTabRegionFocusRestore: 'not-tested', healthyCoreRunRestore: 'not-tested', userAuthentication: 'not-tested',
+  nativeScope,
   source: {}, phases: [], cleanup: {}, visual: { captureOnly: true, aestheticReview: 'not-performed' } }
 let server, failure
 await mkdir(out, { recursive: true })
@@ -34,6 +37,7 @@ async function sizeOf(path) {
 }
 const sourceInputs = new Map()
 const externalInputs = new Map()
+const actualPhases = [] // Raw cases live only in their actual process files, never a second serialized copy.
 try {
   const git = args => execFileSync('git', args, { cwd: repositoryRoot, maxBuffer: 16 * 1024 * 1024 })
   const commit = git(['rev-parse', 'HEAD']).toString().trim()
@@ -44,15 +48,16 @@ try {
   execFileSync('tar', ['-x', '-C', projectionRoot], { input: git(['archive', commit, ...projectedPaths]) })
   const owningFixturePath = join(projectionRoot, 'apps/desktop/scripts/fixtures/browser-operation-feedback/main.ts')
   await mkdir(dirname(owningFixturePath), { recursive: true })
-  await writeFile(owningFixturePath, await readFile(join(fixtures, 'main.ts')))
+  const owningFixturePaths = new Set([owningFixturePath, join(dirname(owningFixturePath), 'motion.ts')])
+  for (const fixture of owningFixturePaths) await writeFile(fixture, await readFile(join(fixtures, fixture.split('/').at(-1))))
   for (const rel of ['', 'apps/desktop', 'packages/core']) {
     await symlink(join(repositoryRoot, rel, 'node_modules'), join(projectionRoot, rel, 'node_modules'))
   }
   receipt.source.candidate = { kind: 'current-main-git-tree-private-source-projection', commit, tree, projectedPaths,
     fixtureOrigin: join(fixtures, 'main.ts'), uncommittedPeerSourceConsumed: false }
-  const expected = { 'browser-operation-feedback.ts': 'ae90ef35837c753d08d436015d5e9f589253f606f00ed0dd85654eb097370698',
+  const expected = { 'browser-operation-feedback.ts': 'e30d06cd287f3642153c03287850dfd70c3ee62939ad212b0dc31c3406812e16',
     'browser-page-dispatch.ts': 'e1426edc674c383154c3abcc3156cdb744dda1f2388e21838eca2610adc85cf1',
-    'browser-view-manager.ts': '29e6164fdeaa848a5c137ff948a762a2d1634dc36f6cc97a711b7c51146ca3c3' }
+    'browser-view-manager.ts': 'f561f35f4a389bfe89b50c9a679b2e2427e7260165e0d1d3772530fc44b0b9f6' }
   for (const [name, sha] of Object.entries(expected)) assert.equal(digest(await readFile(join(projectionRoot, 'apps/desktop/src/main', name))), sha,
     'The immutable Main Browser leaf matches the independently reviewed Source: ' + name)
   const electronWrapper = require.resolve('electron'), executable = require('electron')
@@ -90,7 +95,7 @@ try {
       const assetUrl = id.endsWith('?url')
       sourceInputs.set(p, { path: p, relativePath: rel, sha256: digest(bytes), bytes: bytes.length, snapshot,
         transformKind: assetUrl ? 'vite-asset-url' : 'raw-source', loadedTextSha256: digest(Buffer.from(code)),
-        origin: p === owningFixturePath ? { kind: 'owned-fixture', path: join(fixtures, 'main.ts') } : { kind: 'git-tree-blob', commit, tree, path: rel } })
+        origin: owningFixturePaths.has(p) ? { kind: 'owned-fixture', path: join(fixtures, p.split('/').at(-1)) } : { kind: 'git-tree-blob', commit, tree, path: rel } })
       if (!assetUrl) assert.equal(digest(Buffer.from(code)), digest(bytes), `Raw actual loaded Source differs: ${p}`)
     } }],
     build: { ssr: true, outDir: join(temporaryRoot, 'bundle'), emptyOutDir: true, minify: false, sourcemap: false,
@@ -111,7 +116,7 @@ try {
     sourceInputs.set(path, { path, relativePath, sha256: digest(bytes), bytes: bytes.length, snapshot })
   }
   receipt.source.inputs = [...sourceInputs.values()]
-  await writeFile(join(out, 'source-before.json'), JSON.stringify(receipt.source, null, 2))
+  await writeFile(join(out, 'source-before.json'), JSON.stringify(receipt.source))
   const page = await readFile(join(fixtures, 'page.html'), 'utf8')
   const frame = await readFile(join(fixtures, 'frame.html'), 'utf8')
   let base, cross
@@ -135,7 +140,7 @@ try {
   await new Promise(done => server.listen(0, '0.0.0.0', done))
   base = `http://127.0.0.1:${server.address().port}`; cross = `http://localhost:${server.address().port}`
   const fixtureInputs = []
-  for (const name of ['main.ts', 'page.html', 'page.css', 'page.js', 'frame.html', 'scenario.md']) {
+  for (const name of ['main.ts', 'motion.ts', 'page.html', 'page.css', 'page.js', 'frame.html', 'scenario.md']) {
     const path = join(fixtures, name), bytes = await readFile(path)
     fixtureInputs.push({ path, sha256: digest(bytes), bytes: bytes.length })
   }
@@ -152,22 +157,26 @@ try {
       temporaryRoot, cwd: temporaryRoot, env, timeoutMs: 75_000,
       onLine: line => { lines.push(line); process.stderr.write(line + '\n') } })
     await writeFile(join(out, `${phase}-stderr.txt`), lines.join('\n') + '\n')
-    const row = { phase, process: result, actual: null }
+    const row = { phase, process: result }
     receipt.phases.push(row)
-    const actual = JSON.parse(await readFile(phaseFile, 'utf8'))
-    row.actual = actual
+    const actualBytes = await readFile(phaseFile)
+    const actual = JSON.parse(actualBytes.toString('utf8'))
+    actualPhases.push(actual)
+    if (nativeScope === 'motion') row.actualOriginal = { path: phaseFile, sha256: digest(actualBytes), bytes: actualBytes.length }
+    else row.actual = actual
     assert.equal(result.exitCode, 0, `${phase} actual process failed`)
     assert.equal(result.timedOut, false)
     assert.ok(actual.cases.length > 0, 'Actual private process cases are nonempty')
     assert.equal(actual.phaseCompleted, true, actual.failure?.message)
     assert.equal(actual.versions.electron, '43.7.7')
+    if (nativeScope === 'motion') assert.ok(await sizeOf(out) < 8 * 1024 * 1024, 'The motion increment retains original evidence within 8MiB')
     assert.ok(await sizeOf(temporaryRoot) <= 30 * 1024 * 1024, 'Private bundle and real userdata stay within 30MiB')
   }
-  assert.notEqual(receipt.phases[0].actual.pid, receipt.phases[1].actual.pid, 'Ordinary recovery uses two actual processes')
-  receipt.localBrowserProfileRecovery = { passed: true, firstPid: receipt.phases[0].actual.pid, secondPid: receipt.phases[1].actual.pid,
-    first: receipt.phases[0].actual.retained, second: receipt.phases[1].actual.restored,
+  assert.notEqual(actualPhases[0].pid, actualPhases[1].pid, 'Ordinary recovery uses two actual processes')
+  receipt.localBrowserProfileRecovery = { passed: true, firstPid: actualPhases[0].pid, secondPid: actualPhases[1].pid,
+    first: actualPhases[0].retained, second: actualPhases[1].restored,
     boundary: 'This is real private profile/Browser input recovery, not Desktop Tab/Region or healthy Core Run recovery.' }
-  receipt.passed = receipt.phases.every(row => row.actual.passed === true)
+  receipt.passed = actualPhases.every(actual => actual.passed === true)
   if (!receipt.passed) receipt.failure = { message: 'Actual private process phases finished; failed/not-tested cases, OS window observation and true OOPIF input retain their explicit boundaries. Keep Native receipt RED.' }
 } catch (error) { failure = error; receipt.failure = { message: error.message, stack: error.stack } }
 finally {
@@ -179,7 +188,7 @@ finally {
   }
   receipt.source.drift = drift
   if (drift.length) { receipt.passed = false; receipt.failure ??= { message: 'Actual loaded Source changed during Native proof. Preserve RED and resample this result.' } }
-  await writeFile(join(out, 'source-after.json'), JSON.stringify({ drift, sourceInputCount: sourceInputs.size }, null, 2))
+  await writeFile(join(out, 'source-after.json'), JSON.stringify({ drift, sourceInputCount: sourceInputs.size }))
   receipt.cleanup.privateBytes = await sizeOf(temporaryRoot)
   // Retain only this probe's real durable storage for diagnosis, not caches/dependencies.
   const durable = join(temporaryRoot, 'retained-browser.json')
@@ -196,7 +205,7 @@ finally {
   }
   await rm(temporaryRoot, { recursive: true, force: true })
   receipt.cleanup.privateRootRemoved = true
-  await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
+  await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt))
 }
 console.log(JSON.stringify({ receipt: join(out, 'receipt.json'), passed: receipt.passed, taskComplete: false }))
 if (failure || !receipt.passed) process.exitCode = 1
