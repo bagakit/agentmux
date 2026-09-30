@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "../src/**/*.ts",
+    "../src/**/*.tsx",
+    "../*.ts",
+    "./shared-region-presentation.test.tsx",
+    "./vitest.shared-region.config.mts"
+  ]
+}

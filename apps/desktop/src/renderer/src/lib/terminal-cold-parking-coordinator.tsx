@@ -32,6 +32,7 @@ export type TerminalParkingCollectionInput = {
   activeWorkspaceId: string | null
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined
+  projectedVisibleRegionIds?: ReadonlySet<string> | undefined
 }
 
 /**
@@ -48,15 +49,9 @@ export function collectTerminalColdParkCandidates(
   for (const tab of Object.values(input.tabs)) {
     const layout = input.layouts[tab.workspaceId]
     if (!layout) continue
-    const { navigationContextActive, tabVisible } = surfaceNavigationVisibility(
-      tab,
-      layout,
-      input.tabs,
-      input
-    )
-
     for (const surface of Object.values(tab.regions)) {
       if (!isSessionSurface(surface)) continue
+      const { navigationContextActive, tabVisible } = surfaceNavigationVisibility(tab, layout, input.tabs, input, surface.regionId)
       const session = sessionsById.get(surface.sessionId)
       candidates.push({
         id: surface.regionId,
@@ -95,6 +90,7 @@ export function collectTerminalColdParkCandidates(
 type TerminalParkingCoordinatorOptions = {
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined
+  projectedVisibleRegionIds?: ReadonlySet<string> | undefined
   /** Resource probes own their measurement window and must observe the unparked baseline. */
   measurementActive?: boolean
   parkingEnabled?: boolean
@@ -131,6 +127,7 @@ export function useTerminalRegionParked(regionId: string): boolean {
 export function useTerminalColdParking({
   workbenchVisible,
   projectedVisibleTabIds,
+  projectedVisibleRegionIds,
   measurementActive = false,
   parkingEnabled = true
 }: TerminalParkingCoordinatorOptions): ReadonlySet<string> {
@@ -158,9 +155,9 @@ export function useTerminalColdParking({
       sessions,
       activeWorkspaceId,
       workbenchVisible,
-      projectedVisibleTabIds
+      projectedVisibleTabIds, projectedVisibleRegionIds
     }),
-    [activeWorkspaceId, layouts, sessions, tabs, workbenchVisible, projectedVisibleTabIds]
+    [activeWorkspaceId, layouts, sessions, tabs, workbenchVisible, projectedVisibleTabIds, projectedVisibleRegionIds]
   )
   const candidateKey = useMemo(
     () => candidates.map((candidate) => [

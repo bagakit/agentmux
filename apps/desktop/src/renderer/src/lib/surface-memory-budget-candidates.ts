@@ -17,6 +17,7 @@ export type SurfaceMemoryCollectionInput = {
   activeWorkspaceId: string | null
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined
+  projectedVisibleRegionIds?: ReadonlySet<string> | undefined
 }
 
 function candidateForSurface(
@@ -94,8 +95,8 @@ export function collectSurfaceMemoryCandidates(
   for (const tab of Object.values(input.tabs)) {
     const layout = input.layouts[tab.workspaceId]
     if (!layout) continue
-    const navigation = surfaceNavigationVisibility(tab, layout, input.tabs, input)
     for (const surface of Object.values(tab.regions)) {
+      const navigation = surfaceNavigationVisibility(tab, layout, input.tabs, input, surface.regionId)
       const candidate = candidateForSurface(tab, surface, input, navigation)
       if (candidate) candidates.push(candidate)
     }

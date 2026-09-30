@@ -109,7 +109,10 @@ it('Tab-level Focus has no parent Group chrome and keeps the original mixed Tab 
     expect(originalLeaf).not.toBeNull()
     const { [f.resource.id]: _resourceLayout, ...remainingLayouts } = before.layouts
     await act(async () => useAppStore.setState({ layouts: remainingLayouts }))
-    expect(f.container.querySelector('.focused-tab-workspace .workbench-restore-notice')?.textContent).toContain('still restoring')
+    // The explicit foreign display still confirms this occurrence even while
+    // its resource-home layout is absent. Do not invent a failed restore notice.
+    expect(f.container.querySelector('.focused-tab-workspace .workbench-restore-notice')).toBeNull()
+    expect(useAppStore.getState().agentFocus.execution.reference).toEqual(f.reference)
     expect(f.container.querySelector('[data-selection-leaf="explicit-exact-tab/exact-r2"]')).toBe(originalLeaf)
     await act(async () => useAppStore.setState({ layouts: before.layouts }))
     expect(f.container.querySelector('.focused-tab-workspace .workbench-restore-notice')).toBeNull()
@@ -138,6 +141,9 @@ it('the original Launcher submit keeps its resource Workspace and exact display 
     await act(async () => useAppStore.setState({ launchAgent: submit }))
     // Only the external API reply is left pending; the original Launcher/Store launch path runs.
     const request = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(() => new Promise(() => {}))
+    const expand = f.container.querySelector<HTMLButtonElement>('.focused-tab-workspace button[aria-label="Expand Agents"]')!
+    expect(expand).not.toBeNull()
+    await act(async () => expand.click())
     const launch = f.container.querySelector<HTMLButtonElement>('.focused-tab-workspace .launch-surface__footer .primary-button')!
     expect(launch).not.toBeNull(); expect(launch.disabled).toBe(false)
     await act(async () => launch.click())

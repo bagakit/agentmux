@@ -340,7 +340,7 @@
 .surface-memory-released strong { color:var(--text-2); font-size:var(--fs-body); }
 
 /* Retained Tab hosts move spatially without replacing their React or native view. */
-.workbench-tab-slot, .retained-workbench-view { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.workbench-tab-slot, .workbench-region-slot, .retained-workbench-view, .retained-workbench-region { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .retained-workbench-parking { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
 .workspace-workbench-slot.workspace-workbench-slot--focus-source { visibility: hidden; pointer-events: none; }
 
