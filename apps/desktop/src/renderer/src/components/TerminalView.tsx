@@ -27,11 +27,10 @@ import {
   terminalLinkModifierOpensSystemBrowser
 } from '../lib/terminal-link-gesture'
 import {
-  detectTerminalPathLinks,
   isSystemArtifactPath,
-  terminalPathLinkAtCell,
   type TerminalPathLink
 } from '../lib/terminal-path-link'
+import { terminalPathLinksInBuffer, terminalPathLinkAtBufferCell } from '../lib/terminal-link-range'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
 import { createTerminalPasteInput, installTerminalPasteSanitizer, pasteIntoTerminal, type TerminalPasteTarget } from '../lib/terminal-paste'
 import {
@@ -144,13 +143,7 @@ function terminalPathAtPointer(
   const row = Math.floor(((clientY - rect.top) / rect.height) * terminal.rows)
   if (row < 0 || row >= terminal.rows || column < 1 || column > terminal.cols) return null
   const lineNumber = terminal.buffer.active.viewportY + row
-  const bufferLine = terminal.buffer.active.getLine(lineNumber)
-  const line = bufferLine?.translateToString(true)
-  // Terminal columns count wide cells, while the scanner indexes UTF-16 text.
-  const textColumn = bufferLine?.translateToString(false, 0, column - 1).length
-  return line === undefined || textColumn === undefined
-    ? null
-    : terminalPathLinkAtCell(line, textColumn + 1, workspaceRoot)
+  return terminalPathLinkAtBufferCell(terminal.buffer.active, column, lineNumber + 1, workspaceRoot)
 }
 
 // 终端与对话正文都要判「哪些 scheme 点了能打开」，那必须是同一个判据，而不是各抄一份。判据本体
@@ -587,17 +580,14 @@ export function TerminalView({
       console.warn(`[terminal] Unicode width table did not activate (active=${activeUnicodeVersion})`)
     }
 
-    // File-path link provider. Runs on the render/hover hot path, so it does ONLY string work:
-    // read the buffer line xterm already holds and scan it with the pure, conservative matcher.
+    // File-path links use only a bounded related buffer window and its actual cell facts.
     // No disk, no IPC, no existence probe here — a path that does not exist fails visibly on click
     // via reportError, never on this path.
     const pathLinks = terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber, callback) => {
-        const line = terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true)
-        if (!line) return callback(undefined)
-        const matches = detectTerminalPathLinks(line, activeWorkspaceRootRef.current)
+        const matches = terminalPathLinksInBuffer(terminal.buffer.active, bufferLineNumber, activeWorkspaceRootRef.current)
         if (matches.length === 0) return callback(undefined)
-        callback(matches.map((match) => {
+        callback(matches.map(({ link: match, range }) => {
           const location = match.line !== undefined
             ? { line: match.line, ...(match.column !== undefined ? { column: match.column } : {}) }
             : undefined
@@ -605,11 +595,8 @@ export function TerminalView({
             ? `${match.path}:${match.line}${match.column !== undefined ? `:${match.column}` : ''}`
             : match.path
           return {
-            // 1-based, right side inclusive on start / exclusive-as-inclusive on end (xterm range).
-            range: {
-              start: { x: match.index + 1, y: bufferLineNumber },
-              end: { x: match.index + match.length, y: bufferLineNumber }
-            },
+            // xterm's actual 1-based inclusive cell range, including soft-wrapped rows.
+            range,
             text: match.path,
             activate: (event: MouseEvent) => {
               clearLinkPreview()

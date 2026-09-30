@@ -1,6 +1,8 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
-import { isSystemArtifactPath, terminalPathLinkAtCell } from '../src/renderer/src/lib/terminal-path-link'
+import { isSystemArtifactPath } from '../src/renderer/src/lib/terminal-path-link'
+import { terminalPathLinkAtBufferCell } from '../src/renderer/src/lib/terminal-link-range'
+import { Terminal } from '@xterm/xterm'
 import { openTerminalFileLink } from '../src/renderer/src/lib/terminal-file-action'
 
 describe('terminal system artifact paths', () => {
@@ -19,11 +21,14 @@ describe('terminal system artifact paths', () => {
     expect(isSystemArtifactPath('release/app')).toBe(false)
   })
 
-  it('finds the path under a context-menu cell without probing the disk', () => {
-    const line = 'download release/AgentMux.dmg now'
-    const link = terminalPathLinkAtCell(line, line.indexOf('release/AgentMux.dmg') + 4, _hygiene_fixturePath("workspace"))
-    expect(link?.path).toBe('release/AgentMux.dmg')
-    expect(terminalPathLinkAtCell(line, 1, _hygiene_fixturePath("workspace"))).toBeNull()
+  it('finds the path under a context-menu cell without probing the disk', async () => {
+    const terminal = new Terminal({ allowProposedApi: true })
+    try {
+      await new Promise<void>(resolve => terminal.write('download release/AgentMux.dmg now', resolve))
+      const link = terminalPathLinkAtBufferCell(terminal.buffer.active, 13, 1, _hygiene_fixturePath("workspace"))
+      expect(link?.path).toBe('release/AgentMux.dmg')
+      expect(terminalPathLinkAtBufferCell(terminal.buffer.active, 1, 1, _hygiene_fixturePath("workspace"))).toBeNull()
+    } finally { terminal.dispose() }
   })
 
   it('opens artifacts with the OS and source files in the editor', async () => {
