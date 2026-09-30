@@ -13,6 +13,43 @@ const paths = ['apps/desktop/scripts/fixtures/mote-navigation-footer/archive-mai
 const [probe, owner, caller] = await Promise.all(paths.map(path => readFile(join(repository, path), 'utf8')))
 const inputs = Object.fromEntries(paths.map((path, index) => [path, createHash('sha256').update([probe, owner, caller][index]).digest('hex')]))
 
+test('compact actions proof distinguishes the owning declaration, computed flex child and actual crowded identity', async () => {
+  const anchor = '          assert.equal(proof.compactActionsMutation.declaration', start = probe.indexOf(anchor)
+  const end = probe.indexOf('\n        } finally {', start)
+  assert.ok(start >= 0 && end > start, 'The actual compact mutation assertion block must be nonempty')
+  assert.equal(probe.split(anchor).length, 2, 'There is exactly one actual compact mutation assertion block')
+  const block = probe.slice(start, end)
+  assert.match(block, /proof\.compactActionsMutation\.mutated\.fits/)
+  const baseline = { declaration: 'inline-flex', actions: [
+    { display: 'flex', width: 20, height: 24, hit: true }, { display: 'flex', width: 20, height: 24, hit: true }
+  ], mutated: { fits: false } }
+  assert.equal(baseline.actions.length, 2, 'The controlled assertion input contains both original actions')
+  const consume = value => runInNewContext('(async () => {\n' + block + '\n})()', {
+    assert, proof: { compactActionsMutation: value }, labelGeometry: async () => value.mutated
+  })
+  await consume(structuredClone(baseline))
+  const rejected = []
+  for (const [name, corrupt] of [
+    ['owning rule unchanged', value => { value.declaration = 'none' }],
+    ['computed child still hidden', value => { value.actions[0].display = 'none' }],
+    ['computed inline display mistaken for flex child', value => { value.actions[0].display = 'inline-flex' }],
+    ['original control has no area', value => { value.actions[1].width = 0 }],
+    ['original control is not hit reachable', value => { value.actions[1].hit = false }],
+    ['mutation does not crowd original identity', value => { value.mutated.fits = true }]
+  ]) {
+    const value = structuredClone(baseline); corrupt(value)
+    await assert.rejects(() => consume(value), { name: 'AssertionError' }, name); rejected.push(name)
+  }
+  assert.equal(rejected.length, 6, 'Every semantic counterexample was consumed')
+  await consume(structuredClone(baseline))
+  const evidence = resolve(repository, '.tmp/mote-archive-controls', String(Date.now()))
+  await mkdir(evidence, { recursive: true })
+  await writeFile(join(evidence, 'receipt.json'), JSON.stringify({ schema: 'agentmux.mote-archive-compact-proof-source.v1', passed: true, inputs,
+    sourceBlock: { start, end, sha256: createHash('sha256').update(block).digest('hex') }, actions: baseline.actions.length,
+    rejected, restoredGreen: true, actualCompileCapture: false, userAppOrRunTouched: false }, null, 2))
+  console.log(relative(repository, join(evidence, 'receipt.json')))
+})
+
 test('archive uses the single real Settings button from the mounted WindowUtilityBar owner', async () => {
   const start = probe.indexOf('    const panel = '), end = probe.indexOf('\n', start)
   assert.ok(start >= 0 && end > start, 'The actual control declaration must be nonempty')
