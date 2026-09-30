@@ -31,8 +31,8 @@ const describeMessageSpeaker = createSpeakerResolver()
 
 const MAX_NATIVE_RECORDS = 90
 const MAX_BATCH_PAGES = 3
-type LatestInputs = { messages: readonly AgentSessionUserMessage[]; loading: boolean; error: Error | null; refresh(): Promise<void> }
-const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, refresh: async () => {} }
+type LatestInputs = { messages: readonly AgentSessionUserMessage[]; loading: boolean; error: Error | null; observationError: Error | null; windowFrozen: boolean; refresh(): Promise<void> }
+const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, observationError: null, windowFrozen: false, refresh: async () => {} }
 // Subscribe in a memoized leaf: another Context's status/output may update the
 // tracks, but cannot reproject this Context's unchanged native/captured inputs.
 const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pinned, onChange }: {
@@ -48,7 +48,7 @@ const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pi
     const retained = protectedMessage ? [...native.filter(item => item !== protectedMessage).slice(-capacity), protectedMessage] : native.slice(-capacity)
     return [...retained, ...latest.messages.filter(item => item.source.kind === 'captured')]
   }, [latest.messages, pinnedNative])
-  useLayoutEffect(() => { onChange({ messages, loading: latest.loading, error: latest.error, refresh: latest.refresh }) }, [messages, latest.loading, latest.error, latest.refresh, onChange])
+  useLayoutEffect(() => { onChange({ messages, loading: latest.loading, error: latest.error, observationError: latest.observationError, windowFrozen: latest.windowFrozen, refresh: latest.refresh }) }, [messages, latest.loading, latest.error, latest.observationError, latest.windowFrozen, latest.refresh, onChange])
   return null
 })
 type NativeWindow = {
@@ -311,13 +311,13 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
   </section>
 })
 
-function FocusTimelineLegend({ reading, sources, onRead }: { reading: ReadingWindow; sources: number; onRead(anchor: HTMLElement): void }) {
+function FocusTimelineLegend({ reading, sources, serviceNotice, onRead }: { reading: ReadingWindow; sources: number; serviceNotice: string | null; onRead(anchor: HTMLElement): void }) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const readingNext = useRef(false)
   const read = [...reading.partitions.values()].filter(part => part.read).length
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger asChild><button ref={trigger} data-focus-window-control type="button" className="recent-focus__coverage-button" aria-label="Timeline meaning and coverage" title="What these marks mean, and what has been read"><CircleHelp size={12} /><span>{read} read</span></button></Dialog.Trigger>
+    <Dialog.Trigger asChild><button ref={trigger} data-focus-window-control type="button" className="recent-focus__coverage-button" aria-label="Timeline meaning and coverage" title={serviceNotice ?? "What these marks mean, and what has been read"}><CircleHelp size={12} /><span>{serviceNotice ? "Updates paused" : `${read} read`}</span></button></Dialog.Trigger>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface recent-focus__legend-dialog" onEscapeKeyDown={event => { event.preventDefault(); setOpen(false) }} onPointerDownCapture={event => event.stopPropagation()} onCloseAutoFocus={event => { if (readingNext.current) { event.preventDefault(); readingNext.current = false } }}>
@@ -331,6 +331,7 @@ function FocusTimelineLegend({ reading, sources, onRead }: { reading: ReadingWin
         </dl>
         <section className="recent-focus__legend-coverage" aria-label="Input coverage">
           <strong>{read} {read === 1 ? 'source' : 'sources'} read · {sources} available</strong>
+          {serviceNotice ? <p role="status">{serviceNotice}</p> : null}
           <p>The current Context can also show latest inputs. This count describes explicitly read history sources.</p>
           <p>Other sources have not been read. Select one in Input records to add its real records to this window.</p>
           <p>Inputs without a recorded time remain in Input records. Earlier pages, missing native identities and unavailable sources are explained there.</p>
@@ -692,6 +693,9 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     ? `${nativeWindow.page.items.length} native records retained${nativeWindow.rotated ? ' · Some records are outside this bounded reading window' : ''}. ${nativeWindow.page.nextCursor === null ? 'Beginning of this available snapshot reached.' : 'Coverage incomplete. Earlier records can still be read.'}`
     : 'Native history has not been read for this window. Coverage unknown.'
     : 'Latest input view. Earlier coverage is unknown; read earlier records to inspect the native snapshot.'
+  const inputObservationNotice = historical ? null : latest.windowFrozen
+    ? 'Automatic updates are paused. The current reading window is kept. Read latest records to open a new window.'
+    : latest.observationError ? `Automatic updates unavailable: ${presentError(latest.observationError)} Existing records are kept.` : null
   return <section ref={timelineRef} style={{ height: mode === 'collapsed' ? 28 : height, '--focus-name-width': `${nameWidth}px` } as CSSProperties} className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-ruler-mode={ruler.mode} data-time-zone={time.zone} data-read-source-count={[...nativeWindow.window.partitions.values()].filter(part => part.read).length} data-native-record-count={nativeWindow.window.nativeCount} data-captured-record-count={nativeWindow.window.capturedCount} data-read-bytes={nativeWindow.window.bytes} data-reading-trimmed={nativeWindow.window.trimmed || undefined} data-window-start={range.start} data-window-end={range.end}>
     <FocusLatestInputs control={inputControl} enabled={readingEnabled && !historical} pinned={historical || !preview?.interactive ? undefined : preview.message} onChange={setLatest} />
     {mode !== 'collapsed' ? <div ref={nameResize.containerRef} className="recent-focus__name-column-resize" data-resizing={nameResize.isResizing} style={{ top: headerHeight }}>
@@ -719,7 +723,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         event.stopPropagation()
         if (control instanceof HTMLButtonElement) event.preventDefault()
       }}>
-        {mode !== 'collapsed' ? <><FocusTimelineLegend reading={nativeWindow.window} sources={inputSources.length} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentSessionId} onClick={locateCurrentTrack}><LocateFixed size={12} /></button><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} title={`Input records${inputSource ? ` · ${inputSource.name}` : ''}, including inputs without a recorded time`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
+        {mode !== 'collapsed' ? <><FocusTimelineLegend reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentSessionId} onClick={locateCurrentTrack}><LocateFixed size={12} /></button><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} title={`Input records${inputSource ? ` · ${inputSource.name}` : ''}, including inputs without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
         <button data-focus-window-control type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ChevronLeft size={12} /></button>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><Minus size={12} /></button>
         <select data-focus-window-control aria-label="Focus window size" value={hours} onChange={event => setHours(Number(event.target.value))}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{focusWindowLabel(size)}</option>)}</select>
@@ -753,12 +757,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         sourceError: catalogue.error, onRefreshSources: catalogue.refresh,
         onMoreSources: sourceLimit < inputSources.length ? () => setSourceLimit(value => Math.min(inputSources.length, value + 30)) : undefined,
         loading: historical ? nativeWindow.loading : latest.loading, coverage: inputCoverage,
+        serviceNotice: inputObservationNotice, windowFrozen: !historical && latest.windowFrozen,
         error: !inputReference ? null : historical ? [nativeWindow.error, nativeWindow.capturedError].filter(Boolean).join(' ') || null : latest.error ? presentError(latest.error) : null,
         canContinue: !!inputReference && (!historical || nativeWindow.page?.nextCursor !== null),
         onContext: (id: string) => { setReadingContextId(id); setEarlier(false) },
         onMessage: (message: AgentSessionUserMessage) => setPreview(current => current ? { ...current, message } : current),
         onContinue: () => { if (!historical) setEarlier(true); else nativeWindow.continueReading() },
-        onRefresh: () => { setPreview(current => current?.message && current.message.agentSessionId === inputReference?.agentSessionId ? { ...current, message: undefined } : current); if (historical) nativeWindow.refresh(); else void latest.refresh() }
+        onRefresh: () => { if (historical) nativeWindow.refresh(); else void latest.refresh() }
       } } : {})} /> : null}
   </section>
 })
