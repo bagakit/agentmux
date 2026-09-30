@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
@@ -7,10 +8,12 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { scratchMoteTopics, scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { SpaceObjectContextMenu } from '../src/renderer/src/components/SpaceObjectContextMenu'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customMoteId, customTab, customAgent, moteTopics, quietMoteId, ordinaryTopicId, savedMoteKey, scratchWorkspace, moteConfig } from './fixtures/mote-workface'
 
 let app: MoteAppFixture, catalog: ScratchTopicSnapshot[], generation = 0
+let archiveMenu: Awaited<ReturnType<typeof createArchiveMenu>> | undefined
 beforeEach(() => {
   app = createMoteApp(); generation = 0
   catalog = moteTopics.map(topic => ({ ...topic, ...(topic.soul ? { moteArchive: { state: 'active' as const, version: topic.id === PMO_TEAMS_TOPIC_ID ? 'primary' : 'unwritten' } } : {}) }))
@@ -27,7 +30,7 @@ beforeEach(() => {
     return moteArchive
   })
 })
-afterEach(async () => { await app.dispose() })
+afterEach(async () => { await archiveMenu?.dispose(); archiveMenu = undefined; await app.dispose() })
 function selected(archived = false) {
   if (archived) catalog = catalog.map(topic => topic.id === customMoteId ? { ...topic, moteArchive: { state: 'archived', version: 'saved-archive' } } : topic)
   useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 0, topics: catalog, reading: false, error: null } } })
@@ -62,6 +65,120 @@ async function setArchive(archived: boolean) {
   await useAppStore.getState().setMoteArchived(SCRATCH_WORKSPACE_ID, customMoteId, archived, topicSpaceIconTarget(scratchWorkspace, topic).key,
     (topic.moteArchive as { version: string }).version)
 }
+// Keep the real Radix menu and row lifecycle; vary only when the confirmed IPC
+// result and React's directory commit arrive. Neither order is guaranteed.
+async function createArchiveMenu() {
+  const host = document.createElement('div'); document.body.append(host)
+  const root = createRoot(host)
+  let scope: HTMLDivElement | null = null, matchesTarget = true
+  let complete!: (confirmed: boolean) => void
+  const confirmation = new Promise<boolean>(resolve => { complete = resolve })
+  const onChange = vi.fn(() => confirmation)
+  const returnFocus = vi.fn(() => matchesTarget ? host.querySelector<HTMLButtonElement>('[data-recovery]') : null)
+  async function render(row = true, archived = false, recoveryPending = false) {
+    await act(async () => root.render(<div tabIndex={-1} ref={node => { scope = node }}>
+      {row ? <SpaceObjectContextMenu target={topicSpaceIconTarget(scratchWorkspace, catalog[1]!)} container={() => scope}
+        moteArchive={{ archived, onChange, returnFocus }}>
+        <button type="button" data-space-icon-target="archive-order">Original Mote</button>
+      </SpaceObjectContextMenu> : null}
+      <button type="button" data-recovery disabled={recoveryPending}>Restore Mote</button><input aria-label="New human input" />
+    </div>))
+    await settleMoteApp()
+  }
+  await render()
+  return { host, onChange, returnFocus, render, complete,
+    scope: () => scope!, row: () => host.querySelector<HTMLButtonElement>('[data-space-icon-target]')!,
+    restore: () => host.querySelector<HTMLButtonElement>('[data-recovery]')!, input: () => host.querySelector<HTMLInputElement>('input')!,
+    changeTarget() { matchesTarget = false },
+    async dispose() { await act(async () => root.unmount()); host.remove(); await settleMoteApp() }
+  }
+}
+async function selectArchive(order: Awaited<ReturnType<typeof createArchiveMenu>>) {
+  await act(async () => order.row().focus())
+  const content = await menu(order.row(), true)
+  const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Archive Mote')
+  expect(item).toBeDefined(); await moteClick(item!); expect(order.onChange).toHaveBeenCalledOnce()
+}
+it('confirmed Archive before a delayed row commit returns focus when the real original menu row finally unmounts', async () => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order)
+  await act(async () => order.complete(true)); await settleMoteApp()
+  expect(order.row().isConnected).toBe(true); expect(order.returnFocus).not.toHaveBeenCalled()
+  await order.render(false)
+  expect(document.activeElement).toBe(order.restore()); expect(order.returnFocus).toHaveBeenCalledOnce()
+})
+it('a filtered row waits for delayed confirmation and recovers from its exact local container only after ACK', async () => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order); await order.render(false)
+  await act(async () => order.scope().focus())
+  expect(document.activeElement).toBe(order.scope()); expect(order.returnFocus).not.toHaveBeenCalled()
+  await act(async () => order.complete(true)); await settleMoteApp()
+  expect(document.activeElement).toBe(order.restore()); expect(order.returnFocus).toHaveBeenCalledOnce()
+})
+it('confirmed filtered Archive waits for the original recovery button to become enabled in its real later commit', async () => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order); await order.render(false, false, true)
+  const observe = vi.spyOn(MutationObserver.prototype, 'observe'), disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect')
+  await act(async () => order.complete(true)); await settleMoteApp()
+  expect(order.restore().disabled).toBe(true); expect(document.activeElement).toBe(document.body)
+  const index = observe.mock.calls.findIndex(([element]) => element === order.restore())
+  expect(index).toBeGreaterThan(-1)
+  expect(observe.mock.calls[index]).toEqual([order.restore(), { attributes: true, attributeFilter: ['disabled'] }])
+  await order.render(false)
+  expect(order.restore().disabled).toBe(false); expect(document.activeElement).toBe(order.restore())
+  expect(disconnect.mock.contexts).toContain(observe.mock.contexts[index])
+})
+it('later input cancels and disconnects the exact disabled-control observer before the control becomes ready', async () => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order); await order.render(false, false, true)
+  const observe = vi.spyOn(MutationObserver.prototype, 'observe'), disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect')
+  await act(async () => order.complete(true)); await settleMoteApp()
+  const index = observe.mock.calls.findIndex(([element]) => element === order.restore())
+  expect(index).toBeGreaterThan(-1)
+  await act(async () => { order.input().focus(); order.input().blur() })
+  expect(disconnect.mock.contexts).toContain(observe.mock.contexts[index])
+  await order.render(false)
+  expect(document.activeElement).toBe(document.body)
+})
+it('new input focus followed by blur cancels archive recovery even when the later lost-row focus is body', async () => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order)
+  await act(async () => { order.input().focus(); order.input().blur() })
+  await order.render(false); expect(document.activeElement).toBe(document.body)
+  await act(async () => order.complete(true)); await settleMoteApp()
+  expect(document.activeElement).toBe(document.body); expect(order.returnFocus).not.toHaveBeenCalled()
+})
+it.each(['pointerdown', 'keydown'])('a later human %s cancels the pending archive handoff before its row commit', async type => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order)
+  await act(async () => {
+    order.scope().dispatchEvent(type === 'pointerdown' ? new PointerEvent(type, { bubbles: true }) : new KeyboardEvent(type, { key: 'Tab', bubbles: true }))
+    order.row().blur()
+  })
+  await order.render(false); await act(async () => order.complete(true)); await settleMoteApp()
+  expect(document.activeElement).toBe(document.body); expect(order.returnFocus).not.toHaveBeenCalled()
+})
+it('an exact target change denies the old archive recovery without borrowing the remaining recovery button', async () => {
+  const order = archiveMenu = await createArchiveMenu()
+  await selectArchive(order); order.changeTarget(); await order.render(false)
+  await act(async () => order.complete(true)); await settleMoteApp()
+  expect(document.activeElement).toBe(document.body); expect(order.returnFocus).toHaveBeenCalledOnce()
+})
+it.each([false, true])('confirmed=%s with an original row still present releases all action listeners without moving focus', async confirmed => {
+  const order = archiveMenu = await createArchiveMenu()
+  const content = await menu(order.row(), true)
+  const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Archive Mote')
+  expect(item).toBeDefined()
+  const add = vi.spyOn(document, 'addEventListener'), remove = vi.spyOn(document, 'removeEventListener')
+  await moteClick(item!)
+  const listeners = add.mock.calls.filter(([type, , capture]) => capture === true && ['focusin', 'pointerdown', 'keydown'].includes(type))
+  expect(listeners.map(([type]) => type)).toEqual(['focusin', 'pointerdown', 'keydown'])
+  await act(async () => order.complete(confirmed)); await settleMoteApp()
+  if (confirmed) await order.render(true, true)
+  for (const [type, listener, capture] of listeners) expect(remove).toHaveBeenCalledWith(type, listener, capture)
+  expect(order.row().isConnected).toBe(true); expect(document.activeElement).toBe(order.row())
+  expect(order.returnFocus).not.toHaveBeenCalled()
+})
 it('actual chooser keyboard menu archives only its explicit Mote while retained target, body, two drafts and healthy work stay unchanged', async () => {
   selected(); await app.mount()
   expect([PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId].map(id => choice(id)?.dataset.moteTopicId)).toEqual([PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId])

@@ -47,7 +47,8 @@ try {
     ['final setMoteArchived', 'apps/desktop/src/main/scratch-topics.ts', /args\.scratchTopics\.setMoteArchived\(/],
     ['typed archive invoke', 'apps/desktop/src/main/ipc.ts', /ipcRenderer\.invoke\('scratch:setMoteArchived'/],
     ['store archive request', 'apps/desktop/src/renderer/src/store.ts', /\.setMoteArchived\(/],
-    ['local archive action', 'apps/desktop/src/renderer/src/components/MoteArchiveNotice.tsx', /useMoteArchiveAction\(/]
+    ['local archive action', 'apps/desktop/src/renderer/src/components/MoteArchiveNotice.tsx', /useMoteArchiveAction\(/],
+    ['original archive menu', 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', /<SpaceObjectContextMenu\b/]
   ]) {
     const hits = []
     for (const file of sourceFiles) if (relative(repository, file) !== definition) {
@@ -60,6 +61,8 @@ try {
     'apps/desktop/src/renderer/src/components/LauncherMoteAction.tsx',
     'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx',
     'apps/desktop/src/renderer/src/components/SpaceTopicsTree.tsx'])
+  for (const name of ['PmoTeamsTopicFloatingPanel.tsx', 'SpaceTopicsTree.tsx'])
+    assert.ok(result.callers['original archive menu'].some(row => row.path.endsWith('/' + name)), 'Actual archive menu caller missing: ' + name)
   const service = 'apps/desktop/src/main/scratch-topics.ts', store = 'apps/desktop/src/renderer/src/store.ts'
   const fsTest = 'test/mote-archive-service.test.ts', uiTest = 'test/mote-archive-interaction.test.tsx'
   const variants = [
@@ -71,7 +74,13 @@ try {
     { name: 'late-ack-current-version-fence', path: store, test: uiTest, mutate: source => source.replace("const mayPublish = latestFact?.state !== 'unknown' && latestFact?.version === expectedVersion", 'const mayPublish = true') },
     { name: 'panel-thin-discovery-filter', path: 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', test: uiTest, mutate: source => source.replace("topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map", 'topics.map') },
     { name: 'space-thin-discovery-filter', path: 'apps/desktop/src/renderer/src/components/SpaceTopicsTree.tsx', test: uiTest, mutate: source => source.replace("motes.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived)", 'motes') },
-    { name: 'launcher-thin-discovery-filter', path: 'apps/desktop/src/renderer/src/components/LauncherMoteAction.tsx', test: uiTest, mutate: source => source.replace("motes.filter(mote => mote.moteArchive?.state !== 'archived')", 'motes') }
+    { name: 'launcher-thin-discovery-filter', path: 'apps/desktop/src/renderer/src/components/LauncherMoteAction.tsx', test: uiTest, mutate: source => source.replace("motes.filter(mote => mote.moteArchive?.state !== 'archived')", 'motes') },
+    { name: 'archive-focus-original-row-commit', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
+      mutate: source => source.replace('  useLayoutEffect(() => () => archiveReturnFocus.current?.(), [])\n', '') },
+    { name: 'archive-focus-later-input-cancels', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
+      mutate: source => source.replace("            document.addEventListener('focusin', onFocus, true)\n", '') },
+    { name: 'archive-focus-exact-disabled-control', path: 'apps/desktop/src/renderer/src/components/SpaceObjectContextMenu.tsx', test: uiTest,
+      mutate: source => source.replace("                      readiness.observe(next, { attributes: true, attributeFilter: ['disabled'] })", '                      void next.disabled') }
   ]
   assert.ok(variants.length > 0)
   for (const variant of variants) {

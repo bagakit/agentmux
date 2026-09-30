@@ -148,7 +148,11 @@ function facts() {
       choices: [...(panel?.querySelectorAll<HTMLElement>('[data-mote-topic-id]') ?? [])].map(node => node.dataset.moteTopicId),
       archivedNotice: panel?.querySelector('[data-mote-archived]')?.textContent ?? null,
       input: prompt ? { token: token(prompt), text: prompt.value ?? prompt.textContent, rect: rectangle(prompt) } : null,
-      active: document.activeElement?.getAttribute('aria-label') ?? null, settings: !!document.querySelector('[data-settings-page]'),
+      active: document.activeElement?.getAttribute('aria-label') ?? null,
+      activeElement: document.activeElement ? { tag: document.activeElement.tagName, id: document.activeElement.id,
+        classes: document.activeElement.className, role: document.activeElement.getAttribute('role'),
+        connected: document.activeElement.isConnected, inPanel: panel?.contains(document.activeElement) ?? false } : null,
+      settings: !!document.querySelector('[data-settings-page]'),
       backgroundInert: document.querySelector<HTMLElement>('.app-shell__workspace')?.inert ?? null, panelInert: panel?.closest('[inert]') !== null, activeWorkspaceId: state.activeWorkspaceId } }
 }
 const root = createRoot(document.getElementById('root')!)

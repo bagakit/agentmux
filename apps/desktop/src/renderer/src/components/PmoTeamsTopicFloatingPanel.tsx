@@ -28,7 +28,7 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | null | undefined
   onSelect(topicId: string, tabId: string | undefined): void
   onIdentity(anchor: HTMLButtonElement | null): void
-  onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<void>; pending: string | null; container(): HTMLElement | null; currentTopicId: string
+  onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null; currentTopicId: string
 }) {
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
     targetTopicId: topic.id, ...(selected ? { targetTabId: savedTabId } : {}) }), [topic.id, selected, savedTabId])
@@ -96,7 +96,7 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
   topics: readonly ScratchTopicSnapshot[]; topicId: string; tabId: string | null | undefined
   railMode: 'cards' | 'avatars'; onToggleMode(): void
   onSelect(topicId: string, tabId: string | undefined): void; onOpenSpace(): void; onClose(): void
-  onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<void>; pending: string | null; container(): HTMLElement | null
+  onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null
 }) {
   const [showArchived, setShowArchived] = useState(false)
   const [identityAnchor, setIdentityAnchor] = useState<HTMLButtonElement | null>(null)
