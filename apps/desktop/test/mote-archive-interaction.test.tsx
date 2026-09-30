@@ -239,6 +239,43 @@ it('Space Show archived finds the same hidden object and real Restore returns it
   expect(useAppStore.getState().pinnedItems).toBe(before.pinnedItems); expect(useAppStore.getState().spaceObjectIcons).toBe(before.spaceObjectIcons)
   expect(useAppStore.getState().scratchTopicOrder).toBe(before.scratchTopicOrder); quiet(before)
 })
+it('the real 180px Space Mote keyboard menu pins and unpins the same archived object in the original persistence projection', async () => {
+  selected(true); localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: customMoteId, targetTabId: customTab.id }))
+  useAppStore.setState({ projectRailOpen: true, projectRailWidth: 180 }); await app.mount()
+  await moteClick(button('Show archived Motes in Space'))
+  const original = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)!
+  expect(original.closest('.space-mote-entry')).not.toBeNull(); const before = useAppStore.getState()
+  for (const [label, pinned] of [['Pin Mote', true], ['Unpin Mote', false]] as const) {
+    await act(async () => original.focus()); const content = await menu(original, true)
+    const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === label)
+    expect(item).toBeDefined(); await moteClick(item!)
+    expect(useAppStore.getState().pinnedItems[SCRATCH_WORKSPACE_ID]?.includes(customMoteId) ?? false).toBe(pinned)
+    const saved = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+    expect(saved.pinnedItems?.[SCRATCH_WORKSPACE_ID]?.includes(customMoteId) ?? false).toBe(pinned)
+    expect(document.activeElement).toBe(original); expect(document.querySelector(`[data-space-nav="topic:${customMoteId}"]`)).toBe(original)
+    expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics![1]!.moteArchive?.state).toBe('archived'); quiet(before)
+  }
+})
+it('the real narrow Space Mote keyboard menu edits its exact original SOUL owner after menu close and keeps primary archive protection', async () => {
+  selected(true); localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: customMoteId, targetTabId: customTab.id }))
+  const openFile = vi.spyOn(useAppStore.getState(), 'openFile').mockResolvedValue(true)
+  useAppStore.setState({ projectRailOpen: true, projectRailWidth: 180 }); await app.mount()
+  await moteClick(button('Show archived Motes in Space')); app.ensureMote.mockClear()
+  const original = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)!
+  await act(async () => original.focus()); const content = await menu(original, true)
+  const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Edit SOUL.md')
+  expect(item).toBeDefined(); await moteClick(item!)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(app.ensureMote).toHaveBeenCalledOnce(); expect(app.ensureMote).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, customMoteId)
+  expect(openFile).toHaveBeenCalledOnce(); expect(openFile).toHaveBeenCalledWith('topic--launcher--analyst/SOUL.md', undefined, undefined, SCRATCH_WORKSPACE_ID)
+  expect(useAppStore.getState().tabs[customTab.id]!.regions[customTab.layout.activeRegionId]).toEqual(customTab.regions[customTab.layout.activeRegionId])
+  expect(useAppStore.getState().agentComposerDrafts[customAgent.id]).toContain('Analyst unsent')
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled()
+  const primaryRow = document.querySelector<HTMLElement>(`[data-space-nav="topic:${PMO_TEAMS_TOPIC_ID}"]`)!
+  expect(primaryRow).not.toBeNull(); const primaryMenu = await menu(primaryRow, true)
+  const protectedAction = [...primaryMenu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Primary Mote cannot be archived')
+  expect(protectedAction).toBeDefined(); expect(protectedAction!.getAttribute('aria-disabled')).toBe('true')
+})
 it('primary menu explains final protection and plain Topics offer no archive action', async () => {
   selected(); useAppStore.setState({ projectRailOpen: true }); await app.mount()
   let content = await menu(choice(PMO_TEAMS_TOPIC_ID)!)
@@ -248,6 +285,7 @@ it('primary menu explains final protection and plain Topics offer no archive act
   const plain = document.querySelector<HTMLElement>(`[data-space-nav="topic:${ordinaryTopicId}"]`)
   expect(plain).not.toBeNull(); content = await menu(plain!)
   expect(content.textContent).toContain('Change icon'); expect(content.textContent).not.toContain('Archive')
+  expect(plain!.closest('.space-mote-entry')).toBeNull(); expect(content.textContent).not.toContain('Pin Mote'); expect(content.textContent).not.toContain('Edit SOUL.md')
   expect(api.scratch.setMoteArchived).not.toHaveBeenCalled()
 })
 it('unknown archive metadata remains a Mote with neutral discovery, retained exact target and a working retry notice', async () => {

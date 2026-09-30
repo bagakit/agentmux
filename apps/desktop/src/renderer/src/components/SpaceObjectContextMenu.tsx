@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Archive, ArchiveRestore, Shapes } from 'lucide-react'
+import { Archive, ArchiveRestore, NotebookPen, Pin, Shapes } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -39,9 +39,10 @@ export function useSpaceObjectMenu() {
 }
 
 /** A real object menu for Space Motes/Topics; registered Folder menus reuse the same entry. */
-export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuOpen, moteArchive, container }: {
+export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuOpen, moteArchive, moteActions, container }: {
   target: SpaceIconTarget; onChangeIcon?(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
   moteArchive?: { archived: boolean; disabled?: boolean; reason?: string; onChange(): Promise<boolean>; returnFocus?(): HTMLElement | null }
+  moteActions?: { pinned: boolean; onTogglePin(): void; onEdit(): void }
   container?: () => HTMLElement | null
 }) {
   const menu = useSpaceObjectMenu()
@@ -60,6 +61,14 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
         {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => onChangeIcon(target))}>
           <Shapes size={14} /><span>{target.avatarTarget ? 'Change avatar…' : 'Change icon…'}</span>
         </ContextMenu.Item> : null}
+        {moteActions ? <>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={moteActions.onTogglePin}>
+            <Pin size={14} /><span>{moteActions.pinned ? 'Unpin Mote' : 'Pin Mote'}</span>
+          </ContextMenu.Item>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onEdit)}>
+            <NotebookPen size={14} /><span>Edit SOUL.md</span>
+          </ContextMenu.Item>
+        </> : null}
         {moteArchive ? <ContextMenu.Item className="tab-context-menu__item" disabled={moteArchive.disabled ?? false}
           {...(moteArchive.reason ? { title: moteArchive.reason } : {})} onSelect={() => {
             const original = menu.triggerProps.ref.current

@@ -362,10 +362,13 @@
 @media (prefers-reduced-motion: reduce) { .project-activity-group__disclosure svg { transition: none; } }
 .board-branch-head__recap { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; opacity: .8; }
 
-.project-rail-shell { position: relative; min-height: 0; }
+.project-rail-shell { position: relative; min-height: 0; container: space-navigation / inline-size; }
 .project-rail-shell > .sidebar { height: 100%; width: 100%; }
 .project-rail-width-handle { position: absolute; inset: 0 calc(-1 * var(--sp-1)) 0 auto; width: var(--sp-2); cursor: col-resize; z-index: 2; -webkit-app-region: no-drag; }
 .project-rail-width-handle:hover, .project-rail-width-handle:focus-visible, .project-rail-shell--resizing .project-rail-width-handle { background: var(--line); outline: none; }
+@container space-navigation (max-width: 210px) {
+  .space-mote-entry > .project-rail-entry > :is(.space-pin, .space-mote-edit) { display: none; }
+}
 
 @media (max-width: 900px) {
   .host-settings-card > header { grid-template-columns: 32px minmax(0, 1fr) auto auto; }

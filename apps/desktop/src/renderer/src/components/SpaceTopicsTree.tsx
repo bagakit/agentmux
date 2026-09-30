@@ -104,7 +104,9 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         const attentionLabel = rowAttentionLabel(rowAttention(bucket))
         const isPinned = pinned?.includes(id) === true
         const archived = topic.moteArchive?.state === 'archived'
-        return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon} {...(isMote ? { moteArchive: {
+        const togglePin = () => togglePinned(SCRATCH_WORKSPACE_ID, id), editMote = () => void openMote(id, true)
+        return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon} {...(isMote ? {
+          moteActions: { pinned: isPinned, onTogglePin: togglePin, onEdit: editMote }, moteArchive: {
           archived, disabled: archive.pending === id || id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
           ...(id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),
           onChange: () => archive.change(topic, !archived),
@@ -114,7 +116,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
             return tree.current?.querySelector<HTMLButtonElement>('[aria-label="Show archived Motes in Space"]') ?? null
           }
         } } : {})}>
-        <div className="space-tree-entry" data-space-entry data-mote-archive-state={isMote ? topic.moteArchive?.state : undefined}>
+        <div className={`space-tree-entry${isMote ? ' space-mote-entry' : ''}`} data-space-entry data-mote-archive-state={isMote ? topic.moteArchive?.state : undefined}>
           <div className="project-rail-entry">
             <button type="button" data-space-nav={`topic:${id}`} data-space-parent={key}
               data-space-icon-target={target.key} style={{ '--rail-depth': 1 } as CSSProperties}
@@ -128,9 +130,9 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
               aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${name}`} aria-pressed={isPinned} title={`${isPinned ? 'Unpin' : 'Pin'} ${name}`}
-              onClick={() => togglePinned(SCRATCH_WORKSPACE_ID, id)}><Pin size={11} /></button>
+              onClick={togglePin}><Pin size={11} /></button>
             {isMote ? <button type="button" className="icon-button space-row-action space-mote-edit" aria-label={`Edit ${name} SOUL.md`}
-              title="Edit SOUL.md · New sessions use saved changes" onClick={() => void openMote(id, true)}><NotebookPen size={12} /></button> : null}
+              title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><NotebookPen size={12} /></button> : null}
             {archived ? <button type="button" className="icon-button space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
               disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ArchiveRestore size={12} /></button> : null}
             {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
