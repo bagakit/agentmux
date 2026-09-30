@@ -51,8 +51,8 @@ function fixture() {
       devTools: true, viewport: true, saveBookmark: true, more: true } } }
   return { tabs, sessions, layouts, config, related }
 }
-type Props = { visible: boolean; focusTabId: string | null; focusPortalTargetId: string | null;
-  interactiveResize: boolean; viewTargets?: Readonly<Record<string, string>> }
+type Props = { visible: boolean; viewTargets?: Readonly<Record<string, import('../../../src/renderer/src/lib/workbench-presentation').WorkbenchViewTarget>>; projection?: import('../../../src/renderer/src/lib/workbench-projection').WorkbenchProjection;
+  interactiveResize: boolean }
 type RawEvent = { sequence: number; window: string; kind: string; consumerId: string; phase?: string; props?: Props;
   stateIdentity?: number; monacoRegionIds?: string[]; browserRegionIds?: string[] }
 let root: Root, container: HTMLDivElement, events: RawEvent[], observationWindow: string, dispose: () => void
@@ -153,9 +153,14 @@ it('actual App passes changed resize and Focus projection props through the defa
   await act(async () => useAppStore.setState({ mainSurface: 'agents',
     agentFocus: { execution: { sessionId: 'agent-one', history: [] }, pmo: { sessionId: null } } }))
   expect(commits('unrelated-workspace').length).toBeGreaterThan(0)
-  expect(commits('unrelated-workspace').at(-1)?.props).toMatchObject({ visible: true, focusTabId: 'agent-tab-1', focusPortalTargetId: 'focus-workspace-slot' })
+  const focusProps = commits('unrelated-workspace').at(-1)!.props!
+  expect(focusProps.visible).toBe(false)
+  const focusTarget = focusProps.viewTargets?.['agent-tab-1']
+  expect(focusTarget).toMatchObject({ active: true, visible: true, surface: 'focus', reference: {
+    displayWorkspaceId: 'unrelated-workspace', groupId: 'unrelated-group', tabId: 'agent-tab-1', regionId: 'agent-region-1' } })
+  expect(focusTarget!.hostId).toBe('focus-workbench-slot:["unrelated-workspace","unrelated-group","agent-tab-1"]')
   expect(container.querySelector('[data-workspace-id="unrelated-workspace"]')?.getAttribute('data-visible')).toBe('true')
-  expect(container.querySelector('#focus-workspace-slot .agent-surface')).not.toBeNull()
+  expect(container.querySelector('.focused-tab-workspace .agent-surface')).not.toBeNull()
   expect(useAppStore.getState().sessions.map(session => session.control.run.runId)).toEqual(['run-agent-one', 'run-agent-two'])
   report.passed = true
 })
@@ -169,7 +174,7 @@ it('actual Avatar Settings click opens the current executor route after App upda
     ...config.executors, codex: { ...config.executors.codex!, label: 'Current executor' }
   } }, mainSurface: 'agents',
   agentFocus: { execution: { sessionId: 'agent-one', history: [] }, pmo: { sessionId: null } } }))
-  const avatar = container.querySelector<HTMLElement>('#focus-workspace-slot .agent-avatar[data-executor-id="codex"]')
+  const avatar = container.querySelector<HTMLElement>('.focused-tab-workspace .agent-avatar[data-executor-id="codex"]')
   expect(avatar).not.toBeNull()
   await act(async () => avatar!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
   const settings = document.querySelector<HTMLButtonElement>('.agent-identity-popover button[aria-label="Edit Current executor executor"]')

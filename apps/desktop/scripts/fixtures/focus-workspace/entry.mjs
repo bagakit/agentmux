@@ -1,7 +1,6 @@
 import { createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
-import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
-import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
+import { FocusWorkbenchFixture, absoluteFocusFixtureInputs } from '../../../test/fixtures/focus-workbench'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { restorePersistedUiState } from '../../../src/renderer/src/store'
@@ -9,8 +8,10 @@ import { restoreAgentFocus } from '../../../src/renderer/src/lib/agent-focus'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
 
-const config = await api.config.get()
 const snapshot = await api.sessions.snapshot()
+const inputs = absoluteFocusFixtureInputs(await api.config.get(), snapshot.sessions)
+const config = inputs.config
+snapshot.sessions = inputs.sessions
 const selected = snapshot.sessions.find(session => session.id === 'session-codex')
 const workspaceId = 'workspace-demo'
 const projects = Array.from({ length: 24 }, (_, index) => ({ id: `project-${index}`, name: `Project ${index}`, path: `/fixture/project-${index}`, hostId: 'local', kind: 'folder' }))
@@ -46,10 +47,7 @@ window.focusProbeState = () => {
 function Fixture() {
   useEffect(() => { window.focusProbeReady = true }, [])
   return createElement('section', { className: 'workspace-main-surface', style: { width: '100vw', height: '100vh', position: 'relative' } },
-    createElement(GlobalFocusSurface),
-    createElement('div', { className: 'workspace-workbench-registry' },
-      createElement('div', { className: 'workspace-workbench-slot workspace-workbench-slot--focus-source' },
-        createElement(WorkspaceWorkbench, { workspaceId, visible: true, focusTabId: tab.id, focusPortalTargetId: 'focus-workspace-slot' }))))
+    createElement(FocusWorkbenchFixture, { workspaceId }))
 }
 createRoot(document.getElementById('root')).render(createElement(Fixture))
 window.focusProbeGeometry = () => {
@@ -62,8 +60,8 @@ window.focusProbeGeometry = () => {
   const lanes = document.querySelector('.focus-project-lanes__rows')
   const rect = lanes.getBoundingClientRect()
   const hit = document.elementFromPoint(rect.left + 30, rect.top + Math.min(20, rect.height / 2))
-  const right = document.querySelector('#focus-workspace-slot .workbench-region')
+  const right = document.querySelector('.focused-tab-workspace .workbench-region')
   const rightRect = right.getBoundingClientRect()
   const rightHit = document.elementFromPoint(rightRect.left + rightRect.width / 2, rightRect.top + rightRect.height / 2)
-  return { toolbar: inspect('.focus-toolbar'), contextHeader: inspect('.focus-toolbar__context'), laneNames: [...document.querySelectorAll('.focus-project-lanes__axis')].map(node => node.textContent), disconnectedToggles: [...document.querySelectorAll('.focus-recovery-toggle')].map(node => node.textContent), visibleRecovery: document.querySelectorAll('[data-session-id^=recovery-]').length, lanes: inspect('.focus-project-lanes__rows'), tracks: inspect('.recent-focus__viewport'), track: inspect('.focus-project-lanes__track'), body: inspect('#focus-workspace-slot .workbench-region'), slot: inspect('#focus-workspace-slot'), timeline: inspect('.recent-focus'), main: inspect('.global-focus-layout'), leftHit: Boolean(hit?.closest('.focus-project-lanes')), rightHit: Boolean(rightHit?.closest('#focus-workspace-slot')), terminal: Boolean(document.querySelector('#focus-workspace-slot .xterm')), hydrating: Boolean(document.querySelector('#focus-workspace-slot .terminal-view__xterm--hydrating')), regionIds: [...document.querySelectorAll('#focus-workspace-slot [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
+  return { toolbar: inspect('.focus-toolbar'), contextHeader: inspect('.focus-toolbar__context'), laneNames: [...document.querySelectorAll('.focus-project-lanes__axis')].map(node => node.textContent), disconnectedToggles: [...document.querySelectorAll('.focus-recovery-toggle')].map(node => node.textContent), visibleRecovery: document.querySelectorAll('[data-session-id^=recovery-]').length, lanes: inspect('.focus-project-lanes__rows'), tracks: inspect('.recent-focus__viewport'), track: inspect('.focus-project-lanes__track'), body: inspect('.focused-tab-workspace .workbench-region'), slot: inspect('.focused-tab-workspace'), timeline: inspect('.recent-focus'), main: inspect('.global-focus-layout'), leftHit: Boolean(hit?.closest('.focus-project-lanes')), rightHit: Boolean(rightHit?.closest('.focused-tab-workspace')), terminal: Boolean(document.querySelector('.focused-tab-workspace .xterm')), hydrating: Boolean(document.querySelector('.focused-tab-workspace .terminal-view__xterm--hydrating')), regionIds: [...document.querySelectorAll('.focused-tab-workspace [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
 }

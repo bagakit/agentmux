@@ -27,8 +27,7 @@ export default defineConfig({
         code = `import { Profiler as SourceWorkspaceProfiler } from 'react'\n` + source.replace(renderAnchor,
           `  globalThis.__agentmuxSourceWorkspaceRender?.(workspaceId)\n${renderAnchor}`).replace(anchor,
           `  return <SourceWorkspaceProfiler id={workspaceId} onRender={(id, phase) =>
-    globalThis.__agentmuxSourceWorkspaceCommit?.(id, phase, { visible, focusTabId,
-      focusPortalTargetId, interactiveResize, viewTargets })}>{workbench}</SourceWorkspaceProfiler>\n}`)
+    globalThis.__agentmuxSourceWorkspaceCommit?.(id, phase, { visible, interactiveResize, viewTargets, projection })}>{workbench}</SourceWorkspaceProfiler>\n}`)
       }
       if (file === `${root}/apps/desktop/src/renderer/src/lib/surface-memory-budget-coordinator.tsx`) {
         const anchor = '  return (\n    <SurfaceMemoryBudgetContext.Provider value={previousState.current}>'

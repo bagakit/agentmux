@@ -14,6 +14,11 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
+// Load the installed browser primary so original real Panel registration precedes layout effects.
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 
 const renderer = vi.hoisted(() => ({ mounted: new Map<string, number>(), unmounted: new Map<string, number>() }))
@@ -72,7 +77,7 @@ it('does not mount a second ordinary Topic terminal when the resident Mote proje
   const h = seed()
   await act(async () => h.root.render(createElement('div', {},
     createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID }),
-    createElement(PmoTeamsTopicFloatingPanel, { floating: { open: false, maximized: false, position: { left: 80, top: 72 }, size: { width: 720, height: 520 } }, setFloating: vi.fn() })
+    createElement(PmoTeamsTopicFloatingPanel, { floating: { open: false, preview: false, size: { width: 720, height: 520 } }, setFloating: vi.fn() })
   )))
   expect(Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).filter(region => region.kind === 'terminal')).toHaveLength(2)
   expect(useAppStore.getState().sessions).toHaveLength(2)
@@ -88,10 +93,10 @@ it('moves the same Mote terminal DOM between main, floating and Focus slots with
     return act(async () => h.root.render(createElement('div', {},
       createElement('div', { id: 'focus-view' }),
       createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID,
-        ...(target ? { viewTargets: { [h.mote.id]: target } } : {}),
-        ...(focus ? { focusTabId: h.mote.id, focusPortalTargetId: 'focus-view' } : {}) }),
+        viewTargets: focus ? { [h.mote.id]: { hostId: 'focus-view', active: true, visible: true, surface: 'focus' } }
+          : target ? { [h.mote.id]: { hostId: target, active: true, visible: true } } : {} }),
       createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, topicId: PMO_TEAMS_TOPIC_ID,
-        topicIsolation: 'bound-only', viewOwnership: 'projection', viewHostPrefix: PMO_FLOATING_TAB_SLOT_PREFIX,
+        topicIsolation: 'bound-only', viewOwnership: 'projection', viewHostPrefix: PMO_FLOATING_TAB_SLOT_PREFIX, projectionTabId: h.mote.id,
         visible: Boolean(target) })
     )))
   }
@@ -206,6 +211,13 @@ it('claims the in-flight reusable shell without the actual launcher prewarming a
     warmTerminal: null, prewarmTerminal: initial.prewarmTerminal })
   let finish!: (one: SessionSnapshot) => void
   const launch = vi.spyOn(api.sessions, 'launchTerminal').mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const allocated = session('original-prewarmed-run')
+  // One external fixture producer owns both allocation and its subsequent readback.
+  // Store claim/promote and Launcher mounting remain the actual product callers.
+  const refresh = vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    expect(control).toEqual(allocated.control)
+    return allocated
+  })
   await act(async () => h.root.render(createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID })))
   expect(launch).toHaveBeenCalledTimes(1)
   const originalWarm = useAppStore.getState().warmTerminal
@@ -217,13 +229,14 @@ it('claims the in-flight reusable shell without the actual launcher prewarming a
   expect(created).toHaveLength(1)
   expect(Object.values(created[0]!.regions)).toEqual([expect.objectContaining({ kind: 'terminal', phase: 'launching' })])
   expect(launch).toHaveBeenCalledTimes(1)
-  await act(async () => { finish(session('original-prewarmed-run')); await opening })
+  await act(async () => { finish(allocated); await opening })
   expect(Object.values(useAppStore.getState().tabs[created[0]!.id]!.regions)).toEqual([
     expect.objectContaining({ kind: 'terminal', phase: 'attached', sessionId: 'original-prewarmed-run' })
   ])
   expect(useAppStore.getState().sessions.map(one => one.id)).toEqual(['original-prewarmed-run'])
   expect(launch).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().warmTerminal).toBeNull()
+  expect(refresh).toHaveBeenCalledExactlyOnceWith(allocated.control)
 })
 
 

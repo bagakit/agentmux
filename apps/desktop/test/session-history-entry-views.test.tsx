@@ -3,13 +3,12 @@ import { act, useEffect, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
-import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { App } from '../src/renderer/src/App'
+import { installNativePopover } from './fixtures/mote-workface'
+import { absoluteFocusFixtureInputs } from './fixtures/focus-workbench'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { tabForFocusedSession } from '../src/renderer/src/lib/focus-tab-projection'
-import { executionFocusSessionId } from '../src/renderer/src/lib/agent-focus'
 import { openAgentHistory } from './helpers/agent-history-menu'
 
 // Only PTY/xterm paint is isolated. Actual Store, SessionPane, Header, History,
@@ -29,28 +28,23 @@ vi.mock('react-resizable-panels', async () => {
 
 const initial = useAppStore.getState()
 const workspaceId = 'workspace-demo', tabId = 'history-intake-tab', regionId = 'history-intake-region'
-let root: Root, container: HTMLDivElement, ids: string[]
+let root: Root, container: HTMLDivElement, ids: string[], restorePopover: () => void
 let history: MockInstance<typeof api.sessions.historyPage>
 let writes: MockInstance<typeof api.sessions.write>
 let recover: MockInstance<typeof initial.recoverSession>
-function Workface() {
-  const surface = useAppStore(state => state.mainSurface)
-  const tabs = useAppStore(state => state.tabs)
-  const id = useAppStore(state => executionFocusSessionId(state.agentFocus))
-  const focused = surface === 'agents' ? tabForFocusedSession(tabs, id) : null
-  return <>{surface === 'agents' ? <GlobalFocusSurface /> : null}<WorkspaceWorkbench workspaceId={workspaceId}
-    visible focusTabId={focused?.id ?? null} focusPortalTargetId={focused ? 'focus-workspace-slot' : null} /></>
-}
+function Workface() { return <App /> }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  restorePopover = installNativePopover()
   paint.mounts = {}; paint.refresh.mockClear()
-  const sessions = (await api.sessions.snapshot()).sessions.filter(s => s.kind === 'agent').slice(0, 2)
+  let sessions = (await api.sessions.snapshot()).sessions.filter(s => s.kind === 'agent').slice(0, 2)
     .map(s => ({ ...s, processState: 'running' as const }))
   expect(sessions).toHaveLength(2); ids = sessions.map(s => s.id)
+  const input = absoluteFocusFixtureInputs(await api.config.get(), sessions); sessions = input.sessions
   const tab = createWorkbenchTab(tabId, { regionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: ids[0]! })
   const neighbor = createWorkbenchTab('history-intake-neighbor', { regionId: 'history-intake-neighbor-region', kind: 'agent', phase: 'attached', workspaceId, sessionId: ids[1]! })
-  useAppStore.setState({ ...initial, config: await api.config.get(), sessions, tabs: { [tab.id]: tab, [neighbor.id]: neighbor },
+  useAppStore.setState({ ...initial, initialize: async () => () => {}, loading: false, toolsOpen: false, projectRailOpen: false, config: input.config, sessions, tabs: { [tab.id]: tab, [neighbor.id]: neighbor },
     layouts: { [workspaceId]: createWorkspaceLayout('history-intake-group', [tab.id, neighbor.id]) },
     activeWorkspaceId: workspaceId, mainSurface: 'agents', agentNames: { [ids[0]!]: 'History intake Agent', [ids[1]!]: 'Neighbor Agent' },
     viewModes: { [ids[0]!]: 'terminal', [ids[1]!]: 'terminal' },
@@ -71,7 +65,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await act(async () => root.unmount()); document.body.replaceChildren()
-  useAppStore.setState(initial, true); vi.unstubAllGlobals(); vi.restoreAllMocks()
+  restorePopover(); useAppStore.setState(initial, true); vi.unstubAllGlobals(); vi.restoreAllMocks()
 })
 async function mount() { await act(async () => root.render(<Workface />)) }
 function region() {

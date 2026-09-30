@@ -1,7 +1,6 @@
 import { createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
-import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
-import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
+import { FocusWorkbenchFixture, absoluteFocusFixtureInputs } from '../../../test/fixtures/focus-workbench'
 import { useAppStore, restorePersistedUiState } from '../../../src/renderer/src/store'
 import { restoreAgentFocus } from '../../../src/renderer/src/lib/agent-focus'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -11,7 +10,10 @@ import '../../../src/renderer/src/styles/index.css'
 
 // Reuse the public web-preview transport and ordinary Workbench restore owner.
 // These typed Sessions are presentation inputs, never evidence of live Core Runs.
-const config = await api.config.get(), snapshot = await api.sessions.snapshot()
+const snapshot = await api.sessions.snapshot()
+const inputs = absoluteFocusFixtureInputs(await api.config.get(), snapshot.sessions)
+const config = inputs.config
+snapshot.sessions = inputs.sessions
 const base = snapshot.sessions.find(session => session.id === 'session-codex')
 const workspaceId = 'workspace-demo'
 const project = { id: workspaceId, name: '产品研究与终端连续阅读体验', path: base.workspacePath, hostId: base.hostId, kind: 'folder' }
@@ -57,13 +59,11 @@ window.laneProbeGeometry = () => {
   const groups = lane.querySelector('.focus-project-lanes__groups')
   const overflow = [...root.querySelectorAll('.focus-project-lanes__track, .focus-project-lanes__groups, .focus-context-group')].map(node => ({ className: node.className, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }))
   const compact = lane.querySelector('[data-session-id="offline"]')
-  return { containerWidth: root.getBoundingClientRect().width, display: getComputedStyle(groups).display, columns, horizontalOverflow: overflow.some(node => node.scrollWidth > node.clientWidth+1), overflow, compactHeight: compact?.getBoundingClientRect().height ?? null, topicHeading: document.querySelector('[data-topic-id]')?.textContent, regionIds: [...document.querySelectorAll('#focus-workspace-slot [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
+  return { containerWidth: root.getBoundingClientRect().width, display: getComputedStyle(groups).display, columns, horizontalOverflow: overflow.some(node => node.scrollWidth > node.clientWidth+1), overflow, compactHeight: compact?.getBoundingClientRect().height ?? null, topicHeading: document.querySelector('[data-topic-id]')?.textContent, regionIds: [...document.querySelectorAll('.focused-tab-workspace [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
 }
 function Fixture() {
-  const selectedId = useAppStore(state => state.agentFocus.execution.sessionId)
   useEffect(() => { window.laneProbeReady = true }, [])
   return createElement('section', { className: 'workspace-main-surface', style: { width: '100vw', height: '100vh', position: 'relative' } },
-    createElement(GlobalFocusSurface),
-    createElement('div', { className: 'workspace-workbench-registry' }, createElement('div', { className: 'workspace-workbench-slot workspace-workbench-slot--focus-source' }, createElement(WorkspaceWorkbench, { workspaceId, visible: true, focusTabId: selectedId ? tab.id : null, focusPortalTargetId: selectedId ? 'focus-workspace-slot' : null }))))
+    createElement(FocusWorkbenchFixture, { workspaceId }))
 }
 createRoot(document.getElementById('root')).render(createElement(Fixture))

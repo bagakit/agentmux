@@ -7,6 +7,9 @@ import assert from 'node:assert/strict'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations = {
+  'drop-presentation-context': ['apps/desktop/src/renderer/src/App.tsx',
+    "headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,",
+    "headerPortalTargetId: 'focus-workspace-slot-header',"],
   'first-occurrence': ['apps/desktop/src/renderer/src/lib/focus-tab-projection.ts',
     'const reference = execution.reference ?? (choices.length === 1 ? choices[0] : undefined)',
     'const reference = choices[0]'],

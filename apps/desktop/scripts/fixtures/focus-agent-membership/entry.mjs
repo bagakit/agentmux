@@ -2,8 +2,7 @@ import { createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { FocusNavigationButton } from '../../../src/renderer/src/components/FocusNavigationButton'
 import { FocusNavigationPreview } from '../../../src/renderer/src/components/FocusNavigationPreview'
-import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
-import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
+import { FocusWorkbenchFixture, absoluteFocusFixtureInputs } from '../../../test/fixtures/focus-workbench'
 import { useAppStore, restorePersistedUiState } from '../../../src/renderer/src/store'
 import { restoreAgentFocus } from '../../../src/renderer/src/lib/agent-focus'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -13,7 +12,10 @@ import '../../../src/renderer/src/styles/index.css'
 
 // Reuse the public web-preview transport and ordinary Workbench restore owner.
 // These typed Sessions are presentation inputs, never evidence of live Core Runs.
-const config = await api.config.get(), snapshot = await api.sessions.snapshot()
+const snapshot = await api.sessions.snapshot()
+const inputs = absoluteFocusFixtureInputs(await api.config.get(), snapshot.sessions)
+const config = inputs.config
+snapshot.sessions = inputs.sessions
 const base = snapshot.sessions.find(session => session.id === 'session-codex')
 const workspaceId = 'workspace-demo'
 const project = { id: workspaceId, name: '产品研究与终端连续阅读体验', path: base.workspacePath, hostId: base.hostId, kind: 'folder' }
@@ -51,7 +53,7 @@ window.laneProbeState = () => {
 }
 window.restoreLaneProbe = state => useAppStore.setState({ ...state, config, ...restorePersistedUiState(config, state), agentFocus: restoreAgentFocus(state.agentFocus) })
 window.laneProbeMode = mode => useAppStore.setState(state => ({ agentFocus: { ...state.agentFocus, execution: { ...state.agentFocus.execution, sessionId: mode === 'board' ? null : 'ordinary' } } }))
-window.membershipProbe = () => {const state=useAppStore.getState();return {rows:[...document.querySelectorAll('.global-focus-surface [data-session-id]')].map(node=>node.dataset.sessionId).sort(), slot:document.querySelector('#focus-workspace-slot')?.dataset.focusTabId, terminalRegion:!!document.querySelector('#focus-workspace-slot [data-workbench-region-id=fixture-region]'),xterm:!!document.querySelector('#focus-workspace-slot .xterm'),focus:state.agentFocus.execution.sessionId,draft:state.agentComposerDrafts.ordinary,counts:[...document.querySelectorAll('[data-focus-count]')].map(node=>({key:node.dataset.focusCount,text:node.textContent})),historyTracks:[...document.querySelectorAll('[data-focus-timeline-id]')].map(node=>node.dataset.focusTimelineId)}}
+window.membershipProbe = () => {const state=useAppStore.getState();return {rows:[...document.querySelectorAll('.global-focus-surface [data-session-id]')].map(node=>node.dataset.sessionId).sort(), slot:document.querySelector('.focused-tab-workspace')?.dataset.focusTabId, terminalRegion:!!document.querySelector('.focused-tab-workspace [data-workbench-region-id=fixture-region]'),xterm:!!document.querySelector('.focused-tab-workspace .xterm'),focus:state.agentFocus.execution.sessionId,draft:state.agentComposerDrafts.ordinary,counts:[...document.querySelectorAll('[data-focus-count]')].map(node=>({key:node.dataset.focusCount,text:node.textContent})),historyTracks:[...document.querySelectorAll('[data-focus-timeline-id]')].map(node=>node.dataset.focusTimelineId)}}
 window.laneProbeGeometry = () => {
   const root = document.querySelector('.global-focus-main'), lane = document.querySelector(`[data-project-id="${workspaceId}"]`)
   const columns = [...lane.querySelectorAll('section[data-bucket]')].map(node => {
@@ -61,14 +63,12 @@ window.laneProbeGeometry = () => {
   const groups = lane.querySelector('.focus-project-lanes__groups')
   const overflow = [...root.querySelectorAll('.focus-project-lanes__track, .focus-project-lanes__groups, .focus-context-group')].map(node => ({ className: node.className, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }))
   const compact = lane.querySelector('[data-session-id="offline"]')
-  return { containerWidth: root.getBoundingClientRect().width, display: getComputedStyle(groups).display, columns, horizontalOverflow: overflow.some(node => node.scrollWidth > node.clientWidth+1), overflow, compactHeight: compact?.getBoundingClientRect().height ?? null, topicHeading: document.querySelector('[data-topic-id]')?.textContent, regionIds: [...document.querySelectorAll('#focus-workspace-slot [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
+  return { containerWidth: root.getBoundingClientRect().width, display: getComputedStyle(groups).display, columns, horizontalOverflow: overflow.some(node => node.scrollWidth > node.clientWidth+1), overflow, compactHeight: compact?.getBoundingClientRect().height ?? null, topicHeading: document.querySelector('[data-topic-id]')?.textContent, regionIds: [...document.querySelectorAll('.focused-tab-workspace [data-workbench-region-id]')].map(node => node.dataset.workbenchRegionId) }
 }
 function Fixture() {
-  const selectedId = useAppStore(state => state.agentFocus.execution.sessionId)
   useEffect(() => { window.laneProbeReady = true }, [])
   return createElement('section', { className: 'workspace-main-surface', style: { width: '100vw', height: '100vh', position: 'relative' } },
-    createElement('div',{style:{height:'calc(100vh - 24px)'}},createElement(GlobalFocusSurface)),
-    createElement('footer',{style:{position:'absolute',bottom:0,left:0,height:24,zIndex:5,background:'#171c22',padding:'0 8px',display:'flex'}},createElement(FocusNavigationButton,{'aria-label':'Focus'},'Focus')),
-    createElement('div', { className: 'workspace-workbench-registry' }, createElement('div', { className: 'workspace-workbench-slot workspace-workbench-slot--focus-source' }, createElement(WorkspaceWorkbench, { workspaceId, visible: true, focusTabId: selectedId ? tab.id : null, focusPortalTargetId: selectedId ? 'focus-workspace-slot' : null }))))
+    createElement('div', { style: { height: 'calc(100vh - 24px)' } }, createElement(FocusWorkbenchFixture, { workspaceId })),
+    createElement('footer',{style:{position:'absolute',bottom:0,left:0,height:24,zIndex:5,background:'#171c22',padding:'0 8px',display:'flex'}},createElement(FocusNavigationButton,{'aria-label':'Focus'},'Focus')))
 }
 createRoot(document.getElementById('root')).render(createElement(Fixture))

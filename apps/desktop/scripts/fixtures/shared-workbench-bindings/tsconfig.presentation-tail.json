@@ -1,0 +1,10 @@
+{
+ "extends": "../../../tsconfig.json",
+ "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+ "include": ["../../../src/**/*.ts", "../../../src/**/*.tsx", "../../../*.ts",
+ "../../../test/focus-workbench-projection.test.tsx", "../../../test/workbench-focus-residency.test.tsx",
+ "../../../test/focused-tab-workspace.test.tsx", "../../../test/focus-preview-header.test.tsx",
+ "../../../test/session-history-entry-views.test.tsx", "../../../test/focus-terminal-recovery.test.tsx",
+ "../../../test/topic-terminal-open-close.test.tsx", "../../../test/global-focus-surface.test.tsx",
+ "../browser-app-workspace-cost/app-workspace-cost.fixture.tsx", "../browser-app-workspace-cost/vitest.owning.config.mts"]
+}

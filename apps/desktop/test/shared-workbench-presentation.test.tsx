@@ -23,9 +23,12 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({
     const key = `${linkOrigin.tabId}/${linkOrigin.regionId}`
     useEffect(() => { leaves.mounts.push(key); return () => { leaves.unmounts.push(key) } }, [key])
     const draft = useAppStore(state => state.agentComposerDrafts[sessionId] ?? '')
+    const presentation = useWorkbenchBrowserPresentation()
     return createElement('section', { 'data-fixture-session': sessionId,
       'data-resource-workspace': linkOrigin.workspaceId, 'data-owner-group': linkOrigin.tabGroupId,
-      'data-owner-tab': linkOrigin.tabId, 'data-owner-region': linkOrigin.regionId },
+      'data-owner-tab': linkOrigin.tabId, 'data-owner-region': linkOrigin.regionId,
+      'data-presentation-reference': presentation.reference ? JSON.stringify(presentation.reference) : undefined,
+      'data-presentation-entity': presentation.projection ? JSON.stringify(presentation.projection.entity) : undefined },
     createElement('textarea', { 'aria-label': `Original draft ${key}`, value: draft, readOnly: true }))
   }
 }))
@@ -36,6 +39,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { restoreAgentFocus, sanitizeAgentFocus } from '../src/renderer/src/lib/agent-focus'
 import { workbenchProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
+import { useWorkbenchBrowserPresentation } from '../src/renderer/src/lib/workbench-presentation'
 import { installNativePopover } from './fixtures/mote-workface'
 
 const initial = useAppStore.getState()
@@ -137,6 +141,8 @@ it('actual App → Focus retains the explicit non-first Tab/Group/Region occurre
     expect(focusSlot).not.toBeNull()
     const content = focusSlot.querySelectorAll<HTMLElement>('[data-fixture-session]')
     expect(content.length).toBeGreaterThan(0)
+    expect([...content].map(leaf => leaf.dataset.presentationReference)).toEqual([JSON.stringify(requested), JSON.stringify(requested)])
+    expect([...content].map(leaf => leaf.dataset.presentationEntity)).toEqual([JSON.stringify({ kind: 'tab', tabId: exact.id }), JSON.stringify({ kind: 'tab', tabId: exact.id })])
     actual = { selectedTabId: focusSlot.dataset.focusTabId,
       leafAddresses: [...content].map(leaf => ({ resourceWorkspaceId: leaf.dataset.resourceWorkspace,
         groupId: leaf.dataset.ownerGroup, tabId: leaf.dataset.ownerTab, regionId: leaf.dataset.ownerRegion })),
@@ -161,6 +167,8 @@ it('actual App → Focus retains the explicit non-first Tab/Group/Region occurre
     await act(async () => close.click())
     const afterClose = useAppStore.getState()
     expect(afterClose.agentFocus.execution.sessionId).toBeNull()
+    expect([...content].map(leaf => leaf.dataset.presentationReference)).toEqual([JSON.stringify({ displayWorkspaceId: resource.id, groupId: 'resource-home-group', tabId: exact.id, regionId: exact.layout.activeRegionId }), JSON.stringify({ displayWorkspaceId: resource.id, groupId: 'resource-home-group', tabId: exact.id, regionId: exact.layout.activeRegionId })])
+    expect([...content].map(leaf => leaf.dataset.presentationEntity)).toEqual([undefined, undefined])
     expect(afterClose.layouts).toBe(primary.layouts)
     expect(afterClose.tabs).toBe(primary.tabs)
     expect(afterClose.activeWorkspaceId).toBe(primary.activeWorkspaceId)

@@ -23,6 +23,7 @@ function agent(id: string, state: 'waiting' | 'working' | 'done', observedAt: nu
     label: id === 'needs-you' ? 'Review the patch' : id,
     createdAt: observedAt,
     updatedAt: observedAt,
+    agentSessionUpdatedAt: observedAt,
     processState: state === 'done' ? 'exited' : 'running',
     latestOutputBytes: 0,
     status: { state, source: 'run-process', observedAt },
@@ -72,9 +73,10 @@ describe('Global Agents card board', () => {
     useAppStore.setState({ sessions: [agent('done', 'done', 3), agent('needs-you', 'waiting', 1), agent('working', 'working', 2)], providerCatalog: [] })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     const groups = [...container.querySelectorAll<HTMLElement>('.global-agents-group')]
-    expect(groups.map((group) => group.dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle'])
+    expect(groups.map((group) => group.dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle', 'disconnected'])
     expect(container.querySelector('[data-bucket="results"][data-empty="true"]')).not.toBeNull()
     expect(container.querySelector('[data-session-id="needs-you"]')).toBeTruthy()
+    expect([...container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].map(row => row.dataset.sessionId)).toEqual(['needs-you', 'working', 'done'])
   })
 
   it('clicking a card opens an observation workspace without navigating', async () => {
@@ -114,9 +116,9 @@ describe('Global Agents card board', () => {
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('second')
   })
 
-  it('renders a Terminal Session in the left Focus history without an avatar slot', async () => {
+  it('keeps ordinary Terminal out of Focus while the actual Agent population remains visible', async () => {
     useAppStore.setState({
-      sessions: [terminal('terminal-1')],
+      sessions: [terminal('terminal-1'), agent('agent-1', 'working', 2)],
       providerCatalog: [],
       agentFocus: {
         execution: { sessionId: 'terminal-1', history: [{ sessionId: 'terminal-1', focusedAt: 1 }] },
@@ -125,8 +127,10 @@ describe('Global Agents card board', () => {
     })
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     expect(container.querySelector('.recent-focus')).toBeTruthy()
-    expect(container.querySelector('[data-focus-timeline-id="terminal-1"]')).toBeTruthy()
-    expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .recent-focus__gutter svg')).toBeTruthy()
-    expect(container.querySelector('[data-focus-timeline-id="terminal-1"] .agent-avatar')).toBeNull()
+    expect(container.querySelector('[data-focus-timeline-id="terminal-1"]')).toBeNull()
+    expect(container.querySelector('.focus-context[data-session-id="terminal-1"]')).toBeNull()
+    expect(container.querySelector('.focus-context[data-session-id="agent-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-focus-timeline-id="agent-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-focus-timeline-id="agent-1"] .agent-avatar')).not.toBeNull()
   })
 })

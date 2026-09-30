@@ -7,8 +7,6 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { tabForFocusedSession } from '../src/renderer/src/lib/focus-tab-projection'
-import { executionFocusSessionId } from '../src/renderer/src/lib/agent-focus'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { formatRegionAddress } from '../src/renderer/src/lib/agent-address'
 import { openAgentHistory } from './helpers/agent-history-menu'
@@ -35,8 +33,8 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({
   useLayoutEffect(() => { onObservationRefresh?.(paint.refresh); return () => onObservationRefresh?.(null) }, [onObservationRefresh])
   return <div data-terminal-paint={session.id}><textarea aria-label={`Fixture PTY ${session.id}`} /></div>
 } }))
-import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
-import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { FocusWorkbenchFixture, absoluteFocusFixtureInputs } from './fixtures/focus-workbench'
+import { executionFocusSessionId } from '../src/renderer/src/lib/agent-focus'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 
 const initial = useAppStore.getState(), workspaceId = 'workspace-demo', tabId = 'header-single', regionId = 'header-agent'
@@ -45,24 +43,18 @@ let root: Root, container: HTMLDivElement, sessionIds: string[]
 
 // Same existing App projection seam: one Workbench owner survives surface/Focus changes.
 // No new App seam is added by this slice. Both sides load their actual Global/Workbench callers.
-function Workface({ showGlobal = true }: { showGlobal?: boolean }) {
-  const surface = useAppStore(state => state.mainSurface)
-  const tabs = useAppStore(state => state.tabs)
-  const id = useAppStore(state => executionFocusSessionId(state.agentFocus))
-  const focused = surface === 'agents' ? tabForFocusedSession(tabs, id) : null
-  return <>{surface === 'agents' && showGlobal ? <GlobalFocusSurface /> : null}<WorkspaceWorkbench workspaceId={workspaceId}
-    visible focusTabId={focused?.id ?? null} focusPortalTargetId={focused ? 'focus-workspace-slot' : null} /></>
-}
+function Workface({ showGlobal = true }: { showGlobal?: boolean }) { return <FocusWorkbenchFixture workspaceId={workspaceId} showGlobal={showGlobal} /> }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   paint.mounts = {}; paint.refresh.mockClear(); panels.handles = []
-  const sessions = (await api.sessions.snapshot()).sessions.filter(s => s.kind === 'agent').slice(0, 2)
+  let sessions = (await api.sessions.snapshot()).sessions.filter(s => s.kind === 'agent').slice(0, 2)
     .map(session => ({ ...session, processState: 'running' as const }))
   expect(sessions).toHaveLength(2); sessionIds = sessions.map(s => s.id)
+  const input = absoluteFocusFixtureInputs(await api.config.get(), sessions); sessions = input.sessions
   const tab = createWorkbenchTab(tabId, { regionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: sessionIds[0]! })
   const neighbor = createWorkbenchTab('header-neighbor', { regionId: 'neighbor-agent', kind: 'agent', phase: 'attached', workspaceId, sessionId: sessionIds[1]! })
-  useAppStore.setState({ ...initial, config: await api.config.get(), sessions, tabs: { [tabId]: tab, [neighbor.id]: neighbor },
+  useAppStore.setState({ ...initial, config: input.config, sessions, tabs: { [tabId]: tab, [neighbor.id]: neighbor },
     layouts: { [workspaceId]: createWorkspaceLayout('header-group', [tabId, neighbor.id]) }, activeWorkspaceId: workspaceId, mainSurface: 'agents',
     agentNames: { [sessionIds[0]!]: name, [sessionIds[1]!]: 'Neighbor reviewer' }, agentComposerDrafts: { [sessionIds[0]!]: 'Keep the draft', [sessionIds[1]!]: 'Neighbor draft' },
     viewModes: Object.fromEntries(sessionIds.map(id => [id, 'terminal'])) }, true)
@@ -133,7 +125,7 @@ it('keeps multi-Agent headers/real Panels and the exact original Region menu whi
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await mount()
   expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
-  const target = container.querySelector('#focus-workspace-slot')!; expect(target.querySelectorAll('[data-panel]')).toHaveLength(2)
+  const target = container.querySelector('.focused-tab-workspace')!; expect(target.querySelectorAll('[data-panel]')).toHaveLength(2)
   expect(panels.handles).toHaveLength(1); expect(panels.handles[0]!.getLayout()).toEqual([50, 50])
   expect(target.querySelectorAll('.agent-region-header')).toHaveLength(2)
   const menu = await regionMenu(region())
