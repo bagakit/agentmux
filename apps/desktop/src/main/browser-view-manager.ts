@@ -24,6 +24,7 @@ import {
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
+import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
@@ -341,6 +342,13 @@ export class BrowserViewManager {
       browserViews: [...this.entries.values()].filter((entry) => !entry.view.webContents.isDestroyed()).length,
       releasedBrowserViews: this.releasedEntries.size
     }
+  }
+
+  inputHistoryScope(id: string, profileId: string): BrowserInputHistoryScope {
+    const entry = this.require(id)
+    if (entry.profileId !== profileId) throw new Error('The Browser Profile changed before input history was requested.')
+    if (entry.workspaceId === null) throw new Error('This Browser has no verified Workspace for input history.')
+    return { workspaceId: entry.workspaceId, profileId: entry.profileId }
   }
 
   /** Native Chrome considers only physically visible Browser frames, never Session/Run projections. */

@@ -108,6 +108,8 @@ import { BrowserTaskAssets, BrowserTaskAssetFileStore, BROWSER_TASK_ASSETS_FILE 
 import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets.js'
 import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
+import { BrowserInputHistoryStore } from './browser-input-history.js'
+import type { BrowserInputHistoryTarget, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { pastedDirectory } from './pasted-directory.js'
 import { readPastedImage } from './pasted-image-read.js'
@@ -212,6 +214,7 @@ export async function registerIpc(args: {
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
   await browserProfiles.initialize()
+  const browserInputHistory = new BrowserInputHistoryStore(join(app.getPath('userData'), 'browser-input-history'))
   const browserOperationJournal = new BrowserOperationJournal(
     new BrowserOperationFileStore(join(app.getPath('userData'), BROWSER_OPERATION_JOURNAL_FILE))
   )
@@ -372,6 +375,25 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
+
+  const resolveInputHistoryScope = (target: BrowserInputHistoryTarget): BrowserInputHistoryScope => {
+    let scope: BrowserInputHistoryScope
+    if (target?.kind === 'browser') scope = browsers.inputHistoryScope(target.browserId, target.profileId)
+    else if (target?.kind === 'workspace') scope = {
+      workspaceId: workspace(config, target.workspaceId).id, profileId: browserProfiles.defaultProfileId()
+    }
+    else throw new Error('Browser input history requires its original Browser or Workspace.')
+    workspace(config, scope.workspaceId)
+    browserProfiles.resolvePartition(scope.profileId)
+    return scope
+  }
+  const requireInputHistoryScope = (target: BrowserInputHistoryTarget, expected: BrowserInputHistoryScope): BrowserInputHistoryScope => {
+    const scope = resolveInputHistoryScope(target)
+    if (expected?.workspaceId !== scope.workspaceId || expected?.profileId !== scope.profileId) {
+      throw new Error('The input history scope changed. Reopen this input history before deleting.')
+    }
+    return scope
+  }
 
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
@@ -898,6 +920,22 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:importProfile', event)
     return await browserProfiles.importProfile(sourceToken, label)
   })
+  handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
+    requireTrustedSender('browser:listInputHistory', event)
+    return await browserInputHistory.list(resolveInputHistoryScope(target))
+  })
+  handleWithEvent('browser:recordInputHistory', async (event, target: BrowserInputHistoryTarget, text: string) => {
+    requireTrustedSender('browser:recordInputHistory', event)
+    return await browserInputHistory.record(resolveInputHistoryScope(target), text)
+  })
+  handleWithEvent('browser:removeInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string) => {
+    requireTrustedSender('browser:removeInputHistory', event)
+    return await browserInputHistory.remove(requireInputHistoryScope(target, scope), text)
+  })
+  handleWithEvent('browser:clearInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope) => {
+    requireTrustedSender('browser:clearInputHistory', event)
+    return await browserInputHistory.clear(requireInputHistoryScope(target, scope))
+  })
   handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
@@ -1107,6 +1145,7 @@ export async function registerIpc(args: {
       () => notifier.dispose(),
       () => { browsers.onNativeInput = undefined; nativeChrome.dispose() },
       () => browsers.dispose(),
+      async () => await browserInputHistory.flush(),
       async () => await browserProfiles.dispose(),
       async () => await fileObservations.dispose(),
       async () => await files.dispose(),
