@@ -523,7 +523,7 @@ export function chordForPlatform(binding: ShortcutBinding, isMac: boolean): Chor
 /** The slice of Monaco's API a keybinding needs — just the two constant bags, so this stays window-free. */
 export interface MonacoKeybindingApi {
   KeyMod: { readonly CtrlCmd: number; readonly Shift: number; readonly Alt: number }
-  KeyCode: Readonly<Record<string, number>>
+  KeyCode: Readonly<Record<string, number | string>>
 }
 
 /**
