@@ -6,7 +6,7 @@ import { ConversationMessage, traceDisclosureKey, type ConversationMessageProps 
 import { ConversationReasoningTrace } from './ConversationReasoningTrace'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'workspaceRoot' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'>
+  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'>
 
 type Props = ReadingProps & {
   page: AgentSessionHistoryPage

@@ -13,6 +13,7 @@ import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-ges
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
+import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
 import { createSpeakerResolver } from '../lib/conversation-speaker'
 import { useSessionUserMessages } from '../lib/session-user-messages'
@@ -241,6 +242,37 @@ export function SessionPane({
   const activeWorkspaceRoot = useAppStore((state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
+  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, linkOrigin),
+    [sessionId, linkOrigin.workspaceId, linkOrigin.tabGroupId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.sessionId])
+  const fileContext = useAppStore(selectFileContext)
+  const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)
+  useEffect(() => { setFileLinkIssue(null) }, [fileContext])
+  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }) => {
+    // Freeze the rendered scope and exact display occurrence. Never resolve again from focus.
+    if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
+      setFileLinkIssue('The rendered file context changed before this click could be confirmed.')
+      return
+    }
+    void openFile(path, linkOrigin.tabGroupId, location,
+      fileContext.project?.workspaceId ?? linkOrigin.workspaceId, undefined, fileContext.placement).then((opened) => {
+      if (!opened) setFileLinkIssue('The file resource or original display occurrence could not be confirmed.')
+    }).catch((error: unknown) => {
+      setFileLinkIssue(error instanceof Error ? error.message : String(error))
+    })
+  }, [fileContext, selectFileContext, openFile, linkOrigin.tabGroupId, linkOrigin.workspaceId])
+  const fileReferenceNotice = fileContext.kind !== 'session' || fileLinkIssue ? <>
+    {fileContext.kind === 'goal' ? <div className="activity-feed__read-notice" data-file-reference-scope="current-goal">
+      <span>File links use current Goal project: {fileContext.project!.name}. Earlier messages may have another origin.</span>
+    </div> : null}
+    {fileContext.issue || fileLinkIssue || fileContext.kind === 'goal' && !fileContext.homeDir ? <ServiceWindowNotice notice={{
+      kind: 'indeterminate', notice: {
+        step: fileContext.issue ?? fileLinkIssue ?? 'Home paths are unconfirmed for this project Host.',
+        mode: fileContext.kind === 'goal' ? 'Project-relative files remain available; unconfirmed references stay as written. The PMO keeps running.'
+          : 'Project file context is unconfirmed; references stay as written. The PMO keeps running.',
+        restore: 'Check this Goal’s project association and registered Workspace/Host, then retry the original reference.'
+      }
+    }} /> : null}
+  </> : null
   // Lands the file in this pane's own Tab Group, exactly as a terminal path click does. A miss
   // surfaces through reportError — "click opened nothing" is never silent.
   const openWorkspaceFile = useCallback(
@@ -451,8 +483,10 @@ export function SessionPane({
       }}
       capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
       displayState={session.status.state}
-      workspaceRoot={activeWorkspaceRoot}
-      openWorkspaceFile={openWorkspaceFile}
+      workspaceRoot={fileContext.workspaceRoot}
+      homeDir={fileContext.homeDir}
+      fileReferenceNotice={fileReferenceNotice}
+      {...(fileContext.kind !== 'unconfirmed' ? { openWorkspaceFile: openProjectFile } : {})}
       readPastedImage={readPastedImage}
       openHttpLink={onProseLinkClick}
       {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}

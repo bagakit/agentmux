@@ -1,5 +1,5 @@
 import { ChevronRight, Info, LoaderCircle } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -683,6 +683,8 @@ export function ActivityView({
   readPastedImage,
   openHttpLink,
   workspaceRoot = '',
+  homeDir = '',
+  fileReferenceNotice,
   onContinue,
   onSelectAnnotation,
   describeSpeaker
@@ -703,6 +705,8 @@ export function ActivityView({
    *  destination menu and the Region origin (SessionPane), never resolved here. */
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   workspaceRoot?: string
+  homeDir?: string
+  fileReferenceNotice?: ReactNode
   onContinue?: (prompt: string) => void
   onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   /**
@@ -871,6 +875,7 @@ export function ActivityView({
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
+        {fileReferenceNotice}
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
         </div>
@@ -881,6 +886,7 @@ export function ActivityView({
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
+        {fileReferenceNotice}
         {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
         </div> : null}
@@ -893,6 +899,7 @@ export function ActivityView({
     return (
       <div className="activity-feed" ref={setFeedEl}>
         {readNotice}
+        {fileReferenceNotice}
         <WorkingIndicator />
       </div>
     )
@@ -910,6 +917,7 @@ export function ActivityView({
   return (
     <div className="activity-feed" ref={setFeedEl}>
       {readNotice}
+        {fileReferenceNotice}
       {capability === 'unavailable' ? (
         <div className="activity-feed__empty" role="status">
           This executor does not provide structured activity. Terminal remains available.
@@ -980,6 +988,7 @@ export function ActivityView({
                   speaker={speaker!}
                   name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
                   workspaceRoot={workspaceRoot}
+                  homeDir={homeDir}
                   {...(described?.providerId ? { providerId: described.providerId } : {})}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                   {...(readPastedImage ? { readPastedImage } : {})}
@@ -997,6 +1006,7 @@ export function ActivityView({
                   origin={origin}
                   speaker={speaker}
                   workspaceRoot={workspaceRoot}
+                  homeDir={homeDir}
                   {...(described ?? {})}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                   {...(readPastedImage ? { readPastedImage } : {})}
@@ -1015,6 +1025,7 @@ export function ActivityView({
         page={nativeHistoryPage}
         sessionId={sessionId}
         workspaceRoot={workspaceRoot}
+        homeDir={homeDir}
         {...(describeSpeaker ? { describeSpeaker } : {})}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
         {...(readPastedImage ? { readPastedImage } : {})}

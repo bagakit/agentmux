@@ -11,6 +11,7 @@ export type ConversationReasoningTraceProps = {
   expanded?: boolean
   onToggle?: (open: boolean) => void
   workspaceRoot?: string
+  homeDir?: string
   openWorkspaceFile?: OpenWorkspaceFile
   readPastedImage?: ReadPastedImage
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
@@ -27,6 +28,7 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
   expanded,
   onToggle,
   workspaceRoot = '',
+  homeDir = '',
   openWorkspaceFile,
   readPastedImage,
   openHttpLink
@@ -60,8 +62,8 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
           ) : (
             <div className="log-turn__trace-body">
               <MemoizedAgentMarkdown
-                content={part.text}
-                workspaceRoot={workspaceRoot}
+                content={part.text}                workspaceRoot={workspaceRoot}
+                homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                 {...(readPastedImage ? { readPastedImage } : {})}
                 {...(openHttpLink ? { openHttpLink } : {})}
