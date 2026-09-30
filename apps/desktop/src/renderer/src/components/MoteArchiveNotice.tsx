@@ -15,14 +15,15 @@ export function useMoteArchiveAction(workspace: WorkspaceRecord | undefined) {
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   useEffect(() => { setIssue(null); setPending(null) }, [scope])
   async function change(topic: ScratchTopicSnapshot, archived: boolean) {
-    if (!workspace || pending === topic.id) return
+    if (!workspace || pending === topic.id) return false
     const captured = scope, generation = ++request.current
     setPending(topic.id); setIssue(null)
     try {
       if (!topic.moteArchive || topic.moteArchive.state === 'unknown') throw new Error('Refresh this Mote to confirm its archive state.')
       await useAppStore.getState().setMoteArchived(workspace.id, topic.id, archived, topicSpaceIconTarget(workspace, topic).key, topic.moteArchive.version)
+      return true
     }
-    catch (error) { if (active.current && latest.current === captured && request.current === generation) setIssue(presentError(error)) }
+    catch (error) { if (active.current && latest.current === captured && request.current === generation) setIssue(presentError(error)); return false }
     finally { if (active.current && latest.current === captured && request.current === generation) setPending(null) }
   }
   return { pending, issue, change }
