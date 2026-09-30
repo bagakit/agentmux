@@ -95,11 +95,13 @@ if (mode === '--callers') {
       cwd:root,env:{...process.env,AGENTMUX_TOOLKIT_EVIDENCE:output,AGENTMUX_TOOLKIT_BRIDGE_MUTANT:mutant},timeout:150000,maxBuffer:1024*1024})
     await writeFile(resolve(output,'verifier.log'),child.stdout+child.stderr)
     const receipt=JSON.parse(await readFile(resolve(output,'receipt.json'),'utf8'))
-    assert.equal(receipt.completed,true);assert.equal(receipt.collected,3)
+    assert.equal(receipt.completed,true);assert.equal(receipt.sandbox,true)
+    assert.equal(receipt.collected,mutant==='baseline'?3:1)
+    assert.equal(receipt.passedCases,mutant==='baseline'?3:0)
     const loaded=(await readFile(resolve(output,'loaded-source.jsonl'),'utf8')).split('\n').filter(Boolean).map(JSON.parse)
     assert.ok(loaded.length>0)
     for(const value of loaded.filter(v=>ownSources.includes(v.path)))assert.equal(value.originalSHA256,inputs[value.path],'Bridge Source candidate drift')
-    results.push({name,mutant,collected:3,receiptSHA256:sha(await readFile(resolve(output,'receipt.json'))),exitCode:receipt.exitCode})
+    results.push({name,mutant,collected:receipt.collected,passedCases:receipt.passedCases,receiptSHA256:sha(await readFile(resolve(output,'receipt.json'))),exitCode:receipt.exitCode})
     console.log(child.stdout.trim())
   }
   async function run(name,mutant='baseline',expected) {
@@ -173,6 +175,7 @@ if (mode === '--callers') {
     await run('packaged-path','packaged-path',/actual production asset helper/u)
     await run('utf8','utf8',/rejects malformed UTF8 watch bytes/u)
     await bridge('bridge-early-release','early-release')
+    await bridge('bridge-node-crypto','node-crypto')
     await run('restored')
     await bridge('bridge-restored')
   }

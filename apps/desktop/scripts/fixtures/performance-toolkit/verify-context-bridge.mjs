@@ -37,6 +37,11 @@ for(const [entry,outfile]of [['apps/desktop/src/preload/index.ts',preload],['app
           assert.equal(code.split(anchor).length-1,1,'Actual preload release anchor must be uniquely present')
           code=code.replace(anchor,'void Promise.resolve().catch')
         }
+        if(mutant==='node-crypto'&&path==='apps/desktop/src/preload/index.ts'){
+          const anchor='globalThis.crypto.randomUUID()'
+          assert.equal(code.split(anchor).length-1,1,'Actual preload UUID call must be uniquely present')
+          code="import { randomUUID } from 'node:crypto'\n"+code.replace(anchor,'randomUUID()')
+        }
         loaded.push({path,originalSHA256:sha(bytes),consumedSHA256:sha(code),mutant,bytes:Buffer.byteLength(code)})
         return {contents:code,loader:'ts'}
       })
@@ -52,21 +57,29 @@ try{const output=await promisify(execFile)(electron,[resolve(root,'apps/desktop/
 catch(error){exitCode=typeof error.code==='number'?error.code:-1;stdout=error.stdout??'';stderr=error.stderr??''}
 await writeFile(resolve(evidence,'run.log'),stdout+stderr)
 const failure=await readFile(resolve(evidence,'bridge-failure.json'),'utf8').catch(()=>null)
-if(mutant==='early-release'){
+let collected,passedCases
+if(mutant==='early-release'||mutant==='node-crypto'){
   assert.notEqual(exitCode,0);assert.ok(failure,'Actual isolated bridge must collect a specific failure')
-  const f=JSON.parse(failure);assert.equal(f.name,'AssertionError');assert.match(f.message,/Establishment close must release/u)
-  assert.ok(f.events.some(e=>e.event==='entered')&&f.events.some(e=>e.event==='returned'))
+  const f=JSON.parse(failure);assert.equal(f.name,'AssertionError')
+  assert.match(f.message,mutant==='early-release'?/Establishment close must release/u:/Actual sandboxed product preload must publish its public bridge/u)
+  assert.equal(f.preferences.sandbox,true);assert.equal(f.preferences.contextIsolation,true);assert.equal(f.preferences.nodeIntegration,false)
+  assert.equal(f.collected,1);assert.equal(f.passedCases,0)
+  if(mutant==='early-release')assert.ok(f.events.some(e=>e.event==='entered')&&f.events.some(e=>e.event==='returned'))
+  else assert.ok(f.consoleMessages.some(e=>String(e.error).includes('node:crypto')),'Old Node-only dependency must fail in the actual sandbox')
   assert.ok(loaded.some(v=>v.originalSHA256!==v.consumedSHA256))
+  collected=f.collected;passedCases=f.passedCases
 }else{
   assert.equal(exitCode,0,`Actual isolated bridge GREEN required; inspect ${evidence}/run.log`)
   const result=JSON.parse(await readFile(resolve(evidence,'bridge-result.json'),'utf8'))
-  assert.equal(result.collected,3);assert.ok(result.earlyEvents.length>0);assert.equal(result.contextIsolation,true)
+  assert.equal(result.collected,3);assert.equal(result.passedCases,3);assert.ok(result.earlyEvents.length>0)
+  assert.equal(result.contextIsolation,true);assert.equal(result.nodeIntegration,false);assert.equal(result.sandbox,true)
+  collected=result.collected;passedCases=result.passedCases
 }
 for(const value of loaded)assert.equal(sha(await readFile(resolve(root,value.path))),value.originalSHA256,'No actual tree Source mutation')
-const receipt={completed:true,mutant,exitCode,collected:3,contextIsolation:true,nodeIntegration:false,
+const receipt={completed:true,mutant,exitCode,collected,passedCases,contextIsolation:true,nodeIntegration:false,sandbox:true,
   sourceWriterUsed:false,scope:'Actual Electron/preload/Main IPC transport only; no App, user Runtime or mock Native completion claim',
   loadedSHA256:sha(await readFile(resolve(evidence,'loaded-source.jsonl'))),compiled:{preload:sha(await readFile(preload)),main:sha(await readFile(main))},electron,
   originalFailure:failure?JSON.parse(failure):null}
 await writeFile(resolve(evidence,'receipt.json'),JSON.stringify(receipt,null,2)+'\n')
 await rm(resolve(evidence,'electron-userdata'),{recursive:true,force:true})
-console.log(`${mutant}: ${mutant==='early-release'?'AssertionRED':'GREEN'} (3 actual isolated bridge cases)`)
+console.log(`${mutant}: ${failure?'AssertionRED':'GREEN'} (${collected} actual sandboxed bridge cases reached, ${passedCases} passed)`)
