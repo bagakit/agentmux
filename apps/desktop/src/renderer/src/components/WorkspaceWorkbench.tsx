@@ -45,7 +45,7 @@ import {
   type RegionFocusExpression
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
-import { projectWorkbenchProjection, selectWorkbenchProjectionTab, workbenchProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
+import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, workbenchHomePresentationReferences, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
@@ -1570,9 +1570,14 @@ export function WorkspaceWorkbench({
         />
       </div>
       {viewOwnership === 'owner' && Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
-        const ownerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
-        const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const projection = viewTargets?.[tab.id]
+        const reference = projection?.reference
+        const confirmedDisplayGroup = reference?.tabId === tab.id && tab.regions[reference.regionId] &&
+          projection?.projection?.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))
+          ? reference.groupId : undefined
+        const originalOwnerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
+        const ownerId = originalOwnerId ?? confirmedDisplayGroup
+        const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const targetId = projection?.hostId ?? null
         const tabVisible = (targetId !== null && (projection?.surface === 'survey' || projection?.surface === 'focus' ? projection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
@@ -1593,7 +1598,7 @@ export function WorkspaceWorkbench({
           projection={projection?.projection}
           reference={targetId === null ? homeReferences.get(tab.id) ?? undefined : projection?.reference}
           retainedRegionId={projection?.retainedRegionId ?? (targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null)}>
-          {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
+          {originalOwnerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
             headerPortalTargetId={projection?.surface === 'focus' && targetId && storedLayout && ownerByTab.has(tab.id) &&
