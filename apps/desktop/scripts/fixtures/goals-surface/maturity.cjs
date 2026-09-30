@@ -99,7 +99,14 @@ async function directScenes() {
  assert.deepEqual(created.creates,[created.goal.id]);assert.equal(created.goal.description,'');assert.equal(created.goal.status,'backlog');assert.equal(created.goal.alignment,undefined);assert.equal(created.topicId,created.pmoTopic)
  assert.equal(created.launches.length,1);assert.ok(created.launches[0].prompt.includes(`existing Goal ${created.goal.id}`));assert.ok(created.launches[0].prompt.includes('existing undefined Goal draft'));assert.equal(created.floating.targetTabId,created.tabId)
  assert.equal(await evaluate('document.querySelector("[data-demand-id]").classList.contains("goals-row--undefined")'),true)
- result.observations.push({scene:'actual-new-goal',facts:created});await visibleDirectPmo(created.tabId);await capture('1280-dark-direct-goal-pmo',1280)
+ result.observations.push({scene:'actual-new-goal',facts:created});await visibleDirectPmo(created.tabId)
+ await waitFor('document.querySelectorAll("[data-pmo-teams-topic-floating] .conversation-native-thread__record").length===2')
+ const native = await evaluate(`({ records: document.querySelectorAll('[data-pmo-teams-topic-floating] .conversation-native-thread__record').length,
+   meaningfulAnswer: document.querySelector('[data-pmo-teams-topic-floating] .conversation-native-thread')?.textContent.includes('你希望通过这次尝试，解决什么问题？') ?? false,
+   rulers: document.querySelectorAll('[data-pmo-teams-topic-floating] .activity-ruler').length })`)
+ assert.deepEqual(native, { records: 2, meaningfulAnswer: true, rulers: 0 }, 'Actual public reader consumes both nonempty preview records without an empty observation ruler')
+ result.observations.push({scene:'direct-preview-native-body',native,wireBoundary:'Exact captured Renderer request; Core guide/Notes and real CLI delivery excluded'})
+ await capture('1280-dark-direct-goal-pmo',1280)
  await size(620);assert.equal((await evaluate('goalsVisual.directFacts()')).goal.id,created.goal.id);await visibleDirectPmo(created.tabId);await capture('620-dark-direct-goal-pmo',620)
  await click(button('Close Mote'));await evaluate('goalsVisual.appearance("light")');await visibleDetail('direct-returned-goal');await capture('620-light-direct-returned-goal',620)
  await evaluate('goalsVisual.seedDirect("save-unknown");goalsVisual.appearance("light")');await size(1280);await click('document.querySelector("button[data-new-goal]")')
