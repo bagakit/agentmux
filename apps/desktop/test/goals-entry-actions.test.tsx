@@ -18,6 +18,7 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 const baseline = useAppStore.getState()
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/topics', hostId: 'local', kind: 'folder' as const }
 const project = { id: 'project', name: 'Project Alpha', path: '/alpha', hostId: 'local', kind: 'folder' as const }
+const projectContext = 'Project: Project Alpha\nProject ID: ["local","/alpha"]\nHost: local\nRepository root: /alpha\nWorkspace ID: project\nWorkspace path: /alpha\nThese are the project paths for this request. The PMO working directory is separate; do not substitute it or assume a host home.'
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   workspaces: [scratch], executors: { configured: { providerId: 'codex', label: 'Configured Agent', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
@@ -196,13 +197,13 @@ describe('Goals one-click requests through the mounted product and original owne
     const preparation = deferred<ScratchTopicSnapshot>(); vi.mocked(api.scratch.ensureMote).mockReturnValueOnce(preparation.promise)
     await mount(); expect(action('next').textContent).toContain(project.name)
     const text = source === 'recent' ? '根据最近的项目情况，建议我下一步应该做什么' : '根据当前项目的情况，建议我下一步应该做什么'
-    expect(action('next').textContent).toContain(text); expect(action('next').querySelector('small')?.title).toBe('project · local · /alpha')
+    expect(action('next').textContent).toContain(text); expect(action('next').querySelector('small')?.title).toBe('["local","/alpha"] · local · /alpha')
     expect(action('next').querySelector('.goals-entry__request')?.textContent).toBe(text)
     expect(action('next').querySelector('.goals-entry__request strong')?.textContent).toBe('建议我下一步应该做什么')
     expect(action('next').querySelector('small')?.textContent).toBe(`${source === 'recent' ? '最近项目' : '当前项目'} · Project Alpha`)
     await click('next'); const tab = createdTab()
     await act(async () => { useAppStore.setState({ config: { ...config, workspaces: [scratch, { ...project, name: 'Other name', path: '/other' }] }, activeWorkspaceId: SCRATCH_WORKSPACE_ID }); preparation.resolve(topic(tab.topicId!)) })
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: `${text}\n\n项目：Project Alpha\nProject ID: project\nHost: local\nPath: /alpha`, scratchTopicId: tab.topicId }))
+    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: `${text}\n\n${projectContext}`, scratchTopicId: tab.topicId }))
   })
 
   it.each(['deleted', 'ambiguous', 'host-mismatch', 'path-mismatch', 'pmo-only'] as const)('does not invent a recent Project from %s facts', async mode => {
@@ -227,8 +228,33 @@ describe('Goals one-click requests through the mounted product and original owne
   })
 
   it('resolves a current worktree to its same registered Project without claiming recency', async () => {
-    useAppStore.setState({ config: { ...config, workspaces: [scratch, project, { id: 'branch', kind: 'worktree', hostId: 'local', name: 'feature', path: '/branch', repoPath: '/alpha' }] }, activeWorkspaceId: 'branch' })
+    useAppStore.setState({ config: { ...config, workspaces: [scratch, project, { id: 'branch', kind: 'worktree', hostId: 'local', name: 'feature', path: '/branch', repoPath: '/alpha', branch: 'feat/next' }] }, activeWorkspaceId: 'branch' })
     await mount(); expect(action('next').textContent).toContain('根据当前项目的情况'); expect(action('next').textContent).toContain('Project Alpha')
-    await click('next'); expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: '根据当前项目的情况，建议我下一步应该做什么\n\n项目：Project Alpha\nProject ID: project\nHost: local\nPath: /alpha' }))
+    await click('next'); expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: '根据当前项目的情况，建议我下一步应该做什么\n\nProject: Project Alpha\nProject ID: ["local","/alpha"]\nHost: local\nRepository root: /alpha\nWorkspace ID: branch\nWorkspace path: /branch\nBranch: feat/next\nThese are the project paths for this request. The PMO working directory is separate; do not substitute it or assume a host home.' }))
+  })
+
+  it('keeps the observed branch and host instead of a same-name project on another host', async () => {
+    const branch = { id: 'observed-branch', kind: 'worktree' as const, hostId: 'studio', name: 'work', path: '/worktree', repoPath: '/alpha', branch: 'feat/remote' }
+    const remote = { ...project, id: 'remote-root', hostId: 'studio' }
+    useAppStore.setState({ config: { ...config, hosts: [...config.hosts, { id: 'studio', kind: 'ssh', label: 'Studio', hostname: 'studio' }], workspaces: [scratch, project, remote, branch] }, activeWorkspaceId: project.id,
+      agentFocus: { execution: { sessionId: null, history: [{ sessionId: 'remote-agent', focusedAt: 12, identity: { name: 'Remote', kind: 'agent', providerId: 'codex', hostId: 'studio', workspacePath: '/worktree', project: { id: remote.id, name: remote.name } } }] }, pmo: { sessionId: null } } })
+    await mount()
+    expect(action('next').querySelector('small')?.title).toBe('["studio","/alpha"] · studio · /worktree')
+    await click('next')
+    expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
+    const prompt = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].prompt!
+    expect(prompt).toContain('Project ID: ["studio","/alpha"]\nHost: studio\nRepository root: /alpha\nWorkspace ID: observed-branch\nWorkspace path: /worktree\nBranch: feat/remote')
+    expect(prompt).not.toContain('Project ID: remote-root')
+    expect(prompt).not.toContain('Repository root: /topics')
+    expect(useAppStore.getState().sessions.find(value => value.id === 'original')).toEqual(session('original'))
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
+
+  it('does not invent a current Project when its host registration is ambiguous', async () => {
+    useAppStore.setState({ config: { ...config, hosts: [...config.hosts, config.hosts[0]!], workspaces: [scratch, project] }, activeWorkspaceId: project.id })
+    await mount()
+    expect(container.querySelectorAll('[data-goals-entry-action]')).toHaveLength(2)
+    expect(container.querySelector('[data-goals-entry-action="next"]')).toBeNull()
+    expect(api.sessions.launchAgent).not.toHaveBeenCalled()
   })
 })
