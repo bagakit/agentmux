@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.identity.json",
+  "include": [
+    "./archive-entry.tsx",
+    "../../../test/mote-archive-service.test.ts",
+    "../../../test/mote-archive-interaction.test.tsx",
+    "../../../src/main/ipc.ts",
+    "../../../src/preload/index.ts",
+    "../../../src/renderer/src/global.d.ts"
+  ]
+}

@@ -5,6 +5,11 @@ export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
 export const MOTE_TYPE_NAME = 'Mote'
 export const PMO_TEAMS_TOPIC_TITLE = MOTE_TYPE_NAME
 export const MOTE_SOUL_PATH = 'SOUL.md'
+export const MOTE_STATE_PATH = '.agentmux/mote-state.json'
+/** Directory metadata, independent of Session/Run state and user-owned personality. */
+export type MoteArchiveState =
+  | { state: 'active' | 'archived'; version: string }
+  | { state: 'unknown'; issue: string }
 export const DEFAULT_MOTE_SOUL = `# SOUL
 
 You are a Mote: a persistent collaborator with your own identity, independent of any execution Session or Provider.
@@ -78,6 +83,7 @@ export type ScratchTopicSnapshot = {
   title: string
   summary: string
   soul?: { path: string; content: string; version: string }
+  moteArchive?: MoteArchiveState
   readError?: string
   collaborators: ScratchTopicCollaborator[]
   wiki?: TopicWikiSnapshot
