@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, Profiler } from 'react'
+import { act, Profiler, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -11,11 +11,14 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import * as projectOwner from '../src/renderer/src/lib/goal-project-context'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { createWorkbenchTab, fileTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
+import { workbenchProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
+import { installNativePopover } from './fixtures/mote-workface'
 
 // The complete Pane → Activity → Conversation → Markdown chain, Store and File reducer stay real.
 // Unrelated terminal/composer leaves and remote I/O are bounded test doubles. Local reads use Main.
@@ -25,13 +28,24 @@ vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegion
 vi.mock('../src/renderer/src/components/SessionHistoryView', () => ({ SessionHistoryView: () => null }))
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
 vi.mock('../src/renderer/src/components/AgentLifecycleFeedback', () => ({ AgentLifecycleFeedback: () => null }))
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
+const fileLifetime = vi.hoisted(() => ({ mounts: 0, unmounts: 0, renders: 0 }))
+vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: ({ surface }: { surface: { workspaceId: string; path: string } }) => {
+  fileLifetime.renders++
+  const document = useAppStore(state => state.documents[documentKey(surface.workspaceId, surface.path)])
+  useEffect(() => { fileLifetime.mounts++; return () => { fileLifetime.unmounts++ } }, [])
+  return <pre data-project-file-editor>{document?.content}</pre>
+} }))
 
 
 const initial = useAppStore.getState()
 const origin = { workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'pmo-group', tabId: 'pmo-tab', regionId: 'pmo-region', sessionId: 'pmo' }
 let tinyRoot: string, project: WorkspaceRecord, scratch: WorkspaceRecord, config: AppConfig
 let root: Root, container: HTMLDivElement, files: WorkspaceFiles
-let commits = 0
+let commits = 0, restorePopover: (() => void) | undefined
 function agent(id = 'pmo', workspacePath = scratch.path): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath,
     label: id, createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running',
@@ -108,9 +122,103 @@ beforeEach(async () => {
     return files.read(workspace, path)
   })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container); commits = 0
+  fileLifetime.mounts = 0; fileLifetime.unmounts = 0; fileLifetime.renders = 0
+})
+
+describe('original App resource owner and ordinary display', () => {
+  async function openInApp() {
+    seed('Read src/a.ts:2:3.')
+    useAppStore.setState(state => ({ initialize: async () => () => {}, loading: false,
+      layouts: { [scratch.id]: state.layouts[scratch.id]! }, toolsOpen: false, projectRailOpen: false }))
+    restorePopover = installNativePopover()
+    await act(async () => { await import('../src/renderer/src/components/FileSurfaceView'); await import('../src/renderer/src/components/EditorPane') })
+    await act(async () => root.render(<App />)); await flush()
+    expect(buttons()).toHaveLength(1); await click(buttons()[0]!)
+    await vi.waitFor(async () => { await flush(); expect(container.querySelector('[data-project-file-editor]')).not.toBeNull() })
+    const id = fileTabId(project.id, 'src/a.ts'), tab = useAppStore.getState().tabs[id]!
+    const slotId = workbenchProjectionSlotId('workbench-tab-slot', { displayWorkspaceId: scratch.id, groupId: origin.tabGroupId, tabId: id })
+    const slot = document.getElementById(slotId)!
+    expect(slot).not.toBeNull(); expect(slot.querySelector('[data-project-file-editor]')?.textContent).toBe('REAL PROJECT CONTENT')
+    expect(slot.textContent).not.toContain('still restoring')
+    expect(container.querySelectorAll(`[data-workbench-region-id="${tab.layout.activeRegionId}"]`)).toHaveLength(1)
+    expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0)
+    expect(useAppStore.getState().layouts[project.id]).toBeUndefined()
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([[project.id, 'src/a.ts']]); retained()
+    return slot.querySelector('[data-project-file-editor]')!
+  }
+  it('moves the single Project File body to its original display without requiring a resource layout', async () => {
+    await openInApp()
+    expect(useAppStore.getState().layouts[scratch.id]?.groups[0]?.tabOrder).toEqual([origin.tabId, fileTabId(project.id, 'src/a.ts')])
+    expect(useAppStore.getState().documentRevealTargets[documentKey(project.id, 'src/a.ts')]).toMatchObject({ line: 2, column: 3 })
+  })
+  it('retains the same mounted resource body through a missing display layout and exact recovery', async () => {
+    const editor = await openInApp(), layout = useAppStore.getState().layouts[scratch.id]!
+    await act(async () => useAppStore.setState({ layouts: {} }))
+    expect(container.querySelector('[data-project-file-editor]')).toBe(editor)
+    expect(container.textContent).toContain('still restoring')
+    await act(async () => useAppStore.setState({ layouts: { [scratch.id]: layout } }))
+    expect(container.querySelector('[data-project-file-editor]')).toBe(editor)
+    expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0); retained()
+  })
+  it('does not repeat File paint, context work or read for unrelated Session output', async () => {
+    const context = vi.spyOn(projectOwner, 'goalProjectContext'), editor = await openInApp()
+    expect(context.mock.calls.length).toBeGreaterThan(0); expect(fileLifetime.renders).toBeGreaterThan(0)
+    const before = { context: context.mock.calls.length, paint: fileLifetime.renders, read: vi.mocked(api.files.read).mock.calls.length }
+    await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, agent('unrelated', '/other')],
+      timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 3, items: [] } } })))
+    await flush()
+    expect({ context: context.mock.calls.length, paint: fileLifetime.renders, read: vi.mocked(api.files.read).mock.calls.length }).toEqual(before)
+    expect(container.querySelector('[data-project-file-editor]')).toBe(editor)
+  })
+  it('retains an owned parked resource Tab when its confirmed home membership disappears', async () => {
+    await openInApp()
+    const parked = createWorkbenchTab('parked-resource', { kind: 'file', regionId: 'parked-region', workspaceId: project.id, path: 'parked.ts' })
+    await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [parked.id]: parked },
+      documents: { ...state.documents, [documentKey(project.id, 'parked.ts')]: { path: 'parked.ts', content: 'PARKED ORIGINAL', revision: 'parked' } },
+      layouts: { ...state.layouts, [project.id]: createWorkspaceLayout('resource-home', [parked.id]) } })))
+    await vi.waitFor(async () => { await flush(); expect(container.querySelector('[data-workbench-region-id="parked-region"] [data-project-file-editor]')).not.toBeNull() })
+    const view = container.querySelector('[data-workbench-region-id="parked-region"] [data-project-file-editor]')!
+    expect(view.textContent).toBe('PARKED ORIGINAL'); expect(fileLifetime.mounts).toBe(2)
+    await act(async () => useAppStore.setState(state => ({ layouts: { ...state.layouts, [project.id]: createWorkspaceLayout('resource-home') } })))
+    expect(container.querySelector('[data-workbench-region-id="parked-region"] [data-project-file-editor]')).toBe(view)
+    expect(fileLifetime.mounts).toBe(2); expect(fileLifetime.unmounts).toBe(0)
+    expect(useAppStore.getState().tabs[parked.id]).toBe(parked)
+  })
+  it('keeps the same display host during recovery even when its resource home is available', async () => {
+    const editor = await openInApp(), state = useAppStore.getState(), id = fileTabId(project.id, 'src/a.ts')
+    const displayLayout = state.layouts[scratch.id]!, resourceLayout = createWorkspaceLayout('resource-home', [id])
+    await act(async () => useAppStore.setState({ layouts: { [scratch.id]: displayLayout, [project.id]: resourceLayout } }))
+    const displaySlot = editor.closest('[data-workbench-tab-id]')!
+    expect(displaySlot.getAttribute('data-workbench-group-id')).toBe(origin.tabGroupId)
+    await act(async () => useAppStore.setState({ layouts: { [project.id]: resourceLayout } }))
+    expect(displaySlot.contains(editor)).toBe(true)
+    await act(async () => useAppStore.setState({ layouts: { [scratch.id]: displayLayout, [project.id]: resourceLayout } }))
+    expect(displaySlot.contains(editor)).toBe(true); expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0)
+    await act(async () => useAppStore.setState({ layouts: { [scratch.id]: createWorkspaceLayout(origin.tabGroupId, [origin.tabId]), [project.id]: resourceLayout } }))
+    expect(displaySlot.contains(editor)).toBe(false)
+    expect(editor.closest('[data-workbench-group-id]')?.getAttribute('data-workbench-group-id')).toBe('resource-home')
+    expect(useAppStore.getState().tabs[id]).toBe(state.tabs[id]); expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0)
+  })
+  it('moves the single existing body to the explicitly selected duplicate occurrence', async () => {
+    const editor = await openInApp(), state = useAppStore.getState(), id = fileTabId(project.id, 'src/a.ts'), layout = state.layouts[scratch.id]!
+    const another = createWorkspaceLayout('explicit-other-group', [id]).groups[0]!
+    await act(async () => useAppStore.setState({ layouts: { [scratch.id]: { ...layout, root: { type: 'split', direction: 'horizontal', ratio: .5,
+      first: layout.root, second: { type: 'leaf', groupId: another.id } }, groups: [...layout.groups, another] } } }))
+    expect(useAppStore.getState().layouts[scratch.id]!.groups.map(group => group.tabOrder.includes(id))).toEqual([true, true])
+    const otherSlot = document.getElementById(workbenchProjectionSlotId('workbench-tab-slot', { displayWorkspaceId: scratch.id, groupId: another.id, tabId: id }))!
+    expect(otherSlot.textContent).toContain('Select this exact Group')
+    expect(editor.closest('[data-workbench-group-id]')?.getAttribute('data-workbench-group-id')).toBe(origin.tabGroupId)
+    await act(async () => useAppStore.getState().focusTabGroup(scratch.id, another.id))
+    expect(editor.closest('[data-workbench-group-id]')?.getAttribute('data-workbench-group-id')).toBe(another.id)
+    expect(otherSlot.textContent).not.toContain('Select this exact Group'); expect(otherSlot.contains(editor)).toBe(true)
+    expect(container.querySelectorAll(`[data-workbench-region-id="${state.tabs[id]!.layout.activeRegionId}"]`)).toHaveLength(1)
+    expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0)
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([[project.id, 'src/a.ts']])
+  })
 })
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove()
+  restorePopover?.(); restorePopover = undefined
   await files.dispose(); await rm(tinyRoot, { recursive: true, force: true })
   useAppStore.setState(initial, true); vi.restoreAllMocks(); localStorage.clear()
 })
