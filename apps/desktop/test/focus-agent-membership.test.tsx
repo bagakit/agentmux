@@ -1,3 +1,5 @@
+import { focusFilterOptions } from './fixtures/focus-filter-menu'
+import { resolve } from 'node:path'
 // @vitest-environment happy-dom
 import { act, createElement, memo, Profiler, Fragment } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -8,7 +10,8 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { addWorkbenchRegion, createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { tabForFocusedSession } from '../src/renderer/src/lib/focus-tab-projection'
+import { executionFocusPresentation, tabForFocusedSession } from '../src/renderer/src/lib/focus-tab-projection'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 
 const work = vi.hoisted(() => ({ members: [] as string[], numbers: [] as string[][], commits: {} as Record<string, number> }))
 const owning = vi.hoisted(() => ({ depth: 0, indexes: 0, reads: {} as Record<string, string[]> }))
@@ -39,6 +42,7 @@ vi.mock('../src/renderer/src/components/FocusContextRow', async original => {
 // Heavy leaves and unrelated hierarchy I/O are outside this display-owner proof.
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span', { 'data-avatar-leaf': true }) }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { FocusNavigationPreview } from '../src/renderer/src/components/FocusNavigationPreview'
@@ -62,7 +66,10 @@ function title(id: string) { return row(id).querySelector('strong')!.textContent
 function resetWork() { work.members = []; work.numbers = []; work.commits = {}; owning.reads = {}; owning.indexes = 0 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const config = await api.config.get(), { sessions: examples } = await api.sessions.snapshot(), workspace = config.workspaces[0]!
+  const inputConfig = await api.config.get(), snapshot = await api.sessions.snapshot()
+  // The public spatial catalog requires absolute durable directories, unlike old list-only fixtures.
+  const config = { ...inputConfig, workspaces: inputConfig.workspaces.map(item => ({ ...item, path: resolve(item.path), ...(item.repoPath ? { repoPath: resolve(item.repoPath) } : {}) })) }
+  const examples = snapshot.sessions.map(item => ({ ...item, workspacePath: resolve(item.workspacePath) })), workspace = config.workspaces[0]!
   workspaceId = workspace.id
   const base = examples.find((session): session is Extract<SessionSnapshot,{kind:'agent'}> => session.kind === 'agent'); expect(base).toBeDefined()
   const agent = { ...base!, id: 'agent', hostId: 'local', workspacePath: workspace.path, label: 'Inspect the parser', status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
@@ -83,15 +90,21 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 
 const agentIds = ['agent', 'attention', 'disconnected', 'healthy-lost', 'idle', 'results']
 async function expandDisconnected() { const toggle=container.querySelector<HTMLButtonElement>('[data-bucket="disconnected"] .focus-recovery-toggle');expect(toggle).not.toBeNull();await act(async()=>toggle!.click()) }
-function renderedIds() { return [...container.querySelectorAll<HTMLElement>('[data-session-id]')].map(node=>node.dataset.sessionId).sort() }
+// Agent-only membership is the left lane collection, not the separately retained right work surface.
+function renderedIds() { return [...container.querySelectorAll<HTMLElement>('.global-focus-main [data-session-id]')].map(node=>node.dataset.sessionId).sort() }
+function focusSurface() {
+  const state = useAppStore.getState()
+  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, state.agentFocus.execution.sessionId ? spatialCatalog(state, []) : null, reference => state.selectExecutionFocusReference(reference, state.agentFocus.execution))
+  return createElement(GlobalFocusSurface, { presentation })
+}
 
 it('mounted lanes exclude ordinary running, failed and disconnected Terminals and retain every confirmed Agent state',async()=>{
   useAppStore.setState(state=>({sessions:state.sessions.map(session=>session.id==='second'?{...session,processState:'exited',status:{state:'error',source:'run-process',observedAt:1,exitCode:1}}:session.id==='third'?{...session,processState:'interrupted',status:{state:'disconnected',source:'run-process',observedAt:1}}:session)}))
-  await act(async()=>root.render(createElement(GlobalFocusSurface)));await expandDisconnected()
+  await act(async()=>root.render(focusSurface()));await expandDisconnected()
   expect(renderedIds()).toEqual(agentIds)
   expect(row('agent').dataset.bucket).toBe('working');expect(row('attention').dataset.bucket).toBe('attention');expect(row('results').dataset.bucket).toBe('results');expect(row('idle').dataset.bucket).toBe('idle')
   expect(row('healthy-lost').closest('[data-bucket="idle"]')).not.toBeNull();expect(row('disconnected').closest('[data-bucket="disconnected"]')).not.toBeNull()
-  const options=[...container.querySelectorAll<HTMLSelectElement>('[aria-label="Focus state filter"] option')].map(option=>option.textContent)
+  const options=(await focusFilterOptions(container,'state')).map(option=>option.text)
   expect(options).toEqual(['All states','Attention · 1','Working · 1','Results · 1','Idle / Recovery · 2','Disconnected · 1'])
   const axes=[...container.querySelectorAll<HTMLButtonElement>('.focus-project-lanes__axis')];expect(axes).toHaveLength(1);expect(axes[0]!.title).toContain('· 5 live ·')
 })
@@ -107,8 +120,8 @@ it('exclusion keeps the actual selected Terminal workspace, owner, Region, Run, 
   await act(async()=>useAppStore.getState().focusRegion(workspaceId,'original','original-left','keyboard'))
   await act(async()=>useAppStore.getState().focusExecutionSession('first'))
   const before=useAppStore.getState(), runs=before.sessions.map(session=>session.control.run)
-  await act(async()=>root.render(createElement(GlobalFocusSurface)))
-  expect(renderedIds()).not.toContain('first');expect(container.querySelector('#focus-workspace-slot')?.getAttribute('data-focus-tab-id')).toBe('original')
+  await act(async()=>root.render(focusSurface()))
+  expect(renderedIds()).not.toContain('first');expect(container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe('original')
   expect(container.querySelector('.focus-toolbar__identity strong')?.textContent).toBe('Terminal');expect(container.querySelector('.focus-toolbar__identity')?.getAttribute('title')).not.toContain('Recovery unknown')
   const after=useAppStore.getState();expect(after.agentFocus).toBe(before.agentFocus);expect(after.tabs).toBe(before.tabs);expect(after.layouts).toBe(before.layouts);expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(after.activeWorkspaceId).toBe(workspaceId);expect(after.tabs.original?.layout.activeRegionId).toBe('original-left');expect(tabForFocusedSession(after.tabs,'first')?.id).toBe('original')
@@ -121,15 +134,15 @@ it('original Terminal rename, reorder and return remain precise without adding c
   await act(async()=>useAppStore.getState().swapRegions(workspaceId,'original','original-left','original-right'))
   await act(async()=>useAppStore.getState().focusRegion(workspaceId,'original','original-left','keyboard'))
   await act(async()=>useAppStore.getState().focusExecutionSession('first'))
-  await act(async()=>root.render(createElement(GlobalFocusSurface)))
-  expect(container.querySelector('#focus-workspace-slot')?.getAttribute('data-focus-tab-id')).toBe('original')
+  await act(async()=>root.render(focusSurface()))
+  expect(container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe('original')
   expect(container.querySelector('.focus-toolbar__identity strong')?.textContent).toBe('Release shells');expect(useAppStore.getState().tabs.original?.name).toBe('Release shells');expect(regionIds(useAppStore.getState().tabs.original!.layout.root)).toEqual(['original-right','original-left'])
   await act(async()=>useAppStore.getState().setMainSurface('workbench'))
   const state=useAppStore.getState();expect(state.mainSurface).toBe('workbench');expect(state.layouts[workspaceId]?.groups[0]?.activeTabId).toBe('original');expect(state.tabs.original?.layout.activeRegionId).toBe('original-left')
   state.sessions.forEach((session,index)=>expect(session.control.run).toBe(runs[index]));expect(renderedIds()).not.toContain('first')
 })
 it('irrelevant Terminal bytes, heartbeats, drafts and rename never derive owners or redraw Agent cards',async()=>{
-  await act(async()=>root.render(createElement(GlobalFocusSurface)));expect(Object.keys(work.commits).sort()).toEqual(['agent','attention','healthy-lost','idle','results'])
+  await act(async()=>root.render(focusSurface()));expect(Object.keys(work.commits).sort()).toEqual(['agent','attention','healthy-lost','idle','results'])
   resetWork()
   await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.map(session=>({...session,latestOutputBytes:session.latestOutputBytes+10,status:{...session.status,observedAt:2}}))})))
   await act(async()=>useAppStore.getState().setAgentComposerDraft('first','Another shell draft'))
@@ -145,9 +158,10 @@ it('the shared projection retains exact Agent row arrays for irrelevant Terminal
   expect(changed.contexts.map(row=>row.id).sort()).toEqual(agentIds.filter(id=>id!=='agent'))
 })
 it('Terminal-only input has an honest empty board while its selected original workspace remains',async()=>{
+  await act(async()=>useAppStore.getState().focusRegion(workspaceId,'original','original-left','keyboard'))
   await act(async()=>useAppStore.getState().focusExecutionSession('first'))
   useAppStore.setState(state=>({sessions:state.sessions.filter(session=>session.kind==='terminal'),timelines:{}}))
-  await act(async()=>root.render(createElement(GlobalFocusSurface)))
+  await act(async()=>root.render(focusSurface()))
   expect(renderedIds()).toEqual([]);expect(container.querySelector('.global-agents-empty')?.textContent).toContain('Open an Agent from a Workspace')
-  expect(container.querySelector('#focus-workspace-slot')?.getAttribute('data-focus-tab-id')).toBe('original');expect(useAppStore.getState().sessions).toHaveLength(4)
+  expect(container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe('original');expect(useAppStore.getState().sessions).toHaveLength(4)
 })

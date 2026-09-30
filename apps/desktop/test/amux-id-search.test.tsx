@@ -1,3 +1,4 @@
+import { chooseFocusFilter } from './fixtures/focus-filter-menu'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -71,7 +72,7 @@ it('finds the original Focus Agent by trimmed full ID, unique prefix and middle 
   const focus = vi.fn(initial.focusExecutionSession), select = vi.fn(async () => {})
   useAppStore.setState({ focusExecutionSession: focus, selectSession: select })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
-  expect(new Set(focusIds())).toEqual(new Set([A, B, C, TERMINAL]))
+  expect(new Set(focusIds())).toEqual(new Set([A, B, C]))
   for (const value of [A, `  ${A}  `, 'amux_AbC17-al', 'C17-alp']) {
     await query('Search contexts', value)
     expect(focusIds()).toEqual([A])
@@ -90,19 +91,17 @@ it('keeps all matching Focus Agents, project/state filters, PMO visibility and e
   await query('Search contexts', 'AbC17')
   expect(new Set(focusIds())).toEqual(new Set([A, B, C]))
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
-  const project = container.querySelector<HTMLSelectElement>('[aria-label="Focus project filter"]')!
-  await act(async () => { project.value = 'repo'; project.dispatchEvent(new Event('change', { bubbles: true })) })
+  await chooseFocusFilter(container, 'project', 'repo')
   expect(focusIds()).toEqual([A, B])
-  const state = container.querySelector<HTMLSelectElement>('[aria-label="Focus state filter"]')!
-  await act(async () => { state.value = 'working'; state.dispatchEvent(new Event('change', { bubbles: true })) })
+  await chooseFocusFilter(container, 'state', 'working')
   expect(focusIds()).toEqual([B])
   await query('Search contexts', '  IMPLEMENT PARSER  ')
   expect(focusIds()).toEqual([B])
   await query('Search contexts', PMO)
   expect(focusIds()).toEqual([])
-  await act(async () => { state.value = 'all'; state.dispatchEvent(new Event('change', { bubbles: true })) })
+  await chooseFocusFilter(container, 'state', 'all')
   await query('Search contexts', '')
-  expect(new Set(focusIds())).toEqual(new Set([A, B, TERMINAL]))
+  expect(new Set(focusIds())).toEqual(new Set([A, B]))
 })
 
 it('does not add Focus ID matches for changed case, noncontiguous characters, Run or Terminal identities', async () => {

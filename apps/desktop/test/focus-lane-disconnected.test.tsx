@@ -1,3 +1,4 @@
+import { chooseFocusFilter, focusFilterOptions } from './fixtures/focus-filter-menu'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -41,7 +42,7 @@ function lane(){const node=container.querySelector<HTMLElement>('.focus-project-
 function offlineColumn(){const node=lane().querySelector<HTMLElement>('section[data-bucket="disconnected"]');expect(node).not.toBeNull();return node!}
 function row(id:string){const node=container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`);expect(node).not.toBeNull();return node!}
 async function expand(){const node=offlineColumn().querySelector<HTMLButtonElement>('.focus-recovery-toggle');expect(node).not.toBeNull();await act(async()=>node!.click())}
-async function filter(value:string){const node=container.querySelector<HTMLSelectElement>('[aria-label="Focus state filter"]');expect(node).not.toBeNull();await act(async()=>{node!.value=value;node!.dispatchEvent(new Event('change',{bubbles:true}))})}
+async function filter(value:string){await chooseFocusFilter(container,'state',value)}
 async function search(value:string){const node=container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]');expect(node).not.toBeNull();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(node,value);node!.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function seedTopic(){await act(async()=>useAppStore.setState({sessions:[agent('topic-agent','working','running',ordinary.directoryPath)],agentNames:{'topic-agent':'Scrolling'},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:scratchTopicsScope(scratch),revision:0,topics:[ordinary,mote],error:null,reading:false}}}));await mount()}
 it('keeps five stable columns and moves mixed offline out of Idle / Recovery',async()=>{
@@ -53,8 +54,8 @@ it('keeps five stable columns and moves mixed offline out of Idle / Recovery',as
  expect(row('offline').closest('section[data-bucket="disconnected"]')).toBe(offlineColumn());expect(row('offline').classList.contains('focus-context--compact')).toBe(true)
 })
 it('uses the same presentation classification for state filtering and counts',async()=>{
- await mount();const select=container.querySelector<HTMLSelectElement>('[aria-label="Focus state filter"]')!
- expect([...select.options].map(option=>option.textContent)).toEqual(['All states','Attention · 0','Working · 1','Results · 0','Idle / Recovery · 0','Disconnected · 1'])
+ await mount();const options=await focusFilterOptions(container,'state')
+ expect(options.map(option=>option.text)).toEqual(['All states','Attention · 0','Working · 1','Results · 0','Idle / Recovery · 0','Disconnected · 1'])
  await filter('idle');expect(container.querySelectorAll('.focus-context')).toHaveLength(0)
  await filter('disconnected');expect(lane().querySelector('section[data-bucket="working"]')!.getAttribute('data-empty')).toBe('true');await expand();expect(row('offline').closest('[aria-label="Disconnected projects"]')).toBeNull()
 })

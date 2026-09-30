@@ -1,4 +1,4 @@
-import { CheckCircle2, CirclePause, Inbox, PlayCircle, Search, Unplug, Users } from 'lucide-react'
+import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Unplug, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
@@ -14,6 +14,7 @@ import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes } from './FocusProjectLanes'
 import { FocusToolbar } from './FocusToolbar'
+import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { isMacPlatform } from '../lib/host-platform'
@@ -112,6 +113,9 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const boardLanes = focusProjectLanes.filter(lane => liveProjects.has(lane.projectId))
   const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: 'Idle / Recovery', icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
   const buckets = Object.keys(bucketMeta) as FocusColumn[]
+  const projectOptions = [...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()]
+  const filterSummary = `${projectOptions.find(option => option.id === project)?.name ?? 'All projects'} · ${bucketFilter === 'all' ? 'All states' : bucketMeta[bucketFilter].label}`
+  const filterCount = Number(project !== 'all') + Number(bucketFilter !== 'all')
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
     const columnStyle = { '--focus-state-columns': buckets.map(bucket => {
@@ -133,8 +137,31 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <label className="global-board-select"><select aria-label="Focus project filter" value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All projects</option>{[...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()].map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
-          <label className="global-board-select"><select aria-label="Focus state filter" value={bucketFilter} onChange={event => setBucketFilter(event.target.value as FocusColumn | 'all')}><option value="all">All states</option>{buckets.map(bucket => <option key={bucket} value={bucket}>{bucketMeta[bucket].label} · {matching.filter(row => columnFor(row) === bucket).length}</option>)}</select></label>
+          <FilterMenu.Root>
+            <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
+              <ListFilter size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
+            </button></FilterMenu.Trigger>
+            <FilterMenu.Portal><FilterMenu.Content className="tab-context-menu focus-filter-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => {
+              // Preserve a later deliberate focus; explicit Escape still returns to this trigger.
+              const focused = document.activeElement
+              if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body
+                && !focused.closest('[hidden], [inert]') && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
+            }}>
+              <FilterMenu.Label className="focus-filter-menu__label">Project</FilterMenu.Label>
+              <FilterMenu.RadioGroup className="focus-filter-menu__projects" aria-label="Focus project filter" value={project} onValueChange={setProject}>
+                {[{ id: 'all', name: 'All projects' }, ...projectOptions].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-project={option.id} className="tab-context-menu__item focus-filter-menu__item">
+                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><Check size={13} /></FilterMenu.ItemIndicator></span><span>{option.name}</span>
+                </FilterMenu.RadioItem>)}
+              </FilterMenu.RadioGroup>
+              <FilterMenu.Separator className="tab-context-menu__separator" />
+              <FilterMenu.Label className="focus-filter-menu__label">State</FilterMenu.Label>
+              <FilterMenu.RadioGroup aria-label="Focus state filter" value={bucketFilter} onValueChange={value => setBucketFilter(value as FocusColumn | 'all')}>
+                {[{ id: 'all', label: 'All states' }, ...buckets.map(bucket => ({ id: bucket, label: `${bucketMeta[bucket].label} · ${matching.filter(row => columnFor(row) === bucket).length}` }))].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-state={option.id} className="tab-context-menu__item focus-filter-menu__item">
+                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><Check size={13} /></FilterMenu.ItemIndicator></span><span>{option.label}</span>
+                </FilterMenu.RadioItem>)}
+              </FilterMenu.RadioGroup>
+            </FilterMenu.Content></FilterMenu.Portal>
+          </FilterMenu.Root>
         </div>
       </div>
     </FocusToolbar>
