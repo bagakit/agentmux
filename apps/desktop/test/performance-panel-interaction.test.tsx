@@ -65,7 +65,7 @@ async function mountApp() { await act(async () => root.render(<App />)) }
 async function hover() { await act(async () => { node('.performance-trigger').dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 140)) }) }
 function draft() { return node<HTMLTextAreaElement>('[data-prompt-editor] textarea') }
 
-it('通过 actual App Settings 左侧 caller 消费 Toolkit，并让 script、Pause/Resume 与原 Toolkit 配置可达', async () => {
+it('通过 actual App Settings 右侧工具入口消费 Toolkit，并让 script、Pause/Resume 与原 Toolkit 配置可达', async () => {
   await mountApp()
   expect(vi.mocked(api.toolkit.observe).mock.calls).toHaveLength(0)
   const trigger = node('.performance-trigger'), settings = node('[aria-label="Settings"]', container)
