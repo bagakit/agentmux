@@ -9,6 +9,17 @@ const hash=p=>createHash('sha256').update(fs.readFileSync(resolve(p))).digest('h
 const proof=read(process.argv[index+1]);assert.equal(proof.schema,'agentmux.conversation-native-record-order-qualification.v1')
 assert.ok(Object.keys(proof.sources).length>0,'Nonempty owned source inputs')
 for(const [file,sha] of Object.entries(proof.sources))assert.equal(hash(file),sha,'Exact owned input '+file)
+assert.ok(Array.isArray(proof.sourceSeams)&&proof.sourceSeams.length>0,'Nonempty owned notice seams')
+const seamReview=read(proof.seamReview);assert.equal(seamReview.passed,true);assert.ok(seamReview.reviewer)
+for(const seam of proof.sourceSeams){
+ const tested=fs.readFileSync(resolve(seam.testedSource),'utf8'),current=fs.readFileSync(resolve(seam.path),'utf8')
+ assert.equal(hash(seam.testedSource),seam.testedFileSHA256,'Original actually tested full Source retained')
+ const slice=source=>{const start=source.indexOf(seam.start),end=source.indexOf(seam.end,start);assert.ok(start>=0&&end>start,'Real nonempty notice anchors');assert.equal(source.indexOf(seam.start,start+1),-1,'Unique notice start');assert.equal(source.indexOf(seam.end,end+1),-1,'Unique notice end');return source.slice(start,end)}
+ const original=slice(tested),owned=slice(current);assert.ok(owned.length>0);assert.equal(owned,original,'Exact tested native notice fields')
+ assert.equal(createHash('sha256').update(owned).digest('hex'),seam.sha256)
+ const fields=[...owned.matchAll(/^\s+(\w+):/gm)].map(match=>match[1]);assert.equal(fields.length,seam.fieldCount);assert.ok(fields.length>0);assert.deepEqual(fields,seam.fields)
+ assert.equal(seamReview.testedCommit,seam.testedCommit);assert.equal(seamReview.ownedSeamSHA256,seam.sha256)
+}
 assert.equal(fs.readFileSync(resolve(proof.styleImport.path),'utf8').split(proof.styleImport.text).length,2,'Unique real CSS import')
 function cases(file){const report=read(file),tests=report.testResults.flatMap(result=>result.assertionResults);assert.ok(tests.length>0,'Nonempty collected '+file);return {report,tests}}
 for(const file of Object.values(proof.tests)){const {report,tests}=cases(file);assert.equal(report.success,true,file);assert.equal(tests.filter(test=>test.status==='passed').length,tests.length,file)}
