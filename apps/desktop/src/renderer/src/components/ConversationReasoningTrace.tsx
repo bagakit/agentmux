@@ -62,7 +62,8 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
           ) : (
             <div className="log-turn__trace-body">
               <MemoizedAgentMarkdown
-                content={part.text}                workspaceRoot={workspaceRoot}
+                content={part.text}
+                workspaceRoot={workspaceRoot}
                 homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                 {...(readPastedImage ? { readPastedImage } : {})}

@@ -275,14 +275,16 @@ export function SessionPane({
   }, [fileContext, selectFileContext, openFile, linkOrigin.tabGroupId, linkOrigin.workspaceId])
   const fileReferenceNotice = fileContext.kind !== 'session' || fileLinkIssue ? <>
     {fileContext.kind === 'goal' ? <div className="activity-feed__read-notice" data-file-reference-scope="current-goal">
-      <span>File links use current Goal project: {fileContext.project!.name}. Earlier messages may have another origin.</span>
+      <span>File links use current Goal project: {fileContext.project!.name}.{!fileContext.homeDir ? ' Home paths are unconfirmed for this Host; ~/ references stay as written.' : ''} Earlier messages may have another origin.</span>
     </div> : null}
-    {fileContext.issue || fileLinkIssue || fileContext.kind === 'goal' && !fileContext.homeDir ? <ServiceWindowNotice notice={{
+    {fileContext.issue || fileLinkIssue ? <ServiceWindowNotice notice={{
       kind: 'indeterminate', notice: {
-        step: fileContext.issue ?? fileLinkIssue ?? 'Home paths are unconfirmed for this project Host.',
-        mode: fileContext.kind === 'goal' ? 'Project-relative files remain available; unconfirmed references stay as written. The PMO keeps running.'
+        step: fileContext.issue ?? fileLinkIssue!,
+        mode: fileContext.kind === 'session' ? 'The original Session keeps running. Its file resource or display occurrence is unconfirmed.'
+          : fileContext.kind === 'goal' ? 'Project-relative files remain available; unconfirmed references stay as written. The PMO keeps running.'
           : 'Project file context is unconfirmed; references stay as written. The PMO keeps running.',
-        restore: 'Check this Goal’s project association and registered Workspace/Host, then retry the original reference.'
+        restore: fileContext.kind === 'session' ? 'Check this Session’s original Workspace and Host, then retry the original reference.'
+          : 'Check this Goal’s project association and registered Workspace/Host, then retry the original reference.'
       }
     }} /> : null}
   </> : null
