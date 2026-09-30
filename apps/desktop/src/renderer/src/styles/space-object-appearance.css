@@ -26,3 +26,47 @@
 .pmo-teams-topic-compact-launcher__surface > .space-object-icon > .space-object-icon__avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
 
 .mote-chooser__name .space-object-icon__avatar { width: 24px; height: 24px; }
+
+.mote-face { display: block; width: 100%; height: 100%; overflow: visible; }
+.space-object-icon > .mote-face { width: 20px; height: 20px; }
+.mote-chooser__name .space-object-icon > .mote-face { width: 26px; height: 26px; }
+.mote-avatar-source { display: flex; gap: var(--sp-3); }
+.mote-avatar-source [aria-pressed="true"], .mote-face-editor button[aria-pressed="true"] { border-color: var(--green); color: var(--text); background: var(--surface-3); }
+.mote-face-editor { display: grid; gap: var(--sp-3); }
+.mote-face-editor__preview { justify-self: center; width: 100px; height: 100px; margin-block: var(--sp-2); }
+.mote-face-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.mote-face-editor legend { font-size: var(--fs-meta); color: var(--text-2); margin-bottom: var(--sp-2); }
+.mote-face-editor fieldset > div { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.mote-face-editor button { text-transform: capitalize; min-height: 28px; }
+.mote-face-editor__color { width: 8px; height: 8px; border-radius: 50%; background: #b9e3cb; }
+.mote-face-editor__color[data-palette="peach"] { background: #f1cbb5; }
+.mote-face-editor__color[data-palette="lavender"] { background: #d6ccec; }
+.mote-face-editor__color[data-palette="sky"] { background: #c0d9ea; }
+
+.mote-identity-motion { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.mote-identity-motion > .space-object-icon { display: contents; }
+.pmo-teams-topic-compact-launcher__surface > .mote-identity-motion .space-object-icon__avatar { width: 26px; height: 26px; }
+.pmo-teams-topic-compact-launcher__surface > .mote-identity-motion svg { width: 26px; height: 26px; }
+.mote-face__eyes, .mote-face__gaze, .mote-face__head, .mote-face__mouth, .mote-face__brows { transform-box: fill-box; transform-origin: center; }
+.mote-identity-motion[data-mote-expression="thinking"] .mote-face__brows,
+.mote-identity-motion[data-mote-expression="tool"] .mote-face__brows { transform: translateY(-1px) rotate(-5deg); }
+.mote-identity-motion[data-mote-expression="waiting"] .mote-face__brows { transform: translateY(-2px); }
+.mote-identity-motion[data-mote-expression="starting"] .mote-face__eyes { transform: scaleY(.75); }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="idle"] .mote-face__eyes { animation: mote-blink 8s infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="idle"] .mote-face__gaze { animation: mote-glance 13s infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="idle"] .mote-face__head,
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="sleep"] .mote-face__head { animation: mote-breathe 5s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="thinking"] .mote-face__gaze { animation: mote-think 3.8s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="tool"] .mote-face__gaze { animation: mote-tool-look 1.6s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="tool"] .mote-face__mouth { animation: mote-tool-mouth 2.4s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="starting"] .mote-face__eyes { animation: mote-wake 2s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"] .space-object-icon__avatar { animation: mote-image-breathe 6s ease-in-out infinite; }
+@keyframes mote-blink { 0%, 89%, 94%, 100% { transform: scaleY(1); } 91%, 92% { transform: scaleY(.12); } }
+@keyframes mote-glance { 0%, 55%, 75%, 100% { transform: translateX(0); } 60%, 70% { transform: translateX(1.3px); } }
+@keyframes mote-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-.7px); } }
+@keyframes mote-think { 0%, 100% { transform: translate(0, -1px); } 45%, 65% { transform: translate(1.5px, -2px); } }
+@keyframes mote-tool-look { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1px); } }
+@keyframes mote-tool-mouth { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(.8); } }
+@keyframes mote-wake { 0%, 100% { transform: scaleY(.65); } 70% { transform: scaleY(1); } }
+@keyframes mote-image-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+@media (prefers-reduced-motion: reduce) { .mote-identity-motion * { animation: none !important; } }

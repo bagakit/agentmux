@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Private Mote face review</title>
+<script>
+// React's maintained profiling renderer reports actual product component work.
+// This bounded probe observer is not a product animation listener or counter.
+window.moteFaceCosts = { commits: 0, seen: {}, renders: {}, currentCommit: null, observations: [] };
+window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+  supportsFiber: true, inject: function () { return 1; },
+  onCommitFiberRoot: function (_id, root) {
+    var costs = window.moteFaceCosts, commit = costs.currentCommit; costs.commits++;
+    if (!commit || !(commit.start >= 0 && commit.end >= commit.start)) throw new Error('Original App Profiler commit boundary is absent');
+    function visit(fiber) {
+      if (!fiber) return;
+      if (fiber.type && fiber.type.name === 'MoteIdentityMotion') {
+        var key = fiber.memoizedProps.moteSessionId || 'identity';
+        costs.seen[key] = (costs.seen[key] || 0) + 1;
+        var currentWork = fiber.actualDuration > 0 && fiber.actualStartTime >= commit.start && fiber.actualStartTime <= commit.end;
+        if (currentWork) costs.renders[key] = (costs.renders[key] || 0) + 1;
+        costs.observations.push({ key: key, start: fiber.actualStartTime, duration: fiber.actualDuration, commit: commit, currentWork: currentWork });
+        if (costs.observations.length > 120) costs.observations.shift();
+      }
+      visit(fiber.child); visit(fiber.sibling);
+    }
+    visit(root.current);
+  }, onCommitFiberUnmount: function () {}
+};
+</script></head>
+<body><div id="root"></div><script type="module" src="./paperdoll-entry.tsx"></script></body></html>

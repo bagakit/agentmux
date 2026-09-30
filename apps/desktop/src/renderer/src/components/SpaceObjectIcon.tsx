@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { NotebookText } from 'lucide-react'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconTarget } from '../lib/space-object-appearance'
-import type { MoteAvatarRef } from '../../../shared/mote-avatars'
+import { isMoteFace, type MoteAvatarRef } from '../../../shared/mote-avatars'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { presentError } from '../lib/error-presentation'
@@ -10,6 +10,8 @@ import { projectMonogram } from '../lib/project-monogram'
 import defaultMoteAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { MoteIcon } from './MoteIcon'
 import { ProjectIcon } from './ProjectIcon'
+import { MoteFace, type MoteExpression } from './MoteFace'
+import { MoteIdentityMotion, type MoteIdentityMotionProps } from './MoteIdentityMotion'
 
 function MoteAvatar({ workspaceId, topicId, choice, objectKey }: { workspaceId: string; topicId: string; choice: MoteAvatarRef; objectKey: string }) {
   const [image, setImage] = useState<{ identity: string; url: string } | null>(null)
@@ -33,12 +35,21 @@ function MoteAvatar({ workspaceId, topicId, choice, objectKey }: { workspaceId: 
   </span>
 }
 
-/** Primitive props; reads only this consumer's selected asset, never Session or directory scans. */
-export const SpaceObjectIcon = memo(function SpaceObjectIcon({ kind, name, manualIcon, workspaceId, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey }: {
+/** One selected asset; Mote expressions use only their caller's exact target, never a directory scan. */
+type SpaceObjectIconProps = {
   kind: SpaceIconTarget['kind']; name: string; manualIcon: SpaceIconChoice | null; workspaceId?: string
   avatarWorkspaceId?: string | undefined; avatarTopicId?: string | undefined; avatarObjectKey?: string | undefined
   lastActivityAt?: number | null | undefined; visible?: boolean | undefined; topicGlyph?: boolean
-}) {
+} & MoteIdentityMotionProps
+export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectIconProps) {
+  return props.kind === 'mote' && (props.moteSessionId || props.moteAvailability && props.moteAvailability !== 'static') ? <MoteIdentityMotion moteSessionId={props.moteSessionId} moteHostId={props.moteHostId} moteAvailability={props.moteAvailability} visible={props.visible}>
+    {expression => <SpaceObjectIconContents {...props} expression={expression} />}
+  </MoteIdentityMotion> : <SpaceObjectIconContents {...props} />
+})
+function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
+  if (isMoteFace(manualIcon)) return <span className="project-rail-row__icon space-object-icon" data-space-icon-source="face" aria-hidden="true">
+    {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <NotebookText size={14} />}
+  </span>
   if (manualIcon && typeof manualIcon === 'object') {
     if (!avatarWorkspaceId || !avatarTopicId || !avatarObjectKey) return <span className="space-object-icon" data-space-icon-source="image" title="Saved avatar target is unavailable" aria-hidden="true"><MoteIcon size={14} /></span>
     return <MoteAvatar workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={manualIcon} objectKey={avatarObjectKey} />
@@ -57,4 +68,4 @@ export const SpaceObjectIcon = memo(function SpaceObjectIcon({ kind, name, manua
     {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : 'Topic'} aria-hidden="true">
     {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" /> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <NotebookText size={14} />}
   </span>
-})
+}

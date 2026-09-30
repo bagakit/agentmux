@@ -11,18 +11,19 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const fixture = join(desktop, 'scripts/fixtures/mote-navigation-footer')
 const require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
-let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, moteIdentity = false, moteArchive = false, reuseRenderer = null
+let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, moteIdentity = false, moteArchive = false, motePaperdoll = false, reuseRenderer = null
 if (args[0] === '--reuse') {
   const { recapture } = await import('./fixtures/mote-navigation-footer/recapture.mjs')
   await recapture({ desktop, repository, fixture, driver: import.meta.filename }, args)
   process.exit(0)
 }
 if (args.length) {
-  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only|floating-resize|mote-identity|mote-archive --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
+  assert.ok(args.length === 4 || args.length === 6, 'Use --capture affected-entry|footer-only|floating-resize|mote-identity|mote-archive|mote-paperdoll --candidate <manifest.json> [--reuse-renderer <compiled-receipt.json>]')
   assert.equal(args[0], '--capture'); assert.equal(args[2], '--candidate')
-  assert.ok(['affected-entry', 'footer-only', 'floating-resize', 'mote-identity', 'mote-archive'].includes(args[1]))
+  assert.ok(['affected-entry', 'footer-only', 'floating-resize', 'mote-identity', 'mote-archive', 'mote-paperdoll'].includes(args[1]))
   moteIdentity = args[1] === 'mote-identity'
   moteArchive = args[1] === 'mote-archive'
+  motePaperdoll = args[1] === 'mote-paperdoll'
   footerOnly = args[1] === 'footer-only'
   floatingResize = args[1] === 'floating-resize'
   if (args.length === 6) {
@@ -30,7 +31,7 @@ if (args.length) {
     reuseRenderer = resolve(repository, args[5])
   }
   candidateFile = resolve(repository, args[3])
-  selectedFrames = moteArchive ? ['archive-wide-cards-menu', 'archive-narrow-avatars-current', 'archive-space-discover-restore', 'archive-restored-original-workface', 'archive-save-unconfirmed-unknown'] : moteIdentity ? ['identity-wide-cards', 'identity-wide-avatars', 'identity-narrow-cards', 'identity-narrow-avatars', 'identity-save-unconfirmed', 'identity-full-space'] : floatingResize ? ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue'] : footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
+  selectedFrames = motePaperdoll ? ['paperdoll-primary-default', 'paperdoll-editor-preview', 'paperdoll-thinking-tool', 'paperdoll-narrow-idle', 'paperdoll-restored-sleep', 'paperdoll-unconfirmed-unknown'] : moteArchive ? ['archive-wide-cards-menu', 'archive-narrow-avatars-current', 'archive-space-discover-restore', 'archive-restored-original-workface', 'archive-save-unconfirmed-unknown'] : moteIdentity ? ['identity-wide-cards', 'identity-wide-avatars', 'identity-narrow-cards', 'identity-narrow-avatars', 'identity-save-unconfirmed', 'identity-full-space'] : floatingResize ? ['resize-wide-cards', 'resize-wide-avatars', 'resize-narrow-cards', 'resize-narrow-avatars', 'resize-storage-issue'] : footerOnly ? ['footer-320-dark-double-counts', 'footer-420-dark-double-counts',
     'footer-560-dark-double-counts', 'footer-980-dark-double-counts', 'footer-320-light-double-counts'] : ['wide-closed-low-footer-circle', 'wide-hover-cards-original-input',
     'narrow-long-names-all-motes-cards', 'narrow-avatars-custom-original-draft',
     'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
@@ -93,8 +94,8 @@ const result = {
   ], stage: 'preparation', cleanup: null
 }
 if (selectedFrames) {
-  result.captureSelection = { mode: moteArchive ? 'mote-archive' : moteIdentity ? 'mote-identity' : floatingResize ? 'floating-resize' : footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
-    scope: moteArchive ? 'One actual App Renderer compilation; two independent private Electron phases consume the same original profile, real ScratchTopics Source/typed IPC and durable writer. Five complete archive/Space/restore/failure frames. No old matrix, Core Run or native-stage claim.' : moteIdentity ? 'One actual App Renderer compilation, original image picker and real ScratchTopics asset/ordinary initialization owner in a private process, four rail geometries, save failure and Space identity, same-profile Renderer reload. Six complete frames; no Core Run/native claim.' : floatingResize ? 'One actual App Renderer compile: bounded resize, both rail forms, narrow viewport, cancel, advisory storage failure/recovery and reload proof. Five complete frames; no old Footer/native or eight-flow replay.' : footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
+  result.captureSelection = { mode: motePaperdoll ? 'mote-paperdoll' : moteArchive ? 'mote-archive' : moteIdentity ? 'mote-identity' : floatingResize ? 'floating-resize' : footerOnly ? 'footer-only' : 'affected-entry', frames: selectedFrames,
+    scope: motePaperdoll ? 'One actual App Renderer with the maintained React profiling renderer; original picker/appearance owner, exact single-bridge live events and current ScratchTopics image owner. Same profile, two private processes, six complete frames and native animation/cost evidence; no Core Run or native-stage claim.' : moteArchive ? 'One actual App Renderer compilation; two independent private Electron phases consume the same original profile, real ScratchTopics Source/typed IPC and durable writer. Five complete archive/Space/restore/failure frames. No old matrix, Core Run or native-stage claim.' : moteIdentity ? 'One actual App Renderer compilation, original image picker and real ScratchTopics asset/ordinary initialization owner in a private process, four rail geometries, save failure and Space identity, same-profile Renderer reload. Six complete frames; no Core Run/native claim.' : floatingResize ? 'One actual App Renderer compile: bounded resize, both rail forms, narrow viewport, cancel, advisory storage failure/recovery and reload proof. Five complete frames; no old Footer/native or eight-flow replay.' : footerOnly ? 'One actual Renderer compile; sixteen Footer count geometry cases, five frames and isolated exact CSS-source mutation RED / original-source GREEN. Other rail/Settings/native evidence retains its earlier scope.' :
       'New actual Renderer compilation and six new affected frames; all eight original interactions/assertions replayed. The prior wide avatar and light images retain their original scope, not new candidate screenshots.' }
 }
 await mkdir(evidence, { recursive: true })
@@ -111,7 +112,7 @@ try {
     await writeFile(join(evidence, 'candidate.json'), bytes)
   }
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'),
-    ...(moteArchive ? ['archive.html', 'archive-entry.tsx', 'archive-main.cjs', 'archive-preload.cjs'] : ['index.html', 'entry.tsx', 'main.cjs', 'scenario.md', ...(moteIdentity ? ['identity-main.cjs', 'identity-preload.cjs'] : [])]).map(name => join(fixture, name))]) {
+    ...(motePaperdoll ? ['paperdoll.html', 'paperdoll-entry.tsx', 'paperdoll-main.cjs', 'paperdoll-preload.cjs'] : moteArchive ? ['archive.html', 'archive-entry.tsx', 'archive-main.cjs', 'archive-preload.cjs'] : ['index.html', 'entry.tsx', 'main.cjs', 'scenario.md', ...(moteIdentity ? ['identity-main.cjs', 'identity-preload.cjs'] : [])]).map(name => join(fixture, name))]) {
     const bytes = await readFile(file)
     inputs.set(file, hash(bytes)); originalBytes.set(file, bytes)
   }
@@ -141,7 +142,7 @@ try {
       scope: 'Unchanged original actual Renderer compilation; current separately bound Node capture/assertion driver. No Renderer recompile.' }
   } else {
     const aliases = []
-    if (moteIdentity || moteArchive) for (const name of ['core', 'demand', 'layout']) {
+    if (moteIdentity || moteArchive || motePaperdoll) for (const name of ['core', 'demand', 'layout']) {
       const manifest = JSON.parse(await readFile(join(repository, 'packages', name, 'package.json'), 'utf8'))
       const exports = Object.entries(manifest.exports)
       assert.ok(exports.length > 0)
@@ -151,12 +152,13 @@ try {
         aliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: join(repository, 'packages', name, source) })
       }
     }
+    if (motePaperdoll) aliases.push({ find: /^react-dom\/client$/, replacement: require.resolve('react-dom/profiling') })
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases },
     esbuild: { jsx: 'automatic' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [sourceBinding], css: { postcss: { plugins: [stylesheetBinding] } },
     build: { target: 'esnext', outDir, emptyOutDir: true, minify: false,
-      ...(moteArchive ? { rollupOptions: { input: join(fixture, 'archive.html') } } : {}) } })
+      ...(motePaperdoll ? { rollupOptions: { input: join(fixture, 'paperdoll.html') } } : moteArchive ? { rollupOptions: { input: join(fixture, 'archive.html') } } : {}) } })
   }
   assert.ok(inputs.size > 0, 'Imported input graph must be nonempty')
   assert.ok(styles.size > 1, 'Original consumed local style graph must be nonempty')
@@ -198,6 +200,22 @@ try {
     result.limitations[1] = 'Real private archive metadata and ordinary Workbench persistence; controlled Session snapshots/recovery/attachment do not prove actual Core/ctxmux Run or real CLI survival.'
     result.limitations[4] = 'Public Core/demand/layout exports resolve current Source for this probe; no Core build or runtime lifecycle claim. Private IPC mirrors the typed archive API; production IPC wiring is covered by its owning proof.'
   }
+  if (motePaperdoll) {
+    const producers = result.candidate.files.filter(row => row.path.startsWith('apps/desktop/src/renderer/src/') || row.path === 'apps/desktop/src/shared/mote-avatars.ts' || row.path.endsWith('/paperdoll-entry.tsx'))
+    assert.ok(producers.length >= 12, 'Paperdoll candidate includes original editor/consumers/state/event provenance')
+    for (const row of producers) assert.equal(inputs.get(join(repository, row.path)), row.sha256, 'Every actual paperdoll producer consumes exact candidate Source')
+    for (const name of ['MoteFace.tsx', 'MoteFaceEditor.tsx', 'MoteIdentityMotion.tsx', 'mote-expression.ts', 'SpaceObjectIcon.tsx', 'SpaceIconPicker.tsx', 'session-state.ts', 'session-events.ts']) assert.ok([...inputs.keys()].some(file => file.endsWith('/' + name)), 'Actual face owner not compiled: ' + name)
+    const profileSource = require.resolve('react-dom/profiling'), implementation = join(resolve(profileSource, '..'), 'cjs/react-dom-profiling.profiling.js')
+    result.instrumentation = { renderer: 'react-dom/profiling', sources: [], observation: 'Maintained React profiling renderer; actual MoteIdentityMotion fiber actualDuration/startTime within the original App Profiler current commit start/end. Stale bailout timing excluded. Hook/Profiler are private in byte-bound paperdoll.html/entry; product components are not replaced.' }
+    for (const file of [profileSource, implementation]) {
+      const bytes = await readFile(file), preserved = join(evidence, 'instrumentation', file === profileSource ? 'profiling.js' : 'react-dom-profiling.profiling.js')
+      await mkdir(resolve(preserved, '..'), { recursive: true }); await writeFile(preserved, bytes)
+      result.instrumentation.sources.push({ path: file, sha256: hash(bytes), preserved, bytes: bytes.length })
+    }
+    result.limitations[0] = 'One private Renderer compilation and two private Electron phases. No formal Core/desktop build, package, install or user App/Run control.'
+    result.limitations[1] = 'Real private avatar assets and ordinary durable appearance writer; controlled typed event transport/Session snapshots do not prove Core/ctxmux Run or real CLI survival.'
+    result.limitations[4] = 'Public Core/demand/layout exports resolve current Source; no formal build or runtime lifecycle claim.'
+  }
   result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
   result.watchedStylesheets = [...watchedStyles].sort().map(file => relative(repository, file))
@@ -225,16 +243,16 @@ try {
   }, null, 2))
   console.log(JSON.stringify({ stage: 'compiled-only', compiledRenderer: result.compiledRenderer,
     receipt: join(evidence, 'compiled-receipt.json'), originalInputs: result.originalInputs }))
-  result.stage = moteArchive ? 'two-private-archive-processes' : 'single-private-renderer-process'
+  result.stage = motePaperdoll ? 'two-private-paperdoll-processes' : moteArchive ? 'two-private-archive-processes' : 'single-private-renderer-process'
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  if (moteArchive) {
+  if (moteArchive || motePaperdoll) {
     result.renderer = { passed: false, phases: [], frames: [], checks: [] }
     for (const phase of ['seed', 'restore']) {
       const destination = join(evidence, phase); await mkdir(destination)
       const phaseLogs = []
-      const exit = await runProbeProcess(require('electron'), [join(fixture, 'archive-main.cjs'),
-        join(outDir, 'archive.html'), privateRoot, destination, phase], {
+      const exit = await runProbeProcess(require('electron'), [join(fixture, motePaperdoll ? 'paperdoll-main.cjs' : 'archive-main.cjs'),
+        join(outDir, motePaperdoll ? 'paperdoll.html' : 'archive.html'), privateRoot, destination, phase], {
         temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 60000, onLine: line => phaseLogs.push(line)
       })
       await writeFile(join(destination, 'renderer.log'), phaseLogs.join('\n'))
@@ -276,7 +294,12 @@ try {
   assert.equal(result.renderer.passed, true)
   assert.equal(result.renderer.frames.length, selectedFrames?.length ?? 8, 'Every selected actual frame must be captured')
   if (selectedFrames) assert.deepEqual(result.renderer.frames.map(frame => frame.name), selectedFrames)
-  if (moteArchive) {
+  if (motePaperdoll) {
+    assert.ok(result.renderer.checks.length > 12, 'Actual face proof has nonempty controls, native animation/cost, failure and durable restoration')
+    assert.equal(result.renderer.phases.length, 2)
+    assert.ok(result.renderer.phases[0].renderer.dynamic.tool.length >= 3, 'Real intermediate tool frames are nonempty')
+    for (const frame of result.renderer.phases[0].renderer.dynamic.tool) assert.equal(hash(await readFile(join(evidence, 'seed', frame.file))), frame.sha256)
+  } else if (moteArchive) {
     assert.ok(result.renderer.checks.length >= 10, 'Archive proof has actual controls, original FS, failure and both process results')
     assert.equal(result.renderer.phases.length, 2)
   } else if (moteIdentity) {
@@ -340,7 +363,7 @@ try {
   }
   result.stage = 'source-style-and-compiled-final-binding'
   for (const [file, digest] of inputs) {
-    if ((!floatingResize && !moteArchive) || result.candidate.files.some(row => row.path === relative(repository, file)))
+    if ((!floatingResize && !moteArchive && !motePaperdoll) || result.candidate.files.some(row => row.path === relative(repository, file)))
       assert.equal(hash(await readFile(file)), digest, `Owned input changed during capture: ${relative(repository, file)}`)
     assert.equal(hash(await readFile(join(result.originalInputs, relative(repository, file)))), digest, 'Archived original bytes agree')
   }
@@ -348,7 +371,7 @@ try {
     assert.equal(hash(await readFile(join(evidence, 'renderer', name))), digest, 'Archived compilation agrees')
   }
   for (const row of result.candidate?.files ?? []) assert.equal(hash(await readFile(join(repository, row.path))), row.sha256, 'Candidate remains coherent after capture')
-  if (floatingResize || moteArchive) result.bindingScope = 'All actual compiled/executed inputs and styles are immutable archived bytes. Task-owned candidate/producers remain current; unrelated whole-App end drift is separately reported without changing archived proof.'
+  if (floatingResize || moteArchive || motePaperdoll) result.bindingScope = 'All actual compiled/executed inputs and styles are immutable archived bytes. Task-owned candidate/producers remain current; unrelated whole-App end drift is separately reported without changing archived proof.'
   result.passed = true; result.stage = 'captured-independent-look-pending'
 } catch (error) {
   result.failure = { name: error.name, message: error.message, stack: error.stack }
@@ -362,7 +385,7 @@ try {
   }
   if (result.inputFreshnessAtFinish.changed.length) {
     result.sourceDrift = true
-    if ((!floatingResize && !moteArchive) || result.inputFreshnessAtFinish.changed.some(row => result.candidate?.files.some(owned => owned.path === row.path))) result.passed = false
+    if ((!floatingResize && !moteArchive && !motePaperdoll) || result.inputFreshnessAtFinish.changed.some(row => result.candidate?.files.some(owned => owned.path === row.path))) result.passed = false
   }
   // Partial images/results remain reviewable even when a later stage failed.
   const phase = await readFile(join(evidence, 'renderer.json'), 'utf8').catch(() => null)
@@ -374,10 +397,10 @@ try {
   if (!result.cleanup.remaining.length) { await rm(privateRoot, { recursive: true }); result.cleanup.privateRootRemoved = true }
   await writeFile(join(evidence, 'receipt.json'), JSON.stringify(result, null, 2))
   await writeFile(join(evidence, 'review.md'), [
-    moteArchive ? '# Mote archive and same-object restore — independent actual look pending' : moteIdentity ? '# Mote avatars and primary identity — independent actual look pending' : '# Mote rail / footer / Settings — independent actual look pending', '',
-    `Capture passed: ${result.passed}. Stage: ${result.stage}. This is ${moteArchive ? 'one private Renderer compilation consumed by two private processes' : 'a single private Renderer capture'}, not native/OS/Core Run sign-off.`, '',
+    motePaperdoll ? '# Mote face and truthful expressions — independent actual look pending' : moteArchive ? '# Mote archive and same-object restore — independent actual look pending' : moteIdentity ? '# Mote avatars and primary identity — independent actual look pending' : '# Mote rail / footer / Settings — independent actual look pending', '',
+    `Capture passed: ${result.passed}. Stage: ${result.stage}. This is ${moteArchive || motePaperdoll ? 'one private Renderer compilation consumed by two private processes' : 'a single private Renderer capture'}, not native/OS/Core Run sign-off.`, '',
     ...(result.renderer?.frames ?? []).map(frame => `- ${frame.name}: [Actual complete Renderer frame](${frame.file}) — ${frame.sha256}`), '',
-    moteArchive ? 'Open all five complete frames. Review actual Archive menu inside the native HTML popover, wide cards/narrow avatars, selected archived original input with Restore, Space Show archived/same-object recovery, and compact actionable failure/unknown notice. Fresh-process original tabs/layout/drafts and actual FS readback are in seed/restore receipts. No old matrix, healthy Core Run or native-stage claim.' : moteIdentity ? 'Open all six complete frames. Review the same primary/custom images at 980/420 in cards/avatars, the original circle crop and actionable saving-unconfirmed dialog, visible primary identity, retained real input and same full Space identity. Current Source owners and real private filesystem asset proof are bounded in renderer.json; no healthy App/Core Run claim.' : floatingResize ? 'Open all five complete frames. Review actual corner handle discoverability/hit area, 10px top/right frame, wide/narrow card/avatar original workface, advisory storage failure and usable original input. Only floating resize scope is new.' : footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
+    motePaperdoll ? 'Open all six full frames and original native-animation intermediate frames. Review original dragon/image, compact real face editor, saved thinking/tool face, narrow Idle, new-process sleep, unknown and actionable save failure. React profiling commit evidence concerns actual product face consumers, while original App events still update. No Core Run or user App recovery claim.' : moteArchive ? 'Open all five complete frames. Review actual Archive menu inside the native HTML popover, wide cards/narrow avatars, selected archived original input with Restore, Space Show archived/same-object recovery, and compact actionable failure/unknown notice. Fresh-process original tabs/layout/drafts and actual FS readback are in seed/restore receipts. No old matrix, healthy Core Run or native-stage claim.' : moteIdentity ? 'Open all six complete frames. Review the same primary/custom images at 980/420 in cards/avatars, the original circle crop and actionable saving-unconfirmed dialog, visible primary identity, retained real input and same full Space identity. Current Source owners and real private filesystem asset proof are bounded in renderer.json; no healthy App/Core Run claim.' : floatingResize ? 'Open all five complete frames. Review actual corner handle discoverability/hit area, 10px top/right frame, wide/narrow card/avatar original workface, advisory storage failure and usable original input. Only floating resize scope is new.' : footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
       'Open every frame. Review both rail forms, complete objects and original input, narrow long names, dark/light boundary, low bar and complete circle/status/focus, and Settings operability.',
     'Original inputs/raw CSS/compiled bytes and actual geometry/events are in receipt.json. Capture success does not constitute aesthetic approval.'
   ].join('\n'))

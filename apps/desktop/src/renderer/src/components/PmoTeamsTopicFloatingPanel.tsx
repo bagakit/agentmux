@@ -52,6 +52,8 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
     onPointerLeave={() => onIdentity(null)} onFocus={event => onIdentity(event.currentTarget)} onBlur={() => onIdentity(null)}>
     <span className="mote-chooser__name">
       <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon}
+        moteSessionId={region?.kind === 'agent' ? region.sessionId : undefined} moteHostId={workspace?.hostId}
+        moteAvailability={!tabId || region?.kind === 'launcher' ? 'no-agent' : 'restoring'}
         avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
       <strong>{topic.title}</strong>
     </span><span className="mote-chooser__status">
