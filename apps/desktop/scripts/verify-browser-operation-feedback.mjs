@@ -21,9 +21,10 @@ const out = resolve(process.env.AGENTMUX_FEEDBACK_EVIDENCE_ROOT ?? join(reposito
 const temporaryRoot = await mkdtemp('/tmp/amx-feedback-native-')
 const projectionRoot = join(await realpath(temporaryRoot), 'projection')
 const receipt = { schema: nativeScope === 'motion' ? 'agentmux.browser-operation-feedback-native.v2' : 'agentmux.browser-operation-feedback-native.v1', passed: false, taskComplete: false,
-  author: '/root/browser_surfaces', actualExecutor: '/root', scope: 'stock Electron / actual BrowserViewManager / original native pages / private profile',
+  author: '/root/browser_surfaces', actualExecutor: process.env.AGENTMUX_FEEDBACK_ACTUAL_EXECUTOR ?? '/root', scope: 'stock Electron / actual BrowserViewManager / original native pages / private profile',
   desktopTabRegionFocusRestore: 'not-tested', healthyCoreRunRestore: 'not-tested', userAuthentication: 'not-tested',
   nativeScope,
+  nativeIncrement: process.env.AGENTMUX_FEEDBACK_FRAME_BINDING_ONLY === '1' ? 'frame-binding' : null,
   source: {}, phases: [], cleanup: {}, visual: { captureOnly: true, aestheticReview: 'not-performed' } }
 let server, failure
 await mkdir(out, { recursive: true })
@@ -40,7 +41,7 @@ try {
   execFileSync('tar', ['-x', '-C', projectionRoot], { input: git(['archive', commit, ...projectedPaths]) })
   const owningFixturePath = join(projectionRoot, 'apps/desktop/scripts/fixtures/browser-operation-feedback/main.ts')
   await mkdir(dirname(owningFixturePath), { recursive: true })
-  const owningFixturePaths = new Set([owningFixturePath, join(dirname(owningFixturePath), 'motion.ts')])
+  const owningFixturePaths = new Set(['main.ts', 'motion.ts', 'frame-pixels.mjs', 'frame-state.mjs'].map(name => join(dirname(owningFixturePath), name)))
   for (const fixture of owningFixturePaths) await writeFile(fixture, await readFile(join(fixtures, fixture.split('/').at(-1))))
   for (const rel of ['', 'apps/desktop', 'packages/core']) {
     await symlink(join(repositoryRoot, rel, 'node_modules'), join(projectionRoot, rel, 'node_modules'))
@@ -49,7 +50,7 @@ try {
     fixtureOrigin: join(fixtures, 'main.ts'), uncommittedPeerSourceConsumed: false }
   const expected = { 'browser-operation-feedback.ts': 'e30d06cd287f3642153c03287850dfd70c3ee62939ad212b0dc31c3406812e16',
     'browser-page-dispatch.ts': 'e1426edc674c383154c3abcc3156cdb744dda1f2388e21838eca2610adc85cf1',
-    'browser-view-manager.ts': 'f561f35f4a389bfe89b50c9a679b2e2427e7260165e0d1d3772530fc44b0b9f6' }
+    'browser-view-manager.ts': '0e2ff85baf0c10ff31c83e172ef28241a35820fc6dfe667e8b0d6f9be9f11adb' }
   for (const [name, sha] of Object.entries(expected)) assert.equal(digest(await readFile(join(projectionRoot, 'apps/desktop/src/main', name))), sha,
     'The immutable Main Browser leaf matches the independently reviewed Source: ' + name)
   const electronWrapper = require.resolve('electron'), executable = require('electron')

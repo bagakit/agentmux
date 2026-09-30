@@ -6,6 +6,7 @@ import { webContents } from 'electron'
 import type { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { BrowserCdpSession } from '../../../src/main/browser-cdp-session.js'
 import { discoverBrowserFrameDocuments } from '../../../src/main/browser-frame-documents.js'
+import { inspectFeedbackFrame } from './frame-pixels.mjs'
 
 type Context = {
   manager: BrowserViewManager; contents: Electron.WebContents; id: string; operator: { id: string; name: string }
@@ -29,8 +30,9 @@ const settled = (sample: any) => Array.isArray(sample.hud?.pointer?.animations) 
 /** Test-only observation. Original CDP promises/results are returned untouched; no action awaits a reader or frame. */
 export async function runMotionProbe(c: Context): Promise<void> {
   const { contents, manager, receipt } = c
+  const frameBindingOnly = process.env.AGENTMUX_FEEDBACK_FRAME_BINDING_ONLY === '1'
   const previousPngBytes = c.phase === 'second' ? JSON.parse(await readFile(join(c.out, 'first-receipt.json'), 'utf8')).motion.nativePngBytes : 0
-  receipt.motion = { schema: 'agentmux.browser-feedback-motion.v2', scope: 'T-024-private-native-increment',
+  receipt.motion = { schema: 'agentmux.browser-feedback-motion.v2', scope: frameBindingOnly ? 'T-024-private-native-frame-binding-increment' : 'T-024-private-native-increment',
     observationOnlyPolling: true, pollMs: 8, compositorWindowMs: 260, hoverWindowMs: 650, nativeFrames: [], caseIndices: [],
     heldActions: false, actionScriptSleeps: 0, foregroundCalls: [], systemMouseCalls: [], nativePngBytes: 0, previousPngBytes,
     forbiddenCallsBasis: 'Harness Source audit; private WebContents focus is measured below, global OS focus is not certified.',
@@ -101,7 +103,7 @@ export async function runMotionProbe(c: Context): Promise<void> {
     }
     const skipFrame = (at: number, reason: string) => {
       row.frameCapture.skipped++
-      row.skippedFrames.push({ presentationAt: at, reason, sampleKind: latest?.sampleKind ?? null, sampleSequence: latest?.sequence ?? null })
+      row.skippedFrames.push({ captureCallbackAt: at, reason, sampleKind: latest?.sampleKind ?? null, sampleSequence: latest?.sequence ?? null })
     }
     const stopCamera = () => {
       if (subscribed) { contents.endFrameSubscription(); subscribed = false; cameraWindow.stoppedAt = Date.now() }
@@ -130,6 +132,9 @@ export async function runMotionProbe(c: Context): Promise<void> {
           row.observationErrors.push({ at, message: error.message }); skipFrame(at, 'actual-animation-unreadable'); return
         }
         if (typeof selectedFrame === 'string') { skipFrame(at, selectedFrame); return } // Do not encode irrelevant/cached presentations.
+        const size = image.getSize(), bitmap = { ...size, bytes: image.toBitmap(), order: 'bgra' }
+        const pixelEvidence = inspectFeedbackFrame(bitmap, latest)
+        if ('reason' in pixelEvidence) { skipFrame(at, pixelEvidence.reason); return } // A nearby DOM read cannot make a cached blank/running image a completed witness.
         const bytes = image.toPNG()
         if (previousPngBytes + motion.nativePngBytes + bytes.length > 4 * 1024 * 1024) {
           motion.captureBudgetExhausted = true; row.captureBudgetExhausted = { at, nextFrameBytes: bytes.length }
@@ -137,11 +142,11 @@ export async function runMotionProbe(c: Context): Promise<void> {
         }
         selectedFrame.update(); row.frameCapture.saved++
         motion.nativePngBytes += bytes.length
-        const frame = { sequence: frames.length, presentationAt: at, dirtyRect, size: image.getSize(), webContentsId: contents.id,
-          bytes: bytes.length, sha256: hash(bytes), witnessKinds: selectedFrame.kinds, owner: selectedFrame.owner,
+        const frame = { sequence: frames.length, captureCallbackAt: at, compositorPresentationAt: null, dirtyRect, size, webContentsId: contents.id,
+          bytes: bytes.length, sha256: hash(bytes), witnessKinds: selectedFrame.kinds, candidateOwner: selectedFrame.owner, pixelEvidence,
           sampleAtOrBefore: { sampleKind: latest.sampleKind, sampleSequence: latest.sequence, returnedAt: latest.returnedAt, lagMs: at - latest.returnedAt },
           source: 'original-webcontents-beginFrameSubscription-full-compositor-frame',
-          sampleBinding: 'Latest completed readonly geometry; independent PNG must be inspected, not a generated image.' }
+          sampleBinding: 'Candidate readonly observation only; cue/phase compatibility is recomputed from original pixels. Callback time is not a presentation timestamp.' }
         frames.push({ bytes, row: frame })
       })
     }
@@ -321,9 +326,12 @@ export async function runMotionProbe(c: Context): Promise<void> {
     const intermediate = samples.filter((s: any) => distance(s.hud.pointer.rect, from) > 1 && distance(s.hud.pointer.rect, to) > 1)
     assert.ok(intermediate.length >= 2)
     const sampleIds = new Set(intermediate.map((s: any) => s.sequence))
-    const nativeFrames = row.frames.filter((f: any) => sampleIds.has(f.sampleAtOrBefore?.sampleSequence) && f.sampleAtOrBefore.lagMs >= 0 && f.sampleAtOrBefore.lagMs <= 40)
+    const nativeFrames = row.frames.filter((f: any) => sampleIds.has(f.sampleAtOrBefore?.sampleSequence) && f.pixelEvidence?.compatible &&
+      f.pixelEvidence.arrowPixels && f.candidateOwner.token === target.token)
     assert.ok(nativeFrames.length >= 2, 'Real independent compositor frames accompany intermediate geometry')
     assert.ok(new Set(nativeFrames.map((f: any) => f.sha256)).size >= 2, 'Actual intermediate original images change')
+    const painted = nativeFrames.map((f: any) => f.pixelEvidence.arrowPixels.cssBounds)
+    assert.ok(painted.some((p: any) => painted.some((q: any) => distance(p, q) > 1)), 'The original painted arrow moves; changed page pixels alone cannot prove movement')
     row.motionWitnesses ??= []; row.motionWitnesses.push({ targetIndex, target, actualStep: step, from, to,
       intermediateSampleSequences: intermediate.map((s: any) => s.sequence), nativeFrameSequences: nativeFrames.map((f: any) => f.sequence),
       actionFinishedBeforeAnimation: true, operationFinishedBeforeAnimation: samples.some((s: any) => row.actualOperationCompletedAt && row.actualOperationCompletedAt < s.startedAt),
@@ -357,6 +365,7 @@ export async function runMotionProbe(c: Context): Promise<void> {
   } else {
     await available('motion-same-operation', async () => { const row = await observe('motion-same-operation', script(['Continue', 'Page note']));
       assert.equal(row.targets.length, 2); assert.equal(row.targets[0].frameId, row.targets[1].frameId); movement(row, 1); row.passed = true })
+    if (!frameBindingOnly) {
     await available('motion-rapid-retarget', async () => {
       const row = await observe('motion-rapid-retarget', script(['Continue', 'Page note', 'Edge action']))
       assert.equal(row.targets.length, 3)
@@ -437,8 +446,9 @@ export async function runMotionProbe(c: Context): Promise<void> {
       assert.ok(Array.isArray(events) && events.some((event: any) => event.type === 'scroll' && event.at >= step.finishedAt), 'The actual target child reports the queued post-action scroll')
     })
     await c.osWindow('motion-original-background-window')
+    }
   }
-  for (const method of ['js', 'cdp']) await available(`motion-${method}-executor`, async () => {
+  if (!frameBindingOnly) for (const method of ['js', 'cdp']) await available(`motion-${method}-executor`, async () => {
     const code = method === 'js' ? 'return await js("globalThis.performFixtureWork()")' : 'return await cdp("Runtime.evaluate",{expression:"4+4",returnByValue:true})'
     const row = await observe(`motion-${method}-executor`, code, 80)
     const samples = row.topSamples.filter((s: any) => s.hud?.executor)

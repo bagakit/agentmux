@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { app, BrowserWindow, webContents } from 'electron'
+import { app, BrowserWindow, webContents, screen } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
@@ -15,6 +15,7 @@ import { captureBrowserPageSnapshot } from '../../../src/main/browser-page-snaps
 import { discoverBrowserFrameDocuments } from '../../../src/main/browser-frame-documents.js'
 import { parseBrowserSnapshotQuery } from '../../../src/main/browser-snapshot-query.js'
 import { runMotionProbe } from './motion.js'
+import { withFeedbackFramePaint, feedbackPaintPreparation } from './frame-state.mjs'
 
 const probeRoot = process.env.AGENTMUX_FEEDBACK_PROBE_ROOT!, out = process.env.AGENTMUX_FEEDBACK_OUT!
 const phase = process.env.AGENTMUX_FEEDBACK_PHASE!, phaseFile = process.env.AGENTMUX_FEEDBACK_PHASE_FILE!
@@ -32,14 +33,14 @@ const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 const exec = promisify(execFile)
 const receipt: any = { schema: 'agentmux.browser-feedback-private-process.v1', phase, pid: process.pid, versions: process.versions,
-  author: '/root/browser_surfaces', actualExecutor: '/root', passed: false, cases: [], visual: { captureOnly: true, aestheticReview: 'not-performed', nativePages: [], osWindows: [] },
+  author: '/root/browser_surfaces', actualExecutor: process.env.AGENTMUX_FEEDBACK_ACTUAL_EXECUTOR ?? '/root', passed: false, cases: [], visual: { captureOnly: true, aestheticReview: 'not-performed', nativePages: [], osWindows: [] },
   desktopTabRegionFocusRestore: 'not-tested', healthyCoreRunRestore: 'not-tested' }
 let manager: BrowserViewManager | undefined, profiles: BrowserProfileManager | undefined, window: BrowserWindow | undefined
 const id = 'private-original-feedback-page'
 const operator = { id: 'private-native-operator', name: 'Private operator' }
 const actualChildSessions = new Map<string, any>()
 // Read-only serialization of the actual closed shadow in its owning world. No geometry is assigned.
-const stateExpression = `(()=>{const s=globalThis.__agentMuxBrowserOperationFeedback;if(!s)return null;const read=selector=>{const el=s.shadow?.querySelector(selector);if(!el)return null;const c=getComputedStyle(el),r=el.getBoundingClientRect();const animations=el.getAnimations().map(a=>({currentTime:a.currentTime,playState:a.playState,duration:a.effect?.getComputedTiming().duration,keyframes:a.effect?.getKeyframes().map(k=>({offset:k.computedOffset,transform:k.transform}))}));return {text:el.textContent,rect:{x:r.x,y:r.y,width:r.width,height:r.height},pointerEvents:c.pointerEvents,animationName:c.animationName,transitionDuration:c.transitionDuration,opacity:c.opacity,fill:c.fill,animations}};return {revision:s.revision,operationId:s.operationId,navigationId:s.navigationId,token:s.token,phase:s.phase,kind:s.kind,clearReason:s.clearReason,point:s.point,history:s.history,expiresAt:s.expiresAt,hostConnected:!!s.host?.isConnected,hostPointerEvents:s.host?getComputedStyle(s.host).pointerEvents:null,pointer:read('.pointer'),arrow:read('.pointer svg'),executor:read('.executor'),glow:read('.glow'),label:read('.label'),viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},now:Date.now(),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches}})()`
+let stateExpression = `(()=>{const s=globalThis.__agentMuxBrowserOperationFeedback;if(!s)return null;const read=selector=>{const el=s.shadow?.querySelector(selector);if(!el)return null;const c=getComputedStyle(el),r=el.getBoundingClientRect();const animations=el.getAnimations().map(a=>({currentTime:a.currentTime,playState:a.playState,duration:a.effect?.getComputedTiming().duration,keyframes:a.effect?.getKeyframes().map(k=>({offset:k.computedOffset,transform:k.transform}))}));return {text:el.textContent,rect:{x:r.x,y:r.y,width:r.width,height:r.height},pointerEvents:c.pointerEvents,animationName:c.animationName,transitionDuration:c.transitionDuration,opacity:c.opacity,fill:c.fill,animations}};return {revision:s.revision,operationId:s.operationId,navigationId:s.navigationId,token:s.token,phase:s.phase,kind:s.kind,clearReason:s.clearReason,point:s.point,history:s.history,expiresAt:s.expiresAt,hostConnected:!!s.host?.isConnected,hostPointerEvents:s.host?getComputedStyle(s.host).pointerEvents:null,pointer:read('.pointer'),arrow:read('.pointer svg'),executor:read('.executor'),glow:read('.glow'),label:read('.label'),viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},now:Date.now(),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches}})()`
 const pageState = (contents: Electron.WebContents) => contents.executeJavaScriptInIsolatedWorld(1209, [{ code: stateExpression }])
 async function waitFor(label: string, read: () => Promise<any>, budget = 6000) {
   const deadline = Date.now() + budget
@@ -368,6 +369,17 @@ try {
   receipt.original = { browserId: id, profileId: created.profileId, contentsId: contents.id, url: contents.getURL(), processId: contents.getOSProcessId(),
     frameProcesses: contents.mainFrame.framesInSubtree.map(f => ({ processId: f.processId, osProcessId: f.osProcessId, routingId: f.routingId, detached: f.detached })) }
   if (nativeScope === 'motion') {
+    const display = screen.getDisplayMatching(window.getBounds())
+    const outputSpace = display.colorSpace.includes('P3') ? 'display-p3' : /BT709|SRGB/.test(display.colorSpace) ? 'srgb' : null
+    receipt.framePaintObservation = { displayId: display.id, displayColorSpace: display.colorSpace, outputSpace,
+      conversion: 'actual-computed-CSS-through-offscreen-Chromium-Canvas', originalPngColorProfile: 'not-assumed' }
+    const paintSource = await readFile(join(probeRoot, 'projection/apps/desktop/src/main/browser-operation-feedback.ts'))
+    receipt.framePaintObservation.sourceSha256 = digest(paintSource)
+    receipt.framePaintObservation.preparationStartedAt = Date.now()
+    const prepared = await contents.executeJavaScriptInIsolatedWorld(1209, [{ code: feedbackPaintPreparation(paintSource.toString('utf8'), outputSpace) }])
+    receipt.framePaintObservation.preparationFinishedAt = Date.now()
+    receipt.framePaintObservation.prepared = prepared
+    stateExpression = withFeedbackFramePaint(stateExpression, prepared)
     await runMotionProbe({ manager, contents, id, operator, phase, out, url, retainedFile, receipt, created, retained,
       stateExpression, pageState, action, inspectTarget, nativePage, osWindow })
   } else if (phase === 'second') {
