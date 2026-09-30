@@ -32,7 +32,10 @@ const originalTab = createWorkbenchTab('original-tab', { kind: 'agent', phase: '
 const primaryTab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary' }), topicId: PMO_TEAMS_TOPIC_ID }
 const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: 'teams', topicPath: 'teams/topic.md', collaborators: [], soul: { path: 'SOUL.md', content: '# SOUL', version: 'v1' } }
 let root: Root, container: HTMLDivElement, temporaryRoot: string, owner: ReturnType<typeof openDemandStore>
+let releaseHeldReceipt: (() => void) | undefined, tearingDown = false
 beforeEach(async () => {
+  expect(directGoalRequest(), 'the previous finite operation and cleanup completed').toBeNull()
+  releaseHeldReceipt = undefined; tearingDown = false
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-direct-goal-')); owner = openDemandStore({ root: temporaryRoot })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -52,18 +55,29 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
 })
 afterEach(async () => {
-  const retained = directGoalRequest()
-  if (retained) {
-    expect(retained.pending, 'the test settles its finite operation').toBe(false)
-    if (!await owner.get(retained.id)) await owner.create({ id: retained.id, title: 'Cleanup existing caller identity' })
-    vi.mocked(api.demands.list).mockImplementation(() => owner.list())
-    useAppStore.setState({ requestDemandPmoTask: vi.fn().mockResolvedValue('cleanup-tab') })
-    await act(async () => retryDirectGoal())
+  tearingDown = true
+  // Release only this fixture's held real receipt, then await the existing finite flight.
+  // If it never settles, the finite hook deadline fails before resetting its active owners.
+  await act(async () => {
+    releaseHeldReceipt?.()
+    if (directGoalRequest()?.pending) await retryDirectGoal()
+  })
+  try {
+    const retained = directGoalRequest()
+    if (retained) {
+      expect(retained.pending, 'the test settles its finite operation').toBe(false)
+      if (!await owner.get(retained.id)) await owner.create({ id: retained.id, title: 'Cleanup existing caller identity' })
+      vi.mocked(api.demands.list).mockImplementation(() => owner.list())
+      useAppStore.setState({ requestDemandPmoTask: vi.fn().mockResolvedValue('cleanup-tab') })
+      await act(async () => retryDirectGoal())
+    }
+    expect(directGoalRequest()).toBeNull()
+  } finally {
+    try { await act(async () => root.unmount()) }
+    finally { container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); await rm(temporaryRoot, { recursive: true, force: true }) }
   }
-  await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); await rm(temporaryRoot, { recursive: true, force: true })
-  expect(directGoalRequest()).toBeNull()
-})
-async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
+}, 5_000)
+async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }, { timeout: 3_000 }) }
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 function button(text: string) { const result = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent?.trim() === text || node.getAttribute('aria-label') === text); expect(result, text).toBeDefined(); return result! }
 async function click(text: string) { await act(async () => button(text).click()) }
@@ -98,7 +112,7 @@ describe('Goals direct PMO creation and reading surface', () => {
   it('owns one click across duplicate activation and a mounted board unload/return before the save receipt', async () => {
     let finish!: (receipt: Awaited<ReturnType<typeof owner.create>>) => void
     let saved!: Awaited<ReturnType<typeof owner.create>>
-    vi.mocked(api.demands.create).mockImplementationOnce(async input => { saved = await owner.create(input); return await new Promise(resolve => { finish = resolve }) })
+    vi.mocked(api.demands.create).mockImplementationOnce(async input => { saved = await owner.create(input); return await new Promise(resolve => { finish = resolve; releaseHeldReceipt = () => resolve(saved); if (tearingDown) releaseHeldReceipt() }) })
     await mount(); const newGoal = button('New Goal')
     await act(async () => { newGoal.click(); newGoal.click() })
     await eventually(() => expect(finish).toBeTypeOf('function'))
@@ -206,7 +220,7 @@ describe('Goals direct PMO creation and reading surface', () => {
   it('attaches the created PMO without stealing a newer Goal selection, PMO focus or floating target', async () => {
     let finish!: () => void
     const launch = vi.mocked(api.sessions.launchAgent).getMockImplementation()!
-    vi.mocked(api.sessions.launchAgent).mockImplementationOnce(async input => { await new Promise<void>(resolve => { finish = resolve }); return launch(input) })
+    vi.mocked(api.sessions.launchAgent).mockImplementationOnce(async input => { await new Promise<void>(resolve => { finish = resolve; releaseHeldReceipt = () => resolve(); if (tearingDown) releaseHeldReceipt() }); return launch(input) })
     await mount(); await click('New Goal'); await eventually(() => expect(finish).toBeTypeOf('function'))
     const saved = (await owner.list())[0]!, mapped = useAppStore.getState().demandPmoTabIds[saved.id]!
     await act(async () => { useAppStore.setState(state => ({ selectedDemandId: 'later-goal', agentFocus: { ...state.agentFocus, pmo: { ...state.agentFocus.pmo, sessionId: 'later-pmo' } } })); requestPmoTeamsTopicFloatingOpen({ targetTabId: originalTab.id }) })
@@ -221,7 +235,7 @@ describe('Goals direct PMO creation and reading surface', () => {
   it('publishes the real saved Goal without stealing a later selection or navigation', async () => {
     let finish!: (receipt: Awaited<ReturnType<typeof owner.create>>) => void
     let saved!: Awaited<ReturnType<typeof owner.create>>
-    vi.mocked(api.demands.create).mockImplementationOnce(async input => { saved = await owner.create(input); return await new Promise(resolve => { finish = resolve }) })
+    vi.mocked(api.demands.create).mockImplementationOnce(async input => { saved = await owner.create(input); return await new Promise(resolve => { finish = resolve; releaseHeldReceipt = () => resolve(saved); if (tearingDown) releaseHeldReceipt() }) })
     await mount(); await click('New Goal'); await eventually(() => expect(finish).toBeTypeOf('function'))
     await act(async () => useAppStore.setState({ selectedDemandId: 'later-goal', mainSurface: 'workbench', activeWorkspaceId: 'repo' }))
     await act(async () => finish(saved)); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
@@ -273,7 +287,7 @@ describe('Goals direct PMO creation and reading surface', () => {
 
   it('keeps a newer title draft while the earlier save is in flight', async () => {
     const original = goal(); let resolve!: () => void
-    const update = vi.fn(() => new Promise<void>((r) => { resolve = r }))
+    const update = vi.fn(() => new Promise<void>((r) => { resolve = r; releaseHeldReceipt = () => r(); if (tearingDown) releaseHeldReceipt() }))
     useAppStore.setState({ demands: { [original.id]: original }, selectedDemandId: original.id, updateDemand: update })
     await mount(); const title = await edit('Goal title', 'First revision')
     await act(async () => title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
