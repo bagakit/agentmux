@@ -8,7 +8,7 @@ import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } fro
 import { ConversationInputDetails } from './ConversationInputDetails'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
-import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { ConversationToolTrace } from './ConversationToolTrace'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace'
 import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
@@ -108,9 +108,11 @@ export function ConversationMessage({
   const isDeclaredSender = prefix !== null && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
+  const described = speaker?.role === 'agent' ? describeSpeaker?.(speaker) : undefined
+  const displayProvider = described?.providerId ?? providerId
   const displayName = recordedSpeaker?.role === 'unknown'
     ? 'You'
-    : name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
+    : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -190,17 +192,19 @@ export function ConversationMessage({
       data-declared-source={prefix?.sourceLabel}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
+      data-message-bubble={!isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
-        {speaker ? <ConversationSpeakerAvatar
+        {speaker ? <ConversationMessageAvatar
           speaker={speaker}
           name={displayName}
-          size={20}
-          {...(providerId === undefined ? {} : { providerId })}
+          project={described?.project}
+          providerId={displayProvider}
         /> : <SemanticIcon name="neutral" size={12} />}
       </span>
       <div className="log-turn__head">
         <span className="log-turn__who">{isDeclaredSender ? <><span className="log-turn__source-caption">Message from </span>{prefix.sourceLabel}</> : displayName}</span>
+        {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {isPeerAgent || isSystemContext ? <span className="log-turn__sender-kind">{isSystemContext ? 'System' : 'Agent'}</span> : null}
         {status === 'streaming' ? (
@@ -224,6 +228,8 @@ export function ConversationMessage({
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button>
         </span> : null}
+        {isIncoming || speaker?.role === 'agent' ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
+          declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} /> : null}
         {prefix && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div>
@@ -236,11 +242,11 @@ export function ConversationMessage({
           {parts.map((part, index) => {
             const key = partKey(part)
             return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>{index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
-              ? <MemoizedAgentMarkdown key={packetIndex} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+              ? <MemoizedAgentMarkdown key={packetIndex} className="log-turn__packet-text" content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
               : <blockquote key={packetIndex} className="log-turn__citation"><span className="log-turn__citation-from">{packetPart.from}</span>
                 {packetPart.reference ? <code className="log-turn__citation-ref">{packetPart.reference}</code> : null}
-                <MemoizedAgentMarkdown content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+                <MemoizedAgentMarkdown className="log-turn__packet-text" content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown
               content={index === 0 && prefix ? prefix.body : part.text}
               workspaceRoot={workspaceRoot}
@@ -274,8 +280,6 @@ export function ConversationMessage({
           })}
         </div>
       ) : null}
-      {isIncoming ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
-        declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} /> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
     </div>
   )

@@ -1,6 +1,7 @@
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -16,7 +17,7 @@ import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
 import { createSpeakerResolver } from '../lib/conversation-speaker'
-import { currentConversationSenderDetails } from '../lib/conversation-sender-details'
+import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -201,28 +202,45 @@ export function SessionPane({
   const agentInputExecutor = session?.kind === 'agent'
     ? (connectingExecutor?.label ?? session.executorId)
     : undefined
-  // Resolve actual sender identities without subscribing this pane to unrelated Session output.
+  // Observe only identity facts for the Agents actually represented in this reading surface.
+  // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
+  const speakerIds = useMemo(() => [...new Set([sessionId, ...userMessages.flatMap(message =>
+    message.author.kind === 'agent' ? [message.author.agentSessionId] : [])])], [sessionId, userMessages])
+  const speakerFacts = useAppStore(useShallow(state => visible ? speakerIds.flatMap(id => {
+    const sender = sessionPresentationById(state.sessions).get(id)
+    if (!sender || sender.kind !== 'agent') return [id]
+    const workspaces = state.config?.workspaces ?? []
+    const workspace = workspaces.find(item => item.hostId === sender.hostId && item.path === sender.workspacePath)
+    const projectRoot = workspace ? workspaces.find(item => item.hostId === workspace.hostId &&
+      item.path === (workspace.repoPath ?? workspace.path) && item.kind === 'folder') : undefined
+    return [id, state.agentNames[id], sender.label, sender.providerId, sender.hostId, sender.workspacePath,
+      firstPromptFromTimeline(state.timelines[id]), workspace?.id, workspace?.repoPath, workspace?.branch,
+      workspace?.name, projectRoot?.id, projectRoot?.name]
+  }) : []))
   const describeSpeaker = useMemo(
     () => createSpeakerResolver({
       lookupAgent: (id) => {
-        const sender = useAppStore.getState().sessions.find((agent) => agent.id === id)
-        return sender?.kind === 'agent' ? {
+        const state = useAppStore.getState()
+        const sender = currentConversationSpeakerMetadata(id, {
+          sessions: state.sessions, workspaces: state.config?.workspaces ?? [],
+          agentNames: state.agentNames, timelines: state.timelines
+        })
+        return sender ? {
           label: sender.label,
           providerId: sender.providerId,
+          ...(sender.project ? { project: sender.project } : {}),
           readDetails: () => {
-            const state = useAppStore.getState()
+            const current = useAppStore.getState()
             return currentConversationSenderDetails(id, {
-              sessions: state.sessions,
-              workspaces: state.config?.workspaces ?? [],
-              agentNames: state.agentNames,
-              demands: state.demands
+              sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
+              agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
             })
           }
         } : undefined
       },
       ...(session?.kind === 'agent' ? { currentSession: session } : {})
     }),
-    [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined]
+    [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts]
   )
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
