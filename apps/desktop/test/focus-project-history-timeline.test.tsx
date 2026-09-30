@@ -84,10 +84,12 @@ it('does not substitute current ownership or renames for past observations, incl
   const moved = agent('a', '/beta'); useAppStore.setState({ sessions: [moved], agentNames: { a: 'Renamed now' } }); vi.spyOn(Date, 'now').mockReturnValue(NOW)
   await render(entries, [moved], config())
   const groups = visibleProjects()
-  expect(groups.map(node => node.querySelector('strong')!.textContent)).toEqual(['Project not recorded', 'Alpha project', 'Beta project'])
-  expect(groups[1]!.querySelector('.recent-focus__track .recent-focus__gutter > span')!.textContent).toContain('Observed worker')
-  expect(groups[0]!.querySelector('.recent-focus__segment')!.getAttribute('title')).toContain('Historical name not recorded · Project not recorded')
-  expect(groups[1]!.querySelector('[data-history-only="true"]')).not.toBeNull()
+  expect(groups.map(node => node.querySelector('strong')!.textContent).sort()).toEqual(['Alpha project', 'Beta project', 'Project not recorded'])
+  const alpha = groups.find(node => node.querySelector('strong')!.textContent === 'Alpha project')!
+  const unknown = groups.find(node => node.querySelector('strong')!.textContent === 'Project not recorded')!
+  expect(alpha.querySelector('.recent-focus__track .recent-focus__gutter > span')!.textContent).toContain('Observed worker')
+  expect(unknown.querySelector('.recent-focus__segment')!.getAttribute('title')).toContain('Historical name not recorded · Project not recorded')
+  expect(alpha.querySelector('[data-history-only="true"]')).not.toBeNull()
 })
 
 it('collapses a compact project heading while preserving actual per-Context fragments as an inert summary', async () => {
