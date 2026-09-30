@@ -134,6 +134,9 @@ import type {
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
   AgentSessionHistoryDescriptor,
+  AgentSessionHistoryObservation,
+  AgentSessionHistoryObservationOptions,
+  AgentSessionHistoryObservationHandle,
   AgentTerminalCapabilityState,
   AgentTerminalOutputChannelState,
   AgentTimelineItem,
@@ -563,6 +566,8 @@ export class AgentMuxClient {
   }>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
   private readonly providerReads = new Set<AbortController>()
+  /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
+  private readonly historyObservationControllers = new Set<AbortController>()
   private providerReadsDisposed = false
   // 「用户为这个 runId 发起过停止」这条**意图**事实的台账。与内核报的退出**结果**分居两处：控制面在
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
@@ -1235,6 +1240,9 @@ export class AgentMuxClient {
   async dispose(): Promise<void> {
     this.providerReadsDisposed = true
     this.cancelProviderReads()
+    for (const controller of this.historyObservationControllers) {
+      controller.abort(new AgentMuxError('History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
+    }
     await this.hookServer.stop()
     this.disconnect()
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
@@ -1397,6 +1405,117 @@ export class AgentMuxClient {
       return { agentSessionId, ...normalizeSessionHistoryPage(source, page, limit) }
     } finally {
       lifetime.close()
+    }
+  }
+
+  /** Observe an exact durable native source only while a Consumer needs it. No Runtime connection. */
+  async observeSessionHistory(
+    agentSessionId: string,
+    listener: (observation: AgentSessionHistoryObservation) => void,
+    options: AgentSessionHistoryObservationOptions = {}
+  ): Promise<AgentSessionHistoryObservationHandle> {
+    if (this.providerReadsDisposed) throw new AgentMuxError('History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
+    options.signal?.throwIfAborted()
+    const controller = new AbortController()
+    this.historyObservationControllers.add(controller)
+    let observer: AgentSessionHistoryObservationHandle | undefined
+    let unsubscribe = (): void => {}
+    const cancel = (): void => controller.abort(options.signal?.reason ??
+      new AgentMuxError('History observation was cancelled.', 'AGENT_SESSION_HISTORY_CANCELLED'))
+    options.signal?.addEventListener('abort', cancel, { once: true })
+    let rejectCancelled!: (reason: unknown) => void
+    const cancelled = new Promise<never>((_resolve, reject) => { rejectCancelled = reject })
+    const timer = setTimeout(() => controller.abort(new AgentMuxError(
+      'Native source observation could not be established. Refresh remains available.',
+      'AGENT_SESSION_HISTORY_OBSERVATION_TIMEOUT'
+    )), SESSION_HISTORY_TIMEOUT_MS)
+    let released = false
+    const release = (): void => {
+      if (released) return
+      released = true
+      clearTimeout(timer)
+      observer?.dispose()
+      unsubscribe()
+      options.signal?.removeEventListener('abort', cancel)
+      this.historyObservationControllers.delete(controller)
+    }
+    controller.signal.addEventListener('abort', () => {
+      release()
+      rejectCancelled(controller.signal.reason)
+    }, { once: true })
+    const notify = (observation: AgentSessionHistoryObservation): void => {
+      if (controller.signal.aborted) return
+      try { listener(observation) } catch {
+        // As for onEvent, Consumer callbacks cannot become part of healthy
+        // Run transport or lifecycle control. Their reporting belongs to them.
+      }
+    }
+    try {
+      const descriptor = await Promise.race([this.historyDescriptor(agentSessionId), cancelled])
+      controller.signal.throwIfAborted()
+      const session = descriptor.history
+      const handle = session?.nativeHandle
+      if (!session || handle?.kind !== 'provider' || handle.providerId !== session.providerId) {
+        throw new AgentMuxError('The exact native history locator has not been established.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+      }
+      const provider = this.providers.get(session.providerId)
+      if (!provider.observeSessionHistory) {
+        throw new AgentMuxError('This Provider does not support automatic native history observation. Explicit Refresh remains available.', 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED')
+      }
+      const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
+      const matches = (current: NonNullable<AgentSessionHistoryDescriptor['history']>, hostId: string): boolean =>
+        hostId === descriptor.hostId && current.workspacePath === session.workspacePath &&
+        current.providerId === source.providerId && current.nativeHandle?.kind === 'provider' &&
+        current.nativeHandle.providerId === source.providerId && current.nativeHandle.sessionId === source.nativeSessionId &&
+        current.nativeHandle.transcriptPath === handle.transcriptPath
+      unsubscribe = this.onEvent((event) => {
+        // Only a true locator binding change can invalidate this watch. Ordinary
+        // updatedAt/status/PTY events must never cause a rebind or a page read.
+        if (event.type !== 'agent-session' || event.session.agentSessionId !== agentSessionId ||
+          matches(event.session, event.session.hostId)) return
+        notify({ kind: 'unavailable', agentSessionId, source, code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED',
+          message: 'The native history binding changed. The previous window is retained; explicitly refresh its source.' })
+        controller.abort(new AgentMuxError('Native history binding changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'))
+      })
+      const acquiring = provider.observeSessionHistory({
+        source, signal: controller.signal,
+        command: resolveAgentExecutable(options.commandOverride, provider.executable),
+        args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
+        ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
+        onChange: (observation) => {
+          if (observation.source && (observation.source.providerId !== source.providerId ||
+            observation.source.nativeSessionId !== source.nativeSessionId)) {
+            notify({ kind: 'unavailable', agentSessionId, source, code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED',
+              message: 'Provider observed a different native history source. The existing window is retained.' })
+            controller.abort(new AgentMuxError('Provider observed another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'))
+            return
+          }
+          notify({ ...observation, agentSessionId })
+          if (observation.kind === 'unavailable') controller.abort(new AgentMuxError(observation.message, observation.code))
+        }
+      }).then((handle) => {
+        observer = handle
+        if (controller.signal.aborted) handle.dispose()
+        return handle
+      })
+      const acquired = await Promise.race([acquiring, cancelled])
+      controller.signal.throwIfAborted()
+      if (acquired.source.providerId !== source.providerId || acquired.source.nativeSessionId !== source.nativeSessionId) {
+        throw new AgentMuxError('Provider observed a different native history source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
+      const current = await Promise.race([this.historyDescriptor(agentSessionId), cancelled])
+      controller.signal.throwIfAborted()
+      if (!current.history || !matches(current.history, current.hostId)) {
+        throw new AgentMuxError('Native history binding changed while acquiring its observer.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
+      clearTimeout(timer)
+      return { source, dispose: () => controller.abort(new AgentMuxError(
+        'The history observation Consumer released its handle.', 'AGENT_SESSION_HISTORY_CANCELLED'
+      )) }
+    } catch (error) {
+      if (!controller.signal.aborted) controller.abort(error)
+      release()
+      throw error
     }
   }
 
