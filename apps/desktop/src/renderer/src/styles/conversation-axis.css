@@ -39,6 +39,11 @@
   gap: var(--sp-1);
 }
 
+/* In this vertical stack, use the ruler's declared height instead of a zero flex basis. */
+.activity-ruler__stack > .activity-ruler__track {
+  flex: none;
+}
+
 /* One axis. `position: relative` is the coordinate space every mark's `left: N%` resolves against —
    and because this element is a block inside the shared stack, that space is byte-identical to the
    ruler track's below it.
