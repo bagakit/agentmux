@@ -54,6 +54,9 @@ import type {
   AppConfig,
   BrowserAnnotationMarker,
   BrowserBounds,
+  BrowserPresentationGeometry,
+  BrowserPresentationOccurrence,
+  BrowserPresentationCaptureAck,
   BrowserPng,
   BrowserProfileDeleteApproval,
   BrowserViewport,
@@ -1089,6 +1092,35 @@ export async function registerIpc(args: {
   ) => {
     requireTrustedSender('browser:setAnnotationMarkers', event)
     await browsers.setAnnotationMarkers(id, navigationId, markers)
+  })
+  handleWithEvent('browser:registerPresentation', (event, input: {
+    browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry
+  }) => {
+    requireTrustedSender('browser:registerPresentation', event)
+    return browsers.registerPresentation(event.sender, event.senderFrame, input)
+  })
+  handleWithEvent('browser:updatePresentation', (event, leaseId: string, geometry: BrowserPresentationGeometry) => {
+    requireTrustedSender('browser:updatePresentation', event)
+    browsers.updatePresentation(event.sender, event.senderFrame, leaseId, geometry)
+    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+  })
+  handleWithEvent('browser:removePresentation', (event, leaseId: string) => {
+    requireTrustedSender('browser:removePresentation', event)
+    browsers.removePresentation(event.sender, event.senderFrame, leaseId)
+    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+  })
+  handleWithEvent('browser:armPresentationCapture', (event, leaseId: string) => {
+    requireTrustedSender('browser:armPresentationCapture', event)
+    return browsers.armPresentationCapture(event.sender, event.senderFrame, leaseId)
+  })
+  handleWithEvent('browser:ackPresentationCapture', (event, captureId: string, ack: BrowserPresentationCaptureAck) => {
+    requireTrustedSender('browser:ackPresentationCapture', event)
+    return browsers.ackPresentationCapture(event.sender, event.senderFrame, captureId, ack)
+  })
+  handleWithEvent('browser:activatePresentation', (event, leaseId: string) => {
+    requireTrustedSender('browser:activatePresentation', event)
+    browsers.activatePresentation(event.sender, event.senderFrame, leaseId)
+    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
   })
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => {
     browsers.setBounds(id, bounds)

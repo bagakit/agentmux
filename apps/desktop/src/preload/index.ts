@@ -9,6 +9,7 @@ import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, Age
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   BROWSER_EVENT_CHANNEL,
+  BROWSER_PRESENTATION_EVENT_CHANNEL,
   CONFIG_CHANGED_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
@@ -26,6 +27,10 @@ import type {
   AgentSessionControl,
   AppConfig,
   BrowserBounds,
+  BrowserPresentationGeometry,
+  BrowserPresentationOccurrence,
+  BrowserPresentationCaptureAck,
+  BrowserPresentationEvent,
   BrowserEvent,
   BrowserOperator,
   BrowserOperation,
@@ -382,6 +387,20 @@ const api: AgentMuxPreloadApi = {
     setAnnotationMarkers: (id, navigationId, markers) =>
       ipcRenderer.invoke('browser:setAnnotationMarkers', id, navigationId, markers),
     setBounds: (id: string, bounds: BrowserBounds | null) => ipcRenderer.invoke('browser:setBounds', id, bounds),
+    registerPresentation: (input: { browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry }) =>
+      ipcRenderer.invoke('browser:registerPresentation', input),
+    updatePresentation: (leaseId: string, geometry: BrowserPresentationGeometry) =>
+      ipcRenderer.invoke('browser:updatePresentation', leaseId, geometry),
+    removePresentation: (leaseId: string) => ipcRenderer.invoke('browser:removePresentation', leaseId),
+    armPresentationCapture: (leaseId: string) => ipcRenderer.invoke('browser:armPresentationCapture', leaseId),
+    ackPresentationCapture: (captureId: string, ack: BrowserPresentationCaptureAck) =>
+      ipcRenderer.invoke('browser:ackPresentationCapture', captureId, ack),
+    activatePresentation: (leaseId: string) => ipcRenderer.invoke('browser:activatePresentation', leaseId),
+    onPresentationEvent(listener: (event: BrowserPresentationEvent) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserPresentationEvent): void => listener(value)
+      ipcRenderer.on(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
+      return () => ipcRenderer.off(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
+    },
     release: (id: string) => ipcRenderer.invoke('browser:release', id),
     restore: (id: string, input: { workspaceId: string | null; profileId: string; viewport: BrowserViewport }) =>
       ipcRenderer.invoke('browser:restore', id, input),
