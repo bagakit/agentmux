@@ -8,6 +8,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome.js'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface.js'
 import { WindowUtilityBar } from '../src/renderer/src/components/WindowUtilityBar.js'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 describe('PMO / Space / Focus / Goals / Survey navigation', () => {
@@ -29,24 +30,25 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     localStorage.removeItem('agentmux.leader-topic-floating.v1')
   })
 
-  it('renders the confirmed order with Settings after Search and names with one selected surface', async () => {
+  it('renders the work-surface order with one selected surface and no right utility in the left group', async () => {
     useAppStore.setState({ mainSurface: 'survey' })
-    await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
+    await act(async () => root.render(createElement(SurfaceSwitch)))
     const buttons = [...container.querySelectorAll('button')]
-    expect(buttons).toHaveLength(6)
-    expect(buttons[0]?.getAttribute('aria-label')).toContain('Mote')
-    expect(buttons.slice(1).map((button) => button.getAttribute('aria-label'))).toEqual([
+    expect(buttons).toHaveLength(4)
+    const mote = document.querySelector('button[aria-controls="pmo-teams-topic-floating-panel"]')
+    expect(mote).not.toBeNull(); expect(mote!.getAttribute('aria-label')).toContain('Mote')
+    expect(container.contains(mote)).toBe(false)
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Space: show terminal and file workbench',
       expect.stringMatching(/^Focus: show execution contexts\. \d+ working, \d+ requests, \d+ failed$/),
       'Goals: show goals and progress',
-      'Survey: browse and manage pages',
-      'Settings'
+      'Survey: browse and manage pages'
     ])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
-    expect(buttons[4]?.classList.contains('selected')).toBe(true)
-    expect(buttons[4]?.getAttribute('aria-current')).toBe('page')
+    expect(buttons[3]?.classList.contains('selected')).toBe(true)
+    expect(buttons[3]?.getAttribute('aria-current')).toBe('page')
     expect(container.querySelector('.surface-navigation')).toBeTruthy()
-    expect(container.querySelectorAll('.surface-navigation__slot')).toHaveLength(6)
+    expect(container.querySelectorAll('.surface-navigation__slot')).toHaveLength(4)
     // Tooltips render on hover/focus only, not up-front for all slots — peer chose to lazy-render
     // the tooltip pane (one at a time, positioned to the hovered button) rather than mount 5 hidden
     // ones. `aria-label` on each button carries the accessible name already; the tooltip is a
@@ -58,7 +60,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
 
   it('switches each product entry to its existing main surface', async () => {
     useAppStore.setState({ mainSurface: 'survey', sessions: [] })
-    await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
+    await act(async () => root.render(createElement(SurfaceSwitch)))
     const entries = [
       ['Space:', 'workbench'],
       ['Focus:', 'agents'],
@@ -77,11 +79,11 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
   it('keeps PMO outside the four-surface group and preserves execution focus while opening and closing it', async () => {
     useAppStore.setState({ mainSurface: 'board' })
     const focus = useAppStore.getState().agentFocus
-    await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
-    const group = container.querySelector('[role="group"][aria-label="Work surfaces and settings"]')
+    await act(async () => root.render(createElement(SurfaceSwitch)))
+    const group = container.querySelector('[role="group"][aria-label="Work surfaces"]')
     expect(group).toBeTruthy()
-    expect(group!.querySelectorAll('button')).toHaveLength(5)
-    const pmo = container.querySelector('button[aria-controls="pmo-teams-topic-floating-panel"]') as HTMLButtonElement
+    expect(group!.querySelectorAll('button')).toHaveLength(4)
+    const pmo = document.querySelector('button[aria-controls="pmo-teams-topic-floating-panel"]') as HTMLButtonElement
     expect(pmo).toBeTruthy()
     expect(group!.contains(pmo)).toBe(false)
     expect(container.querySelector('nav')!.contains(pmo)).toBe(false)
@@ -94,24 +96,28 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
     }
   })
 
-  it('opens Settings after Search without changing the selected surface or execution focus', async () => {
-    const openSettings = vi.fn()
+  it('opens Settings from the right utilities without changing the selected surface or execution focus', async () => {
+    const openSettings = vi.fn(), closeSettings = vi.fn()
     useAppStore.setState({ mainSurface: 'board' })
     const focus = useAppStore.getState().agentFocus
-    await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: openSettings })))
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>('nav button')]
-    expect(buttons).toHaveLength(5)
-    const settings = buttons[4]!
-    expect(buttons[3]!.getAttribute('aria-label')).toBe('Survey: browse and manage pages')
-    expect(settings.getAttribute('aria-label')).toBe('Settings')
+    const utility = (settingsOpen: boolean) => createElement(SettingsNavigation.Provider, { value: { open: openSettings } },
+      createElement(WindowUtilityBar, { settingsOpen, onCloseSettings: closeSettings }))
+    await act(async () => root.render(utility(false)))
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('button')]
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Keyboard shortcuts', 'Settings'])
+    const settings = buttons[1]!
+    expect(settings.getAttribute('aria-expanded')).toBe('false')
     expect(settings.hasAttribute('aria-current')).toBe(false)
-    expect(settings.classList.contains('selected')).toBe(false)
     await act(async () => settings.click())
     expect(openSettings).toHaveBeenCalledExactlyOnceWith('overview')
+    await act(async () => buttons[0]!.click())
+    expect(openSettings).toHaveBeenLastCalledWith('keyboard-shortcuts')
+    await act(async () => root.render(utility(true)))
+    expect(settings.getAttribute('aria-expanded')).toBe('true')
+    await act(async () => settings.click())
+    expect(closeSettings).toHaveBeenCalledOnce()
     expect(useAppStore.getState().mainSurface).toBe('board')
     expect(useAppStore.getState().agentFocus).toEqual(focus)
-    await act(async () => root.render(createElement(WindowUtilityBar)))
-    expect([...container.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Keyboard shortcuts'])
   })
 
   it('clamps the rendered tooltip at both window edges', async () => {
@@ -121,7 +127,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
       return { left: anchorLeft, top: 760, width: this.classList.contains('surface-navigation__tooltip') ? 180 : 36 } as DOMRect
     })
     try {
-      await act(async () => root.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
+      await act(async () => root.render(createElement(SurfaceSwitch)))
       const launcher = container.querySelector('button[aria-label^="Survey"]')!
       for (const [left, expected] of [[4, '8px'], [280, '112px']] as const) {
         anchorLeft = left

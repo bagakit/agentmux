@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
+import { PanelLeft, PanelsTopLeft, RadioTower } from 'lucide-react'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
-import type { SettingsPageId } from './SettingsPanel'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
@@ -122,9 +121,7 @@ export function TopBreadcrumb() {
   )
 }
 
-export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSettings }: {
-  onOpenSettings: (section: SettingsPageId) => void
-  settingsOpen?: boolean
+export function SurfaceSwitch({ onCloseSettings }: {
   onCloseSettings?: () => void
 }) {
   const mainSurface = useAppStore((state) => state.mainSurface)
@@ -210,19 +207,8 @@ export function SurfaceSwitch({ onOpenSettings, settingsOpen = false, onCloseSet
     <>
       {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'launcher').map(renderPlugin)}
       <nav className="surface-navigation" aria-label="Primary surfaces">
-        <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces and settings">
+        <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface').map(renderPlugin)}
-          <button
-            type="button"
-            className="surface-navigation__slot surface-navigation__settings"
-            aria-label="Settings"
-            title="Settings"
-            aria-expanded={settingsOpen}
-            data-settings-section="overview"
-            onClick={() => settingsOpen ? onCloseSettings?.() : onOpenSettings('overview')}
-          >
-            <Settings2 size={14} aria-hidden="true" />
-          </button>
         </div>
       </nav>
       {activePlugin && tooltip ? (

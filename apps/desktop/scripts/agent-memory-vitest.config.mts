@@ -8,10 +8,8 @@ export default mergeConfig(base, defineConfig({
   test: {
     include: [
       'apps/desktop/test/process-resource-sampler.test.ts',
-      'apps/desktop/test/resource-usage-panel.test.ts',
       'apps/desktop/test/resource-usage-observability.test.tsx',
-      'apps/desktop/test/resource-usage-ipc-lifecycle.test.ts',
-      'apps/desktop/test/resource-usage-collapsed.test.tsx',
+      'apps/desktop/test/performance-panel-interaction.test.tsx',
       'apps/desktop/test/runtime-resource-observation.test.ts',
       'apps/desktop/test/resource-usage-style.test.ts'
     ],

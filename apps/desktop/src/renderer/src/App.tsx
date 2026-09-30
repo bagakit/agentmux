@@ -12,7 +12,7 @@ import {
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
-import { ResourceUsagePanel } from './components/ResourceUsagePanel'
+import { PerformancePanel } from './components/performance/PerformancePanel'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -500,11 +500,10 @@ function DesktopApp() {
         />
       ) : null}
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch onOpenSettings={openSettings} settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
-          <ResourceUsagePanel />
           <GlobalSystemNotices nativeOverlayWarning={nativeOverlayWarning} />
-          <WindowUtilityBar />
+          <WindowUtilityBar settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} toolkit={<PerformancePanel />} />
         </div>
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest'
  *
  * 这条派生的返回值会被 CSS `text-overflow: ellipsis` 再截一刀，而 CSS 的省略号永远吃**尾巴**——
  * 也就是路径里唯一有识别力的那一头（文件名）。所以「传不传根」不是排版偏好：不传，这行字在窄面板上
- * 就只剩一串各行雷同的前缀。三个消费面各自落在带 ellipsis 的选择器里：
- * `.resource-usage__activity`、`.project-activity-menu__reason`、
+ * 就只剩一串各行雷同的前缀。两个消费面各自落在带 ellipsis 的选择器里：
+ * `.project-activity-menu__reason`、
  * `.project-activity-group__identity small`。
  *
  * **为什么不只扫 `sessionRecentActivity(` 本身。** 第一版就是那么写的，然后没抓到它唯一该抓的东西：
@@ -24,8 +24,7 @@ import { describe, expect, it } from 'vitest'
 describe('通往 sessionRecentActivity 的每条路都带上仓根', () => {
   const SOURCES = [
     new URL('../src/renderer/src/components/ProjectActivity.tsx', import.meta.url),
-    new URL('../src/renderer/src/lib/project-activity-row.ts', import.meta.url),
-    new URL('../src/renderer/src/lib/resource-usage-panel.ts', import.meta.url)
+    new URL('../src/renderer/src/lib/project-activity-row.ts', import.meta.url)
   ]
 
   /** 一次调用的实参文本——从 `<name>(` 起按括号配平读到闭括号。 */
@@ -78,9 +77,9 @@ describe('通往 sessionRecentActivity 的每条路都带上仓根', () => {
       .map((match) => match[1]!)
       .filter((name) => name !== 'sessionRecentActivity')
 
-  it('自检 1：扫描面找得到那三个直接调用点——否则下面的断言会恒真', () => {
+  it('自检 1：扫描面找得到那两个直接调用点——否则下面的断言会恒真', () => {
     const found = SOURCES.flatMap((path) => callArguments(readFileSync(path, 'utf8'), 'sessionRecentActivity'))
-    expect(found.length, `只找到 ${found.length} 个直接调用点，扫描面可能已经失效`).toBe(3)
+    expect(found.length, `只找到 ${found.length} 个直接调用点，扫描面可能已经失效`).toBe(2)
   })
 
   it('自检 2：转发包装这一层真的被识别出来了——它是第一版漏掉的那一层', () => {
