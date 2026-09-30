@@ -48,7 +48,7 @@ try{
   if(density&&!process.argv.includes('--density-before-only')){const bytes=await readFile(densityBaseline),baseline=JSON.parse(bytes);result.densityBaseline={path:densityBaseline,sha256:hash(bytes),sourceCommit:baseline.sourceCommit,sourceBefore:baseline.sourceBefore};assert.ok(Object.keys(baseline.sourceBefore).length>0,'Measured prior layout has nonempty Source identity')}
   const outDir=join(privateRoot,'renderer')
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,minify:false,sourcemap:true,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
-  if(mainMote||direct) { await cp(outDir, join(evidence, 'compiled'), {recursive:true}); result.compiledDirectory=join(evidence,'compiled') }
+  if(mainMote||direct||densityList) { await cp(outDir, join(evidence, 'compiled'), {recursive:true}); result.compiledDirectory=join(evidence,'compiled') }
   const compiled={};for(const entry of await readdir(outDir,{recursive:true,withFileTypes:true})){if(entry.isFile()){const p=join(entry.parentPath,entry.name);compiled[p.slice(outDir.length+1)]=hash(await readFile(p))}}
   assert.ok(Object.keys(compiled).length>0);await writeFile(join(evidence,'compiled.json'),JSON.stringify(compiled,null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const log=[]
