@@ -1,7 +1,7 @@
 import '../monaco'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import { AlertTriangle, Code, Eye, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
@@ -140,9 +140,20 @@ export function EditorPane({
   const monacoTheme = useMonacoTheme()
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
+  // Models are disposable projections of the Store's one TextDoc. A File-only URI would share
+  // a model across Regions, so unmounting one preview would dispose the other editor's model.
+  const modelPath = `agentmux-file:///${encodeURIComponent(surface.regionId)}/${encodeURIComponent(key)}`
+  const editorViewState = useRef<{ modelPath: string; state: ReturnType<MonacoStandaloneEditor['saveViewState']> } | null>(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
 
+  useLayoutEffect(() => () => {
+    const editor = editorRef.current
+    if (!editor?.getModel()) return
+    // Capture before @monaco-editor/react's passive unmount disposes the model. Only this
+    // mounted File/Region keeps its view state; the library's global path cache is unnecessary.
+    editorViewState.current = { modelPath, state: editor.saveViewState() }
+  }, [modelPath, previewing, regionMode, released, Boolean(document)])
 
 
   // A file Region restored from persistence arrives with no document behind it: the surface is only
@@ -428,12 +439,17 @@ export function EditorPane({
           <GitDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} />
         ) : (
           <Editor
-            path={`${surface.workspaceId}:${document.path}`}
+            key={modelPath}
+            path={modelPath}
+            saveViewState={false}
             language={detectLanguage(document.path)}
             value={document.content}
             onChange={(value) => update(tabId, value ?? '', surface.regionId)}
             onMount={(editor, monaco) => {
               editorRef.current = editor
+              if (editorViewState.current?.modelPath === modelPath) {
+                editor.restoreViewState(editorViewState.current.state)
+              }
               // Monaco owns the editor lifetime. Clear only the instance that disposed itself so a
               // late dispose from an old Region cannot erase a newer editor reference after restore.
               editor.onDidDispose(() => {
