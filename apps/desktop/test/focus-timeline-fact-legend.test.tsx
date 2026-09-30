@@ -10,7 +10,7 @@ import type { AgentFocusHistoryEntry } from '../src/renderer/src/lib/agent-focus
 // Typed current semantic observations exercise UI facts; these are not physical
 // healthy-Run qualification. Messages still come through the genuine public reader.
 const context = (h: Awaited<ReturnType<typeof fixture>>, i: number, state: FocusContext['state'] = 'running', start: number | null = null): FocusContext => ({
-  id: `archived-${i}`, name: `Context ${i}`, detail: 'Observed task', state, stateLabel: state, processState: 'running', bucket: state === 'working' ? 'working' : 'idle', kind: 'agent', providerId: 'claude', hostId: 'private-host', topicId: null,
+  id: `archived-${i}`, name: `Context ${i}`, detail: 'Observed task', recap: null, detailIsRecap: false, state, stateLabel: state, processState: 'running', bucket: state === 'working' ? 'working' : 'idle', kind: 'agent', providerId: 'claude', hostId: 'private-host', topicId: null,
   workspaceId: 'project', workspaceName: 'Project', workspacePath: h.directory, liveAgent: true, actionable: false, lastActivityAt: null, runId: `not-controlled-archived-${i}`, workingEnteredAt: start, workspace: undefined
 })
 const visit = (id: string, at: number): AgentFocusHistoryEntry => ({ sessionId: id, focusedAt: at })
