@@ -140,7 +140,28 @@ app.whenReady().then(async () => {
           }
         }
       }
-      assert.equal(editor.save.primary, true); assert.notEqual(editor.save.background, 'none'); assert.equal(editor.cancel.primary, false)
+      assert.equal(editor.save.primary, true); assert.equal(editor.cancel.primary, false)
+      // Dialog primary actions use the original matte material; observe real paint, not a gradient requirement.
+      const paint = editor.paint = await read(`(() => {
+        const dialog = document.querySelector('.space-icon-picker[role="dialog"]')
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1; const context = canvas.getContext('2d')
+        const control = node => {
+          const style = getComputedStyle(node), rect = node.getBoundingClientRect()
+          context.clearRect(0, 0, 1, 1); context.fillStyle = style.backgroundColor; context.fillRect(0, 0, 1, 1)
+          return { background: style.backgroundColor, color: style.color, backgroundPixel: Array.from(context.getImageData(0, 0, 1, 1).data), rect: { width: rect.width, height: rect.height } }
+        }
+        const rules = list => Array.from(list).flatMap(rule => rule.cssRules ? [rule, ...rules(rule.cssRules)] : [rule])
+        const primaryRules = Array.from(document.styleSheets).flatMap(sheet => rules(sheet.cssRules))
+          .filter(rule => rule.selectorText?.replace(/\\s+/g, ' ').trim() === '.dialog-surface footer .primary-button')
+          .map(rule => ({ selector: rule.selectorText, background: rule.style.getPropertyValue('background'), color: rule.style.getPropertyValue('color') }))
+        return { save: control(dialog.querySelector('.space-icon-picker__save')), cancel: control(dialog.querySelector('footer button')), primaryRules }
+      })()`)
+      assert.equal(paint.primaryRules.length, 1, 'Exactly one loaded original Dialog primary rule is observed')
+      for (const rule of paint.primaryRules) assert.ok(rule.background.trim() && rule.color.trim(), 'The loaded primary rule contains both paint declarations')
+      for (const control of [paint.save, paint.cancel]) { assert.ok(control.rect.width > 0 && control.rect.height > 0); assert.equal(control.backgroundPixel.length, 4); assert.ok(control.background && control.color) }
+      assert.ok(paint.save.backgroundPixel[3] > 0, 'Save has actual nontransparent primary paint')
+      assert.notEqual(paint.save.background, paint.cancel.background, 'Save and Cancel have distinct actual backgrounds')
+      assert.notEqual(paint.save.color, paint.cancel.color, 'Save and Cancel have distinct actual text colors')
       return current
     }
     await until('window.motePaperdollProof?.ready&&window.motePaperdollProof.facts().ready', 'actual App initialized')
