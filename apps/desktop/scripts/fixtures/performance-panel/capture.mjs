@@ -7,7 +7,8 @@ import { createRequire } from 'node:module'
 import { isBuiltin } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
-export async function capturePerformancePanel({ root, evidence }) {
+export async function capturePerformancePanel({ root, evidence, captureScope = 'full' }) {
+  assert.ok(['full','placement'].includes(captureScope),'已知明确 capture scope')
   const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures/performance-panel')
   const require=createRequire(path.join(desktop,'package.json')),sha=bytes=>createHash('sha256').update(bytes).digest('hex')
   const {build,loadConfigFromFile}=await import(pathToFileURL(require.resolve('vite')).href)
@@ -18,7 +19,7 @@ export async function capturePerformancePanel({ root, evidence }) {
   const privateRoot=await fs.mkdtemp(path.join(os.tmpdir(),'amx-performance-ui-'))
   await fs.mkdir(evidence,{recursive:true})
   const compiled=path.join(evidence,'compiled'),inputs=new Map(),artifacts=[]
-  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,evidence,privateRoot,processes:[],frames:[],
+  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,evidence,privateRoot,processes:[],frames:[],
     actualApp:true,actualSettings:true,actualTerminalView:true,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
@@ -73,7 +74,7 @@ export async function capturePerformancePanel({ root, evidence }) {
     const env={...process.env,AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD:path.join(compiled,'fixture-preload.cjs'),
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
-    for(const phase of ['control','restart','joined']){
+    for(const phase of captureScope==='placement'?['placement']:['control','restart','joined']){
       const process=await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs')],
         {temporaryRoot:privateRoot,cwd:root,env,timeoutMs:90000})
       receipt.processes.push({...process,phase})
@@ -84,6 +85,7 @@ export async function capturePerformancePanel({ root, evidence }) {
       assert.equal(raw.afterDisposalLeases,0,phase+': 结束registered IPC全部自有lease归零')
       if(phase==='joined'){assert.equal(raw.joined.officialExecution,true);receipt.officialOwnerQualification=true;receipt.joined=raw.joined}
     }
+    if(captureScope==='placement')receipt.boundary='仅本次 Settings 左归属修正：实际 App 9 geometry、7 native keyboard、Settings toggle/Escape/snapshot retention、完整 Footer 图；不运行或签原full hidden/restart/joined/T004。'
     receipt.completed=true
   } catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack}}
   finally {

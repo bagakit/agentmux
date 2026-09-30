@@ -11,7 +11,7 @@ describe('window utility status bar layout', () => {
     const app = await appSource
     const rail = await railSource
     const styles = await stylesSource
-    expect(app).toContain('<WindowUtilityBar settingsOpen=')
+    expect(app).toContain('<WindowUtilityBar toolkit={<PerformancePanel />} />')
     expect(app).not.toContain('className="window-status-bar__status"')
     expect(app).toContain('className="window-status-bar__right"')
     expect(app).not.toContain('ProjectRailToolbar')
@@ -25,7 +25,7 @@ describe('window utility status bar layout', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const footer = app.slice(start, end)
-    expect(footer).toContain('<SurfaceSwitch onCloseSettings={closeSettings} />')
+    expect(footer).toContain('<SurfaceSwitch settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} />')
     expect(footer).toContain('toolkit={<PerformancePanel />}')
     const navigation = footer.indexOf('window-status-bar__surface-switch')
     const right = footer.indexOf('window-status-bar__right')
