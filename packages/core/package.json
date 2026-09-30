@@ -52,6 +52,10 @@
       "types": "./dist/agent-message-render.d.ts",
       "import": "./dist/agent-message-render.js"
     },
+    "./agent-outbound-message": {
+      "types": "./dist/agent-outbound-message.d.ts",
+      "import": "./dist/agent-outbound-message.js"
+    },
     "./agent-session-id": {
       "types": "./dist/agent-session-id.d.ts",
       "import": "./dist/agent-session-id.js"

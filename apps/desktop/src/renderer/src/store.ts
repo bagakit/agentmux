@@ -54,7 +54,10 @@ import {
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
 import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
+import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
+import { primaryMoteExecutorId } from './lib/primary-mote-executor'
+import { requestPmoTeamsTopicFloatingOpen } from './lib/pmo-teams-topic-floating'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
@@ -317,6 +320,9 @@ export type EditorRegionDiffState = {
 }
 export type MainSurface = 'survey' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
+  /** An explicit new discussion keeps the Mote identity and owns its first draft before preparation. */
+  newTab?: boolean
+  initialRequest?: { prompt: string; executorId?: string }
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
   /** Cancels this caller's late navigation, without cancelling metadata or a Session. */
@@ -2278,7 +2284,7 @@ function fileNavigationSelection(state: AppState): string {
     state.agentFocus.execution.sessionId, state.agentFocus.pmo.sessionId, state.surveyZoneSelection])
 }
 
-async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
+async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string): Promise<string> {
   const get = useAppStore.getState
   const set = useAppStore.setState
   const state = get()
@@ -2287,20 +2293,21 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
   const projectContext = goalProjectContextText(goalProjectContext(state.config, demand.projectId, state.activeWorkspaceId), demand.projectId)
   const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
   if (!workspace) throw new Error('Scratch workspace is unavailable')
-  const executorId = Object.keys(state.config?.executors ?? {})[0]
-  if (!executorId) throw new Error('No PMO executor is configured')
-  const buildPmoPrompt = (): string => {
+  const executorId = primaryMoteExecutorId(state)
+  const buildPmoPrompt = (fresh = false): string => {
     const current = get()
     const executionContext = executionFocusContextText(
       current.agentFocus,
       current.sessions,
       (session) => current.agentNames[session.id] ?? session.label
     )
-    return [
-      prompt?.trim() || MOTE_COORDINATION_ROLE,
+    return composeOutboundMessage({ amux: [
+      MOTE_COORDINATION_ROLE,
+      prompt?.trim(),
       projectContext,
-      executionContext
-    ].join('\n\n')
+      executionContext,
+      ...(fresh ? [`This is a fresh dedicated PMO context for Demand ${demand.id}.`, `Title: ${demand.title}`, `Description: ${demand.description || '(empty)'}`] : [])
+    ].filter(Boolean).join('\n\n'), ...(userRequest ? { user: userRequest } : {}) })
   }
   const focusPmoTabSession = (tabId: string): void => {
     const current = get()
@@ -2329,25 +2336,27 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
     mappedRegion !== undefined && isAgentOrLauncherSurface(mappedRegion)
   )
   if (mappedTabIsUsable && mappedTab) {
+    if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
+      // The live recipient already has its exact owner. Topic file preparation cannot gate input.
+      if (!get().send(mappedRegion.sessionId, buildPmoPrompt())) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
+      focusPmoTabSession(mappedTab.id)
+      return mappedTab.id
+    }
     await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
     if (mappedRegion?.kind === 'launcher') {
       const liveLayout = get().layouts[workspace.id]
       const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
       if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
-      const contextPrompt = [
-        buildPmoPrompt(),
-        `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
-        `Title: ${demand.title}`,
-        `Description: ${demand.description || '(empty)'}`
-      ].join('\n\n')
+      const contextPrompt = buildPmoPrompt(true)
       get().setAgentComposerDraft(mappedTab.layout.activeRegionId, contextPrompt)
+      if (!executorId) {
+        get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
+        return mappedTab.id
+      }
       await get().launchAgent(executorId, contextPrompt, groupId, {
         tabId: mappedTab.id,
         regionId: mappedTab.layout.activeRegionId
       }, undefined, { tabName: `PMO · ${demand.title}` })
-    }
-    if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
-      if (!get().send(mappedRegion.sessionId, buildPmoPrompt())) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
     }
     focusPmoTabSession(mappedTab.id)
     return mappedTab.id
@@ -2359,18 +2368,17 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
   const tab = { ...newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID), name: `PMO · ${demand.title}` }
   const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
   if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
-  const contextPrompt = [
-    buildPmoPrompt(),
-    `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
-    `Title: ${demand.title}`,
-    `Description: ${demand.description || '(empty)'}`
-  ].join('\n\n')
+  const contextPrompt = buildPmoPrompt(true)
   set((next) => ({
     tabs: { ...next.tabs, [tab.id]: tab },
     layouts: { ...next.layouts, [workspace.id]: nextLayout },
     demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id },
     agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: contextPrompt }
   }))
+  if (!executorId) {
+    get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
+    return tab.id
+  }
   await get().launchAgent(executorId, contextPrompt, currentLayout.activeGroupId, {
     tabId: tab.id,
     regionId: tab.layout.activeRegionId
@@ -4799,7 +4807,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       `"$AGENTMUX_CLI" demand show --demand ${quote(demand.id)}`,
       `"$AGENTMUX_CLI" demand update --demand ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
     ].join('\n\n')
-    return openGoalPmo(demandId, prompt)
+    return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work')
   },
   async createDemand(input) {
     const presentation = get()
@@ -5583,6 +5591,53 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
+    }
+    if (options?.newTab) {
+      const request = options.initialRequest
+      const tab = { ...newLauncherTab(workspace.id, topicId), ...(request ? { topicPreparation: 'mote' as const } : {}) }
+      const regionId = tab.layout.activeRegionId, initialSurface = tab.regions[regionId]
+      let groupId: string | undefined
+      set(current => {
+        const layout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
+        const placed = addTabPlacement(layout, layout.activeGroupId, tab.id)
+        if (!placed) return current
+        groupId = layout.activeGroupId
+        return {
+          tabs: { ...current.tabs, [tab.id]: tab },
+          layouts: { ...current.layouts, [workspace.id]: reveal ? placed : {
+            ...placed, activeGroupId: layout.activeGroupId,
+            groups: placed.groups.map(group => {
+              const previous = layout.groups.find(item => item.id === group.id)
+              return previous ? { ...group, activeTabId: previous.activeTabId, recentTabIds: previous.recentTabIds } : group
+            })
+          } },
+          ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
+          ...(request ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: request.prompt } } : {}),
+          workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id)
+        }
+      })
+      if (!groupId) throw new Error('The Scratch Tab Group is no longer available')
+      // Present the exact born owner once. A late preparation receipt never reopens a closed float.
+      if (request && !options.signal?.aborted) requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, targetTabId: tab.id })
+      try {
+        const snapshot = request ? await api.scratch.ensureMote(workspace.id, topicId) : await api.scratch.readTopic(workspace.id, topicId)
+        if (!snapshot) throw new Error('Scratch Topic no longer exists')
+      } catch (cause) {
+        if (request && get().tabs[tab.id]?.regions[regionId] === initialSurface) get().reportError(cause, {
+          kind: 'indeterminate', summary: 'Topic preparation is unconfirmed. Your request has not been sent; the same Mote, Tab, Region and draft are kept. Retry Start agent here.'
+        })
+        throw cause
+      }
+      if (get().tabs[tab.id]?.regions[regionId] !== initialSurface) return
+      set(current => {
+        const currentTab = current.tabs[tab.id]
+        if (!currentTab?.topicPreparation || currentTab.regions[regionId] !== initialSurface) return current
+        const { topicPreparation: _prepared, ...prepared } = currentTab
+        return { tabs: { ...current.tabs, [tab.id]: prepared }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
+      })
+      if (request?.executorId) await get().launchAgent(request.executorId, request.prompt, groupId, { tabId: tab.id, regionId })
+      else if (request) get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. Your request has not been sent; choose an Agent and Start agent in this same Region.'), { kind: 'indeterminate' })
+      return
     }
     // Reveal the durable Scratch shell before reading Topic metadata. Filesystem reads are a
     // preparation step, not permission to hide the workbench: if the read is slow or fails, the
