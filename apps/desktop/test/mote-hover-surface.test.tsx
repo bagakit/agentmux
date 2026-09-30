@@ -9,6 +9,7 @@ import { pmoTeamsTopicFloatingViewTargets, usePmoTeamsTopicFloatingState } from 
 import { effectiveSessionViewMode } from '../src/renderer/src/lib/session-presentation'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { warmLauncherId } from '../src/renderer/src/lib/warm-terminal-preview'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry'
@@ -28,6 +29,7 @@ vi.mock('../src/renderer/src/components/SessionMailbox', () => ({ SessionMailbox
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 
 const baseline = useAppStore.getState()
+const launcherBaseline = useLauncherState.getState()
 let root: Root, container: HTMLDivElement, restorePopover: () => void
 let warm: ReturnType<typeof vi.fn>, detect: ReturnType<typeof vi.fn>, launch: ReturnType<typeof vi.fn>, send: ReturnType<typeof vi.fn>
 function Workface({ focus = false, workbenchVisible = false }: { focus?: boolean; workbenchVisible?: boolean }) {
@@ -47,6 +49,19 @@ function panel() { return container.querySelector<HTMLElement>('[data-pmo-teams-
 function entry() { return container.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button')! }
 function choice(id: string) { const result = panel().querySelector<HTMLButtonElement>(`[data-mote-topic-id="${id}"]`); expect(result).not.toBeNull(); return result! }
 function saved() { return window.localStorage.getItem(savedMoteKey) }
+function launcherInput(parent: ParentNode, tab: ReturnType<typeof createWorkbenchTab>) {
+  expect(tab.id.length).toBeGreaterThan(0); expect(tab.layout.activeRegionId.length).toBeGreaterThan(0)
+  const region = tab.regions[tab.layout.activeRegionId]
+  expect(region?.kind).toBe('launcher'); expect(region?.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
+  expect(region?.regionId).toBe(tab.layout.activeRegionId)
+  const inputs = parent.querySelectorAll<HTMLElement>(`[data-workbench-tab-id="${tab.id}"] [aria-label="Agent prompt"]`)
+  expect(inputs).toHaveLength(1)
+  const input = inputs[0]!
+  expect(input.isConnected).toBe(true)
+  expect(input.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id')).toBe(region?.regionId)
+  expect(input.closest('.launch-surface')?.getAttribute('data-agent-section')).toBe('expanded')
+  return input
+}
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) }) }
 async function mount(focus = false, workbenchVisible = false) { await act(async () => root.render(createElement(Workface, { focus, workbenchVisible }))); await settle() }
 async function pointer(element: HTMLElement, type: 'over' | 'out' | 'down') {
@@ -59,6 +74,9 @@ async function click(element: HTMLElement) { await pointer(element, 'down'); awa
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   window.localStorage.clear(); restorePopover = installNativePopover(); seedMoteWorkface()
+  // These cases observe an already expanded input. Its existing preference owns
+  // that presentation; hovering must never expand or activate the Launcher.
+  expect(useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID, 'agents', 'expanded')).toBe(true)
   warm = vi.fn(); detect = vi.fn(async () => {}); launch = vi.fn(); send = vi.fn(() => true)
   useAppStore.setState({ prewarmTerminal: warm, detectExecutors: detect, launchAgent: launch, send, reportError: vi.fn() })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(moteTopics)
@@ -67,7 +85,8 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); restorePopover(); window.localStorage.clear()
+  await act(async () => root.unmount()); container.remove(); restorePopover()
+  useLauncherState.setState(launcherBaseline, true); window.localStorage.clear()
   vi.restoreAllMocks(); useAppStore.setState(baseline, true)
 })
 
@@ -91,8 +110,7 @@ describe('one operative Mote hover surface', () => {
     if (backgroundVisible) useAppStore.setState({ activeWorkspaceId: SCRATCH_WORKSPACE_ID, mainSurface: 'workbench' })
     await mount(false, backgroundVisible)
     const original = useAppStore.getState(), calls = warm.mock.calls.length
-    const input = container.querySelector<HTMLElement>(`[data-original-workbench] [data-workbench-tab-id="${neighbor.id}"] [aria-label="Agent prompt"]`)!
-    expect(input).not.toBeNull()
+    const input = launcherInput(container.querySelector('[data-original-workbench]')!, neighbor)
     if (backgroundVisible) expect(calls).toBeGreaterThan(0)
     else expect(calls).toBe(0)
     await hover(); await click(entry())
@@ -160,7 +178,7 @@ describe('one operative Mote hover surface', () => {
     expect(tab?.topicId).toBe(quietMoteId)
     expect(tab?.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
     expect(tab?.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
-    expect(panel().querySelector('[aria-label="Agent prompt"]')).not.toBeNull()
+    launcherInput(panel(), tab)
     expect(warm).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, warmLauncherId({ tabGroupId: 'mote-group', regionId: tab.layout.activeRegionId }))
     expect(new Set(warm.mock.calls.map(call => call[0]))).toEqual(new Set([SCRATCH_WORKSPACE_ID]))
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
@@ -191,8 +209,7 @@ describe('one operative Mote hover surface', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.recentTabIds).toEqual(group.recentTabIds)
     expect(state.agentFocus.execution).toEqual(before.agentFocus.execution)
     expect(state.sessions).toBe(before.sessions)
-    const input = panel().querySelector<HTMLElement>('[aria-label="Agent prompt"]')!
-    expect(input).not.toBeNull()
+    const input = launcherInput(panel(), tab)
     expect(input.closest('[data-workbench-tab-id]')?.getAttribute('data-workbench-tab-id')).toBe(newId)
     await act(async () => {
       input.replaceChildren(Object.assign(document.createElement('p'), { textContent: 'New Mote unsent' }))
@@ -214,10 +231,10 @@ describe('one operative Mote hover surface', () => {
     expect(next.agentComposerDrafts[tab.layout.activeRegionId]).toBe('New Mote unsent')
     await click(panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${newId}"]`)!)
     expect(panel().dataset.moteTargetTab).toBe(newId)
-    expect(panel().querySelector('[aria-label="Agent prompt"]')).toBe(input)
+    expect(launcherInput(panel(), tab)).toBe(input)
     await click(entry()); await click(entry())
     expect(panel().dataset.moteTargetTab).toBe(newId)
-    expect(panel().querySelector('[aria-label="Agent prompt"]')).toBe(input)
+    expect(launcherInput(panel(), tab)).toBe(input)
     expect(input.textContent).toBe('New Mote unsent')
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
   })
@@ -263,9 +280,8 @@ describe('one operative Mote hover surface', () => {
     await hover()
     expect(panel().dataset.moteTargetTopic).toBe(quietMoteId)
     expect(panel().dataset.moteStatus).toBe('No Agent yet')
-    const launcher = panel().querySelector<HTMLElement>('[aria-label="Initial prompt"]') ?? panel().querySelector<HTMLElement>('[contenteditable="true"]')
-    expect(launcher).not.toBeNull()
-    expect(launcher!.textContent).toBe('Launcher unsent')
+    const launcher = launcherInput(panel(), quietTab)
+    expect(launcher.textContent).toBe('Launcher unsent')
     expect(document.activeElement).toBe(input)
     expect(warm).not.toHaveBeenCalled(); expect(detect).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
     expect(saved()).toBe(disk)
