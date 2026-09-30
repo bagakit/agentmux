@@ -10,7 +10,7 @@ import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appea
 import { scratchMoteTopics, scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { SpaceObjectContextMenu } from '../src/renderer/src/components/SpaceObjectContextMenu'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
-import { customMoteId, customTab, customAgent, moteTopics, quietMoteId, ordinaryTopicId, savedMoteKey, scratchWorkspace, moteConfig } from './fixtures/mote-workface'
+import { customMoteId, customTab, customAgent, moteTopics, quietMoteId, quietTab, ordinaryTopicId, savedMoteKey, scratchWorkspace, moteConfig } from './fixtures/mote-workface'
 
 let app: MoteAppFixture, catalog: ScratchTopicSnapshot[], generation = 0
 let archiveMenu: Awaited<ReturnType<typeof createArchiveMenu>> | undefined
@@ -354,8 +354,15 @@ it('unconfirmed write receipt never publishes success or hides the original Mote
   expect(useAppStore.getState().scratchTopicSnapshots).toBe(before.scratchTopicSnapshots); quiet(before)
 })
 it('Launcher recommends active objects while its explicitly selected archived Mote and nonempty in-flight request retain the same original owner', async () => {
-  selected(true); await app.mount()
-  const chooser = button('Choose Mote: ' + catalog[1]!.title)
+  selected(true)
+  useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', quietTab.id)
+  await app.mount(); await moteClick(button('Close Mote', app.panel()))
+  const launcher = document.querySelector<HTMLElement>(`.workbench-tab-slot[data-workbench-tab-id="${quietTab.id}"] .launch-surface`)
+  expect(launcher).not.toBeNull(); expect(launcher!.closest('[inert]')).toBeNull()
+  expect(launcher!.getAttribute('data-agent-section')).toBe('collapsed')
+  await moteClick(button('Expand Agents', launcher!))
+  expect(launcher!.getAttribute('data-agent-section')).toBe('expanded')
+  const chooser = button('Choose Mote: ' + catalog[1]!.title, launcher!)
   expect(chooser.textContent).toContain(catalog[1]!.title)
   await act(async () => { chooser.focus(); chooser.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }); await settleMoteApp()
   const content = document.querySelector('[role="menu"]')
@@ -363,9 +370,9 @@ it('Launcher recommends active objects while its explicitly selected archived Mo
   await act(async () => content!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
   let release!: () => void
   app.ensureMote.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(catalog[1]!) }))
-  const request = button('Create with Mote'), drafts = useAppStore.getState().agentComposerDrafts
+  const request = button('Create with Mote', launcher!), drafts = useAppStore.getState().agentComposerDrafts
   await moteClick(request)
-  expect(button('Submitting…').disabled).toBe(true)
+  expect(button('Submitting…', launcher!).disabled).toBe(true)
   await act(async () => { release() }); await settleMoteApp()
   expect(app.send).toHaveBeenCalledTimes(1); expect(app.send).toHaveBeenCalledWith(customAgent.id, expect.stringContaining('Launcher unsent'), expect.any(Function), 'manual')
   expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
