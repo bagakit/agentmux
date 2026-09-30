@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict')
 module.exports = async ({evaluate,size,click,capture,waitFor,result,visibleDirectPmo}) => {
+ const unknownOnly = process.env.AGENTMUX_GOALS_MAIN_MOTE_CASE === 'unknown'
+ assert.ok(!process.env.AGENTMUX_GOALS_MAIN_MOTE_CASE || unknownOnly,'Unknown Main Mote capture case')
+ result.caseFilter = unknownOnly ? 'unknown-only' : 'all'
  const selector = value => `document.querySelector(${JSON.stringify(value)})`
  const close = () => click(selector('[aria-label="Close Mote"]'))
  const readConversation = async () => {
@@ -7,6 +10,7 @@ module.exports = async ({evaluate,size,click,capture,waitFor,result,visibleDirec
   if(before.hasViewChoice) await click(selector('[data-pmo-teams-topic-floating] [aria-label="Show Activity"]'))
   result.observations.push({scene:'actual-user-conversation-view-choice',before})
  }
+ if(!unknownOnly) {
  await evaluate('goalsMainMote.seed()'); await size(1280)
  assert.ok(await evaluate('document.querySelector("[data-goals-entry-action=ideas]").textContent.includes("主 Mote · 原主 bot")'))
  await capture('1280-light-primary-mote-entry',1280);await size(620);await capture('620-light-primary-mote-entry',620)
@@ -41,6 +45,7 @@ module.exports = async ({evaluate,size,click,capture,waitFor,result,visibleDirec
  await waitFor('!goalsMainMote.facts().pending && goalsMainMote.facts().region?.kind==="agent"')
  const cold=await evaluate('goalsMainMote.facts()');assert.equal(cold.requests.length,1);assert.equal(cold.requests[0].prompt,'我还不知道能做什么，可以了解我并给我建议吗？');assert.deepEqual(Object.keys(cold.goals),[])
  await visibleDirectPmo(cold.tabId);await capture('620-light-primary-mote-cold-launch',620);await readConversation();await waitFor('document.querySelector("[data-pmo-teams-topic-floating]").textContent.includes("我还不知道能做什么，可以了解我并给我建议吗？")');await capture('620-light-primary-mote-cold-discussion',620);result.observations.push({scene:'actual-cold-primary-discussion',facts:cold});await close()
+ }
  await evaluate('goalsMainMote.seed("unknown")');await size(1280);await click('document.querySelector("[data-goals-entry-action=understand]")');await waitFor('!goalsMainMote.facts().pending')
  const unknown=await evaluate('goalsMainMote.facts()');assert.equal(unknown.topicId,'launcher:leader');assert.equal(unknown.requests.length,0);assert.equal(unknown.region.kind,'launcher');assert.equal(unknown.draft,'我还不知道能做什么，可以了解我并给我建议吗？')
  await visibleDirectPmo(unknown.tabId)
@@ -50,6 +55,10 @@ module.exports = async ({evaluate,size,click,capture,waitFor,result,visibleDirec
  assert.ok(await evaluate('document.querySelector("[data-pmo-teams-topic-floating] .launch-surface").textContent.includes("Your request has not been sent")'))
  assert.equal(await evaluate('document.querySelectorAll("[data-pmo-teams-topic-floating] .agent-pick[aria-pressed=true]").length'),0)
  assert.equal(await evaluate('document.querySelector("[data-pmo-teams-topic-floating] .launcher-launch-button").disabled'),true)
+ assert.deepEqual(Object.values(unknown.primaryTab.regions).map(region=>region.kind),['agent'])
+ const primaryChoice = selector('[data-pmo-teams-topic-floating] [data-mote-topic-id="launcher:leader"]')
+ assert.equal(await evaluate(`${primaryChoice}.dataset.moteStatus`),'Status unknown')
+ assert.ok(await evaluate(`${primaryChoice}.textContent.includes("Primary · Status unknown")`))
  await capture('1280-light-primary-mote-unknown',1280);await size(620);await visibleDirectPmo(unknown.tabId);await capture('620-light-primary-mote-unknown',620)
- result.observations.push({scene:'actual-unknown-primary-owner',facts:unknown});assert.equal(result.frames.length,15)
+ result.observations.push({scene:'actual-unknown-primary-owner',facts:unknown});assert.equal(result.frames.length,unknownOnly?2:15)
 }

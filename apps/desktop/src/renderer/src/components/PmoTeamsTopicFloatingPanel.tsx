@@ -23,6 +23,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
+import { primaryMoteHasBot } from '../lib/primary-mote-executor'
 
 const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId }: {
   topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | null | undefined
@@ -42,9 +43,11 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
   const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
-  const status = moteTargetStatus(tab, session, tabId)
+  const retainedPrimaryBot = useAppStore(state => topic.id === PMO_TEAMS_TOPIC_ID && primaryMoteHasBot(state))
+  const targetStatus = moteTargetStatus(tab, session, tabId)
+  const status = retainedPrimaryBot && targetStatus === 'No Agent yet' ? 'Status unknown' : targetStatus
   const identityStatus = (topic.moteArchive?.state === 'archived' ? 'Archived · ' : '') + (topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' : '') + status
-  const restoring = Boolean(tabId && (!tab || !region || region.kind === 'agent' && !session))
+  const restoring = Boolean(retainedPrimaryBot && targetStatus === 'No Agent yet' || tabId && (!tab || !region || region.kind === 'agent' && !session))
   const choice = <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
     data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
     aria-label={topic.title + ' · ' + identityStatus} onClick={() => onSelect(topic.id, tabId)}
@@ -53,7 +56,7 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
     <span className="mote-chooser__name">
       <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon}
         moteSessionId={region?.kind === 'agent' ? region.sessionId : undefined} moteHostId={workspace?.hostId}
-        moteAvailability={!tabId || region?.kind === 'launcher' ? 'no-agent' : 'restoring'}
+        moteAvailability={(!tabId || region?.kind === 'launcher') && !retainedPrimaryBot ? 'no-agent' : 'restoring'}
         avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
       <strong>{topic.title}</strong>
     </span><span className="mote-chooser__status">
