@@ -129,7 +129,7 @@ app.whenReady().then(async () => {
       for (const type of ['keyDown', 'keyUp']) await input('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: code, modifiers,
         ...(value === 'Enter' && type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
     }
-    const panel = '#pmo-teams-topic-floating-panel', entry = '[data-pmo-teams-topic-launcher] button', settings = '.surface-navigation__settings[aria-label="Settings"]'
+    const panel = '#pmo-teams-topic-floating-panel', entry = '[data-pmo-teams-topic-launcher] button', settings = '.window-status-bar__utilities [aria-label="Settings"]'
     const row = id => node(`${panel} [data-mote-topic-id="${id}"]`)
     const menuItem = label => `[...document.querySelectorAll('[role="menuitem"]')].find(n=>n.textContent.trim()===${JSON.stringify(label)}&&n.getBoundingClientRect().width>0)`
     const open = async () => {
