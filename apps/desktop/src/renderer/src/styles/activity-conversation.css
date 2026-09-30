@@ -94,22 +94,21 @@
 .log-turn[data-trace-only='true'] .log-turn__node { display: none; }
 .log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
 .log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
-.log-turn__annotation { display: grid; gap: var(--sp-3); width: min(300px, 100%); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); overflow: auto; pointer-events: auto; }
-.conversation-annotation-note__passage { min-width: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-0); }
-.conversation-annotation-note__passage > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1); list-style: none; cursor: pointer; color: var(--text-3); font-size: var(--fs-micro); }
+.log-turn__annotation { display: grid; gap: var(--sp-4); width: 280px; padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); overflow: auto; pointer-events: auto; }
+.conversation-annotation-note__passage { min-width: 0; }
+.conversation-annotation-note__passage > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--sp-3); list-style: none; cursor: pointer; color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-annotation-note__passage > summary::-webkit-details-marker { display: none; }
 .conversation-annotation-note__passage > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); border-radius: var(--radius-sm); }
 .conversation-annotation-note__passage[open] > summary > svg { transform: rotate(180deg); }
-.conversation-annotation-note__preview { grid-column: 1 / -1; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.conversation-annotation-note__passage[open] .conversation-annotation-note__preview { display: none; }
+.conversation-annotation-note__preview { min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.conversation-annotation-note__passage[open] .conversation-annotation-note__preview { -webkit-line-clamp: 1; }
 .log-turn__annotation-quote { max-height: 6em; overflow: auto; margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__annotation-quote:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); }
-.conversation-annotation-note__field { display: grid; min-width: 0; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
-.log-turn__annotation textarea { min-height: 68px; width: 100%; resize: vertical; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-1); font: inherit; font-size: var(--fs-meta); line-height: 1.5; }
-.log-turn__annotation textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
-.log-turn__annotation-actions { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-2); }
+.log-turn__annotation textarea { min-height: 54px; width: 100%; resize: vertical; padding: var(--sp-3) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-meta); line-height: 1.5; }
+.log-turn__annotation textarea:focus { border-color: var(--focus-line); }
+.log-turn__annotation-actions { display: flex; align-items: center; gap: var(--sp-3); }
 .log-turn__annotation-actions .primary-button { flex: 1; min-width: 0; font-size: var(--fs-meta); }
-.conversation-annotation-note__header { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-meta); gap: var(--sp-3); }
+.conversation-annotation-note__header { display: flex; align-items: center; justify-content: space-between; color: var(--text-2); font-size: var(--fs-meta); gap: var(--sp-3); }
 .conversation-annotation-note__header strong { font-weight: 500; }
 .conversation-annotation-note__close { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .conversation-annotation-note__close:hover { color: var(--text); background: var(--wash-2); }
@@ -120,8 +119,6 @@
 .conversation-annotation-note__location, .conversation-annotation-note__error { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
 .conversation-annotation-note__error { color: var(--red-text); }
 .conversation-annotation-recovery { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
-.agent-surface > .log-turn__annotation { align-self: end; width: min(360px, calc(100% - var(--sp-3) * 2)); max-height: min(240px, 40%); margin: var(--sp-2) var(--sp-3); flex-shrink: 0; }
-.agent-surface[data-conversation-note='side'] > .agent-body { margin-right: 320px; }
 /* "Continue from here" 是一个开在回合体下方的小控件——不是正文，所以从 --text-3 起，hover 才升到
    强调色。无底色无描边：它坐在 turn 自己的地上，一条底色会在密集的对话流里读成一个多余的盒子。 */
 .log-turn__continue {
