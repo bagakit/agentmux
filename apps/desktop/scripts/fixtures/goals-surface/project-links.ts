@@ -32,7 +32,11 @@ export function projectLinksPreview(initial: ReturnType<typeof useAppStore.getSt
       + 'Read ~/projects/alpha/src/a.ts:12:3, then compare [the same source](./src/a.ts).\n\n'
       + 'The PMO stays in its own working directory while these file references use the project shown above.\n\n'
       + 'Next, inspect the two exported functions and decide which behavior to verify first.'
-    api.sessions.historyPage = async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'links-preview' }, items: [], nextCursor: null })
+    api.sessions.historyPage = async control => ({ agentSessionId: control.agentSessionId,
+      source: { providerId: 'codex', nativeSessionId: 'links-preview' },
+      items: [{ id: 'links-native-message', kind: 'assistant-message', startedAt: 1791090000000, contentParts: [{ kind: 'text', text: body }] }], nextCursor: null })
+    // Static preview source subscription only; no native filesystem/CLI observation is exercised.
+    api.sessions.observeHistory = async () => ({ source: { providerId: 'codex', nativeSessionId: 'links-preview' }, dispose() {} })
     api.files.observe = async () => {}; api.files.unobserve = async () => {}
     api.files.read = async (workspaceId, path) => { reads.push({ workspaceId, path }); return { status: 'read', document: { path,
       content: '// Project Alpha — src/a.ts\n\nexport const projectName = "Project Alpha"\n\nexport function readConfiguration() {\n  return { name: projectName, preserved: true }\n}\n', revision: 'links-preview-file' } } }
@@ -45,8 +49,7 @@ export function projectLinksPreview(initial: ReturnType<typeof useAppStore.getSt
         sessions: [...initial.sessions, session], viewModes: { [session.id]: 'activity' }, pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [],
         demands: { [goal.id]: goal }, demandPmoTabIds: { [goal.id]: tab.id }, selectedDemandId: goal.id,
         tabs: { [tab.id]: tab }, layouts: { [scratch.id]: createWorkspaceLayout('links-original-group', [tab.id]), [resource.id]: createWorkspaceLayout('links-project-group') },
-        timelines: { [session.id]: { agentSessionId: session.id, revision: 1, items: [{ id: 'links-message', agentSessionId: session.id,
-          kind: 'assistant_message', source: 'native-hook', title: 'Project findings', content: body, status: 'complete', createdAt: 1791090000000, updatedAt: 1791090000000 }] } },
+        timelines: { [session.id]: { agentSessionId: session.id, revision: 1, items: [] } },
         documents: {}, documentIssues: {}, agentComposerDrafts: { [session.id]: '' }, error: null, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })
       render(mode)
     })
@@ -54,6 +57,7 @@ export function projectLinksPreview(initial: ReturnType<typeof useAppStore.getSt
   return { seed, facts: () => {
     const state = useAppStore.getState()
     return { reads, session: state.sessions.find(item => item.id === session.id), tabs: state.tabs, layouts: state.layouts,
-      mapping: state.demandPmoTabIds, documents: state.documents, originalGroup: 'links-original-group', projectWorkspaceId: project.id }
+      mapping: state.demandPmoTabIds, documents: state.documents, timelineItemCount: state.timelines[session.id]?.items.length ?? -1,
+      originalGroup: 'links-original-group', projectWorkspaceId: project.id }
   } }
 }

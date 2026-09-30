@@ -262,6 +262,18 @@ describe('current mapped Goal project links through the original mounted Pane', 
     expect(useAppStore.getState().documents[documentKey(project.id, 'src/a.ts')]?.content).toBe('REMOTE PROJECT CONTENT')
     placed(); retained()
   })
+  it('keeps a normally unassigned Goal readable without a false recovery notice or borrowed path root', async () => {
+    seed('Read `src/a.ts` and [source](./src/a.ts).')
+    useAppStore.setState(state => ({ demands: { ...state.demands, goal: { ...goal(), projectId: null, projectName: null } } }))
+    await mount()
+    expect(container.textContent).toContain('src/a.ts')
+    expect(container.querySelector('.activity-feed')).not.toBeNull()
+    expect(container.querySelector('.service-window')).toBeNull()
+    expect(container.querySelector('[data-file-reference-scope]')).toBeNull()
+    expect(buttons()).toEqual([])
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([])
+    retained()
+  })
   it.each(['unknown', 'deleted', 'conflict'] as const)('keeps original prose and healthy Pane for %s project association', async mode => {
     seed('Read `src/a.ts` and [source](./src/a.ts).')
     if (mode === 'unknown') useAppStore.setState(state => ({ demands: { ...state.demands, goal: goal('goal', 'unregistered-project') } }))
@@ -291,22 +303,21 @@ describe('current mapped Goal project links through the original mounted Pane', 
     expect(useAppStore.getState().layouts[project.id]?.groups[0]?.tabOrder).toEqual([])
     placed(); retained()
   })
-  it('keeps home in both native reasoning reading branches through the common trace', async () => {
+  it('keeps home in the native conversation through the common reasoning trace', async () => {
     const home = `~/${relative(homedir(), project.path)}/src/a.ts:9:4`
     seed('Read src/a.ts.')
     vi.mocked(api.sessions.historyPage).mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
       source: { providerId: 'codex', nativeSessionId: 'reasoning-proof' }, items: [{ id: 'thinking', kind: 'assistant-message',
         contentParts: [{ kind: 'reasoning', text: `Inspect ${home}.` }] }], nextCursor: null }))
     await mount()
-    expect(container.querySelectorAll('.conversation-native-reasoning__record')).toHaveLength(1)
-    const trace = container.querySelector<HTMLDetailsElement>('.conversation-native-reasoning details')!
+    expect(container.querySelectorAll('.conversation-native-thread__record')).toHaveLength(1)
+    const trace = container.querySelector<HTMLDetailsElement>('.conversation-native-thread details')!
     await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
     expect(buttons()).toHaveLength(2)
-    const nativeButton = container.querySelector<HTMLButtonElement>('.conversation-native-reasoning button.md-link--file')!
+    const nativeButton = container.querySelector<HTMLButtonElement>('.conversation-native-thread button.md-link--file')!
     await click(nativeButton)
     expect(useAppStore.getState().documentRevealTargets[documentKey(project.id, 'src/a.ts')]).toEqual({ line: 9, column: 4 })
-    await act(async () => container.querySelector<HTMLButtonElement>('.conversation-native-reasoning__turn-toggle')!.click())
-    expect(container.querySelectorAll('.conversation-native-reasoning__turn .log-turn__trace-body button.md-link--file')).toHaveLength(1)
+    expect(container.querySelectorAll('.conversation-native-thread .log-turn__trace-body button.md-link--file')).toHaveLength(1)
     expect(vi.mocked(api.files.read).mock.calls).toEqual([[project.id, 'src/a.ts']]); placed(); retained()
   })
   it('retains a previously mapped Pane when its mapping is removed', async () => {
