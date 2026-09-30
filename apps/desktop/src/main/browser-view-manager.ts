@@ -25,6 +25,7 @@ import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
+import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { browserPngFromNativeImage } from './browser-image.js'
@@ -2062,6 +2063,10 @@ export class BrowserViewManager {
 
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     const contents = view.webContents
+    installTextEditContextMenu(contents, this.window, {
+      isCurrent: () => this.nativeOwner(entry.id)?.view === view,
+      origin: () => view.getBounds()
+    })
     contents.on('input-event', (_event, input) => {
       if (this.owns(entry, view) && HUMAN_INPUT_EVENT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
