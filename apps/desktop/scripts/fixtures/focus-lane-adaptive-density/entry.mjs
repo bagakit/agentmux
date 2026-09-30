@@ -54,6 +54,10 @@ window.laneProof = {
       timelines = { original: { agentSessionId: 'original', revision: 1, items: [{ id: 'answer', agentSessionId: 'original', kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Answer', content: 'Reviewed input and timeline behavior; original work retained.', createdAt: now, updatedAt: now }] } }
     } else if (kind === 'offline') sessions = [agent('original', 'running'), ...Array.from({ length: 5 }, (_, i) => agent('archived-' + i, 'disconnected'))]
     else if (kind === 'topics') sessions = [agent('original', 'running'), ...topics.flatMap((topic, i) => [agent('topic-live-' + i, 'working', topic.directoryPath), agent('topic-off-' + i, 'disconnected', topic.directoryPath)])]
+    else if (kind === 'multiple') {
+      sessions = [agent('original', 'working'), agent('working-2', 'working'), agent('working-3', 'working'), agent('review', 'error'), agent('answer', 'done'), agent('idle', 'running'), agent('offline', 'disconnected')]
+      timelines = { answer: { agentSessionId: 'answer', revision: 1, items: [{ id: 'multi-answer', agentSessionId: 'answer', kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Answer', content: 'Reviewed change', createdAt: now, updatedAt: now }] } }
+    }
     else throw new Error('Explicit scene required')
     useAppStore.setState({ sessions, timelines, agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])) })
   },

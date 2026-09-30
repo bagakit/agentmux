@@ -105,6 +105,15 @@ it('hover has three actual summaries and no history/control changes',async()=>{
  expect(page).not.toHaveBeenCalled();expect(catalog).not.toHaveBeenCalled();expect(timeline).not.toHaveBeenCalled()
  await act(async()=>button.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));expect(document.querySelector('.focus-disconnected-summary')).toBeNull()
  expect(useAppStore.getState().sessions).toBe(state.sessions);expect(useAppStore.getState().agentFocus).toBe(state.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+ // Repeat the same actual caller with two registered Branches of one project.
+ await act(async()=>useAppStore.setState(current=>({config:{...current.config!,workspaces:[...current.config!.workspaces,{id:'checkout-a',name:'Checkout A',hostId:'local',kind:'worktree',path:'/checkout-a',repoPath:'/repo',branch:'feature/a'},{id:'checkout-b',name:'Checkout B',hostId:'local',kind:'worktree',path:'/checkout-b',repoPath:'/repo',branch:'feature/b'}]},sessions:[agent('branch-live-a','working','running','/checkout-a'),agent('branch-off-a','disconnected','interrupted','/checkout-a'),agent('branch-live-b','working','running','/checkout-b'),agent('branch-off-b','disconnected','interrupted','/checkout-b')]})))
+ const branches=[...container.querySelectorAll<HTMLElement>('.focus-project-board > .focus-project-lanes [data-project-id="repo"]')]
+ expect(branches).toHaveLength(2);expect(new Set(branches.map(node=>node.dataset.laneId)).size).toBe(2)
+ const branch=branches.find(node=>node.querySelector('.focus-project-lanes__axis')?.textContent?.includes('feature/b'))!;expect(branch).toBeDefined()
+ const branchEntry=branch.querySelector<HTMLButtonElement>('.focus-disconnected-entry')!;expect(branchEntry).not.toBeNull()
+ await act(async()=>{branchEntry.focus();branchEntry.click()})
+ expect(document.activeElement).toBe(row('branch-off-b'));expect(row('branch-off-b').closest<HTMLElement>('[data-lane-id]')!.dataset.laneId).toBe(branch.dataset.laneId)
+ expect([...drawer().querySelectorAll('.focus-context')].map(node=>node.getAttribute('data-session-id'))).toEqual(['branch-off-a','branch-off-b'])
 })
 it('mixed and pure offline belong to one shared view and filters keep the same qualification',async()=>{
  await act(async()=>useAppStore.setState(s=>({sessions:[...s.sessions,agent('old','disconnected','interrupted','/old')]})));await mount()
