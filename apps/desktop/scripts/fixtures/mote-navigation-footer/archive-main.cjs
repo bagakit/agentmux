@@ -284,7 +284,7 @@ app.whenReady().then(async () => {
         const box=rect(n),text=rect(range),css=getComputedStyle(n),titleRange=document.createRange();titleRange.selectNodeContents(strong);
         return {viewport:{width:innerWidth,height:innerHeight},rail:rect(rail),row:rect(row),identity:rect(identity),name:{text:strong.textContent,box:rect(strong),range:rect(titleRange)},
           label:{text:n.textContent,box,range:text,flex:css.flex,flexShrink:css.flexShrink,minWidth:css.minWidth,overflow:css.overflow},
-          fits:box.width>0&&box.height>0&&text.width>0&&text.height>0&&box.width+1>=text.width&&box.right<=rect(identity).right+1&&box.right<=rect(row).right+1};
+          fits:rect(strong).width>0&&rect(strong).height>0&&box.width>0&&box.height>0&&text.width>0&&text.height>0&&box.width+1>=text.width&&box.right<=rect(identity).right+1&&box.right<=rect(row).right+1};
       })()`)
       const style = fs.readFileSync(path.join(repository, 'apps/desktop/src/renderer/src/styles/chrome.css'), 'utf8')
       const rule = '.space-mote-row .project-rail-row__identity > small { flex: 0 0 auto; }'
@@ -297,6 +297,16 @@ app.whenReady().then(async () => {
       assert.equal(originalRule.flex, '0 0 auto', 'The actual loaded rule is the original Source flex block')
       const compiledStyle = fs.readFileSync(fileURLToPath(originalRule.stylesheet))
       assert.equal(compiledStyle.toString().split(rule).length, 2, 'The actual loaded compiled stylesheet contains exactly this owning Source block')
+      const compactSelector = '.space-mote-entry > .project-rail-entry > :is(.space-pin, .space-mote-edit)'
+      const compactSourceRule = compactSelector + ' { display: none; }'
+      assert.equal(style.split(compactSourceRule).length, 2, 'Exactly one compact Mote actions Source block is consumed')
+      assert.equal(compiledStyle.toString().split(compactSourceRule).length, 2, 'Actual compiled CSS retains the compact actions Source block')
+      const compactRule = `(() => {const found=[];const walk=rules=>{for(const rule of rules){if(rule.selectorText===${JSON.stringify(compactSelector)})found.push(rule);if(rule.cssRules)walk(rule.cssRules);}};
+        for(const sheet of document.styleSheets)walk(sheet.cssRules);if(found.length!==1)throw new Error('Exactly one loaded compact Mote actions rule is required');return found[0];})()`
+      const originalCompact = await read(`(() => {const rule=${compactRule};return {style:rule.style.cssText,display:rule.style.display,parent:rule.parentRule.cssText};})()`)
+      assert.equal(originalCompact.display, 'none'); assert.match(originalCompact.parent, /@container space-navigation\s/)
+      const compactActions = async () => read(`(() => {const entry=${spaceRow}.closest('.space-mote-entry'),actions=[...entry.querySelectorAll('.space-pin,.space-mote-edit')];
+        if(actions.length!==2)throw new Error('Exactly the original Pin and SOUL actions are required');return actions.map(n=>{const r=n.getBoundingClientRect();return {label:n.getAttribute('aria-label'),display:getComputedStyle(n).display,width:r.width,height:r.height};});})()`)
       const separator = node('[role="separator"][aria-label="Resize Projects"]')
       const originalWidth = Number(await read(`${separator}.getAttribute('aria-valuenow')`))
       assert.ok(Number.isFinite(originalWidth) && originalWidth > 0)
@@ -324,6 +334,26 @@ app.whenReady().then(async () => {
           await returnToSpaceRow(); const geometry = await labelGeometry(); proof.boundaries.push({ name, width, geometry })
           assert.ok(Math.abs(geometry.rail.width - width) < 1, 'The original sidebar really reaches its supported boundary')
           assert.equal(geometry.label.flexShrink, '0'); assert.equal(geometry.fits, true, 'Original Archived label is fully readable at the ' + name + ' boundary')
+          await locate(spaceRestore)
+        }
+        proof.compactActionsMutation = { selector: compactSelector, original: originalCompact, before: await compactActions() }
+        assert.deepEqual(proof.compactActionsMutation.before.map(action => action.display), ['none', 'none'])
+        try {
+          await read(`${compactRule}.style.display='inline-flex'`)
+          await read('new Promise(resolve=>requestAnimationFrame(resolve))')
+          proof.compactActionsMutation.actions = await compactActions()
+          for (const action of proof.compactActionsMutation.actions) {
+            assert.equal(action.display, 'inline-flex'); assert.ok(action.width > 0 && action.height > 0, 'The exact two original actions really regain their row area')
+          }
+          proof.compactActionsMutation.mutated = await labelGeometry()
+          assert.equal(proof.compactActionsMutation.mutated.fits, false, 'Removing the compact actions Source rule reproduces the crowded original Mote identity')
+        } finally {
+          await read(`${compactRule}.style.cssText=${JSON.stringify(originalCompact.style)}`)
+          assert.equal(await read(`${compactRule}.style.cssText`), originalCompact.style)
+          proof.compactActionsMutation.after = await compactActions()
+          assert.deepEqual(proof.compactActionsMutation.after.map(action => action.display), ['none', 'none'])
+          proof.compactActionsMutation.restored = await labelGeometry()
+          assert.equal(proof.compactActionsMutation.restored.fits, true, 'The exact compact Source block restores the readable original identity')
         }
         await read(`${loadedRule}.style.setProperty('flex','0 1 auto',${JSON.stringify(originalRule.priority)})`)
         await read('new Promise(resolve=>requestAnimationFrame(resolve))')
