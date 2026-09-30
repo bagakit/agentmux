@@ -70,7 +70,7 @@ function resolver() {
   } })
 }
 function message(id: string) { const found = [...host.querySelectorAll<HTMLElement>('.log-turn')].find(turn => turn.dataset.messageId === id); expect(found).toBeDefined(); return found! }
-function button(turn: HTMLElement) { const found = turn.querySelector<HTMLButtonElement>('button.conversation-input-details__toggle'); expect(found?.textContent).toBe('Message details'); return found! }
+function button(turn: HTMLElement) { const found = turn.querySelector<HTMLButtonElement>('button.conversation-input-details__toggle'); expect(found?.getAttribute('aria-label')).toBe('Message details'); expect(found?.querySelector('svg')).not.toBeNull(); return found! }
 function details(turn: HTMLElement) { const found = turn.querySelector<HTMLElement>('section[aria-label="Message details"]'); expect(found).not.toBeNull(); return found! }
 function value(turn: HTMLElement, label: string) { const found = [...details(turn).querySelectorAll('dt')].find(dt => dt.textContent === label); expect(found).toBeDefined(); return found!.nextElementSibling?.textContent }
 async function toggle(turn: HTMLElement) { await act(async () => button(turn).click()); await settle() }
@@ -187,7 +187,7 @@ it('actual SessionPane reads fresh current sender/project/goal metadata on reope
   await drawPane(f); const turn = message(f.messages[0]!.id), body = turn.querySelector('.log-turn__text')!, text = body.querySelector('strong')!.firstChild!, range = document.createRange()
   range.selectNodeContents(text); window.getSelection()!.addRange(range)
   const feed = host.querySelector<HTMLElement>('.activity-feed')!; expect(feed).not.toBeNull(); feed.scrollTop = 219
-  expect(window.getSelection()!.toString()).toBe('One original passage'); expect(read).not.toHaveBeenCalled(); expect(appearance).not.toHaveBeenCalled()
+  expect(window.getSelection()!.toString()).toBe('One original passage'); expect(read).not.toHaveBeenCalled(); expect(appearance.mock.calls).toEqual([['sender-project']])
   await toggle(turn); expect(details(turn).querySelector('strong')?.textContent).toBe('Current declared sender'); await toggle(turn)
   await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [DECLARED_ID]: 'Renamed current sender' }, config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace => workspace.id === 'sender-project' ? { ...workspace, name: 'Renamed current project' } : workspace) } })))
   await toggle(turn)
@@ -204,10 +204,10 @@ it('actual SessionPane History carries the same native source and precise lazy r
   await act(async () => host.querySelector<HTMLButtonElement>('[data-leaf="header"] button')!.click()); await settle()
   for (let i = 0; i < 80 && host.querySelectorAll('[data-history-item-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(row => row.dataset.historyItemId)).toEqual([...RAW_IDS])
-  expect(body.isConnected).toBe(true); expect(read).not.toHaveBeenCalled(); expect(appearance).not.toHaveBeenCalled()
+  expect(body.isConnected).toBe(true); expect(read).not.toHaveBeenCalled(); expect(appearance.mock.calls).toEqual([['sender-project']])
   const turn = message(RAW_IDS[0]); await toggle(turn)
   expect(value(turn, 'Source')).toBe('Provider native input · claude'); expect(value(turn, 'Record')).toBe(RAW_IDS[0]); expect(value(turn, 'Session')).toBe(DECLARED_ID)
-  expect(read.mock.calls.map(([id]) => id)).toEqual([DECLARED_ID]); expect(appearance.mock.calls).toEqual([['sender-project']])
+  expect(read.mock.calls.map(([id]) => id)).toEqual([DECLARED_ID]); expect(appearance.mock.calls).toEqual([['sender-project'], ['sender-project']])
 })
 
 it('rejects a spaced declaration as a session lookup even though the original native record remains readable', async () => {
@@ -222,11 +222,11 @@ it('rejects a spaced declaration as a session lookup even though the original na
 it('missing or retired sender metadata remains unknown on reopen without a guessed end time or recipient substitute', async () => {
   const f = await fixture(), appearance = vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
   await drawPane(f); const turn = message(f.messages[0]!.id), body = turn.querySelector('.log-turn__text')!; await toggle(turn)
-  expect(value(turn, 'Session')).toBe(DECLARED_ID); expect(appearance).toHaveBeenCalledOnce(); await toggle(turn)
+  expect(value(turn, 'Session')).toBe(DECLARED_ID); expect(appearance.mock.calls).toEqual([['sender-project'], ['sender-project']]); await toggle(turn)
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== DECLARED_ID) })))
   await toggle(turn)
   expect(details(turn).textContent).toContain('No current sender metadata for this exact session.'); expect(details(turn).textContent).not.toContain('Lifecycle end')
-  expect(details(turn).textContent).not.toContain('Recipient agent'); expect(details(turn).querySelector('a')).toBeNull(); expect(appearance).toHaveBeenCalledOnce()
+  expect(details(turn).textContent).not.toContain('Recipient agent'); expect(details(turn).querySelector('a')).toBeNull(); expect(appearance.mock.calls).toEqual([['sender-project'], ['sender-project']])
   expect(turn.querySelector('.log-turn__text')).toBe(body); expect(body.isConnected).toBe(true); expect(useAppStore.getState().agentComposerDrafts[RECIPIENT_ID]).toBe('Keep the original unsent reply draft.')
 })
 

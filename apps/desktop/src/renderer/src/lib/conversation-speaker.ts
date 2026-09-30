@@ -66,6 +66,7 @@ export type ConversationSenderDetails = {
  */
 export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
   name: string
+  project?: ConversationSenderDetails['project']
   providerId?: AgentProviderId
   /** Invoked only when the reader explicitly opens this sender's details. */
   readDetails?: () => ConversationSenderDetails | undefined
@@ -78,6 +79,7 @@ export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
 export function createSpeakerResolver(options?: {
   lookupAgent?: (agentSessionId: string) => {
     label?: string
+    project?: ConversationSenderDetails['project']
     providerId?: AgentProviderId
     readDetails?: () => ConversationSenderDetails | undefined
   } | undefined
@@ -92,6 +94,7 @@ export function createSpeakerResolver(options?: {
       if (found) {
         return {
           name: found.label ?? speaker.id,
+          ...(found.project ? { project: found.project } : {}),
           ...(found.readDetails ? { readDetails: found.readDetails } : {}),
           ...(found.providerId ? { providerId: found.providerId } : {})
         }
