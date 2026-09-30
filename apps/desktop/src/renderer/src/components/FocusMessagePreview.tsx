@@ -149,6 +149,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       <p className="recent-focus__sender-run">Sender Run not recorded · Execution relationship unknown</p></details> : null}
     <div className="recent-focus__message-body" data-input-preview-id={message.id} data-input-source={message.source.kind}><ConversationMessage messageId={message.id}
       speaker={speaker!}
+      describeSpeaker={describeSpeaker} inputSource={message.source} conversationSessionId={message.agentSessionId}
       name={described!.name} content={message.contentParts}
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
