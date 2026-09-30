@@ -14,6 +14,7 @@ import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSu
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
+import { directGoalRequest } from '../src/renderer/src/lib/goals-direct-pmo'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
 
@@ -182,7 +183,7 @@ function projectFixture(path = '/repo') {
 async function choose(node: HTMLSelectElement, value: string) { await act(async () => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })); await settleDemand() }) }
 function durableOwner() {
   const owner = openDemandStore({ root: join(dirname(f.store.filePath), 'demands') })
-  vi.spyOn(api.demands, 'create').mockImplementation(input => demandTransport(owner.create({ ...input, id: 'authored-project-goal' })))
+  vi.spyOn(api.demands, 'create').mockImplementation(input => demandTransport(owner.create(input)))
   vi.spyOn(api.demands, 'update').mockImplementation((id, patch) => demandTransport(owner.update(id, patch)))
   return owner
 }
@@ -196,17 +197,20 @@ describe('Goals consume opaque Project identities through original mounted produ
     expect([...filter.options].map(option => [option.value, option.textContent])).toEqual([['all', 'All projects'], [projects[0]!.id, 'Repo'], [projects[1]!.id, 'Other host Repo']])
     await choose(filter, projects[0]!.id)
     expect([...dom.container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual(['one'])
-    await click('New Goal'); await fill(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Goal intent"]')!, 'Create a real goal in this Project.'); await click('Save & discuss')
-    await vi.waitFor(async () => expect((await owner.get('authored-project-goal'))!.projectId).toBe(projects[0]!.id))
-    expect((await owner.get('authored-project-goal'))!).toMatchObject({ projectId: projects[0]!.id, projectName: 'Repo', description: 'Create a real goal in this Project.' })
-    await vi.waitFor(() => expect(request).toHaveBeenCalledExactlyOnceWith('authored-project-goal', 'grill'))
+    await click('New Goal')
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1))
+    const id = request.mock.calls[0]![0]!
+    expect(dom.container.querySelector('[aria-label="Goal intent"]')).toBeNull()
+    expect((await owner.get(id))!).toMatchObject({ id, projectId: projects[0]!.id, projectName: 'Repo', description: '', title: 'Untitled goal' })
+    expect(request).toHaveBeenCalledExactlyOnceWith(id, 'grill')
+    await vi.waitFor(() => expect(directGoalRequest()).toBeNull())
     const property = dom.container.querySelector<HTMLSelectElement>('[aria-label="Goal project"]')!
     expect(property.value).toBe(projects[0]!.id)
     expect([...property.options].map(option => option.value)).toEqual(['', projects[0]!.id, projects[1]!.id])
     await choose(property, projects[1]!.id)
-    await vi.waitFor(async () => expect((await owner.get('authored-project-goal'))!).toMatchObject({ projectId: projects[1]!.id, projectName: 'Other host Repo' }))
+    await vi.waitFor(async () => expect((await owner.get(id))!).toMatchObject({ projectId: projects[1]!.id, projectName: 'Other host Repo' }))
     await choose(property, '')
-    await vi.waitFor(async () => expect((await owner.get('authored-project-goal'))!).toMatchObject({ projectId: null, projectName: null }))
+    await vi.waitFor(async () => expect((await owner.get(id))!).toMatchObject({ projectId: null, projectName: null }))
     expect(createTopic).not.toHaveBeenCalled()
   })
 

@@ -117,7 +117,7 @@ describe('Demand dedicated PMO Tab context', () => {
     const retained = useAppStore.getState().agentSteerQueues[session.id]![0]!
     expect(retained.text).toContain("--demand 'goal'\"'\"'s-id'")
     expect(retained.text).toContain("criterion'\"'\"'s-id")
-    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), undefined, { allowUncertainTurn: true })
+    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), undefined, { allowUncertainTurn: true }, false)
     expect(useAppStore.getState().sessions).toEqual([session])
     expect(launch).not.toHaveBeenCalled()
     submit.mockResolvedValue(undefined)
