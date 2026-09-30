@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, crashReporter, dialog, Menu, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { applicationMenuTemplate } from './application-menu.js'
+import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { CrashLog } from './crash-log.js'
@@ -176,6 +177,7 @@ function startPrimaryInstance(): void {
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     workbenchWindow = window
+    installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
     window.once('closed', () => { if (workbenchWindow === window) workbenchWindow = null })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.

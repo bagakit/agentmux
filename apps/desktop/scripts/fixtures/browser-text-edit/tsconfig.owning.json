@@ -1,0 +1,7 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "paths": { "@agentmux/core": ["../../../../../packages/core/src/index.ts"], "@agentmux/core/*": ["../../../../../packages/core/src/*"] }
+  },
+  "include": ["../../../src/main/text-edit-context-menu.ts", "../../../src/main/browser-view-manager.ts", "../../../test/text-edit-context-menu.test.ts"]
+}
