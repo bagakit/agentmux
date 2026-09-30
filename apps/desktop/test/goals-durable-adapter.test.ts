@@ -164,10 +164,19 @@ describe('actual durable owner to Renderer projection', () => {
 
 it('invokes the actual registered Main Demand handlers against the unique filesystem owner', async () => {
   const main = await readFile(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
-  const start = main.indexOf("  handle('demands:list'")
-  const end = main.indexOf('\n  /**', start)
-  expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start)
-  const block = main.slice(start, end)
+  const source = ts.createSourceFile('ipc.ts', main, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const registration = source.statements.find((statement): statement is ts.FunctionDeclaration =>
+    ts.isFunctionDeclaration(statement) && statement.name?.text === 'registerIpc')
+  expect(registration?.body).toBeDefined()
+  const handlers = registration!.body!.statements.filter(statement => {
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) return false
+    const call = statement.expression
+    const channel = call.arguments[0]
+    return ts.isIdentifier(call.expression) && call.expression.text === 'handle'
+      && channel !== undefined && ts.isStringLiteral(channel) && channel.text.startsWith('demands:')
+  })
+  expect(handlers.length).toBeGreaterThan(0)
+  const block = handlers.map(statement => statement.getText(source)).join('\n')
   expect(block.length).toBeGreaterThan(0)
   expect(block).toContain("handle('demands:decision'")
   const routes = new Map<string, (...args: unknown[]) => Promise<unknown>>()
