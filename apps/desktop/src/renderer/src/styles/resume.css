@@ -1,4 +1,6 @@
-.launcher-resume-trigger { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.launcher-resume-trigger { min-height: 32px; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2); background: transparent; box-shadow: none; font-weight: 550; }
+.launcher-resume-trigger:hover:not(:disabled) { background: var(--surface-2); color: var(--text); box-shadow: none; }
+.launcher-resume-trigger > svg { flex: none; }
 .launcher-resume {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 32px);

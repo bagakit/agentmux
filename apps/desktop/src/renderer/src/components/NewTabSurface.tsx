@@ -1,12 +1,13 @@
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '../lib/composer-insertion'
-import { Check, ChevronRight, ChevronDown, Folder, LoaderCircle, Minus, Play, RadioTower, RefreshCw, SquareTerminal, X } from 'lucide-react'
+import { Check, ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { currentHostCheck, hostCheckLabel } from '../lib/host-check'
+import { currentHostCheck } from '../lib/host-check'
+import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { configuredExecutors } from '../lib/executors'
 import { currentExecutorDetection, executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '../lib/error-presentation'
@@ -31,6 +32,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
+import { LauncherEnvironment } from './LauncherEnvironment'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 
 export function NewTabSurface({
@@ -120,7 +122,10 @@ export function NewTabSurface({
     activeWorkspaceId
   }))
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
-  const hostLabel = host?.label ?? workspace?.hostId ?? 'No host'
+  const localHome = useAppStore(state => state.localHome)
+  const displayPath = workspace ? applyCopyPathStyle(workspace.path, {
+    home: host?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
+  }) : ''
   const storedHostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)
   const hostCheck = host ? currentHostCheck(storedHostCheck, host) : undefined
   // Only show a warm shell created for this exact host and working directory.
@@ -275,20 +280,7 @@ export function NewTabSurface({
 
   return (
     <section className="launch-surface" data-agent-section={sections.agents}>
-      <details className="launcher-environment">
-        <summary aria-label="Runtime environment">
-          <span className="launcher-environment__project"><Folder size={18} /><h2>{workspace?.name ?? 'Choose a workspace'}</h2></span>
-          <span className="launcher-environment__host">{host?.kind === 'ssh' ? <RadioTower size={13} /> : <SquareTerminal size={13} />}{host?.kind === 'local' ? 'Local' : host?.kind === 'ssh' ? 'SSH' : 'Unknown host'}<span>· {hostLabel}</span><ChevronDown size={12} /></span>
-          <span className="launcher-environment__path" title={workspace?.path}>{workspace?.path ?? 'No working directory selected'}</span>
-        </summary>
-        <div className="launcher-environment__details">
-          <dl><div><dt>Working directory</dt><dd>{workspace?.path ?? 'Not selected'}</dd></div>
-            <div><dt>Host</dt><dd>{hostLabel}{host?.kind === 'ssh' ? ` · ${host.user ? `${host.user}@` : ''}${host.hostname}${host.port ? `:${host.port}` : ''}` : ''}</dd></div>
-            <div><dt>Connection check</dt><dd>{hostCheck ? hostCheckLabel(hostCheck) : 'Not tested'}{hostCheck?.detail ? <small>{hostCheck.detail}</small> : null}</dd></div>
-            <div><dt>Execution environment</dt><dd>Configured host shell<small>Isolated environments are not supported yet.</small></dd></div>
-          </dl>
-        </div>
-      </details>
+      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
 
       {topicPreparation || (executors.length === 0 && prompt) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: topicPreparation ? 'Mote Topic preparation is unconfirmed' : 'No Agent Executor is configured',
@@ -298,11 +290,13 @@ export function NewTabSurface({
       {persistenceIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: persistenceIssue?.includes('could not be read') ? 'Saved Launcher preferences could not be read' : 'Launcher preferences could not be saved', mode: `${persistenceIssue ?? ''} Current sections and drafts remain usable in this window. They may not survive a restart.`, restore: persistenceIssue?.includes('could not be read') ? 'Copy any new drafts before reopening this window to retry reading saved preferences. The existing saved data is kept.' : 'Restore local storage access, then change a section or edit the draft to retry saving.' } }} /> : null}
 
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
-        <span className="launcher-agents-head__identity">{sections.agents === 'collapsed' && selectedExecutor ? <AgentAvatar executorId={selectedExecutor.id} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={16} /> : null}<strong>{sections.agents === 'collapsed' ? selectedExecutor?.label ?? 'Agent' : 'Agent'}</strong>
-          {sections.agents === 'collapsed' && prompt ? <small title={prompt}>{prompt.split('\n')[0]}</small> : null}</span>
+        {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
+          <AgentAvatar executorId={executorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ChevronRight size={14} />
+        </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
+          {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} disabled={busy !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!workspace || detecting} onClick={() => workspace && void detectExecutors(workspace.hostId)}>{detecting ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}</button>
-          <button type="button" className="icon-button" aria-label={sections.agents === 'expanded' ? 'Collapse Agents' : 'Expand Agents'} title={sections.agents === 'expanded' ? 'Collapse' : 'Expand'} onClick={() => setSection('agents', sections.agents === 'expanded' ? 'collapsed' : 'expanded')}>{sections.agents === 'expanded' ? <Minus size={13} /> : <ChevronDown size={13} />}</button>
+          {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><Minus size={13} /></button> : null}
           <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><X size={13} /></button>
         </span>
       </div> : null}
@@ -334,15 +328,16 @@ export function NewTabSurface({
             onChooseSkill={skill => appendReference(skill.path)} onCommand={command => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
             {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
           <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
-        </div></div>
+        </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded}
+          onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
+          onSelect={(optionId, choiceId) => setLaunchOptionSelection(current => { if (choiceId === null) { const { [optionId]: _cleared, ...rest } = current; return rest }; return { ...current, [optionId]: choiceId } })} /></div>
         <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
       </> : null}
-      {sections.agents !== 'hidden' ? <div className="launch-surface__footer">
-        <div className="launcher-launch-tools"><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded}
-          onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
-          onSelect={(optionId, choiceId) => setLaunchOptionSelection(current => { if (choiceId === null) { const { [optionId]: _cleared, ...rest } = current; return rest }; return { ...current, [optionId]: choiceId } })} /><LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} /></div>
-        <button className="primary-button" disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch agent'}</button>
-        <LauncherResumePicker workspace={workspace} disabled={busy !== null} />
+      {sections.agents === 'expanded' ? <div className="launch-surface__footer">
+        <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
+        <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} disabled={busy !== null} />
+          <button className="primary-button launcher-launch-button" disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
+        </div>
       </div> : null}
       {selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}

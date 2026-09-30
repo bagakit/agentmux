@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
 export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
 export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionMode> = {
-  agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'
+  agents: 'collapsed', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'
 }
 export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }

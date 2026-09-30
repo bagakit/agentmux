@@ -10,7 +10,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const initial = useLauncherState.getState()
-beforeEach(async () => { await act(async () => useLauncherState.setState({ sections: {}, drafts: {}, executors: {}, persistenceIssue: null })) })
+beforeEach(async () => { await act(async () => useLauncherState.setState({ sections: { workspace: { agents: 'expanded' } }, drafts: {}, executors: {}, persistenceIssue: null })) })
 afterEach(async () => { window.localStorage.setItem('agentmux-launcher', JSON.stringify({ state: { sections: {}, drafts: {}, executors: {} }, version: 0 })); await act(async () => { await useLauncherState.persist.rehydrate(); useLauncherState.setState(initial, true) }) })
 async function mount(state: 'ready' | 'error' | 'missing' = 'ready') {
   const host = composerConfig.hosts[0]!, executor = composerConfig.executors.codex!
@@ -23,7 +23,7 @@ async function mount(state: 'ready' | 'error' | 'missing' = 'ready') {
 describe('actual Launcher work start', () => {
   it('anchors the real bound workspace, host and directory without welcome copy or fabricated connection', async () => {
     await mount(); const environment = dom.container.querySelector('.launcher-environment')!
-    expect(environment.textContent).toContain('Project'); expect(environment.textContent).toContain('This Mac'); expect(environment.textContent).toContain('/repo'); expect(environment.textContent).toContain('Not tested')
+    expect(environment.textContent).toContain('Project'); expect(environment.textContent).toContain('This Mac'); expect(environment.textContent).toContain('/repo'); expect(environment.textContent).not.toContain('Ready'); await dom.click('[aria-label="Runtime environment"]'); expect(document.querySelector('.launcher-environment__panel')?.textContent).toContain('Not tested'); await act(async () => (document.querySelector('[aria-label="Close runtime environment"]') as HTMLButtonElement).click())
     expect(dom.container.textContent).not.toContain('Available Agents'); expect(dom.container.textContent).not.toContain('New session')
     expect(dom.container.querySelector('.agent-pick[aria-pressed="true"] strong')?.textContent).toBe('Codex')
     expect(dom.container.querySelector('[aria-label="Agent name"]')).toBeNull()
@@ -36,7 +36,7 @@ describe('actual Launcher work start', () => {
   })
   it('only confirmed missing commands disable launch', async () => { await mount('missing'); expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true); expect(dom.container.textContent).toContain('not found') })
   it('collapse and close retain the same selected Agent and complete draft, then restore an editable input', async () => {
-    await mount(); await dom.click('[aria-label="Collapse Agents"]'); expect(dom.container.querySelector('.launcher-composer')).toBeNull(); expect(dom.container.textContent).toContain('Preserve the full request'); expect(dom.container.querySelector('.primary-button')).not.toBeNull()
+    await mount(); await dom.click('[aria-label="Collapse Agents"]'); expect(dom.container.querySelector('.launcher-composer')).toBeNull(); expect(dom.container.textContent).toContain('Preserve the full request'); expect(dom.container.querySelector('.primary-button')).toBeNull(); expect(dom.container.querySelector('.launcher-resume-trigger')).not.toBeNull()
     await dom.click('[aria-label="Close Agents"]'); expect(dom.container.querySelector('[aria-label="Launch options"]')).toBeNull(); expect(dom.container.querySelector('.launcher-restore')?.textContent).toContain('Codex')
     await dom.click('.launcher-restore'); expect(dom.draft('region')).toBe('Preserve the full request\nincluding this second line.')
     const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
@@ -50,7 +50,7 @@ describe('actual Launcher work start', () => {
     await dom.click('[aria-label="Expand Note"]')
     const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.launcher-note-composer .tiptap')!.editor
     await act(async () => { editor.commands.insertContent('New unsaved note after the failed read') })
-    expect(useLauncherState.getState().drafts['region:region'].note).toBe('New unsaved note after the failed read')
+    expect(useLauncherState.getState().drafts['region:region']!.note).toBe('New unsaved note after the failed read')
     expect(window.localStorage.getItem('agentmux-launcher')).toBe(saved)
     expect(dom.container.textContent).toContain('Copy any new drafts before reopening this window')
     expect(dom.container.textContent).not.toContain('edit the draft to retry saving')

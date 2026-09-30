@@ -25,7 +25,7 @@ if (!restarting) {
   const initial=await api.config.get()
   await api.config.save({...initial,workspaces:[...initial.workspaces.map(item=>item.path==='home//agentmux'?{...item,path:'/Users/preview/projects/agentmux'}:item),{id:SCRATCH_WORKSPACE_ID,name:'No Project',path:'/Users/preview/.agentmux/scratch',hostId:'local',kind:'folder'}]},initial)
   const snapshot=api.sessions.snapshot
-  api.sessions.snapshot=async()=>{const value=await snapshot();return {...value,sessions:value.sessions.map(session=>session.workspacePath==='home//agentmux'?{...session,workspacePath:'/Users/preview/projects/agentmux'}:session)}}
+  api.sessions.snapshot=async()=>{const value=await snapshot();return {...value,localHome:'/Users/preview',sessions:value.sessions.map(session=>session.workspacePath==='home//agentmux'?{...session,workspacePath:'/Users/preview/projects/agentmux'}:session)}}
 }
 if (restarting) {
   if (!restartFacts) throw new Error('Restart must have the exact captured preview API facts, not seeded views')
@@ -49,6 +49,14 @@ const agents = snapshot.sessions.filter(session => session.kind === 'agent')
 const warm = restarting ? restartFacts.warm : await api.sessions.launchTerminal({ hostId: workspace.hostId, workspacePath: workspace.path })
 const neighbor = restarting ? restartFacts.neighbor : await api.sessions.launchTerminal({ hostId: workspace.hostId, workspacePath: workspace.path })
 const calls = { stops: [] as unknown[], browsers: [] as unknown[], files: [] as unknown[], submissions: [] as unknown[], launches: [] as unknown[] }
+// Controlled native history facts keep the normal UI scene separate from the
+// web-preview host's intentional unsupported-history service notice.
+const historyScope = (target: Parameters<typeof api.browser.listInputHistory>[0]) => ({
+  workspaceId: target.kind === 'workspace' ? target.workspaceId : workspaceId,
+  profileId: target.kind === 'browser' ? target.profileId : 'launcher-private-profile'
+})
+api.browser.listInputHistory = async target => ({ scope: historyScope(target), entries: [] })
+api.browser.recordInputHistory = async (target, text) => ({ scope: historyScope(target), entries: text.trim() ? [{ text, submittedAt: Date.now() }] : [], outcome: text.trim() ? 'recorded' : 'empty' })
 const stop = api.sessions.stop, browserCreate = api.browser.create, write = api.files.write, submit = api.sessions.submitPrompt, launch = api.sessions.launchAgent
 api.sessions.stop = async (...args) => { calls.stops.push(args); return stop(...args) }
 api.browser.create = async (...args) => { calls.browsers.push(args); return browserCreate(...args) }
@@ -79,6 +87,10 @@ const probe = {
   flush() { return prepareRendererUpdate('quit') },
   bootFacts() { const state=useAppStore.getState(); return {config:state.config,snapshot:{...snapshot,sessions:state.sessions,timelines:state.timelines,recoveryCandidates:state.recoveryCandidates},warm,neighbor} },
   settings() { flushSync(()=>root.render(<div style={{display:'flex',width:'100%',height:'100%'}}><SettingsPanel onClose={()=>probe.scene()} /></div>)) },
+  pathStyle(absolute: boolean) {
+    const config = useAppStore.getState().config!
+    flushSync(() => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: absolute } }))
+  },
   scene({ split = false, long = false, theme = 'dark', ratio = 0.5 } = {}) {
     document.documentElement.dataset.appearance = theme
     const config = structuredClone(baseConfig)

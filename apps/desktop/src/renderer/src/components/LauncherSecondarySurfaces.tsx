@@ -4,7 +4,7 @@ import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { useAppStore } from '../store'
 import { EMPTY_LAUNCHER_DRAFT, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { InlineComposer } from './InlineComposer'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { TerminalView } from './TerminalView'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
@@ -34,6 +34,32 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   const retryCreatedNote = useAppStore(state => state.retryCreatedNote)
   const projection = useWorkbenchBrowserPresentation().projection
   const browserInput = useRef<BrowserAddressInputHandle>(null)
+  const [browserClosing, setBrowserClosing] = useState(false)
+  const browserCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const browserRow = useRef<HTMLElement>(null)
+  function cancelBrowserClose() {
+    if (browserCloseTimer.current) clearTimeout(browserCloseTimer.current)
+    browserCloseTimer.current = null
+    setBrowserClosing(false)
+  }
+  // Only the short visual exit is local. The existing section owner receives the final intent.
+  function collapseBrowser() {
+    cancelBrowserClose()
+    onSectionChange('browser', 'collapsed')
+    if (!visible || browserRow.current?.closest('[hidden], [inert]') || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return
+    }
+    setBrowserClosing(true)
+    browserCloseTimer.current = setTimeout(() => {
+      browserCloseTimer.current = null
+      setBrowserClosing(false)
+    }, 180)
+  }
+  useEffect(() => {
+    cancelBrowserClose()
+    return () => { if (browserCloseTimer.current) clearTimeout(browserCloseTimer.current) }
+  }, [workspace?.id, launcherId, visible])
+  useEffect(() => { if (sections.browser !== 'collapsed') cancelBrowserClose() }, [sections.browser])
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
   const disabled = !workspace || busy !== null
@@ -78,8 +104,8 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
           {sections.terminal === 'expanded' ? warmSession && terminalThemeId && workspace ? <div className="launch-terminal__body"><TerminalView session={warmSession} themeId={terminalThemeId} fontSize={terminalFontSize} interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={{ workspaceId: workspace.id, tabGroupId }} /></div> : <div className="launcher-terminal-pending"><span>{warmPending ? 'Preparing a reusable host shell…' : 'The shell preview is not available.'}</span><button type="button" className="small-button" disabled={disabled} onClick={openTerminal}>Open Terminal<ArrowUpRight size={12} /></button></div> : null}
         </section> : null}
         <div className="launch-surface-quick-grid">
-          {sections.browser !== 'hidden' ? <section className="launcher-utility" data-section="browser" data-mode={sections.browser}>{header('browser')}
-            {sections.browser === 'expanded' ? <form className="launcher-browser-input" onSubmit={event => { event.preventDefault(); if (!disabled) browserInput.current?.submit() }}><Globe2 size={14} /><BrowserAddressInput ref={browserInput} aria-label="Browser address or search" value={draft.browser} disabled={busy === 'browser'} submitDisabled={disabled} placeholder="Search or enter a URL" historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => setDraft('browser', value)} onSubmit={openBrowser} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} /><button type="submit" className="icon-button" disabled={disabled} data-agentmux-action={DESKTOP_ACTIONS.openBrowser} aria-label="Go to Browser address or search" title="Open address or search"><ArrowUpRight size={14} /></button></form> : null}
+          {sections.browser !== 'hidden' ? <section ref={browserRow} className="launcher-utility launcher-browser" data-section="browser" data-mode={sections.browser} data-closing={browserClosing || undefined}>
+            {sections.browser === 'expanded' || browserClosing ? <form className="launcher-browser-input" onSubmit={event => { event.preventDefault(); if (!disabled && !browserClosing) browserInput.current?.submit() }}><Globe2 size={15} aria-label="Browser" /><span className="launcher-browser-field" inert={browserClosing}><BrowserAddressInput ref={browserInput} aria-label="Browser address or search" value={draft.browser} disabled={busy === 'browser' || browserClosing} submitDisabled={disabled || browserClosing} placeholder="Search or enter a URL" historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => setDraft('browser', value)} onSubmit={openBrowser} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} /></span><button type="submit" className="icon-button" disabled={disabled || browserClosing} data-agentmux-action={DESKTOP_ACTIONS.openBrowser} aria-label="Go to Browser address or search" title="Open address or search"><ArrowUpRight size={14} /></button><span className="launcher-section-actions"><button type="button" className="icon-button" aria-label="Collapse Browser" title="Collapse Browser" onClick={collapseBrowser}><Minus size={13} /></button><button type="button" className="icon-button" aria-label="Close Browser" title="Close Browser" onClick={() => { cancelBrowserClose(); onSectionChange('browser', 'hidden') }}><X size={13} /></button></span></form> : header('browser')}
             {inputHistoryNotice ? <p className="launcher-persistence-notice" role="status">{inputHistoryNotice}</p> : null}
           </section> : null}
           {sections.note !== 'hidden' ? <section className="launcher-utility" data-section="note" data-mode={sections.note}>{header('note')}

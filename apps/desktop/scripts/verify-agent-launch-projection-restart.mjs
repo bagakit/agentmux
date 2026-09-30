@@ -30,7 +30,7 @@ const critical = [fileURLToPath(import.meta.url), join(base, 'apps/desktop/scrip
   join(base, 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json')]
 const hash = async p => createHash('sha256').update(await readFile(p)).digest('hex')
 const capture = async () => Object.fromEntries(await Promise.all(critical.map(async p => [p, await hash(p)])))
-const before = await capture(), children = [], records = [], cleanupErrors = []
+const before = await capture(), children = [], records = [], cleanupErrors = [], cleanupObservations = []
 let failure
 const worker = join(root, 'worker.mjs')
 const source = `
@@ -142,7 +142,7 @@ try {
       // This Node host does not provide Electron's optional OS resource sampling.
       // Runtime lifecycle, public Core and persistence remain their actual implementations.
       bundler.onResolve({ filter: /^electron$/ }, () => ({ path: 'private-resource-observation', namespace: 'private-node-host' }))
-      bundler.onLoad({ filter: /.*/, namespace: 'private-node-host' }, () => ({ contents: 'export const app = { getAppMetrics: () => [] }', loader: 'js' }))
+      bundler.onLoad({ filter: /.*/, namespace: 'private-node-host' }, () => ({ contents: 'export const app = { getAppMetrics: () => [] }; export const nativeImage = { createFromBuffer: () => { throw new Error("Private Node host does not provide OS image decoding") } }', loader: 'js' }))
     } }], define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, logLevel: 'silent' })
   // Resolve external dependencies from the project without copying/installing them.
   await import('node:fs/promises').then(({ symlink }) => symlink(join(base, 'apps/desktop/node_modules'), join(root, 'node_modules')))
@@ -172,18 +172,26 @@ finally {
   for (const pid of await listProbeProcesses(-1, root)) {
     try {
       await signalOwnedProbeProcess(pid, root, 'SIGTERM')
-    } catch (error) { cleanupErrors.push(String(error)) }
+    } catch (error) {
+      if ((await listProbeProcesses(-1, root)).includes(pid)) cleanupErrors.push(String(error))
+      else cleanupObservations.push({ pid, observation: String(error), resolved: 'A fresh process listing no longer contains this private process.' })
+    }
   }
   const deadline = Date.now() + 4000
   while (Date.now() < deadline && (await listProbeProcesses(-1, root)).length) await new Promise(done => setTimeout(done, 25))
   let remaining = await listProbeProcesses(-1, root)
-  for (const pid of remaining) { try { await signalOwnedProbeProcess(pid, root, 'SIGKILL') } catch (error) { cleanupErrors.push(String(error)) } }
+  for (const pid of remaining) {
+    try { await signalOwnedProbeProcess(pid, root, 'SIGKILL') } catch (error) {
+      if ((await listProbeProcesses(-1, root)).includes(pid)) cleanupErrors.push(String(error))
+      else cleanupObservations.push({ pid, observation: String(error), resolved: 'A fresh process listing no longer contains this private process.' })
+    }
+  }
   await new Promise(done => setTimeout(done, 50)); remaining = await listProbeProcesses(-1, root)
   const after = await capture(); if (JSON.stringify(before) !== JSON.stringify(after)) failure ??= 'Selected inputs changed during proof'
   if (!remaining.length && !cleanupErrors.length) await rm(root, { recursive: true, force: true })
   const receipt = { passed: !failure && !remaining.length && !cleanupErrors.length, records,
     inputsBefore: before, inputsAfter: after, failure: failure ?? null,
-    cleanup: { remaining, errors: cleanupErrors, rootRemoved: !remaining.length && !cleanupErrors.length },
+    cleanup: { remaining, errors: cleanupErrors, observations: cleanupObservations, rootRemoved: !remaining.length && !cleanupErrors.length },
     scope: 'Actual public Core/FileStore/native PTY, RuntimeController, Store filesystem-host storage; ordinary two Node processes, not Electron/OS input/user Run.' }
   await writeFile(join(out, 'restart-last.json'), JSON.stringify(receipt, null, 2) + '\n')
   console.log(JSON.stringify({ passed: receipt.passed, processes: records.length, cleanup: receipt.cleanup }))

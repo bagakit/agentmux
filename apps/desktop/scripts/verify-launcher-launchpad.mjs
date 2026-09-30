@@ -10,8 +10,9 @@ const arg=name=>process.argv.find(value=>value.startsWith(name+'='))?.slice(name
 const receiptPath=arg('--receipt')?resolve(repository,arg('--receipt')):null
 const evidence=arg('--output')?resolve(repository,arg('--output')):receiptPath?dirname(receiptPath):join(repository,'.tmp/launcher-launchpad-capture')
 const designRoot=arg('--design-root')?resolve(arg('--design-root')):repository
+const scenes=arg('--scenes')??'full'
 const sha=value=>createHash('sha256').update(value).digest('hex')
-const modules=['components/NewTabSurface.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','styles/launcher.css','styles/resume.css']
+const modules=['components/NewTabSurface.tsx','components/LauncherEnvironment.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','lib/copy-path-display.ts','styles/launcher.css','styles/resume.css']
 const section=(bytes,start,end)=>{const a=bytes.indexOf(start),b=end?bytes.indexOf(end,a+start.length):bytes.length;assert.ok(a>=0&&b>a,'Source binding has a nonempty exact scope: '+start);return bytes.slice(a,b)}
 async function bindings(){
  const facts={}
@@ -30,7 +31,7 @@ async function bindings(){
 }
 async function callers(){
  const result=[]
- for(const [symbol,definition,caller] of [['NewTabSurface','components/NewTabSurface.tsx','components/WorkspaceWorkbench.tsx'],['LaunchRefine','components/LaunchOptionControls.tsx','components/NewTabSurface.tsx'],['LauncherResumePicker','components/LauncherResumePicker.tsx','components/NewTabSurface.tsx'],['LauncherSecondarySurfaces','components/LauncherSecondarySurfaces.tsx','components/NewTabSurface.tsx'],['LauncherMoteAction','components/LauncherMoteAction.tsx','components/NewTabSurface.tsx']]){
+ for(const [symbol,definition,caller] of [['NewTabSurface','components/NewTabSurface.tsx','components/WorkspaceWorkbench.tsx'],['LauncherEnvironment','components/LauncherEnvironment.tsx','components/NewTabSurface.tsx'],['LaunchRefine','components/LaunchOptionControls.tsx','components/NewTabSurface.tsx'],['LauncherResumePicker','components/LauncherResumePicker.tsx','components/NewTabSurface.tsx'],['LauncherSecondarySurfaces','components/LauncherSecondarySurfaces.tsx','components/NewTabSurface.tsx'],['LauncherMoteAction','components/LauncherMoteAction.tsx','components/NewTabSurface.tsx']]){
   assert.notEqual(definition,caller);const file=join(sourceRoot,caller),bytes=await readFile(file,'utf8'),source=ts.createSourceFile(file,bytes,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),hits=[]
   function visit(node){if((ts.isJsxOpeningElement(node)||ts.isJsxSelfClosingElement(node))&&node.tagName.getText(source)===symbol)hits.push(node.getText(source));ts.forEachChild(node,visit)}visit(source)
   assert.ok(hits.length>0,'Actual non-definition/non-test caller: '+symbol);result.push({symbol,definition,caller,hits,sha256:sha(hits.join('\n'))})
@@ -65,7 +66,7 @@ if(receiptPath){
  await writeFile(receiptPath,JSON.stringify(receipt,null,2));console.log(JSON.stringify({passed:true,receipt:receiptPath,sourceDigest:identity.digest}));process.exit(0)
 }
 const privateRoot=await mkdtemp('/tmp/amx-launchpad-'),profile=join(privateRoot,'profile'),outDir=join(privateRoot,'out')
-const result={schema:'agentmux.launcher-launchpad-capture.v1',passed:false,sourceDigest:identity.digest,identity,callers:realCallers,frames:[],processes:[],
+const result={schema:'agentmux.launcher-launchpad-capture.v1',passed:false,scenes,sourceDigest:identity.digest,identity,callers:realCallers,frames:[],processes:[],
  aestheticReview:'Not performed by capture. Independent review is required by the final receipt gate.',userRunTouched:false,
  boundary:'Actual isolated production Workbench/Region, CSS, rich editors and xterm. Controlled preview API facts. Two separate Electron processes reuse one private profile; no native daemon or vendor CLI continuity claim.'}
 try{
@@ -80,7 +81,7 @@ try{
  const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')))
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
  for(const phase of ['capture','restart']){
-  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase,arg('--scenes')??'full'],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})
+  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase,scenes],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})
   await writeFile(join(evidence,phase+'-process.log'),lines.join('\n'));const render=JSON.parse(await readFile(join(evidence,phase+'-render.json'),'utf8'));result.processes.push({phase,outcome,render});assert.equal(outcome.exitCode,0,render.failure?.message);assert.equal(render.passed,true)
   for(const frame of render.frames)result.frames.push({...frame,sha256:sha(await readFile(join(evidence,frame.file)))})
  }

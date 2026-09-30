@@ -25,7 +25,7 @@ async function mount(kind: 'agent' | 'launcher' = 'agent', prompt = sourcePrompt
   })
   await dom.render(<LauncherMoteAction workspace={composerConfig.workspaces[0]} prompt={prompt} sourceTabId="source" sourceRegionId="source-region" />)
 }
-function createButton() { return dom.container.querySelector<HTMLButtonElement>('.launch-refine__toggle')! }
+function createButton() { return dom.container.querySelector<HTMLButtonElement>('.launcher-mote__create')! }
 function expectDrafts() { expect(useAppStore.getState().agentComposerDrafts).toEqual({ 'source-region': sourcePrompt, 'selected-mote': oldMoteDraft, 'mote-region': oldMoteDraft }); expect(useAppStore.getState().activeWorkspaceId).toBe('workspace') }
 
 describe('explicit selected Mote creation request', () => {
@@ -33,8 +33,8 @@ describe('explicit selected Mote creation request', () => {
     await mount(); expect(createButton().textContent).toBe('Create with Mote'); expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe('Mote')
     await act(async () => { createButton().click(); createButton().click() })
     const queue = useAppStore.getState().agentSteerQueues['selected-mote']
-    expect(queue).toHaveLength(1); expect(queue![0].text).toContain('Help me create an Agent'); expect(queue![0].text).toContain('Project: Project\nHost: local\nWorking directory: /repo\n\n'+sourcePrompt)
-    expect(queue![0].runId).toBe('run-selected-mote'); expect(queue![0].origin).toBe('manual'); expectDrafts(); expect(createButton().textContent).toBe('Request queued'); expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, targetTabId: 'mote' })
+    expect(queue).toHaveLength(1); expect(queue![0]!.text).toContain('Help me create an Agent'); expect(queue![0]!.text).toContain('Project: Project\nHost: local\nWorking directory: /repo\n\n'+sourcePrompt)
+    expect(queue![0]!.runId).toBe('run-selected-mote'); expect(queue![0]!.origin).toBe('manual'); expectDrafts(); expect(createButton().textContent).toBe('Request queued'); expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, targetTabId: 'mote' })
     await act(async () => createButton().click()); expect(useAppStore.getState().agentSteerQueues['selected-mote']).toHaveLength(1)
   })
   it('starts only the exact original Mote Launcher using the existing public launch action', async () => {
@@ -45,7 +45,7 @@ describe('explicit selected Mote creation request', () => {
     await mount('launcher'); let release!: () => void
     const launch = vi.fn().mockImplementation(() => new Promise<void>(r => { release = r }))
     await act(async () => useAppStore.setState({ launchAgent: launch })); await act(async () => createButton().click())
-    const original = useAppStore.getState().tabs.mote
+    const original = useAppStore.getState().tabs.mote!
     const changed = addWorkbenchRegion(original, 'mote-region', 'right', { regionId: 'other-region', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID })
     await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, mote: { ...changed, layout: { ...changed.layout, activeRegionId: 'other-region' } } } })); await act(async () => release())
     expect(launch).toHaveBeenCalledTimes(1); expect(readPmoTeamsTopicFloatingState()?.open).toBe(false); expectDrafts()

@@ -14,7 +14,7 @@ import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, useP
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), initial = useLauncherState.getState()
-beforeEach(async () => { await act(async () => { useLauncherState.setState({ sections: {}, drafts: {}, executors: {}, persistenceIssue: null }); requestPmoTeamsTopicFloatingClose() }) })
+beforeEach(async () => { await act(async () => { useLauncherState.setState({ sections: { workspace: { agents: 'expanded' } }, drafts: {}, executors: {}, persistenceIssue: null }); requestPmoTeamsTopicFloatingClose() }) })
 afterEach(async () => { await act(async () => useLauncherState.setState(initial, true)) })
 async function mount() {
   const tab = createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' })
@@ -38,12 +38,15 @@ describe('actual Launcher utility surfaces', () => {
   })
   it('Note edits use the real rich input and save complete Markdown through the existing file create/write owner', async () => {
     await mount(); await dom.click('[aria-label="Expand Note"]'); await act(async () => { noteEditor().commands.insertContent('## Keep this note\nComplete second line') })
-    const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved' }), open = vi.fn().mockResolvedValue(undefined)
+    const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved' }), open = vi.fn().mockResolvedValue(true)
     await act(async () => useAppStore.setState({ openFile: open }))
     const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.includes('Save & open note'))!
     await act(async () => button.click())
-    expect(write).toHaveBeenCalledWith('workspace', { path: expect.stringMatching(/^note-.*\.md$/), content: '## Keep this note\nComplete second line', expectedRevision: null })
-    expect(open).toHaveBeenCalledWith(expect.stringMatching(/^note-.*\.md$/), 'group', undefined, 'workspace'); expect(useLauncherState.getState().drafts['region:region'].note).toBe('')
+    expect(write).toHaveBeenCalledOnce()
+    const [workspaceId, saved] = write.mock.calls[0]!
+    expect(workspaceId).toBe('workspace'); expect(saved.path).toMatch(/^note-.*\.note\.json$/); expect(saved.expectedRevision).toBeNull()
+    expect(JSON.parse(saved.content)).toMatchObject({ schema: 'agentmux.note.v1', content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '## Keep this note' }, { type: 'hardBreak' }, { type: 'text', text: 'Complete second line' }] }] } })
+    expect(open).toHaveBeenCalledOnce(); expect(open.mock.calls[0]!.slice(0, 4)).toEqual([saved.path, 'group', undefined, 'workspace']); expect(open.mock.calls[0]![5]).toMatchObject({ displayWorkspaceId: 'workspace', resource: { hostId: 'local', path: '/repo' } }); expect(useLauncherState.getState().drafts['region:region']!.note).toBe('')
   })
   it('Note save failure and closing preserve the complete original draft', async () => {
     await mount(); await dom.click('[aria-label="Expand Note"]'); await act(async () => { noteEditor().commands.insertContent('Do not lose me\nSecond line') })
@@ -52,7 +55,7 @@ describe('actual Launcher utility surfaces', () => {
     expect(dom.container.textContent).toContain('Note write unavailable'); await dom.click('[aria-label="Close Note"]'); await dom.click('[aria-label="Restore Note"]'); expect(noteEditor().getText({ blockSeparator: '\n' })).toBe('Do not lose me\nSecond line')
   })
   it('Terminal collapsing/closing never stops the healthy warm Run, and expanding reuses the same original shell', async () => {
-    await mount(); const session = { ...composerSession('warm'), kind: 'terminal' as const, providerId: null, control: { kind: 'terminal' as const, hostId: 'local', run: { runId: 'healthy-warm-run' } } }
+    await mount(); const session = { ...composerSession('warm'), kind: 'terminal' as const, providerId: null, control: { kind: 'terminal' as const, hostId: 'local', runId: 'healthy-warm-run', run: { runId: 'healthy-warm-run' } } }
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
     await act(async () => useAppStore.setState({ warmTerminal: { key: warmTerminalKey('local', '/repo'), ownerLauncherId: 'region:region', session, ready: Promise.resolve(session) } }))
     expect(dom.container.querySelector('[data-warm-preview]')).not.toBeNull(); await dom.click('[aria-label="Collapse Terminal"]'); expect(dom.container.querySelector('[data-warm-preview]')).toBeNull()
@@ -61,7 +64,7 @@ describe('actual Launcher utility surfaces', () => {
   })
   it('Mote creation delegates through its original Launcher while preserving both drafts and navigation', async () => {
     await mount(); const mote = { ...createWorkbenchTab('mote', { regionId: 'mote-input', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
-    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/scratch', hostId: 'local', kind: 'scratch' as const }
+    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/scratch', hostId: 'local', kind: 'folder' as const }
     await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratch] }, tabs: { ...useAppStore.getState().tabs, mote }, layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [mote.id]) }, agentComposerDrafts: { region: 'The complete request\nwith a second line', 'mote-input': 'Existing Mote draft' }, openScratchTopic: vi.fn().mockResolvedValue(undefined), refreshScratchTopics: vi.fn().mockResolvedValue(undefined) }))
     const ensure = vi.spyOn(api.scratch, 'ensureMote').mockResolvedValue({} as never), launch = vi.fn().mockResolvedValue(undefined)
     await act(async () => useAppStore.setState({ launchAgent: launch }))
@@ -72,8 +75,8 @@ describe('actual Launcher utility surfaces', () => {
   it.each(['ensure', 'open'] as const)('Mote does not write a late %s result after the source project changes', async (waitingFor) => {
     await mount()
     const mote = { ...createWorkbenchTab('mote', { regionId: 'mote-input', kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
-    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/scratch', hostId: 'local', kind: 'scratch' as const }
-    const other = { id: 'other', name: 'Another project', path: '/other', hostId: 'local', kind: 'directory' as const }
+    const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/scratch', hostId: 'local', kind: 'folder' as const }
+    const other = { id: 'other', name: 'Another project', path: '/other', hostId: 'local', kind: 'folder' as const }
     let release!: () => void
     const late = new Promise<void>(resolve => { release = resolve })
     const open = vi.fn().mockImplementation(() => waitingFor === 'open' ? late : Promise.resolve())
@@ -81,11 +84,11 @@ describe('actual Launcher utility surfaces', () => {
     vi.spyOn(api.scratch, 'ensureMote').mockImplementation(async () => { if (waitingFor === 'ensure') await late; return {} as never })
     const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.includes('Create with Mote'))!
     await act(async () => button.click())
-    await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, launcher: { ...useAppStore.getState().tabs.launcher, workspaceId: 'other' } } }))
+    await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, launcher: { ...useAppStore.getState().tabs.launcher!, workspaceId: 'other' } } }))
     await act(async () => release())
     expect(useAppStore.getState().agentComposerDrafts['mote-input']).toBe('Original Mote draft')
     expect(dom.draft('region')).toBe('The complete request\nwith a second line')
-    expect(readPmoTeamsTopicFloatingState().open).toBe(false)
+    expect(readPmoTeamsTopicFloatingState()?.open ?? false).toBe(false)
     expect(open).toHaveBeenCalledTimes(waitingFor === 'ensure' ? 0 : 1)
   })
   it('Mote preparation never writes a different Region of the same target Tab after awaiting', async () => {
@@ -103,7 +106,7 @@ describe('actual Launcher utility surfaces', () => {
     await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, mote: { ...mote, layout: { ...mote.layout, activeRegionId: 'other-mote-input' } } } }))
     await act(async () => release())
     expect(useAppStore.getState().agentComposerDrafts).toMatchObject({ region: 'The complete request', 'original-mote-input': 'Original target request', 'other-mote-session': 'Other target request' })
-    expect(readPmoTeamsTopicFloatingState().open).toBe(false)
+    expect(readPmoTeamsTopicFloatingState()?.open ?? false).toBe(false)
   })
 
   it('the selected Mote input cannot prepare its own request into itself', async () => {
@@ -120,7 +123,7 @@ describe('actual Launcher utility surfaces', () => {
     const mote = { ...createWorkbenchTab('mote', { regionId: 'mote-input', kind: 'agent', phase: 'attached', sessionId: 'mote-session', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
     const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', path: '/scratch', hostId: 'local', kind: 'folder' as const }
     const session = composerSession('mote-session'), paints = vi.fn()
-    const recap = (content: string) => ({ agentSessionId: session.id, revision: 1, items: [{ id: 'message', agentSessionId: session.id, kind: 'user_message' as const, status: 'complete' as const, source: 'user' as const, content, createdAt: 1, updatedAt: 1 }] })
+    const recap = (content: string) => ({ agentSessionId: session.id, revision: 1, items: [{ id: 'message', agentSessionId: session.id, kind: 'user_message' as const, status: 'complete' as const, source: 'user' as const, title: 'Task', content, createdAt: 1, updatedAt: 1 }] })
     await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratch] }, tabs: { ...useAppStore.getState().tabs, mote }, layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [mote.id]) }, sessions: [session], timelines: { [session.id]: recap('Original coordinator task') }, refreshScratchTopics: vi.fn().mockResolvedValue(undefined) }))
     await dom.render(<Profiler id="retained-launcher-handoff" onRender={paints}><LauncherMoteAction workspace={composerConfig.workspaces[0]} prompt="Original project request" sourceTabId="launcher" sourceRegionId="region" /></Profiler>)
     expect(dom.container.querySelector('.launcher-mote')?.textContent).toContain('Create with Mote')
