@@ -1,8 +1,8 @@
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join, sep } from 'node:path'
-import type { AgentProviderId } from '@agentmux/core'
+import { durableWriteFile, type AgentProviderId } from '@agentmux/core'
 import { nativeImage, type NativeImage } from 'electron'
 import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
 import { decodeMoteAvatar, previewMoteAvatar, moteAvatarPng } from './mote-avatar-image.js'
@@ -10,6 +10,8 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import {
   SCRATCH_WORKSPACE_ID,
   MOTE_SOUL_PATH,
+  MOTE_STATE_PATH,
+  type MoteArchiveState,
   DEFAULT_MOTE_SOUL,
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   SCRATCH_TOPIC_WIKI_PATH,
@@ -207,6 +209,7 @@ export type PreparedScratchAgentTopic = {
 }
 
 export class ScratchTopics {
+  private readonly moteStateWrites = new Map<string, Promise<unknown>>()
   constructor(private readonly createAvatarImage: (bytes: Buffer) => NativeImage = bytes => nativeImage.createFromBuffer(bytes)) {}
 
   private decodeAvatar(input: MoteAvatarInput): NativeImage {
@@ -243,6 +246,52 @@ export class ScratchTopics {
     if (directoryIdentity(workspace.hostId, join(workspace.path, scratchTopicDirectoryName(topicId))) !== objectKey) {
       throw new Error('This Mote directory changed while editing. Reopen its avatar editor to use the current object.')
     }
+  }
+
+  private async readMoteArchive(directory: string, topicId: string): Promise<MoteArchiveState> {
+    const absent: MoteArchiveState = { state: 'active', version: topicId === PMO_TEAMS_TOPIC_ID ? 'primary' : 'unwritten' }
+    try {
+      const metadata = await lstat(join(directory, '.agentmux'))
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('Mote metadata is not a regular directory.')
+      let content: string
+      try { content = await readRegularFile(join(directory, MOTE_STATE_PATH)) }
+      catch (error) { if (errorCode(error) === 'ENOENT') return absent; throw error }
+      const value = JSON.parse(content)
+      if (typeof value.archived !== 'boolean' || typeof value.version !== 'string' || !/^[0-9a-f-]{36}$/.test(value.version))
+        throw new Error('Mote archive metadata is invalid.')
+      if (topicId === PMO_TEAMS_TOPIC_ID && value.archived) throw new Error('The primary Mote cannot be archived. Its existing work remains available; repair its archive metadata and retry the directory read.')
+      return { state: value.archived ? 'archived' : 'active', version: value.version }
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return absent
+      return { state: 'unknown', issue: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  async setMoteArchived(workspace: WorkspaceRecord, topicId: string, archived: boolean, objectKey: string,
+    expectedVersion: string): Promise<MoteArchiveState & { state: 'active' | 'archived' }> {
+    if (topicId === PMO_TEAMS_TOPIC_ID) throw new Error('The primary Mote cannot be archived.')
+    if (typeof archived !== 'boolean') throw new Error('Choose Archive or Restore explicitly.')
+    this.requireAvatarObject(workspace, topicId, objectKey)
+    const directory = await this.avatarMoteDirectory(workspace, topicId)
+    // Only concurrent mutations of this actual directory are serialized. No persistent registry.
+    const previous = this.moteStateWrites.get(directory)
+    const job = Promise.resolve(previous).catch(() => {}).then(async () => {
+      this.requireAvatarObject(workspace, topicId, objectKey)
+      if (await this.avatarMoteDirectory(workspace, topicId) !== directory) throw new Error('The original Mote directory changed.')
+      const current = await this.readMoteArchive(directory, topicId)
+      if (current.state === 'unknown') throw new Error('Mote archive state is unconfirmed: ' + current.issue)
+      if (current.version !== expectedVersion) throw new Error('Mote archive state changed. Refresh this Mote before retrying.')
+      await ensureDirectory(join(directory, '.agentmux'))
+      const version = randomUUID()
+      await durableWriteFile(join(directory, MOTE_STATE_PATH), JSON.stringify({ archived, version }) + '\n', { mode: 0o600 })
+      const confirmed = await this.readMoteArchive(directory, topicId)
+      if (confirmed.state === 'unknown' || confirmed.version !== version || confirmed.state !== (archived ? 'archived' : 'active'))
+        throw new Error('The archive write could not be confirmed. Refresh this Mote to inspect its saved state.')
+      return confirmed
+    })
+    this.moteStateWrites.set(directory, job)
+    try { return await job }
+    finally { if (this.moteStateWrites.get(directory) === job) this.moteStateWrites.delete(directory) }
   }
 
   async previewAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage> {
@@ -351,6 +400,7 @@ export class ScratchTopics {
       topicPath: `${directoryName}/topic.md`,
       ...copy,
       ...(soul ? { soul } : {}),
+      ...(soul || topicId === PMO_TEAMS_TOPIC_ID ? { moteArchive: await this.readMoteArchive(resolved, topicId) } : {}),
       collaborators: agentFiles.flatMap((fileName) => collaborator(fileName) ?? []),
       wiki: {
         path: `${directoryName}/${SCRATCH_TOPIC_WIKI_PATH}`,

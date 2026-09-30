@@ -20,6 +20,7 @@ import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, 
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
+import { directoryIdentity } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -92,6 +93,7 @@ import {
   PMO_TEAMS_TOPIC_ID,
   MOTE_COORDINATION_ROLE,
   SCRATCH_WORKSPACE_ID,
+  scratchTopicDirectoryName,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
 } from '../../shared/scratch-topics'
@@ -800,6 +802,7 @@ type AppState = {
   openProjectFolder(): Promise<void>
   createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; executorId?: string }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
+  setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<void>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
   renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
   /**
@@ -5428,12 +5431,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const job = api.scratch.listTopics(workspaceId).then(topics => {
       if (!stillCurrent()) return
       const retained = get().scratchTopicSnapshots[workspaceId]?.topics
-      const errors = topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] : [])
+      const errors = topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] :
+        topic.moteArchive?.state === 'unknown' ? [`${topic.title}: Archive state unconfirmed · ${topic.moteArchive.issue}`] : [])
       const facts = topics.map(topic => {
         const previousTopic = retained?.find(candidate => candidate.id === topic.id)
         // A failed file read is no new identity fact. Keep the last complete object,
         // with the read failure alongside it rather than guessing away its SOUL.
-        return topic.readError && previousTopic && !previousTopic.readError ? previousTopic : topic
+        if (topic.readError && previousTopic && !previousTopic.readError) return previousTopic
+        // Archive read failure is advisory; it neither erases SOUL nor revives an archived Mote.
+        return topic.moteArchive?.state === 'unknown' && previousTopic?.moteArchive?.state !== 'unknown' && previousTopic?.moteArchive
+          ? { ...topic, moteArchive: previousTopic.moteArchive } : topic
       })
       set(current => ({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
         scope, revision, topics: facts, error: errors.length ? errors.join(' · ') : null, reading: false
@@ -5449,6 +5456,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     scratchTopicReads.set(workspaceId, { key, promise: job })
     return job
+  },
+  async setMoteArchived(workspaceId, topicId, archived, objectKey, expectedVersion) {
+    const captured = get(), workspace = captured.config?.workspaces.find(item => item.id === workspaceId)
+    const scope = workspace ? scratchTopicsScope(workspace) : null
+    const snapshot = captured.scratchTopicSnapshots[workspaceId]
+    const topic = snapshot?.scope === scope ? snapshot.topics?.find(item => item.id === topicId) : undefined
+    if (!workspace || !topic?.moteArchive || topic.moteArchive.state === 'unknown' || topic.moteArchive.version !== expectedVersion ||
+      directoryIdentity(workspace.hostId, workspace.path.replace(/[\\/]+$/, '') + '/' + scratchTopicDirectoryName(topicId)) !== objectKey) {
+      const error = new Error('Mote archive state is not confirmed. Refresh its directory before retrying.')
+      get().reportError(error); throw error
+    }
+    try {
+      const fact = await api.scratch.setMoteArchived(workspaceId, topicId, archived,
+        objectKey, expectedVersion)
+      if (fact.state !== (archived ? 'archived' : 'active') || !fact.version)
+        throw new Error('The Mote archive write is not confirmed. Refresh its directory to inspect the saved state.')
+      set(current => {
+        const resource = current.config?.workspaces.find(item => item.id === workspaceId)
+        if (!resource || scratchTopicsScope(resource) !== scope) return current
+        const revision = bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId)
+        const latest = current.scratchTopicSnapshots[workspaceId]
+        const latestFact = latest?.topics?.find(item => item.id === topicId)?.moteArchive
+        const mayPublish = latestFact?.state !== 'unknown' && latestFact?.version === expectedVersion
+        return { workspaceFileRevisions: revision,
+          ...(latest?.scope === scope ? { scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
+            ...latest, revision: revision[workspaceId]!, topics: latest.topics?.map(item => item.id === topicId && mayPublish ? { ...item, moteArchive: fact } : item) ?? null
+          } } } : {}) }
+      })
+      if (get().config?.workspaces.some(item => item.id === workspaceId && scratchTopicsScope(item) === scope))
+        await get().refreshScratchTopics(workspaceId, true)
+    } catch (error) { get().reportError(error); throw error }
   },
   async createScratchTopic(preset, initialRequest) {
     const state = get()

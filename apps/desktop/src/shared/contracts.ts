@@ -1382,6 +1382,7 @@ export type AgentMuxDesktopApi = {
     reveal(workspaceId: string, path: string): Promise<void>
   }
   scratch: {
+    setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<import('./scratch-topics').MoteArchiveState & { state: 'active' | 'archived' }>
     previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>
     saveMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef>
     readMoteAvatar(workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage>

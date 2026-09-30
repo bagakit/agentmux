@@ -1,5 +1,5 @@
-import { NotebookText, Pin, NotebookPen } from 'lucide-react'
-import { useMemo, type CSSProperties } from 'react'
+import { ArchiveRestore, NotebookText, Pin, NotebookPen } from 'lucide-react'
+import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
@@ -17,6 +17,7 @@ import { matchesSpaceQuery } from '../lib/space-tree-navigation'
 import { topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
+import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 
 /** Filesystem objects and existing Session facts; no separate Space or heat registry. */
 export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: {
@@ -55,6 +56,10 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   }, [sessions, workspace.hostId, workspace.path])
   const entries = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && !topic.soul) ?? []
   const motes = scratchMoteTopics(topics)
+  const archive = useMoteArchiveAction(workspace)
+  const [showArchived, setShowArchived] = useState(false)
+  const tree = useRef<HTMLDivElement>(null)
+  const archivedMotes = motes.filter(topic => topic.moteArchive?.state === 'archived')
 
   async function openOverview(): Promise<void> {
     try { await selectWorkspace(workspace.id); setWorkspaceTool('files-branches') } catch (cause) { reportError(cause) }
@@ -86,6 +91,8 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         {...(label === 'Topics' ? { onOpen: () => void openOverview(), selected: activeWorkspaceId === workspace.id && !current } : {})}
         createLabel={label === 'Motes' ? 'Create Mote' : 'Create Topic'} onCreate={() => createTopic(label === 'Motes' ? 'mote' : undefined)}
         activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={sectionSessions} contexts={contexts} /> : undefined} />
+      {label === 'Motes' ? <button type="button" className="space-section-label" aria-label="Show archived Motes in Space"
+        aria-pressed={showArchived} onClick={() => setShowArchived(value => !value)}><strong>{showArchived ? 'Hide archived' : 'Show archived'}</strong><small>{archivedMotes.length}</small></button> : null}
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}
       {expanded ? ids.map((id) => {
         const topic = byId.get(id)!
@@ -96,34 +103,48 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         const bucket = byTopic.get(id) ?? []
         const attentionLabel = rowAttentionLabel(rowAttention(bucket))
         const isPinned = pinned?.includes(id) === true
-        return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon}>
-        <div className="space-tree-entry" data-space-entry>
+        const archived = topic.moteArchive?.state === 'archived'
+        return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon} {...(isMote ? { moteArchive: {
+          archived, disabled: archive.pending === id || id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
+          ...(id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),
+          onChange: () => archive.change(topic, !archived),
+          returnFocus: () => {
+            const state = useAppStore.getState(), resource = state.config?.workspaces.find(item => item.id === workspace.id)
+            if (resource?.hostId !== workspace.hostId || resource.path !== workspace.path || state.activeWorkspaceId !== activeWorkspaceId) return null
+            return tree.current?.querySelector<HTMLButtonElement>('[aria-label="Show archived Motes in Space"]') ?? null
+          }
+        } } : {})}>
+        <div className="space-tree-entry" data-space-entry data-mote-archive-state={isMote ? topic.moteArchive?.state : undefined}>
           <div className="project-rail-entry">
             <button type="button" data-space-nav={`topic:${id}`} data-space-parent={key}
               data-space-icon-target={target.key} style={{ '--rail-depth': 1 } as CSSProperties}
               className={`project-rail-row ${isMote ? 'space-mote-row' : 'space-topic-row'}${selected ? ' project-rail-row--active' : ''}`}
-              aria-label={[`Open ${isMote && id !== PMO_TEAMS_TOPIC_ID ? `Mote · ${name}` : name}`, attentionLabel].filter(Boolean).join(' · ')}
+              aria-label={[`Open ${isMote && id !== PMO_TEAMS_TOPIC_ID ? `Mote · ${name}` : name}`, archived ? 'Archived' : '', attentionLabel].filter(Boolean).join(' · ')}
               aria-current={selected ? 'page' : undefined}
               title={[name, topic.readError ?? topic.summary, topic.directoryPath].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
               <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />
-              <span className="project-rail-row__identity"><strong>{name}</strong></span>
+              <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
               aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${name}`} aria-pressed={isPinned} title={`${isPinned ? 'Unpin' : 'Pin'} ${name}`}
               onClick={() => togglePinned(SCRATCH_WORKSPACE_ID, id)}><Pin size={11} /></button>
             {isMote ? <button type="button" className="icon-button space-row-action space-mote-edit" aria-label={`Edit ${name} SOUL.md`}
               title="Edit SOUL.md · New sessions use saved changes" onClick={() => void openMote(id, true)}><NotebookPen size={12} /></button> : null}
+            {archived ? <button type="button" className="icon-button space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
+              disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ArchiveRestore size={12} /></button> : null}
             {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
           </div>
           {topic.readError ? <div className="new-tab-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
+          {topic.moteArchive?.state === 'unknown' ? <MoteArchiveNotice workspaceId={workspace.id} issue={topic.moteArchive.issue} /> : null}
         </div></SpaceObjectContextMenu>
       }) : null}
     </nav>
   }
-  return <div className="space-topics-tree">
-    {section('Motes', motes)}
+  return <div ref={tree} className="space-topics-tree">
+    {section('Motes', motes.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived))}
     {section('Topics', entries)}
     {error ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
+    <MoteArchiveNotice workspaceId={workspace.id} issue={archive.issue} />
   </div>
 }
