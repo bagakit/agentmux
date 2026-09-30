@@ -31,6 +31,7 @@ import {
   type TerminalPathLink
 } from '../lib/terminal-path-link'
 import { terminalPathLinksInBuffer, terminalPathLinkAtBufferCell } from '../lib/terminal-link-range'
+import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
 import { createTerminalPasteInput, installTerminalPasteSanitizer, pasteIntoTerminal, type TerminalPasteTarget } from '../lib/terminal-paste'
 import {
@@ -218,6 +219,8 @@ export function TerminalView({
   /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
   const linkPressRef = useRef<{ x: number; y: number } | null>(null)
   const linkPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const linkPreviewElementRef = useRef<HTMLDivElement>(null)
+  const linkPreviewShownRef = useRef(false)
   const interactiveResizeRef = useRef(interactiveResize)
   interactiveResizeRef.current = interactiveResize
   // Font size is a prop the attach effect must NOT depend on (a change must not rebuild xterm and
@@ -290,8 +293,26 @@ export function TerminalView({
   function clearLinkPreview(): void {
     if (linkPreviewTimerRef.current !== null) clearTimeout(linkPreviewTimerRef.current)
     linkPreviewTimerRef.current = null
-    setLinkPreview(null)
+    // Hide synchronously before xterm can paint newer bytes or geometry. Idle writes do no React work.
+    if (linkPreviewElementRef.current) linkPreviewElementRef.current.style.visibility = 'hidden'
+    if (linkPreviewShownRef.current) {
+      linkPreviewShownRef.current = false
+      setLinkPreview(null)
+    }
   }
+  useLayoutEffect(() => {
+    const popup = linkPreviewElementRef.current, terminal = terminalRef.current
+    if (!linkPreview || !popup) return
+    const screen = rootRef.current?.querySelector('.xterm-screen')
+    if (!terminal || !screen || !visibleRef.current || terminalLinkReadoutOverlapsText(
+      terminal.buffer.active, terminal.cols, terminal.rows, screen.getBoundingClientRect(), popup.getBoundingClientRect()
+    )) {
+      clearLinkPreview()
+      return
+    }
+    popup.style.visibility = 'visible'
+  }, [linkPreview])
+  useLayoutEffect(clearLinkPreview, [fontSize])
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
@@ -449,6 +470,7 @@ export function TerminalView({
     // A const the closures below can capture without TypeScript re-widening it to null.
     const terminalRoot = root
     const terminalGeneration = ++terminalGenerationRef.current
+    let linkPreviewWrites = 0
     viewportMemoryRef.current = { kind: 'latest' }
     setHydrating(true)
     setRevealOverdue(false)
@@ -546,17 +568,28 @@ export function TerminalView({
     // the lines around the pointer. One timer belongs to this retained TerminalView, not the Run.
     function showLinkPreview(event: MouseEvent, preview: TerminalLinkPreviewContent): void {
       clearLinkPreview()
-      if (event.buttons !== 0 || !visibleRef.current || terminal.hasSelection()) return
+      if (event.buttons !== 0 || !visibleRef.current || terminal.hasSelection() || linkPreviewWrites > 0) return
       const pointerY = event.clientY
       linkPreviewTimerRef.current = setTimeout(() => {
         linkPreviewTimerRef.current = null
-        if (!visibleRef.current || terminal.hasSelection() || linkRequestRef.current) return
+        if (!visibleRef.current || terminal.hasSelection() || linkRequestRef.current || linkPreviewWrites > 0) return
         const rect = terminalRoot.getBoundingClientRect()
         // Two short readout lines need space away from the hovered row in very short splits.
         if (rect.height < 80) return
         const placement = pointerY < rect.top + rect.height / 2 ? 'bottom' : 'top'
+        linkPreviewShownRef.current = true
         setLinkPreview({ ...preview, placement })
       }, 350)
+    }
+    async function writeTerminal(data: string | Uint8Array): Promise<void> {
+      linkPreviewWrites++
+      clearLinkPreview()
+      try {
+        await terminalWrite(terminal, data)
+      } finally {
+        linkPreviewWrites--
+        if (terminalGenerationRef.current === terminalGeneration) clearLinkPreview()
+      }
     }
     terminal.loadAddon(fit)
     terminal.loadAddon(search)
@@ -718,6 +751,7 @@ export function TerminalView({
     const kittyOutputDecoder = new TextDecoder()
     let renderReady: { dispose(): void } | null = null
     const preserveRowResizeReading = (resize: () => void): void => {
+      clearLinkPreview()
       const selected = terminal.getSelectionPosition()
       const cols = terminal.cols
       const rows = terminal.rows
@@ -805,7 +839,7 @@ export function TerminalView({
 
     const writeOutput = async (data: Uint8Array): Promise<void> => {
       if (disposed) return
-      await terminalWrite(terminal, data)
+      await writeTerminal(data)
       kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, kittyOutputDecoder.decode(data, { stream: true }))
       if (!disposed) setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
     }
@@ -857,7 +891,9 @@ export function TerminalView({
             if (preserve) continue
             viewport.acceptOwnerSize(step.checkpoint.size)
             await restoreTerminalCheckpoint(step.restoreBytes, async (data) => {
-              if (!disposed) await terminalWrite(terminal, data)
+              if (!disposed) {
+                await writeTerminal(data)
+              }
             })
             cursor = step.checkpoint.throughByte
             resizeRevision = step.checkpoint.resizeRevision
@@ -1056,7 +1092,10 @@ export function TerminalView({
       })
     }
     const disposeEvents = api.sessions.onEvent(accept, session.control)
-    const resize = new ResizeObserver(() => viewport.observeViewport())
+    const resize = new ResizeObserver(() => {
+      clearLinkPreview()
+      viewport.observeViewport()
+    })
     resize.observe(root)
     /**
      * 输入的唯一出口。四条通路（onData、onBinary、OSC 回复、Shift+Enter）都送进这里——
@@ -1617,6 +1656,8 @@ export function TerminalView({
           {linkPreview ? (
             <div
               className="terminal-link-preview"
+              ref={linkPreviewElementRef}
+              style={{ visibility: 'hidden' }}
               data-placement={linkPreview.placement}
               role="tooltip"
             >

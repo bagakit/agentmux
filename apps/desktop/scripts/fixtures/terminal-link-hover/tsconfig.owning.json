@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": ["./entry.tsx", "./xterm-observed.ts", "../terminal-wheel/distribution.d.ts", "../../../src/renderer/src/global.d.ts"]
+}
