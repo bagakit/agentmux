@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/monaco', () => ({}))
 // Keep the real FileSurfaceView/EditorPane and their owner. Only browser canvas painting is adapted.
 vi.mock('@monaco-editor/react', () => ({ default: ({ value }: { value: string }) => <textarea aria-label="Private source canvas" value={value} readOnly /> }))
+vi.mock('monaco-editor', async () => (await import('./helpers/workface-monaco-fixture')).workfaceMonacoAdapter())
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Original private Terminal painter</div> }))
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
@@ -20,19 +21,22 @@ import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { agent, neighborSid, privateEnvironment, regionIdC, tabId, targetSid } from './helpers/workface-control-fixture'
 import { fileConfig, fileTopics, fileCatalog, startWorkfaceFileFixture, zoneFor } from './helpers/workface-file-fixture'
+import { workfaceMonacoModelCount } from './helpers/workface-monaco-fixture'
 
 const initial = useAppStore.getState(), ownFile = 'apps/desktop/test/workface-file-open-control.test.tsx'
 const restoring = process.env.AGENTMUX_WORKFACE_RESTORE_PHASE === 'file-open-child'
 const restoreName = 'ordinary independent process restores the original File graph and reads its document through the actual Pane'
 let root: Root, container: HTMLDivElement, fixture: Awaited<ReturnType<typeof startWorkfaceFileFixture>> | undefined
+let modelBaseline: number
 beforeEach(async () => {
   vi.restoreAllMocks(); localStorage.clear(); useAppStore.setState(initial, true)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  modelBaseline = workfaceMonacoModelCount()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   if (!restoring) fixture = await startWorkfaceFileFixture()
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); await fixture?.stop(); fixture = undefined
+afterEach(async () => { await act(async () => root.unmount()); expect(workfaceMonacoModelCount()).toBe(modelBaseline); container.remove(); await fixture?.stop(); fixture = undefined
   vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 function args(path: string, workspaceId = 'resource', extra: string[] = []) {
   return ['open', 'file', '--zone', zoneFor(workspaceId, workspaceId === SCRATCH_WORKSPACE_ID).zoneId, '--path', path, ...extra]

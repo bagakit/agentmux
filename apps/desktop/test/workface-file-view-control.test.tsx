@@ -9,8 +9,8 @@ import { join, resolve } from 'node:path'
 import { addTabOccurrence } from '@agentmux/layout'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/monaco', () => ({}))
-vi.mock('@monaco-editor/react', () => ({ default: ({ value }: { value: string }) => <textarea aria-label="Private source canvas" value={value} readOnly />,
-  DiffEditor: ({ original, modified }: { original: string; modified: string }) => <div data-private-diff><pre data-old>{original}</pre><pre data-new>{modified}</pre></div> }))
+vi.mock('@monaco-editor/react', () => ({ default: ({ value }: { value: string }) => <textarea aria-label="Private source canvas" value={value} readOnly /> }))
+vi.mock('monaco-editor', async () => (await import('./helpers/workface-monaco-fixture')).workfaceMonacoAdapter())
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion, documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
@@ -18,23 +18,26 @@ import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { agent, neighborSid, privateEnvironment, targetSid } from './helpers/workface-control-fixture'
 import { fileConfig, fileTopics, startWorkfaceFileFixture, zoneFor } from './helpers/workface-file-fixture'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
+import { workfaceMonacoModelCount } from './helpers/workface-monaco-fixture'
 
 const initial = useAppStore.getState(), ownFile = 'apps/desktop/test/workface-file-view-control.test.tsx'
 const restoring = process.env.AGENTMUX_WORKFACE_RESTORE_PHASE === 'file-view-child'
 const restoreName = 'ordinary independent process retains File identities and TextDoc while transient modes return to format defaults'
 let fixture: Awaited<ReturnType<typeof startWorkfaceFileFixture>> | undefined, root: Root, container: HTMLDivElement
 let currentId: string, currentRegion: string, otherRegion: string
+let modelBaseline: number
 const diff = vi.fn(async (_workspace: string, path: string) => ({ path, old: { present: true as const, binary: false as const, text: 'Original HEAD bytes' },
   new: { present: true as const, binary: false as const, text: 'Original worktree bytes' }, binary: false, change: 'modified' as const }))
 beforeEach(async () => {
   vi.restoreAllMocks(); localStorage.clear(); useAppStore.setState(initial, true); diff.mockClear()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  modelBaseline = workfaceMonacoModelCount()
   vi.stubGlobal('agentmux', undefined)
   window.agentmux = { git: { diff } } as unknown as AgentMuxPreloadApi
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   if (!restoring) fixture = await startWorkfaceFileFixture()
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); await fixture?.stop(); fixture = undefined
+afterEach(async () => { await act(async () => root.unmount()); expect(workfaceMonacoModelCount()).toBe(modelBaseline); container.remove(); await fixture?.stop(); fixture = undefined
   delete (window as Partial<Window>).agentmux; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 async function arrange(path = 'shared.md', opaqueId?: string) {
   const receipt = await fixture!.run(['open', 'file', '--zone', zoneFor('resource').zoneId, '--path', path])
@@ -61,7 +64,7 @@ async function mount() {
   await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 function canvases() { const nodes = [...container.querySelectorAll('[data-file-view]')]; expect(nodes).toHaveLength(3)
-  return nodes.map(node => node.querySelector('[data-private-diff]') ? 'diff' : node.querySelector('textarea') ? 'source' : node.querySelector('.file-preview-pane') ? 'bytes-preview' : 'preview') }
+  return nodes.map(node => node.querySelector('.monaco-diff-editor') ? 'diff' : node.querySelector('textarea') ? 'source' : node.querySelector('.file-preview-pane') ? 'bytes-preview' : 'preview') }
 function protectedFacts() { const state = useAppStore.getState(); return { tabs: state.tabs, layouts: state.layouts, documents: state.documents, dirty: state.dirtyDocuments,
   sessions: state.sessions, drafts: state.agentComposerDrafts, mainSurface: state.mainSurface, activeWorkspaceId: state.activeWorkspaceId,
   agentFocus: state.agentFocus, selection: state.workbenchSpaceSelection, retained: state.retainedSpatialFocus, caret: state.regionCaretFocus } }
@@ -85,8 +88,9 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
     expect(protectedFacts()).toEqual(before)
     await act(async () => { expect(await view('diff')).toMatchObject({ effectiveMode: 'diff', data: 'text', content: { status: 'available' }, outcome: 'changed' }) })
     expect(canvases()).toEqual(['diff', 'diff', 'source']); expect(diff).toHaveBeenCalledExactlyOnceWith('resource', 'shared.md')
-    expect([...container.querySelectorAll('[data-old]')].map(node => node.textContent)).toEqual(['Original HEAD bytes', 'Original HEAD bytes'])
-    expect([...container.querySelectorAll('[data-new]')].map(node => node.textContent)).toEqual(['Original worktree bytes', 'Original worktree bytes'])
+    expect(workfaceMonacoModelCount()).toBe(modelBaseline + 4)
+    expect([...container.querySelectorAll('[data-workface-diff-side="original"]')].map(node => node.textContent)).toEqual(['Original HEAD bytes', 'Original HEAD bytes'])
+    expect([...container.querySelectorAll('[data-workface-diff-side="modified"]')].map(node => node.textContent)).toEqual(['Original worktree bytes', 'Original worktree bytes'])
     await act(async () => { await view('source') }); expect(canvases()).toEqual(['source', 'source', 'source'])
     expect(protectedFacts()).toEqual(before); fixture!.noLifecycle()
   })

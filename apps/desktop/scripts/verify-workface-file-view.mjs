@@ -7,6 +7,7 @@ const store = 'apps/desktop/src/renderer/src/store.ts'
 const read = path => readFileSync(path, 'utf8')
 verifyWorkfaceMutations({ operation: 'file-view', testPath: 'apps/desktop/test/workface-file-view-control.test.tsx',
   sourcePaths: [view, mode, editor, store, 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx',
+    'apps/desktop/src/renderer/src/components/GitDiffCanvas.tsx', 'apps/desktop/test/helpers/workface-monaco-fixture.ts',
     'apps/desktop/src/renderer/src/lib/desktop-presentation.ts', 'apps/desktop/test/helpers/workface-file-fixture.ts',
     'packages/core/bin/agentmux', 'packages/core/dist/agentmux.js', 'packages/core/dist/control-host.js'],
   callers: [{ symbol: 'executeWorkfaceFileView', definition: view }, { symbol: 'storedFileRegionMode', definition: mode },
