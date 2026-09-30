@@ -26,6 +26,7 @@ vi.mock('../src/renderer/src/components/SessionHistoryView', () => ({ SessionHis
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
 vi.mock('../src/renderer/src/components/AgentLifecycleFeedback', () => ({ AgentLifecycleFeedback: () => null }))
 
+
 const initial = useAppStore.getState()
 const origin = { workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'pmo-group', tabId: 'pmo-tab', regionId: 'pmo-region', sessionId: 'pmo' }
 let tinyRoot: string, project: WorkspaceRecord, scratch: WorkspaceRecord, config: AppConfig
@@ -137,7 +138,7 @@ describe('current mapped Goal project links through the original mounted Pane', 
   })
   it('uses remote relative/absolute resources and keeps remote home literal despite matching local paths', async () => {
     project = { ...project, hostId: 'remote' }
-    config = { ...config, workspaces: [project, scratch], hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', target: 'proof-host' }] }
+    config = { ...config, workspaces: [project, scratch], hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'proof-host' }] }
     const literal = `~/${relative(homedir(), project.path)}/src/a.ts`
     seed(`Read src/a.ts and \`${project.path}/src/a.ts:8:2\`. Home stays ${literal}.`)
     vi.mocked(api.files.read).mockImplementation(async (workspaceId, path) => {
@@ -146,7 +147,8 @@ describe('current mapped Goal project links through the original mounted Pane', 
     })
     await mount(); expect(buttons()).toHaveLength(2)
     expect(container.textContent).toContain(literal)
-    expect(container.textContent).toContain('Home paths are unconfirmed')
+    expect(container.querySelector('[data-file-reference-scope]')?.textContent).toContain('Home paths are unconfirmed')
+    expect(container.querySelector('.service-window')).toBeNull()
     for (const button of buttons()) await click(button)
     expect(vi.mocked(api.files.read).mock.calls).toEqual([[project.id, 'src/a.ts']])
     expect(useAppStore.getState().documents[documentKey(project.id, 'src/a.ts')]?.content).toBe('REMOTE PROJECT CONTENT')
@@ -180,6 +182,42 @@ describe('current mapped Goal project links through the original mounted Pane', 
     expect(useAppStore.getState().activeWorkspaceId).toBe(project.id)
     expect(useAppStore.getState().layouts[project.id]?.groups[0]?.tabOrder).toEqual([])
     placed(); retained()
+  })
+  it('keeps home in both native reasoning reading branches through the common trace', async () => {
+    const home = `~/${relative(homedir(), project.path)}/src/a.ts:9:4`
+    seed('Read src/a.ts.')
+    vi.mocked(api.sessions.historyPage).mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
+      source: { providerId: 'codex', nativeSessionId: 'reasoning-proof' }, items: [{ id: 'thinking', kind: 'assistant-message',
+        contentParts: [{ kind: 'reasoning', text: `Inspect ${home}.` }] }], nextCursor: null }))
+    await mount()
+    expect(container.querySelectorAll('.conversation-native-reasoning__record')).toHaveLength(1)
+    const trace = container.querySelector<HTMLDetailsElement>('.conversation-native-reasoning details')!
+    await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
+    expect(buttons()).toHaveLength(2)
+    const nativeButton = container.querySelector<HTMLButtonElement>('.conversation-native-reasoning button.md-link--file')!
+    await click(nativeButton)
+    expect(useAppStore.getState().documentRevealTargets[documentKey(project.id, 'src/a.ts')]).toEqual({ line: 9, column: 4 })
+    await act(async () => container.querySelector<HTMLButtonElement>('.conversation-native-reasoning__turn-toggle')!.click())
+    expect(container.querySelectorAll('.conversation-native-reasoning__turn .log-turn__trace-body button.md-link--file')).toHaveLength(1)
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([[project.id, 'src/a.ts']]); placed(); retained()
+  })
+  it('retains a previously mapped Pane when its mapping is removed', async () => {
+    seed('Read src/a.ts.'); await mount(); expect(buttons()).toHaveLength(1)
+    await act(async () => useAppStore.setState({ demandPmoTabIds: {} }))
+    expect(buttons()).toEqual([]); expect(container.textContent).toContain('Goal association')
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([]); retained()
+  })
+  it('reports ordinary Session file misses with its own context', async () => {
+    seed('Read src/a.ts.', false)
+    vi.mocked(api.files.read).mockResolvedValue({ status: 'deleted' })
+    await mount()
+    await act(async () => { buttons()[0]!.click(); await vi.waitFor(() => expect(vi.mocked(api.files.read).mock.calls).toEqual([[scratch.id, 'src/a.ts']])) })
+    await flush()
+    expect(container.querySelector('.service-window')).not.toBeNull()
+    expect(container.querySelector('.service-window')?.textContent).toContain('original Session keeps running')
+    expect(container.querySelector('.service-window')?.textContent).toContain('Session’s original Workspace and Host')
+    expect(container.querySelector('.service-window')?.textContent).not.toContain('Goal')
+    retained()
   })
   it('retains ordinary non-Goal Session’s own host/path route', async () => {
     seed('Read src/a.ts.', false); await mount(); expect(buttons()).toHaveLength(1); await click(buttons()[0]!)

@@ -39,7 +39,7 @@ export function projectLinksPreview(initial: ReturnType<typeof useAppStore.getSt
     flushSync(() => {
       useAppStore.setState({ ...initial, initialize: async () => () => {}, loading: false,
         config: { ...initial.config!, hosts: [...initial.config!.hosts.filter(host => host.id !== 'links-remote'),
-          ...(mode === 'remote' ? [{ id: 'links-remote', kind: 'ssh' as const, label: 'Remote project Host', target: 'preview-host' }] : [])], workspaces: [resource, scratch],
+          ...(mode === 'remote' ? [{ id: 'links-remote', kind: 'ssh' as const, label: 'Remote project Host', hostname: 'preview-host' }] : [])], workspaces: [resource, scratch],
           appearance: { ...initial.config!.appearance, appAppearance: mode === 'local' ? 'dark' : 'light' } },
         localHome: '/Users/preview', mainSurface: 'workbench', activeWorkspaceId: scratch.id, toolsOpen: false, projectRailOpen: true,
         sessions: [...initial.sessions, session], viewModes: { [session.id]: 'activity' }, pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [],
