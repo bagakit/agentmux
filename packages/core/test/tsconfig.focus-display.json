@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler" },
+  "include": [
+    "../src/**/*.ts",
+    "./control-focus-display.test.ts",
+    "./vitest.focus-display.config.mts",
+    "./focus-display-demand-freshness.ts"
+  ]
+}
