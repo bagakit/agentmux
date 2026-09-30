@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": ["../../../src/main/browser-webauthn-access.ts", "../../../test/browser-webauthn-access.test.ts"]
+}
