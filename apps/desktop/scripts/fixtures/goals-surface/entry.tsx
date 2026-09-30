@@ -47,14 +47,40 @@ const ensureMote = api.scratch.ensureMote
 const createGoal = api.demands.create, readGoals = api.demands.list, updateGoal = api.demands.update, launchGoalPmo = api.sessions.launchAgent
 let directFailure: 'save-unknown' | 'pmo' | null = null
 let directCreates: string[] = [], directLaunches: { prompt: string; topicId?: string }[] = []
+const directHistory = new Map<string, { prompt: string; providerId: string }>()
 function seedDirect(mode?: 'save-unknown' | 'pmo') {
   if (directGoalRequest()) throw new Error('Settle the previous actual direct Goal operation before reseeding')
   requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); seed('empty'); directFailure = mode ?? null; directCreates = []; directLaunches = []
+  directHistory.clear()
   api.demands.create = async input => { directCreates.push(input.id!); const saved = await createGoal(input); if (directFailure === 'save-unknown') throw new Error('目标已交给保存服务，但回执尚未收到。请读取同一个目标确认。'); return saved }
   // Preview native transport mirrors the durable alignment receipt shape; real filesystem and Main proofs stay in owning/native tests.
   api.demands.update = async (id, patch) => { const receipt = await updateGoal(id, patch); if (patch.alignment) receipt.demand.alignment = { ...patch.alignment, revision: (useAppStore.getState().demands[id]?.alignment?.revision ?? 0) + 1, confirmedAt: null }; return receipt }
   api.demands.list = async () => { if (directFailure === 'save-unknown') throw new Error('保存服务暂时无法读取。请求 ID 已保留，请稍后重新读取。'); return readGoals() }
-  api.sessions.launchAgent = async input => { directLaunches.push({ prompt: input.prompt ?? '', ...(input.scratchTopicId ? { topicId: input.scratchTopicId } : {}) }); if (directFailure === 'pmo') throw new Error('专属 Agent 的启动回执尚未确认。此目标和原启动区保留，请重试。'); return launchGoalPmo(input) }
+  api.sessions.launchAgent = async input => {
+    directLaunches.push({ prompt: input.prompt ?? '', ...(input.scratchTopicId ? { topicId: input.scratchTopicId } : {}) })
+    if (directFailure === 'pmo') throw new Error('专属 Agent 的启动回执尚未确认。此目标和原启动区保留，请重试。')
+    const receipt = await launchGoalPmo(input)
+    if (!receipt.session || receipt.session.kind !== 'agent') throw new Error('The preview transport did not return its Agent Session projection')
+    directHistory.set(receipt.session.id, { prompt: input.prompt ?? '', providerId: receipt.session.providerId })
+    return receipt
+  }
+  // Current public native-history DTOs, reflecting the actual Renderer request verbatim.
+  // This preview excludes Core guide/Notes and does not claim a real CLI transcript or delivery.
+  api.sessions.historyPage = async control => {
+    const captured = directHistory.get(control.agentSessionId)
+    if (!captured) throw new Error('No captured direct-Goal preview request for this exact Session')
+    return { agentSessionId: control.agentSessionId,
+      source: { providerId: captured.providerId, nativeSessionId: control.agentSessionId }, nextCursor: null,
+      items: [
+        { id: `${control.agentSessionId}-direct-request`, kind: 'user-message', startedAt: 1, contentParts: [{ kind: 'text', text: captured.prompt }] },
+        { id: `${control.agentSessionId}-direct-answer`, kind: 'assistant-message', startedAt: 2, contentParts: [{ kind: 'text', text: '我们从这个目标开始。你希望通过这次尝试，解决什么问题？' }] }
+      ] }
+  }
+  api.sessions.observeHistory = async control => {
+    const captured = directHistory.get(control.agentSessionId)
+    if (!captured) throw new Error('No captured direct-Goal preview request for this exact Session')
+    return { source: { providerId: captured.providerId, nativeSessionId: control.agentSessionId }, dispose() {} }
+  }
 }
 function directFacts() {
   const state = useAppStore.getState(), id = state.selectedDemandId ?? directGoalRequest()?.id, goal = id ? state.demands[id] : undefined
@@ -105,7 +131,7 @@ function seed(mode = 'many') {
   const config = mode === 'long-current' ? { ...previewConfig, workspaces: previewConfig.workspaces.map(workspace => workspace.id === projectWorkspace.id ? { ...workspace, name: '持续保留工作区与真实 Agent 状态的长期项目 / workspace-continuity-and-reliable-delivery' } : workspace) } : previewConfig
   flushSync(() => { useAppStore.setState({ initialize, config: mode === 'delivery-failure' ? { ...initial.config!, workspaces: [...initial.config!.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID), { ...projectWorkspace, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: '/preview/scratch', kind: 'folder' }] } : config, loading: false, mainSurface: 'board', sessions, demands: Object.fromEntries(entries.map((goal) => [goal.id, goal])), selectedDemandId: scenario ? goals[0]!.id : null, activeWorkspaceId: ['current', 'long-current'].includes(mode) ? projectWorkspace.id : null,
     agentFocus: mode === 'recent' ? { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: 1790960000000, identity: { name: sessions[0]!.label, kind: sessions[0]!.kind, providerId: sessions[0]!.providerId, hostId: project.hostId, workspacePath: projectWorkspace.path, project: { id: projectWorkspace.id, name: projectWorkspace.name } } }] }, pmo: { sessionId: null } } : EMPTY_AGENT_FOCUS,
-    layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true, leaderTopicVisible: false }); root?.render(<App key={mode} />) })
+    layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true }); root?.render(<App key={mode} />) })
 }
 seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
