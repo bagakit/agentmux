@@ -1,9 +1,9 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
-const [html, privateRoot, evidence, scope] = process.argv.slice(2)
+const [html, privateRoot, evidence, scope, baselineFile] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: 'maturity', beforeOnly: scope === 'before-only', passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
+const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
 let win
 const evaluate = expression => win.webContents.executeJavaScript(expression)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -17,6 +17,57 @@ async function insert(selector,text){await click(`document.querySelector(${JSON.
 async function keyboardFocus(selector){for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);await paint()}
 async function visibleDetail(label){const bounds=await evaluate(`(()=>{const detail=document.querySelector('.goals-detail'),title=document.querySelector('.goals-title'),d=detail.getBoundingClientRect(),t=title.getBoundingClientRect();return {width:d.width,height:d.height,left:d.left,right:d.right,top:d.top,bottom:d.bottom,viewportWidth:innerWidth,viewportHeight:innerHeight,titleHeight:t.height,titleScrollHeight:title.scrollHeight,titleRows:title.rows,titleTop:t.top,titleBottom:t.bottom,nativeFieldSizing:CSS.supports('field-sizing','content')}})()`);assert.ok(bounds.width>200 && bounds.height>200 && bounds.left>=0 && bounds.right<=bounds.viewportWidth+1 && bounds.top>=0 && bounds.top<bounds.viewportHeight-200,'Selected Goal detail occupies a real readable viewport');assert.ok(bounds.titleHeight<150 && bounds.titleTop<bounds.viewportHeight-100,'Goal title grows with actual current width without hiding the document');assert.equal(bounds.nativeFieldSizing,true);result.observations.push({scene:label,visibleDetail:bounds})}
 async function scenario(mode,width,theme){await evaluate(`goalsVisual.seed(${JSON.stringify(mode)});goalsVisual.appearance(${JSON.stringify(theme)})`);await size(width);await paint();const facts=await evaluate('goalsVisual.facts()');result.observations.push({scene:mode,width,theme,facts});return facts}
+async function densityStart(scene, expectedRequests, baseline) {
+ const geometry=await evaluate(`(()=>{const box=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}},common=document.querySelector('.goals-common'),collection=document.querySelector('.goals-collection'),rows=[...document.querySelectorAll('[data-demand-id]')],actions=[...document.querySelectorAll('[data-common-action]')],reading=document.querySelector('.goals-common__reading'),art=common.querySelector('img');return {surface:box(document.querySelector('.goals-surface')),common:box(common),collection:box(collection),toolbar:box(document.querySelector('.goals-toolbar')),rows:rows.map(e=>({id:e.dataset.demandId,...box(e),title:e.querySelector('strong').textContent,next:e.querySelector('.goals-row__next').textContent,facts:e.querySelector('.goals-row__facts').textContent})),actions:actions.map(e=>({...box(e),body:e.querySelector('.goals-entry__request').textContent,facts:e.querySelector('.goals-common__facts').textContent})),reading:{...box(reading),clientHeight:reading.clientHeight,scrollHeight:reading.scrollHeight},brand:art?{...box(art),loaded:art.naturalWidth>0}:null,collapsed:document.querySelector('[aria-label="收起常用操作"]')?.getAttribute('aria-expanded')}})()`)
+ assert.equal(geometry.collapsed,'true','Density preserves expanded directory preference')
+ assert.ok(geometry.actions.length>0,'Actual mounted common actions are nonempty')
+ assert.deepEqual(geometry.actions.map(item=>item.body),expectedRequests,'Full original one-click requests remain visible in the actual controls')
+ assert.ok(geometry.actions.every(item=>item.facts.includes('Agent')),'Actual action target facts remain nonempty')
+ assert.ok(geometry.brand?.loaded && geometry.brand.width>0 && geometry.brand.height>0,'One real brand image remains rendered')
+ if(!result.beforeOnly){
+  assert.ok(geometry.common.height<=200,'Top common actions fit the 200px functional budget')
+  const before=baseline.render.observations.find(item=>item.scene===scene)?.geometry
+  assert.ok(before?.common.height>0,'Same-fixture measured baseline is nonempty')
+  assert.ok(geometry.common.height<=before.common.height*.7,'Top common actions remove at least 30 percent of measured prior occupancy')
+  assert.ok(geometry.collection.width>=geometry.surface.width*.88,'Goal scanning uses at least 88 percent of available width')
+  assert.ok(geometry.actions.every(item=>Math.abs(item.top-geometry.actions[0].top)<1),'Wide full original requests are arranged in parallel')
+  assert.ok(geometry.reading.scrollHeight<=geometry.reading.clientHeight+1,'Normal first actions need no nested decorative scrolling')
+  if(scene==='mixed'){
+   assert.equal(geometry.rows.length,6,'Exactly six real Goal rows are mounted')
+   assert.ok(geometry.rows.every(item=>item.title&&item.next),'Real Goal title and next-step facts are nonempty')
+   assert.ok(geometry.rows.reduce((sum,item)=>sum+item.height,0)/geometry.rows.length<=64,'Wide simple Goal rows average at most 64px')
+   assert.ok(geometry.rows.every(item=>item.top>=geometry.collection.top && item.bottom<=geometry.collection.bottom),'All six real Goals are readable in the first scan viewport')
+  }
+ }
+ result.observations.push({scene,geometry})
+}
+async function densityDetail(scene) {
+ await visibleDetail(scene)
+ const geometry=await evaluate(`(()=>{const rail=document.querySelector('.goals-index').getBoundingClientRect(),detail=document.querySelector('.goals-detail').getBoundingClientRect(),documentStyle=getComputedStyle(document.querySelector('.goals-document')),doc=document.querySelector('.goals-document').getBoundingClientRect(),toolbar=document.querySelector('.goals-detail__toolbar').getBoundingClientRect();return {railWidth:rail.width,bodyOffset:doc.left+parseFloat(documentStyle.paddingLeft)-detail.left,toolbarOffset:parseFloat(getComputedStyle(document.querySelector('.goals-detail__toolbar')).paddingLeft),documentWidth:doc.width,detailWidth:detail.width,criteria:document.querySelectorAll('[data-goal-success-criterion]').length}})()`)
+ assert.ok(geometry.criteria>0,'Actual detail success criteria are nonempty')
+ if(!result.beforeOnly){assert.ok(geometry.railWidth>=260 && geometry.railWidth<=320,'Detail navigation stays within its 260–320px budget');assert.ok(geometry.bodyOffset>=16 && geometry.bodyOffset<=24,'Goal document starts 16–24px from the detail boundary');assert.equal(geometry.bodyOffset,geometry.toolbarOffset,'Goal document and toolbar share their left reading edge')}
+ result.observations.push({scene,detailGeometry:geometry})
+}
+async function densityScenes(){
+ const baseline=result.beforeOnly?null:JSON.parse(await fs.readFile(baselineFile,'utf8'))
+ const defaults=['我还不知道能做什么，可以了解我并给我建议吗？','我有一些点子，我们开始尝试一个项目']
+ await scenario('empty',1280,'light');await densityStart('empty',defaults,baseline);await capture('1280-light-density-initial',1280)
+ await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
+ const facts=await evaluate('goalsVisual.facts()');assert.equal(facts.ids.length,6);assert.ok(facts.criteria>0&&facts.reports>0&&facts.checks>0,'Mixed target/result collections are nonempty');await densityStart('mixed',defaults,baseline);await capture('1280-dark-density-mixed',1280)
+ await evaluate('goalsVisual.seedCommon("project")');await size(1280)
+ await densityStart('project',[...defaults,'根据最近的项目情况，建议我下一步应该做什么'],baseline);await capture('1280-dark-density-project',1280)
+ await scenario('proposal',1280,'dark');await densityDetail('wide-detail');await capture('1280-dark-density-detail',1280)
+ if(result.beforeOnly)return
+ await scenario('empty',620,'light');await capture('620-light-density-initial',620)
+ await evaluate('goalsVisual.seedCommon("long-project");goalsVisual.appearance("dark")');await size(620)
+ const long=await evaluate(`(()=>{const e=document.querySelector('[data-common-action="prompt:common-review"]'),body=e.querySelector('.goals-entry__request'),r=body.getBoundingClientRect();return {body:body.textContent,width:r.width,containerWidth:document.querySelector('.goals-common').getBoundingClientRect().width,count:document.querySelectorAll('[data-common-action]').length,facts:[...document.querySelectorAll('.goals-common__facts')].map(e=>e.textContent)}})()`)
+ assert.equal(long.count,3);assert.ok(long.body.startsWith('1.')&&long.body.includes('9.'),'Actual long original request includes its complete last paragraph');assert.ok(long.width<=long.containerWidth);assert.ok(long.facts.some(text=>text.includes('workspace-continuity-and-reliable-delivery')),'Actual long Project target remains readable')
+ await keyboardFocus('.goals-common__reading');await evaluate(`(()=>{const e=document.querySelector('.goals-common');e.scrollTop=e.scrollHeight})()`);await paint();result.observations.push({scene:'long-request',long});await capture('620-dark-density-long-request-tail',620)
+ await scenario('results',1280,'dark');await densityDetail('results');assert.equal(await evaluate('document.querySelectorAll("[data-goal-criterion-id]").length'),2);assert.equal(await evaluate('document.querySelectorAll(".goals-evidence__open").length'),2);await capture('1280-dark-density-results',1280)
+ await scenario('unknown',620,'light');await visibleDetail('density-unknown');assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-accept],[data-goal-accept-gaps]"))'),false);await evaluate('document.querySelector(".goals-grounding").scrollIntoView({block:"start"})');await capture('620-light-density-unknown',620)
+ await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280);await click(button('管理'));await click(button('新增操作'));await insert('[data-common-editor] textarea','先读取真实记录，再建议一次可验证的小尝试。');await evaluate('window.originalDensityEditor=document.querySelector("[data-common-editor] textarea");goalsVisual.holdConfigSave()');await click(button('保存操作'));await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")');await evaluate('goalsVisual.finishConfigSave(true)');await waitFor('Boolean(document.querySelector(".goals-common__context-feedback")?.textContent.includes("保存未完成"))');await size(620);await visibleDetail('density-compact-error');await capture('620-dark-density-compact-error',620);await click(button('回到常用操作'))
+ assert.equal(await evaluate('window.originalDensityEditor===document.querySelector("[data-common-editor] textarea")'),true,'Density retains the original mounted editor');assert.equal(await evaluate('document.querySelector("[data-common-editor] textarea").value'),'先读取真实记录，再建议一次可验证的小尝试。');assert.equal(await evaluate('document.activeElement.textContent.trim()'),'保存操作');const focus=await evaluate(`(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),p=e.closest('.goals-common__manager').getBoundingClientRect();return {top:r.top,bottom:r.bottom,right:r.right,scrollTop:p.top,scrollBottom:p.bottom,scrollRight:p.right,scrollbar:parseFloat(getComputedStyle(e.closest('.goals-common__manager'),'::-webkit-scrollbar').width),outline:getComputedStyle(e).outlineWidth}})()`);assert.ok(focus.top>=focus.scrollTop&&focus.bottom<=focus.scrollBottom&&focus.right<=focus.scrollRight-focus.scrollbar,'Original returned Save stays fully visible away from the scrollbar');assert.equal(focus.outline,'2px');result.observations.push({scene:'manager-return',focus});await capture('620-dark-density-manager-return',620);assert.equal(result.frames.length,10)
+}
 app.whenReady().then(async()=>{
  try{
   await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1280,height:780,webPreferences:{sandbox:false,backgroundThrottling:false}})
@@ -24,7 +75,9 @@ app.whenReady().then(async()=>{
   await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===6')
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
-  if(scope==='before-only'){
+  if(scope?.startsWith('density')){
+   await densityScenes()
+  }else if(scope==='before-only'){
    await scenario('confirmed',1280,'dark');await waitFor('Boolean(document.querySelector("[data-goal-summary]"))')
    const counts=await evaluate('({goals:document.querySelectorAll("[data-demand-id]").length,criteria:document.querySelectorAll("[data-goal-success-criterion]").length})')
    assert.ok(counts.goals>0 && counts.criteria>0,'Actual baseline Goal and criteria exist');result.observations.push({scene:'wide-detail-baseline',counts})

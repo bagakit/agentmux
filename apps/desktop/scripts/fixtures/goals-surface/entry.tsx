@@ -53,13 +53,13 @@ const commonPrompts: ComposerShortcut[] = [
 ]
 
 function seedCommon(mode = 'empty') {
-  seed(mode === 'empty' ? 'empty' : mode === 'project' ? 'recent' : 'many')
+  seed(mode === 'empty' ? 'empty' : mode === 'project' ? 'recent' : mode === 'long-project' ? 'long-current' : 'many')
   configSaveFailure = false
   const base = useAppStore.getState().config!
   let composerShortcuts = structuredClone(commonPrompts)
   let items: GoalsCommonActionRef[] | undefined
-  if (['many', 'long'].includes(mode)) items = [{ kind: 'prompt', id: commonPrompts[0]!.id }, { kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }, ...commonPrompts.slice(1).map(prompt => ({ kind: 'prompt' as const, id: prompt.id }))]
-  if (mode === 'long') composerShortcuts = [{ ...commonPrompts[0]!, body: Array.from({ length: 9 }, (_, index) => `${index + 1}. 阅读当前记录，保留原始事实、仍未确认的问题，以及每个结论的出处。下一次只执行最小验证，不编造已完成结果。`).join('\n') }, ...commonPrompts.slice(1)]
+  if (['many', 'long', 'long-project'].includes(mode)) items = [{ kind: 'prompt', id: commonPrompts[0]!.id }, { kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }, ...commonPrompts.slice(1).map(prompt => ({ kind: 'prompt' as const, id: prompt.id }))]
+  if (['long', 'long-project'].includes(mode)) composerShortcuts = [{ ...commonPrompts[0]!, body: Array.from({ length: 9 }, (_, index) => `${index + 1}. 阅读当前记录，保留原始事实、仍未确认的问题，以及每个结论的出处。下一次只执行最小验证，不编造已完成结果。`).join('\n') }, ...commonPrompts.slice(1)]
   if (mode === 'unavailable') { composerShortcuts = [{ ...commonPrompts[0]!, providerId: 'unconfigured-provider' }]; items = [{ kind: 'prompt', id: commonPrompts[0]!.id }, { kind: 'builtin', id: 'ideas' }] }
   if (mode === 'explicit-empty') items = []
   flushSync(() => {
