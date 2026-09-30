@@ -29,6 +29,8 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  * 让本表的键随那个常量一起变。
  */
 export const PRIVILEGED_SENDER_LABELS = {
+  'sessions:observeHistory': 'history observation',
+  'sessions:releaseHistoryObservation': 'history observation',
   'continuousProgress:list': 'continuous progress',
   'continuousProgress:create': 'continuous progress',
   'continuousProgress:action': 'continuous progress',

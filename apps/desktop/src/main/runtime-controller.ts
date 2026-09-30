@@ -17,6 +17,8 @@ import {
   type AgentExecutorId,
   type AgentProviderId,
   type AgentSessionHistoryPage,
+  type AgentSessionHistoryObservation,
+  type AgentSessionHistoryObservationHandle,
   type AgentMuxClient,
   type AgentMuxClientEvent,
   type AgentMuxInteractionResponse,
@@ -72,6 +74,7 @@ type RuntimeHost = {
   executionHost: ExecutionHost
   client: AgentMuxClient
   unsubscribe: () => void
+  historyObservationDisposers: Set<() => void>
 }
 
 type PreparedRuntimeHost = {
@@ -450,10 +453,11 @@ export class RuntimeController {
         const previous = this.hosts.get(prepared.id)
         if (previous) retired.set(prepared.id, previous)
         const unsubscribe = prepared.client.onEvent((event) => this.publish(prepared.id, event))
-        this.hosts.set(prepared.id, { ...prepared, unsubscribe })
+        this.hosts.set(prepared.id, { ...prepared, unsubscribe, historyObservationDisposers: new Set() })
       }
       this.hostSignatures = preparation.hostSignatures
       for (const [id, host] of retired) {
+        for (const release of host.historyObservationDisposers) release()
         host.unsubscribe()
         void disposePrepared([{ id, executionHost: host.executionHost, client: host.client }]).catch((error) => {
           console.error(`Failed to dispose retired Runtime host ${id}`, error)
@@ -875,6 +879,57 @@ export class RuntimeController {
       throw new Error(`History page belongs to another Session: ${page.agentSessionId}`)
     }
     return page
+  }
+
+  async observeSessionHistory(
+    control: SessionHistoryReference,
+    listener: (observation: AgentSessionHistoryObservation) => void,
+    config: AppConfig,
+    signal: AbortSignal
+  ): Promise<AgentSessionHistoryObservationHandle> {
+    signal.throwIfAborted()
+    if (typeof control.agentSessionId !== 'string' || !control.agentSessionId) throw new Error('History observation requires an Agent Session.')
+    const host = this.hosts.get(control.hostId)
+    if (!host) throw new Error(`History host is not configured: ${control.hostId}`)
+    const controller = new AbortController()
+    let handle: AgentSessionHistoryObservationHandle | undefined
+    let disposed = false
+    const dispose = (): void => {
+      if (disposed) return
+      disposed = true
+      controller.abort(signal.reason ?? new Error('History observation owner was released.'))
+      handle?.dispose()
+      signal.removeEventListener('abort', dispose)
+      host.historyObservationDisposers.delete(retire)
+    }
+    const retire = (): void => {
+      try {
+        listener({ kind: 'unavailable', agentSessionId: control.agentSessionId,
+          code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED',
+          message: 'History host configuration changed. The current window is kept; refresh its source.' })
+      } catch {
+        // A readonly Consumer cannot veto replacing or disposing its Host.
+      } finally { dispose() }
+    }
+    host.historyObservationDisposers.add(retire)
+    signal.addEventListener('abort', dispose, { once: true })
+    try {
+      const descriptor = (await this.sessionHistorySources()).find(entry =>
+        entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId)
+      controller.signal.throwIfAborted()
+      if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
+      const executor = requireSessionExecutor(config, descriptor.history)
+      const acquired = await host.client.observeSessionHistory(control.agentSessionId, observation => {
+        if (!disposed) listener(observation)
+      }, { commandOverride: executor.command, args: executor.args, env: executor.env, signal: controller.signal })
+      handle = acquired
+      if (disposed || this.hosts.get(control.hostId) !== host) {
+        acquired.dispose()
+        controller.signal.throwIfAborted()
+        throw new Error('History host configuration changed while observing its source.')
+      }
+      return { source: acquired.source, dispose }
+    } catch (error) { dispose(); throw error }
   }
 
   async toolkitRunPort(): Promise<ToolkitRunPort> {
@@ -1435,6 +1490,7 @@ export class RuntimeController {
       // cleanup fails, the window can report the failure and retry/recover against still-live
       // owners; clearing the maps first used to leave the reservation set behind and every later
       // attach was rejected as "Host is being reconfigured" forever.
+      for (const [, host] of hosts) for (const release of host.historyObservationDisposers) release()
       await disposePrepared(hosts.map(([id, host]) => ({ id, ...host })))
       this.hosts.clear()
       this.clients.clear()

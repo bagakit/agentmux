@@ -1,11 +1,16 @@
 import { useEffect, useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
-import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentSessionHistoryObservationHandle } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
 import { useAppStore } from '../store'
 
 export type AgentSessionControlInput = AgentSessionControl
+
+const MAX_NATIVE_RECORDS = 90
+const MAX_NATIVE_BYTES = 12 * 1024 * 1024
+const MAX_REVALIDATION_PAGES = 3
+type ReadMode = 'initial' | 'earlier' | 'revalidate' | 'replace'
 
 type SessionEntry = {
   key: string
@@ -21,10 +26,14 @@ type SessionEntry = {
   error: Error | null
   inFlight: Promise<AgentSessionHistoryPage | null> | null
   version: number
-  latestRequestedId: number
-  latestAppliedId: number
   consumerLifetimeId: number
-  queuedRefresh: boolean
+  queuedRefresh: ReadMode | null
+  observationController: AbortController | null
+  observationHandle: AgentSessionHistoryObservationHandle | null
+  observationReady: Promise<void> | null
+  observationError: Error | null
+  windowFrozen: boolean
+  refreshTimer: ReturnType<typeof setTimeout> | null
 }
 
 const sessionRegistry = new Map<string, SessionEntry>()
@@ -55,10 +64,14 @@ function getOrCreateEntry(control: AgentSessionControlInput): SessionEntry {
       error: null,
       inFlight: null,
       version: 0,
-      latestRequestedId: 0,
-      latestAppliedId: 0,
       consumerLifetimeId: 0,
-      queuedRefresh: false
+      queuedRefresh: null,
+      observationController: null,
+      observationHandle: null,
+      observationReady: null,
+      observationError: null,
+      windowFrozen: false,
+      refreshTimer: null
     }
     sessionRegistry.set(key, entry)
   }
@@ -72,80 +85,179 @@ function notifySubscribers(entry: SessionEntry) {
   }
 }
 
+function sameSource(a: AgentSessionHistoryPage['source'], b: AgentSessionHistoryPage['source']): boolean {
+  return a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId
+}
+
+function withinWindow(items: AgentSessionHistoryPage['items']): boolean {
+  if (items.length > MAX_NATIVE_RECORDS) return false
+  let bytes = 0
+  for (const item of items) {
+    bytes += new TextEncoder().encode(JSON.stringify(item)).byteLength
+    if (bytes > MAX_NATIVE_BYTES) return false
+  }
+  return true
+}
+
+function pauseEntry(entry: SessionEntry): void {
+  entry.consumerLifetimeId++
+  entry.observationController?.abort()
+  entry.observationHandle?.dispose()
+  entry.observationController = null
+  entry.observationHandle = null
+  entry.observationReady = null
+  if (entry.refreshTimer) clearTimeout(entry.refreshTimer)
+  entry.refreshTimer = null
+  entry.queuedRefresh = null
+  entry.inFlight = null
+  entry.loading = false
+}
+
+function scheduleRevalidation(control: AgentSessionControlInput, entry: SessionEntry): void {
+  if (entry.windowFrozen || !entry.subscribers.size || entry.refreshTimer) return
+  // One short burst timer per actual observed source, never a poll.
+  entry.refreshTimer = setTimeout(() => {
+    entry.refreshTimer = null
+    if (!entry.subscribers.size || entry.windowFrozen) return
+    void fetchSessionHistoryPage(control, entry, 'revalidate')
+  }, 50)
+}
+
+function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, replacing = false): Promise<void> {
+  if (entry.observationReady) return entry.observationReady
+  const controller = new AbortController()
+  const lifetime = entry.consumerLifetimeId
+  entry.observationController = controller
+  entry.observationError = null
+  const current = (): boolean => !controller.signal.aborted && entry.observationController === controller &&
+    entry.consumerLifetimeId === lifetime && entry.subscribers.size > 0
+  const acquiring = (async () => {
+    try {
+      const handle = await api.sessions.observeHistory(control, observation => {
+        if (!current() || observation.agentSessionId !== entry.agentSessionId) return
+        if (observation.kind === 'unavailable') {
+          entry.observationError = Object.assign(new Error(observation.message), { code: observation.code })
+          entry.observationHandle?.dispose()
+          entry.observationHandle = null
+          notifySubscribers(entry)
+          return
+        }
+        const source = entry.observationHandle?.source
+        if (source && !sameSource(source, observation.source)) {
+          entry.observationError = new Error('Native source changed. The current window is kept; refresh its source.')
+          notifySubscribers(entry)
+          return
+        }
+        scheduleRevalidation(control, entry)
+      }, { signal: controller.signal })
+      if (!current()) { handle.dispose(); return }
+      if (!replacing && entry.historyPage && !sameSource(entry.historyPage.source, handle.source)) {
+        handle.dispose()
+        entry.observationError = new Error('Native source changed. The current window is kept; refresh its source.')
+      } else if (entry.observationError) handle.dispose()
+      else entry.observationHandle = handle
+    } catch (error) {
+      if (current()) entry.observationError = error instanceof Error ? error : new Error(String(error))
+    } finally {
+      if (current()) notifySubscribers(entry)
+    }
+  })()
+  entry.observationReady = acquiring
+  return acquiring
+}
+
 async function fetchSessionHistoryPage(
   control: AgentSessionControlInput,
   entry: SessionEntry,
-  cursor?: string,
-  isExplicitRefresh?: boolean
+  mode: ReadMode = 'initial'
 ): Promise<AgentSessionHistoryPage | null> {
-  // If an in-flight request is already active for this session:
   if (entry.inFlight) {
-    if (isExplicitRefresh) {
-      entry.queuedRefresh = true
+    if (mode === 'replace' || mode === 'revalidate') {
+      if (entry.queuedRefresh !== 'replace') entry.queuedRefresh = mode
     }
     return entry.inFlight
   }
-
+  if (!entry.subscribers.size || (mode !== 'replace' && entry.windowFrozen)) return entry.historyPage
+  const lifetime = entry.consumerLifetimeId
+  const current = (): boolean => entry.subscribers.size > 0 && lifetime === entry.consumerLifetimeId
   entry.loading = true
   entry.error = null
   notifySubscribers(entry)
-
-  const requestId = ++entry.latestRequestedId
-  const requestLifetimeId = entry.consumerLifetimeId
-
   const promise = (async () => {
     try {
-      const page = await api.sessions.historyPage(control, { limit: 30, ...(cursor ? { cursor } : {}) })
-
-      // Check if consumers left or consumer lifetime changed while in flight
-      if (entry.subscribers.size === 0 || requestLifetimeId !== entry.consumerLifetimeId) {
-        return null
+      // Establish the source watch (or its explicit degraded result) before the
+      // first read, so append between acquisition and read cannot be lost.
+      await observeEntry(control, entry, mode === 'replace')
+      if (!current()) return null
+      const read = async (cursor?: string): Promise<AgentSessionHistoryPage> => {
+        const page = await api.sessions.historyPage(control, { limit: 30, ...(cursor ? { cursor } : {}) })
+        if (page.agentSessionId !== entry.agentSessionId) throw new Error('Native page belongs to another Session.')
+        if (entry.observationHandle && !sameSource(entry.observationHandle.source, page.source)) {
+          throw new Error('Native source changed after observation was established. Refresh its source.')
+        }
+        if (entry.historyPage && mode !== 'replace' && !sameSource(entry.historyPage.source, page.source)) {
+          throw new Error('Native source changed. The current window is kept; refresh its source.')
+        }
+        return page
       }
-
-      // Generation check: discard older request if a newer request already applied
-      if (requestId < entry.latestAppliedId) {
+      let page = await read(mode === 'earlier' ? entry.nextCursor ?? undefined : undefined)
+      if (!current()) return null
+      let items = page.items
+      let nextCursor = page.nextCursor
+      if (mode === 'earlier') {
+        const existing = new Set(entry.items.map(item => item.id))
+        items = [...page.items.filter(item => !existing.has(item.id)), ...entry.items]
+      } else if (mode === 'revalidate' && entry.items.length) {
+        const boundary = entry.items[entry.items.length - 1]!.id
+        let incoming = [...page.items]
+        let index = incoming.findIndex(item => item.id === boundary)
+        for (let pages = 1; index < 0 && nextCursor && pages < MAX_REVALIDATION_PAGES; pages++) {
+          if (!withinWindow(incoming)) break
+          const earlier = await read(nextCursor)
+          if (!current()) return null
+          if (!sameSource(page.source, earlier.source)) throw new Error('Native source changed during revalidation.')
+          incoming = [...earlier.items, ...incoming]
+          nextCursor = earlier.nextCursor
+          index = incoming.findIndex(item => item.id === boundary)
+        }
+        if (index < 0) {
+          entry.windowFrozen = true
+          return entry.historyPage
+        }
+        // Retain old raw IDs and their objects. Only newly observed records are
+        // appended; reread overlap updates a record only when its facts changed.
+        const refreshed = new Map(incoming.map(item => [item.id, item]))
+        const existing = new Set(entry.items.map(item => item.id))
+        items = [...entry.items.map(item => {
+          const latest = refreshed.get(item.id)
+          return latest && JSON.stringify(latest) !== JSON.stringify(item) ? latest : item
+        }), ...incoming.slice(index + 1).filter(item => !existing.has(item.id))]
+        nextCursor = entry.nextCursor
+      }
+      if (!withinWindow(items)) {
+        entry.windowFrozen = true
         return entry.historyPage
       }
-
-      if (page && page.agentSessionId === control.agentSessionId) {
-        entry.latestAppliedId = requestId
-        if (cursor) {
-          // Prepend earlier items so canonical chronological order (0..30) is preserved!
-          const combinedItems = [...page.items, ...entry.items]
-          entry.items = combinedItems
-          entry.nextCursor = page.nextCursor
-          entry.historyPage = { ...page, items: combinedItems }
-        } else {
-          entry.items = page.items
-          entry.nextCursor = page.nextCursor
-          entry.historyPage = page
-        }
-        entry.error = null
-      }
+      entry.items = items
+      entry.nextCursor = nextCursor
+      entry.historyPage = { ...page, items, nextCursor }
+      entry.error = null
+      if (mode === 'replace') entry.windowFrozen = false
       return entry.historyPage
-    } catch (err) {
-      if (entry.subscribers.size > 0 && requestLifetimeId === entry.consumerLifetimeId) {
-        entry.error = err instanceof Error ? err : new Error(String(err))
-      }
-      // Preserve existing observed items across transport failures
+    } catch (error) {
+      if (current()) entry.error = error instanceof Error ? error : new Error(String(error))
       return entry.historyPage
     } finally {
-      if (requestLifetimeId === entry.consumerLifetimeId) {
+      if (current()) {
         entry.inFlight = null
-        if (!entry.queuedRefresh && requestId === entry.latestRequestedId) {
-          entry.loading = false
-        }
-      }
-      notifySubscribers(entry)
-
-      // If an explicit refresh was queued while this request was in flight, execute it now
-      if (entry.queuedRefresh && entry.subscribers.size > 0 && requestLifetimeId === entry.consumerLifetimeId) {
-        entry.queuedRefresh = false
-        void fetchSessionHistoryPage(control, entry, undefined, false)
+        entry.loading = false
+        notifySubscribers(entry)
+        const queued = entry.queuedRefresh
+        entry.queuedRefresh = null
+        if (queued) void fetchSessionHistoryPage(control, entry, queued)
       }
     }
   })()
-
   entry.inFlight = promise
   return promise
 }
@@ -161,6 +273,8 @@ export function useSessionUserMessages(
   hasMore: boolean
   loading: boolean
   error: Error | null
+  observationError: Error | null
+  windowFrozen: boolean
   loadEarlier: () => Promise<void>
   refresh: () => Promise<void>
 } {
@@ -188,14 +302,12 @@ export function useSessionUserMessages(
       entry.consumerCount--
       if (entry.consumerCount <= 0) {
         // When all consumers leave, release entry and cache so future consumers read fresh source
-        entry.consumerLifetimeId++
-        entry.inFlight = null
-        entry.loading = false
+        pauseEntry(entry)
         entry.historyPage = null
         entry.items = []
         entry.nextCursor = null
         entry.error = null
-        entry.queuedRefresh = false
+        entry.queuedRefresh = null
         sessionRegistry.delete(sessionKey)
       }
     }
@@ -209,6 +321,7 @@ export function useSessionUserMessages(
 
       return () => {
         entry.subscribers.delete(onStoreChange)
+        if (!entry.subscribers.size) pauseEntry(entry)
       }
     },
     [active, sessionKey]
@@ -224,8 +337,8 @@ export function useSessionUserMessages(
   useEffect(() => {
     if (!active || !control) return
     const entry = sessionRegistry.get(sessionKey)
-    if (entry && !entry.historyPage && !entry.inFlight && !entry.loading) {
-      void fetchSessionHistoryPage(control, entry)
+    if (entry && !entry.observationReady && !entry.inFlight && !entry.loading) {
+      void fetchSessionHistoryPage(control, entry, entry.historyPage ? 'revalidate' : 'initial')
     }
   }, [active, sessionKey])
 
@@ -233,14 +346,21 @@ export function useSessionUserMessages(
     if (!active || !control) return
     const entry = sessionRegistry.get(sessionKey)
     if (!entry) return
-    await fetchSessionHistoryPage(control, entry, undefined, true /* isExplicitRefresh */)
+    if (!entry.inFlight) {
+      entry.observationController?.abort()
+      entry.observationHandle?.dispose()
+      entry.observationController = null
+      entry.observationHandle = null
+      entry.observationReady = null
+    }
+    await fetchSessionHistoryPage(control, entry, 'replace')
   }, [active, sessionKey])
 
   const loadEarlier = useCallback(async () => {
     if (!active || !control) return
     const entry = sessionRegistry.get(sessionKey)
-    if (!entry || !entry.nextCursor || entry.loading) return
-    await fetchSessionHistoryPage(control, entry, entry.nextCursor)
+    if (!entry || !entry.nextCursor || entry.loading || entry.items.length >= MAX_NATIVE_RECORDS) return
+    await fetchSessionHistoryPage(control, entry, 'earlier')
   }, [active, sessionKey])
 
   // Non-speculative read during render: do not create entry on uncommitted/aborted renders
@@ -296,6 +416,8 @@ export function useSessionUserMessages(
     hasMore: Boolean(entry?.nextCursor),
     loading: active ? (entry?.loading ?? false) : false,
     error: entry?.error ?? null,
+    observationError: entry?.observationError ?? null,
+    windowFrozen: entry?.windowFrozen ?? false,
     loadEarlier,
     refresh
   }

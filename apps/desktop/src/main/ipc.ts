@@ -3,6 +3,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
+import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
 import { ToolkitOwner } from './toolkit-owner.js'
 import { performanceLaunch } from './toolkit-asset.js'
@@ -96,6 +97,7 @@ import {
   PASTED_IMAGE_EXTENSIONS,
   PASTED_IMAGE_MAX_BYTES,
   RESOURCE_USAGE_CHANNEL,
+  SESSION_HISTORY_OBSERVATION_CHANNEL,
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
 import { terminalPalette } from '../shared/terminal-palettes.js'
@@ -797,6 +799,18 @@ export async function registerIpc(args: {
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
+  const historyObservations = new SessionHistoryObservationOwners((reference, listener, signal) =>
+    args.runtime.observeSessionHistory(reference, listener, config, signal))
+  handleWithEvent('sessions:observeHistory', async (event, token: string, session: import('../shared/contracts.js').SessionHistoryReference) => {
+    requireTrustedSender('sessions:observeHistory', event)
+    return await historyObservations.acquire(event.sender, token, session, observation => {
+      if (!event.sender.isDestroyed()) event.sender.send(SESSION_HISTORY_OBSERVATION_CHANNEL, { token, observation })
+    })
+  })
+  handleWithEvent('sessions:releaseHistoryObservation', (event, token: string) => {
+    requireTrustedSender('sessions:releaseHistoryObservation', event)
+    historyObservations.release(event.sender.id, token)
+  })
   handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {
     const result = await args.runtime.attachSession(event.sender.id, session, afterSequence, config)
     if (!event.sender.isDestroyed()) return result
@@ -1184,6 +1198,7 @@ export async function registerIpc(args: {
       () => {
         for (const unsubscribe of usageSubscriptions.values()) unsubscribe()
         usageSubscriptions.clear()
+        historyObservations.dispose()
         releaseResourceObservation()
       },
       () => notifier.dispose(),
