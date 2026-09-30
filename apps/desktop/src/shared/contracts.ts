@@ -1298,6 +1298,26 @@ export type BrowserBounds = {
   height: number
 }
 
+export type BrowserPresentationOccurrence = {
+  presentationId: string
+  location: Pick<import('@agentmux/core/control').AgentMuxSpaceLocation,
+    'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'>
+}
+export type BrowserPresentationGeometry = { visible: false } | { visible: true; bounds: BrowserBounds }
+export type BrowserPresentationLease = { leaseId: string }
+export type BrowserPresentationCapture = { captureId: string; browserId: string }
+export type BrowserPresentationCaptureAck =
+  | { outcome: 'ready'; trackIds: readonly [string, ...string[]] }
+  | { outcome: 'stopped'; trackIds: readonly [string, ...string[]] }
+  | { outcome: 'failed'; message: string }
+export type BrowserPresentationRevocationReason =
+  | 'requester-ended' | 'source-replaced' | 'source-released' | 'no-visible-presentations'
+/** Media resources never close or remove a Browser entity/Region. */
+export type BrowserPresentationEvent =
+  | { type: 'capture-revoked'; browserId: string; captureId: string; reason: BrowserPresentationRevocationReason }
+  | { type: 'input-owner-changed'; browserId: string; leaseId: string | null }
+export const BROWSER_PRESENTATION_EVENT_CHANNEL = 'agentmux:browser-presentation-event'
+
 export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'
 /** Main -> renderer: the user clicked a notification about this Agent Session. */
 export const AGENT_ATTENTION_ACTIVATE_CHANNEL = 'agentmux:agent-attention-activate'
@@ -1615,6 +1635,17 @@ export type AgentMuxDesktopApi = {
     cancelElementSelection(id: string): Promise<void>
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
+    registerPresentation(input: {
+      browserId: string
+      occurrence: BrowserPresentationOccurrence
+      geometry: BrowserPresentationGeometry
+    }): Promise<BrowserPresentationLease>
+    updatePresentation(leaseId: string, geometry: BrowserPresentationGeometry): Promise<void>
+    removePresentation(leaseId: string): Promise<void>
+    armPresentationCapture(leaseId: string): Promise<BrowserPresentationCapture>
+    ackPresentationCapture(captureId: string, ack: BrowserPresentationCaptureAck): Promise<void>
+    activatePresentation(leaseId: string): Promise<void>
+    onPresentationEvent(listener: (event: BrowserPresentationEvent) => void): () => void
     /** Release only the Main-owned native page surface; the Renderer Region remains present. */
     release(id: string): Promise<void>
     /** Rebuild a previously released native page from the retained Region projection. */

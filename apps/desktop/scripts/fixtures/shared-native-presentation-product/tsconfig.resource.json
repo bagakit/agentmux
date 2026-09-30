@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../test/browser-presentation-resource.test.ts", "resource-main.ts"]
+}

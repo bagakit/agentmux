@@ -3,11 +3,12 @@ import { parseBrowserStructuredOutputRequest } from './browser-structured-output
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow, type WebContents, type Session } from 'electron'
+import { WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
+  BROWSER_PRESENTATION_EVENT_CHANNEL,
   BROWSER_VIEWPORT_PRESETS,
   type BrowserAnnotationMarker,
   type BrowserBounds,
@@ -20,6 +21,11 @@ import {
   type BrowserViewport,
   type BrowserOperator,
   type BrowserActivityState
+} from '../shared/contracts.js'
+import type {
+  BrowserPresentationOccurrence, BrowserPresentationGeometry, BrowserPresentationLease,
+  BrowserPresentationCapture, BrowserPresentationCaptureAck, BrowserPresentationEvent,
+  BrowserPresentationRevocationReason
 } from '../shared/contracts.js'
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
@@ -104,6 +110,29 @@ type BrowserEntry = {
   feedback?: BrowserOperationFeedback
   demonstration?: BrowserDemonstrationState
   taskAssets?: BrowserTaskAssetState
+  /** Transient resources for this entity; never a second durable binding catalogue. */
+  presentationLeaseIds: Set<string>
+  captureId: string | null
+  inputLeaseId: string | null
+}
+
+type PresentationDocument = { frame: WebFrameMain; session: Session; url: string }
+type PresentationLease = {
+  id: string
+  entry: BrowserEntry
+  document: PresentationDocument
+  occurrence: BrowserPresentationOccurrence
+  geometry: BrowserPresentationGeometry
+}
+type PresentationCapture = {
+  id: string
+  entry: BrowserEntry
+  document: PresentationDocument
+  source: WebContentsView
+  profileId: string
+  granted: boolean
+  revoked: boolean
+  trackIds: readonly string[] | null
 }
 
 /** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
@@ -302,6 +331,12 @@ export class BrowserViewManager {
   private readonly entries = new Map<string, BrowserEntry>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private readonly webAuthnSessions = new Map<Session, () => void>()
+  private readonly presentationLeases = new Map<string, PresentationLease>()
+  private readonly presentationCaptures = new Map<string, PresentationCapture>()
+  private presentationDocument: PresentationDocument | null = null
+  private pendingPresentationCapture: PresentationCapture | null = null
+  private disposePresentationRequester: (() => void) | null = null
+  private presentationDisposed = false
   private demonstrationCapture: { entry: BrowserEntry; view: WebContentsView; contents: WebContents; capture: BrowserDemonstrationCapture } | null = null
 
   private readonly taskExecutions = new Map<string, { entry: BrowserEntry; runId: string | undefined; operationId: string | undefined; stopRequested: boolean }>()
@@ -351,6 +386,241 @@ export class BrowserViewManager {
     return { workspaceId: entry.workspaceId, profileId: entry.profileId }
   }
 
+  registerPresentation(sender: WebContents, frame: WebFrameMain | null, input: {
+    browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry
+  }): BrowserPresentationLease {
+    const document = this.requirePresentationDocument(sender, frame)
+    const entry = this.require(input.browserId)
+    const occurrence = input.occurrence
+    if (!occurrence?.presentationId?.trim() || !occurrence.location ||
+      !['displayWorkspaceId', 'groupId', 'tabId', 'regionId'].every(key =>
+        typeof occurrence.location[key as keyof typeof occurrence.location] === 'string' &&
+        occurrence.location[key as keyof typeof occurrence.location].trim())) {
+      throw new Error('Browser presentation requires an exact occurrence')
+    }
+    const geometry = this.presentationGeometry(input.geometry)
+    for (const id of entry.presentationLeaseIds) {
+      const existing = this.presentationLeases.get(id)!
+      if (existing.document === document && existing.occurrence.presentationId === occurrence.presentationId) {
+        throw new Error('This Browser presentation is already registered')
+      }
+    }
+    const id = randomUUID()
+    this.presentationLeases.set(id, { id, entry, document,
+      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location } }, geometry })
+    entry.presentationLeaseIds.add(id)
+    return { leaseId: id }
+  }
+
+  updatePresentation(sender: WebContents, frame: WebFrameMain | null,
+    leaseId: string, value: BrowserPresentationGeometry): void {
+    const lease = this.requirePresentationLease(sender, frame, leaseId)
+    lease.geometry = this.presentationGeometry(value)
+    if (lease.entry.inputLeaseId === leaseId) {
+      if (lease.geometry.visible) this.setBounds(lease.entry.id, lease.geometry.bounds)
+      else this.clearPresentationInput(lease.entry)
+    }
+    if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
+  }
+
+  removePresentation(sender: WebContents, frame: WebFrameMain | null, leaseId: string): void {
+    const lease = this.requirePresentationLease(sender, frame, leaseId)
+    this.removePresentationLease(lease)
+  }
+
+  armPresentationCapture(sender: WebContents, frame: WebFrameMain | null,
+    leaseId: string): BrowserPresentationCapture {
+    const lease = this.requirePresentationLease(sender, frame, leaseId)
+    if (!lease.geometry.visible) throw new Error('Browser presentation is hidden')
+    const existing = lease.entry.captureId ? this.presentationCaptures.get(lease.entry.captureId) : undefined
+    if (existing && !existing.revoked) {
+      if (!existing.trackIds) throw new Error('Browser presentation capture is still pending')
+      return { captureId: existing.id, browserId: lease.entry.id }
+    }
+    // At most one capture record per entity. Old cleanup reports remain unknown after a new arm;
+    // they cannot retain released Native owners or revive a newer capture.
+    if (existing) this.presentationCaptures.delete(existing.id)
+    if (this.pendingPresentationCapture) throw new Error('Another Browser presentation capture is still pending')
+    if (lease.entry.view.webContents.isDestroyed()) throw new Error('Browser native page is unavailable')
+    const capture: PresentationCapture = {
+      id: randomUUID(), entry: lease.entry, document: lease.document,
+      source: lease.entry.view, profileId: lease.entry.profileId,
+      granted: false, revoked: false, trackIds: null
+    }
+    this.presentationCaptures.set(capture.id, capture)
+    lease.entry.captureId = capture.id
+    this.pendingPresentationCapture = capture
+    return { captureId: capture.id, browserId: lease.entry.id }
+  }
+
+  ackPresentationCapture(sender: WebContents, frame: WebFrameMain | null,
+    captureId: string, ack: BrowserPresentationCaptureAck): void {
+    const document = this.requirePresentationDocument(sender, frame)
+    const capture = this.presentationCaptures.get(captureId)
+    if (!capture || capture.document !== document) throw new Error('Unknown Browser presentation capture')
+    if (ack.outcome === 'failed') {
+      if (typeof ack.message !== 'string' || !ack.message.trim()) throw new Error('Capture failure requires a message')
+      // This holder reports that no stream was obtained; no invented source/visibility reason.
+      capture.revoked = true
+      if (capture.entry.captureId === capture.id) capture.entry.captureId = null
+      if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
+      this.presentationCaptures.delete(capture.id)
+      return
+    }
+    if (!['ready', 'stopped'].includes(ack.outcome) || !Array.isArray(ack.trackIds) ||
+      ack.trackIds.length === 0 || ack.trackIds.some(id => typeof id !== 'string' || !id.trim()) ||
+      new Set(ack.trackIds).size !== ack.trackIds.length) throw new Error('Capture acknowledgement requires actual track ids')
+    if (capture.trackIds && (capture.trackIds.length !== ack.trackIds.length ||
+      !capture.trackIds.every(id => ack.trackIds.includes(id)))) throw new Error('Capture track ids changed')
+    if (ack.outcome === 'ready') {
+      if (capture.revoked || !capture.granted || !this.isPresentationCaptureCurrent(capture)) {
+        throw new Error('Browser presentation capture is no longer authorized')
+      }
+      capture.trackIds = [...ack.trackIds]
+    } else {
+      capture.revoked = true
+      if (capture.entry.captureId === capture.id) capture.entry.captureId = null
+      this.presentationCaptures.delete(capture.id)
+    }
+    if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
+  }
+
+  activatePresentation(sender: WebContents, frame: WebFrameMain | null, leaseId: string): void {
+    const lease = this.requirePresentationLease(sender, frame, leaseId)
+    if (!lease.geometry.visible) throw new Error('Browser presentation is hidden')
+    // Only explicit input selection moves the original Native owner. Other videos contain its viewport.
+    this.setBounds(lease.entry.id, lease.geometry.bounds)
+    lease.entry.inputLeaseId = leaseId
+    lease.entry.view.webContents.focus()
+    this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId })
+  }
+
+  private requirePresentationDocument(sender: WebContents, frame: WebFrameMain | null): PresentationDocument {
+    if (this.presentationDisposed || this.window.isDestroyed() || sender !== this.window.webContents ||
+      sender.isDestroyed() || !frame || frame.detached || frame !== sender.mainFrame || frame.parent !== null ||
+      sender.isLoadingMainFrame() || !sender.getURL() || frame.url !== sender.getURL()) {
+      throw new Error('Untrusted Browser presentation document')
+    }
+    if (!this.disposePresentationRequester) this.attachPresentationRequester(sender)
+    const current = this.presentationDocument
+    if (current && !this.isPresentationDocumentCurrent(current)) this.invalidatePresentationRequester()
+    return this.presentationDocument ??= { frame, session: sender.session, url: sender.getURL() }
+  }
+
+  private isPresentationDocumentCurrent(document: PresentationDocument): boolean {
+    const sender = this.window.webContents
+    return !this.presentationDisposed && !this.window.isDestroyed() && !sender.isDestroyed() &&
+      document === this.presentationDocument && sender.session === document.session &&
+      !document.frame.detached && sender.mainFrame === document.frame &&
+      !sender.isLoadingMainFrame() && document.frame.url === document.url && sender.getURL() === document.url
+  }
+
+  private attachPresentationRequester(sender: WebContents): void {
+    const onNavigation = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>): void => {
+      if (details.isMainFrame && !details.isSameDocument) this.invalidatePresentationRequester()
+    }
+    const onSameDocument = (_event: unknown, url: string, isMainFrame: boolean): void => {
+      if (isMainFrame && this.presentationDocument) this.presentationDocument.url = url
+    }
+    const invalidate = (): void => this.invalidatePresentationRequester()
+    sender.on('did-start-navigation', onNavigation)
+    sender.on('did-navigate-in-page', onSameDocument)
+    sender.on('render-process-gone', invalidate)
+    sender.on('destroyed', invalidate)
+    sender.session.setDisplayMediaRequestHandler((request, callback) => {
+      const capture = this.pendingPresentationCapture
+      let originMatches = false
+      try { originMatches = new URL(request.securityOrigin).origin === new URL(capture?.document.url ?? '').origin } catch { /* reject opaque/invalid origins */ }
+      if (!capture || capture.granted || !this.isPresentationCaptureCurrent(capture) ||
+        request.frame !== capture.document.frame || request.frame.url !== capture.document.url ||
+        !originMatches || !request.videoRequested || request.audioRequested) {
+        callback(null as never)
+        return
+      }
+      // Main explicitly authorizes this exact App document, not all frames sharing its Session.
+      // Native source navigation changes its live frame; it never ends the Browser entity's capture.
+      capture.granted = true
+      callback({ video: capture.source.webContents.mainFrame })
+    }, { useSystemPicker: false })
+    this.disposePresentationRequester = () => {
+      sender.removeListener('did-start-navigation', onNavigation)
+      sender.removeListener('did-navigate-in-page', onSameDocument)
+      sender.removeListener('render-process-gone', invalidate)
+      sender.removeListener('destroyed', invalidate)
+      sender.session.setDisplayMediaRequestHandler(null)
+    }
+  }
+
+  private requirePresentationLease(sender: WebContents, frame: WebFrameMain | null, id: string): PresentationLease {
+    const document = this.requirePresentationDocument(sender, frame)
+    const lease = this.presentationLeases.get(id)
+    if (!lease || lease.document !== document || this.entries.get(lease.entry.id) !== lease.entry) {
+      throw new Error('Unknown Browser presentation lease')
+    }
+    return lease
+  }
+
+  private presentationGeometry(value: BrowserPresentationGeometry): BrowserPresentationGeometry {
+    if (value?.visible === false) return { visible: false }
+    const bounds = value?.visible === true ? normalizeBrowserBounds(value.bounds) : null
+    if (!bounds) throw new Error('Browser presentation bounds must be finite with a positive size')
+    return { visible: true, bounds }
+  }
+
+  private hasVisiblePresentation(entry: BrowserEntry): boolean {
+    for (const id of entry.presentationLeaseIds) if (this.presentationLeases.get(id)?.geometry.visible) return true
+    return false
+  }
+
+  private isPresentationCaptureCurrent(capture: PresentationCapture): boolean {
+    return !capture.revoked && this.isPresentationDocumentCurrent(capture.document) &&
+      this.owns(capture.entry, capture.source) && !capture.source.webContents.isDestroyed() &&
+      capture.entry.profileId === capture.profileId && this.hasVisiblePresentation(capture.entry)
+  }
+
+  private clearPresentationInput(entry: BrowserEntry): void {
+    if (!entry.inputLeaseId) return
+    entry.inputLeaseId = null
+    this.setBounds(entry.id, null)
+    this.sendPresentation({ type: 'input-owner-changed', browserId: entry.id, leaseId: null })
+  }
+
+  private removePresentationLease(lease: PresentationLease): void {
+    this.presentationLeases.delete(lease.id)
+    lease.entry.presentationLeaseIds.delete(lease.id)
+    if (lease.entry.inputLeaseId === lease.id) this.clearPresentationInput(lease.entry)
+    if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
+  }
+
+  private revokePresentationCapture(entry: BrowserEntry, reason: BrowserPresentationRevocationReason): void {
+    const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
+    if (!capture || capture.revoked) return
+    capture.revoked = true
+    if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
+    this.sendPresentation({ type: 'capture-revoked', browserId: entry.id, captureId: capture.id, reason })
+  }
+
+  private invalidatePresentationRequester(): void {
+    const document = this.presentationDocument
+    if (!document) return
+    // Invalidate before notifying; a late promise/ACK cannot revive this App document's leases.
+    this.presentationDocument = null
+    for (const lease of this.presentationLeases.values()) {
+      if (lease.document !== document) continue
+      this.revokePresentationCapture(lease.entry, 'requester-ended')
+      this.removePresentationLease(lease)
+    }
+    for (const [id, capture] of this.presentationCaptures) {
+      if (capture.document === document) this.presentationCaptures.delete(id)
+    }
+  }
+
+  private sendPresentation(event: BrowserPresentationEvent): void {
+    if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) {
+      this.window.webContents.send(BROWSER_PRESENTATION_EVENT_CHANNEL, event)
+    }
+  }
+
   /** Native Chrome considers only physically visible Browser frames, never Session/Run projections. */
   visibleNativeBounds(): BrowserBounds[] {
     return [...this.entries.values()].flatMap(entry =>
@@ -398,6 +668,10 @@ export class BrowserViewManager {
   async release(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (!entry) return
+    this.revokePresentationCapture(entry, 'source-released')
+    if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
+    entry.captureId = null
+    for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
     this.releaseUploadFiles(entry)
     void entry.feedback?.clear()
     void this.releaseDemonstrationCapture(entry)
@@ -486,7 +760,8 @@ export class BrowserViewManager {
       humanControl: false,
       activeRun: undefined,
       runInFlight: false,
-      feedbackRevision: 0
+      feedbackRevision: 0,
+      presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
@@ -634,6 +909,7 @@ export class BrowserViewManager {
       void this.releaseDemonstrationCapture(entry)
       entry.pendingSwitch = null
       void entry.feedback?.clear()
+      this.revokePresentationCapture(entry, 'source-replaced')
       entry.view = candidate
       entry.profileId = profileId
       entry.requestedUrl = candidate.webContents.getURL() || url
@@ -2026,6 +2302,10 @@ export class BrowserViewManager {
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
     if (!entry) return this.releasedEntries.delete(id)
+    this.revokePresentationCapture(entry, 'source-released')
+    if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
+    entry.captureId = null
+    for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
     this.releaseUploadFiles(entry)
     void entry.feedback?.clear()
     void this.releaseDemonstrationCapture(entry)
@@ -2052,6 +2332,11 @@ export class BrowserViewManager {
   }
 
   dispose(): void {
+    this.presentationDisposed = true
+    this.invalidatePresentationRequester()
+    this.disposePresentationRequester?.()
+    this.disposePresentationRequester = null
+    this.presentationCaptures.clear()
     this.unsubscribeTaskAssets?.()
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
@@ -2194,6 +2479,7 @@ export class BrowserViewManager {
     })
     contents.on('render-process-gone', (_event, details) => {
       if (!this.owns(entry, view)) return
+      this.revokePresentationCapture(entry, 'source-replaced')
       entry.error = `Browser renderer stopped: ${details.reason}`
       this.emit(entry)
     })
@@ -2203,6 +2489,10 @@ export class BrowserViewManager {
         return
       }
       if (!this.owns(entry, view)) return
+      this.revokePresentationCapture(entry, 'source-released')
+      if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
+      entry.captureId = null
+      for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
       void this.releaseDemonstrationCapture(entry)
       this.releaseUploadFiles(entry)
       this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch'))
