@@ -56,7 +56,6 @@
 @container (max-width: 800px) {
   .focus-project-lanes__row { grid-template-columns: minmax(0, 1fr); }
   .focus-project-lanes__groups { display: flex; flex-direction: column; }
-  .focus-context-group[data-empty='true'] { display: none; }
 }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .focus-disconnected-projects { flex: none; min-height: 0; max-height: 45%; overflow: auto; border-top: 1px solid var(--line); }
