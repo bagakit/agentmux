@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/core": ["packages/core/src/index.ts"],
+      "@agentmux/core/control": ["packages/core/src/control.ts"]
+    }
+  },
+  "include": ["main.ts", "motion.ts", "frame-state.mjs", "frame-pixels.mjs"]
+}
