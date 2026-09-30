@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ComposerOutbox, type ComposerQueuedMessage } from '../src/renderer/src/components/ComposerOutbox.js'
 
-function render(queued: ComposerQueuedMessage[], copy = true): string {
+function render(queued: ComposerQueuedMessage[], copy = true, selectedId = queued[0]?.id ?? null): string {
   return renderToStaticMarkup(createElement(ComposerOutbox, {
-    queued,
+    queued, selectedId, onSelect: () => {},
     onSend: () => {}, onRemove: () => {}, ...(copy ? { onCopy: () => {} } : {})
   }))
 }
@@ -16,7 +16,7 @@ const entry = (overrides: Partial<ComposerQueuedMessage> = {}): ComposerQueuedMe
 describe('queue delivery facts and recovery actions', () => {
   it('describes explicit per-message steer without promising an automatic tail', () => {
     const html = render([entry()])
-    expect(html).toContain('1 message queued for delivery')
+    expect(html).toContain('Queued for delivery.')
     expect(html).toContain('Send explicitly steers this message, including during the current turn.')
     expect(html).toContain('It does not send the other queued messages.')
     expect(html).toContain('Messages restored from a previous application session wait for your explicit Send.')
@@ -36,7 +36,7 @@ describe('queue delivery facts and recovery actions', () => {
 
   it('does not promise automatic delivery of a deferred entry whose Run ended', () => {
     const html = render([entry({ status: 'deferred', deliverable: false, error: 'Not ready earlier' })])
-    expect(html).toContain('cannot be sent to the current Run')
+    expect(html).toContain('the bound Run is unavailable or changed')
     expect(html).toContain('Keep these exact words')
     expect(html).toContain('Copy message')
     expect(html).not.toContain('retries when')
@@ -46,11 +46,14 @@ describe('queue delivery facts and recovery actions', () => {
 
   it('derives actions per entry when old and current Runs coexist', () => {
     const html = render([entry({ deliverable: false }), entry({ id: 'q2', text: 'Current Run', status: 'deferred' })])
-    expect(html).toContain('1 of 2 messages cannot be sent')
-    expect(html.match(/Send queued message/g)).toHaveLength(1)
-    expect(html.match(/>Remove</g)).toHaveLength(2)
-    expect(html).toContain('Copy all')
-    expect(html).toContain('Current Run')
+    expect(html).toContain('the bound Run is unavailable or changed')
+    expect(html.match(/>Remove</g)).toHaveLength(1)
+    expect(html).not.toContain('Send queued message')
+    const current = render([entry({ deliverable: false }), entry({ id: 'q2', text: 'Current Run', status: 'deferred' })], true, 'q2')
+    expect(current.match(/Send queued message/g)).toHaveLength(1)
+    expect(current.match(/>Remove</g)).toHaveLength(1)
+    expect(current).toContain('Current Run')
+    expect(render([entry({ deliverable: false }), entry({ id: 'q2', text: 'Current Run', status: 'deferred' })], true, null)).toContain('Copy all')
   })
 
   it('never offers to recall an in-flight message and disables competing manual retry', () => {

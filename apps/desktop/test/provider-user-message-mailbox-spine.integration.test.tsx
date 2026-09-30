@@ -177,14 +177,14 @@ it('delivers terminal native user inputs to mounted AgentSessionComposer and Ses
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
 
   // Native input is recorded in session history; must NOT claim 'Sent' or 'Delivery not confirmed'
-  const headers = [...outboxPanel.querySelectorAll('header strong')].map((h) => h.textContent)
+  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__row > strong')].map((h) => h.textContent)
   expect(headers).toContain('Recorded')
   expect(headers).not.toContain('Sent')
   expect(headers).not.toContain('You')
 
   // Timestamps accurately formatted
   const times = [...outboxPanel.querySelectorAll('time')].map((t) => t.getAttribute('dateTime'))
-  expect(times).toEqual(['2026-10-03T01:10:00.000Z', '2026-10-03T01:10:30.000Z'])
+  expect(times).toEqual(['2026-10-03T01:10:30.000Z', '2026-10-03T01:10:00.000Z'])
 
   spine.verifyZeroControls()
 })
@@ -273,7 +273,7 @@ it('preserves distinct records in Outbox when identical prompt text is entered r
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const messages = [...outboxPanel.querySelectorAll('li p')].map((p) => p.textContent)
+      const messages = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__preview')].map((p) => p.textContent)
       expect(messages.filter((m) => m === repeatedText)).toHaveLength(2)
     }, { timeout: 1000 })
   })
@@ -368,7 +368,7 @@ it('unverified correlation: native raw IDs matching unsent operations do not hid
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const queuedTexts = [...outboxPanel.querySelectorAll('.composer-outbox li > span:first-child')].map((s) => s.textContent)
+      const queuedTexts = [...outboxPanel.querySelectorAll('.composer-outbox .composer-mailbox__preview')].map((s) => s.textContent)
       expect(queuedTexts).toEqual(queue.map((q) => q.text))
     })
   })
@@ -459,18 +459,18 @@ it('page 30 boundary: non-null native continuation remains honestly visible with
   // Click Load earlier messages button
   await dom.click('.composer-mailbox__boundary button')
 
-  // Verify that all 31 records are loaded and canonical chronological order (0..30) is preserved
+  // Verify all 31 source records survive paging and the reading list shows their original timestamps newest first.
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const items = outboxPanel.querySelectorAll('.composer-mailbox__messages li')
+      const items = outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')
       expect(items).toHaveLength(31)
     }, { timeout: 1000 })
   })
 
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-  const bodies = [...outboxPanel.querySelectorAll('.composer-mailbox__messages p')].map((p) => p.textContent)
-  expect(bodies).toEqual(Array.from({ length: 31 }, (_, i) => `Message item index ${i}`))
+  const bodies = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__preview')].map((p) => p.textContent)
+  expect(bodies).toEqual(Array.from({ length: 31 }, (_, i) => `Message item index ${30 - i}`))
 })
 
 it('mounting Composer with closed Mailbox must not read native history', async () => {
@@ -587,14 +587,15 @@ it('reopening Mailbox after session facts update reads new appended native input
 
   // Session facts update in store
   const currentSnap = useAppStore.getState().sessions.find((s) => s.id === sessionId)!
-  useAppStore.setState({
+  await act(async () => useAppStore.setState({
     sessions: [{ ...currentSnap, updatedAt: 2, agentSessionUpdatedAt: 2 }]
-  })
+  }))
 
   // Reopening / toggling mailbox refreshes and displays third message
   await act(async () => {
     await toggle('closed')
     await toggle('open')
+    await folder('outbox')
   })
 
   await act(async () => {
@@ -803,6 +804,7 @@ it('revalidation shared by two consumers: one fresh public read satisfies one re
   await dom.render(<AgentSessionComposer sessionId={sessionId} />)
   await act(async () => {
     await toggle('open')
+    await folder('outbox')
   })
   await act(async () => {
     await vi.waitFor(() => {
@@ -1271,7 +1273,7 @@ it('mixed mounted surface: timeline captured item and native item with legal ide
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const items = outboxPanel.querySelectorAll('.composer-mailbox__messages li')
+      const items = outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')
       expect(items).toHaveLength(3)
       expect(outboxPanel.textContent).toContain('Terminal input message alpha')
       expect(outboxPanel.textContent).toContain('Second terminal command bravo')
@@ -1295,19 +1297,20 @@ it('mixed mounted surface: timeline captured item and native item with legal ide
   }
   await appendFile(spine.transcriptPath, JSON.stringify(fourthLine) + '\n')
   const snap = useAppStore.getState().sessions.find((s) => s.id === sessionId)!
-  useAppStore.setState({
+  await act(async () => useAppStore.setState({
     sessions: [{ ...snap, updatedAt: 3, agentSessionUpdatedAt: 3 }]
-  })
+  }))
 
   await act(async () => {
     await toggle('closed')
     await toggle('open')
+    await folder('outbox')
   })
 
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      expect(outboxPanel.querySelectorAll('.composer-mailbox__messages li')).toHaveLength(4)
+      expect(outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')).toHaveLength(4)
       expect(outboxPanel.textContent).toContain('Fourth appended dynamic message')
     })
   })

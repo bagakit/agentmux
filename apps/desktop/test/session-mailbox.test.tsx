@@ -82,6 +82,11 @@ async function toggle(state: 'open' | 'closed') {
   Object.defineProperty(event, 'newState', { value: state })
   await act(async () => mailbox().dispatchEvent(event))
 }
+async function readRecord(key: string) {
+  const row = [...mailbox().querySelectorAll<HTMLButtonElement>('button[data-record-key]')].find(row => row.dataset.recordKey === key)
+  expect(row).toBeDefined(); await act(async () => row!.click())
+}
+async function backToRows() { const button = mailbox().querySelector<HTMLButtonElement>('.composer-mailbox__back button'); expect(button).not.toBeNull(); await act(async () => button!.click()) }
 async function folder(name: 'inbox' | 'outbox' | 'system' | 'progress') {
   await dom.click(`[role="tab"][id$="-${name}-tab"]`)
 }
@@ -204,11 +209,13 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
   const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
   const render = () => dom.render(<SessionMailbox system={system} queued={queued}
     timeline={{ agentSessionId: 'agent-1', revision: 1, items }} userMessages={userMessages} />)
-  await render()
-  const contents = (name: string) => [...mailbox().querySelectorAll(`[id$="-${name}"] .composer-mailbox__messages li > p`)].map(el => el.textContent)
+  await render(); await toggle('open'); await folder('outbox')
+  const contents = (name: string) => [...mailbox().querySelectorAll(`[id$="-${name}"] ${name === 'outbox' ? '.composer-mailbox__history ' : ''}.composer-mailbox__messages .composer-mailbox__preview`)].map(el => el.textContent)
   expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'missing-a', 'missing-b'])
+  await folder('inbox')
   expect(contents('inbox')).toEqual(['Body in-new', 'Body in-old'])
-  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map(el => el.textContent)).toEqual(['First intention', 'Second intention'])
+  await folder('outbox')
+  expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(el => el.textContent)).toEqual(['First intention', 'Second intention'])
   expect(items.map(item => item.content)).toEqual(['Body old', 'Body tie-a', 'Body tie-b', 'Body in-old', 'Body in-new'])
   userMessages = [...userMessages, native('loaded-earlier', 5)]
   await render()
@@ -226,16 +233,17 @@ it('uses the selected System owner time, keeps unknown times last, and never mak
     ['connection', 20], ['delivery', 30], ['queue', undefined]])
   await act(async () => useAppStore.setState({ sessions: [current], agentSteerQueues: { 'agent-1': queue } }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  const steps = () => [...mailbox().querySelectorAll('.composer-notice .service-window__step')].map(el => el.textContent)
+  await toggle('open'); await folder('system')
+  const steps = () => [...mailbox().querySelectorAll('.composer-notice .composer-mailbox__row > strong')].map(el => el.textContent)
   expect(steps()).toEqual(['Screen confirmation from retained terminal output didn’t complete', 'Checking terminal capabilities didn’t complete', 'A queued message has not been sent'])
-  expect([...mailbox().querySelectorAll('.composer-notice__body time')].map(el => el.getAttribute('datetime'))).toEqual([
+  expect([...mailbox().querySelectorAll('.composer-notice time')].map(el => el.getAttribute('datetime'))).toEqual([
     new Date(30).toISOString(), new Date(20).toISOString()])
-  expect(mailbox().querySelectorAll('.composer-notice__body small')).toHaveLength(1)
-  expect(mailbox().querySelector('.composer-notice__body small')!.textContent).toBe('Time not recorded.')
+  expect([...mailbox().querySelectorAll('.composer-notice .composer-mailbox__metadata')].map(el => el.textContent).filter(text => text?.includes('Time not recorded'))).toHaveLength(1)
   await toggle('open'); await toggle('closed')
   await act(async () => useAppStore.setState({ sessions: [{ ...current,
     terminalCapability: { ...current.terminalCapability!, observedAt: 40 } }] }))
   expect(unread()).toBe('false')
+  await toggle('open'); await folder('system')
   expect(steps()).toEqual(['Checking terminal capabilities didn’t complete', 'Screen confirmation from retained terminal output didn’t complete', 'A queued message has not been sent'])
   const output = { ...current, terminalCapability: undefined }
   expect(sessionServiceNotices(output).map(item => [item.id, item.observedAt])).toEqual([['connection', 1000], ['delivery', 30]])
@@ -263,6 +271,7 @@ it('uses one right Session mailbox, opens incoming notices to clear the red dot,
   await act(async () => useAppStore.setState({ noticeReadReceipts: persisted.noticeReadReceipts }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(unread()).toBe('false')
+  await toggle('open'); await folder('system')
   expect(mailbox().textContent).toContain('screen confirmation')
 })
 
@@ -299,7 +308,9 @@ it('coalesces repetitions but marks changed causes and a recurrence after recove
   await toggle('open')
   await toggle('closed')
   await act(async () => useAppStore.setState({ sessions: [composerSession()] }))
+  await toggle('open'); await folder('system')
   expect(mailbox().textContent).toContain('No current notices.')
+  await toggle('closed')
   expect(useAppStore.getState().noticeReadReceipts['agent-1']).toBeUndefined()
   await act(async () => useAppStore.setState({ sessions: [session()] }))
   expect(unread()).toBe('true')
@@ -334,9 +345,10 @@ it('shows ordered outgoing messages and wires retry, copy and removal without se
   expect(send).not.toHaveBeenCalled()
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(2)
   expect(mailbox().textContent).not.toContain('private-cursor')
+  await dom.click('[data-record-key^="notice:queue:"]') // Read the queue notice.
   await dom.click('.composer-notice__body button') // View outbox
   expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('First exact words')
-  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map((item) => item.textContent))
+  expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map((item) => item.textContent))
     .toEqual(['First exact words', 'Second exact words'])
   const action = async (text: string) => {
     const button = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')].find((item) => item.textContent?.trim() === text)
@@ -347,9 +359,9 @@ it('shows ordered outgoing messages and wires retry, copy and removal without se
   expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', 'queued-1')
   await action('Copy all')
   expect(copy).toHaveBeenCalledExactlyOnceWith('First exact words\n\nSecond exact words')
-  await action('Remove')
+  await readRecord('queue:queued-1'); await action('Remove')
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued[1]])
-  expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
+  await folder('system'); expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
   expect(trigger().textContent).toBe('1')
 })
 
@@ -370,18 +382,21 @@ it.each(['queued', 'restoring'] as const)('shows exact nonempty %s, deferred, fa
   await toggle('open')
   await folder('outbox')
   const rows = [...mailbox().querySelectorAll<HTMLLIElement>('.composer-outbox li')]
-  expect(rows.map(row => row.querySelector('span:first-child')?.textContent)).toEqual([
+  expect(rows.map(row => row.querySelector('.composer-mailbox__preview')?.textContent)).toEqual([
     'Exact active request', 'Exact deferred request', 'Exact failed request', 'Exact old Run request'
   ])
   expect(rows.map(row => row.dataset.state)).toEqual([status, 'deferred', 'failed', 'queued'])
-  expect(rows[0]!.textContent).toContain(status === 'restoring'
-    ? 'Restoring the Agent. This message has not been dispatched.' : 'Sending. Waiting for delivery confirmation.')
-  expect(rows[1]!.textContent).toContain('Provider is not ready.')
-  expect(rows[2]!.textContent).toContain('Input was refused.')
-  expect(rows[3]!.textContent).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
-  expect(mailbox().textContent).not.toContain('private-helper')
-  expect(mailbox().textContent).not.toContain('private-failure')
-  expect(rows[0]!.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
+  const explanations = [status === 'restoring' ? 'Restoring the Agent. This message has not been dispatched.' : 'Sending. Waiting for delivery confirmation.',
+    'Provider is not ready.', 'Input was refused.', 'Its delivery result is unknown; it will not be replayed on another Run.']
+  for (let index = 0; index < queued.length; index++) {
+    await readRecord(`queue:${queued[index]!.operationId}`)
+    const detail = mailbox().querySelector('.composer-outbox')!
+    expect(detail.textContent).toContain(explanations[index])
+    expect(detail.textContent).not.toContain('private-helper')
+    expect(detail.textContent).not.toContain('private-failure')
+    if (index === 0) expect([...detail.querySelectorAll<HTMLButtonElement>('button')].filter(button => ['Move up', 'Move down', 'Remove', 'Send queued message'].includes(button.textContent!)).map(button => button.disabled)).toEqual([true, true, true, true])
+    await backToRows()
+  }
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual(queued)
   expect(submit).not.toHaveBeenCalled()
   expect(recover).not.toHaveBeenCalled()
@@ -402,7 +417,7 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
   await folder('outbox')
-  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map(row => row.textContent))
+  expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(row => row.textContent))
     .toEqual([pending.text, old.text])
   expect(submit).not.toHaveBeenCalled()
   expect(recover).not.toHaveBeenCalled()
@@ -420,7 +435,9 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
     { operationId: pending.operationId, runId: pending.runId, promptCondition: pending.promptCondition, text: pending.text, status: 'deferred',
       error: 'Provider is still preparing. Diagnostic: private-helper=93' }, old
   ])
-  expect(mailbox().querySelector('.composer-outbox li')?.textContent).toContain('Provider is still preparing.')
+  await readRecord('queue:restored-intent')
+  expect(mailbox().querySelector('.composer-outbox')?.textContent).toContain('Provider is still preparing.')
+  await backToRows()
   expect(mailbox().textContent).not.toContain('private-helper')
   await clickSend()
   expect(submit.mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
@@ -428,7 +445,7 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
     [composerSession().control, pending.text, pending.operationId]
   ])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([old])
-  expect([...mailbox().querySelectorAll('.composer-outbox li > span:first-child')].map(row => row.textContent)).toEqual([old.text])
+  expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(row => row.textContent)).toEqual([old.text])
   expect(mailbox().querySelectorAll('.composer-outbox > button')).toHaveLength(1) // Copy only; no Send to another Run.
   expect(recover).not.toHaveBeenCalled()
 })
@@ -454,10 +471,12 @@ it('retains receipts through empty startup snapshots but alerts for a new Run', 
   await dom.render(null)
   await act(async () => useAppStore.setState({ sessions: [] }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open'); await folder('system')
   expect(mailbox().textContent).toContain('Waiting for Session status.')
   expect(useAppStore.getState().noticeReadReceipts['agent-1']).toEqual(receipt)
   await act(async () => useAppStore.setState({ sessions: [session()] }))
   expect(unread()).toBe('false')
+  await toggle('closed') // Observe the next Run without acknowledging an open System folder.
   const resumed = session()
   resumed.control = { ...resumed.control, run: { runId: 'new-run' } }
   resumed.terminalPromptDelivery.run = { runId: 'new-run' }
@@ -481,10 +500,12 @@ it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox 
   }
   await clickAction()
   expect(unread()).toBe('true')
+  await folder('system'); await dom.click('.composer-notice .composer-mailbox__row')
   expect(mailbox().querySelector('.composer-notice')?.textContent).toContain('unavailable')
   expect(useAppStore.getState().error).toBeNull()
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued])
-  await clickAction()
+  await folder('outbox'); await clickAction()
+  await folder('system')
   expect(action).toHaveBeenCalledTimes(2)
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(0)
   expect(unread()).toBe('false')
@@ -556,6 +577,7 @@ it('keeps unconfirmed initial input visible and copyable without calling it Sent
   expect(visible.textContent).toContain('Delivery not confirmed')
   expect(visible.querySelector('.composer-mailbox__messages strong')?.textContent).not.toBe('Sent')
   await dom.click('.composer-mailbox__messages button')
+  await dom.click('.composer-mailbox__detail .composer-tool')
   expect(copy).toHaveBeenCalledExactlyOnceWith('Body initial')
 })
 

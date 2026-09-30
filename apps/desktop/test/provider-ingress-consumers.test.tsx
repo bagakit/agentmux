@@ -102,7 +102,7 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     await useAppStore.getState().sendQueuedAgentSteer('s', 'restored')
     expect(submit).toHaveBeenCalledWith(expect.any(Object), 'kept', 'restored', {
       expectedRun: { runId: 'r' }, afterSubmissionId: 'original-predecessor'
-    }, undefined, { allowUncertainTurn: true })
+    }, undefined, { allowUncertainTurn: true }, false)
     expect(api.sessions.refresh).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
@@ -277,13 +277,14 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
 describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at the UI layer', () => {
   function render(deliverable: boolean): string {
     return renderToStaticMarkup(createElement(ComposerOutbox, {
+      selectedId: 'a', onSelect: () => {},
       queued: [{ id: 'a', text: 'a', status: 'queued', deliverable }, { id: 'b', text: 'b', status: 'queued', deliverable }]
     }))
   }
 
   it('a live Run offers explicit delivery without claiming Provider consumption', () => {
     const markup = render(true)
-    expect(markup).toContain('queued for delivery')
+    expect(markup).toContain('Queued for delivery')
     expect(markup).toContain('Send explicitly steers this message, including during the current turn.')
     expect(markup).toContain('It does not send the other queued messages.')
     // "queued for delivery" is Host-accepted intent, NOT proof the Provider consumed anything.
@@ -295,13 +296,16 @@ describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at 
 
   it('an ended run does not promise delivery and says where the words are kept', () => {
     const markup = render(false)
-    expect(markup).not.toContain('queued for delivery')
+    expect(markup).not.toContain('Queued for delivery')
     expect(markup).toContain('Not sent')
     // MUTATION: collapse the two branches to one optimistic label (ComposerOutbox.tsx) — a
     // non-deliverable queue would read "queued for delivery" → red.
     expect(markup).toContain('the bound Run is unavailable or changed')
     expect(markup).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
-    expect(markup).toContain('<span>a</span>')
-    expect(markup).toContain('<span>b</span>')
+    expect(markup).toContain('composer-mailbox__full-text">a</p>')
+    const second = renderToStaticMarkup(createElement(ComposerOutbox, { selectedId: 'b', onSelect: () => {},
+      queued: [{ id: 'a', text: 'a', status: 'queued', deliverable: false }, { id: 'b', text: 'b', status: 'queued', deliverable: false }] }))
+    expect(second).toContain('composer-mailbox__full-text">b</p>')
+    expect(second).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
   })
 })

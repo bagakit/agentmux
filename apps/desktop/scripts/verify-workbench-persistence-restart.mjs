@@ -206,9 +206,9 @@ async function surface(cdp) {
     const panel = document.querySelector('.workbench-region-split > [data-panel]')
     return { workbench: state.restoredWorkbench, focus: state.agentFocus, draft: state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
       queued: state.agentSteerQueues[${JSON.stringify(session.agentSessionId)}],
-      outbox: visible('.composer-outbox li').map(row => ({ text: row.querySelector('span')?.textContent,
+      outbox: visible('.composer-outbox li').map(row => ({ text: row.querySelector('.composer-mailbox__preview')?.textContent,
         datetime: row.querySelector('time')?.getAttribute('datetime') ?? null,
-        unknownTime: row.textContent.includes('Queued time unknown') })),
+        unknownTime: row.textContent.includes('Time not recorded') })),
       editorText: editor?.innerText, splitPercent: panel ? Number(panel.getAttribute('data-panel-size')) : null,
       tabs: visible('button.workbench-tab[data-workbench-tab-id]').map(el => el.dataset.workbenchTabId).sort(),
       regions: visible('[data-workbench-region-id]').map(el => el.dataset.workbenchRegionId).sort(),
@@ -440,9 +440,13 @@ setInterval(tick,100);
     { text: 'Private unknown-time pending intent', datetime: null, unknownTime: true },
     { text: 'Private last pending intent', datetime: new Date(1_790_832_090_000).toISOString(), unknownTime: false }
   ])
-  const moveLastUp = "Array.from(document.querySelectorAll('.composer-outbox li')).find(row => row.querySelector('span')?.textContent === 'Private last pending intent')?.querySelectorAll('button')[0]"
+  const readLast = "Array.from(document.querySelectorAll('.composer-outbox li')).find(row => row.querySelector('.composer-mailbox__preview')?.textContent === 'Private last pending intent')?.querySelector('.composer-mailbox__row')"
+  await activateButton(first.cdp, readLast)
+  await waitFor('selected original queue detail', () => first.cdp.evaluate("document.querySelector('.composer-outbox .composer-mailbox__full-text')?.textContent === 'Private last pending intent'"))
+  const moveLastUp = "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.textContent === 'Move up')"
   await activateButton(first.cdp, moveLastUp)
   await activateButton(first.cdp, moveLastUp)
+  await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
   const expectedQueue = [before.queued[2], before.queued[0], before.queued[1]]
   await waitFor('actual outbox reordered', async () => (await surface(first.cdp)).outbox.map(row => row.text).join('|') === expectedQueue.map(entry => entry.text).join('|'))
   await activateButton(first.cdp, "document.querySelector('.composer-mailbox button[aria-label=\"Close mailbox\"]')")

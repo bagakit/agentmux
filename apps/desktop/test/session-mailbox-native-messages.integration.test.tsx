@@ -284,10 +284,10 @@ it('delivers terminal native user inputs, Message Tool confirmed, and unverified
   // Native items: Recorded
   // Confirmed captured items: Sent
   // Failed captured items: Delivery not confirmed
-  const messageItems = [...outboxPanel.querySelectorAll('.composer-mailbox__messages li')]
+  const messageItems = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')]
   expect(messageItems.length).toBeGreaterThanOrEqual(4)
 
-  const headers = messageItems.map((li) => li.querySelector('header strong')?.textContent)
+  const headers = messageItems.map((li) => li.querySelector('.composer-mailbox__row > strong')?.textContent)
   expect(headers).toContain('Recorded')
   expect(headers).toContain('Sent')
   expect(headers).toContain('Delivery not confirmed')
@@ -295,6 +295,7 @@ it('delivers terminal native user inputs, Message Tool confirmed, and unverified
   expect(headers).not.toContain('Human')
 
   // Sending status description in queue
+  await dom.click('[data-record-key="queue:op-sending"]')
   expect(outboxPanel.textContent).toContain('Sending. Waiting for delivery confirmation.')
 
   // Check outbox tab count
@@ -409,13 +410,13 @@ it('preserves distinct records in Outbox when identical prompt text is entered r
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const messages = [...outboxPanel.querySelectorAll('.composer-mailbox__messages li p')].map((p) => p.textContent)
+      const messages = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__preview')].map((p) => p.textContent)
       expect(messages.filter((m) => m === repeatedText)).toHaveLength(3)
     }, { timeout: 1000 })
   })
 
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__messages li header strong')].map((h) => h.textContent)
+  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__row > strong')].map((h) => h.textContent)
   // 2 native recorded + 1 captured sent
   expect(headers.filter((h) => h === 'Recorded')).toHaveLength(2)
   expect(headers.filter((h) => h === 'Sent')).toHaveLength(1)
@@ -509,7 +510,7 @@ it('queue reconciliation does not eliminate queued messages by matching text, ti
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const messages = [...outboxPanel.querySelectorAll('.composer-mailbox__messages li p')].map((p) => p.textContent)
+      const messages = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__preview')].map((p) => p.textContent)
       expect(messages).toContain('Identical message text in queue and native')
       expect(messages).toContain('Another native record')
     })
@@ -517,7 +518,7 @@ it('queue reconciliation does not eliminate queued messages by matching text, ti
 
   // Queued operations must NOT be eliminated by rawId collision or identical text with native records
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-  const queuedTexts = [...outboxPanel.querySelectorAll('.composer-outbox li > span:first-child')].map((s) => s.textContent)
+  const queuedTexts = [...outboxPanel.querySelectorAll('.composer-outbox .composer-mailbox__preview')].map((s) => s.textContent)
   expect(queuedTexts).toEqual(queue.map((q) => q.text))
 })
 
@@ -563,6 +564,8 @@ it('queue actions (send queued, copy, remove, move) remain functional in Outbox 
   await action('Copy all')
   expect(copy).toHaveBeenCalledExactlyOnceWith('First queued message\n\nSecond queued message')
 
+  const first = dom.container.querySelector<HTMLButtonElement>('[data-record-key="queue:queued-act-1"]')!
+  expect(first).not.toBeNull(); await act(async () => first.click())
   await action('Remove')
   expect(useAppStore.getState().agentSteerQueues[sessionId]).toEqual([queue[1]])
 
@@ -772,9 +775,9 @@ it('transport read failure preserves queued messages, drafts, and existing obser
 
   // Trigger retry / refresh
   const snap = useAppStore.getState().sessions.find((s) => s.id === sessionId)!
-  useAppStore.setState({
+  await act(async () => useAppStore.setState({
     sessions: [{ ...snap, updatedAt: 3, agentSessionUpdatedAt: 3 }]
-  })
+  }))
 
   await act(async () => {
     await vi.waitFor(() => {
@@ -843,7 +846,7 @@ it('mixed mounted surface: timeline captured item and native item with legal ide
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      const items = outboxPanel.querySelectorAll('.composer-mailbox__messages li')
+      const items = outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')
       expect(items).toHaveLength(3)
       expect(outboxPanel.textContent).toContain('Terminal input message alpha')
       expect(outboxPanel.textContent).toContain('Second terminal command bravo')
@@ -867,19 +870,20 @@ it('mixed mounted surface: timeline captured item and native item with legal ide
   }
   await appendFile(spine.transcriptPath, JSON.stringify(fourthLine) + '\n')
   const snap = useAppStore.getState().sessions.find((s) => s.id === sessionId)!
-  useAppStore.setState({
+  await act(async () => useAppStore.setState({
     sessions: [{ ...snap, updatedAt: 3, agentSessionUpdatedAt: 3 }]
-  })
+  }))
 
   await act(async () => {
     await toggle('closed')
     await toggle('open')
+    await folder('outbox')
   })
 
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      expect(outboxPanel.querySelectorAll('.composer-mailbox__messages li')).toHaveLength(4)
+      expect(outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')).toHaveLength(4)
       expect(outboxPanel.textContent).toContain('Fourth appended dynamic message')
     })
   })
@@ -936,11 +940,11 @@ it('public captured unverified record without a queue entry remains visible in O
   expect(dom.container.querySelector('[role="tab"][id$="-outbox-tab"]')?.textContent).toContain('Outbox (3)')
 
   // Verify honest labeling: header is 'Delivery not confirmed', NOT 'Sent', NOT 'Recorded'
-  const unverifiedItem = Array.from(panel.querySelectorAll('.composer-mailbox__messages li')).find(
+  const unverifiedItem = Array.from(panel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')).find(
     (li) => li.textContent?.includes('Captured accepted input without delivery confirmation')
   )!
   expect(unverifiedItem).toBeDefined()
-  expect(unverifiedItem.querySelector('header strong')?.textContent).toBe('Delivery not confirmed')
+  expect(unverifiedItem.querySelector('.composer-mailbox__row > strong')?.textContent).toBe('Delivery not confirmed')
 
   // Unverified item is NOT failed: no retry hint, no copy button
   expect(unverifiedItem.textContent).not.toContain('Check the Agent’s response before sending again.')
@@ -1014,7 +1018,7 @@ it('knownAgent incoming unverified stream enters Inbox with remote agent identit
   const inboxPanel = dom.container.querySelector('[id$="-inbox"]')!
   expect(inboxPanel.textContent).toContain('Incoming stream from peer agent')
   // Verify remote agent identity: labeled with agent prefix/name, never 'Human', never 'You'
-  const incomingHeader = inboxPanel.querySelector('.composer-mailbox__messages li header strong')?.textContent
+  const incomingHeader = inboxPanel.querySelector('.composer-mailbox__row > strong')?.textContent
   expect(incomingHeader).toContain('Agent remote-a')
   expect(incomingHeader).not.toContain('Human')
   expect(incomingHeader).not.toContain('You')
