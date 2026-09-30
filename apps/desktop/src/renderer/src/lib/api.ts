@@ -848,6 +848,10 @@ const mockApi: AgentMuxDesktopApi = {
     historyPage: async () => {
       throw new Error('Native conversation history is unavailable in the web preview.')
     },
+    observeHistory: async () => {
+      throw Object.assign(new Error('Automatic native observation is unavailable in the web preview; Refresh remains available.'),
+        { code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED' })
+    },
     attach: async (control, afterByte = 0) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)

@@ -16,6 +16,7 @@ import {
   CONTROL_RESPONSE_CHANNEL,
   RESOURCE_USAGE_CHANNEL,
   SESSION_EVENT_CHANNEL,
+  SESSION_HISTORY_OBSERVATION_CHANNEL,
   WINDOW_RESIZE_EVENT_CHANNEL,
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
@@ -52,6 +53,8 @@ import type {
   MoveWorkspacePathInput,
   RemoveWorktreeInput,
   RuntimeEvent,
+  SessionHistoryObservationEvent,
+  SessionHistoryObservationReady,
   SessionControl,
   TerminalLaunchInput,
   UsageSnapshot,
@@ -268,6 +271,32 @@ const api: AgentMuxPreloadApi = {
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
+    observeHistory: async (session, listener, options) => {
+      options?.signal?.throwIfAborted()
+      const token = crypto.randomUUID()
+      let disposed = false
+      const receive = (_event: unknown, payload: SessionHistoryObservationEvent): void => {
+        if (!disposed && payload.token === token && payload.observation.agentSessionId === session.agentSessionId) listener(payload.observation)
+      }
+      const dispose = (): void => {
+        if (disposed) return
+        disposed = true
+        ipcRenderer.removeListener(SESSION_HISTORY_OBSERVATION_CHANNEL, receive)
+        options?.signal?.removeEventListener('abort', dispose)
+        void ipcRenderer.invoke('sessions:releaseHistoryObservation', token).catch(() => {})
+      }
+      ipcRenderer.on(SESSION_HISTORY_OBSERVATION_CHANNEL, receive)
+      options?.signal?.addEventListener('abort', dispose, { once: true })
+      try {
+        const ready: SessionHistoryObservationReady = await ipcRenderer.invoke('sessions:observeHistory', token, session)
+        if (disposed) {
+          options?.signal?.throwIfAborted()
+          throw new Error('History observation was released before ready.')
+        }
+        if ('error' in ready) throw Object.assign(new Error(ready.error.message), { code: ready.error.code })
+        return { source: ready.source, dispose }
+      } catch (error) { dispose(); throw error }
+    },
     attach: (session: SessionControl, afterSequence = 0) =>
       ipcRenderer.invoke('sessions:attach', session, afterSequence),
     refreshAttachment: (session: SessionControl, attachmentId: string | null, afterByte: number) =>

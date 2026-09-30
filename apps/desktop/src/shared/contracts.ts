@@ -45,7 +45,9 @@ import type {
   AgentTimelineSnapshot,
   AgentSessionHistoryPage,
   AgentSessionHistoryDescriptor,
-  AgentSessionHistoryPageOptions
+  AgentSessionHistoryPageOptions,
+  AgentSessionHistoryObservation,
+  AgentSessionHistoryObservationHandle
 } from '@agentmux/core'
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
 
@@ -88,6 +90,10 @@ export { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME }
 
 /** Renderer can request a page; native invocation belongs to the trusted host. */
 export type SessionHistoryPageOptions = Pick<AgentSessionHistoryPageOptions, 'cursor' | 'limit'>
+export type SessionHistoryObservationReady =
+  | { source: AgentSessionHistoryObservationHandle['source'] }
+  | { error: { code: string; message: string } }
+export type SessionHistoryObservationEvent = { token: string; observation: AgentSessionHistoryObservation }
 export type { RunUsage, UsageSnapshot } from './process-usage'
 export type { ScratchTopicSnapshot } from './scratch-topics'
 // Only the two names product code imports through the contracts path are re-exported here; the rest of
@@ -1334,6 +1340,7 @@ export const AGENT_ATTENTION_ACTIVATE_CHANNEL = 'agentmux:agent-attention-activa
 export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 /** Main -> renderer: one runtime/session event from the Agent runtime controller. */
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
+export const SESSION_HISTORY_OBSERVATION_CHANNEL = 'agentmux:session-history-observation'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
 export const NATIVE_BROWSER_INPUT_CHANNEL = 'ui:nativeBrowserInput'
@@ -1502,6 +1509,8 @@ export type AgentMuxDesktopApi = {
     historySources(): Promise<AgentSessionHistoryDescriptor[]>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
+    observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
+      options?: { signal?: AbortSignal }): Promise<AgentSessionHistoryObservationHandle>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
     refreshAttachment(session: SessionControl, attachmentId: string | null, afterByte: number): Promise<SessionAttachResult>
     replay(attachmentId: string, afterByte: number): Promise<SessionReplayResult>
