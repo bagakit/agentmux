@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
@@ -10,7 +10,7 @@ import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, requestAgentMuxCon
 import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace } from './goals-alignment-restart-proof.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
-import { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns } from './goals-entry-restart-proof.mjs'
+import { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns, proveOriginalRunOutput } from './goals-entry-restart-proof.mjs'
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
 // source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
@@ -22,21 +22,29 @@ const require = createRequire(import.meta.url)
 const exec = promisify(execFile)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
+const knownFlags = new Set(['--message-context', '--goals-entry', '--goals-direct-pmo', '--goals-alignment', '--close-region', '--identity-menu', '--swap-names', '--hold-for-watchdog'])
+for (const argument of process.argv.slice(2)) assert.ok(knownFlags.has(argument) || argument.startsWith('--probe-root=') || argument.startsWith('--receipt-path='), `Unknown workbench restart mode or option: ${argument}`)
 const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?.slice('--probe-root='.length)
 const receiptPath = process.argv.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
-const root = await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-')
+// ConfigOwner and Core compare canonical workspace paths. A private /tmp alias must not
+// manufacture an unknown Topic owner for a Session whose actual cwd is /private/tmp.
+const root = await realpath(await mkdtemp(probeRoot ? join(probeRoot, 'workbench-crash-') : '/tmp/amx-workbench-crash-'))
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
 const messageContextProof = process.argv.includes('--message-context')
 const messagePrompt = { id: 'private-status-context', keyword: 'statuscontext', label: 'Private message context', body: 'Configured private instruction\n  Exact retained spacing', states: ['running', 'working'], providerId: 'codex' }
 const goalsEntryProof = process.argv.includes('--goals-entry')
-const inheritedCallerNames = (goalsEntryProof || messageContextProof) ? Object.keys(process.env).filter(name =>
+const goalsDirectPmoProof = process.argv.includes('--goals-direct-pmo')
+assert.ok(!(goalsEntryProof && goalsDirectPmoProof), 'Goals entry and direct Goal PMO are separate explicit modes')
+const goalsCtaProof = goalsEntryProof || goalsDirectPmoProof
+const ordinaryRecoveryProof = messageContextProof || goalsDirectPmoProof
+const inheritedCallerNames = (goalsCtaProof || messageContextProof) ? Object.keys(process.env).filter(name =>
   /^AGENTMUX_(?:ENV|CLI|AGENT_SESSION(?:_.*)?|AGENT_CAPABILITY|HOOK(?:_.*)?|PROVIDER_ID|EXECUTOR_ID|LIFECYCLE_OPERATION_ID|USAGE_TRANSCRIPT_FORMAT)$/.test(name)) : []
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME', ...inheritedCallerNames].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const children = new Set()
-const deadline = Date.now() + 110_000
+const deadline = Date.now() + (goalsDirectPmoProof ? 240_000 : 110_000)
 const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-file'
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
@@ -46,8 +54,8 @@ const identityMenuProof = process.argv.includes('--identity-menu')
 const swapNameProof = process.argv.includes('--swap-names')
 assert.ok(!swapNameProof || (identityMenuProof && !regionCloseProof), 'Three-Agent Swap is a separate identity case, never the original close case')
 assert.ok(!goalsAlignmentProof || (!regionCloseProof && !identityMenuProof && !swapNameProof), 'Goals is a separate original-workspace recovery case')
-assert.ok(!goalsEntryProof || (!goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Actual Goals CTA entry is a separate original-workspace recovery case')
-assert.ok(!messageContextProof || (!goalsEntryProof && !goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Message context is an explicit separate restart case')
+assert.ok(!goalsCtaProof || (!goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Actual Goals CTA is a separate original-workspace recovery case')
+assert.ok(!messageContextProof || (!goalsCtaProof && !goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Message context is an explicit separate restart case')
 const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
@@ -59,7 +67,7 @@ let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRe
 let goalsEntryFixture, goalsEntryRestored, messageBefore
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
-async function waitFor(label, read, budget = 20_000) {
+async function waitFor(label, read, budget = goalsDirectPmoProof ? 45_000 : 20_000) {
   const end = Math.min(deadline, Date.now() + budget)
   while (Date.now() < end) { const value = await read(); if (value) return value; await delay(60) }
   throw new Error(`Workbench crash proof timed out: ${label}`)
@@ -110,7 +118,7 @@ async function launch(label) {
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   try {
-  if (goalsEntryProof && label === 'second') {
+  if (goalsCtaProof && label === 'second') {
     goalsEntryRestored = await restoreGoalsEntryBeforeSpace({ cdp, fixture: goalsEntryFixture, activateButton, waitFor,
       focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
         requestId: randomUUID(), operation: 'focus', target: { kind: 'region', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
@@ -301,7 +309,7 @@ try {
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
   await mkdir(topicsPath, { recursive: true })
   await mkdir(codexHome, { recursive: true, mode: 0o700 })
-  if (goalsEntryProof) goalsEntryFixture = await createGoalsEntryFixture({ root, topicsPath, desktopRoot })
+  if (goalsCtaProof) goalsEntryFixture = await createGoalsEntryFixture({ root, userData, topicsPath, desktopRoot, directGoal: goalsDirectPmoProof, receiptPath })
   const executable = join(workspacePath, 'private-cat.sh'), bindingPath = join(root, 'private-hook-binding.json')
   // Generated identifiers/URL/token contain only the Core-defined safe ASCII alphabet. Never print
   // the binding or put it in argv; it belongs to this one temporary private Run only.
@@ -312,11 +320,15 @@ try {
   client = await connectLocalAgentMux({ store })
   session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'probe', providerId: 'codex', commandOverride: executable,
     workspacePath, env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false, cols: 100, rows: 30 })
-  const originalRun = (await client.listRuns()).find(run => run.runId === session.run.runId)
+  let originalRun = (await client.listRuns()).find(run => run.runId === session.run.runId)
   assert.equal(originalRun?.state, 'running'); assert.ok(originalRun.pid)
   assert.ok(Number.isFinite(originalRun.acceptedInputBytes) && originalRun.acceptedInputBytes >= 0,
     'Zero-replay proof requires an actual known Runtime input cursor')
   ownedRunProcess = await runProcessIdentity(originalRun.pid); assert.ok(ownedRunProcess)
+  if (goalsDirectPmoProof) {
+    goalsEntryFixture.originalOutput = await proveOriginalRunOutput({ client, session, run: originalRun, waitFor, marker: 'private-original-output-before-goal-restart' })
+    originalRun = (await client.listRuns()).find(run => run.runId === session.run.runId)
+  }
   if (swapNameProof) await createSwapPeers({ client, root, workspacePath, codexHome, peers: swapPeers })
   if (holdForWatchdog) {
     await client.dispose(); client = null
@@ -380,7 +392,7 @@ try {
     return true
   })()`)
   const producerPath = join(root, 'status-producer.mjs')
-  const producerSource = messageContextProof ? `import {readFile} from 'node:fs/promises';
+  const producerSource = ordinaryRecoveryProof ? `import {readFile} from 'node:fs/promises';
 const binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));
 let receipts=0,inFlight=0,maximumInFlight=0,skippedTicks=0;
 function tick(){
@@ -398,7 +410,7 @@ function tick(){
 tick();
 setInterval(tick,100);
 ` : `import {readFile} from 'node:fs/promises';\nconst binding=JSON.parse(await readFile(${JSON.stringify(bindingPath)},'utf8'));\nlet receipts=0;\nfor(;;){const start=Date.now();try {const r=await fetch(binding.url,{method:'POST',headers:{authorization:'Bearer '+binding.token,'content-type':'application/json'},body:JSON.stringify({receiptId:'private-crash-'+(++receipts),eventName:'UserPromptSubmit',payload:{}}),signal:AbortSignal.timeout(1000)});process.stdout.write(JSON.stringify({at:Date.now(),status:r.status,receipts})+'\\n');}catch{process.stdout.write(JSON.stringify({at:Date.now(),status:'unavailable',receipts})+'\\n');}await new Promise(r=>setTimeout(r,Math.max(0,100-(Date.now()-start))));}\n`
-  if (messageContextProof) pressureProducer = { mode: 'fixed-cadence-bounded-in-flight', intervalMs: 100, inFlightLimit: 4, timeoutMs: 1_000,
+  if (ordinaryRecoveryProof) pressureProducer = { mode: 'fixed-cadence-bounded-in-flight', intervalMs: 100, inFlightLimit: 4, timeoutMs: 1_000,
     observedMaximumInFlight: 0, completedRequests: 0, launchedRequests: 0, skippedTicks: 0 }
   await writeFile(producerPath, producerSource, { mode: 0o600 })
   producer = spawn(process.execPath, [producerPath], { detached: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env } })
@@ -491,7 +503,7 @@ setInterval(tick,100);
     goalsExpectedWorkbench = expectedWorkbench; goalsExpectedFocus = before.focus
     lastEditAt = Date.now()
   }
-  if (goalsEntryProof) {
+  if (goalsCtaProof) {
     const entry = await clickGoalsEntryInActualUI({ cdp: first.cdp, fixture: goalsEntryFixture, activateButton, waitFor,
       expectedOriginalWorkbench: expectedWorkbench, expectedOriginalFocus: before.focus })
     expectedWorkbench = entry.workbench
@@ -501,12 +513,12 @@ setInterval(tick,100);
   await assertPrivateRunOutsideElectronGroup(first.child.pid, originalRun.pid)
   await delay(Math.max(0, lastEditAt + 2_000 - Date.now()))
   const immediatelyBeforeCrash = await surface(first.cdp)
-  if (goalsEntryProof) surfaceDiagnostic = { stage: 'before-first-crash', regions: immediatelyBeforeCrash.regions,
+  if (goalsCtaProof) surfaceDiagnostic = { stage: 'before-first-crash', regions: immediatelyBeforeCrash.regions,
     activeRegions: immediatelyBeforeCrash.activeRegions, regionVisibility: immediatelyBeforeCrash.regionVisibility }
   const observer = await first.cdp.evaluate('window.__crashProof')
   const crashAt = Date.now()
   const hooks = observer.hooks.filter(event => event.at >= lastEditAt)
-  if (messageContextProof) {
+  if (ordinaryRecoveryProof) {
     const observedGaps = hooks.length ? [hooks[0].at-lastEditAt, ...hooks.slice(1).map((event, i) => event.at-hooks[i].at), crashAt-hooks.at(-1).at] : []
     const posts = acknowledgements.filter(post => post.at >= lastEditAt && post.at <= crashAt)
     pressureFinal = { lastEditAt, crashAt, windowMs: crashAt-lastEditAt, count: hooks.length, hooks, gaps: observedGaps,
@@ -538,11 +550,11 @@ setInterval(tick,100);
     maximumPressureGap = Math.max(...gaps)
   }
   assert.deepEqual(observer.unloads, [])
-  if (!goalsAlignmentProof && !goalsEntryProof) { assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60) }
+  if (!goalsAlignmentProof && !goalsCtaProof) { assert.equal(immediatelyBeforeCrash.editorText, newDraft); assert.equal(immediatelyBeforeCrash.splitPercent, regionCloseProof ? null : 60) }
   assert.equal(immediatelyBeforeCrash.draft, newDraft)
   assert.deepEqual(immediatelyBeforeCrash.queued, expectedQueue, 'Actual queue order and its recorded or unknown times must be written before the abrupt crash')
   // The sole surviving Region stays active in durable layout; its ring has no competing choice.
-  if (!goalsAlignmentProof && !goalsEntryProof) assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
+  if (!goalsAlignmentProof && !goalsCtaProof) assert.deepEqual(immediatelyBeforeCrash.activeRegions, regionCloseProof ? [] : [fileRegionId])
   first.cdp.close()
   process.kill(-first.child.pid, 'SIGKILL') // Exact detached private Electron group; the Run is outside it.
   await waitFor('first abrupt exit', () => first.child.signalCode !== null || first.child.exitCode !== null, 5_000)
@@ -550,25 +562,26 @@ setInterval(tick,100);
   process.kill(-producer.pid, 'SIGTERM')
   await waitFor('producer exit after crash', () => producer.signalCode !== null || producer.exitCode !== null, 3_000)
   children.delete(producer)
-  if (goalsEntryProof) {
+  if (goalsCtaProof) {
     client = await connectLocalAgentMux({ store })
     await readGoalsEntryNativeBaseline({ client, fixture: goalsEntryFixture })
     await client.dispose(); client = null
   }
   const second = await launch('second')
-  const restoredExpectedWorkbench = goalsEntryProof ? goalsEntryFixture.expectedWorkbench : expectedWorkbench
-  const restoredExpectedFocus = goalsEntryProof ? goalsEntryFixture.expectedFocus : swapNameProof ? immediatelyBeforeCrash.focus : before.focus
-  if (goalsEntryProof) await assertPrivateRunOutsideElectronGroup(second.child.pid, goalsEntryFixture.retry.process.pid)
+  const restoredExpectedWorkbench = goalsCtaProof ? goalsEntryFixture.expectedWorkbench : expectedWorkbench
+  const restoredExpectedFocus = goalsCtaProof ? goalsEntryFixture.expectedFocus : swapNameProof ? immediatelyBeforeCrash.focus : before.focus
+  if (goalsCtaProof) await assertPrivateRunOutsideElectronGroup(second.child.pid, goalsEntryFixture.retry.process.pid)
   assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
   const restored = await surface(second.cdp)
-  if (goalsEntryProof) surfaceDiagnostic = { stage: 'after-explicit-retry-and-original-focus', regions: restored.regions,
+  if (goalsCtaProof) surfaceDiagnostic = { stage: 'after-explicit-retry-and-original-focus', regions: restored.regions,
     activeRegions: restored.activeRegions, regionVisibility: restored.regionVisibility }
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
-    regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null, goalsEntry: goalsEntryRestored ?? null,
+    regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null, goalsEntry: goalsEntryProof ? goalsEntryRestored : null,
+    goalsDirectPmo: goalsDirectPmoProof ? goalsEntryRestored : null,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsEntryProof || messageContextProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: maximumPressureGap, successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
@@ -580,7 +593,7 @@ setInterval(tick,100);
       regionVisibility: restored.regionVisibility,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
     limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
-      messageContextProof ? 'Ordinary message-context recovery; no fixture/manual post-edit storage flush, unload or quit before SIGKILL. The live producer pressure is observed separately in pressureQualification; recovery passed does not certify uninterrupted stress.'
+      ordinaryRecoveryProof ? 'Ordinary scoped recovery; no fixture/manual post-edit storage flush, unload or quit before SIGKILL. The live producer pressure is observed separately in pressureQualification; recovery passed does not certify uninterrupted stress.'
         : 'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
       'Historical queue admission times are synthetic seeded facts; actual first-admission clock behavior is separately bound by the owning source test.',
       'Renderer status counts observe public IPC arrival; actual Store consumption and projection bounds are verified by the owning behavioral suite.',
@@ -626,16 +639,21 @@ setInterval(tick,100);
     const entries = await restoreSwapMenu({ cdp: second.cdp, key, activateButton, waitFor, agentRegionId, identityName })
     result.swapNames = { passed: true, fixture: swapFixture, before: swapBefore, after, selection: swapSelection, entries }
   }
+  if (goalsDirectPmoProof) {
+    result.goalsDirectPmo.originalOutputAfterRestart = await proveOriginalRunOutput({ cdp: second.cdp, session, baseline: goalsEntryFixture.originalOutput,
+      waitFor, marker: 'private-original-output-after-goal-restart' })
+  }
   second.cdp.close(); process.kill(-second.child.pid, 'SIGKILL')
   await waitFor('second private exit', () => second.child.signalCode !== null || second.child.exitCode !== null, 5_000); children.delete(second.child)
   client = await connectLocalAgentMux({ store })
   const run = (await client.listRuns()).find(value => value.runId === session.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, originalRun.pid)
-  assert.equal(run.acceptedInputBytes, originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write any input to this private Run')
-  if (goalsEntryProof) {
-    await finishGoalsEntryNativeProof({ client, fixture: goalsEntryFixture, result: result.goalsEntry })
+  assert.equal(run.acceptedInputBytes, goalsDirectPmoProof ? result.goalsDirectPmo.originalOutputAfterRestart.acceptedInputBytes : originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write unrequested input to this private Run')
+  if (goalsCtaProof) {
+    const entryResult = goalsDirectPmoProof ? result.goalsDirectPmo : result.goalsEntry
+    await finishGoalsEntryNativeProof({ client, fixture: goalsEntryFixture, result: entryResult })
     assert.deepEqual(await runProcessIdentity(originalRun.pid), ownedRunProcess, 'The original healthy Run retains its exact process birth')
-    result.goalsEntry.originalRun = { ...ownedRunProcess, inputBefore: originalRun.acceptedInputBytes, inputAfter: run.acceptedInputBytes }
+    entryResult.originalRun = { ...ownedRunProcess, inputBefore: originalRun.acceptedInputBytes, inputAfter: run.acceptedInputBytes }
   }
   if (swapNameProof) {
     const runs = await client.listRuns()
@@ -691,6 +709,9 @@ setInterval(tick,100);
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
 const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
+  goalsDirectPmoAttempt: goalsDirectPmoProof && goalsEntryFixture ? { sourceBefore: goalsEntryFixture.sourceBefore,
+    normal: goalsEntryFixture.normal ?? null, failedGoal: goalsEntryFixture.failedGoal ?? null,
+    failedMapping: goalsEntryFixture.failed ?? null, preparationFailure: goalsEntryFixture.preparationFailure ?? null } : null,
   pressureProducer, pressureFinal, pressureQualification, failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
 // Task gate captures command output without preserving it on a failed command. Keep the same receipt
 // in the ignored diagnostic directory so an early failure remains inspectable after private cleanup.
