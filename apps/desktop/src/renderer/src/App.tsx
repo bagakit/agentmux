@@ -46,7 +46,7 @@ import { beginRendererStartup, startupProgressDetail } from './lib/startup-progr
 import { surveySelectReference } from './lib/survey-workface'
 import { selectSpatialCatalog, spatialCatalog } from './lib/space-agent-control'
 import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
-import { projectWorkbenchProjection, workbenchProjectionSlotId, type WorkbenchProjection } from './lib/workbench-projection'
+import { projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection } from './lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs } from './lib/workbench-resource-display'
@@ -158,12 +158,14 @@ function DesktopApp() {
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     useAppStore.getState().selectExecutionFocusReference(reference, agentFocus.execution)
   }, [agentFocus.execution])
+  const [focusRegionOnly, setFocusRegionOnly] = useState(false)
+  useEffect(() => setFocusRegionOnly(false), [agentFocus.execution.sessionId])
   const focusPresentation = useMemo(() => mainSurface === 'agents'
-    ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference)
+    ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
     : { projection: null, issue: null, references: [] },
-  [mainSurface, agentFocus.execution, tabs, surveyCatalog, selectFocusReference])
+  [mainSurface, agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
   const focusProjection = focusPresentation.projection
-  const focusTab = focusProjection?.entity.kind === 'tab' ? tabs[focusProjection.entity.tabId] : null
+  const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
     if (!state.surveyZoneSelection || state.surveyZoneSelection.zoneId !== surveySelection?.zoneId) return
@@ -216,7 +218,7 @@ function DesktopApp() {
     if (focusVisible && focusProjection && focusTab) {
       const reference = focusProjection.selection[0]!
       if (!targets[focusTab.id]) targets[focusTab.id] = {
-        hostId: workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
+        hostId: focusProjection.entity.kind === 'region' ? workbenchRegionProjectionSlotId(`${focusProjection.presentationId}-slot`, reference) : workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
         active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId,
         headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
@@ -282,8 +284,11 @@ function DesktopApp() {
     return () => { unsubscribeStore(); unsubscribeRejectedLoads() }
   }, [fileEditingProbe])
   const projectedVisibleTabIds = useMemo(() => new Set([
-    ...Object.entries(viewTargets).flatMap(([tabId, target]) => target.visible === false ? [] : [tabId]), ...(focusTab ? [focusTab.id] : [])
-  ]), [viewTargets, focusTab?.id])
+    ...Object.entries(viewTargets).flatMap(([tabId, target]) => target.visible === false || target.projection?.entity.kind === 'region' ? [] : [tabId])
+  ]), [viewTargets])
+  const projectedVisibleRegionIds = useMemo(() => new Set(Object.values(viewTargets).flatMap(target =>
+    target.visible !== false && target.projection?.entity.kind === 'region' && target.reference?.regionId === target.projection.entity.regionId
+      ? [target.reference.regionId] : [])), [viewTargets])
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has
   // a persisted surface for (plus the active one during its first layout frame) mounted: switching
   // back then changes visibility instead of destroying SessionPane/xterm/ctxmux attachments, while an
@@ -385,7 +390,7 @@ function DesktopApp() {
   return (
     <SettingsNavigation.Provider value={settingsNavigation}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
-      <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} measurementActive={terminalParkingMeasurement}>
+      <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={terminalParkingMeasurement}>
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
       >
@@ -440,7 +445,7 @@ function DesktopApp() {
                 </section>
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} viewTargets={viewTargets} /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div

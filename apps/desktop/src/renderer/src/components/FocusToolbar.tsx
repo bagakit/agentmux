@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { ArrowUpRight, Inbox, MoreHorizontal, PanelRightClose, Pencil } from 'lucide-react'
+import { ArrowUpRight, Inbox, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { findGroup } from '@agentmux/layout'
 import type { FocusContext } from '../lib/focus-context'
@@ -9,16 +9,16 @@ import { isSessionSurface } from '../lib/workbench-surface-kinds'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
-export function FocusToolbar({ children, selectedId, selected, tab, onReview, onCloseWorkspace }: {
-  children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; onReview(): void; onCloseWorkspace(): void
+export function FocusToolbar({ children, selectedId, selected, tab, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
+  children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
 }) {
   return <header className="focus-toolbar">
     <div className="focus-toolbar__filters">{children}</div>
-    {selectedId ? <FocusToolbarContext key={selectedId} selectedId={selectedId} selected={selected} tab={tab} onReview={onReview} onCloseWorkspace={onCloseWorkspace} /> : null}
+    {selectedId ? <FocusToolbarContext key={selectedId} selectedId={selectedId} selected={selected} tab={tab} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
   </header>
 }
-function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorkspace }: {
-  selectedId: string; selected: FocusContext | undefined; tab: WorkbenchTab | null; onReview(): void; onCloseWorkspace(): void
+function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
+  selectedId: string; selected: FocusContext | undefined; tab: WorkbenchTab | null; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
 }) {
   const renameAgent = useAppStore(state => state.renameAgent)
   const renameTab = useAppStore(state => state.renameTab)
@@ -64,6 +64,7 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
   }
   const actions = [
     ...(selected?.kind === 'agent' || tab ? [{ key: 'rename', label: selected?.kind === 'agent' ? 'Rename Agent' : 'Rename Tab', icon: Pencil, run: () => setDraft(name) }] : []),
+    ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: Square, run: onToggleRegion }] : []),
     { key: 'space', label: 'Continue in Space', icon: ArrowUpRight, run: continueInSpace },
     ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: Inbox, run: onReview }] : []),
     { key: 'close', label: 'Close Focus workspace', icon: PanelRightClose, run: onCloseWorkspace }
