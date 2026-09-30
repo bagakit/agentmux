@@ -70,3 +70,9 @@
 }
 
 .conversation-avatar--system { color: var(--text-3); background: var(--surface-2); }
+
+/* The project leads the message identity; its Agent remains a small distinct corner mark. */
+.conversation-message-avatar { position: relative; display: inline-flex; flex: none; width: 32px; height: 32px; }
+.conversation-message-avatar > .project-rail-row__icon { width: 100%; height: 100%; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); overflow: hidden; }
+.conversation-message-avatar > .project-rail-row__icon img { width: 100%; height: 100%; object-fit: cover; }
+.conversation-message-avatar__badge { position: absolute; right: -3px; bottom: -3px; display: flex; border-radius: 50%; box-shadow: 0 0 0 2px var(--surface-1); }
