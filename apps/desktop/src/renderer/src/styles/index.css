@@ -47,6 +47,7 @@
 @import './resume.css';
 @import './activity.css';
 @import './activity-conversation.css';
+@import './conversation-input-details.css';
 @import './conversation-tool-trace.css';
 @import './conversation-native-reasoning.css';
 @import './session-history.css';

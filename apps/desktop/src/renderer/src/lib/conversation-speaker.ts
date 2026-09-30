@@ -51,12 +51,24 @@ export function speakerForDisplay(speaker: ConversationSpeaker): ConversationSpe
   return speaker.role === 'unknown' ? { role: 'human', id: HUMAN_SPEAKER_ID } : speaker
 }
 
+/** Current metadata, never a snapshot of the sender at delivery time. */
+export type ConversationSenderDetails = {
+  sessionId: string
+  label: string
+  providerId: AgentProviderId
+  createdAt: number
+  project?: { workspaceId: string; name: string; path: string; branch?: string }
+  goals: readonly { id: string; title: string }[]
+}
+
 /**
  * 把一个身份解析成「叫什么、画哪个 provider」。
  */
 export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
   name: string
   providerId?: AgentProviderId
+  /** Invoked only when the reader explicitly opens this sender's details. */
+  readDetails?: () => ConversationSenderDetails | undefined
 }
 
 /**
@@ -64,7 +76,11 @@ export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
  * 不用收件人当前资料代填发件人。
  */
 export function createSpeakerResolver(options?: {
-  lookupAgent?: (agentSessionId: string) => { label?: string; providerId?: AgentProviderId } | undefined
+  lookupAgent?: (agentSessionId: string) => {
+    label?: string
+    providerId?: AgentProviderId
+    readDetails?: () => ConversationSenderDetails | undefined
+  } | undefined
   currentSession?: { id: string; label?: string; providerId?: AgentProviderId } | undefined
 }): DescribeSpeaker {
   return (recordedSpeaker: ConversationSpeaker) => {
@@ -76,6 +92,7 @@ export function createSpeakerResolver(options?: {
       if (found) {
         return {
           name: found.label ?? speaker.id,
+          ...(found.readDetails ? { readDetails: found.readDetails } : {}),
           ...(found.providerId ? { providerId: found.providerId } : {})
         }
       }
