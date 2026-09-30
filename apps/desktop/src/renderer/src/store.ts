@@ -18,7 +18,7 @@ import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
-import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconId, type SpaceIconOverrides } from './lib/space-object-appearance'
+import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconChoice, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
@@ -547,7 +547,7 @@ type AppState = {
   pinnedItems: Record<string, string[]>
   /** User-authored Space identity, alongside pin/layout presentation; never Runtime configuration. */
   spaceObjectIcons: SpaceIconOverrides
-  setSpaceObjectIcon(key: string, icon: SpaceIconId | null): Promise<void>
+  setSpaceObjectIcon(key: string, icon: SpaceIconChoice | null): Promise<void>
   /** 在一个 scope 内 pin/unpin 一个 id。保序；unpin 恰好移除一条；移空则删掉该 scope 键（同 toggleProjectGroup 删键，不留空数组）。 */
   togglePinnedItem(scope: string, id: string): void
   toolsOpen: boolean
@@ -2067,6 +2067,7 @@ const persistentWorkbenchStorage = createDebouncedPersistentStorage<PersistedApp
 // The writer batches real presentation changes before this boundary. A visible localStorage value
 // is not a cross-process durability receipt; ask its existing platform owner to commit that batch.
 // Failure is advisory: retain the written state and retry on the next real storage mutation.
+const spaceIconSaveRequests = new Map<string, object>()
 let workbenchSaveRequest = 0
 async function requestWorkbenchStorageFlush(): Promise<void> {
   const request = ++workbenchSaveRequest
@@ -2764,6 +2765,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
       if (!persistWarning) openPersistWrites()
+      // Ordinary startup ensures the original primary identity once. Metadata failure is advisory;
+      // it cannot hold up restored workfaces or reconcile a healthy Session into a replacement.
+      if (config.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) {
+        void Promise.resolve().then(() => api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID))
+          .then(() => get().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true))
+          .catch(error => get().reportError(new Error('The primary Mote directory could not be confirmed. Existing work surfaces and Agent work remain available; open Mote to retry. ' + presentError(error))))
+      }
       // Restored dirty buffers keep their base revision and immediately resume observation.
       // Refresh marks disk conflicts through the existing reducer; it never overwrites a dirty draft.
       for (const key of Object.keys(get().documents)) {
@@ -4781,19 +4789,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async setSpaceObjectIcon(key, icon) {
     requireSpaceIconSelection(key, icon)
     if (!workbenchWriteFence.isOpen()) throw new Error('The saved workbench is still loading. Your icon choice is kept; retry when it is ready.')
-    set((state) => {
-      if ((state.spaceObjectIcons[key] ?? null) === icon) return state
-      const { [key]: _previous, ...others } = state.spaceObjectIcons
-      return { spaceObjectIcons: icon === null ? others : { ...others, [key]: icon } }
-    })
-    try {
-      persistentWorkbenchStorage.flush()
-      // The existing platform owner accepts a flush request; its void return is not a disk ACK.
-      await requestWorkbenchStorageFlush()
-    } catch (error) {
-      get().reportWorkbenchSaveFailure(error)
-      throw error
+    const request = {}; spaceIconSaveRequests.set(key, request)
+    // Explicitly saving the same image creates a fresh confirmed choice for its bounded read retry.
+    const selected = icon && typeof icon === 'object' ? { ...icon } : icon
+    const choice = (current: SpaceIconOverrides) => {
+      const { [key]: _previous, ...others } = current
+      return selected === null ? others : { ...others, [key]: selected }
     }
+    const writeChoice = (icons: SpaceIconOverrides) => {
+      // The same persisted projection/writer owns the candidate. It is not visible until confirmed.
+      const options = useAppStore.persist.getOptions()
+      persistentWorkbenchStorage.storage.setItem(options.name!, { state: partializeAppState({ ...get(), spaceObjectIcons: icons }), ...(options.version === undefined ? {} : { version: options.version }) })
+      persistentWorkbenchStorage.flush()
+    }
+    try {
+      writeChoice(choice(get().spaceObjectIcons))
+      await requestWorkbenchStorageFlush()
+      if (spaceIconSaveRequests.get(key) !== request) return
+      // Validate the latest projection before publication; unrelated edits during the request stay intact.
+      writeChoice(choice(get().spaceObjectIcons))
+      set(state => ({ spaceObjectIcons: choice(state.spaceObjectIcons) }))
+    } catch (error) {
+      if (spaceIconSaveRequests.get(key) === request) {
+        // Replace the rejected pending value with current confirmed facts, never an old workbench.
+        try { writeChoice(get().spaceObjectIcons) } catch { /* Original failure stays visible; only confirmed facts remain pending. */ }
+        get().reportWorkbenchSaveFailure(error)
+      }
+      throw error
+    } finally { if (spaceIconSaveRequests.get(key) === request) spaceIconSaveRequests.delete(key) }
   },
   setPortalOverlayCount(portalOverlayCount) {
     set({ portalOverlayCount })
