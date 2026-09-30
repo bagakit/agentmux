@@ -17,6 +17,7 @@ import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
 import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
+import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
 import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconId, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
@@ -456,6 +457,8 @@ type AppState = {
   mainSurface: MainSurface
   surveyZoneSelection: SurveyZoneSelection | null
   surveyToolsOpen: boolean
+  surveySidebarWidth: number
+  setSurveySidebarWidth(width: number): void
   setSurveyZoneSelection(selection: SurveyZoneSelection | null): void
   setSurveyToolsOpen(open: boolean): void
   openSurveyBrowserTools(target: SurveyBrowserTarget): void
@@ -1804,6 +1807,7 @@ type PersistedAppState = {
   mainSurface?: MainSurface
   surveyZoneSelection?: SurveyZoneSelection | null
   focusTimelineNameWidth?: number
+  surveySidebarWidth?: number
   focusTimelineHeight?: number
   focusTimelineRuler?: FocusRulerPreferences
   agentFocus?: AgentFocusContext
@@ -1828,6 +1832,7 @@ export type RestoredUiState = Pick<
   | 'activeWorkspaceId'
   | 'mainSurface'
   | 'surveyZoneSelection'
+  | 'surveySidebarWidth'
   | 'projectRailOpen'
   | 'collapsedProjectGroups'
   | 'explorerCollapsed'
@@ -1905,6 +1910,7 @@ export function restorePersistedUiState(
     | 'activeWorkspaceId'
     | 'mainSurface'
     | 'surveyZoneSelection'
+    | 'surveySidebarWidth'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
     | 'explorerCollapsed'
@@ -1928,6 +1934,7 @@ export function restorePersistedUiState(
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
+    surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
@@ -1978,6 +1985,7 @@ function selectPersistedInputs(state: AppState) {
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
     surveyZoneSelection: state.surveyZoneSelection,
+    surveySidebarWidth: state.surveySidebarWidth,
     agentFocus: state.agentFocus,
     focusTimelineNameWidth: state.focusTimelineNameWidth,
     focusTimelineHeight: state.focusTimelineHeight,
@@ -2361,6 +2369,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentNames: {},
   mainSurface: 'workbench',
   surveyZoneSelection: null,
+  surveySidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH,
+  setSurveySidebarWidth(width) {
+    set({ surveySidebarWidth: clampSurveySidebarWidth(width) })
+    // Commit only the finished presentation gesture through the existing save owner.
+    void saveWorkbenchSelection(false)
+  },
   surveyToolsOpen: false,
   setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
