@@ -1,6 +1,7 @@
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation } from './components/SettingsNavigation'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
 import { useSidebarResize } from './hooks/useSidebarResize'
@@ -42,8 +43,14 @@ import { RendererResourceOwners } from './components/RendererResourceOwners'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 import { beginRendererStartup, startupProgressDetail } from './lib/startup-progress'
-import { surveyBrowserSurface } from './lib/survey-browser'
+import { surveySelectReference } from './lib/survey-workface'
+import { selectSpatialCatalog, spatialCatalog } from './lib/space-agent-control'
+import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
+import { projectWorkbenchProjection, workbenchProjectionSlotId, type WorkbenchProjection } from './lib/workbench-projection'
+import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget } from './lib/workbench-presentation'
+import { sessionPresentationById } from './lib/session-presentation'
+import { isSessionSurface } from './lib/workbench-surface-kinds'
 
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
@@ -97,7 +104,7 @@ function DesktopApp() {
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null } : null }
     desktopPresentationCommitted()
   })
-  const surveySelection = useAppStore((state) => state.surveyBrowserSelection)
+  const surveySelection = useAppStore((state) => state.surveyZoneSelection)
   const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
   const [unconfirmedBrowserRegionIds, setUnconfirmedBrowserRegionIds] = useState<ReadonlySet<string>>(() => new Set())
   const onBrowserControlConfirmation = useCallback((regionId: string, unconfirmed: boolean) => {
@@ -114,15 +121,64 @@ function DesktopApp() {
     window.addEventListener('resize', resized)
     return () => window.removeEventListener('resize', resized)
   }, [])
-  const surveyPage = surveyBrowserSurface(tabs, surveySelection)
   const surveyVisible = mainSurface === 'survey' && !settingsRoute
-  const viewTargets = useMemo<Readonly<Record<string, WorkbenchViewTarget>>>(() => ({
-    ...moteViewTargets,
-    ...(surveyVisible && surveyPage && surveySelection ? { [surveySelection.tabId]: {
-      hostId: 'survey-browser-slot', active: !(surveyToolsOpen && narrowControls),
-      visible: !(surveyToolsOpen && narrowControls), surface: 'survey' as const, controlsOpen: surveyToolsOpen
-    } } : {})
-  }), [moteViewTargets, surveyVisible, surveyPage?.regionId, surveySelection?.tabId, surveyToolsOpen, narrowControls])
+  const surveyBindings = useAppStore(state => state.spaceZoneBindings)
+  const surveyTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
+  const surveySessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
+    Object.values(tab.regions).flatMap(surface => isSessionSurface(surface) ? [surface.sessionId] : [])))], [tabs])
+  // The spatial directory reads execution identity, never status/output clocks.
+  const surveySessions = useAppStore(useShallow(state => {
+    if (!surveyVisible || surveySessionIds.length === 0) return []
+    const byId = sessionPresentationById(state.sessions)
+    return surveySessionIds.flatMap(id => {
+      const session = byId.get(id)
+      return [id, session?.control.run.runId ?? null, session?.hostId ?? null, session?.workspacePath ?? null]
+    })
+  }))
+  const topicsWorkspace = config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+  const surveyTopics = scratchTopicsForWorkspace(surveyTopicSnapshots, topicsWorkspace)
+  const retainedSurveyCatalog = useRef<AgentMuxSpaceCatalog | null>(null)
+  const surveyCatalog = useMemo(() => {
+    if (!surveyVisible) return retainedSurveyCatalog.current
+    const catalog = spatialCatalog(useAppStore.getState(), surveyTopics ?? [])
+    retainedSurveyCatalog.current = catalog
+    return catalog
+  }, [surveyVisible, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
+  const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
+    const state = useAppStore.getState()
+    if (!state.surveyZoneSelection || state.surveyZoneSelection.zoneId !== surveySelection?.zoneId) return
+    const matches = (catalog: AgentMuxSpaceCatalog | null) => catalog?.locations.some(location =>
+      location.zoneId === state.surveyZoneSelection!.zoneId && location.displayWorkspaceId === reference.displayWorkspaceId &&
+      location.groupId === reference.groupId && location.tabId === reference.tabId && location.regionId === reference.regionId)
+    // A just-created original Tab has not reached this rendered catalog yet.
+    if (!matches(surveyCatalog) && !matches(spatialCatalog(state, surveyTopics ?? []))) return
+    state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
+  }, [surveySelection?.zoneId, surveyCatalog, surveyTopics])
+  const surveyProjection = useMemo<WorkbenchProjection | null>(() => {
+    if (!surveySelection || !surveyCatalog) return null
+    const displayIds = new Set(surveyCatalog.locations.filter(location => location.zoneId === surveySelection.zoneId).map(location => location.displayWorkspaceId))
+    const displayWorkspaceId = surveySelection.active?.displayWorkspaceId ?? (displayIds.size === 1 ? [...displayIds][0] : undefined)
+    if (!displayWorkspaceId) return null
+    const catalog = surveyCatalog.zones.some(zone => zone.zoneId === surveySelection.zoneId) ? selectSpatialCatalog(surveyCatalog, { zoneId: surveySelection.zoneId }) : surveyCatalog
+    return { entity: { kind: 'zone', zoneId: surveySelection.zoneId }, presentationId: 'survey-workbench', displayWorkspaceId, catalog,
+      selection: surveySelection.selection, onSelect: selectSurveyReference }
+  }, [surveySelection, surveyCatalog, selectSurveyReference])
+  const surveyProjectedLayout = useMemo(() => surveyProjection ? projectWorkbenchProjection(layouts[surveyProjection.displayWorkspaceId], tabs, surveyProjection) : null,
+    [surveyProjection, layouts, tabs])
+  const viewTargets = useMemo<Readonly<Record<string, WorkbenchViewTarget>>>(() => {
+    const targets: Record<string, WorkbenchViewTarget> = { ...moteViewTargets }
+    if (surveyVisible && surveyProjection && surveyProjectedLayout?.layout) {
+      for (const group of surveyProjectedLayout.layout.groups) {
+        const tabId = group.activeTabId
+        const reference = surveyProjection.selection.find(reference => reference.displayWorkspaceId === surveyProjection.displayWorkspaceId && reference.groupId === group.id && reference.tabId === tabId)
+        if (!tabId || !reference || surveyProjectedLayout.unsupportedTabIds.has(tabId) || moteViewTargets?.[tabId]) continue
+        targets[tabId] = { hostId: workbenchProjectionSlotId(`${surveyProjection.presentationId}-slot`, reference),
+          active: !(surveyToolsOpen && narrowControls), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', controlsOpen: surveyToolsOpen,
+          retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) }
+      }
+    }
+    return targets
+  }, [moteViewTargets, surveyVisible, surveyProjection, surveyProjectedLayout, surveyToolsOpen, narrowControls, selectSurveyReference])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
   useEffect(() => {
     if (mainSurface === 'survey') setSurveyVisited(true)
@@ -190,7 +246,7 @@ function DesktopApp() {
   // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
   // registry rule as a project instead of being filtered out after a Topic click.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || candidate.id === surveySelection?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
+    fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
@@ -338,7 +394,7 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
                 </section>
               ) : null}
-              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} /> : null}
+              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} viewTargets={viewTargets} /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (

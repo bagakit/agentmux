@@ -9,7 +9,9 @@ export type AgentMuxDesktopFocusTarget =
   | { kind: 'surface'; surface: AgentMuxDesktopSurface }
 export type AgentMuxDesktopInputPolicy = 'preserve' | 'target'
 export type AgentMuxDesktopSpaceSelection = {
-  spaceId: string; zoneId: string; workspaceId: string
+  spaceId: string | null; zoneId: string | null;
+  /** Exact display Workspace; resource context remains on the catalog entity. */
+  workspaceId: string
   tabId: string | null; groupId: string | null; regionId: string | null
   topicId: string | null
 }

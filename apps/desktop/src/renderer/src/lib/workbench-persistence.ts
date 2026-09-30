@@ -1,9 +1,6 @@
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import {
-  activateTab,
-  addTab,
   createWorkspaceLayout,
-  findGroupForTab,
   groupIds,
   groupLeafId,
   removeTab,
@@ -519,16 +516,6 @@ function keepTabsInLayout(
   return next
 }
 
-function addTabWithoutStealingFocus(
-  layout: WorkspaceLayout,
-  groupId: string,
-  tabId: string
-): WorkspaceLayout {
-  const activeTabId = layout.groups.find((group) => group.id === groupId)?.activeTabId
-  const next = addTab(layout, groupId, tabId)
-  return activeTabId ? activateTab(next, groupId, activeTabId) : next
-}
-
 export function projectPersistedWorkbench(input: PersistedWorkbench): PersistedWorkbench {
   const tabs = Object.fromEntries(
     Object.values(input.tabs).flatMap((persistedTab) => {
@@ -642,27 +629,15 @@ export function restorePersistedWorkbench(input: {
     })
   )
   const layouts: Record<string, WorkspaceLayout> = {}
-  const workspaceIds = new Set([...input.config.workspaces.map(workspace => workspace.id), ...Object.values(tabs).map(tab => tab.workspaceId)])
+  const workspaceIds = new Set([...input.config.workspaces.map(workspace => workspace.id), ...Object.values(tabs).map(tab => tab.workspaceId), ...Object.keys(input.persisted.layouts)])
   for (const workspaceId of workspaceIds) {
-    const workspaceTabIds = new Set(
-      Object.values(tabs)
-        .filter((tab) => tab.workspaceId === workspaceId)
-        .map((tab) => tab.id)
-    )
-    // 归一化排在补挂之前，不是之后：下面的 `addTabWithoutStealingFocus` 把无处安放的 Tab 挂到
-    // `layout.activeGroupId` 上，而磁盘上的这个指针可能指着一个已经不在 `groups` 表里的分组。若先补挂
-    // 再归一化，那些 Tab 已经进了一个画不出来的分组（`workbench-layout.ts:350-352` 记的孤儿形状），之后
-    // 再把指针重座也救不回它们。先把指针落到一个真在场的分组上，补挂才有正确的落点。
-    let layout = normalizePersistedLayout(
+    // Preserve every live entity reference in this exact durable display layout. Zero occurrences
+    // are intentional after unbinding; resource membership never invents a new placement.
+    const layout = normalizePersistedLayout(
       input.persisted.layouts[workspaceId]
-        ? keepTabsInLayout(input.persisted.layouts[workspaceId]!, workspaceTabIds)
+        ? keepTabsInLayout(input.persisted.layouts[workspaceId]!, new Set(Object.keys(tabs)))
         : createWorkspaceLayout(input.createTabGroupId())
     )
-    for (const tabId of workspaceTabIds) {
-      if (!findGroupForTab(layout, tabId)) {
-        layout = addTabWithoutStealingFocus(layout, layout.activeGroupId, tabId)
-      }
-    }
     layouts[workspaceId] = layout
   }
   return { tabs, layouts, repairs }

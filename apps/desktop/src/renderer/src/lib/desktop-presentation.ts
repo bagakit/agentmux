@@ -82,7 +82,7 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
     else {
       const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
       const target = selection.surface !== 'space' ? main : regionId ? queryIdentity('data-workbench-region-id', regionId)
-        : selection.space ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : main
+        : selection.space?.zoneId ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : selection.space ? null : main
       const borrowed = selection.surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
       const exactGoal = selection.surface !== 'goals' || !selection.goalId ||
         Boolean(main?.querySelector(`[data-goal-detail-id=${CSS.escape(selection.goalId)}]`))

@@ -1,6 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
   Columns2,
+  Check,
   Copy,
   CornerDownRight,
   Crosshair,
@@ -236,7 +237,11 @@ export function WorkbenchTabContextMenu({
   regionCount,
   onArrange,
   moveSessionViewTargets,
-  onMoveSessionView
+  onMoveSessionView,
+  displayTargets,
+  bindingPending,
+  onOpenChange,
+  onDisplayBindingChange
 }: {
   children: ReactNode
   canCloseOthers: boolean
@@ -272,6 +277,10 @@ export function WorkbenchTabContextMenu({
   // 搬过去是 no-op，故以缺席表达而非禁用的假按钮。
   moveSessionViewTargets: ReadonlyArray<MoveSessionViewTarget>
   onMoveSessionView(targetWorkspaceId: string): void
+  displayTargets: readonly { displayWorkspaceId: string; groupId: string; label: string; linked: boolean }[]
+  bindingPending: boolean
+  onOpenChange(open: boolean): void
+  onDisplayBindingChange(displayWorkspaceId: string, groupId: string, linked: boolean): void
 }) {
   const copyModel = createWorkbenchTabCopyModel({
     tabId,
@@ -281,7 +290,7 @@ export function WorkbenchTabContextMenu({
   })
   const layoutEntries = workbenchRegionLayoutMenuEntries({ regionCount, arrange: onArrange })
   return (
-    <ContextMenu.Root>
+    <ContextMenu.Root onOpenChange={onOpenChange}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
@@ -316,6 +325,31 @@ export function WorkbenchTabContextMenu({
             )
           })}
           <ContextMenu.Separator className="tab-context-menu__separator" />
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={displayTargets.length === 0}>
+              <FolderSymlink size={14} />
+              <span>Link to Workspace / Group</span>
+              <span className="tab-context-menu__chevron">›</span>
+            </ContextMenu.SubTrigger>
+            <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+              <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
+                {displayTargets.map((target) => (
+                  <ContextMenu.CheckboxItem
+                    key={JSON.stringify([target.displayWorkspaceId, target.groupId])}
+                    className="tab-context-menu__item"
+                    title={`${target.displayWorkspaceId} / ${target.groupId}`}
+                    checked={target.linked}
+                    disabled={bindingPending}
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={(linked) => onDisplayBindingChange(target.displayWorkspaceId, target.groupId, linked === true)}
+                  >
+                    <span style={{ width: 14 }}><ContextMenu.ItemIndicator><Check size={14} /></ContextMenu.ItemIndicator></span>
+                    <span>{target.label}</span>
+                  </ContextMenu.CheckboxItem>
+                ))}
+              </ContextMenu.SubContent>
+            </ContextMenu.Portal>
+          </ContextMenu.Sub>
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={!canMoveToNewGroup}>
               <Columns2 size={14} />

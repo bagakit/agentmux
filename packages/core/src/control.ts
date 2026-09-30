@@ -882,6 +882,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'space.inspect': 'short',
   'space.mv': 'long',
   'space.rename': 'long',
+  'space.bind': 'long',
+  'space.unbind': 'long',
   'open.terminal': 'long',
   'open.browser': 'long',
   send: 'long',

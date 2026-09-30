@@ -341,10 +341,11 @@ async function pmoCommand(args: readonly string[]): Promise<number> {
   if (action === 'workspaces') {
     const receipt = await requestAgentMuxControl({ ...requestBase(), operation: 'space.ls', target: {} })
     if (receipt.operation !== 'space.ls') throw new AgentMuxError('Workspace discovery receipt operation is mismatched.', 'CONTROL_PROTOCOL_ERROR')
-    const { spaces, zones } = receipt.result.catalog
+    const { spaces, zones, bindings } = receipt.result.catalog
     const workspaceId = flags.values.get('--workspace'), projectId = flags.values.get('--project')
     const selected = zones.filter(zone => (!workspaceId || zone.workspaceId === workspaceId) &&
-      (!projectId || spaces.some(space => space.spaceId === zone.spaceId && space.projectId === projectId)))
+      (!projectId || bindings.some(binding => binding.zoneId === zone.zoneId &&
+        spaces.some(space => space.spaceId === binding.spaceId && space.projectId === projectId))))
     const workspaces = [...new Set(selected.map(zone => zone.workspaceId))].map(workspaceId => ({
       workspaceId, zones: selected.filter(zone => zone.workspaceId === workspaceId)
     })).slice(0, limit)
@@ -531,11 +532,12 @@ async function openCommand(args: readonly string[]): Promise<number> {
   printSuccess(receipt.operation, receipt.result); return 0
 }
 
-const SPACE_SELECTOR_FLAGS = { '--space': 'data', '--zone': 'data', '--tab': 'data', '--region': 'data' } as const
+const SPACE_SELECTOR_FLAGS = { '--space': 'data', '--zone': 'data', '--tab': 'data', '--region': 'data', '--display-workspace': 'data', '--group': 'data' } as const
 const SPACE_DESTINATION_FLAGS = { ...SPACE_SELECTOR_FLAGS, '--new-tab': 'boolean', '--split': 'value', '--focus': 'boolean', '--request-id': 'data' } as const
 function spaceSelector(flags: ParsedFlags): AgentMuxSpaceSelector {
   return Object.fromEntries(['space', 'zone', 'tab', 'region'].filter(key => flags.values.has(`--${key}`))
-    .map(key => [`${key}Id`, spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT', key === 'space' || key === 'zone')]))
+    .map(key => [`${key}Id`, spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT', key === 'space' || key === 'zone')])
+    .concat(['display-workspace', 'group'].filter(key => flags.values.has(`--${key}`)).map(key => [key === 'group' ? 'groupId' : 'displayWorkspaceId', spaceControlId(flags.values.get(`--${key}`), key, 'INVALID_CLI_ARGUMENT')])) )
 }
 function useSpaceRequestId(flags: ParsedFlags): void {
   if (flags.values.has('--request-id')) CLI_REQUEST_ID = spaceControlId(flags.values.get('--request-id'), 'Request ID', 'INVALID_CLI_ARGUMENT')
@@ -614,16 +616,31 @@ async function spaceCommand(args: readonly string[]): Promise<number> {
     writeJson(receipt)
     return receipt.result.outcome === 'partial' ? 1 : 0
   }
-  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, mv, or rename.')
+  if (action === 'bind' || action === 'unbind') {
+    const flags = parseFlags(args.slice(1), { ...SPACE_SELECTOR_FLAGS, '--request-id': 'data' })
+    useSpaceRequestId(flags)
+    const target = spaceSelector(flags)
+    if (target.regionId) throw cliError('Binding targets are an exact Zone/Space pair or Tab/display Workspace/Group occurrence.')
+    const binding = target.tabId
+      ? { kind: 'tab-group', tabId: target.tabId, displayWorkspaceId: target.displayWorkspaceId, groupId: target.groupId }
+      : { kind: 'zone-space', zoneId: target.zoneId, spaceId: target.spaceId }
+    if (target.tabId && (target.zoneId || target.spaceId) || !target.tabId && (target.displayWorkspaceId || target.groupId)) throw cliError('Do not combine Zone relations with Tab display placements.')
+    const request = parseSpaceControlRequest({ ...requestBase(), operation: action === 'bind' ? 'space.bind' : 'space.unbind', binding }, 'INVALID_CLI_ARGUMENT')
+    const receipt = await requestAgentMuxControl(request)
+    writeJson(receipt)
+    return (receipt.operation === 'space.bind' || receipt.operation === 'space.unbind') && receipt.result.outcome === 'unknown' ? 1 : 0
+  }
+  if (action !== 'ls' && action !== 'inspect' && action !== 'mv') throw cliError('space requires ls, inspect, mv, bind, unbind, or rename.')
   const flags = parseFlags(args.slice(1), action === 'mv'
-    ? { ...SPACE_DESTINATION_FLAGS, '--from-region': 'data', '--expect-session': 'data' }
+    ? { ...SPACE_DESTINATION_FLAGS, '--from-region': 'data', '--expect-session': 'data', '--from-space': 'data', '--from-display-workspace': 'data', '--from-group': 'data' }
     : action === 'inspect' ? { ...SPACE_SELECTOR_FLAGS, '--request': 'data' } : { '--space': 'data', '--zone': 'data' })
   useSpaceRequestId(flags)
   const target = spaceSelector(flags)
   if (flags.values.has('--request') && Object.keys(target).length) throw cliError('--request cannot be combined with a spatial selector.')
   const request = parseSpaceControlRequest(action === 'mv'
     ? { ...requestBase(), operation: 'space.mv', fromRegionId: identifier(flags.values.get('--from-region'), 'Source Region'),
-      expectedAgentSessionId: identifier(flags.values.get('--expect-session'), 'Expected Session'), destination: spaceDestination(flags), focus: flags.booleans.has('--focus') }
+      expectedAgentSessionId: identifier(flags.values.get('--expect-session'), 'Expected Session'),
+      ...(['--from-space', '--from-display-workspace', '--from-group'].some(key => flags.values.has(key)) ? { fromLocation: Object.fromEntries(['space', 'display-workspace', 'group'].filter(key => flags.values.has(`--from-${key}`)).map(key => [key === 'group' ? 'groupId' : key === 'space' ? 'spaceId' : 'displayWorkspaceId', flags.values.get(`--from-${key}`)])) } : {}), destination: spaceDestination(flags), focus: flags.booleans.has('--focus') }
     : { ...requestBase(), operation: action === 'ls' ? 'space.ls' : 'space.inspect',
       target: flags.values.has('--request') ? { requestId: flags.values.get('--request')! } : target }, 'INVALID_CLI_ARGUMENT')
   const receipt = await requestAgentMuxControl(request)
@@ -1137,7 +1154,7 @@ function requestsHelp(args: readonly string[]): boolean {
       (args.length === 4 && args[1] === 'executors' && args[2] === 'refresh' && help(args[3]))
   }
   if (args[0] === 'agent' || args[0] === 'space' || args[0] === 'focus') {
-    const data = ['--executor', '--session', '--prompt', '--name', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
+    const data = ['--display-workspace', '--group', '--from-space', '--from-display-workspace', '--from-group', '--executor', '--session', '--prompt', '--name', '--space', '--zone', '--tab', '--region', '--goal', '--request-id', '--request', '--from-region', '--expect-session', '--path', '--branch', '--new-branch', '--directory']
     return args.some((argument, index) => (argument === '--help' || argument === '-h') && !data.includes(args[index - 1] ?? ''))
   }
   return args.some((argument, index) => (
