@@ -622,6 +622,25 @@ export type AgentProviderSessionHistoryContext = {
 
 export type AgentProviderSessionHistoryPage = Omit<AgentSessionHistoryPage, 'agentSessionId'>
 
+/** A relevant native source changed; this is not a user message or an accepted input receipt. */
+export type AgentProviderSessionHistoryObservation =
+  | { kind: 'invalidated'; source: AgentSessionHistorySource }
+  | { kind: 'unavailable'; source?: AgentSessionHistorySource; code: string; message: string }
+
+export type AgentSessionHistoryObservation = AgentProviderSessionHistoryObservation & { agentSessionId: string }
+
+export type AgentSessionHistoryObservationOptions = Pick<AgentSessionHistoryPageOptions,
+  'commandOverride' | 'args' | 'env'> & { signal?: AbortSignal }
+
+export type AgentSessionHistoryObservationHandle = {
+  source: AgentSessionHistorySource
+  dispose(): void
+}
+
+/** Providers own their native locator and observation protocol. No Run authority is required. */
+export type AgentProviderSessionHistoryObservationContext = Omit<AgentProviderSessionHistoryContext,
+  'cursor' | 'limit'> & { onChange(observation: AgentProviderSessionHistoryObservation): void }
+
 export type AgentSessionUserMessageSource =
   | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
   | { kind: 'captured'; submissionId: string }

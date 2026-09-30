@@ -33,6 +33,8 @@ import type {
   AgentProviderResumeContext,
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
+  AgentProviderSessionHistoryObservationContext,
+  AgentSessionHistoryObservationHandle,
   AgentTerminalHandshake,
   AgentTerminalPromptRenderMatcher,
   NativeHookEnvelope,
@@ -80,6 +82,7 @@ export type AgentProvider = {
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
+  observeSessionHistory?(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle>
   /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
   planManagedHooks?(context: AgentManagedHookPlanContext): AgentManagedHookPlan | null
   inspectHookActivation?(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation>
@@ -109,6 +112,7 @@ export type AgentProviderDefinition = {
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
+  observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
   buildResumeArgs?: (
@@ -249,6 +253,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
+    ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
     async probeCapabilities(probe, commandOverride) {
