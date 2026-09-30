@@ -85,7 +85,7 @@ async function restart() {
   const expected = JSON.parse(await fs.readFile(path.join(evidence,'expected-durable.json'),'utf8')), actual = await evaluate('filePreviewProbe.beforeFixture')
   assert.deepEqual(actual.tabs,expected.tabs); assert.deepEqual(actual.layouts,expected.layouts); assert.equal(actual.activeWorkspaceId,expected.activeWorkspaceId)
   for(const [key,doc] of Object.entries(expected.documents)){assert.deepEqual(actual.documents[key],doc);assert.equal(actual.dirtyDocuments[key],true)}
-  await wait(imageReady('original.png'));await wait(`Array.from(document.querySelectorAll('[data-workbench-region-id="preview-neighbor"] .monaco-editor .view-line')).map(line=>line.textContent).join(' ').replace(/\\u00a0/g,' ').includes('Current unsaved Markdown'))`)
+  await wait(imageReady('original.png'));await wait(`Array.from(document.querySelectorAll('[data-workbench-region-id="preview-neighbor"] .monaco-editor .view-line')).map(line=>line.textContent).join(' ').replace(/\\u00a0/g,' ').includes('Current unsaved Markdown')`)
   await frame('renderer-profile-file-restart','original.png'); report.durable={passed:true,expected,actual,boundary:'A second ordinary Electron process reads original durable File Tabs/Regions/layout/focus/dirty documents before any scene setup. Native workspace bytes pass through production preload into the actual WorkspaceFiles owner.'}
 }
 app.whenReady().then(async()=>{try{
