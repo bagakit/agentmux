@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 
-module.exports = async function projectLinksScenes({ evaluate, size, click, capture, waitFor, result }) {
+module.exports = async function projectLinksScenes({ evaluate, size, click, capture: captureFrame, waitFor, result, fileDisplayOnly = false }) {
+  const capture = (name, width) => fileDisplayOnly && name !== '1280-dark-project-file-original-group' ? Promise.resolve() : captureFrame(name, width)
   const nativeOnly = async scene => {
     await waitFor('document.querySelectorAll(".conversation-native-thread__record").length===1')
     const facts = await evaluate(`({ nativeRecords: document.querySelectorAll('.conversation-native-thread__record').length,
@@ -50,5 +51,5 @@ module.exports = async function projectLinksScenes({ evaluate, size, click, capt
   assert.deepEqual(await evaluate('goalsProjectLinks.facts().session.control'), original)
   await nativeOnly('missing-association-native-body-empty-observations')
   await capture('620-light-project-association-unconfirmed', 620)
-  assert.equal(result.frames.length, 4)
+  assert.equal(result.frames.length, fileDisplayOnly ? 1 : 4)
 }
