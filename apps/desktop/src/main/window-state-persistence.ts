@@ -72,16 +72,26 @@ export function registerWindowStatePersistence(
 
 /** One bounded preparation for this actual workbench window, before IPC or Runtime disposal. */
 export async function prepareWindowWorkbenchForQuit(window: BrowserWindow): Promise<void> {
-  if (window.isDestroyed() || window.webContents.isDestroyed()) return
+  if (window.isDestroyed() || window.webContents.isDestroyed() || window.webContents.isCrashed()) return
   let timer: ReturnType<typeof setTimeout> | undefined
+  let onGone: () => void = () => {}
+  const rendererGone = new Promise<void>((resolve) => { onGone = resolve })
+  window.webContents.once('render-process-gone', onGone)
   try {
     await Promise.race([
-      window.webContents.executeJavaScript('window.agentmuxPrepareRendererUpdate("quit")'),
+      window.webContents.executeJavaScript('window.agentmuxPrepareRendererUpdate("quit")').catch((error: unknown) => {
+        if (window.webContents.isDestroyed() || window.webContents.isCrashed()) return
+        throw error
+      }),
+      rendererGone,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('The workbench save request did not respond within five seconds.')), 5_000)
       })
     ])
-  } finally { clearTimeout(timer) }
+  } finally {
+    clearTimeout(timer)
+    window.webContents.removeListener('render-process-gone', onGone)
+  }
 }
 
 /** Keep the original window and healthy Runs when the presentation save step is unconfirmed. */
