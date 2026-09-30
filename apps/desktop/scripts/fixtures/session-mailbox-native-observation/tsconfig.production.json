@@ -1,0 +1,7 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../src/renderer/src/components/SessionMailbox.tsx"
+  ]
+}

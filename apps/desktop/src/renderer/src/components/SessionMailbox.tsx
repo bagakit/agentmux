@@ -185,23 +185,12 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
     hasMore,
     loadEarlier,
     refresh,
-    error: historyError
+    error: historyError,
+    observationError,
+    windowFrozen
   } = useSessionUserMessages(effectiveControl, { enabled: open })
 
   const effectiveUserMessages = propUserMessages ?? hookUserMessages
-
-  const sessionFactsKey = storeSession?.kind === 'agent'
-    ? `${storeSession.updatedAt}:${storeSession.agentSessionUpdatedAt}`
-    : storeSession?.updatedAt
-  const lastFactsKeyRef = useRef(sessionFactsKey)
-  useEffect(() => {
-    if (lastFactsKeyRef.current !== undefined && lastFactsKeyRef.current !== sessionFactsKey) {
-      lastFactsKeyRef.current = sessionFactsKey
-      void refresh()
-    } else {
-      lastFactsKeyRef.current = sessionFactsKey
-    }
-  }, [sessionFactsKey, refresh])
 
   const messages = useMemo(() => timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
     item.kind === 'user_message') ?? [], [timeline])
@@ -359,6 +348,14 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <div className="composer-mailbox__error" data-kind="error">
               <strong>Failed to read native conversation history</strong><p>{historyError.message}</p>
               <button type="button" className="composer-tool" onClick={() => void refresh()}>Retry</button>
+            </div> : null}
+            {observationError ? <div className="composer-mailbox__error" data-kind="error">
+              <strong>Automatic native updates are unavailable</strong><p>{observationError.message} Existing messages are kept.</p>
+              <button type="button" className="composer-tool" onClick={() => void refresh()}>Refresh source</button>
+            </div> : null}
+            {windowFrozen ? <div className="composer-mailbox__boundary">
+              <span>The native source changed. This bounded reading window is kept.</span>
+              <button type="button" className="composer-tool" onClick={() => void refresh()}>Read latest records</button>
             </div> : null}
             <MessageHistory items={sent} incoming={false} selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} />
             {!selectedMessage && hasMore ? <div className="composer-mailbox__boundary"><span>Earlier native messages available.</span>
