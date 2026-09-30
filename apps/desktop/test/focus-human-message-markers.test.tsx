@@ -30,6 +30,16 @@ afterEach(async () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
 });
+function previewOf(marker: HTMLElement) {
+    const id = marker.getAttribute('aria-describedby');
+    expect(id).not.toBeNull();
+    const preview = document.getElementById(id!);
+    expect(preview).not.toBeNull();
+    expect(preview!.getAttribute('role')).toBe('dialog');
+    expect(preview!.dataset.previewMessageId).toBe(marker.dataset.messageId);
+    expect(document.getElementById('agentmux-window-overlay-host')?.contains(preview)).toBe(true);
+    return preview!;
+}
 async function fixture() {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const template = new AgentProviderRegistry().get('codex');
@@ -97,7 +107,7 @@ async function fixture() {
     const root = createRoot(element);
     roots.push(root);
     const onSelect = vi.fn();
-    const render = async () => { const state = useAppStore.getState(); const contexts = createFocusProjectionSelector()({ sessions: state.sessions, config: state.config, timelines: state.timelines, agentNames: {} }).contexts; expect(contexts.map(c => c.id)).toEqual([session.agentSessionId]); await act(async () => root.render(createElement(RecentFocusTimeline, { entries: [], contexts, currentSessionId: session.agentSessionId, onSelect }))); };
+    const render = async () => { const state = useAppStore.getState(); const contexts = createFocusProjectionSelector()(state).contexts; expect(contexts.map(c => c.id)).toEqual([session.agentSessionId]); await act(async () => root.render(createElement(RecentFocusTimeline, { entries: [], contexts, currentSessionId: session.agentSessionId, onSelect }))); };
     return { client, store, session, recipient, element, render, writes, submit, onSelect };
 }
 it('actual Store Control send and Core recording show a nonempty known Agent marker without claiming Human', async () => {
@@ -117,7 +127,7 @@ it('actual Store Control send and Core recording show a nonempty known Agent mar
     expect(markers[0]!.title).toContain('Agent message · Sender private-author');
     expect(markers[0]!.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId).toBe(h.session.agentSessionId);
     await act(async () => markers[0]!.click());
-    const preview = h.element.querySelector<HTMLElement>('[role="dialog"]')!;
+    const preview = previewOf(markers[0]!);
     expect(preview).toBeTruthy();
     expect(preview.textContent).toContain('Agent message');
     expect(preview.textContent).toContain('private-author');
@@ -145,11 +155,12 @@ it('actual public Core plain send retains two identical prompts without claiming
         expect.stringContaining('Prompt · Sender not recorded')
     ]);
     await act(async () => markers[0]!.click());
-    expect(h.element.querySelector('[role="dialog"]')!.getAttribute('aria-label')).toBe('Message');
-    expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain(prompt);
-    expect(h.element.querySelector('[role="dialog"]')!.textContent).toContain('Prompt · Sender not recorded');
+    const preview = previewOf(markers[0]!);
+    expect(preview.getAttribute('aria-label')).toBe('Message');
+    expect(preview.textContent).toContain(prompt);
+    expect(preview.textContent).toContain('Prompt · Sender not recorded');
     expect(h.onSelect).not.toHaveBeenCalled();
-    await act(async () => h.element.querySelector<HTMLButtonElement>('[role="dialog"] > button')!.click());
+    await act(async () => preview.querySelector<HTMLButtonElement>(':scope > button')!.click());
     expect(h.onSelect).toHaveBeenCalledExactlyOnceWith(h.session.agentSessionId);
     expect((await h.client.sessionTimeline(h.session.agentSessionId)).items).toEqual(captured.items);
 });
@@ -182,7 +193,7 @@ it('actual continuous-progress caller through Runtime/Core/Store presents an aut
     expect(markers[0]!.getAttribute('aria-label')).toMatch(/^Prompt in .+, sender not recorded$/);
     expect(markers[0]!.title).toContain('Prompt · Sender not recorded');
     await act(async () => markers[0]!.click());
-    const preview = h.element.querySelector<HTMLElement>('[role="dialog"]')!;
+    const preview = previewOf(markers[0]!);
     expect(preview.getAttribute('aria-label')).toBe('Message');
     expect(preview.textContent).toContain('Prompt · Sender not recorded');
     expect(preview.textContent).toContain(loop.prompt);

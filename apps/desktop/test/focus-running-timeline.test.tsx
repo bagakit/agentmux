@@ -23,7 +23,7 @@ let root: Root, element: HTMLDivElement
 const select = createFocusProjectionSelector()
 const onSelect = vi.fn()
 async function render(sessions = [agent()], entries: Array<{ sessionId: string; focusedAt: number }> = []) {
-  const contexts = select({ sessions, timelines: {}, config: null, agentNames: {} }).contexts
+  const contexts = select({ sessions, timelines: {}, config: null, agentNames: {}, scratchTopicSnapshots: useAppStore.getState().scratchTopicSnapshots }).contexts
   await act(async () => root.render(createElement(RecentFocusTimeline, { contexts, entries, currentSessionId: null, onSelect })))
   return contexts
 }
@@ -77,7 +77,7 @@ it('requires authoritative matching semantic state and an alive Run before claim
     agent({ id: 'ended', processState: 'interrupted' })]
   const contexts = await render(cases)
   expect(contexts.map(c => c.workingEnteredAt)).toEqual([null, null, null])
-  expect([...element.querySelectorAll<HTMLElement>('.recent-focus__track')].map(n => n.dataset.focusTimelineId)).toEqual(['process-signal', 'mismatched-semantic'])
+  expect([...element.querySelectorAll<HTMLElement>('.recent-focus__track')].map(n => n.dataset.focusTimelineId)).toEqual(['mismatched-semantic', 'process-signal'])
   expect(element.querySelectorAll('.recent-focus__working')).toHaveLength(0)
 })
 
@@ -99,14 +99,17 @@ it('queries only the proven current work-state intersection in history and leave
   expect(element.querySelectorAll('.recent-focus__track')).toHaveLength(0); expect(work()).toBeNull(); expect(live()).toBeNull()
 })
 
-it('does not show a Shell as semantic work or let inspection change the durable focus', async () => {
+it('excludes a plain Shell while retaining the confirmed Agent live/work bands and read-only inspection', async () => {
   const shell: SessionSnapshot = { id: 'shell', kind: 'terminal', providerId: null, hostId: 'local', workspacePath: '/repo', label: 'Shell',
     createdAt: NOW - 20 * HOUR_MS, updatedAt: NOW, processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: NOW },
     control: { kind: 'terminal', hostId: 'local', runId: 'shell-run', run: { runId: 'shell-run' } } }
-  const contexts = select({ sessions: [shell], timelines: {}, config: null, agentNames: {} }).contexts, before = useAppStore.getState().agentFocus
+  const contexts = select({ sessions: [shell, agent()], timelines: {}, config: null, agentNames: {}, scratchTopicSnapshots: useAppStore.getState().scratchTopicSnapshots }).contexts, before = useAppStore.getState().agentFocus
+  expect(contexts.map(context => context.id)).toEqual(['live'])
   await act(async () => root.render(createElement(RecentFocusTimeline, { contexts, entries: [], currentSessionId: null, onSelect })))
-  expect(live()!.title).toContain('Shell open'); expect(work()).toBeNull()
+  expect([...element.querySelectorAll<HTMLElement>('.recent-focus__track')].map(track => track.dataset.focusTimelineId)).toEqual(['live'])
+  expect(live()).not.toBeNull(); expect(live()!.dataset.runId).toBe('current-run')
+  expect(work()).not.toBeNull(); expect(work()!.dataset.runId).toBe('current-run')
   await changeWindow('Previous focus window'); await changeWindow('Return to current focus window')
   expect(onSelect).not.toHaveBeenCalled(); expect(useAppStore.getState().agentFocus).toBe(before)
-  await act(async () => live()!.click()); expect(onSelect).toHaveBeenCalledWith('shell')
+  await act(async () => live()!.click()); expect(onSelect).toHaveBeenCalledWith('live')
 })
