@@ -79,9 +79,12 @@ async function visibleDirectPmo(tabId) {
 }
 async function visibleDirectLauncherFooter() {
  await phase('scrolling-original-launcher-to-footer')
+ const expand = await evaluate(`Boolean(document.querySelector('[data-pmo-teams-topic-floating] [aria-label="Expand Agents"]'))`)
+ if (expand) await click(`document.querySelector('[data-pmo-teams-topic-floating] [aria-label="Expand Agents"]')`)
+ assert.ok(await evaluate(`Boolean(document.querySelector('[data-pmo-teams-topic-floating] .launch-surface__footer'))`), 'Original expanded Agent section has a real recovery footer')
  await evaluate(`document.querySelector('[data-pmo-teams-topic-floating] .launch-surface__footer').scrollIntoView({block:'end'})`);await paint()
- const footer=await evaluate(`(()=>{const p=document.querySelector('[data-pmo-teams-topic-floating] .launch-surface'),r=p.getBoundingClientRect();return {overflow:getComputedStyle(p).overflowY,scrollTop:p.scrollTop,scrollHeight:p.scrollHeight,clientHeight:p.clientHeight,port:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},actions:[...p.querySelectorAll('.launch-surface__footer .primary-button,.launcher-resume-trigger')].map(e=>{const b=e.getBoundingClientRect();return {text:e.textContent.trim(),left:b.left,top:b.top,right:b.right,bottom:b.bottom,height:b.height}})}})()`)
- assert.equal(footer.overflow,'auto');assert.deepEqual(footer.actions.map(e=>e.text),['Launch agent','Resume'])
+ const footer=await evaluate(`(()=>{const p=document.querySelector('[data-pmo-teams-topic-floating] .launch-surface'),r=p.getBoundingClientRect();return {overflow:getComputedStyle(p).overflowY,scrollTop:p.scrollTop,scrollHeight:p.scrollHeight,clientHeight:p.clientHeight,port:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},actions:[...p.querySelectorAll('.launch-surface__footer .launcher-primary-actions .launcher-resume-trigger,.launch-surface__footer .launcher-launch-button')].map(e=>{const b=e.getBoundingClientRect();return {text:e.textContent.trim(),left:b.left,top:b.top,right:b.right,bottom:b.bottom,height:b.height}})}})()`)
+ assert.equal(footer.overflow,'auto');assert.deepEqual(footer.actions.map(e=>e.text),['Resume','Launch'])
  for(const action of footer.actions)assert.ok(action.height>20 && action.left>=footer.port.left && action.right<=footer.port.right && action.top>=footer.port.top && action.bottom<=footer.port.bottom,'Original launcher scrollport exposes the complete recovery controls')
  result.observations.push({scene:'original-launcher-footer-visible',footer})
 }
