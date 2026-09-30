@@ -46,7 +46,7 @@ import { beginRendererStartup, startupProgressDetail } from './lib/startup-progr
 import { surveySelectReference } from './lib/survey-workface'
 import { selectSpatialCatalog, spatialCatalog } from './lib/space-agent-control'
 import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
-import { projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection } from './lib/workbench-projection'
+import { projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs } from './lib/workbench-resource-display'
@@ -109,6 +109,7 @@ function DesktopApp() {
     desktopPresentationCommitted()
   })
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
+  const [surveyTabView, setSurveyTabView] = useState<{ zoneId: string; reference: WorkbenchProjectionSelection } | null>(null)
   const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
   const [unconfirmedBrowserRegionIds, setUnconfirmedBrowserRegionIds] = useState<ReadonlySet<string>>(() => new Set())
   const onBrowserControlConfirmation = useCallback((regionId: string, unconfirmed: boolean) => {
@@ -176,15 +177,34 @@ function DesktopApp() {
     if (!matches(surveyCatalog) && !matches(spatialCatalog(state, surveyTopics ?? []))) return
     state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
   }, [surveySelection?.zoneId, surveyCatalog, surveyTopics])
+  const surveyActive = surveySelection?.active
+  const surveyActiveConfirmed = Boolean(surveyActive && surveyCatalog?.locations.some(location =>
+    location.zoneId === surveySelection?.zoneId && location.displayWorkspaceId === surveyActive.displayWorkspaceId &&
+    location.groupId === surveyActive.groupId && location.tabId === surveyActive.tabId && location.regionId === surveyActive.regionId) &&
+    tabs[surveyActive.tabId]?.regions[surveyActive.regionId] &&
+    layouts[surveyActive.displayWorkspaceId]?.groups.some(group => group.id === surveyActive.groupId && group.tabOrder.includes(surveyActive.tabId)))
+  const surveyTabViewActive = Boolean(surveyTabView && surveyActiveConfirmed && surveyActive &&
+    surveyTabView.zoneId === surveySelection?.zoneId && surveyTabView.reference.displayWorkspaceId === surveyActive.displayWorkspaceId &&
+    surveyTabView.reference.groupId === surveyActive.groupId && surveyTabView.reference.tabId === surveyActive.tabId)
+  useEffect(() => {
+    if (surveyTabView && !surveyTabViewActive) setSurveyTabView(null)
+  }, [surveyTabView, surveyTabViewActive])
+  const toggleSurveyTabView = useCallback(() => {
+    if (surveyTabViewActive) { setSurveyTabView(null); return }
+    const held = useAppStore.getState().surveyZoneSelection
+    if (!surveyActiveConfirmed || !held?.active || held !== surveySelection) return
+    setSurveyTabView({ zoneId: held.zoneId, reference: held.active })
+  }, [surveyTabViewActive, surveyActiveConfirmed, surveySelection])
   const surveyProjection = useMemo<WorkbenchProjection | null>(() => {
     if (!surveySelection || !surveyCatalog) return null
     const displayIds = new Set(surveyCatalog.locations.filter(location => location.zoneId === surveySelection.zoneId).map(location => location.displayWorkspaceId))
     const displayWorkspaceId = surveySelection.active?.displayWorkspaceId ?? (displayIds.size === 1 ? [...displayIds][0] : undefined)
     if (!displayWorkspaceId) return null
     const catalog = surveyCatalog.zones.some(zone => zone.zoneId === surveySelection.zoneId) ? selectSpatialCatalog(surveyCatalog, { zoneId: surveySelection.zoneId }) : surveyCatalog
-    return { entity: { kind: 'zone', zoneId: surveySelection.zoneId }, presentationId: 'survey-workbench', displayWorkspaceId, catalog,
-      selection: surveySelection.selection, onSelect: selectSurveyReference }
-  }, [surveySelection, surveyCatalog, selectSurveyReference])
+    return { entity: surveyTabViewActive && surveySelection.active ? { kind: 'tab', tabId: surveySelection.active.tabId } : { kind: 'zone', zoneId: surveySelection.zoneId },
+      presentationId: 'survey-workbench', displayWorkspaceId, catalog,
+      selection: surveyTabViewActive && surveySelection.active ? [surveySelection.active] : surveySelection.selection, onSelect: selectSurveyReference }
+  }, [surveySelection, surveyCatalog, selectSurveyReference, surveyTabViewActive])
   const surveyProjectedLayout = useMemo(() => surveyProjection ? projectWorkbenchProjection(layouts[surveyProjection.displayWorkspaceId], tabs, surveyProjection) : null,
     [surveyProjection, layouts, tabs])
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
@@ -444,7 +464,8 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
                 </section>
               ) : null}
-              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} viewTargets={viewTargets} /> : null}
+              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} viewTargets={viewTargets}
+                tabViewControl={{ active: surveyTabViewActive, available: surveyActiveConfirmed, onToggle: toggleSurveyTabView }} /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (

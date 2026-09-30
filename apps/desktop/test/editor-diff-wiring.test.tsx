@@ -1,26 +1,50 @@
-import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitFileDiff } from '../src/shared/git-contracts.js'
 import { editorPaneStoreState } from './helpers/editor-pane-store.js'
 
 // The core guard for the diff feature: when a file Region is in diff mode, EditorPane must render
-// Monaco's DiffEditor with the sides pointed the right way — NOT fall back to the plain editable Editor,
+// the original GitDiffCanvas with Monaco's sides pointed the right way — NOT fall back to the plain editable Editor,
 // and NOT feed both diff sides from the same git version. Both failures look fine on screen:
 //   - falling back to the plain Editor shows the worktree file and silently loses "this is a diff";
 //   - both sides from the worktree renders a genuinely-changed file as "no changes".
-// We stub both Monaco components to record which one mounted and with what props, so a fallback or a
-// swapped side is a red test, not a silent visual regression. The base store shape comes from the
+// Only the Monaco platform is stubbed. The real Canvas mounts its original models and widget, so a
+// fallback or swapped side is a red test. The base store shape comes from the
 // shared editorPaneStoreState() helper so a future slice does not silently red this file.
 
 const mounted = vi.hoisted(() => ({
   plain: 0,
-  diff: [] as Array<{ original: unknown; modified: unknown }>
+  diff: [] as Array<{ original: string; modified: string }>,
+  models: [] as Array<{ getValue(): string; setValue(value: string): void; getLanguageId(): string; dispose: ReturnType<typeof vi.fn> }>,
+  widgets: [] as Array<{ dispose: ReturnType<typeof vi.fn> }>,
+  viewModels: [] as Array<{ dispose: ReturnType<typeof vi.fn> }>
 }))
 
 const fixture = vi.hoisted(() => ({ state: {} as Record<string, unknown> }))
 
 vi.mock('../src/renderer/src/monaco.js', () => ({}))
+vi.mock('monaco-editor', () => ({
+  Uri: { parse: (value: string) => ({ value }) },
+  editor: {
+    createModel: (value: string, language: string) => {
+      const model = { getValue: () => value, setValue: (next: string) => { value = next }, getLanguageId: () => language, dispose: vi.fn() }
+      mounted.models.push(model); return model
+    },
+    createDiffEditor: () => {
+      const widget = { dispose: vi.fn(), updateOptions: vi.fn(),
+        createViewModel: (pair: { original: { getValue(): string }; modified: { getValue(): string } }) => {
+          const viewModel = { pair, dispose: vi.fn() }; mounted.viewModels.push(viewModel); return viewModel
+        },
+        setModel: (viewModel: { pair: { original: { getValue(): string }; modified: { getValue(): string } } } | null) => {
+          if (viewModel) mounted.diff.push({ original: viewModel.pair.original.getValue(), modified: viewModel.pair.modified.getValue() })
+        } }
+      mounted.widgets.push(widget); return widget
+    },
+    setModelLanguage: vi.fn(), setTheme: vi.fn()
+  }
+}))
 vi.mock('@monaco-editor/react', async () => {
   // Monaco 的常量取自共享 helper（真值，附来源）而不是在这里手抄：EditorPane 每加一个注册，手抄的那份
   // 就少一个常量，而缺常量会让注册**抛**，把红打在与被测接线无关的地方。
@@ -36,13 +60,10 @@ vi.mock('@monaco-editor/react', async () => {
         onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
         revealLineInCenter: vi.fn(),
         setPosition: vi.fn(),
+        getModel: vi.fn(() => null),
         focus: vi.fn()
       }
       onMount?.(editor, monacoKeybindingConstants())
-      return null
-    },
-    DiffEditor: ({ original, modified }: { original?: unknown; modified?: unknown }) => {
-      mounted.diff.push({ original, modified })
       return null
     }
   }
@@ -65,6 +86,8 @@ const WORKSPACE = 'workspace'
 const PATH = 'src/app.ts'
 const KEY = `${WORKSPACE}\0${PATH}`
 const REGION = 'region'
+let root: Root
+let container: HTMLDivElement
 
 function modifiedDiff(oldText: string, newText: string): GitFileDiff {
   return {
@@ -76,34 +99,42 @@ function modifiedDiff(oldText: string, newText: string): GitFileDiff {
   }
 }
 
-function renderMarkup(): string {
+async function renderMarkup(): Promise<string> {
   fixture.state.documents = { [KEY]: { path: PATH, content: 'worktree content', revision: 'r1' } }
-  return renderToStaticMarkup(
+  await act(async () => root.render(
     createElement(EditorPane, {
       tabId: 'tab',
       surface: { regionId: REGION, kind: 'file' as const, workspaceId: WORKSPACE, path: PATH }
     })
-  )
+  ))
+  return container.innerHTML
 }
 
 beforeEach(() => {
   fixture.state = { ...editorPaneStoreState() }
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await act(async () => root.unmount()); container.remove()
+  expect(mounted.models).toHaveLength(mounted.diff.length * 2)
+  expect(mounted.widgets).toHaveLength(mounted.diff.length)
+  expect(mounted.viewModels).toHaveLength(mounted.diff.length)
+  for (const resource of [...mounted.models, ...mounted.widgets, ...mounted.viewModels]) expect(resource.dispose).toHaveBeenCalledTimes(1)
   mounted.plain = 0
-  mounted.diff = []
+  mounted.diff = []; mounted.models = []; mounted.widgets = []; mounted.viewModels = []
 })
 
 describe('editor diff-mode render wiring', () => {
-  it('edit mode renders the plain Editor, never the DiffEditor', () => {
+  it('edit mode renders the plain Editor, never the diff widget', async () => {
     fixture.state.editorRegionModes = {} // defaults to 'edit'
-    renderMarkup()
+    await renderMarkup()
     expect(mounted.plain).toBe(1)
     expect(mounted.diff).toHaveLength(0)
   })
 
-  it('diff mode renders the DiffEditor and does NOT fall back to the plain Editor', () => {
+  it('diff mode mounts the original Canvas diff widget and does NOT fall back to the plain Editor', async () => {
     // The core judgment: a Region in diff mode with a loaded diff must mount DiffEditor. If the branch
     // ever fell through to <Editor>, this reddens on the plain count — the exact "diff silently becomes
     // a plain editor" regression.
@@ -111,24 +142,24 @@ describe('editor diff-mode render wiring', () => {
     fixture.state.editorRegionDiffs = {
       [REGION]: { loading: false, diff: modifiedDiff('const a = 1', 'const a = 2'), error: null }
     }
-    renderMarkup()
+    await renderMarkup()
     expect(mounted.diff).toHaveLength(1)
     expect(mounted.plain).toBe(0)
   })
 
-  it('feeds the DiffEditor old→original, new→modified — swapping the sides reddens this', () => {
+  it('feeds the original Canvas old→original, new→modified — swapping the sides reddens this', async () => {
     fixture.state.editorRegionModes = { [REGION]: 'diff' }
     fixture.state.editorRegionDiffs = {
       [REGION]: { loading: false, diff: modifiedDiff('was here before', 'is here now'), error: null }
     }
-    renderMarkup()
+    await renderMarkup()
     expect(mounted.diff[0]?.original).toBe('was here before')
     expect(mounted.diff[0]?.modified).toBe('is here now')
     // And never the always-empty diff: the two sides must not be the same text.
     expect(mounted.diff[0]?.original).not.toBe(mounted.diff[0]?.modified)
   })
 
-  it('a binary diff shows a placeholder, not a DiffEditor fed two empty strings', () => {
+  it('a binary diff shows a placeholder, not a diff widget fed two empty strings', async () => {
     fixture.state.editorRegionModes = { [REGION]: 'diff' }
     fixture.state.editorRegionDiffs = {
       [REGION]: {
@@ -137,18 +168,18 @@ describe('editor diff-mode render wiring', () => {
         error: null
       }
     }
-    const markup = renderMarkup()
+    const markup = await renderMarkup()
     expect(mounted.diff).toHaveLength(0)
     expect(mounted.plain).toBe(0)
     expect(markup).toContain('Binary file')
   })
 
-  it('a diff load error shows the message, not a blank DiffEditor', () => {
+  it('a diff load error shows the message, not a blank diff widget', async () => {
     fixture.state.editorRegionModes = { [REGION]: 'diff' }
     fixture.state.editorRegionDiffs = {
       [REGION]: { loading: false, diff: null, error: 'fatal: not a git repository' }
     }
-    const markup = renderMarkup()
+    const markup = await renderMarkup()
     expect(mounted.diff).toHaveLength(0)
     expect(markup).toContain('fatal: not a git repository')
   })

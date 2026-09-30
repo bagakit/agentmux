@@ -97,7 +97,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
       const incoming = snapshot.trend.slice(-60)
       const numeric = (point: ToolkitSnapshot['trend'][number]) => point.appCpuPercent !== null || point.appRssKib !== null
       if (previous.executionId !== snapshot.executionId)
-        return { executionId: snapshot.executionId, lastSourceAt: incoming.findLast(numeric)?.observedAt ?? null, resumePending: paused, points: incoming }
+        return { executionId: snapshot.executionId, lastSourceAt: incoming.filter(numeric).at(-1)?.observedAt ?? null, resumePending: paused, points: incoming }
       if (paused) {
         if (previous.resumePending) return previous
         return { ...previous, resumePending: true, points: previous.points.length ? [...previous.points,
@@ -109,7 +109,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
         return latest ? { executionId: snapshot.executionId, lastSourceAt: latest.observedAt, resumePending: false,
           points: [...previous.points, latest].slice(-60) } : previous
       }
-      const anchor = incoming.findLastIndex(point => numeric(point) && point.observedAt === previous.lastSourceAt)
+      const anchor = incoming.reduce((last, point, index) => numeric(point) && point.observedAt === previous.lastSourceAt ? index : last, -1)
       const start = anchor >= 0 ? anchor + 1 : fresh.length ? incoming.indexOf(fresh[0]!) : incoming.length - 1
       const points = previous.points.slice()
       let lastSourceAt = previous.lastSourceAt

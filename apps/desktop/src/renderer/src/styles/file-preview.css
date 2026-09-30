@@ -22,11 +22,14 @@
 .file-preview__pdf { width:100%; flex:1; min-height:0; border:0; }
 .file-markdown-preview { height:100%; overflow:auto; padding:var(--sp-6) var(--sp-7); color:var(--text); font-size:var(--fs-prose); line-height:1.65; overflow-wrap:anywhere; }
 .file-markdown-preview > * { max-width:78ch; margin-inline:auto; }
-.editor-pane--format { grid-template-rows:auto minmax(0, 1fr); container-type:inline-size; }
-.editor-pane--format.editor-pane--issue { grid-template-rows:auto auto minmax(0, 1fr); }
-.editor-pane--format > .editor-header { flex-wrap:wrap; min-height:34px; padding-block:var(--sp-2); gap:var(--sp-2) var(--sp-4); }
-.editor-pane--format .editor-header__actions { flex-wrap:wrap; }
-@container (max-width:420px) {
-  .editor-pane--format > .editor-header > span { flex-basis:100%; }
+.editor-pane { container-type:inline-size; }
+.editor-pane > .editor-header { flex-wrap:nowrap; min-height:34px; gap:var(--sp-3); }
+.editor-header__actions { flex:none; flex-wrap:nowrap; }
+.editor-header__path { flex:1; }
+.editor-header__more { flex:none; }
+.editor-menu-shortcut { margin-left:auto; color:var(--text-3); font-size:var(--fs-micro); }
+@container (max-width:360px) {
+  .editor-header__label { display:none; }
+  .editor-header__actions .small-button { width:24px; min-width:24px; padding:0; justify-content:center; }
   .file-markdown-preview { padding:var(--sp-5); }
 }

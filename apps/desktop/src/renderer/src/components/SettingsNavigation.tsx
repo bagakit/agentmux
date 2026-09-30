@@ -1,5 +1,5 @@
 import { createContext } from 'react'
-import type { SettingsSectionId } from './SettingsPanel'
+import type { SettingsPageId } from './SettingsPanel'
 
 /** App owns the route; deep controls only request the existing settings surface. */
-export const SettingsNavigation = createContext<{ open(section: SettingsSectionId, executorId?: string): void } | null>(null)
+export const SettingsNavigation = createContext<{ open(section: SettingsPageId, executorId?: string): void } | null>(null)

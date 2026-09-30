@@ -27,7 +27,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button type="button" className="survey-topic-trigger" aria-label="Link Topics">
-          <span>Link Topics…</span><ChevronDown size={12} aria-hidden="true" />
+          <span>{linked === undefined ? 'Topics unknown' : linked.length === 1 ? linked[0]!.name : linked.length ? `${linked.length} Topics` : 'Add to Topic'}</span><ChevronDown size={12} aria-hidden="true" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
