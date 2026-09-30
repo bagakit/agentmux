@@ -8,7 +8,7 @@ import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
 import { FocusDisconnectedProjects } from './FocusDisconnectedProjects'
 import { deriveFocusProjectLanes } from '../lib/focus-project-lanes'
-import { tabForFocusedSession } from '../lib/focus-tab-projection'
+import { tabForFocusedSession, type ExecutionFocusPresentation } from '../lib/focus-tab-projection'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
@@ -23,6 +23,10 @@ import { topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
+import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { groupIds, regionIds } from '@agentmux/layout'
 
 type FocusColumn = FocusBucket | 'disconnected'
 // Presentation only: an observation connection loss cannot retire a running Run.
@@ -31,7 +35,11 @@ function columnFor(context: FocusContext): FocusColumn {
     ? 'disconnected' : context.bucket
 }
 
-export function GlobalFocusSurface() {
+export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets }: {
+  presentation?: ExecutionFocusPresentation
+  directoryIssue?: string | null
+  viewTargets?: Readonly<Record<string, WorkbenchViewTarget>>
+} = {}) {
   const contextSelector = useMemo(createFocusProjectionSelector, [])
   const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
   const moteIdentity = useAppStore(useShallow(state => {
@@ -46,8 +54,10 @@ export function GlobalFocusSurface() {
   const config = useAppStore((state) => state.config)
   const topicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const tabs = useAppStore((state) => state.tabs)
+  const layouts = useAppStore(state => state.layouts)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
-  const selectedTab = useMemo(() => tabForFocusedSession(tabs, selectedId), [selectedId, tabs])
+  const projection = presentation?.projection ?? null
+  const selectedTab = projection?.entity.kind === 'tab' ? tabs[projection.entity.tabId] ?? null : null
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
@@ -179,9 +189,31 @@ export function GlobalFocusSurface() {
         if (event.key === 'End') { event.preventDefault(); adjustWorkspaceRatio(0.76) }
       }}
     /><aside className="global-session-workspace" aria-label="Focus workspace">
-      {selectedTab
-        ? <div id="focus-workspace-slot" className="focused-tab-workspace" data-focus-tab-id={selectedTab.id} />
-        : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
+      {selectedTab && projection
+        ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab.id}>
+          <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection}
+            viewOwnership="projection" viewTargets={viewTargets} visible />
+        </div>
+        : presentation?.issue || directoryIssue
+          ? <div className="global-session-workspace__empty focus-location-recovery">
+            <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+              step: 'Focus work surface', mode: directoryIssue ?? presentation!.issue!,
+              restore: 'Choose a confirmed location. The original Session and work surfaces are retained.'
+            } }} />
+            {presentation?.references.length ? <div className="focus-location-choices" aria-label="Choose Focus location">{presentation.references.map(reference => {
+              const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
+              const groupIndex = layout ? groupIds(layout.root).indexOf(reference.groupId) : -1
+              const regionIndex = tab ? regionIds(tab.layout.root).indexOf(reference.regionId) : -1
+              return <button type="button" className="small-button focus-location-choice" key={JSON.stringify(reference)} onClick={() => focusExecutionSession(selectedId, reference)}
+                title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
+                <strong>{tab?.name ?? reference.tabId}</strong>
+                <small>{config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? reference.displayWorkspaceId}
+                  {' · '}{groupIndex >= 0 ? `Group ${groupIndex + 1}` : reference.groupId}
+                  {' · '}{regionIndex >= 0 ? `Region ${regionIndex + 1}` : reference.regionId}</small>
+              </button>
+            })}</div> : null}
+          </div>
+          : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
     <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} />
