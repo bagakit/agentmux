@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { MOTE_FACE_PARTS, type MoteFace as MoteFaceChoice } from '../../../shared/mote-avatars'
 import { MoteFace } from './MoteFace'
 
@@ -7,10 +8,11 @@ export function MoteFaceEditor({ face, disabled, onChange }: { face: MoteFaceCho
     <div className="mote-face-editor__preview" role="img" aria-label="Your Mote face preview"><MoteFace face={face} /></div>
     {(Object.keys(MOTE_FACE_PARTS) as Array<keyof typeof MOTE_FACE_PARTS>).map(part => <fieldset key={part}>
       <legend>{labels[part]}</legend>
-      <div>{MOTE_FACE_PARTS[part].map(value => <button type="button" className="small-button" key={value}
+      <div>{MOTE_FACE_PARTS[part].map(value => <button type="button" className={`small-button${face[part] === value ? ' small-button--active' : ''}`} key={value}
         aria-label={`${labels[part]} · ${value}`} aria-pressed={face[part] === value} disabled={disabled}
         data-mote-face-part={part} data-mote-face-value={value} onClick={() => onChange({ ...face, [part]: value })}>
         {part === 'palette' ? <span className="mote-face-editor__color" data-palette={value} aria-hidden="true" /> : null}{value}
+        <Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" />
       </button>)}</div>
     </fieldset>)}
   </div>

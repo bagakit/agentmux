@@ -111,13 +111,28 @@ function animationFacts(node: Element) {
     animations: node.getAnimations({ subtree: true }).map(animation => ({ state: animation.playState, time: animation.currentTime, name: 'animationName' in animation ? String(animation.animationName) : null })),
     gaze: node.querySelector('.mote-face__gaze') ? getComputedStyle(node.querySelector('.mote-face__gaze')!).transform : null }
 }
+function editorFacts() {
+  const dialog = document.querySelector('.space-icon-picker')
+  if (!dialog) return null
+  const groups = [...dialog.querySelectorAll('.mote-avatar-source, .mote-face-editor fieldset')].map(group => ({
+    label: group.getAttribute('aria-label') ?? group.querySelector('legend')?.textContent,
+    buttons: [...group.querySelectorAll('button')].map(button => {
+      const style = getComputedStyle(button)
+      return { label: button.getAttribute('aria-label') ?? button.textContent, selected: button.getAttribute('aria-pressed') === 'true', rect: rectangle(button), shadow: style.boxShadow,
+        marks: [...button.querySelectorAll('.mote-avatar-selection-mark')].map(mark => { const style = getComputedStyle(mark); return { rect: rectangle(mark), visibility: style.visibility, display: style.display, opacity: style.opacity, paths: mark.querySelectorAll('path').length } }) }
+    })
+  }))
+  const save = dialog.querySelector('.space-icon-picker__save'), cancel = dialog.querySelector('footer button')
+  return { groups, save: save ? { primary: save.classList.contains('primary-button'), rect: rectangle(save), background: getComputedStyle(save).backgroundImage } : null,
+    cancel: cancel ? { primary: cancel.classList.contains('primary-button'), rect: rectangle(cancel) } : null }
+}
 function facts() {
   const panel = document.getElementById('pmo-teams-topic-floating-panel'), state = useAppStore.getState(), entry = document.querySelector('[data-pmo-teams-topic-launcher] button')
   return { ready: !!document.querySelector('.app-shell') && !state.loading, phase, protected: protectedFacts(), icons: copy(state.spaceObjectIcons), calls: copy(calls), errors: [...errors], transported: copy(transported), bridgeSubscriptions,
     costs: copy(window.moteFaceCosts), floating: copy(readPmoTeamsTopicFloatingState()), saved: JSON.parse(localStorage.getItem(savedMoteKey) ?? 'null'), initialization: { initialDurable, initialFloating, afterOrdinaryInitialize, seeded: phase === 'seed' },
     ui: { topicId: entry?.getAttribute('data-mote-target-topic'), tabId: entry?.getAttribute('data-mote-target-tab'), sessionId: entry?.getAttribute('data-mote-target-session'), visible: panel?.matches(':popover-open'), rect: rectangle(panel),
       entry: entry ? { rect: rectangle(entry), image: entry.querySelector('img')?.getAttribute('src'), source: entry.querySelector('[data-space-icon-source]')?.getAttribute('data-space-icon-source'), motion: animationFacts(entry.querySelector('[data-mote-expression]')!) } : null,
-      faces: [...document.querySelectorAll<HTMLElement>('[data-mote-expression]')].map(animationFacts), dialog: document.querySelector('.space-icon-picker')?.textContent ?? null, prompt: panel?.querySelector<HTMLTextAreaElement>('[aria-label="Message Agent"]')?.value ?? null } }
+      faces: [...document.querySelectorAll<HTMLElement>('[data-mote-expression]')].map(animationFacts), dialog: document.querySelector('.space-icon-picker')?.textContent ?? null, editor: editorFacts(), prompt: panel?.querySelector<HTMLTextAreaElement>('[aria-label="Message Agent"]')?.value ?? null } }
 }
 const root = createRoot(document.getElementById('root')!)
 const proof = { ready: false, facts, status, timeline, protectedFacts, ids: { primary: PMO_TEAMS_TOPIC_ID, custom: customMoteId, quiet: quietMoteId },
