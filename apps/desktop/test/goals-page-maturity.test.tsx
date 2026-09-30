@@ -7,6 +7,7 @@ import type { WorkspaceRecord } from '../src/shared/contracts'
 import * as projectProjection from '../src/renderer/src/lib/workspace-projects'
 import { projectWorkspaces } from '../src/renderer/src/lib/workspace-projects'
 import { documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
@@ -26,16 +27,18 @@ let f: Awaited<ReturnType<typeof configOwnerFixture>>
 const pendingDemand = new Set<Promise<unknown>>()
 function demandTransport<T>(value: Promise<T>) { pendingDemand.add(value); void value.finally(() => pendingDemand.delete(value)).catch(() => {}); return value }
 async function settleDemand() { for (let i = 0; i < 4; i++) { await Promise.resolve(); await Promise.allSettled([...pendingDemand]) } }
+const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/topics', hostId: 'local', kind: 'folder' as const }
 const createTopic = vi.fn(async () => 'original-topic')
+const openTopic = vi.fn(async () => 'original-topic')
 const request = vi.fn(async () => 'original-goal-tab')
 const open = vi.fn(async () => 'original-goal-tab')
 beforeEach(async () => {
-  f = await configOwnerFixture({ workspaces: [], composerShortcuts: [] })
+  f = await configOwnerFixture({ workspaces: [scratch], composerShortcuts: [] })
   const publish = f.publish.getMockImplementation()!
   f.publish.mockImplementation(saved => { publish(saved); useAppStore.setState({ config: saved }) })
   vi.spyOn(api.config, 'save').mockImplementation((next, expected) => f.owner.edit(expected, next))
-  createTopic.mockReset().mockResolvedValue('original-topic'); request.mockReset().mockResolvedValue('original-goal-tab'); open.mockReset().mockResolvedValue('original-goal-tab')
-  useAppStore.setState({ config: f.owner.current, demands: { one: goal() }, selectedDemandId: null, agentFocus: EMPTY_AGENT_FOCUS, activeWorkspaceId: null, mainSurface: 'board', sessions: [composerSession('healthy')], createScratchTopic: createTopic, requestDemandPmoTask: request, openDemandPmo: open })
+  createTopic.mockReset().mockResolvedValue('original-topic'); openTopic.mockReset().mockResolvedValue('original-topic'); request.mockReset().mockResolvedValue('original-goal-tab'); open.mockReset().mockResolvedValue('original-goal-tab')
+  useAppStore.setState({ config: f.owner.current, demands: { one: goal() }, selectedDemandId: null, agentFocus: EMPTY_AGENT_FOCUS, activeWorkspaceId: null, mainSurface: 'board', sessions: [composerSession('healthy')], tabs: {}, layouts: {}, executorDetections: {}, createScratchTopic: createTopic, openScratchTopic: openTopic, requestDemandPmoTask: request, openDemandPmo: open })
 })
 async function mount() { await dom.render(<GlobalBoardSurface />) }
 function button(label: string) { const node = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label); expect(node, label).toBeDefined(); return node! }
@@ -55,7 +58,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     expect(dom.container.querySelector('.goals-alignment h2')!.textContent).toBe('Goal definition')
     expect([...dom.container.querySelectorAll('[data-goal-success-criterion]')].map(node => node.textContent)).toEqual(['The original tabs and splits remain.'])
     expect(dom.container.querySelector('[data-goal-confirm]')).not.toBeNull()
-    expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
     await select('decision')
     expect(dom.container.querySelector('.goals-open-questions')!.textContent).toContain('Should resume happen automatically?')
     expect(dom.container.querySelector('.goals-open-questions')!.closest('details')).toBeNull()
@@ -81,7 +84,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     expect(editor.value).toBe('A real unsaved instruction.')
     expect(document.activeElement).toBe(editor)
     expect(f.owner.current.goalsCommonActions).toEqual(originalDirectory)
-    expect(api.config.save).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+    expect(api.config.save).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
     expect(useAppStore.getState().sessions.map(session => session.control)).toEqual([composerSession('healthy').control])
   })
 
@@ -121,8 +124,10 @@ describe('Goals whole-page current facts, reading and return through mounted own
 
   it('projects a new preparation failure from the original launch owner while a Goal remains selected', async () => {
     let reject!: (reason: Error) => void
-    createTopic.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    openTopic.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
     await mount(); await dom.click('[data-common-action="builtin:ideas"]'); await select()
+    expect(openTopic).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: '我有一些点子，我们开始尝试一个项目', executorId: 'codex' } })
+    expect(createTopic).not.toHaveBeenCalled()
     expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('正在准备对话')
     await act(async () => reject(new Error('launch receipt unconfirmed')))
     await vi.waitFor(() => expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('对话准备未确认'))
@@ -149,7 +154,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     await click('Back to goals'); expect(search.value).toBe('one')
     await select()
     expect(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')!.value).toBe('Unsaved clearer title')
-    expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('places the original open discussion action by no-report facts, without sending a verification request', async () => {
@@ -211,7 +216,7 @@ describe('Goals consume opaque Project identities through original mounted produ
     await vi.waitFor(async () => expect((await owner.get(id))!).toMatchObject({ projectId: projects[1]!.id, projectName: 'Other host Repo' }))
     await choose(property, '')
     await vi.waitFor(async () => expect((await owner.get(id))!).toMatchObject({ projectId: null, projectName: null }))
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('opens opaque Project evidence through its preferred Workspace and exact original file path/line/column without accepting the report', async () => {

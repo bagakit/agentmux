@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' } }))
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
@@ -8,10 +9,12 @@ import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/Sh
 import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
 import { useAppStore } from '../src/renderer/src/store'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { resolveComposerShortcuts } from '../src/shared/composer-shortcut-library'
 import { authoredConfigCarryOver } from '../src/main/config-store'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
-import { composerDOM, composerConfig } from './helpers/composer-dom-fixture'
+import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
 const prompts = [
@@ -19,9 +22,17 @@ const prompts = [
   { id: 'notes', keyword: 'notes', label: '整理笔记', body: '读我的笔记，建议一个可验证的下一步。' }
 ]
 let f: Awaited<ReturnType<typeof configOwnerFixture>>
+const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: '/topics', hostId: 'local', kind: 'folder' as const }
 const createTopic = vi.fn(async () => 'owned-topic')
+const openTopic = vi.fn(async () => 'owned-topic')
+function primaryClaude() {
+  const session = { ...composerSession('primary', 'claude'), executorId: 'otherClaude', workspacePath: '/topics/topic--launcher--leader' }
+  const tab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  useAppStore.setState({ sessions: [session], tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('primary-group', [tab.id]) } })
+  return session
+}
 beforeEach(async () => {
-  f = await configOwnerFixture({ composerShortcuts: prompts, workspaces: [], executors: {
+  f = await configOwnerFixture({ composerShortcuts: prompts, workspaces: [scratch], executors: {
     codex: composerConfig.executors.codex!,
     claude: { ...composerConfig.executors.codex!, providerId: 'claude', label: 'Claude Local', command: 'claude' },
     otherClaude: { ...composerConfig.executors.codex!, providerId: 'claude', label: 'Other Claude', command: 'claude' }
@@ -29,8 +40,8 @@ beforeEach(async () => {
   const publish = f.publish.getMockImplementation()!
   f.publish.mockImplementation(saved => { publish(saved); useAppStore.setState({ config: saved }) })
   useAppStore.setState({ config: f.owner.current, demands: {}, selectedDemandId: null, agentFocus: EMPTY_AGENT_FOCUS, activeWorkspaceId: null,
-    mainSurface: 'board', createScratchTopic: createTopic, sessions: [], loading: false })
-  createTopic.mockClear()
+    mainSurface: 'board', createScratchTopic: createTopic, openScratchTopic: openTopic, sessions: [], tabs: {}, layouts: {}, executorDetections: {}, loading: false })
+  createTopic.mockClear(); openTopic.mockReset().mockResolvedValue('owned-topic')
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => f.owner.edit(expected, next))
 })
 async function mount(open = vi.fn()) { await dom.render(<SettingsNavigation.Provider value={{ open }}><GlobalBoardSurface /></SettingsNavigation.Provider>); return open }
@@ -75,17 +86,21 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
     expect(action('builtin:next')).toBeNull()
     await act(async () => action('builtin:ideas')!.click())
-    expect(createTopic).toHaveBeenCalledExactlyOnceWith('mote', { prompt: '我有一些点子，我们开始尝试一个项目', executorId: 'codex' })
+    expect(openTopic).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: '我有一些点子，我们开始尝试一个项目', executorId: 'codex' } })
+    expect(createTopic).not.toHaveBeenCalled()
   })
 
-  it('references the original full body and launches the first real matching Executor even when terminal states exclude running', async () => {
+  it('references the original full body and uses the actual primary bot even when terminal states exclude running', async () => {
+    const original = primaryClaude()
     await mount(); await manage(); await reference(); await click('完成')
     const node = action('prompt:review')!
     expect(node.querySelector('.goals-entry__request')!.textContent, 'Live prompt body is the complete request').toBe(prompts[0]!.body)
-    expect(node.querySelector('.goals-common__facts')!.textContent, 'The visible target is the first configured matching Executor').toBe('Agent · Claude Local')
+    expect(node.querySelector('.goals-common__facts')!.textContent, 'The visible target comes from the actual primary Session and configured provider').toBe('主 Mote · Other Claude')
     expect(node.disabled).toBe(false)
     await act(async () => node.click())
-    expect(createTopic, 'Visible body and matching executor reach the original Mote owner').toHaveBeenCalledExactlyOnceWith('mote', { prompt: prompts[0]!.body, executorId: 'claude' })
+    expect(openTopic, 'Visible body and the actual primary executor reach the original Mote owner').toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: prompts[0]!.body, executorId: 'otherClaude' } })
+    expect(createTopic).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions[0]!.control).toEqual(original.control)
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
   })
 
@@ -119,7 +134,7 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(resolveComposerShortcuts(useAppStore.getState().config).find(prompt => prompt.id === 'review')!.body).toBe(text)
     await dom.render(<ShortcutSettingsPane config={f.owner.current} onSave={vi.fn()} />)
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor="review"] textarea')!.value).toBe(text)
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('retains unsaved body when finishing or pressing Escape and only explicit cancel drops it', async () => {
@@ -138,7 +153,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await click('取消编辑')
     expect(dom.container.querySelector('.goals-common__draft')).toBeNull()
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('keeps a failed or conflicted body draft and the original expectation without creating a half-saved reference', async () => {
@@ -156,17 +171,19 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(body().value, 'Conflict keeps the editable authored body').toBe('我的正文')
     expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('composerShortcuts.notes.body')
     expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === 'notes')!.body).toBe('他人的正文')
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
-  it('retains an unavailable Provider operation for management without silently launching the default Agent', async () => {
+  it('retains the unconfirmed original primary Provider operation for management without silently launching another Agent', async () => {
+    const original = primaryClaude()
     await mount(); await manage(); await reference(); await click('完成')
     await external({ executors: { codex: composerConfig.executors.codex! } })
     expect(action('prompt:review')!.disabled).toBe(true)
-    expect(action('prompt:review')!.textContent).toContain('没有配置适用 claude 的 Agent')
+    expect(action('prompt:review')!.textContent).toContain('主 Mote 的 Agent 尚未确认，请先选择适用 claude 的 Agent。')
     await act(async () => action('prompt:review')!.click()); await manage(); await dom.click('[data-common-select="prompt:review"]')
     expect(body().value).toBe(prompts[0]!.body)
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions[0]!.control).toEqual(original.control)
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('leaves a deleted library reference non-executable and removes it without reviving a second body', async () => {
@@ -177,7 +194,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await manage(); await dom.click('[aria-label="移出常用 指令已删除"]'); await settled()
     expect((await f.disk()).goalsCommonActions!.items).toEqual([{ kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }])
     expect((await f.disk()).composerShortcuts).toEqual([prompts[1]])
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('preserves an explicitly empty directory across readback and carry-over, and can restore a removed default', async () => {
@@ -190,7 +207,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await manage(); await reference('尝试一个项目'); await click('完成')
     expect([...dom.container.querySelectorAll('[data-common-action]')].map(node => (node as HTMLElement).dataset.commonAction)).toEqual(['builtin:ideas'])
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('persists reorder/removal/collapse and returns keyboard focus to the same or adjacent stable reference', async () => {
@@ -206,7 +223,7 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
     await dom.click('[aria-label="展开常用操作"]'); await settled()
     expect((await f.disk()).goalsCommonActions!.collapsed).toBe(false)
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
   it('requires the same explicit save/cancel path before leaving unsaved bodies for Settings', async () => {
@@ -218,6 +235,6 @@ describe('Goals common actions through the mounted product and durable config ow
     await save()
     expect(open).toHaveBeenCalledExactlyOnceWith('prompts')
     expect((await f.disk()).composerShortcuts!.at(-1)!.body).toBe('尚未提交')
-    expect(createTopic).not.toHaveBeenCalled()
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 })
