@@ -14,7 +14,7 @@ const evidenceRoot=process.env.AGENTMUX_GOALS_MUTATION_EVIDENCE_ROOT||join(repos
 const evidence = join(evidenceRoot, `attempt-${Date.now()}`)
 const densityBaseline=process.env.AGENTMUX_GOALS_DENSITY_BASELINE||join(process.env.AGENTMUX_GOALS_EVIDENCE_ROOT||join(repository,'.tmp/goals-surface'),'density-baseline.json')
 const component = 'src/renderer/src/components/GlobalBoardSurface.tsx', alignment = 'src/renderer/src/components/GoalAlignment.tsx', css = 'src/renderer/src/styles/goals.css'
-const inputs = [component, alignment, css, 'src/renderer/src/components/GoalsCommonActions.tsx', 'src/renderer/src/components/GoalProperties.tsx', 'src/renderer/src/lib/goal-presentation.ts', 'src/renderer/src/lib/workspace-projects.ts', 'test/goals-page-maturity.test.tsx', 'scripts/fixtures/goals-surface/entry.tsx', 'scripts/fixtures/goals-surface/maturity.cjs']
+const inputs = [component, alignment, css, 'src/renderer/src/components/GoalsCommonActions.tsx', 'src/renderer/src/components/GoalProperties.tsx', 'src/renderer/src/lib/goal-presentation.ts', 'src/renderer/src/lib/workspace-projects.ts', ...(!densityOnly?['test/goals-page-maturity.test.tsx']:[]), 'scripts/fixtures/goals-surface/entry.tsx', 'scripts/fixtures/goals-surface/maturity.cjs']
 const original = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(desktop, file))])))
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const hashes = values => Object.fromEntries([...values].map(([file, bytes]) => [file, digest(bytes)]))
@@ -83,8 +83,8 @@ async function mutate(mutation, run) {
 }
 try {
   await mkdir(evidence, { recursive: true }); await mkdir(copiedDesktop, { recursive: true })
-  for (const directory of ['src', 'resources', 'scripts/fixtures/goals-surface', 'test/helpers']) await cp(join(desktop, directory), join(copiedDesktop, directory), { recursive: true })
-  await cp(join(desktop, 'test/goals-page-maturity.test.tsx'), join(copiedDesktop, 'test/goals-page-maturity.test.tsx'))
+  for (const directory of ['src', 'resources', 'scripts/fixtures/goals-surface', ...(!densityOnly?['test/helpers']:[])]) await cp(join(desktop, directory), join(copiedDesktop, directory), { recursive: true })
+  if(!densityOnly)await cp(join(desktop, 'test/goals-page-maturity.test.tsx'), join(copiedDesktop, 'test/goals-page-maturity.test.tsx'))
   await symlink(join(desktop, 'node_modules'), join(copiedDesktop, 'node_modules')); await symlink(join(repository, 'node_modules'), join(copy, 'node_modules')); await symlink(join(repository, 'packages'), join(copy, 'packages'))
   for (const file of ['package.json', 'tsconfig.base.json', 'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts']) await cp(join(repository, file), join(copy, file))
   for (const file of ['package.json', 'tsconfig.json']) await cp(join(desktop, file), join(copiedDesktop, file))
