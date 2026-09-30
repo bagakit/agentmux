@@ -26,7 +26,7 @@ async function densityStart(scene, expectedRequests, baseline) {
  assert.ok(geometry.brand?.loaded && geometry.brand.width>0 && geometry.brand.height>0,'One real brand image remains rendered')
  if(!result.beforeOnly){
   assert.ok(geometry.common.height<=200,'Top common actions fit the 200px functional budget')
-  const before=baseline.render.observations.find(item=>item.scene===scene)?.geometry
+  const before=baseline.render.observations.find(item=>item.scene===scene&&item.geometry)?.geometry
   assert.ok(before?.common.height>0,'Same-fixture measured baseline is nonempty')
   assert.ok(geometry.common.height<=before.common.height*.7,'Top common actions remove at least 30 percent of measured prior occupancy')
   assert.ok(geometry.collection.width>=geometry.surface.width*.88,'Goal scanning uses at least 88 percent of available width')
@@ -43,15 +43,17 @@ async function densityStart(scene, expectedRequests, baseline) {
 }
 async function densityDetail(scene) {
  await visibleDetail(scene)
- const geometry=await evaluate(`(()=>{const rail=document.querySelector('.goals-index').getBoundingClientRect(),detail=document.querySelector('.goals-detail').getBoundingClientRect(),documentStyle=getComputedStyle(document.querySelector('.goals-document')),doc=document.querySelector('.goals-document').getBoundingClientRect(),toolbar=document.querySelector('.goals-detail__toolbar').getBoundingClientRect();return {railWidth:rail.width,bodyOffset:doc.left+parseFloat(documentStyle.paddingLeft)-detail.left,toolbarOffset:parseFloat(getComputedStyle(document.querySelector('.goals-detail__toolbar')).paddingLeft),documentWidth:doc.width,detailWidth:detail.width,criteria:document.querySelectorAll('[data-goal-success-criterion]').length}})()`)
+ const geometry=await evaluate(`(()=>{const rail=document.querySelector('.goals-index').getBoundingClientRect(),detail=document.querySelector('.goals-detail').getBoundingClientRect(),documentStyle=getComputedStyle(document.querySelector('.goals-document')),doc=document.querySelector('.goals-document').getBoundingClientRect(),toolbar=document.querySelector('.goals-detail__toolbar').getBoundingClientRect();return {railWidth:rail.width,bodyOffset:doc.left+parseFloat(documentStyle.paddingLeft)-detail.left,toolbarOffset:toolbar.left+parseFloat(getComputedStyle(document.querySelector('.goals-detail__toolbar')).paddingLeft)-detail.left,documentWidth:doc.width,detailWidth:detail.width,criteria:document.querySelectorAll('[data-goal-success-criterion]').length}})()`)
  assert.ok(geometry.criteria>0,'Actual detail success criteria are nonempty')
  if(!result.beforeOnly){assert.ok(geometry.railWidth>=260 && geometry.railWidth<=320,'Detail navigation stays within its 260–320px budget');assert.ok(geometry.bodyOffset>=16 && geometry.bodyOffset<=24,'Goal document starts 16–24px from the detail boundary');assert.equal(geometry.bodyOffset,geometry.toolbarOffset,'Goal document and toolbar share their left reading edge')}
  result.observations.push({scene,detailGeometry:geometry})
 }
 async function densityScenes(){
  const baseline=result.beforeOnly?null:JSON.parse(await fs.readFile(baselineFile,'utf8'))
+ if(scope==='density-detail-only'){await scenario('proposal',1280,'dark');await densityDetail('wide-detail');await capture('1280-dark-density-detail',1280);return}
  const defaults=['我还不知道能做什么，可以了解我并给我建议吗？','我有一些点子，我们开始尝试一个项目']
  await scenario('empty',1280,'light');await densityStart('empty',defaults,baseline);await capture('1280-light-density-initial',1280)
+ if(scope==='density-start-only')return
  await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
  const facts=await evaluate('goalsVisual.facts()');assert.equal(facts.ids.length,6);assert.ok(facts.criteria>0&&facts.reports>0&&facts.checks>0,'Mixed target/result collections are nonempty');await densityStart('mixed',defaults,baseline);await capture('1280-dark-density-mixed',1280)
  await evaluate('goalsVisual.seedCommon("project")');await size(1280)
