@@ -41,7 +41,7 @@ function run(label, command, mutation) {
 }
 try {
   const baseline = run('baseline')
-  for (const mutation of ['wheel-disconnected', 'zoom-disconnected', 'viewport-reread', 'old-four-levels']) {
+  for (const mutation of ['wheel-disconnected', 'blank-wheel-disconnected', 'zoom-disconnected', 'viewport-reread', 'old-four-levels']) {
     assert.equal(run(mutation, undefined, mutation).tests, baseline.tests)
     assert.equal(run(`${mutation}-exact-restore`).tests, baseline.tests)
   }
@@ -52,13 +52,31 @@ try {
   receipt.callers = Object.fromEntries(Object.entries(callers).map(([symbol, [file, needle]]) => { const source = readFileSync(resolve(root, file), 'utf8'), index = source.indexOf(needle); assert.ok(index >= 0, `${symbol} non-definition product caller`); return [symbol, { file, line: source.slice(0, index).split('\n').length, needle }] }))
   receipt.after = binding(); assert.deepEqual(receipt.after, receipt.before); receipt.sourcePass = true
   if (!process.argv.includes('--source-only')) {
-    const accepted = 'docs/reviews/evidence/focus-timeline-navigation-2026-10-03/accepted/scene-final'
+    const accepted = '.tmp/focus-timeline-read-coverage-scene-recipient-proof-final'
     const scenePath = process.env.AGENTMUX_FOCUS_NAVIGATION_SCENE_RECEIPT ?? `${accepted}/receipt.json`, reviewPath = process.env.AGENTMUX_FOCUS_NAVIGATION_VISUAL_REVIEW ?? `${accepted}/visual-review.json`
     const sceneFile = resolve(root, scenePath), reviewFile = resolve(root, reviewPath), sceneBytes = readFileSync(sceneFile), reviewBytes = readFileSync(reviewFile)
     const scene = JSON.parse(sceneBytes), review = JSON.parse(reviewBytes)
-    assert.equal(scene.schema, 'agentmux.focus-timeline-navigation-scene-delivery.v1'); assert.equal(scene.passed, true)
+    assert.equal(scene.schema, 'agentmux.focus-timeline-read-coverage-scene.v1'); assert.equal(scene.passed, true)
     for (const file of sourcePaths.slice(0, 4)) assert.equal(scene.inputs[file], receipt.before[file])
     assert.deepEqual(scene.actual.controls, []); assert.equal(scene.cleanup.privateRootRemoved, true); assert.ok(scene.images.length >= 2)
+    const cost = scene.actual.cost200, blank = scene.actual.blankPan
+    assert.equal(cost.actualActions, 200); assert.equal(cost.pointerOrKeyboardRunControls, 0)
+    assert.deepEqual(Object.keys(cost.before.counts).sort(), ['catalog', 'page', 'projector', 'timeline'])
+    for (const count of Object.values(cost.before.counts)) assert.ok(Number.isInteger(count) && count > 0)
+    assert.deepEqual(cost.after.counts, cost.before.counts); assert.deepEqual(cost.before.controls, []); assert.deepEqual(cost.after.controls, [])
+    assert.ok(cost.before.draft.length > 0); assert.equal(cost.after.draft, cost.before.draft)
+    assert.equal(scene.actual.pinAfter.sameNode, true); assert.ok(scene.actual.pinBefore.selection.length > 0); assert.equal(scene.actual.pinAfter.selection, scene.actual.pinBefore.selection)
+    assert.ok(blank.before.tracks.length > 0); assert.deepEqual(blank.blankStart.tracks, [])
+    assert.ok(blank.pointer.x >= blank.actualHit.time.left && blank.pointer.x <= blank.actualHit.time.right)
+    assert.ok(blank.pointer.nameX < blank.actualHit.time.left)
+    assert.ok(['recent-focus__viewport', 'recent-focus__canvas', 'recent-focus__tracks', 'recent-focus__empty'].includes(blank.actualHit.className))
+    assert.deepEqual(blank.wheelEvents.map(event => event.prevented), [true, true, true, true, false])
+    assert.ok(blank.sameDirection.start < blank.blankStart.start); assert.ok(blank.reverse.start > blank.sameDirection.start); assert.ok(blank.shift.start < blank.reverse.start)
+    assert.equal(blank.blankIdentity.start, blank.shift.start)
+    for (const state of [blank.blankStart, blank.sameDirection, blank.reverse, blank.shift, blank.blankIdentity]) {
+      assert.deepEqual(state.counts, blank.before.counts); assert.deepEqual(state.controls, []); assert.equal(state.draft, blank.before.draft)
+    }
+    assert.ok(scene.images.some(image => image.width === 320)); assert.ok(scene.images.some(image => image.width >= 1100))
     assert.equal(review.verdict, 'pass'); assert.ok(review.reviewerAgentId?.length > 0); assert.equal(review.sceneReceiptSHA256, hash(sceneBytes))
     for (const image of scene.images) { assert.equal(hash(readFileSync(resolve(dirname(sceneFile), image.path))), image.sha256); assert.ok(review.viewedImages.some(item => item.path === image.path && item.sha256 === image.sha256 && item.observation?.trim().length > 0)) }
     receipt.scene = { file: scenePath, sha256: hash(sceneBytes), compiled: scene.compiled, images: scene.images }; receipt.visualReview = { file: reviewPath, sha256: hash(reviewBytes), reviewerAgentId: review.reviewerAgentId }; receipt.taskDone = true

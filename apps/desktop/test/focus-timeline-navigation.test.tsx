@@ -68,6 +68,7 @@ async function fixture(count = 130) {
     // happy-dom's WheelEvent extends Event rather than MouseEvent. Supply the
     // browser's standard read-only modifiers in this transport fixture only.
     for (const modifier of ['shiftKey', 'ctrlKey', 'metaKey'] as const) Object.defineProperty(event, modifier, { value: init[modifier] ?? false })
+    for (const coordinate of ['clientX', 'clientY'] as const) Object.defineProperty(event, coordinate, { value: init[coordinate] ?? 0 })
     await act(async () => target.dispatchEvent(event)); return event
   }
   const choose = async () => {
@@ -165,4 +166,37 @@ it('removes the native wheel listener when collapsed and unmounted instead of re
   const mounted = h.element.querySelector('.recent-focus__time-scale')!; expect(mounted).not.toBe(detachedScale)
   await act(async () => h.root.unmount()); roots.splice(roots.indexOf(h.root), 1)
   expect((await h.wheel({ deltaX: 400 }, mounted)).defaultPrevented).toBe(false); h.unchanged()
+})
+
+it('continues horizontal and Shift navigation after a real track leaves the window while blank identity space stays native', async () => {
+  const h = await fixture(1)
+  await h.choose(); await h.wait(() => expect(h.inputs()).toHaveLength(2))
+  const lane = h.element.querySelector<HTMLElement>('.recent-focus__lane')!
+  expect(lane).not.toBeNull(); expect(h.element.querySelectorAll('[data-focus-timeline-id]')).toHaveLength(1)
+  const close = document.querySelector<HTMLButtonElement>('[aria-label="Close message"]')!
+  expect(close).not.toBeNull(); await act(async () => close.click())
+  const start = h.range(), before = h.counts()
+  expect((await h.wheel({ deltaX: -400 }, lane)).defaultPrevented).toBe(true)
+  expect(h.range()).toEqual(start.map(time => time - 4 * HOUR_MS))
+  expect(h.element.querySelectorAll('[data-focus-timeline-id]')).toHaveLength(0)
+  expect(lane.isConnected).toBe(false)
+  const targets = ['.recent-focus__tracks', '.recent-focus__canvas', '.recent-focus__viewport', '.recent-focus__empty']
+    .map(selector => h.element.querySelector<HTMLElement>(selector)!)
+  expect(targets).not.toContain(null); expect(targets[0]!.children).toHaveLength(0)
+  const blankStart = h.range()
+  for (const target of targets) {
+    expect((await h.wheel({ deltaX: -400, clientX: 312, clientY: 80 }, target)).defaultPrevented).toBe(true)
+    expect(h.range()).toEqual(blankStart.map(time => time - 4 * HOUR_MS))
+    expect((await h.wheel({ deltaX: 400, clientX: 312, clientY: 80 }, target)).defaultPrevented).toBe(true)
+    expect(h.range()).toEqual(blankStart)
+    expect((await h.wheel({ deltaY: -400, shiftKey: true, clientX: 312, clientY: 80 }, target)).defaultPrevented).toBe(true)
+    expect(h.range()).toEqual(blankStart.map(time => time - 4 * HOUR_MS))
+    await h.wheel({ deltaY: 400, shiftKey: true, clientX: 312, clientY: 80 }, target)
+    expect(h.range()).toEqual(blankStart)
+    for (const init of [{ deltaY: 100 }, { deltaX: 100, ctrlKey: true }, { deltaX: 100, metaKey: true }, { deltaX: -400, clientX: 40 }, { deltaY: -400, shiftKey: true, clientX: 40 }]) {
+      expect((await h.wheel({ clientX: 312, clientY: 80, ...init }, target)).defaultPrevented).toBe(false)
+      expect(h.range()).toEqual(blankStart)
+    }
+  }
+  expect(h.counts()).toEqual(before); h.unchanged()
 })

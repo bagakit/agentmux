@@ -60,7 +60,7 @@ export function resolveFocusInputTrack(observations: ReadonlyMap<string, FocusIn
 }
 
 /** Historical segments use their own observation. Current ownership only describes current facts. */
-export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputTrack?: FocusInputTrack): FocusTimelineProject[] {
+export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputTracks: readonly FocusInputTrack[] = []): FocusTimelineProject[] {
   const groups = new Map<string, FocusTimelineProject>()
   const tracks = new Map<string, FocusTimelineTrack>()
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
@@ -89,7 +89,7 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
   }
   // Only actually read, timed input occupies a row. Its Context observations
   // organize the row; message-time ownership remains explicitly unknown.
-  if (readonlyInputTrack) {
+  for (const readonlyInputTrack of readonlyInputTracks) {
     const track = ensure(readonlyInputTrack.sessionId, readonlyInputTrack.identity)
     track.inputProjectObserved = !!readonlyInputTrack.identity?.project
   }
@@ -111,7 +111,7 @@ const compareName = (a: { key: string; name: string }, b: { key: string; name: s
 
 /** Collect rank candidates from retained/current facts, independent of the viewport.
  * Focus timestamps select a recorded name only; they never supply task activity. */
-export function focusTimelineOrderCandidates(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], entries: readonly AgentFocusHistoryEntry[], inputTrack?: FocusInputTrack): FocusTimelineOrderCandidate[] {
+export function focusTimelineOrderCandidates(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], entries: readonly AgentFocusHistoryEntry[], inputTracks: readonly FocusInputTrack[] = []): FocusTimelineOrderCandidate[] {
   const groups = new Map<string, { key: string; name: string; namedAt: number; activityAt: number | null; tracks: Map<string, { key: string; name: string; namedAt: number }> }>()
   const remember = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined, namedAt: number, activityAt: number | null = null) => {
     const key = projectKey(identity)
@@ -125,7 +125,7 @@ export function focusTimelineOrderCandidates(contexts: readonly FocusContext[], 
   for (const entry of entries) remember(entry.sessionId, entry.identity, entry.focusedAt)
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   for (const context of contexts) remember(context.id, currentIdentity(context, byContext.get(context.id)), Infinity, context.lastActivityAt)
-  if (inputTrack) remember(inputTrack.sessionId, inputTrack.identity, -Infinity)
+  for (const inputTrack of inputTracks) remember(inputTrack.sessionId, inputTrack.identity, -Infinity)
   return [...groups.values()].map(group => ({ key: group.key, name: group.name, activityAt: group.activityAt,
     tracks: [...group.tracks.values()].map(({ key, name }) => ({ key, name })) }))
 }

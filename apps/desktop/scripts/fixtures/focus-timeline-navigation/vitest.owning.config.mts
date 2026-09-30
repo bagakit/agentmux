@@ -13,6 +13,7 @@ export default defineConfig({
       const originalCode = code, mutation = process.env.AGENTMUX_FOCUS_NAVIGATION_MUTATION
       const changes: Record<string, [string, string]> = {
         'wheel-disconnected': ["viewport.addEventListener('wheel', wheel, { passive: false })", 'void wheel'],
+        'blank-wheel-disconnected': ['if (!namedTimeTarget && !blankTimeTarget) return', 'if (!namedTimeTarget) return'],
         'zoom-disconnected': ['onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex - 1]!)}', 'onClick={() => {}}'],
         'viewport-reread': ["historical ? 'snapshot' : 'latest', readonlyReading]", "historical ? 'snapshot' : 'latest', readonlyReading, anchor, hours]"]
       }

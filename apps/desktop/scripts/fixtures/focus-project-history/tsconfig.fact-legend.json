@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "../../../src/**/*.ts",
+    "../../../src/**/*.tsx",
+    "../../../*.ts",
+    "../../../test/focus-timeline-fact-legend.test.tsx",
+    "../../../test/fixtures/focus-history-public.tsx"
+  ]
+}

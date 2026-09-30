@@ -238,7 +238,7 @@ it('abandons a genuinely read but late old Context page after switching Context 
   await act(async () => { release(); await gate })
   await h.wait(() => expect(h.inputs().map(item => item.dataset.inputMessageId)).toEqual(['native:claude:native-archived-1:other-1']))
   expect(h.calls.page.mock.calls.map(call => call[0].agentSessionId)).toEqual(['archived-0', 'archived-1'])
-  expect(h.element.textContent).not.toContain('archived-0'); expect(original).not.toBeNull(); h.noRuntime()
+  expect(h.markers().map(item => item.dataset.messageId)).toEqual(['captured:captured', 'native:claude:native-archived-1:other-1']); expect(original).not.toBeNull(); h.noRuntime()
 })
 
 it('stops new pages and discards a late actually-read page when hidden, preserving a usable Client', async () => {
