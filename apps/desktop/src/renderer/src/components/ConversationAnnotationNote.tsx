@@ -1,6 +1,6 @@
-import { autoUpdate, computePosition, inline, offset, shift, size } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, inline, offset, shift, size } from '@floating-ui/dom'
 import { ChevronDown, X } from 'lucide-react'
-import { useEffect, useImperativeHandle, useRef, useState, type Ref, type RefObject } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type RefObject } from 'react'
 import type { ConversationAnnotation } from './ConversationMessage'
 import { ComposerTextarea } from './ComposerTextarea'
 import { WindowOverlayPortal } from './WindowOverlayHost'
@@ -50,7 +50,6 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
   const [edit, setEdit] = useState<Edit | null>(null)
   const [note, setNote] = useState('')
   const [opened, setOpened] = useState(true)
-  const [docked, setDocked] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rects, setRects] = useState<DOMRect[]>([])
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
@@ -59,6 +58,9 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
   const focusRequested = useRef<{ origin: Element | null } | null>(null)
   const current = useRef({ edit, note })
   current.current = { edit, note }
+  const available = active && onAnnotate !== undefined && edit?.sessionId === sessionId
+  const availableRef = useRef(available)
+  availableRef.current = available
 
   useImperativeHandle(ref, () => ({
     select(target, sourceSessionId) {
@@ -68,78 +70,81 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
         (previous.edit.sessionId !== sourceSessionId || previous.edit.target.messageId !== target.messageId ||
           !sameRange(previous.edit.target.range, target.range))) {
         setError('Finish or discard the current note before choosing another passage.')
-        if (previous.edit.sessionId === sessionId) { focusRequested.current = { origin: document.activeElement }; setOpened(true) }
+        if (previous.edit.sessionId === sessionId) setOpened(true)
         return
       }
       if (previous.edit?.sessionId === sourceSessionId && previous.edit.target.messageId === target.messageId &&
         sameRange(previous.edit.target.range, target.range)) {
-        focusRequested.current = { origin: document.activeElement }; setOpened(true)
+        setOpened(true)
         return
       }
       const next = visibleRects(target, regionRef.current)
-      focusRequested.current = { origin: document.activeElement }
+      // Selecting text is a reading action. Keep native selection and focus;
+      // editing starts when the user enters the floating input.
+      focusRequested.current = null
       setEdit({ target, sessionId: sourceSessionId })
-      setNote(''); setError(null); setOpened(true); setDocked(next.length === 0)
+      setNote(''); setError(null); setOpened(true)
       setRects(next); setPosition(null)
     }
   }), [onAnnotate, regionRef, sessionId])
 
-  const available = active && onAnnotate !== undefined && edit?.sessionId === sessionId
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (available || !edit) return
+    focusRequested.current = null
+    const selection = window.getSelection()
+    if (selection?.rangeCount && sameRange(selection.getRangeAt(0), edit.target.range)) selection.removeAllRanges()
+    // An untouched popover is transient selection chrome, not a note draft.
+    // Written notes keep their original identity without measuring hidden DOM.
+    if (!note.trim()) { setEdit(null); setError(null) }
+  }, [available, edit, note])
+
+  useLayoutEffect(() => {
     if (!edit || !available) { setRects([]); setPosition(null); return }
     let disposed = false
     const target = edit.target
+    let revision = 0
     const update = async () => {
-      if (disposed) return
-      const region = regionRef.current!
-      // Reserve a real side gutter only in this Pane, with room left to read.
-      // Narrow Panes keep the same editor below their reading viewport.
-      const side = opened && region.getBoundingClientRect().width >= 680 &&
-        visibleRects(target, region).length > 0
-      if (side) region.dataset.conversationNote = 'side'
-      else delete region.dataset.conversationNote
+      if (disposed || !availableRef.current) return
+      const request = ++revision
+      const region = regionRef.current
+      if (!region?.isConnected) return
       const next = visibleRects(target, region)
-      const nextDocked = !side
-      if (docked !== nextDocked) { setDocked(nextDocked); return }
       setRects(previous => previous.length === next.length && previous.every((r, i) =>
         r.left === next[i]!.left && r.top === next[i]!.top && r.width === next[i]!.width && r.height === next[i]!.height) ? previous : next)
-      if (!next.length || docked || !surfaceRef.current) { setPosition(null); return }
+      if (!opened || !surfaceRef.current) { setPosition(null); return }
       const surface = surfaceRef.current
+      // Freeze this update's geometry before Floating UI awaits its platform.
+      // A late computation never reads a Range in a now-hidden reading surface.
+      const bounds = region.getBoundingClientRect()
+      const left = Math.min(...next.map(rect => rect.left))
+      const top = Math.min(...next.map(rect => rect.top))
+      const reference = next.length ? new DOMRect(left, top,
+        Math.max(...next.map(rect => rect.right)) - left, Math.max(...next.map(rect => rect.bottom)) - top) : bounds
       const result = await computePosition({
-        contextElement: target.contextElement,
-        getBoundingClientRect: () => target.range.getBoundingClientRect(),
-        getClientRects: () => target.range.getClientRects()
+        contextElement: next.length ? target.contextElement : region,
+        getBoundingClientRect: () => reference,
+        getClientRects: () => next
       }, surface, {
-        strategy: 'fixed', placement: 'right-start',
-        middleware: [inline(), offset(({ rects: measured }) => ({
-          mainAxis: region.getBoundingClientRect().right - 308 - measured.reference.x - measured.reference.width
-        })),
+        strategy: 'fixed', placement: next.length ? 'bottom-start' : 'bottom-end',
+        middleware: [inline(), offset(next.length ? 8 : -surface.offsetHeight - 8),
+          flip({ boundary: region, padding: 8 }),
           shift({ boundary: region, padding: 8 }), size({ boundary: region, padding: 8,
             apply({ availableWidth, availableHeight }) {
-              if (disposed) return
-              surface.style.maxWidth = `${Math.max(0, Math.min(300, availableWidth))}px`
+              if (disposed || !availableRef.current || request !== revision) return
+              surface.style.maxWidth = `${Math.max(0, Math.min(280, availableWidth))}px`
               surface.style.maxHeight = `${Math.max(0, availableHeight)}px`
             }
           })]
       })
-      if (!disposed && visibleRects(target, regionRef.current).length) {
-        const body = target.contextElement.closest<HTMLElement>('.log-turn__body')!.getBoundingClientRect()
-        const floating = surface.getBoundingClientRect()
-        // No room beside the original body: keep the editor below the reading
-        // viewport, in this Pane's normal flow, rather than covering its text.
-        // Stay outside the body column, including other messages above/below
-        // this passage. Vertical flip/shift alone cannot promise that.
-        if (result.x < body.right && result.x + floating.width > body.left) {
-          setDocked(true)
-          return
-        }
+      if (!disposed && availableRef.current && request === revision) {
         setPosition(previous => previous?.x === result.x && previous?.y === result.y ? previous : { x: result.x, y: result.y })
       }
     }
     const refresh = () => { void update() }
-    const region = regionRef.current!
+    const region = regionRef.current
+    if (!region) return
     const surface = surfaceRef.current
-    const stop = surface && opened ? autoUpdate(target.contextElement, surface, refresh,
+    const stop = surface && opened && target.contextElement.isConnected ? autoUpdate(target.contextElement, surface, refresh,
       { ancestorScroll: false, ancestorResize: false }) : undefined
     region.addEventListener('scroll', refresh, true)
     window.addEventListener('resize', refresh)
@@ -161,16 +166,12 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
     return () => {
       disposed = true; stop?.(); observer.disconnect(); resize.disconnect()
       region.removeEventListener('scroll', refresh, true); window.removeEventListener('resize', refresh)
-      delete region.dataset.conversationNote
     }
-  }, [edit, available, docked, opened, regionRef, rects.length > 0])
+  }, [edit, available, opened, regionRef])
 
   useEffect(() => {
     if (!available) { focusRequested.current = null; return }
-    if (focusRequested.current && available && opened && (docked || position) && inputRef.current) {
-      // A wide Pane reopens from its retained flow editor into the side gutter.
-      // Wait for that stable surface before focusing an input about to unmount.
-      if (docked && rects.length > 0 && regionRef.current!.getBoundingClientRect().width >= 680) return
+    if (focusRequested.current && opened && position && inputRef.current) {
       const { origin } = focusRequested.current
       const focused = document.activeElement
       // Opening requested focus, but awaiting position is not permission to
@@ -180,7 +181,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
       if (stillOwned) inputRef.current.focus({ preventScroll: true })
       focusRequested.current = null
     }
-  }, [edit, available, opened, docked, position !== null, regionRef, rects.length > 0])
+  }, [edit, available, opened, position !== null])
 
   function close(): void {
     const ownedFocus = surfaceRef.current?.contains(document.activeElement)
@@ -208,34 +209,31 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
 
   if (!edit || !available) return null
   const editor = <div ref={surfaceRef} className="log-turn__annotation" role="dialog" aria-label="Annotate selected text"
-    data-anchor-state={docked ? rects.length ? 'range-docked' : 'unavailable' : 'range'}
-    style={docked ? undefined : { position: 'fixed', left: position?.x, top: position?.y, visibility: position ? 'visible' : 'hidden' }}
+    data-anchor-state={rects.length ? 'range' : 'unavailable'}
+    style={{ position: 'fixed', left: position?.x, top: position?.y, visibility: position ? 'visible' : 'hidden' }}
     onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() } }}>
     <header className="conversation-annotation-note__header">
       <strong>Note</strong>
       <button type="button" className="conversation-annotation-note__close" aria-label="Close note" title="Close note · keep draft" onClick={close}><X size={14} aria-hidden="true" /></button>
     </header>
-    {docked && !rects.length ? <span className="conversation-annotation-note__location" role="status">Original selection position is unavailable. Your note is retained.</span> : null}
+    {!rects.length ? <span className="conversation-annotation-note__location" role="status">Original selection position is unavailable. Your note is retained.</span> : null}
     <details className="conversation-annotation-note__passage">
-      <summary><span>Selected passage</span><ChevronDown size={12} aria-hidden="true" /><span className="conversation-annotation-note__preview">{edit.target.quote}</span></summary>
+      <summary aria-label="Selected passage"><span className="conversation-annotation-note__preview">{edit.target.quote}</span><ChevronDown size={12} aria-hidden="true" /></summary>
       <blockquote className="log-turn__annotation-quote" tabIndex={0} aria-label="Selected passage">{edit.target.quote}</blockquote>
     </details>
-    <label className="conversation-annotation-note__field"><span>Your note</span>
-      <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="What would you like to add?" rows={3} />
-    </label>
+    <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="Add a note…" rows={2} />
     {error ? <div className="conversation-annotation-note__error" role="alert">{error}</div> : null}
     <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" onClick={discard}>Discard note</button><button type="button" className="primary-button" disabled={!note.trim()} onClick={add}>Add to reply draft</button></div>
   </div>
 
   return <>
-    {rects.length > 0 ? <WindowOverlayPortal>{rects.map((rect, index) => <span key={index} className="conversation-annotation-underline" aria-hidden="true"
+    <WindowOverlayPortal>{rects.map((rect, index) => <span key={index} className="conversation-annotation-underline" aria-hidden="true"
       style={{ position: 'fixed', left: rect.left, top: rect.bottom - 1, width: rect.width }} />)}
-      {!docked && opened ? editor : null}
-    </WindowOverlayPortal> : null}
-    {docked && opened ? editor : null}
-    {(!rects.length && !docked) || !opened ? <div className="conversation-annotation-recovery" role="status">
+      {opened ? editor : null}
+    </WindowOverlayPortal>
+    {!opened ? <div className="conversation-annotation-recovery" role="status">
       {rects.length ? 'Note draft retained for the underlined passage.' : 'Note draft retained; original selection position unavailable.'}
-      <button type="button" className="small-button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setDocked(true); setOpened(true) }}>Resume note</button>
+      <button type="button" className="small-button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setOpened(true) }}>Resume note</button>
     </div> : null}
   </>
 }
