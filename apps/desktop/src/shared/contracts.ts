@@ -1,4 +1,5 @@
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
+import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
 import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousProgressInputResult } from './continuous-progress'
 import type {
@@ -484,6 +485,7 @@ export type AppConfig = {
   workspaces: WorkspaceRecord[]
   appearance: AppearanceConfig
   browser: BrowserConfig
+  toolkit?: ToolkitPreferences
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
   // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".

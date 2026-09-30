@@ -20,6 +20,7 @@ import {
   clampTerminalFontSize
 } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
+import { PERFORMANCE_STATUS_BAR_IDS } from '../shared/toolkit-preferences.js'
 
 export const hostSchema = z.discriminatedUnion('kind', [
   z.object({ id: z.literal('local'), kind: z.literal('local'), label: z.string().min(1) }).strict(),
@@ -212,6 +213,9 @@ const configSchema = z
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
     browser: browserSchema,
+    toolkit: z.object({
+      performance: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional()
+    }).strict().optional(),
     // Optional: a config written before this field existed is still valid, and `get()` back-fills the
     // explicit default. The mode is validated against the one tier table so an unknown id is rejected
     // rather than silently meaning "off".

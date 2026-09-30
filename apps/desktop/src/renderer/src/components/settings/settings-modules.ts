@@ -8,6 +8,7 @@ import { agentsSettingsModule } from './modules/agents'
 import { promptsSettingsModule } from './modules/prompts'
 import { workspacesSettingsModule } from './modules/workspaces'
 import { hostsSettingsModule } from './modules/hosts'
+import { toolkitSettingsModule } from './modules/toolkit'
 
 /** The only Renderer composition point. Order is the product's navigation order. */
 export const settingsModules = [
@@ -16,6 +17,7 @@ export const settingsModules = [
   browserSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,
+  toolkitSettingsModule,
   agentsSettingsModule,
   promptsSettingsModule,
   workspacesSettingsModule,

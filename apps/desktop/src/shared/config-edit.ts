@@ -1,5 +1,6 @@
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, type AppConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
+import { DEFAULT_PERFORMANCE_PREFERENCES } from './toolkit-preferences'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
@@ -13,6 +14,10 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function effective(path: string, value: unknown): unknown {
+  if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES }
+  if (path === 'toolkit.performance') return value ?? DEFAULT_PERFORMANCE_PREFERENCES
+  if (path === 'toolkit.performance.enabled') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.enabled
+  if (path === 'toolkit.performance.statusBar') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.statusBar
   if (path === 'copyPathsAsAbsolute' || path === 'browser.agentAutomation') return value ?? false
   if (path === 'appearance.appAppearance') return value ?? APP_APPEARANCE_DEFAULT
   if (path === 'appearance.terminalFontSize') return value ?? TERMINAL_FONT_SIZE_DEFAULT
