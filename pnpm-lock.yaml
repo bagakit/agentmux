@@ -168,6 +168,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@xmldom/xmldom':
+        specifier: 0.9.12
+        version: 0.9.12
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../demand
@@ -235,6 +238,10 @@ importers:
         version: 3.2.7(@types/node@24.13.3)(yaml@2.9.0)
 
 packages:
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
+
 
   luxon@3.7.2:
     resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
@@ -2052,6 +2059,8 @@ packages:
 
 
 snapshots:
+  '@xmldom/xmldom@0.9.12': {}
+
 
   luxon@3.7.2: {}
 

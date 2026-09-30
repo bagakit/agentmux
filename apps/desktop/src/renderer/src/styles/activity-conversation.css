@@ -389,3 +389,10 @@
 @media (max-width: 620px) {
   .log-turn[data-speaker-role='system'] { margin-inline: var(--sp-3); }
 }
+
+/* Authored packet declarations stay quiet; quoted attribution retains its own reading edge. */
+.log-turn__packet-declaration { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.log-turn__citation { margin: var(--sp-3) 0; border-inline-start: 2px solid var(--line); padding: var(--sp-1) var(--sp-3); color: var(--text-2); }
+.log-turn__citation-from { display: inline; color: var(--text-2); font-size: var(--fs-meta); font-weight: 560; }
+.log-turn__citation-ref { margin-inline-start: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.log-turn__citation > .md { margin-top: var(--sp-1); }

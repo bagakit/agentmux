@@ -1,7 +1,7 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ChevronRight, Copy } from 'lucide-react'
-import { memo, useEffect, useId, useRef, useState } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { formatClock, formatOffset } from '../lib/activity-ruler'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
@@ -103,7 +103,8 @@ export function ConversationMessage({
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
   const isSystemContext = speaker?.role === 'system'
   const isIncoming = speaker?.role === 'human' || isPeerAgent
-  const prefix = isIncoming && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null
+  const prefix = useMemo(() => isIncoming && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
+    [isIncoming, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
   const isDeclaredSender = prefix !== null && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
@@ -224,6 +225,7 @@ export function ConversationMessage({
           </button>
         </span> : null}
         {prefix && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
+        {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div>
       {isSystemContext && hasContent ? <button type="button" className="log-turn__system-toggle"
         aria-expanded={systemContextOpen} aria-controls={systemContentId}
@@ -233,14 +235,20 @@ export function ConversationMessage({
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {parts.map((part, index) => {
             const key = partKey(part)
-            return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}><MemoizedAgentMarkdown
+            return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>{index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
+              ? <MemoizedAgentMarkdown key={packetIndex} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+                {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
+              : <blockquote key={packetIndex} className="log-turn__citation"><span className="log-turn__citation-from">{packetPart.from}</span>
+                {packetPart.reference ? <code className="log-turn__citation-ref">{packetPart.reference}</code> : null}
+                <MemoizedAgentMarkdown content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown
               content={index === 0 && prefix ? prefix.body : part.text}
               workspaceRoot={workspaceRoot}
               homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
               {...(readPastedImage ? { readPastedImage } : {})}
               {...(openHttpLink ? { openHttpLink } : {})}
-            /></div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
+            />}</div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
               <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot}
                 traceId={traceDisclosureKey(messageId, key)}
                 {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}

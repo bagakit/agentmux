@@ -1,3 +1,4 @@
+import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 
 /**
@@ -24,15 +25,70 @@ export type AgentMuxMessagePrefix = {
   sourceLabel: string
   declaredAgentSessionId: string | null
   body: string
+  packet?: AgentMuxMessagePacket
 }
 
-/** Parse only the complete leading reading wrapper. The original text remains the copy source.
- * Native Provider inputs and captured deliveries use this same presentation grammar. */
+export type AgentMuxMessagePacket = {
+  /** All packet metadata is authored declaration, never verified identity or time. */
+  profile: string
+  name: string
+  time: string
+  parts: readonly (
+    | { kind: 'text'; text: string }
+    | { kind: 'citation'; from: string; reference?: string; text: string }
+  )[]
+}
+
+function attributes(element: Element, required: readonly string[], optional: readonly string[] = []): boolean {
+  const names = Array.from(element.attributes).map(attribute => attribute.name)
+  return required.every(name => names.includes(name)) &&
+    names.every(name => (required.includes(name) || optional.includes(name)) && Boolean(element.getAttribute(name)?.trim()))
+}
+
+/** Interpret the existing single packet shape. Invalid input stays authored text. */
+function parsePacket(text: string): AgentMuxMessagePacket | null {
+  if (!/^<bagakit-msg(?:\s|>)/u.test(text) || !text.trimEnd().endsWith('</bagakit-msg>') || /<!|<\?/u.test(text)) return null
+  try {
+    const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(text, 'text/xml')
+    const root = document.documentElement
+    if (!root || root.tagName !== 'bagakit-msg' || !attributes(root, ['type', 'name', 'time'])) return null
+    if (Array.from(document.childNodes).some(node => node !== root && (node.nodeType !== 3 || node.textContent?.trim()))) return null
+    const time = root.getAttribute('time')!
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(time) || !Number.isFinite(Date.parse(time)) ||
+      new Date(`${time.slice(0, 19)}Z`).toISOString().slice(0, 19) !== time.slice(0, 19)) return null
+    const parts: AgentMuxMessagePacket['parts'][number][] = []
+    for (const node of Array.from(root.childNodes)) {
+      if (node.nodeType === 3) {
+        parts.push({ kind: 'text', text: node.textContent ?? '' })
+      } else if (node.nodeType === 1) {
+        const cite = node as Element
+        if (cite.tagName !== 'cite' || !attributes(cite, ['from'], ['ref']) ||
+          Array.from(cite.childNodes).some(child => child.nodeType !== 3) || !cite.textContent?.trim()) return null
+        const reference = cite.getAttribute('ref')
+        parts.push({ kind: 'citation', from: cite.getAttribute('from')!, text: cite.textContent,
+          ...(reference === null ? {} : { reference }) })
+      } else return null
+    }
+    if (!parts.some(part => part.text.trim())) return null
+    return { profile: root.getAttribute('type')!, name: root.getAttribute('name')!, time, parts }
+  } catch {
+    return null
+  }
+}
+
+/** Native inputs and captured deliveries share this reading grammar; copying keeps original bytes. */
 export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix | null {
   const header = /^\[Message from ([^\]\r\n]+)\]\r?\n([\s\S]+)$/iu.exec(text)
-  if (!header || !header[2]!.trim()) return null
-  const sourceLabel = header[1]!.trim()
+  const authoredBody = header?.[2] ?? text
+  const packet = parsePacket(authoredBody)
+  if (!header && !packet) return null
+  // An incomplete/unknown packet is not a partial reading wrapper.
+  if (!packet && /^<bagakit-msg(?:\s|>)/u.test(authoredBody)) return null
+  if (!authoredBody.trim()) return null
+  const sourceLabel = header ? header[1]!.trim() : packet!.name
   if (!sourceLabel) return null
-  const declaredAgent = /^Agent ([^\s\[\]]+)$/iu.exec(sourceLabel)
-  return { sourceLabel, declaredAgentSessionId: declaredAgent?.[1] ?? null, body: header[2]! }
+  const declaredAgent = header ? /^Agent ([^\s\[\]]+)$/iu.exec(sourceLabel) : null
+  return { sourceLabel, declaredAgentSessionId: declaredAgent?.[1] ?? null,
+    body: packet ? packet.parts.map(part => part.text).join('') : authoredBody,
+    ...(packet ? { packet } : {}) }
 }
