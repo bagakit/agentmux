@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ILink, ILinkHandler, ILinkProvider } from '@xterm/xterm'
+import type { IBufferCell, IBufferLine, ILink, ILinkHandler, ILinkProvider } from '@xterm/xterm'
 
 // Mount the product owner; only xterm's canvas/parser and the private API are fixtures.
 // This proves provider callbacks and rendered menus, not native hit testing or a real Run.
@@ -15,14 +15,15 @@ const renderer = vi.hoisted(() => {
     rows = 24
     element?: HTMLElement
     selection = ''
-    line = 'src/example.ts:3'
+    cellLines: IBufferLine[] = []
+    nullCell!: IBufferCell
     provider?: ILinkProvider
     selectionChanged = () => {}
     scrolled = () => {}
     data = (_data: string) => {}
     userInput = () => {}
     modes = { mouseTrackingMode: 'none' }
-    buffer = { active: { type: 'normal', viewportY: 0, baseY: 0, length: 24, getLine: () => ({ translateToString: () => this.line }) } }
+    buffer = { active: { type: 'normal', viewportY: 0, baseY: 0, length: 24, getLine: (index: number) => this.cellLines[index], getNullCell: () => this.nullCell } }
     constructor(options: Terminal['options']) { this.options = options; Terminal.instances.push(this) }
     loadAddon() {}
     open(root: HTMLElement) { this.element = root; root.innerHTML = '<div class="xterm-screen"></div>' }
@@ -93,6 +94,23 @@ let web: InstanceType<typeof renderer.WebLinksAddon>
 let openHttp: ReturnType<typeof vi.fn>
 let openFile: ReturnType<typeof vi.fn>
 
+async function installCells(text: string, cols = 80) {
+  const { Terminal: NativeTerminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
+  const { Unicode11Addon } = await import('@xterm/addon-unicode11')
+  const parsed = new NativeTerminal({ cols, rows: 24, allowProposedApi: true })
+  parsed.loadAddon(new Unicode11Addon()); parsed.unicode.activeVersion = '11'
+  const written = new Promise<void>(resolve => parsed.write(text, resolve))
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1)
+  await written
+  terminal.cols = cols; terminal.nullCell = parsed.buffer.active.getNullCell()
+  terminal.cellLines = Array.from({ length: parsed.buffer.active.length }, (_, y) => {
+    const row = parsed.buffer.active.getLine(y)!, cells = Array.from({ length: row.length }, (_, x) => row.getCell(x)!)
+    const content = row.translateToString(false)
+    return { isWrapped: row.isWrapped, length: row.length, getCell: (x: number) => cells[x], translateToString: (trim = false) => trim ? content.trimEnd() : content }
+  })
+  parsed.dispose()
+}
+
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.useFakeTimers()
@@ -121,6 +139,7 @@ beforeEach(async () => {
   expect(renderer.Terminal.instances).toHaveLength(1)
   expect(renderer.WebLinksAddon.instances).toHaveLength(1)
   terminal = renderer.Terminal.instances[0]!; web = renderer.WebLinksAddon.instances[0]!
+  await installCells('src/example.ts:3')
   expect(terminal.options.linkHandler?.activate).toBeTypeOf('function')
   expect(element.querySelector('.terminal-view__xterm--hydrating')).toBeNull()
 })
@@ -137,7 +156,7 @@ function pointer(button = 0, x = 50, y = 80) {
   return event
 }
 async function fileLink(path = 'src/example.ts:3'): Promise<ILink> {
-  terminal.line = path
+  await installCells(path)
   let links: ILink[] | undefined
   terminal.provider!.provideLinks(1, (result) => { links = result })
   expect(links).toHaveLength(1)
@@ -145,6 +164,37 @@ async function fileLink(path = 'src/example.ts:3'): Promise<ILink> {
 }
 
 describe('mounted Terminal link exits', () => {
+  it('the wrapped continuation context menu resolves the same full file in its source workspace', async () => {
+    await installCells('说明 src/example.ts:3:2,', 12)
+    const reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
+    await act(async () => {
+      pointer(2, 70, 30)
+      element.querySelector('.terminal-view__xterm')!.dispatchEvent(new MouseEvent('contextmenu', { button: 2, clientX: 70, clientY: 30, bubbles: true }))
+    })
+    const action = host.querySelector<HTMLElement>('[role="menuitem"][title*="src/example.ts"]')
+    expect(action, host.textContent ?? '').not.toBeNull()
+    await act(async () => action!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(reveal).toHaveBeenCalledWith(origin.workspaceId, 'src/example.ts')
+    expect(openFile).not.toHaveBeenCalled(); expect(api.files.openSystem).not.toHaveBeenCalled()
+  })
+  it('the actual provider consumes Unicode cell ranges and a wrapped full path from either row, keeping click owner and no IPC on hover', async () => {
+    for (const [text, start] of [['说明 src/example.ts:3:2', 6], ['e\u0301 src/example.ts:3:2', 3], ['😀 src/example.ts:3:2', 4]] as const) {
+      await installCells(text)
+      let links: ILink[] | undefined
+      terminal.provider!.provideLinks(1, value => { links = value })
+      expect(links).toHaveLength(1); expect(links![0]!.range).toEqual({ start: { x: start, y: 1 }, end: { x: start + 17, y: 1 } })
+    }
+    await installCells('说明 src/example.ts:3:2,', 12)
+    let first: ILink[] | undefined, second: ILink[] | undefined
+    terminal.provider!.provideLinks(1, value => { first = value }); terminal.provider!.provideLinks(2, value => { second = value })
+    expect(first).toHaveLength(1); expect(second).toHaveLength(1)
+    expect(second![0]!.range).toEqual(first![0]!.range)
+    expect(second![0]!.range).toEqual({ start: { x: 6, y: 1 }, end: { x: 11, y: 2 } })
+    expect(api.files.openSystem).not.toHaveBeenCalled(); expect(openFile).not.toHaveBeenCalled(); expect(openHttp).not.toHaveBeenCalled()
+    await act(async () => second![0]!.activate(pointer(), second![0]!.text))
+    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3, column: 2 }, origin.workspaceId)
+    expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
   for (const provider of ['bare URL', 'OSC 8'] as const) {
     it(`${provider}: plain primary shows menu; modifier primary opens system`, async () => {
       const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
