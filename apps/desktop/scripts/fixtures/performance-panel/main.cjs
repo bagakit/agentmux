@@ -20,7 +20,7 @@ app.whenReady().then(async()=>{
     current = await configStore.get()
     const owner = new ConfigOwner({read:()=>current,save:next=>configStore.save(next),publish:saved=>{current=saved;win?.webContents.send('proof:config:changed',saved)}})
     ipcMain.handle('proof:setup',async(_event,preview)=>{
-      if(phase==='control'||phase==='placement') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
+      if(phase==='control'||phase==='placement'||phase==='buttons') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
         workspaces:[...preview.workspaces,...current.workspaces.filter(workspace=>!preview.workspaces.some(item=>item.id===workspace.id))],
         appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{performance:{enabled:true,statusBar:'label'}},
         composerShortcuts:[{id:'original',keyword:'original',label:'Original authored prompt',body:'Original saved body remains exact.'}]})) }
@@ -82,6 +82,37 @@ app.whenReady().then(async()=>{
     const key=async keyCode=>{win.webContents.sendInputEvent({type:'keyDown',keyCode});if(keyCode==='Return')win.webContents.sendInputEvent({type:'char',keyCode:'\r'});win.webContents.sendInputEvent({type:'keyUp',keyCode});await settle()}
     const close=async()=>{await click(q('[data-performance-close]'));await until('!document.querySelector(".performance-popover")');assert.equal(leases.size,0,'Close释放真实registeredIPC此lease')}
     const scene=async(width,theme)=>{win.setContentSize(width,900);await read('window.performanceScene.theme('+JSON.stringify(theme)+')');await until('innerWidth==='+width+'&&document.documentElement.dataset.appearance==='+JSON.stringify(theme));await settle()}
+    const buttonSelector='.surface-navigation button,.window-status-bar__utilities > button,.window-status-bar__toolkits .performance-trigger'
+    const buttonStyles=async()=>read('('+function(selector){
+      const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d')
+      const alpha=color=>{context.clearRect(0,0,1,1);context.fillStyle=color;context.fillRect(0,0,1,1);return context.getImageData(0,0,1,1).data[3]/255}
+      const rules=[];const walk=list=>{for(const rule of list){if(rule.selectorText)rules.push(rule);else if(rule.cssRules)walk(rule.cssRules)}}
+      for(const sheet of document.styleSheets)walk(sheet.cssRules)
+      return [...document.querySelectorAll(selector)].map(node=>{
+        const style=getComputedStyle(node),glyph=node.querySelector(':scope > svg'),glyphStyle=glyph&&getComputedStyle(glyph)
+        return {label:node.getAttribute('aria-label'),connected:node.isConnected&&node.checkVisibility(),bounds:node.getBoundingClientRect().toJSON(),
+          current:node.getAttribute('aria-current'),expanded:node.getAttribute('aria-expanded'),hover:node.matches(':hover'),focus:node.matches(':focus-visible'),
+          background:style.backgroundColor,alpha:alpha(style.backgroundColor),outlineStyle:style.outlineStyle,outlineWidth:parseFloat(style.outlineWidth),outlineAlpha:alpha(style.outlineColor),outlineOffset:parseFloat(style.outlineOffset),
+          color:style.color,radius:style.borderRadius,transitionProperty:style.transitionProperty,transitionDuration:style.transitionDuration,animationDuration:style.animationDuration,
+          transform:style.transform,filter:style.filter,backdropFilter:style.backdropFilter,boxShadow:style.boxShadow,runningAnimations:node.getAnimations().filter(a=>a.playState==='running').length,
+          glyph:glyph&&{width:glyph.getBoundingClientRect().width,height:glyph.getBoundingClientRect().height,strokeWidth:glyphStyle.strokeWidth,transform:glyphStyle.transform},
+          statusGlyphs:[...node.querySelectorAll('[data-focus-count] svg')].map(svg=>({width:svg.getBoundingClientRect().width,height:svg.getBoundingClientRect().height,strokeWidth:getComputedStyle(svg).strokeWidth})),
+          owningRules:rules.filter(rule=>node.matches(rule.selectorText)&&(/surface-navigation button|window-status-bar__utility-button|performance-trigger/.test(rule.selectorText))).map(rule=>({selector:rule.selectorText,background:rule.style.background,outline:rule.style.outline}))}
+      })
+    }.toString()+')('+JSON.stringify(buttonSelector)+')')
+    const focusStyle=async()=>{
+      const styles=await buttonStyles(),focused=styles.filter(button=>button.focus)
+      assert.equal(focused.length,1,'原生键盘焦点准确落到七常规入口之一')
+      const button=focused[0]
+      assert.ok(button.connected&&button.owningRules.length>0,'实际焦点owning CSSOM与connected按钮非空')
+      assert.ok(button.outlineStyle==='solid'&&button.outlineWidth>=1&&button.outlineAlpha>0&&button.outlineOffset>=-button.bounds.height/2,'键盘焦点有完整可见轮廓')
+      raw.buttonFocus.push(button);return button
+    }
+    const captureButtons=async(file,description)=>{
+      await settle();const styles=await buttonStyles();assert.equal(styles.length,7,'实际七个普通按钮采样非空')
+      const png=(await win.webContents.capturePage()).toPNG();fs.writeFileSync(path.join(evidence,file),png)
+      raw.frames.push({file,sha256:createHash('sha256').update(png).digest('hex'),description,buttonStyles:styles,width:await read('innerWidth'),theme:await read('document.documentElement.dataset.appearance')})
+    }
     const capture=async(file,description)=>{
       await settle()
       const geometry=await read('(()=>{const p=document.querySelector(".performance-popover"),s=document.querySelector(".window-status-bar"),t=document.querySelector(".performance-trigger"),r=p?.getBoundingClientRect(),rect=q=>document.querySelector(q)?.getBoundingClientRect().toJSON();return{width:innerWidth,height:innerHeight,overflow:document.documentElement.scrollWidth-innerWidth,panel:r?.toJSON(),footer:s?.getBoundingClientRect().toJSON(),trigger:t?.getBoundingClientRect().toJSON(),settings:rect(".surface-navigation [aria-label=Settings]"),keyboard:rect("[aria-label=\\"Keyboard shortcuts\\"]"),navigation:rect(".surface-navigation__surfaces"),text:p?.textContent,role:p?.getAttribute("role"),focus:document.activeElement?.getAttribute("aria-label"),animationCount:p?[...p.querySelectorAll("*"),p].flatMap(n=>n.getAnimations()).filter(a=>a.playState==="running").length:0}})()')
@@ -146,6 +177,29 @@ app.whenReady().then(async()=>{
       assert.equal(leases.size,0,'icon/label关闭不观察')
       assert.equal(await read('document.querySelectorAll(".window-status-bar [aria-label=Settings]").length'),1,'实际App唯一Settings入口')
       assert.equal(await read('document.querySelector(".window-status-bar__right [aria-label=Settings]")'),null,'右侧不保留Settings副本')
+      if(phase==='buttons') {
+        raw.buttonFocus=[];raw.buttonStates=[]
+        const styles=await buttonStyles();assert.equal(styles.length,7,'actual App七入口自身非空正控')
+        assert.ok(styles.every(button=>button.connected&&button.bounds.width>0&&button.glyph&&button.owningRules.length>0),'七connected实际按钮/glyph/CSSOM非空')
+        const selected=styles.filter(button=>button.current==='page');assert.equal(selected.length,1,'四工作面唯一真实current')
+        assert.ok(selected[0].alpha>0,'真实状态面与 idle 不同')
+        for(const button of styles){
+          assert.equal(button.glyph.width,14);assert.equal(button.glyph.height,14);assert.equal(parseFloat(button.glyph.strokeWidth),1.7)
+          assert.equal(button.radius,'4px');assert.equal(button.transform,'none');assert.equal(button.glyph.transform,'none');assert.equal(button.filter,'none');assert.equal(button.backdropFilter,'none')
+          assert.equal(button.runningAnimations,0,'普通按钮idle无持续动画')
+          assert.ok(button.statusGlyphs.length===0||button.statusGlyphs.every(glyph=>glyph.width===11&&glyph.height===11&&parseFloat(glyph.strokeWidth)===2),'Focus原11px状态glyph保留')
+          if(!button.current&&button.expanded!=='true')assert.equal(button.alpha,0,'普通按钮idle透明')
+        }
+        raw.buttonStates.push({state:'idle',styles})
+        if(process.env.AGENTMUX_PERFORMANCE_BUTTON_MUTANT==='focus'){
+          await click(q('.performance-trigger'));await key('Escape')
+          // 真实Tab经过合法通知邻接，只在本轮七入口检查owning focus。
+          for(let i=0;i<8;i++){
+            win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['shift']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['shift']});await settle()
+            if(await read('document.activeElement.matches('+JSON.stringify(buttonSelector)+')')){await focusStyle();break}
+          }
+        }
+      }
       raw.statusbarGeometry=[]
       for(const width of [1480,640,320]) {
         await scene(width,'dark')
@@ -163,7 +217,7 @@ app.whenReady().then(async()=>{
           if(variant==='disabled')assert.equal(geometry.trigger,undefined,'关闭配置移除Toolkit入口')
           else {assert.equal(geometry.label,'Performance');assert.ok(geometry.keyboard.right<=geometry.trigger.left&&geometry.trigger.right<=geometry.utilities.right);await point(q('.performance-trigger'))
             if(variant==='label'){assert.equal(geometry.text,'Performance');assert.ok(geometry.spanWidth>=20,'窄窗label保可见文字与完整accessible name')}
-            else assert.equal(geometry.text,'')}
+            else {assert.equal(geometry.text,'');if(phase==='buttons')assert.ok(geometry.trigger.width<=geometry.keyboard.width+4,'icon-only Performance无独有40px空槽')}}
           raw.statusbarGeometry.push({variant,...geometry})
         }
       }
@@ -181,13 +235,14 @@ app.whenReady().then(async()=>{
         for(const expected of keyboardTargets.slice(0,-1).reverse()) {
           win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['shift']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['shift']});await settle()
           const focus=await read('document.activeElement.getAttribute("aria-label")');assert.equal(focus,expected,'原生ShiftTab准确到connected可见邻接控件');nativeTab.push({direction:'backward',focus});reached.add(focus)
+          if(phase==='buttons'&&requiredTargets.includes(focus))await focusStyle()
         }
-        for(const expected of keyboardTargets.slice(1)) {await key('Tab');const focus=await read('document.activeElement.getAttribute("aria-label")');assert.equal(focus,expected,'原生Tab准确到connected可见邻接控件');nativeTab.push({direction:'forward',focus});reached.add(focus)}
+        for(const expected of keyboardTargets.slice(1)) {await key('Tab');const focus=await read('document.activeElement.getAttribute("aria-label")');assert.equal(focus,expected,'原生Tab准确到connected可见邻接控件');nativeTab.push({direction:'forward',focus});reached.add(focus);if(phase==='buttons'&&requiredTargets.includes(focus))await focusStyle()}
         assert.deepEqual([...reached].sort(),[...keyboardTargets].sort(),'原生Tab/ShiftTab可达两组全部入口')
         raw.statusbarKeyboard.push({width,requiredTargets,targets:keyboardTargets,reached:[...reached],nativeTab})
       }
-      if(phase==='placement') {
-        raw.qualificationScope='settings-left-placement-only'
+      if(phase==='placement'||phase==='buttons') {
+        raw.qualificationScope=phase==='buttons'?'statusbar-buttons-only':'settings-left-placement-only'
         raw.boundary='仅本次左右归属/实际Footer/七原生控件与Settings开合、原工作面保持；不签full hidden/restart/joined/T004。'
         await scene(1480,'dark')
         const mainSurface=await read('window.performanceScene.mainSurface()')
@@ -196,18 +251,61 @@ app.whenReady().then(async()=>{
         await until('document.querySelector(".settings-page")?.dataset.settingsPage==="overview"')
         assert.equal(await read('window.performanceScene.mainSurface()'),mainSurface,'Settings打开不改变原mainSurface')
         assert.equal(await read('document.querySelector(".surface-navigation [aria-label=Settings]").getAttribute("aria-expanded")'),'true')
+        if(phase==='buttons'){
+          const styles=await buttonStyles(),settings=styles.find(button=>button.label==='Settings')
+          assert.ok(settings.expanded==='true'&&!settings.current&&settings.alpha>0,'Settings真实expanded驱动反馈面，无第五current')
+          raw.buttonStates.push({state:'settings-expanded',styles});await captureButtons('1480-dark-settings-expanded.png','Left Settings expanded / real low emphasis state')
+        }
         await click(q('.surface-navigation [aria-label="Settings"]'))
         await until('!document.querySelector(".settings-page")')
         await click(q('.surface-navigation [aria-label="Settings"]'));await key('Escape')
         await until('!document.querySelector(".settings-page")')
         assert.equal(await read('window.performanceScene.mainSurface()'),mainSurface,'Settings再次点击及Escape保原mainSurface')
         assert.equal(await read('window.originalPlacementTerminal===document.querySelector(".xterm-helper-textarea")&&window.originalPlacementTerminal.isConnected'),true,'Settings开合保原xterm输入节点')
+        if(phase==='buttons'){
+          const move=async expression=>{const p=await point(expression);win.webContents.sendInputEvent({type:'mouseMove',x:p.x,y:p.y});await settle();return p}
+          const labels=(await buttonStyles()).map(button=>button.label),boundsBefore=(await buttonStyles()).map(button=>({label:button.label,bounds:button.bounds}))
+          raw.buttonPointer=[]
+          for(const label of labels){
+            const selector='.window-status-bar button[aria-label='+JSON.stringify(label)+']',expression=q(selector),p=await move(expression)
+            if(label==='Performance')await until('!!document.querySelector(".performance-popover")')
+            const style=(await buttonStyles()).find(button=>button.label===label)
+            assert.equal(style.hover,true,'trusted pointer真实悬停原入口')
+            assert.ok(style.alpha>0,'hover或真实current/expanded有有限反馈')
+            if(!style.current&&style.expanded!=='true')assert.ok(style.alpha<0.09,'hover比current/expanded反馈更轻')
+            win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...p});await settle()
+            assert.deepEqual((await buttonStyles()).map(button=>({label:button.label,bounds:button.bounds})),boundsBefore,'hover/press不改变七入口bounds')
+            assert.equal((await buttonStyles()).find(button=>button.label===label).boxShadow,'none','七普通按钮按压无旧inset阴影')
+            const outside={x:p.x,y:p.y-30};win.webContents.sendInputEvent({type:'mouseMove',...outside});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...outside});await settle()
+            raw.buttonPointer.push({label,hover:style,pressedBoundsStable:true})
+            if(label==='Performance'&&await read('!!document.querySelector(".performance-popover")'))await close()
+          }
+          await click(q('.xterm-helper-textarea'));const originalFocus=await read('document.activeElement===window.originalPlacementTerminal')
+          assert.equal(originalFocus,true,'实际Terminal输入焦点正控')
+          await hover();assert.equal(await read('document.activeElement===window.originalPlacementTerminal'),true,'Performance hover不抢原输入')
+          const expanded=(await buttonStyles()).find(button=>button.label==='Performance');assert.equal(expanded.expanded,'true');assert.ok(expanded.alpha>0,'Performance真实expanded反馈面')
+          raw.buttonStates.push({state:'performance-hover-expanded',styles:await buttonStyles()});await close()
+          await click(q('.surface-navigation__surfaces [aria-current="page"]'));assert.equal(await read('window.performanceScene.mainSurface()'),mainSurface,'当前Space可信click保原工作面')
+          for(const width of [1480,320]){
+            await scene(width,'dark');await move(q('[data-shortcut-help-open]'));await captureButtons(width+'-dark-keyboard-hover.png','Light Keyboard hover / full App')
+            await click(q('.performance-trigger'));await key('Escape')
+            do{win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['shift']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['shift']});await settle()}while(!await read('document.activeElement.matches('+JSON.stringify(buttonSelector)+')'))
+            await focusStyle();await captureButtons(width+'-dark-native-focus.png','Real native Tab focus / complete visible outline')
+          }
+          await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await settle()
+          assert.equal(await read('matchMedia("(prefers-reduced-motion: reduce)").matches'),true,'实际媒体偏好reduce正控')
+          const reduced=await buttonStyles();assert.equal(reduced.length,7)
+          for(const button of reduced){assert.ok(button.transitionDuration.split(',').every(value=>parseFloat(value)===0),'reduce下实际全部transition duration为零');assert.ok(button.animationDuration.split(',').every(value=>parseFloat(value)===0),'reduce下实际全部animation duration为零')}
+          raw.buttonReduced={matchMedia:true,styles:reduced}
+          await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]});await settle();assert.equal(await read('matchMedia("(prefers-reduced-motion: reduce)").matches'),false)
+        }
         for(const [width,theme,file] of [[1480,'dark','1480-dark-placement.png'],[1480,'light','1480-light-placement.png'],[640,'dark','640-dark-placement.png'],[320,'dark','320-dark-placement.png'],[320,'light','320-light-placement.png']]) {
           await scene(width,theme);await click(q('.performance-trigger'));await capture(file,'Settings left / Toolkit right / complete actual App Footer');await close()
         }
         raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface,'有限placement开合保原Tab/Region/Session/layout/focus/draft snapshot')
         raw.settings={unique:true,left:true,rightDuplicate:false,openClose:true,escape:true,sameMainSurface:mainSurface,sameTerminalInputNode:true}
         assert.equal(leases.size,0,'本次placement关闭无自己的观察lease')
+        if(phase==='buttons'){raw.boundary='T005七普通按钮有限状态/几何/原生焦点/reduce/原工作面保持；不签T002/fullT004/hidden/restart/joined/用户FPS';assert.equal(raw.buttonPointer.length,7)}
       } else {
       await scene(1480,'dark')
       // Fresh点击：不得只通过先hover再click规避hidden元素无法接焦点。
