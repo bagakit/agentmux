@@ -163,6 +163,48 @@ app.whenReady().then(async () => {
     await assert.rejects(topics.setMoteArchived(scratch, primary, true, keyFor(primary), firstPrimary.moteArchive.version), /primary Mote cannot be archived/)
     assert.deepEqual(userFiles(), userBefore)
     result.checks.push({ name: 'real-final-primary-guard-and-original-files', passed: true, userFiles: userBefore })
+    if (phase === 'seed') {
+      await open()
+      for (const target of [{ name: 'primary', topicId: primary, tabId: 'default-tab', regionId: 'default-region', sessionId: 'default-agent' },
+        { name: 'custom', topicId: custom, tabId: 'custom-tab', regionId: 'custom-region', sessionId: 'custom-agent' }]) {
+        await click(row(target.topicId))
+        await until(`window.moteArchiveProof.facts().ui.sessionId===${JSON.stringify(target.sessionId)}`, 'original exact ' + target.name + ' Agent selected')
+        await locate(node(`${panel} [aria-label="Show Terminal"]`))
+        await click(node(`${panel} [aria-label="Show Terminal"]`))
+        await until(`window.moteArchiveProof.facts().ui.mode.surface==='terminal'`, 'manual real ' + target.name + ' Terminal')
+        const terminal = await facts()
+        assert.equal(terminal.protected.viewModes[target.sessionId], 'terminal')
+        assert.equal(terminal.ui.topicId, target.topicId); assert.equal(terminal.ui.tabId, target.tabId); assert.equal(terminal.ui.regionId, target.regionId)
+        assert.ok(terminal.ui.input.token > 0 && terminal.ui.input.text.length > 0, 'Original nonempty ' + target.name + ' draft is actually mounted')
+        assert.ok(Object.keys(terminal.protected.drafts).length >= 4 && terminal.protected.sessionFacts.length >= 5, 'Original work and unrelated Sessions are nonempty')
+        await click(node(`${panel} [aria-label="Close Mote"]`))
+        await until('!window.moteArchiveProof.facts().ui.visible', 'close original ' + target.name + ' Terminal')
+        const closed = await facts(), entryPoint = await locate(node(entry))
+        await input('Input.dispatchMouseEvent', { type: 'mouseMoved', ...entryPoint })
+        await until('window.moteArchiveProof.facts().floating.preview&&!window.moteArchiveProof.facts().floating.open&&window.moteArchiveProof.facts().ui.visible', 'readonly real ' + target.name + ' hover')
+        const hovered = await facts()
+        assert.deepEqual(hovered.protected, terminal.protected, 'Hover cannot change mode, focus, work or drafts')
+        assert.deepEqual(hovered.saved, closed.saved, 'Hover does not persist an opening intention')
+        assert.equal(hovered.ui.mode.effective, 'terminal'); assert.equal(hovered.ui.mode.surface, 'terminal')
+        await click(node(entry)); await open()
+        const dialogue = await facts()
+        assert.equal(dialogue.ui.mode.effective, 'activity'); assert.equal(dialogue.ui.mode.surface, 'activity')
+        assert.equal(dialogue.ui.topicId, target.topicId); assert.equal(dialogue.ui.tabId, target.tabId); assert.equal(dialogue.ui.sessionId, target.sessionId)
+        assert.ok(dialogue.ui.mode.surfaceRect.width > 0 && dialogue.ui.mode.surfaceRect.height > 0)
+        assert.ok(dialogue.ui.mode.activityRect.width > 0 && dialogue.ui.mode.activityRect.height > 0 && dialogue.ui.mode.activityText.length > 0, 'Original real Activity body is nonempty and visible')
+        assert.equal(dialogue.ui.input.token, terminal.ui.input.token); assert.equal(dialogue.ui.input.text, terminal.ui.input.text)
+        assert.deepEqual(dialogue.protected, { ...terminal.protected, viewModes: { ...terminal.protected.viewModes, [target.sessionId]: 'activity' } }, 'Only the accurate original mode changes on reopening')
+        await click(node(`${panel} [aria-label="Show Terminal"]`))
+        await until(`window.moteArchiveProof.facts().ui.mode.surface==='terminal'`, 'open ' + target.name + ' permits a later real Terminal choice')
+        const laterTerminal = await facts()
+        assert.deepEqual(laterTerminal.protected, terminal.protected, 'Later Terminal keeps original work and modes')
+        await click(node(`${panel} [aria-label="Show Activity"]`)); await open()
+        result.checks.push({ name: 'default-dialogue-' + target.name + '-explicit-reopen', passed: true, target,
+          terminal, closed, hovered, dialogue, laterTerminal,
+          scope: 'Original real Entry/rail/SessionPane/Composer and Activity controls, trusted CDP events; controlled external Sessions, no user App/Core Run or OS IME claim.' })
+      }
+      assert.equal((await facts()).ui.topicId, custom)
+    }
     await open()
     // Activity does not mount TerminalView and healthy running Sessions do not
     // recover. Request its original terminal UI, then return to the saved mode;

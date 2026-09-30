@@ -7,6 +7,8 @@ import { tabGroupForTab } from './workbench-tabs'
 import { layoutForActiveTopic } from './scratch-topic-layout'
 import type { WorkbenchViewTarget } from './workbench-presentation'
 import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
+import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
+import { effectiveSessionViewMode, sessionPresentationById } from './session-presentation'
 
 export const PMO_FLOATING_TAB_SLOT_PREFIX = 'mote-floating-tab-slot'
 const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
@@ -169,10 +171,27 @@ export function pinPmoTeamsTopicFloating(): void {
 export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: string; targetTabId?: string; onReturnFocus?: () => void }): void {
   cancelClose()
   captureFocus(options?.onReturnFocus)
+  const previous = snapshot(), current = useAppStore.getState()
   const tabId = options?.targetTabId?.trim()
-  const topicId = options?.targetTopicId?.trim() ?? (tabId ? useAppStore.getState().tabs[tabId]?.topicId : undefined)
-  update({ open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
-    ...(tabId ? { targetTabId: tabId } : topicId && topicId !== snapshot().targetTopicId ? { targetTabId: undefined } : {}) })
+  const topicId = options?.targetTopicId?.trim() ?? (tabId ? current.tabs[tabId]?.topicId : undefined)
+  const next = { ...previous, open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
+    ...(tabId ? { targetTabId: tabId } : topicId && topicId !== previous.targetTopicId ? { targetTabId: undefined } : {}) }
+  const layout = current.layouts[SCRATCH_WORKSPACE_ID]
+  const resolvedTopicId = pmoTeamsTopicFloatingTargetTopicId(next, current.tabs)
+  const resolvedTabId = pmoTeamsTopicFloatingTargetTabId(next, current.tabs, layout, current.agentFocus.pmo.sessionId)
+  const isOpening = !previous.open || resolvedTopicId !== pmoTeamsTopicFloatingTargetTopicId(previous, current.tabs) ||
+    resolvedTabId !== pmoTeamsTopicFloatingTargetTabId(previous, current.tabs, layout, current.agentFocus.pmo.sessionId)
+  if (isOpening) {
+    const tab = resolvedTabId ? current.tabs[resolvedTabId] : undefined
+    const workspace = current.config?.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)
+    const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
+    const region = tab?.regions[tab.layout.activeRegionId]
+    const session = region?.kind === 'agent' ? sessionPresentationById(current.sessions).get(region.sessionId) : undefined
+    if (tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === resolvedTopicId && layout && tabGroupForTab(layout, tab.id) &&
+      scratchTopicKind(resolvedTopicId, topics) === 'mote' && session?.kind === 'agent' &&
+      effectiveSessionViewMode(current, session.id) !== 'activity') current.setViewMode(session.id, 'activity', { focus: false })
+  }
+  update(next)
   requestAnimationFrame(() => {
     if (!snapshot().open) return
     const active = document.activeElement
