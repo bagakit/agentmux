@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
+import { assertFocusTimelineSceneInputs } from './focus-timeline-reading-qualification.mjs'
 
 const root = resolve(import.meta.dirname, '../../..')
 const output = resolve(root, `.tmp/focus-timeline-navigation-qualification-${Date.now()}`)
@@ -57,7 +58,10 @@ try {
     const sceneFile = resolve(root, scenePath), reviewFile = resolve(root, reviewPath), sceneBytes = readFileSync(sceneFile), reviewBytes = readFileSync(reviewFile)
     const scene = JSON.parse(sceneBytes), review = JSON.parse(reviewBytes)
     assert.equal(scene.schema, 'agentmux.focus-timeline-read-coverage-scene.v1'); assert.equal(scene.passed, true)
-    for (const file of sourcePaths.slice(0, 4)) assert.equal(scene.inputs[file], receipt.before[file])
+    const styleScopeFile = process.env.AGENTMUX_FOCUS_TIMELINE_STYLE_SCOPE
+    const acceptedMainRef = process.env.AGENTMUX_FOCUS_TIMELINE_STYLE_COMMIT ?? 'HEAD'
+    receipt.styleScope = assertFocusTimelineSceneInputs({ root, sceneBytes, paths: sourcePaths.slice(0, 4), expectedInputs: receipt.before, styleScopeFile, acceptedMainCssBytes: styleScopeFile ? execFileSync('git', ['show', `${acceptedMainRef}:apps/desktop/src/renderer/src/styles/focus.css`], { cwd: root }) : undefined })
+    if (receipt.styleScope) receipt.styleScope.acceptedMainRef = acceptedMainRef
     assert.deepEqual(scene.actual.controls, []); assert.equal(scene.cleanup.privateRootRemoved, true); assert.ok(scene.images.length >= 2)
     const cost = scene.actual.cost200, blank = scene.actual.blankPan
     assert.equal(cost.actualActions, 200); assert.equal(cost.pointerOrKeyboardRunControls, 0)
