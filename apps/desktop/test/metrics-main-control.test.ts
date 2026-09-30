@@ -38,7 +38,7 @@ import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge'
 import { createRendererControlApi } from '../src/renderer/src/lib/control-api'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, readRendererResourceOwnerCounts } from '../src/renderer/src/store'
-import { CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, CONTROL_CANCEL_CHANNEL, RESOURCE_USAGE_CHANNEL } from '../src/shared/contracts'
+import { CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, CONTROL_CANCEL_CHANNEL } from '../src/shared/contracts'
 
 const children: ChildProcess[] = [], cleanup: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -127,10 +127,8 @@ async function registered() {
     send(channel: string, value: unknown) {
       if (channel === CONTROL_REQUEST_CHANNEL) { rendererReads++; fixture.rendererRequest?.(value) }
       if (channel === CONTROL_CANCEL_CHANNEL) fixture.rendererCancel?.(value)
-      if (channel === RESOURCE_USAGE_CHANNEL) ipcFrames.push(value)
     }
   }()
-  const ipcFrames: unknown[] = []
   const disposeRenderer = await useAppStore.getState().initialize()
   useAppStore.setState({ config, agentComposerDrafts: { 'healthy-session': 'preserved input' } })
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
@@ -140,12 +138,12 @@ async function registered() {
   cleanup.push(dispose)
   events.get('local')!({ type: 'process-state', state: 'running', pid: 100, run: { runId: 'healthy-run', hostId: 'local' } })
   events.get('remote')!({ type: 'process-state', state: 'running', pid: 777, run: { runId: 'remote-run', hostId: 'remote' } })
-  return { directory, sampler, runtime, configBefore, configStore, resourceReads, diagnostics, readTable, sender, ipcFrames,
+  return { directory, sampler, runtime, configBefore, configStore, resourceReads, diagnostics, readTable, sender,
     stop, input, attach, resume, get rendererReads() { return rendererReads }, tick: () => { clock += 1000 }, dispose }
 }
 
 describe('registered Main metrics and actual CLI', () => {
-  it('shares one nonempty sampler for two CLI watches, get and the original IPC through two periods and releases to zero', async () => {
+  it('shares one nonempty sampler for two CLI watches, get and a later CLI watcher through two periods and releases to zero', async () => {
     const f = await registered()
     vi.useFakeTimers({ toFake: ['setInterval','clearInterval'] })
     const first = startCli(f.directory, 'watch'), second = startCli(f.directory, 'watch')
@@ -170,9 +168,10 @@ describe('registered Main metrics and actual CLI', () => {
     expect(snapshot.runtime.data![0]!.runtimeStorageObservedAt).toBeTypeOf('number')
     expect(snapshot.runtime.data![1]!.process).toMatchObject({ cpuPercent: null, rssKib: null })
     expect(snapshot.renderer.data).toMatchObject({ window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: { monacoEditors: null, monacoModels: null } })
-    fixture.handlers.get('resourceUsage:subscribe')!({ sender: f.sender })
+    const third = startCli(f.directory, 'watch')
+    await waitFor(() => expect(third.frames().filter(frame => frame.event === 'snapshot').length).toBeGreaterThan(0))
+    expect(third.errors()).toEqual([])
     expect(samplerState(f.sampler).consumers).toBe(3)
-    expect(f.ipcFrames.length).toBeGreaterThan(0)
     f.tick(); await vi.advanceTimersByTimeAsync(1000)
     await waitFor(() => expect(f.readTable).toHaveBeenCalledTimes(2))
     expect(f.resourceReads).toHaveBeenCalledTimes(2); expect(f.diagnostics).toHaveBeenCalledTimes(1)
@@ -187,7 +186,7 @@ describe('registered Main metrics and actual CLI', () => {
     expect(frames.at(-1)!.result.observation.runtime.lastSuccessAt).toBe(snapshot.runtime.lastSuccessAt)
     first.child.kill('SIGINT'); await waitFor(() => expect(first.closed).toBe(true))
     expect(samplerState(f.sampler).consumers).toBe(2)
-    fixture.handlers.get('resourceUsage:unsubscribe')!({ sender: f.sender })
+    third.child.kill('SIGINT'); await waitFor(() => expect(third.closed).toBe(true))
     expect(samplerState(f.sampler).consumers).toBe(1)
     second.child.kill('SIGTERM'); await waitFor(() => expect(second.closed).toBe(true))
     expect(samplerState(f.sampler)).toEqual({ consumers: 0, timer: false })
@@ -197,7 +196,7 @@ describe('registered Main metrics and actual CLI', () => {
     const reads = f.readTable.mock.calls.length
     await vi.advanceTimersByTimeAsync(5000)
     expect(f.readTable).toHaveBeenCalledTimes(reads)
-    await record({ case: 'shared-positive', raw: [first.stdout, second.stdout, get.stdout], readTable: reads,
+    await record({ case: 'shared-positive', raw: [first.stdout, second.stdout, third.stdout, get.stdout], readTable: reads,
       runtimeReads: f.resourceReads.mock.calls.length, storageReads: f.diagnostics.mock.calls.length,
       rendererReads: f.rendererReads, consumers: samplerState(f.sampler), snapshot })
   })

@@ -3,7 +3,6 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { AgentTimelineItem, SessionSnapshot } from '../src/shared/contracts.js'
 import { sessionRecentActivity } from '../src/renderer/src/lib/session-recency.js'
 import { projectActivityRow } from '../src/renderer/src/lib/project-activity-row.js'
-import { usagePanelRows } from '../src/renderer/src/lib/resource-usage-panel.js'
 import { MAX_STEP_SUMMARY_LENGTH } from '../src/renderer/src/lib/activity-step-summary.js'
 
 // 用户问的是「这个 Agent 最近在干什么」。答案有一条严格优先级阶梯，每一级都盖过它下面那级——
@@ -188,21 +187,11 @@ describe('仓根要一路传到 stepTitle', () => {
     expect(result).toBe('Edit …po/apps/desktop/src/main/agent-notifier.ts')
   })
 
-  it('根穿过 projectActivityRow 与 usagePanelRows 两层，不在中途被丢掉', () => {
+  it('根穿过 projectActivityRow，不在中途被丢掉', () => {
     // 接线判据：形参加了却不往下传，上面两条照样绿。
     const row = projectActivityRow(agent({ state: 'working' }), [call], 1, '/Users/me/proj/repo')
     expect(row.reason).toBe('Edit apps/desktop/src/main/agent-notifier.ts')
 
-    const session = agent({ state: 'working' })
-    const rows = usagePanelRows(
-      { runs: [{ runId: 'run-a1', cpuPercent: 1, rssKib: 1 }] } as never,
-      [session],
-      {
-        timelines: { [session.id]: { items: [call] } } as never,
-        now: 1,
-        workspaceRoots: { [session.id]: '/Users/me/proj/repo' }
-      }
-    )
-    expect(rows[0]?.activity).toBe('Edit apps/desktop/src/main/agent-notifier.ts')
+
   })
 })

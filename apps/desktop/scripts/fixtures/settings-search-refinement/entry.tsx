@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SurfaceSwitch } from '../../../src/renderer/src/components/TopRowChrome'
+import { WindowUtilityBar } from '../../../src/renderer/src/components/WindowUtilityBar'
+import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -27,8 +29,8 @@ function Fixture() {
       <main className="main-shell main-shell--merged" aria-label="Controlled empty workbench" />
       {open && <SettingsPanel initialSection="general" onClose={() => setOpen(false)} />}
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={open} onOpenSettings={() => setOpen(true)} onCloseSettings={() => setOpen(false)} /></div>
-        <div className="window-status-bar__right"><span>Controlled status facts</span></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch onCloseSettings={() => setOpen(false)} /></div>
+        <div className="window-status-bar__right"><span>Controlled status facts</span><SettingsNavigation.Provider value={{ open: () => setOpen(true) }}><WindowUtilityBar settingsOpen={open} onCloseSettings={() => setOpen(false)} /></SettingsNavigation.Provider></div>
       </footer>
     </div>
     <WindowOverlayHost />

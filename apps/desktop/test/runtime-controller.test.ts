@@ -2728,7 +2728,7 @@ describe('RuntimeController configuration transaction', () => {
       return { controller, sampler }
     }
 
-    /** 经由订阅读一帧——那是产品唯一的读取口（ipc.ts 的 resourceUsage:subscribe）。 */
+    /** 经由共享采样订阅读一帧——Toolkit 与公开 Metricsport 使用同一 sampler。 */
     async function runsInOneFrame(sampler: ProcessResourceSampler): Promise<string[]> {
       let frame: ResourceSample | undefined
       const stop = sampler.subscribe(snapshot => { frame = snapshot })

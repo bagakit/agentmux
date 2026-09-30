@@ -96,7 +96,6 @@ import {
   CONTROL_RESPONSE_CHANNEL,
   PASTED_IMAGE_EXTENSIONS,
   PASTED_IMAGE_MAX_BYTES,
-  RESOURCE_USAGE_CHANNEL,
   SESSION_HISTORY_OBSERVATION_CHANNEL,
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
@@ -652,44 +651,10 @@ export async function registerIpc(args: {
   handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))
   handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>) => await demands.addActivity(id, input))
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
-  /**
-   * 资源采样的订阅与退订。
-   *
-   * 采样只在有订阅者时进行，因此这两个 handler 就是"折叠态零开销"这条约束的兑现处。
-   * 退订必须可靠：Renderer 崩溃或刷新时若没人退订，采样会永远跑下去——所以除了显式
-   * 退订，还监听 sender 的销毁与导航。
-   */
-  const usageSubscriptions = new Map<number, () => void>()
-  const stopUsageSubscription = (webContentsId: number): void => {
-    usageSubscriptions.get(webContentsId)?.()
-  }
   const toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
-  handleWithEvent('resourceUsage:subscribe', (event) => {
-    const sender = event.sender
-    stopUsageSubscription(sender.id)
-    const unsubscribe = args.runtime.resourceSampler.subscribe((snapshot) => {
-      if (sender.isDestroyed()) return
-      sender.send(RESOURCE_USAGE_CHANNEL, snapshot)
-    })
-    let disposed = false
-    const cleanup = (): void => {
-      if (disposed) return
-      disposed = true
-      sender.removeListener('destroyed', cleanup)
-      sender.removeListener('did-start-navigation', cleanup)
-      if (usageSubscriptions.get(sender.id) === cleanup) usageSubscriptions.delete(sender.id)
-      unsubscribe()
-    }
-    usageSubscriptions.set(sender.id, cleanup)
-    sender.once('destroyed', cleanup)
-    sender.once('did-start-navigation', cleanup)
-  })
-  handleWithEvent('resourceUsage:unsubscribe', (event) => {
-    stopUsageSubscription(event.sender.id)
-  })
   handleWithEvent('ui:requestStorageFlush', async (event) => {
     requireTrustedSender('ui:requestStorageFlush', event)
     requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(args.window.webContents.session, {
@@ -1196,8 +1161,6 @@ export async function registerIpc(args: {
       async () => await control.stop(),
       () => detach(),
       () => {
-        for (const unsubscribe of usageSubscriptions.values()) unsubscribe()
-        usageSubscriptions.clear()
         historyObservations.dispose()
         releaseResourceObservation()
       },

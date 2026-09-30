@@ -393,12 +393,12 @@ describe('IPC 事件面：两侧按方向指向同一个常量', () => {
   it('判据自检：把 main 一处推送换回字面量，推送方向那条集合判据会红', () => {
     // 变异只改一件事：把一处真实推送的常量换成它今天的字面值，不动 preload、不动 import。
     // 「不动 import」是刻意的——那正是真实重构会留下的形状，也正是上一版「被引用过」恒真的原因。
-    const target = 'RESOURCE_USAGE_CHANNEL'
-    const file = 'ipc.ts'
+    const target = 'TOOLKIT_CHANGED_CHANNEL'
+    const file = 'toolkit-ipc.ts'
     const original = readFileSync(join(MAIN_DIR, file), 'utf8')
     const mutated = original.replace(
-      `sender.send(${target}, snapshot)`,
-      "sender.send('agentmux:resource-usage', snapshot)"
+      `sender.send(${target}, { id, snapshot: parseToolkitSnapshot(snapshot) })`,
+      "sender.send('agentmux:toolkit-changed', { id, snapshot: parseToolkitSnapshot(snapshot) })"
     )
     expect(mutated, '锚点没匹配上，自检没有真的构造出「改回字面量」形状').not.toBe(original)
     const overrides = new Map([[file, mutated]])
@@ -408,7 +408,7 @@ describe('IPC 事件面：两侧按方向指向同一个常量', () => {
       channelsOf(mainPushSites(overrides)),
       `变异后 ${target} 仍在 main 的推送集合里——那这次变异没构造出被守的形状`
     ).not.toContain(target)
-    expect(channelsOf(mainPushSites(overrides))).toContain('agentmux:resource-usage')
+    expect(channelsOf(mainPushSites(overrides))).toContain('agentmux:toolkit-changed')
     // 且它今天确实只由**一处**推送——这一条是上面那步能成立的前提：如果别处也推送同一频道，
     // 换掉一处不会让常量退出集合，这次自检就证不出集合判据敏感。
     expect(

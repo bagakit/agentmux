@@ -3,7 +3,8 @@ import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
-import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
+import { WindowUtilityBar } from '../src/renderer/src/components/WindowUtilityBar'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -27,7 +28,7 @@ it('renders the daily-preference/resource entries, with Overview before the unch
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] p')].map(node => node.textContent))
     .toEqual(['Preferences', 'Resources'])
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')].map(node => node.textContent))
-    .toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Keyboard shortcuts', 'Agents', 'Prompts', 'Workspaces', 'Hosts'])
+    .toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Keyboard shortcuts', 'Toolkit', 'Agents', 'Prompts', 'Workspaces', 'Hosts'])
   expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Overview')
   expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
   await section('Appearance')
@@ -39,9 +40,9 @@ it('renders the daily-preference/resource entries, with Overview before the unch
   expect(dom.container.querySelector('[data-settings-pane="copy-paths"]')).toBeNull()
 })
 
-it('ordinary settings entry targets Overview through the actual SurfaceSwitch control', async () => {
+it('ordinary settings entry targets Overview through the actual right utility control', async () => {
   const open = vi.fn()
-  await dom.render(<SurfaceSwitch onOpenSettings={open} />)
+  await dom.render(<SettingsNavigation.Provider value={{ open }}><WindowUtilityBar /></SettingsNavigation.Provider>)
   await dom.click('[aria-label="Settings"]')
   expect(open).toHaveBeenCalledExactlyOnceWith('overview')
 })

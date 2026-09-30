@@ -81,11 +81,11 @@ async function nativeMain() {
     send(channel:string,value:any){this.events.push({channel,value})}
   }()
   const detachRenderer=runtime.attach(sender as any)
-  const dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
-    progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{} as any,workspaceFiles:{dispose:async()=>{}} as any})
   const sdk=new CtxmuxClient({socketPath:join(directory,'ctxmux.sock')})
+  let dispose: (()=>Promise<void>) | undefined
+  await record('fixture-startup',{directory,phase:'before-registerIpc'})
   cleanups.push(async()=>{
-    await dispose()
+    await dispose?.()
     // Exact private fixture cleanup uses the public SDK, independently of any Source mutant.
     // Its corrective actions are recorded, never counted as the product oracle.
     for(const run of await sdk.list().catch(()=>[])) {
@@ -103,6 +103,9 @@ async function nativeMain() {
     for(const daemon of ownDaemons) {process.kill(daemon.pid,'SIGTERM');await until(()=>expect(alive(daemon.pid)).toBe(false))}
     await rm(directory,{recursive:true,force:true})
   })
+  dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
+    progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{} as any,workspaceFiles:{dispose:async()=>{}} as any})
+  await record('fixture-startup',{directory,phase:'registered'})
   const core=(runtime as any).hosts.get('local').client as AgentMuxClient
   const controlPath=join(directory,'control.sock')
   const request=(operation:any)=>({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:crypto.randomUUID(),operation,toolId:'performance'})
@@ -183,7 +186,11 @@ describe('registered Main official Performance vertical slice',()=>{
     },{path:m.controlPath})
     cleanups.push(async()=>metric.dispose())
     let snapshots:ToolkitSnapshot[]=[], endError:Error|undefined
-    const watcher=await subscribeAgentMuxToolkit(m.request('toolkit.watch') as any,{onFrame:f=>{if(f.event==='snapshot')snapshots.push(f.result.snapshot)},onEnd:e=>{endError=e}},{path:m.controlPath})
+    const establishment=await subscribeAgentMuxToolkit(m.request('toolkit.watch') as any,{onFrame:f=>{if(f.event==='snapshot')snapshots.push(f.result.snapshot)},onEnd:e=>{endError=e}},{path:m.controlPath})
+      .then(watcher=>({watcher,error:null}),error=>({watcher:null,error}))
+    expect(establishment.error,'Actual owned RawRun Toolkit observation must establish before consumer reads').toBeNull()
+    expect(establishment.watcher,'Actual Toolkit observation must return its own disposer').toHaveProperty('dispose',expect.any(Function))
+    const watcher=establishment.watcher!
     cleanups.push(async()=>watcher.dispose())
     await until(()=>{expect(endError).toBeUndefined();expect(snapshots.filter(v=>v.sequence>0).length).toBeGreaterThanOrEqual(2)},15000)
     expect(scan).not.toHaveBeenCalled()

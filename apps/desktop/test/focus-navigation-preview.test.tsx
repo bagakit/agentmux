@@ -24,7 +24,7 @@ beforeEach(async () => {
     timelines: { working: items('working', 'user_message', 'Compile the parser'), result: items('result', 'assistant_message', 'Parser tests pass') },
     agentFocus: { execution: { sessionId: 'idle', history: [] }, pmo: { sessionId: null } } })
   commits.mockClear()
-  await act(async () => root.render(createElement(Profiler, { id: 'navigation', onRender: commits }, createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }))))
+  await act(async () => root.render(createElement(Profiler, { id: 'navigation', onRender: commits }, createElement(SurfaceSwitch))))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it('opens a bounded live snapshot on hover, retaining the current context and prioritizing attention and work', async () => {

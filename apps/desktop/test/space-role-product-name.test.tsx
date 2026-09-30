@@ -40,7 +40,7 @@ it('shows Mote consistently in the real Space tree, creation menu and fixed navi
   useAppStore.setState({ config: { ...initial.config!, version: 9, workspaces: [workspace], hosts: [], executors: {} }, sessions: [], tabs: {}, layouts: {}, pinnedItems: {}, collapsedProjectGroups: {}, workspaceFileRevisions: {}, mainSurface: 'board', createScratchTopic: create, openScratchTopic: openTopic })
   const focus = useAppStore.getState().agentFocus
   await act(async () => root.render(createElement('div', {},
-    createElement(SurfaceSwitch, { onOpenSettings: vi.fn() }),
+    createElement(SurfaceSwitch),
     createElement(SpaceTopicsTree, { workspace, icons: {}, onChangeIcon: () => {} }),
     createElement(SpaceCreateMenu, { onOpenFolder: async () => {} })
   )))

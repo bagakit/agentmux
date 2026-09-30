@@ -13,8 +13,8 @@ const tests = ['process-resource-sampler.test.ts', 'resource-usage-observability
 const sourceInputs = [
   'apps/desktop/src/shared/process-usage.ts',
   'apps/desktop/src/main/process-resource-sampler.ts',
-  'apps/desktop/src/renderer/src/lib/resource-usage-panel.ts',
-  'apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx',
+  'apps/desktop/scripts/fixtures/performance-panel/data.ts',
   ...tests.map((name) => `apps/desktop/test/${name}`)
 ]
 
@@ -54,6 +54,8 @@ async function sourceProof() {
   try {
     await cp(join(root, 'apps/desktop/src'), join(isolated, 'apps/desktop/src'), { recursive: true })
     await mkdir(join(isolated, 'apps/desktop/test'), { recursive: true })
+    await mkdir(join(isolated, 'apps/desktop/scripts/fixtures/performance-panel'), { recursive: true })
+    await cp(join(root, 'apps/desktop/scripts/fixtures/performance-panel/data.ts'), join(isolated, 'apps/desktop/scripts/fixtures/performance-panel/data.ts'))
     for (const name of tests) await cp(join(root, 'apps/desktop/test', name), join(isolated, 'apps/desktop/test', name))
     await symlink(join(root, 'node_modules'), join(isolated, 'node_modules'), 'dir')
     await symlink(join(root, 'apps/desktop/node_modules'), join(isolated, 'apps/desktop/node_modules'), 'dir')
@@ -85,8 +87,8 @@ export default defineConfig({ root: ${JSON.stringify(isolated)}, esbuild: { jsx:
       ['descendant-count', 'apps/desktop/src/shared/process-usage.ts', 'descendantProcessCount: processCount - 1', 'descendantProcessCount: 0'],
       ['pid-double-count', 'apps/desktop/src/shared/process-usage.ts', 'if (claimed.has(current)) continue', 'if (false) continue'],
       ['sampler-root-field', 'apps/desktop/src/main/process-resource-sampler.ts', 'rootRssKib: subtree?.rootRssKib ?? null', 'rootRssKib: null'],
-      ['panel-root-field', 'apps/desktop/src/renderer/src/lib/resource-usage-panel.ts', 'rootRssText: formatRss(run.rootRssKib)', 'rootRssText: formatRss(run.descendantsRssKib)'],
-      ['mounted-details', 'apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx', '<dd>{row.rootRssText}</dd>', '<dd>—</dd>']
+      ['panel-root-field', 'apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx', 'memory(run.rootRssKib)', 'memory(run.descendantsRssKib)'],
+      ['mounted-details', 'apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx', '<dd>{memory(run.rootRssKib)}</dd>', '<dd>—</dd>']
     ]
     const results = []
     for (const [label, path, anchor, replacement] of mutants) {
@@ -109,13 +111,13 @@ export default defineConfig({ root: ${JSON.stringify(isolated)}, esbuild: { jsx:
     for (const [symbol, definition] of [
       ['rollUpSubtrees', 'apps/desktop/src/shared/process-usage.ts'],
       ['ProcessResourceSampler', 'apps/desktop/src/main/process-resource-sampler.ts'],
-      ['usagePanelRows', 'apps/desktop/src/renderer/src/lib/resource-usage-panel.ts'],
-      ['ResourceUsagePanel', 'apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx']
+      ['PerformanceOverview', 'apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx'],
+      ['PerformancePanel', 'apps/desktop/src/renderer/src/components/performance/PerformancePanel.tsx']
     ]) callers[symbol] = await productionCallers(symbol, definition)
     const after = await inputDigests()
     assert.deepEqual(after, before, 'shared source/test inputs changed during proof')
     receipt = { schema: 'agentmux.agent-memory-source-proof.v1', result: 'pass', baseline, mutations: results, restored, sourceInputs: before, callers,
-      scope: 'Isolated actual source mutations plus nonempty mounted sampler-to-resource-panel behavior; no installed acceptance or leak claim.' }
+      scope: 'Isolated actual source mutations plus nonempty mounted sampler-to-Toolkit-Performance behavior; no installed acceptance or leak claim.' }
   } finally {
     await rm(isolated, { recursive: true, force: true })
   }

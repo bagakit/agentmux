@@ -31,10 +31,11 @@ const FEATURE_ANCHORS = [
   },
   {
     id: 'window-resource-observation',
-    source: 'apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx',
-    symbol: 'ResourceUsagePanel',
-    callers: ['apps/desktop/src/renderer/src/App.tsx'],
-    tests: ['apps/desktop/test/resource-usage-observability.test.tsx', 'apps/desktop/test/resource-usage-collapsed.test.tsx']
+    source: 'apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx',
+    formerSources: ['apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx'],
+    symbol: 'PerformanceOverview',
+    callers: ['apps/desktop/src/renderer/src/components/performance/PerformancePanel.tsx'],
+    tests: ['apps/desktop/test/resource-usage-observability.test.tsx']
   },
   {
     id: 'workspace-path-rebind',

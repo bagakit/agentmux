@@ -20,7 +20,7 @@ const ownSources = ['packages/core/src/metrics.ts','packages/core/src/control.ts
   'apps/desktop/src/main/process-resource-sampler.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/ipc.ts',
   'apps/desktop/src/main/control-ipc-bridge.ts','apps/desktop/src/shared/process-usage.ts','apps/desktop/src/shared/contracts.ts',
   'apps/desktop/src/renderer/src/lib/control-api.ts','apps/desktop/src/renderer/src/lib/resource-owner-counts.ts',
-  'apps/desktop/src/renderer/src/store.ts','apps/desktop/src/renderer/src/components/ResourceUsagePanel.tsx']
+  'apps/desktop/src/renderer/src/store.ts','apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx']
 const proofPaths = [config,'apps/desktop/scripts/verify-toolkit-metrics.mjs','packages/core/test/metrics-control-host.test.ts',
   'packages/core/test/metrics-cli.test.ts','apps/desktop/test/metrics-main-control.test.ts',
   'apps/desktop/test/resource-owner-counts.test.ts','apps/desktop/test/resource-usage-observability.test.tsx','vitest.setup.ts']

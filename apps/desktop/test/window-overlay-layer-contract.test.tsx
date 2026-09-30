@@ -57,7 +57,7 @@ describe('window overlay host contract', () => {
 
   it('mounts the active Dock tooltip in the window host instead of the clipped nav tree', async () => {
     useAppStore.setState({ mainSurface: 'survey' })
-    await act(async () => root?.render(createElement(SurfaceSwitch, { onOpenSettings: vi.fn() })))
+    await act(async () => root?.render(createElement(SurfaceSwitch)))
     const search = container?.querySelector('button[aria-label^="Survey"]') as HTMLButtonElement
     expect(search).toBeTruthy()
     await act(async () => search.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
