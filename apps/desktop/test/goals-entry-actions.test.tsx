@@ -121,6 +121,22 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     const tab = createdTab(); expect(tab.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
     expect(useAppStore.getState().agentComposerDrafts[tab.layout.activeRegionId]).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
+    expect(container.querySelector('.launch-surface')?.textContent).toContain('Primary Mote Agent is unconfirmed')
+    expect(container.querySelector('.launch-surface')?.textContent).toContain('Your request has not been sent')
+    const start = await launchAction()
+    expect(start.disabled).toBe(true)
+    expect(container.querySelectorAll('.agent-pick[aria-pressed="true"]')).toHaveLength(0)
+    const explicit = container.querySelector<HTMLButtonElement>('.agent-pick')!
+    expect(explicit).not.toBeNull()
+    await act(async () => explicit.click())
+    expect(start.disabled).toBe(false)
+    expect(container.querySelectorAll('.agent-pick[aria-pressed="true"]')).toHaveLength(1)
+    expect(container.querySelector('.launch-surface')?.textContent).toContain('You chose')
+    await act(async () => start.click())
+    expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0]).toMatchObject({ scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我还不知道能做什么，可以了解我并给我建议吗？' })
+    expect(useAppStore.getState().tabs[tab.id]?.regions[tab.layout.activeRegionId]?.kind).toBe('agent')
+    expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 
   it('keeps an explicit Executor override and refuses a library Provider conflict without rewriting its body', async () => {
