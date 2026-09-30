@@ -26,6 +26,8 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex'), delay 
 const children = new Set(), connections = new Set(), deadline = Date.now() + 140_000
 const workspaceId = 'width-workspace', groupId = 'width-group', tabId = 'width-tab', agentRegionId = 'width-agent', fileRegionId = 'width-file'
 const draft = 'Keep the original width restart draft'
+const rulerJoin = process.argv.includes('--ruler-join')
+const joinPreferences = { mode: 'uniform', timeZone: 'America/New_York', intervalMinutes: 90, phaseMinutes: 1425 }
 const receipt = { schema: 'agentmux.focus-timeline-name-width-restart.v1', passed: false, processes: [], controls: [], cleanup: {},
   boundary: 'Existing ordinary production Main/preload/Renderer, public Core Provider and real private PTY. Controlled first-hydrate Focus timestamps are visit inputs, not execution duration. Repository CLI fixture, not vendor Writer or user installation. First process receives one initial seed; second receives none. No HOME environment reassignment, package, build or user Runtime.' }
 let client, session, originalRun, failure, interruption
@@ -105,7 +107,34 @@ async function launch(label, seed) {
   return { child, main, cdp, seedReport: seed ? JSON.parse(await readFile(reportFile, 'utf8')) : null }
 }
 async function surface(probe) {
-  return probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state, scene=document.querySelector('.recent-focus'), name=scene.querySelector('.recent-focus__ruler > .recent-focus__gutter').getBoundingClientRect(), handle=scene.querySelector('[aria-label="Resize timeline names"]');return{workbench:saved.restoredWorkbench,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],width:saved.focusTimelineNameWidth,renderedWidth:name.width,handle:handle.getAttribute('aria-valuenow'),tracks:[...scene.querySelectorAll('[data-focus-timeline-id]')].map(n=>n.dataset.focusTimelineId),projects:[...scene.querySelectorAll('[data-timeline-project]')].map(n=>n.dataset.timelineProject),height:saved.focusTimelineHeight,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length).map(n=>n.dataset.workbenchRegionId).sort()}})()`)
+  return probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state, scene=document.querySelector('.recent-focus'), name=scene.querySelector('.recent-focus__ruler > .recent-focus__gutter').getBoundingClientRect(), handle=scene.querySelector('[aria-label="Resize timeline names"]');return{workbench:saved.restoredWorkbench,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],width:saved.focusTimelineNameWidth,renderedWidth:name.width,handle:handle.getAttribute('aria-valuenow'),tracks:[...scene.querySelectorAll('[data-focus-timeline-id]')].map(n=>n.dataset.focusTimelineId),projects:[...scene.querySelectorAll('[data-timeline-project]')].map(n=>n.dataset.timelineProject),height:saved.focusTimelineHeight,ruler:saved.focusTimelineRuler,hours:Number(scene.querySelector('[aria-label=\"Focus window size\"]')?.value),mode:scene.dataset.rulerMode,zone:scene.dataset.timeZone,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length).map(n=>n.dataset.workbenchRegionId).sort()}})()`)
+}
+async function joinClick(probe, selector) {
+  await waitFor('actual join control can be hit: ' + selector, () => probe.cdp.evaluate(`(() => {const n=document.querySelector(${JSON.stringify(selector)});if(!n)return false;const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button,input')===n})()`))
+  const point = await probe.cdp.evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  for (const type of ['mousePressed','mouseReleased']) await probe.cdp.call('Input.dispatchMouseEvent', {type,...point,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1})
+}
+async function joinChange(probe, selector, value) {
+  await probe.cdp.evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw new Error('Missing actual join control');if(n instanceof HTMLSelectElement&&!Array.from(n.options).some(o=>o.value===${JSON.stringify(value)}))throw new Error('Nonexistent actual option');const proto=n instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(n,${JSON.stringify(value)});n.dispatchEvent(new Event('input',{bubbles:true}));n.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+}
+async function setJoinPreferences(probe) {
+  await probe.cdp.evaluate(`document.querySelector('[aria-label="Focus timeline settings"]').scrollIntoView({block:'nearest',inline:'nearest'})`)
+  await joinClick(probe, '[aria-label="Focus timeline settings"]')
+  await waitFor('actual ruler dialog',()=>probe.cdp.evaluate(`Boolean(document.querySelector('.focus-ruler-settings'))`))
+  await probe.cdp.evaluate(`Promise.all(document.getAnimations().filter(a=>a.playState==='running'&&(a.effect?.getComputedTiming().iterations??1)!==Infinity).map(a=>a.finished.catch(()=>{}))).then(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))))`)
+  await joinClick(probe, '[name="focus-ruler-mode"][value="uniform"]')
+  await joinChange(probe, '[aria-label="Focus timeline time zone"]', joinPreferences.timeZone)
+  await joinChange(probe, '[aria-label="Time ruler interval in minutes"]', String(joinPreferences.intervalMinutes))
+  await joinChange(probe, '[aria-label="Time ruler clock offset"]', '23:45')
+  await joinClick(probe, '.focus-ruler-settings footer button:last-child')
+  const value=await waitFor('actual selected preferences persisted',async()=>{const value=await surface(probe);return JSON.stringify(value.ruler)===JSON.stringify(joinPreferences)?value:null})
+  assert.equal(value.mode,'uniform');assert.equal(value.zone,joinPreferences.timeZone);return value
+}
+async function joinShot(probe,name) {
+  await probe.cdp.evaluate(`Promise.all([document.fonts.ready,...document.getAnimations().filter(a=>a.playState==='running'&&(a.effect?.getComputedTiming().iterations??1)!==Infinity).map(a=>a.finished.catch(()=>{}))]).then(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))))`)
+  const image=await probe.cdp.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true})
+  const imagePath=join(output,name+'.png');await writeFile(imagePath,Buffer.from(image.data,'base64'))
+  receipt.images??=[];receipt.images.push({path:name+'.png',sha256:digest(await readFile(imagePath)),state:await surface(probe),pid:probe.child.pid})
 }
 async function actualTerminal(probe) {
   const { cdp } = probe; await cdp.call('Debugger.enable')
@@ -187,12 +216,19 @@ try {
   const first = await launch('first', seed), before = await surface(first)
   assert.equal(before.width, 112); assert.equal(before.renderedWidth, 112); assert.equal(before.draft, draft); assert.ok(before.tracks.includes(session.agentSessionId)); assert.ok(before.projects.length > 0)
   receipt.seedReport = first.seedReport
+  if(rulerJoin){
+    assert.equal(before.hours,4)
+    await joinChange(first,'[aria-label=\"Focus window size\"]','6')
+    const preferred=await setJoinPreferences(first);assert.equal(preferred.hours,6);assert.equal(preferred.width,112);assert.deepEqual(preferred.workbench,before.workbench);assert.equal(preferred.draft,draft)
+    receipt.joinInitial={before,preferred};
+  }
   await waitFor('first original Run is input ready', async () => { const value = await inspectRegion(); return value.terminalView?.liveReady && value.terminalView.acceptsInput ? value : null })
   const widthRunBefore = await run()
   const originalTerminal = await actualTerminal(first), edited = await adjust(first, 244), laterTerminal = await actualTerminal(first)
   const same = await first.cdp.call('Runtime.callFunctionOn', { objectId: originalTerminal, arguments: [{ objectId: laterTerminal }], functionDeclaration: 'function(current){return this===current}', returnByValue: true })
   assert.equal(same.exceptionDetails, undefined); assert.equal(same.result.value, true); receipt.sameProcessXtermPreserved = true
   assert.deepEqual(edited.workbench, before.workbench); assert.deepEqual(edited.focus, before.focus); assert.equal(edited.draft, draft); assert.equal(edited.height, before.height)
+  if(rulerJoin){assert.deepEqual(edited.ruler,joinPreferences);assert.equal(edited.hours,6);await joinChange(first,'[aria-label=\"Focus window size\"]','4');await waitFor('first returns actual local4h',async()=>{const value=await surface(first);return value.hours===4?value:null});await joinShot(first,'ordinary-first-prefs-width')}
   const widthRunAfter = await run()
   assert.equal(widthRunAfter.acceptedInputBytes, widthRunBefore.acceptedInputBytes, 'Queries and width adjustment never submit the draft')
   receipt.widthInputBoundary = { beforeByte: widthRunBefore.acceptedInputBytes, afterByte: widthRunAfter.acceptedInputBytes, permitsOriginalAttachProtocol: true }
@@ -203,6 +239,7 @@ try {
   receipt.originalRunAfterQuit = preservedAfterQuit
   await writeFile(join(output, 'second-process-restored-checkpoint.json'), JSON.stringify(receipt, null, 2) + '\n')
   assert.equal(restored.width, 244); assert.equal(restored.renderedWidth, 244); assert.deepEqual(restored.workbench, edited.workbench); assert.deepEqual(restored.focus, edited.focus); assert.equal(restored.draft, draft); assert.equal(restored.height, before.height); assert.deepEqual(restored.tracks, edited.tracks)
+  if(rulerJoin){assert.deepEqual(restored.ruler,joinPreferences);assert.equal(restored.mode,'uniform');assert.equal(restored.zone,joinPreferences.timeZone);assert.equal(restored.hours,4);receipt.rulerPreferencesRestored=true;receipt.hoursBoundary={firstEdited:6,firstBeforeQuit:4,second:restored.hours,changedHourDurable:false};await joinShot(second,'ordinary-second-restored-prefs-width')}
   const inspected = await waitFor('restored same Run is input ready', async () => { const value = await inspectRegion(); return value.terminalView?.liveReady && value.terminalView.acceptsInput ? value : null })
   receipt.restoredRegion = { kind: inspected.kind, agentSessionId: inspected.agentSessionId,
     terminalView: { runId: inspected.terminalView.runId, liveReady: inspected.terminalView.liveReady, acceptsInput: inspected.terminalView.acceptsInput } }

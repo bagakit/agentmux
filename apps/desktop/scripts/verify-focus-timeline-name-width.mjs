@@ -46,7 +46,7 @@ try {
     assert.equal(run(mutation, undefined, mutation).tests, baseline.tests)
     assert.equal(run(`${mutation}-exact-restore`).tests, baseline.tests)
   }
-  run('adjacent-resize-and-reading', [process.execPath, 'node_modules/vitest/vitest.mjs', 'run', 'apps/desktop/test/project-rail-resize.test.tsx', 'apps/desktop/test/focus-timeline-navigation.test.tsx', 'apps/desktop/test/recent-focus-timeline.test.tsx', '--maxWorkers=1'])
+  run('adjacent-resize-and-reading', [process.execPath, 'node_modules/vitest/vitest.mjs', 'run', '--config', 'apps/desktop/scripts/fixtures/focus-timeline-name-width/vitest.adjacent.config.mts', 'apps/desktop/test/project-rail-resize.test.tsx', 'apps/desktop/test/focus-timeline-navigation.test.tsx', 'apps/desktop/test/recent-focus-timeline.test.tsx', '--maxWorkers=1'])
   run('production-types', [process.execPath, 'node_modules/typescript/bin/tsc', '--noEmit', '-p', 'apps/desktop/tsconfig.json'])
   run('owning-types', [process.execPath, 'node_modules/typescript/bin/tsc', '--noEmit', '-p', 'apps/desktop/scripts/fixtures/focus-timeline-name-width/tsconfig.owning.json'])
   const callers = { RecentFocusTimeline: [productPaths[5], '<RecentFocusTimeline '], useSidebarResize: [productPaths[0], 'useSidebarResize<HTMLDivElement>({'], setFocusTimelineNameWidth: [productPaths[0], 'state.setFocusTimelineNameWidth'], clampFocusTimelineNameWidth: [productPaths[1], 'clampFocusTimelineNameWidth(persisted.focusTimelineNameWidth)'] }

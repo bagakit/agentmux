@@ -25,6 +25,9 @@ const binding = () => Object.fromEntries(paths.map(path => [path, hash(readFileS
 const option = process.argv.indexOf('--slice')
 const slice = option < 0 ? 'axis' : process.argv[option + 1]
 assert.ok(['source', 'axis', 'join'].includes(slice), 'Use --slice source, axis or join')
+if (slice === 'join') {
+  await import('./verify-focus-timeline-join.mjs')
+} else {
 const receipt = {
   schema: 'agentmux.focus-timeline-ruler-qualification.v1', passed: false, sourcePass: false,
   taskDone: false, slice, before: binding(), stages: [],
@@ -116,18 +119,13 @@ try {
       assert.ok(review.value.viewedImages.some(viewed => viewed.sha256 === image.sha256 && viewed.observation?.trim().length > 0))
     }
     receipt.build = build; receipt.scene = scene; receipt.visualReview = review
-    if (slice === 'join') {
-      const width = artifact('AGENTMUX_FOCUS_RULER_WIDTH_RECEIPT')
-      const navigation = artifact('AGENTMUX_FOCUS_RULER_NAVIGATION_RECEIPT')
-      assert.equal(width.value.passed, true); assert.equal(navigation.value.passed, true)
-      assert.ok(width.value.restart?.passed, 'Exact-candidate ordinary restart is required for the join')
-      for (const path of paths.slice(0, 7)) assert.equal(width.value.inputs[path], receipt.before[path])
-      receipt.width = width; receipt.navigation = navigation
-    }
+
   }
   receipt.after = binding(); assert.deepEqual(receipt.after, receipt.before); receipt.passed = true
 } catch (error) {
   receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1
 } finally {
   save(); console.log(JSON.stringify({ passed: receipt.passed, sourcePass: receipt.sourcePass, taskDone: receipt.taskDone, receipt: relative(root, resolve(output, 'receipt.json')) }))
+}
+
 }

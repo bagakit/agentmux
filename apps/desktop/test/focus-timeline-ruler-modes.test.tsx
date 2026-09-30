@@ -253,3 +253,77 @@ it('keeps ninety real reader records, original body/Range and opaque reading sco
   expect(viewport.scrollTop).toBe(37); expect(viewport.scrollLeft).toBe(23); expect(h.range()).toEqual(initialRange)
   expect(useAppStore.getState().agentComposerDrafts).toEqual({ original: 'Keep this draft' }); expect(h.connect.mock.calls).toEqual([])
 })
+
+
+it('joins real name-width gestures, eleven window presets and three settings modes without losing bounded reading or selected text', async () => {
+  const h = await mountedTimeline()
+  await act(async () => useAppStore.getState().setFocusTimelineNameWidth(112))
+  await h.click('View input records')
+  await h.wait(() => expect(document.querySelector('[aria-label="Input records Context"] option[value="retired-ruler"]')).not.toBeNull())
+  await act(async () => {
+    const select = document.querySelector<HTMLSelectElement>('[aria-label="Input records Context"]')!
+    select.value = 'retired-ruler'; select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await h.wait(() => expect(document.querySelectorAll('[data-input-message-id]').length).toBe(90))
+  expect(h.page.mock.calls).toHaveLength(3)
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-input-message-id]')!.click())
+  const body = document.querySelector<HTMLElement>('.recent-focus__message-body')!
+  expect(body).not.toBeNull()
+  const text = body.querySelector('.log-turn__text')!.firstChild!, originalRange = document.createRange()
+  originalRange.selectNodeContents(text); document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(originalRange)
+  const selected = document.getSelection()!.toString(); expect(selected.length).toBeGreaterThan(0)
+  const viewport = h.element.querySelector<HTMLElement>('.recent-focus__viewport')!
+  viewport.scrollTop = 37; viewport.scrollLeft = 23
+  const before = h.counts(), initialRecords = [...document.querySelectorAll<HTMLElement>('[data-input-message-id]')].map(node => node.dataset.inputMessageId)
+  expect(initialRecords).toHaveLength(90)
+  const preserve = () => {
+    expect(document.querySelector('.recent-focus__message-body')).toBe(body)
+    expect(document.getSelection()!.getRangeAt(0)).toBe(originalRange)
+    expect(document.getSelection()!.toString()).toBe(selected)
+    expect(viewport.scrollTop).toBe(37); expect(viewport.scrollLeft).toBe(23)
+    expect(useAppStore.getState().agentComposerDrafts).toEqual({ original: 'Keep this draft' })
+    expect(h.connect.mock.calls).toEqual([])
+  }
+  const apply = async (mode: FocusRulerPreferences['mode'], zone: string) => {
+    await h.click('Focus timeline settings')
+    await act(async () => document.querySelector<HTMLInputElement>(`[name="focus-ruler-mode"][value="${mode}"]`)!.click())
+    await act(async () => {
+      const input = document.querySelector<HTMLSelectElement>('[aria-label="Focus timeline time zone"]')!
+      input.value = zone; input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Apply')!.click())
+    expect(useAppStore.getState().focusTimelineRuler).toEqual(prefs(zone, { mode }))
+  }
+  const separator = h.element.querySelector<HTMLElement>('[aria-label="Resize timeline names"]')!
+  expect(separator).not.toBeNull()
+  await act(async () => separator.dispatchEvent(new MouseEvent('mousedown', { clientX: 112, button: 0, bubbles: true, cancelable: true })))
+  await act(async () => { window.dispatchEvent(new MouseEvent('mousemove', { clientX: 244 })); await new Promise(requestAnimationFrame) })
+  expect(useAppStore.getState().focusTimelineNameWidth).toBe(112)
+  await act(async () => window.dispatchEvent(new MouseEvent('mouseup')))
+  expect(useAppStore.getState().focusTimelineNameWidth).toBe(244); preserve()
+  const sizes = h.element.querySelector<HTMLSelectElement>('[aria-label="Focus window size"]')!
+  const values = ['0.5', '1', '2', '4', '6', '8', '12', '18', '24', '36', '48']
+  expect([...sizes.options].map(option => option.value)).toEqual(values)
+  for (const [mode, zone] of [['daily', 'UTC'], ['uniform', 'America/New_York'], ['free', 'Asia/Shanghai']] as const) {
+    await apply(mode, zone); preserve()
+    for (const value of values) {
+      await act(async () => { sizes.value = value; sizes.dispatchEvent(new Event('change', { bubbles: true })) })
+      expect(Number(h.range()[1]) - Number(h.range()[0])).toBe(Number(value) * 3_600_000)
+      expect(sizes.value).toBe(value); expect(useAppStore.getState().focusTimelineNameWidth).toBe(244)
+      expect(useAppStore.getState().focusTimelineRuler).toEqual(prefs(zone, { mode }))
+      expect(h.counts()).toEqual(before); preserve()
+    }
+  }
+  expect([...document.querySelectorAll<HTMLElement>('[data-input-message-id]')].map(node => node.dataset.inputMessageId)).toEqual(initialRecords)
+  const earlier = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Read earlier records')!
+  expect(earlier).not.toBeNull(); expect(earlier.disabled).toBe(false)
+  const priorCursor = h.page.mock.calls.at(-1)![1]!.cursor
+  expect(typeof priorCursor).toBe('string')
+  await act(async () => earlier.click())
+  await h.wait(() => expect(h.page.mock.calls.length).toBeGreaterThan(3))
+  await h.wait(() => expect(document.querySelectorAll('[data-input-message-id]').length).toBe(90))
+  expect(h.page.mock.calls[3]![1]!.cursor).not.toBe(priorCursor)
+  expect([...document.querySelectorAll<HTMLElement>('[data-input-message-id]')].map(node => node.dataset.inputMessageId)).not.toEqual(initialRecords)
+  expect(document.querySelectorAll('[data-input-message-id]')).toHaveLength(90)
+  preserve()
+})
