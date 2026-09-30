@@ -9,12 +9,13 @@ import { build } from 'vite'
 import { listProbeProcesses, stopProbeProcesses, runProbeProcess } from './probe-process.mjs'
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), fixture=join(desktop,'scripts/fixtures/goals-surface')
 const require=createRequire(import.meta.url),exec=promisify(execFile),hash=bytes=>createHash('sha256').update(bytes).digest('hex')
-assert.ok(process.argv.slice(2).every(flag=>['--common-actions','--full-workflow','--corrections-only','--focus-only','--maturity','--before-only','--legibility-only','--width-only','--return-only','--density-only','--density-before-only','--direct-goal-only','--direct-reading-only','--project-links-only','--goal-main-mote-only'].includes(flag)),'Unknown Goals capture flag')
+assert.ok(process.argv.slice(2).every(flag=>['--common-actions','--full-workflow','--corrections-only','--focus-only','--maturity','--before-only','--legibility-only','--width-only','--return-only','--density-only','--density-before-only','--direct-goal-only','--direct-reading-only','--project-links-only','--project-file-display-only','--goal-main-mote-only'].includes(flag)),'Unknown Goals capture flag')
 const directReading=process.argv.includes('--direct-reading-only')
 const direct=process.argv.includes('--direct-goal-only')||directReading
 const mainMote=process.argv.includes('--goal-main-mote-only')
 assert.ok(!mainMote || process.argv.slice(2).length === 1, 'Main Mote capture is one explicit bounded mode')
-const links=process.argv.includes('--project-links-only')
+const fileDisplayOnly=process.argv.includes('--project-file-display-only')
+const links=process.argv.includes('--project-links-only')||fileDisplayOnly
 assert.ok(!links || process.argv.slice(2).length === 1, 'Project links capture is one explicit bounded mode')
 assert.ok(!direct || process.argv.slice(2).length === 1, 'Direct Goal capture is one explicit bounded mode')
 const density=process.argv.includes('--density-only')||process.argv.includes('--density-before-only')
@@ -37,7 +38,7 @@ if(mainMote||direct)ownedSources.push('../../packages/core/src/agent-message-ren
 const sourceHashes = async () => Object.fromEntries(await Promise.all(ownedSources.map(async file => [file, hash(await readFile(join(desktop, file)))])))
 // Default proof follows the current Goals entry acceptance; the broader detail workflow remains explicit.
 const mode=mainMote?'goal-main-mote':links?'project-links':direct?'direct-goal':density?'density':process.argv.includes('--maturity')?'maturity':process.argv.includes('--common-actions')?'common-actions':process.argv.includes('--full-workflow')?'full-workflow':'entry-controls'
-const result={schema:'agentmux.goals-visual-capture.v1',captureOnly:true,readingOnly:directReading,aestheticReview:'not-performed',mode,passed:false,userRunTouched:false}
+const result={schema:'agentmux.goals-visual-capture.v1',captureOnly:true,fileDisplayOnly,readingOnly:directReading,aestheticReview:'not-performed',mode,passed:false,userRunTouched:false}
 try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=process.env.AGENTMUX_GOALS_SOURCE_COMMIT||(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
   result.sourceBefore=await sourceHashes()
@@ -48,7 +49,7 @@ try{
   const compiled={};for(const entry of await readdir(outDir,{recursive:true,withFileTypes:true})){if(entry.isFile()){const p=join(entry.parentPath,entry.name);compiled[p.slice(outDir.length+1)]=hash(await readFile(p))}}
   assert.ok(Object.keys(compiled).length>0);await writeFile(join(evidence,'compiled.json'),JSON.stringify(compiled,null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const log=[]
-  result.outcome=await runProbeProcess(require('electron'),[join(fixture,['maturity','density','direct-goal','project-links','goal-main-mote'].includes(mode)?'maturity.cjs':mode==='common-actions'?'common-actions.cjs':mode==='full-workflow'?'main.cjs':'controls.cjs'),join(outDir,'index.html'),privateRoot,evidence,...(mainMote?['goal-main-mote-only']:links?['project-links-only']:direct?[directReading?'direct-reading-only':'direct-goal-only']:density?[process.argv.includes('--density-before-only')?'density-before-only':'density-only',densityBaseline]:process.argv.includes('--before-only')?['before-only']:process.argv.includes('--legibility-only')?['legibility-only']:process.argv.includes('--width-only')?['width-only']:process.argv.includes('--return-only')?['return-only']:process.argv.includes('--corrections-only')?['corrections-only']:process.argv.includes('--focus-only')?['focus-only']:[])],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:60000,onLine:line=>log.push(line)})
+  result.outcome=await runProbeProcess(require('electron'),[join(fixture,['maturity','density','direct-goal','project-links','goal-main-mote'].includes(mode)?'maturity.cjs':mode==='common-actions'?'common-actions.cjs':mode==='full-workflow'?'main.cjs':'controls.cjs'),join(outDir,'index.html'),privateRoot,evidence,...(mainMote?['goal-main-mote-only']:links?[fileDisplayOnly?'project-file-display-only':'project-links-only']:direct?[directReading?'direct-reading-only':'direct-goal-only']:density?[process.argv.includes('--density-before-only')?'density-before-only':'density-only',densityBaseline]:process.argv.includes('--before-only')?['before-only']:process.argv.includes('--legibility-only')?['legibility-only']:process.argv.includes('--width-only')?['width-only']:process.argv.includes('--return-only')?['return-only']:process.argv.includes('--corrections-only')?['corrections-only']:process.argv.includes('--focus-only')?['focus-only']:[])],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:60000,onLine:line=>log.push(line)})
   await writeFile(join(evidence,'process.log'),log.join('\n'));
   const renderBytes=await readFile(join(evidence,'render.json'),'utf8').catch(error=>{if(error.code==='ENOENT')return null;throw error})
   assert.ok(renderBytes, `Private Renderer did not return a render receipt (exit=${result.outcome.exitCode}, timedOut=${result.outcome.timedOut}); inspect process.log and phase.json`)
