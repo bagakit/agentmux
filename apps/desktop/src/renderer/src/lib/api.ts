@@ -1094,6 +1094,11 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(browser)
     },
     listProfiles: async () => structuredClone(mockBrowserProfiles),
+    // Web preview has no Main durable history owner; never present memory-only history as saved.
+    listInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
+    recordInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
+    removeInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
+    clearInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     createProfile: async (label) => {
       const profile: BrowserProfileSummary = {
         id: crypto.randomUUID(),

@@ -52,6 +52,8 @@ import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserRe
 import type { BrowserStepEvidenceRead } from './browser-step-evidence'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from './browser-result-artifact'
 import type { BrowserDemonstrationState } from './browser-demonstration'
+import type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
+export type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistoryEntry, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from './browser-task-assets'
 export type { BrowserStepEvidenceRead } from './browser-step-evidence'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
@@ -1540,6 +1542,11 @@ export type AgentMuxDesktopApi = {
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
     importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
+    /** Explicit human address/search submissions only; page navigation never records here. */
+    listInputHistory(target: BrowserInputHistoryTarget): Promise<BrowserInputHistorySnapshot>
+    recordInputHistory(target: BrowserInputHistoryTarget, text: string): Promise<BrowserInputHistoryRecord>
+    removeInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string): Promise<BrowserInputHistorySnapshot>
+    clearInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope): Promise<BrowserInputHistorySnapshot>
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     captureScreenshot(id: string): Promise<BrowserScreenshotCapture>
