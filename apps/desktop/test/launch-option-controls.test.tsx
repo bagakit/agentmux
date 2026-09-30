@@ -12,7 +12,7 @@ beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = 
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
 function Fixture({ declarations = options, naming = false }: { declarations?: LaunchOption[]; naming?: boolean }) {
   const [expanded, setExpanded] = useState(false), [selection, setSelection] = useState<LaunchOptionSelection>({}), [names, setNames] = useState({ agentName: '', tabName: '' })
-  return <LaunchRefine options={declarations} selection={selection} expanded={expanded} onToggle={() => setExpanded(value => !value)} onSelect={(id, choice) => { selected(id, choice); setSelection(choice === null ? {} : { [id]: choice }) }}
+  return <LaunchRefine options={declarations} selection={selection} expanded={expanded} active={true} onToggle={() => setExpanded(value => !value)} onSelect={(id, choice) => { selected(id, choice); setSelection(choice === null ? {} : { [id]: choice }) }}
     {...(naming ? { names, onNameChange: (field: 'agentName' | 'tabName', value: string) => setNames(current => ({ ...current, [field]: value })) } : {})} />
 }
 async function mount(declarations = options, naming = false) { await act(async () => root.render(<Fixture declarations={declarations} naming={naming} />)) }

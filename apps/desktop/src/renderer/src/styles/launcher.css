@@ -10,8 +10,10 @@
 .launcher-environment__host { flex: none; max-width: 42%; min-width: 0; min-height: 32px; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); font: var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
 .launcher-environment__host > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .launcher-environment__host > svg { flex: none; }
+.launcher-environment__host > svg:last-child, .launcher-other-agents > svg, .launcher-mote__target > svg:last-child { transition: transform var(--dur-fast) var(--ease-enter); }
 .launcher-environment__host:hover, .launcher-environment__host[data-state='open'] { color: var(--text); background: var(--surface-2); border-color: var(--line); }
 .launcher-environment__host[data-state='open'] > svg:last-child { transform: rotate(180deg); }
+.launcher-other-agents[aria-expanded='true'] > svg, .launcher-mote__target[aria-expanded='true'] > svg:last-child { transform: rotate(180deg); }
 .launcher-environment__panel { position: fixed; z-index: var(--layer-popover); width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: var(--sp-6); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text); background: var(--surface-2); box-shadow: var(--elev-3), var(--hl); }
 .launcher-environment__panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-5); }
 .launcher-environment__identity { min-width: 0; display: flex; align-items: center; gap: var(--sp-5); }
@@ -35,12 +37,13 @@
 .launcher-agent-entry small { overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
 .launcher-section-actions { flex: none; display: inline-flex; gap: var(--sp-1); align-items: center; }
 .launcher-section-actions .icon-button { width: 26px; height: 26px; color: var(--text-3); }
-.agent-catalog { max-height: 104px; overflow-y: auto; overscroll-behavior: contain; margin-bottom: var(--sp-5); }
-.agent-picks { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-catalog { max-height: 104px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2) var(--sp-2) var(--sp-6); margin-top: calc(-1 * var(--sp-2)); margin-bottom: 0; }
+.agent-picks { position: relative; isolation: isolate; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-picks > button, .agent-picks > .agent-catalog__empty { position: relative; z-index: 1; }
 .agent-pick { min-width: 0; max-width: 100%; min-height: 32px; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-2); background: transparent; font: inherit; cursor: pointer; }
 .agent-pick strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 550; }
 .agent-pick:hover { color: var(--text); background: var(--surface-1); }
-.agent-pick--selected { color: var(--text); background: var(--surface-2); border-color: var(--line); box-shadow: var(--hl); }
+.agent-pick--selected, .agent-pick--selected:hover { color: var(--text); background: transparent; border-color: transparent; box-shadow: none; }
 .agent-pick--selected strong { font-weight: 650; }
 .agent-pick__check { flex: none; color: var(--green); }
 .agent-pick__unconfirmed { color: var(--amber); font-size: var(--fs-meta); }
@@ -53,6 +56,7 @@
 .launch-surface .launcher-composer:focus-within { border-color: var(--focus-line); background: var(--surface-1); }
 .launcher-tools { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0 0; }
 .launcher-tools > div { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.launcher-tools > div:first-child { padding: var(--sp-2); margin: calc(-1 * var(--sp-2)); }
 .launch-surface__footer { min-height: 36px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-5); margin-top: var(--sp-5); }
 .launcher-primary-actions { display: inline-flex; align-items: center; gap: var(--sp-3); }
 .launch-surface .launcher-launch-button { min-height: 32px; min-width: 88px; padding: var(--sp-3) var(--sp-5); border: 1px solid transparent; border-radius: var(--radius); background: var(--green); box-shadow: none; font-weight: 600; }
@@ -95,13 +99,13 @@
 .launcher-terminal-pending { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) 0; color: var(--text-3); font-size: var(--fs-meta); }
 .launch-surface-quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-6); }
 .launch-surface-quick-grid > [data-mode='expanded'], .launch-surface-quick-grid > [data-closing='true'] { grid-column: 1 / -1; }
-.launcher-browser-input { display: flex; min-width: 0; min-height: 40px; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-3); background: var(--surface-1); animation: launcher-browser-open 180ms ease-out; }
+.launcher-browser-input { display: flex; min-width: 0; min-height: 40px; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-3); background: var(--surface-1); animation: launcher-browser-open var(--dur-enter) var(--ease-enter); }
 .launcher-browser-input > svg { flex: none; }
 .launcher-browser-field { flex: 1; min-width: 0; display: flex; }
 .launcher-browser-input input { min-width: 0; flex: 1; width: 100%; border: 0; padding: var(--sp-2) 0; background: transparent; color: var(--text); outline: none; font: var(--fs-meta)/1.5 var(--font-sans); }
 .launcher-browser-input:focus-within { border-color: var(--focus-line); }
 .launcher-browser-input input::placeholder { color: var(--text-3); }
-.launcher-browser[data-closing='true'] .launcher-browser-input { animation: launcher-browser-close 180ms ease-in forwards; }
+.launcher-browser[data-closing='true'] .launcher-browser-input { animation: launcher-browser-close var(--dur-enter) var(--ease-enter) forwards; }
 @keyframes launcher-browser-close { from { opacity: 1; clip-path: inset(0 0 0 0 round var(--radius)); } to { opacity: 0; clip-path: inset(0 28% 0 0 round var(--radius)); } }
 @keyframes launcher-browser-open { from { opacity: 0; clip-path: inset(0 28% 0 0 round var(--radius)); } to { opacity: 1; clip-path: inset(0 0 0 0 round var(--radius)); } }
 .launcher-note-composer { margin-top: var(--sp-2); min-height: 6rem; max-height: 10rem; }
@@ -148,5 +152,23 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
   .launcher-agent-entry { flex-basis: 100%; }
   .launcher-agents-head > .launcher-section-actions { margin-left: auto; }
 }
-@media (prefers-reduced-motion: reduce) { .launcher-browser-input, .launcher-browser[data-closing='true'] .launcher-browser-input { animation: none; } }
+/* One short functional response, using the same scale as Settings. Native controls keep input. */
+.launch-surface button, .launcher-environment__panel button, .launch-refine__panel button { transition: color var(--dur-fast) var(--ease-enter), background-color var(--dur-fast) var(--ease-enter), border-color var(--dur-fast) var(--ease-enter), box-shadow var(--dur-fast) var(--ease-enter); }
+.launch-surface button:active:not(:disabled), .launcher-environment__panel button:active:not(:disabled), .launch-refine__panel button:active:not(:disabled) { box-shadow: inset 0 1px 2px var(--scrim-1); }
+.launch-surface button:focus-visible, .launcher-environment__panel button:focus-visible, .launch-refine__panel button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.launcher-environment__panel[data-state='open'], .launch-refine__panel[data-state='open'] { animation: launcher-panel-in var(--dur-enter) var(--ease-enter); }
+.launcher-environment__panel[data-state='closed'], .launch-refine__panel[data-state='closed'] { animation: launcher-panel-out var(--dur-enter) var(--ease-enter); pointer-events: none; }
+@keyframes launcher-panel-in { from { opacity: 0; transform: translateY(4px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes launcher-panel-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(4px) scale(.98); } }
+.launch-surface[data-motion-active='true'] :is(.agent-catalog, .launcher-composer, .launcher-tools, .launch-surface__footer) { animation: settings-pane-in var(--dur-enter) var(--ease-enter); }
+.launch-surface[data-motion-active='false'] :is(.agent-catalog, .launcher-composer, .launcher-tools, .launch-surface__footer),
+.launch-surface[data-motion-active='false'] .launcher-browser-input, .launch-surface[data-motion-active='false'] .launcher-browser[data-closing='true'] .launcher-browser-input,
+[hidden] .launch-surface :is(.agent-catalog, .launcher-composer, .launcher-tools, .launch-surface__footer), [inert] .launch-surface :is(.agent-catalog, .launcher-composer, .launcher-tools, .launch-surface__footer),
 [hidden] .launcher-browser-input, [inert] .launcher-browser-input, [hidden] .launcher-browser[data-closing='true'] .launcher-browser-input, [inert] .launcher-browser[data-closing='true'] .launcher-browser-input { animation: none; }
+.launch-surface[data-motion-active='false'] button, .launch-surface[data-motion-active='false'] button > svg, [hidden] .launch-surface button, [inert] .launch-surface button { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .launch-surface[data-motion-active='true'] :is(.agent-catalog, .launcher-composer, .launcher-tools, .launch-surface__footer),
+  .launcher-browser-input, .launcher-browser[data-closing='true'] .launcher-browser-input,
+  .launcher-environment__panel[data-state='open'], .launcher-environment__panel[data-state='closed'], .launch-refine__panel[data-state='open'], .launch-refine__panel[data-state='closed'] { animation: none; }
+  .launch-surface button, .launch-surface button > svg, .launcher-environment__panel button, .launch-refine__panel button { transition: none; }
+}

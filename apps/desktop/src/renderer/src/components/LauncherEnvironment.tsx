@@ -1,5 +1,5 @@
 import { ChevronDown, Folder, RadioTower, SquareTerminal, X } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
@@ -8,11 +8,12 @@ import { hostCheckLabel } from '../lib/host-check'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** The existing Host facts are read on demand; this surface does not check or change execution. */
-export function LauncherEnvironment({ workspace, host, check, displayPath }: {
+export function LauncherEnvironment({ workspace, host, check, displayPath, active }: {
   workspace: WorkspaceRecord | undefined
   host: HostConfig | undefined
   check: HostCheckState | undefined
   displayPath: string
+  active: boolean
 }) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -20,9 +21,10 @@ export function LauncherEnvironment({ workspace, host, check, displayPath }: {
   const label = host?.label ?? workspace?.hostId ?? 'No host'
   const kind = host?.kind === 'local' ? 'Local host' : host?.kind === 'ssh' ? 'SSH host' : 'Host unconfirmed'
   const Icon = host?.kind === 'ssh' ? RadioTower : SquareTerminal
+  useEffect(() => { if (!active) setOpen(false) }, [active])
   useLayoutEffect(() => {
     const anchor = trigger.current
-    if (!open || !anchor || !panel) return
+    if (!active || !open || !anchor || !panel) return
     let disposed = false
     const position = async () => {
       const result = await computePosition(anchor, panel, { placement: 'bottom-end', strategy: 'fixed',
@@ -31,21 +33,22 @@ export function LauncherEnvironment({ workspace, host, check, displayPath }: {
     }
     const stop = autoUpdate(anchor, panel, () => { void position() })
     return () => { disposed = true; stop() }
-  }, [open, panel])
+  }, [active, open, panel])
 
   return <header className="launcher-environment">
     <div className="launcher-environment__project"><Folder size={20} /><div>
       <h2 title={workspace?.name}>{workspace?.name ?? 'Choose a workspace'}</h2>
       <span className="launcher-environment__path" title={workspace?.path}>{displayPath || 'No working directory selected'}</span>
     </div></div>
-    <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} aria-label="Runtime environment" title={`${kind} · ${label}`}>
+    <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
+      <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} disabled={!active} aria-label="Runtime environment" title={`${kind} · ${label}`}>
         <Icon size={14} /><span>{label}</span><ChevronDown size={12} />
       </button></Dialog.Trigger>
-      <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-        <Dialog.Content ref={setPanel} className="launcher-environment__panel" style={{ visibility: 'hidden' }}>
+      {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+        <Dialog.Content ref={setPanel} className="launcher-environment__panel" inert={!open} style={{ visibility: 'hidden' }}
+          onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
           <header><div className="launcher-environment__identity"><Icon size={18} /><div><Dialog.Title>{label}</Dialog.Title><Dialog.Description>{kind}</Dialog.Description></div></div>
-            <Dialog.Close className="icon-button" aria-label="Close runtime environment"><X size={14} /></Dialog.Close></header>
+            <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><X size={14} /></Dialog.Close></header>
           <dl>
             <div><dt>Working directory</dt><dd className="launcher-environment__directory" title={workspace?.path}>{displayPath || 'Not selected'}</dd></div>
             {host?.kind === 'ssh' ? <div><dt>Address</dt><dd>{host.user ? `${host.user}@` : ''}{host.hostname}{host.port ? `:${host.port}` : ''}</dd></div> : null}
@@ -54,7 +57,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath }: {
           </dl>
           <p className="launcher-environment__availability">Isolated environments are not supported yet.</p>
         </Dialog.Content>
-      </Dialog.Portal>
+      </Dialog.Portal> : null}
     </Dialog.Root>
   </header>
 }
