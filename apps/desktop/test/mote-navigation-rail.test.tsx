@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { useAppStore } from '../src/renderer/src/store'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { allStyleRules } from './helpers/styles'
 import { createMoteApp, moteClick, motePointer, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customAgent, customMoteId, customTab, defaultAgent, defaultTab, executionAgent, moteTopics, ordinaryTopicId, quietMoteId, savedMoteKey, scratchWorkspace } from './fixtures/mote-workface'
@@ -23,6 +25,28 @@ function mode(value: 'cards' | 'avatars') {
 }
 
 describe('actual Mote navigation rail and original Workbench', () => {
+  it.each([true, false])('the mounted primary card distinguishes retained Agent facts from a cold launcher (retained=%s)', async retained => {
+    const discussion = { ...createWorkbenchTab('new-primary-discussion', { kind: 'launcher', regionId: 'new-primary-region', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
+    const before = useAppStore.getState()
+    const tabs = Object.fromEntries(Object.entries(before.tabs).filter(([, tab]) => retained || tab.topicId !== PMO_TEAMS_TOPIC_ID))
+    const layout = before.layouts[SCRATCH_WORKSPACE_ID]!
+    useAppStore.setState({ tabs: { ...tabs, [discussion.id]: discussion }, sessions: before.sessions.filter(session => session.workspacePath !== defaultAgent.workspacePath),
+      layouts: { ...before.layouts, [SCRATCH_WORKSPACE_ID]: { ...layout, groups: layout.groups.map(group => ({ ...group, tabOrder: [...group.tabOrder.filter(id => tabs[id]), discussion.id], recentTabIds: [...group.recentTabIds.filter(id => tabs[id]), discussion.id], activeTabId: discussion.id })) } },
+      agentComposerDrafts: { ...before.agentComposerDrafts, 'new-primary-region': '完整的未发送请求' } })
+    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: discussion.id }))
+    await app.mount()
+    const card = choice(PMO_TEAMS_TOPIC_ID)
+    expect(card.dataset.moteTargetTab).toBe(discussion.id)
+    expect(card.dataset.moteStatus).toBe(retained ? 'Status unknown' : 'No Agent yet')
+    expect(card.querySelector('.mote-chooser__status-text')?.textContent).toBe(retained ? 'Primary · Status unknown' : 'Primary · No Agent yet')
+    expect(card.querySelector('[data-mote-availability]')?.getAttribute('data-mote-availability')).toBe(retained ? 'restoring' : 'no-agent')
+    if (retained) expect(useAppStore.getState().tabs[defaultTab.id]).toBe(defaultTab)
+    expect(useAppStore.getState().tabs[discussion.id]).toBe(discussion)
+    expect(useAppStore.getState().agentComposerDrafts['new-primary-region']).toBe('完整的未发送请求')
+    expect(useAppStore.getState().agentFocus.execution).toBe(before.agentFocus.execution)
+    expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled()
+  })
+
   it('presents every real Mote with its own full identity and status in both modes', async () => {
     await app.mount(); await app.hover(); mode('cards')
     expect(choices().map(button => button.dataset.moteTopicId)).toEqual([PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId])
@@ -38,7 +62,7 @@ describe('actual Mote navigation rail and original Workbench', () => {
     expect(app.panel().querySelector('.pmo-teams-topic-floating__content')?.querySelectorAll('.workspace-workbench')).toHaveLength(1)
     await moteClick(toggle()); mode('avatars')
     for (const topic of moteTopics.filter(topic => topic.soul)) {
-      const button = choice(topic.id), label = topic.title + ' · ' + button.dataset.moteStatus
+      const button = choice(topic.id), label = topic.title + ' · ' + (topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' : '') + button.dataset.moteStatus
       expect(button.getAttribute('aria-label')).toBe(label); expect(button.hasAttribute('title')).toBe(false)
       expect(button.querySelector('.mote-chooser__name img, .space-object-icon')).not.toBeNull()
     }
