@@ -16,6 +16,7 @@ import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
 import { createSpeakerResolver } from '../lib/conversation-speaker'
+import { currentConversationSenderDetails } from '../lib/conversation-sender-details'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from './AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -203,7 +204,19 @@ export function SessionPane({
     () => createSpeakerResolver({
       lookupAgent: (id) => {
         const sender = useAppStore.getState().sessions.find((agent) => agent.id === id)
-        return sender?.kind === 'agent' ? sender : undefined
+        return sender?.kind === 'agent' ? {
+          label: sender.label,
+          providerId: sender.providerId,
+          readDetails: () => {
+            const state = useAppStore.getState()
+            return currentConversationSenderDetails(id, {
+              sessions: state.sessions,
+              workspaces: state.config?.workspaces ?? [],
+              agentNames: state.agentNames,
+              demands: state.demands
+            })
+          }
+        } : undefined
       },
       ...(session?.kind === 'agent' ? { currentSession: session } : {})
     }),

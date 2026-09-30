@@ -1,0 +1,522 @@
+{
+  "schema": "agentmux.conversation-sender-public-scene.v1",
+  "config": {
+    "version": 9,
+    "hosts": [
+      {
+        "id": "local",
+        "kind": "local",
+        "label": "Private source fixture"
+      }
+    ],
+    "executors": {
+      "claude": {
+        "label": "Claude",
+        "providerId": "claude",
+        "command": "claude",
+        "args": [],
+        "env": {},
+        "injectAgentMuxGuide": true
+      }
+    },
+    "workspaces": [
+      {
+        "id": "recipient-project",
+        "hostId": "local",
+        "path": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w",
+        "kind": "folder",
+        "name": "Recipient project"
+      },
+      {
+        "id": "sender-project",
+        "hostId": "local",
+        "path": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w/sender-project",
+        "kind": "folder",
+        "name": "Current sender project"
+      },
+      {
+        "id": "other-project",
+        "hostId": "local",
+        "path": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w/unrelated-project",
+        "kind": "folder",
+        "name": "Unrelated project"
+      }
+    ],
+    "appearance": {
+      "terminalTheme": "graphite"
+    },
+    "browser": {
+      "toolbar": {
+        "selectElement": true,
+        "screenshot": true,
+        "devTools": true,
+        "viewport": true,
+        "saveBookmark": true,
+        "more": true
+      }
+    }
+  },
+  "sessions": [
+    {
+      "id": "sender-context-recipient",
+      "kind": "agent",
+      "hostId": "local",
+      "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w",
+      "label": "Recipient agent",
+      "providerId": "claude",
+      "executorId": "claude",
+      "agentSessionUpdatedAt": 3000,
+      "promptSubmissionPredecessor": null,
+      "createdAt": 1000,
+      "updatedAt": 9000,
+      "processState": "running",
+      "status": {
+        "state": "done",
+        "source": "run-process",
+        "observedAt": 9000
+      },
+      "latestOutputBytes": 0,
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "control": {
+        "kind": "agent",
+        "hostId": "local",
+        "agentSessionId": "sender-context-recipient",
+        "run": {
+          "runId": "private-no-process-sender-context-recipient"
+        }
+      }
+    },
+    {
+      "id": "sender-context-declared",
+      "kind": "agent",
+      "hostId": "local",
+      "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w/sender-project",
+      "label": "Current declared sender",
+      "providerId": "claude",
+      "executorId": "claude",
+      "agentSessionUpdatedAt": 3000,
+      "promptSubmissionPredecessor": null,
+      "createdAt": 1000,
+      "updatedAt": 9000,
+      "processState": "running",
+      "status": {
+        "state": "done",
+        "source": "run-process",
+        "observedAt": 9000
+      },
+      "latestOutputBytes": 0,
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "control": {
+        "kind": "agent",
+        "hostId": "local",
+        "agentSessionId": "sender-context-declared",
+        "run": {
+          "runId": "private-no-process-sender-context-declared"
+        }
+      }
+    },
+    {
+      "id": "sender-context-trusted",
+      "kind": "agent",
+      "hostId": "local",
+      "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w/sender-project",
+      "label": "Current trusted sender",
+      "providerId": "claude",
+      "executorId": "claude",
+      "agentSessionUpdatedAt": 3000,
+      "promptSubmissionPredecessor": null,
+      "createdAt": 1000,
+      "updatedAt": 9000,
+      "processState": "running",
+      "status": {
+        "state": "done",
+        "source": "run-process",
+        "observedAt": 9000
+      },
+      "latestOutputBytes": 0,
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "control": {
+        "kind": "agent",
+        "hostId": "local",
+        "agentSessionId": "sender-context-trusted",
+        "run": {
+          "runId": "private-no-process-sender-context-trusted"
+        }
+      }
+    },
+    {
+      "id": "unrelated-agent",
+      "kind": "agent",
+      "hostId": "local",
+      "workspacePath": "/var/folders/42/0r9mq8cs2ls8hxdpymx51_6c0000gn/T/conversation-sender-context-P1Qq0w/unrelated-project",
+      "label": "Unrelated agent",
+      "providerId": "claude",
+      "executorId": "claude",
+      "agentSessionUpdatedAt": 3000,
+      "promptSubmissionPredecessor": null,
+      "createdAt": 1000,
+      "updatedAt": 9000,
+      "processState": "running",
+      "status": {
+        "state": "done",
+        "source": "run-process",
+        "observedAt": 9000
+      },
+      "latestOutputBytes": 0,
+      "capabilities": {
+        "terminal": true,
+        "timeline": "complete-events",
+        "permission": "observe",
+        "providerResume": true,
+        "replyCorrelation": "none"
+      },
+      "control": {
+        "kind": "agent",
+        "hostId": "local",
+        "agentSessionId": "unrelated-agent",
+        "run": {
+          "runId": "private-no-process-unrelated-agent"
+        }
+      }
+    }
+  ],
+  "demands": {
+    "explicit": {
+      "id": "explicit",
+      "title": "Explicit sender goal",
+      "description": "Explicit persisted goal association",
+      "status": "in_progress",
+      "priority": "normal",
+      "projectId": "sender-project",
+      "projectName": "Current sender project",
+      "sessionIds": [
+        "sender-context-declared",
+        "sender-context-trusted"
+      ],
+      "createdAt": 10,
+      "updatedAt": 20,
+      "source": "session"
+    },
+    "unrelated": {
+      "id": "unrelated",
+      "title": "Unrelated goal with matching words",
+      "description": "Explicit persisted goal association",
+      "status": "in_progress",
+      "priority": "normal",
+      "projectId": "sender-project",
+      "projectName": "Current sender project",
+      "sessionIds": [
+        "unrelated-agent"
+      ],
+      "createdAt": 10,
+      "updatedAt": 20,
+      "source": "session"
+    }
+  },
+  "timeline": {
+    "agentSessionId": "sender-context-recipient",
+    "revision": 1,
+    "items": [
+      {
+        "id": "captured-trusted",
+        "agentSessionId": "sender-context-recipient",
+        "kind": "user_message",
+        "source": "user",
+        "status": "complete",
+        "createdAt": 3500,
+        "updatedAt": 3500,
+        "title": "Captured input",
+        "content": "[Message from Agent conflicting-declaration]\nThe recorded author remains authoritative.",
+        "authorAgentSessionId": "sender-context-trusted"
+      },
+      {
+        "id": "captured-unmatched",
+        "agentSessionId": "sender-context-recipient",
+        "kind": "user_message",
+        "source": "user",
+        "status": "complete",
+        "createdAt": 4000,
+        "updatedAt": 4000,
+        "title": "Captured input",
+        "content": "[Message from Agent missing-sender]\nUnmatched declaration remains a declaration."
+      }
+    ]
+  },
+  "page": {
+    "agentSessionId": "sender-context-recipient",
+    "source": {
+      "providerId": "claude",
+      "nativeSessionId": "sender-context-native"
+    },
+    "items": [
+      {
+        "id": "original-native-first",
+        "kind": "user-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "[Message from Agent sender-context-declared]\n**One original passage**\nSame body, separate original records."
+          }
+        ],
+        "startedAt": 3000
+      },
+      {
+        "id": "original-native-second",
+        "kind": "user-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "[Message from Agent sender-context-declared]\n**One original passage**\nSame body, separate original records."
+          }
+        ]
+      }
+    ],
+    "nextCursor": null
+  },
+  "messages": [
+    {
+      "id": "native:claude:sender-context-native:original-native-first",
+      "rawId": "original-native-first",
+      "agentSessionId": "sender-context-recipient",
+      "source": {
+        "kind": "native",
+        "providerId": "claude",
+        "nativeSessionId": "sender-context-native",
+        "recordId": "original-native-first"
+      },
+      "author": {
+        "kind": "unknown"
+      },
+      "content": "[Message from Agent sender-context-declared]\n**One original passage**\nSame body, separate original records.",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "[Message from Agent sender-context-declared]\n**One original passage**\nSame body, separate original records."
+        }
+      ],
+      "recordedAt": 3000
+    },
+    {
+      "id": "native:claude:sender-context-native:original-native-second",
+      "rawId": "original-native-second",
+      "agentSessionId": "sender-context-recipient",
+      "source": {
+        "kind": "native",
+        "providerId": "claude",
+        "nativeSessionId": "sender-context-native",
+        "recordId": "original-native-second"
+      },
+      "author": {
+        "kind": "unknown"
+      },
+      "content": "[Message from Agent sender-context-declared]\n**One original passage**\nSame body, separate original records.",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "[Message from Agent sender-context-declared]\n**One original passage**\nSame body, separate original records."
+        }
+      ]
+    },
+    {
+      "id": "captured:captured-trusted",
+      "rawId": "captured-trusted",
+      "agentSessionId": "sender-context-recipient",
+      "source": {
+        "kind": "captured",
+        "submissionId": "captured-trusted"
+      },
+      "author": {
+        "kind": "agent",
+        "agentSessionId": "sender-context-trusted"
+      },
+      "content": "[Message from Agent conflicting-declaration]\nThe recorded author remains authoritative.",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "[Message from Agent conflicting-declaration]\nThe recorded author remains authoritative."
+        }
+      ],
+      "recordedAt": 3500,
+      "deliveryStatus": "complete"
+    },
+    {
+      "id": "captured:captured-unmatched",
+      "rawId": "captured-unmatched",
+      "agentSessionId": "sender-context-recipient",
+      "source": {
+        "kind": "captured",
+        "submissionId": "captured-unmatched"
+      },
+      "author": {
+        "kind": "unknown"
+      },
+      "content": "[Message from Agent missing-sender]\nUnmatched declaration remains a declaration.",
+      "contentParts": [
+        {
+          "kind": "text",
+          "text": "[Message from Agent missing-sender]\nUnmatched declaration remains a declaration."
+        }
+      ],
+      "recordedAt": 4000,
+      "deliveryStatus": "complete"
+    }
+  ],
+  "control": {
+    "kind": "agent",
+    "hostId": "local",
+    "agentSessionId": "sender-context-recipient",
+    "run": {
+      "runId": "private-no-process-sender-context-recipient"
+    }
+  },
+  "nativeProducer": "Actual public Core/FileStore/Claude reader over controlled on-disk records",
+  "capturedProducer": "Controlled typed captured submission records; not delivery/acceptance or vendor writer",
+  "controls": [
+    [
+      "attach",
+      0
+    ],
+    [
+      "connect",
+      0
+    ],
+    [
+      "continuationByte",
+      0
+    ],
+    [
+      "continuationView",
+      0
+    ],
+    [
+      "detach",
+      0
+    ],
+    [
+      "disconnect",
+      0
+    ],
+    [
+      "emitRunEvent",
+      0
+    ],
+    [
+      "hasAttachment",
+      0
+    ],
+    [
+      "identity",
+      0
+    ],
+    [
+      "input",
+      0
+    ],
+    [
+      "interrupt",
+      0
+    ],
+    [
+      "isConnected",
+      0
+    ],
+    [
+      "list",
+      0
+    ],
+    [
+      "markConnectionLost",
+      0
+    ],
+    [
+      "observeOutput",
+      0
+    ],
+    [
+      "onConnectionLost",
+      0
+    ],
+    [
+      "onError",
+      0
+    ],
+    [
+      "onEvent",
+      0
+    ],
+    [
+      "openAttachment",
+      0
+    ],
+    [
+      "prepareStop",
+      0
+    ],
+    [
+      "projectAttachment",
+      0
+    ],
+    [
+      "projectRun",
+      0
+    ],
+    [
+      "pump",
+      0
+    ],
+    [
+      "replay",
+      0
+    ],
+    [
+      "requireClient",
+      0
+    ],
+    [
+      "resetConnection",
+      0
+    ],
+    [
+      "resize",
+      0
+    ],
+    [
+      "resourceSnapshot",
+      0
+    ],
+    [
+      "start",
+      0
+    ],
+    [
+      "status",
+      0
+    ],
+    [
+      "stop",
+      0
+    ],
+    [
+      "translateLiveEvent",
+      0
+    ]
+  ]
+}

@@ -607,10 +607,9 @@ describe('ActivityView', () => {
     expect(markup).toContain('aria-expanded="false"')
   })
 
-  it('同一步的入参行与结果行在对话里只占一行，且留下的是带结果的那条', () => {
-    // View 把折叠换成 `timelineRows` 这件事本身要被守住：换回旧的按顺序折叠，这条会红。
-    // 多步会被 Run 折叠体包起来（展开前只显示 "N steps / M unique"），所以这里断言的是折叠体
-    // 给出的计数——两条折成一条 unique，且整个 Run 被标为失败。
+  it('不同原ID的同正文步骤保两条记录与失败事实，不猜执行关联', () => {
+    // Only a trusted producer ID can relate input/result observations. Equal text cannot.
+    // Owning DOM coverage opens this group and checks both original IDs and payloads.
     const markup = render('complete-events', [
       activity('pre', {
         kind: 'tool_call', title: 'Bash', toolName: 'Bash',
@@ -623,7 +622,8 @@ describe('ActivityView', () => {
     ])
 
     expect(markup).toContain('2 steps')
-    expect(markup).toContain('1 unique')
+    expect(markup).not.toContain('unique')
+    expect(markup).toContain('data-observation-id=')
     expect(markup).toContain('log-row__chip--failed')
   })
 

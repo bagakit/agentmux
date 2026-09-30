@@ -1,0 +1,5 @@
+html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+.sender-context-preview { height: 100%; display: flex; flex-direction: column; background: var(--surface-0); color: var(--text); }
+.sender-context-preview > p { flex: none; margin: 0; padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
+.sender-context-preview__pane { flex: 1; min-height: 0; }
+.sender-context-preview__pane > .agent-surface { width: 100%; height: 100%; }

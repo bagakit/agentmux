@@ -1,5 +1,5 @@
-import { ChevronRight, Info, LoaderCircle } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+import { ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -15,7 +15,6 @@ import {
   toolCallToDiff,
   type ToolDiff
 } from '../lib/activity-diff'
-import { timelineRows } from '../lib/activity-timeline-rows'
 import {
   createRulerScale,
   describeReadout,
@@ -43,16 +42,25 @@ import { ConversationMessage } from './ConversationMessage'
 import { ConversationNativeReasoning } from './ConversationNativeReasoning'
 import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
 import { SemanticIcon } from './semantic-icons'
+import { WorkflowCard } from './workflow/WorkflowCard'
+import { WorkflowToolRow } from './workflow/WorkflowToolRow'
 
 /**
  * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
  * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见 {@link ConversationMessage}），
  * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
  */
-function Glyph({ kind, size = 12 }: { kind: AgentTimelineItem['kind']; size?: number }) {
+function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind']; toolName?: string; size?: number }) {
   if (kind === 'user_message') return <SemanticIcon name="user-message" size={size} />
   if (kind === 'assistant_message') return <SemanticIcon name="assistant-message" size={size} />
-  if (kind === 'tool_call') return <SemanticIcon name="tool-call" size={size} />
+  if (kind === 'tool_call') {
+    const name = toolName?.toLowerCase()
+    if (name === 'bash' || name === 'shell' || name === 'exec_command' || name === 'run_command') return <SemanticIcon name="terminal" size={size} />
+    if (name === 'read' || name === 'read_file') return <FileText size={size} />
+    if (name === 'edit' || name === 'write' || name === 'write_file' || name === 'apply_patch') return <Pencil size={size} />
+    if (name === 'grep' || name === 'glob' || name === 'search') return <Search size={size} />
+    return <SemanticIcon name="tool-call" size={size} />
+  }
   if (kind === 'permission') return <SemanticIcon name="permission" size={size} />
   return <SemanticIcon name="neutral" size={size} />
 }
@@ -442,40 +450,14 @@ export function Ruler({
   )
 }
 
-/**
- * 一行的状态记号：Streaming / Failed 徽标与来源标签。
- *
- * 抽成一处而不是在可展开与不可展开两支各写一遍——那两份此前逐字相同，于是能各自漂移，而**只有
- * 可展开那支被守住**：现有断言喂的是两条连续 tool_call，被折叠成 Run，`log-row__chip--failed`
- * 由 Run 折叠头的徽标满足、`data-status="failed"` 由 ruler 的刻度满足；另一条失败用例带
- * `toolInput` 故走可展开分支。不可展开那支（既无入参又无输出的失败步骤）两个记号各自单独删掉，
- * 38 条全绿——而那一支**没有可展开面板**，徽标与 data-status 是它唯一的失败线索，去掉后失败步骤
- * 与成功步骤逐像素相同。
- *
- * `data-status` 收不进这里（是两支上两个不同元素的属性），只能靠断言守。而那条断言的判据必须切到
- * **行自己那一段**里：ruler 的刻度（:322）带同一个属性，对整份文档 `toContain` 会被刻度满足——
- * 我第一版就是这么写的，把行上的 `data-status` 改成常量仍然 40 条全绿。见测试里的 `logRowMarkup`。
- */
-function RowMeta({ item, showSource }: { item: AgentTimelineItem; showSource: boolean }) {
-  return (
-    <>
-      {item.status === 'streaming' ? <span className="log-row__chip">Streaming</span> : null}
-      {item.status === 'failed' ? <span className="log-row__chip log-row__chip--failed">Failed</span> : null}
-      <span className="log-row__source" data-persistent={showSource ? '' : undefined}>{item.source}</span>
-    </>
-  )
-}
-
 function Row({
   item,
   origin,
-  count,
   showSource,
   workspaceRoot
 }: {
   item: AgentTimelineItem
   origin: number
-  count: number
   showSource: boolean
   /** 用来把仓内绝对路径缩成相对路径，见 activity-step-summary 的 shortenPath。缺席则原样显示。 */
   workspaceRoot: string
@@ -493,10 +475,10 @@ function Row({
   // 用户就不必在脑子里反转义再做行对比。算不出 diff 时（工具不是编辑类、JSON 坏了）如实退回
   // 原始 payload，不猜、不半渲染。
   const diff = useMemo(() => {
-    if (!payload) return null
+    if (!open || !payload) return null
     const fromTool = item.toolInput ? toolCallToDiff(item.title, item.toolInput) : null
     return fromTool ?? parseUnifiedDiff(payload)
-  }, [payload, item.toolInput, item.title])
+  }, [open, payload, item.toolInput, item.title])
   // 折叠起来的一行只有裸工具名时，三行 `Bash` 分不出跑的是哪条命令——而不展开就认得出，
   // 正是折叠的前提。带上那个最具识别性的参数。
   const heading = stepTitle(item.title, item.toolName, item.toolInput, workspaceRoot)
@@ -504,40 +486,15 @@ function Row({
 
   return (
     <Fragment>
-      {expandable ? (
-        <button
-          type="button"
-          className={`log-row log-row--${item.kind}`}
-          data-status={item.status}
-          data-expandable=""
-          aria-expanded={open}
-          aria-description={recordedTime.offset}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span className="log-row__node"><Glyph kind={item.kind} /></span>
-          <span className="log-row__time" title={recordedTime.offset}>{recordedTime.from}</span>
-          <span className="log-row__title">
-            {heading}
-            {count > 1 ? <span className="log-row__count">×{count}</span> : null}
-          </span>
-          <span className="log-row__meta">
-            <RowMeta item={item} showSource={showSource} />
-            <ChevronRight size={12} className="log-row__chevron" data-open={open ? '' : undefined} />
-          </span>
-        </button>
-      ) : (
-        <div className={`log-row log-row--${item.kind}`} data-status={item.status}>
-          <span className="log-row__node"><Glyph kind={item.kind} /></span>
-          <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time>
-          <span className="log-row__title">
-            {heading}
-            {count > 1 ? <span className="log-row__count">×{count}</span> : null}
-          </span>
-          <span className="log-row__meta">
-            <RowMeta item={item} showSource={showSource} />
-          </span>
-        </div>
-      )}
+      <WorkflowToolRow observation={{
+        id: item.id,
+        title: heading,
+        status: item.status,
+        recordedTime,
+        source: item.source,
+        persistentSource: showSource
+      }} className={`log-row log-row--${item.kind}`} icon={<Glyph kind={item.kind} {...(item.toolName ? { toolName: item.toolName } : {})} />}
+        {...(expandable ? { expanded: open, onToggle: () => setOpen((value) => !value) } : {})} />
       {prose ? <p className="log-row__prose">{prose}</p> : null}
       {open && diff ? <DiffBlock diff={diff} /> : null}
       {open && !diff && payload ? <pre className="log-row__payload">{payload}</pre> : null}
@@ -577,42 +534,51 @@ export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
 
 function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; origin: number; workspaceRoot: string }) {
   const [open, setOpen] = useState(false)
-  const rows = useMemo(() => timelineRows(items), [items])
+  const [showAll, setShowAll] = useState(false)
+  const [presentedIds, setPresentedIds] = useState<Set<string>>(() => new Set())
+  const visible = (item: AgentTimelineItem, index: number): boolean =>
+    showAll || items.length <= 10 || presentedIds.has(item.id) || index >= items.length - 6 || item.status !== 'complete'
+  // Only disclosure intent is retained. Records stay in the original Timeline snapshot.
+  // A status change must never remove a row the user has already read or selected.
+  useLayoutEffect(() => {
+    if (!open || showAll) return
+    setPresentedIds((previous) => {
+      const next = new Set(previous)
+      items.forEach((item, index) => {
+        if (items.length <= 10 || index >= items.length - 6 || item.status !== 'complete') next.add(item.id)
+      })
+      return next.size === previous.size ? previous : next
+    })
+  }, [items, open, showAll])
+  if (items.length === 0) return null
+  const counts = items.reduce((result, item) => {
+    if (item.status === 'complete' || item.status === 'streaming' || item.status === 'failed') result[item.status]++
+    else result.unknown++
+    return result
+  }, { complete: 0, streaming: 0, failed: 0, unknown: 0 })
+  const hiddenCount = items.filter((item, index) => !visible(item, index)).length
   const failed = items.some((item) => item.status === 'failed')
-  // A group's record range ends at its latest update, not the last step's start.
-  // Concurrent steps can finish out of order; an update does not prove the Session or process ended.
+  const streaming = items.some((item) => item.status === 'streaming')
+  const complete = items.every((item) => item.status === 'complete')
+  // This is the recorded range of these observations, not a Run execution duration.
   const lastRecordedAt = Math.max(...items.map((item) => item.updatedAt))
   const elapsed = lastRecordedAt - items[0]!.createdAt
   const recordedTime = describeActivityRecordTime(items[0]!.createdAt, lastRecordedAt, origin)
-
-  return (
-    <Fragment>
-      <button
-        type="button"
-        className="log-fold"
-        data-open={open ? '' : undefined}
-        aria-expanded={open}
-        aria-description={recordedTime.offset}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="log-fold__node"><ChevronRight size={12} className="log-fold__chevron" /></span>
-        <span className="log-fold__label">
-          <span className="log-fold__time" title={recordedTime.offset}>
-            <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
-          </span>
-          <span className="log-fold__steps">{items.length} steps</span>
-          {elapsed > 0 ? <span className="log-fold__elapsed">{formatDuration(elapsed)}</span> : null}
-          {rows.length < items.length ? <span className="log-row__count">{rows.length} unique</span> : null}
-          {failed ? <span className="log-row__chip log-row__chip--failed">FAILED</span> : null}
-        </span>
-      </button>
-      {open
-        ? rows.map(({ item, count }, index) => (
-            <Row key={item.id} item={item} origin={origin} count={count} showSource={index === 0} workspaceRoot={workspaceRoot} />
-          ))
-        : null}
-    </Fragment>
-  )
+  return <WorkflowCard observation={{
+    id: `observed-${items[0]!.id}`,
+    stepCount: items.length,
+    counts,
+    ...(failed ? { status: 'failed' as const } : streaming ? { status: 'streaming' as const } : complete ? { status: 'complete' as const } : {}),
+    streaming,
+    recordedTime,
+    ...(elapsed > 0 ? { elapsed: formatDuration(elapsed) } : {})
+  }} expanded={open} onExpandedChange={setOpen}>
+    {hiddenCount > 0 ? <button type="button" className="wf-observation__more" onClick={() => setShowAll(true)}>
+      <ChevronRight size={12} aria-hidden="true" />Show {hiddenCount} more recorded steps
+    </button> : null}
+    {items.map((item, index) => visible(item, index) ? <Row key={item.id} item={item} origin={origin}
+      showSource={index === 0} workspaceRoot={workspaceRoot} /> : null)}
+  </WorkflowCard>
 }
 
 /** A segment paired with the half-open range of event indices it covers, so a position on the ruler
@@ -981,6 +947,8 @@ export function ActivityView({
                 <ConversationMessage
                   messageId={entry.message.id}
                   conversationSessionId={sessionId}
+                  inputSource={entry.message.source}
+                  {...(describeSpeaker ? { describeSpeaker } : {})}
                   content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
                   {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
                   {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
@@ -1000,6 +968,8 @@ export function ActivityView({
                 <ConversationMessage
                   messageId={entry.item.id}
                   conversationSessionId={sessionId}
+                  {...(entry.item.kind === 'user_message' ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id } } : {})}
+                  {...(describeSpeaker ? { describeSpeaker } : {})}
                   content={entry.item.content ?? ''}
                   status={entry.item.status}
                   createdAt={entry.item.createdAt}
@@ -1015,7 +985,7 @@ export function ActivityView({
                   {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
                 />
               ) : (
-                <Row item={entry.item} origin={origin} count={1} showSource workspaceRoot={workspaceRoot} />
+                <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot} />
               )}
             </div>
           )

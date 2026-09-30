@@ -379,6 +379,8 @@ export function SessionHistoryView({
               <ConversationMessage
                 messageId={item.id}
                 conversationSessionId={control.agentSessionId}
+                {...(userMsg ? { inputSource: userMsg.source } : {})}
+                describeSpeaker={resolveSpeaker}
                 {...(speaker ? { speaker } : {})}
                 name={displayName}
                 {...(described?.providerId ? { providerId: described.providerId } : reading.source ? { providerId: reading.source.providerId } : {})}

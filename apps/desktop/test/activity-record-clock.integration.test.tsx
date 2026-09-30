@@ -100,16 +100,16 @@ describe('Activity actual recorded clock consumption', () => {
     expect(times()[1]!.title).toBe('+48h24m00s from start')
   })
 
-  it('retains exact duplicate counts, failed status and concrete same-instant records without making elapsed time', async () => {
+  it('retains distinct original IDs, failed status and concrete same-instant records without making elapsed time', async () => {
     await mount([event('repeat-1', { title: 'Same tool', toolInput: 'same', status: 'failed' }), event('repeat-2', { title: 'Same tool', toolInput: 'same', status: 'failed' })])
     const group = fold()
     expect([...group.querySelector('.log-fold__time')!.children].map(child => child.textContent)).toEqual(['09:31:15', '–', '09:31:15'])
     expect(group.querySelector('.log-fold__elapsed')).toBeNull()
-    expect(group.querySelector('.log-row__chip--failed')?.textContent).toBe('FAILED')
-    expect(group.querySelector('.log-row__count')?.textContent).toBe('1 unique')
+    expect(group.querySelector('.log-row__chip--failed')?.textContent).toBe('Failed')
+    expect(group.querySelector('.log-fold__steps')?.textContent).toBe('2 steps')
     await act(async () => group.click())
-    expect(times().map(time => time.textContent)).toEqual(['09:31:15'])
-    expect(host.querySelector('.log-row .log-row__count')?.textContent).toBe('×2')
+    expect(times().map(time => time.textContent)).toEqual(['09:31:15', '09:31:15'])
+    expect([...host.querySelectorAll('[data-observation-step-id]')].map(node => node.getAttribute('data-observation-step-id'))).toEqual(['repeat-1', 'repeat-2'])
     expect(host.querySelector('.activity-ruler__track')?.getAttribute('data-axis')).toBe('ordinal')
   })
 

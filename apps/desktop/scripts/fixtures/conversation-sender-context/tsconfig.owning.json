@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": ["../../../src/**/*.ts", "../../../src/**/*.tsx", "../../../test/conversation-sender-context.integration.test.tsx", "./public-inputs.fixture.ts"],
+  "compilerOptions": {"noEmit": true}
+}
