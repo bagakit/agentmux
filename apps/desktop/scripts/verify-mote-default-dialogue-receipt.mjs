@@ -11,12 +11,12 @@ const args = process.argv.slice(2)
 assert.equal(args.length, 2, 'Use --input <actual-consumption.json>'); assert.equal(args[0], '--input')
 const input = JSON.parse(await readFile(resolve(repository, args[1]), 'utf8'))
 assert.equal(input.schema, 'agentmux.mote-default-dialogue-actual-consumption.v1')
-async function artifact(reference) {
+async function artifact(reference, json = true) {
   assert.ok(reference && typeof reference.path === 'string' && reference.path.length > 0)
   assert.match(reference.sha256, /^[a-f0-9]{64}$/)
   const path = resolve(repository, reference.path), bytes = await readFile(path)
   assert.equal(hash(bytes), reference.sha256, 'Referenced original artifact SHA must agree')
-  return { path, bytes, value: JSON.parse(bytes) }
+  return { path, bytes, value: json ? JSON.parse(bytes) : undefined }
 }
 const actual = await artifact(input.actualReceipt), candidate = await artifact(input.candidate), visual = await artifact(input.visualReview)
 const receipt = actual.value
@@ -26,17 +26,19 @@ assert.equal(receipt.captureSelection.mode, 'mote-archive')
 assert.equal(receipt.candidate.sha256, input.candidate.sha256)
 assert.ok(candidate.value.files.length > 0, 'Source candidate cannot be empty')
 assert.deepEqual(receipt.candidate.files, candidate.value.files)
+assert.ok(receipt.inputs && Object.keys(receipt.inputs).length > 0 && receipt.compiled && Object.keys(receipt.compiled).length > 0,
+  'Actual input/output graph must be nonempty')
 const owner = 'apps/desktop/src/renderer/src/lib/pmo-teams-topic-floating.ts'
 const entries = candidate.value.files.filter(row => row.path === owner)
 assert.equal(entries.length, 1, 'Candidate binds the real explicit-open owner exactly once')
 assert.equal(receipt.inputs[owner], entries[0].sha256, 'Actual compiled Renderer consumed this owning Source')
 assert.equal(hash(await readFile(join(repository, owner))), entries[0].sha256, 'Current owning Source still agrees')
-assert.equal(hash(await readFile(join(receipt.originalInputs, owner))), entries[0].sha256, 'Original consumed bytes are preserved')
-assert.ok(Object.keys(receipt.inputs).length > 0 && Object.keys(receipt.compiled).length > 0, 'Actual input/output graph is nonempty')
+const originalOwner = await artifact(input.preservedOwner, false)
+assert.equal(hash(originalOwner.bytes), entries[0].sha256, 'Explicitly preserved original owning bytes match the actual consumed Source')
 assert.equal(receipt.renderer.passed, true)
 assert.deepEqual(receipt.renderer.phases.map(one => one.phase), ['seed', 'restore'])
 for (const phase of receipt.renderer.phases) {
-  assert.equal(phase.renderer.passed, true); assert.equal(phase.exit.exitCode, 0); assert.equal(phase.exit.timedOut, false)
+  assert.equal(phase.renderer.passed, true, 'Both actual process phases must be passed'); assert.equal(phase.exit.exitCode, 0); assert.equal(phase.exit.timedOut, false)
   assert.ok(phase.renderer.checks.length > 0, 'Both actual process checks must be nonempty')
 }
 assert.notEqual(receipt.renderer.phases[0].renderer.pid, receipt.renderer.phases[1].renderer.pid)
@@ -76,7 +78,7 @@ const names = ['archive-wide-cards-menu', 'archive-narrow-avatars-current', 'arc
   'archive-restored-original-workface', 'archive-save-unconfirmed-unknown']
 assert.deepEqual(receipt.renderer.frames.map(frame => frame.name), names, 'The original five actual complete scenes are required')
 const review = visual.value
-assert.equal(review.status, 'approved'); assert.equal(review.actualReceiptSha256, input.actualReceipt.sha256)
+assert.equal(review.status, 'approved', 'Independent actual visual review must be approved'); assert.equal(review.actualReceiptSha256, input.actualReceipt.sha256)
 assert.equal(review.candidateSha256, input.candidate.sha256); assert.deepEqual(review.must_fix, [])
 assert.deepEqual(review.frames.map(frame => frame.name), names, 'Independent review must personally cover all five original scenes')
 for (let index = 0; index < names.length; index++) {
