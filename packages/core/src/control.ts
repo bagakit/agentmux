@@ -9,6 +9,8 @@ import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
 export * from './metrics.js'
+import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolkit.js'
+export * from './toolkit.js'
 export type * from './space-control.js'
 export type * from './desktop-focus-control.js'
 
@@ -546,6 +548,7 @@ export type AgentMuxControlCrashLogResult =
   | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
 
 export type AgentMuxControlRequest =
+  | ToolkitRequest
   | AgentMuxControlMetricsRequest
   | AgentMuxSpaceControlRequest
   | AgentMuxControlInspectClientRequest
@@ -639,6 +642,7 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | ToolkitResult
   | { operation: 'metrics.get'; observation: MetricsObservation }
   | { operation: 'metrics.watch' }
   | AgentMuxSpaceControlResult
@@ -809,6 +813,7 @@ export type AgentMuxControlBrowserSubscription = {
 
 export interface AgentMuxControlHost {
   metrics?: AgentMuxMetricsPort
+  toolkit?: AgentMuxToolkitPort
   execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
   /**
    * 建立一条进度订阅。**可选**——不实现它的宿主照旧服务其余 14 个操作，订阅请求得到一个类型化的
@@ -870,6 +875,12 @@ export const AGENTMUX_CONTROL_MAX_MESSAGE_BYTES = 256 * 1024
  * owner 已坏或写入未提交。
  */
 const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+  'toolkit.list': 'short',
+  'toolkit.get': 'short',
+  'toolkit.script': 'short',
+  'toolkit.run': 'long',
+  'toolkit.stop': 'long',
+  'toolkit.watch': 'short',
   'metrics.get': 'short',
   'metrics.watch': 'short',
   'inspect.client': 'short',

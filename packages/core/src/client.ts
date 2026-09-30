@@ -1806,6 +1806,18 @@ export class AgentMuxClient {
     }
   }
 
+  /** Reclaim only an ended, unpinned terminal record; never force process or Attachment teardown. */
+  async removeTerminal(ref: AgentMuxRunRef): Promise<void> {
+    this.requireConnected()
+    if (this.registry.findByRun(ref) || this.registry.isRetiredRun(ref)) {
+      throw new AgentMuxError('Agent Session Run cannot be removed through the terminal API.', 'RUN_KIND_MISMATCH')
+    }
+    await this.kernel.remove(ref.runId)
+    this.runPids.delete(ref.runId)
+    this.endedRuns.delete(ref.runId)
+    this.stopRequestedRuns.delete(ref.runId)
+  }
+
   async releaseRunAttachment(ref: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
     await this.kernel.detach(ref.runId)

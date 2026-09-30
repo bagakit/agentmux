@@ -231,7 +231,17 @@ its own observation time and availability. Runtime CPU/RSS can be unavailable.
 No Runtime is started or connected. Offline host: CONTROL_UNAVAILABLE; host without
 this capability: METRICS_UNSUPPORTED. Slow output terminates instead of queueing frames.`
 
+const TOOLKIT_HELP = `Usage: agentmux toolkit list
+       agentmux toolkit get|script|run|stop|watch performance
+
+Performance is an official read-only script consuming public metrics queries.
+get/script/list only read; run holds one manual observation until stop.
+watch holds its own lease until disconnect or SIGINT; other observers continue.
+stop ends this tool's exact observation, preserves its last result, and never stops Agents.
+Source identity and per-source observation times accompany results. No scheduling is provided.`
+
 const HELP = new Map<string, string>([
+  ...['toolkit','toolkit.list','toolkit.get','toolkit.script','toolkit.run','toolkit.stop','toolkit.watch'].map(name => [name, TOOLKIT_HELP] as [string,string]),
   ['metrics', METRICS_HELP],
   ['metrics.get', METRICS_HELP],
   ['metrics.watch', METRICS_HELP],

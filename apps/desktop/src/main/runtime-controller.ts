@@ -1,3 +1,4 @@
+import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
@@ -305,6 +306,7 @@ async function disposePrepared(hosts: readonly PreparedRuntimeHost[]): Promise<v
 
 export class RuntimeController {
   private readonly hosts = new Map<string, RuntimeHost>()
+  private readonly toolkitRuns = new Map<string, (event: AgentMuxClientEvent) => void>()
   private readonly clients = new Set<WebContents>()
   private readonly sessionAttachmentOwners = new Map<string, SessionAttachmentOwner>()
   private readonly sessionAttachmentLeases = new Map<string, SessionAttachmentLease>()
@@ -875,6 +877,25 @@ export class RuntimeController {
     return page
   }
 
+  async toolkitRunPort(): Promise<ToolkitRunPort> {
+    const hostId = 'local'
+    const client = await this.connectedClient(hostId)
+    return {
+      create: async (input, onEvent) => await this.trackHostLifecycleOperation(hostId, async () => {
+        const run = await client.createTerminal(input)
+        this.toolkitRuns.set(terminalInputKey(hostId, run.runId), onEvent)
+        return run
+      }),
+      attach: async (ref, afterByte) => await client.attachTerminal(ref.runId, afterByte, 'raw'),
+      release: async ref => await client.releaseRunAttachment(ref),
+      stop: async ref => await client.stopTerminal(ref),
+      remove: async ref => {
+        await client.removeTerminal(ref)
+        this.toolkitRuns.delete(terminalInputKey(hostId, ref.runId))
+      }
+    }
+  }
+
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId)
@@ -910,6 +931,9 @@ export class RuntimeController {
     config: AppConfig,
     refresh?: { attachmentId: string | null }
   ): Promise<SessionAttachResult> {
+    if ('run' in control && this.toolkitRuns.has(terminalInputKey(control.hostId, control.run.runId))) {
+      throw new AgentMuxError('Toolkit owns this raw Attachment.', 'RUN_KIND_MISMATCH')
+    }
     const key = sessionAttachmentKey(control)
     const rendererGeneration = this.rendererGenerations.get(webContentsId) ?? 0
     return await this.serializeSessionAttachment(key, async () => {
@@ -1637,6 +1661,9 @@ export class RuntimeController {
   }
 
   private publish(hostId: string, event: AgentMuxClientEvent): void {
+    const ref = 'run' in event ? event.run : ('evidence' in event ? event.evidence?.run : undefined)
+    const toolkit = ref ? this.toolkitRuns.get(terminalInputKey(hostId, ref.runId)) : undefined
+    if (toolkit && (event.type === 'terminal-output' || event.type === 'terminal-snapshot')) { toolkit(event); return }
     if (event.type === 'terminal-output' || event.type === 'terminal-snapshot') {
       const queryKey = terminalInputKey(hostId, event.run.runId)
       // Only original tail bytes contain new CLI queries; restoration bytes are synthetic.
@@ -1698,6 +1725,7 @@ export class RuntimeController {
     } else if (this.hosts.get(hostId)?.executionHost.kind === 'local' && event.type === 'run-removed') {
       this.resourceSampler.forgetRun(event.run.runId)
     }
+    if (toolkit) { toolkit(event); return }
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event }
     for (const client of this.clients) {
       if (client.isDestroyed()) continue
