@@ -17,6 +17,7 @@ import { appendFileReferences } from '../lib/composer-file-reference'
 import { expandSemanticReferences } from '../lib/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
+import { scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { InlineComposer } from './InlineComposer'
@@ -35,7 +36,7 @@ import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
 import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
 
 export function NewTabSurface({
@@ -133,12 +134,27 @@ export function NewTabSurface({
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
-  // 卡片上写「Start in ⟨谁⟩」的那个 Workspace，与五个启动动作真正落进去的那个，必须是**同一次**
-  // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
+  // Host、工作目录与五个启动动作共用同一次资源判定；Mote 名称只表达当前对象，不改变执行环境。
   const workspace = config?.workspaces.find((item) => item.id === resolveLauncherWorkspaceId({
     launcherTabWorkspaceId: tabWorkspaceId,
     activeWorkspaceId
   }))
+  const launcherTopicId = useAppStore(state => {
+    if (tabId === undefined && regionId === undefined) return undefined
+    const tab = tabId ? state.tabs[tabId] : undefined
+    const region = regionId ? tab?.regions[regionId] : undefined
+    if (!tab || tab.id !== tabId || !region || region.regionId !== regionId || region.kind !== 'launcher' || region.workspaceId !== tab.workspaceId) return null
+    return tab.workspaceId === SCRATCH_WORKSPACE_ID ? tab.topicId : undefined
+  })
+  // Scope lookup returns the existing array; output events never scan the directory.
+  const launcherTopics = useAppStore(state => workspace && launcherTopicId
+    ? scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace) : null)
+  const contextName = useMemo(() => {
+    if (launcherTopicId === undefined) return undefined
+    const topic = launcherTopics?.find(item => item.id === launcherTopicId)
+    if (!topic || topic.readError || !topic.title.trim()) return 'Context name unconfirmed'
+    return scratchTopicKind(topic.id, launcherTopics) === 'mote' ? topic.title : undefined
+  }, [launcherTopicId, launcherTopics])
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
   const localHome = useAppStore(state => state.localHome)
   const displayPath = workspace ? applyCopyPathStyle(workspace.path, {
@@ -300,7 +316,7 @@ export function NewTabSurface({
 
   return (
     <section className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}>
-      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive} />
+      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive} contextName={contextName} />
 
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Primary Mote Agent is unconfirmed',

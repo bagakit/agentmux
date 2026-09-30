@@ -8,17 +8,19 @@ import { hostCheckLabel } from '../lib/host-check'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** The existing Host facts are read on demand; this surface does not check or change execution. */
-export function LauncherEnvironment({ workspace, host, check, displayPath, active }: {
+export function LauncherEnvironment({ workspace, host, check, displayPath, active, contextName }: {
   workspace: WorkspaceRecord | undefined
   host: HostConfig | undefined
   check: HostCheckState | undefined
   displayPath: string
   active: boolean
+  contextName?: string | undefined
 }) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const [panel, setPanel] = useState<HTMLDivElement | null>(null)
   const label = host?.label ?? workspace?.hostId ?? 'No host'
+  const name = contextName ?? workspace?.name ?? 'Choose a workspace'
   const kind = host?.kind === 'local' ? 'Local host' : host?.kind === 'ssh' ? 'SSH host' : 'Host unconfirmed'
   const Icon = host?.kind === 'ssh' ? RadioTower : SquareTerminal
   useEffect(() => { if (!active) setOpen(false) }, [active])
@@ -37,7 +39,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
 
   return <header className="launcher-environment">
     <div className="launcher-environment__project"><Folder size={20} /><div>
-      <h2 title={workspace?.name}>{workspace?.name ?? 'Choose a workspace'}</h2>
+      <h2 title={name}>{name}</h2>
       <span className="launcher-environment__path" title={workspace?.path}>{displayPath || 'No working directory selected'}</span>
     </div></div>
     <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
