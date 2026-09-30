@@ -87,7 +87,6 @@
 .window-status-bar__toolkits { display:flex; align-items:center; flex-direction:row-reverse; flex:0 1 auto; min-width:0; }
 .window-status-bar__right { margin-left: auto; flex: 0 1 auto; justify-content: flex-end; gap: var(--sp-2); }
 .window-status-bar__utility-button { flex: none; width: 22px; height: 22px; color: var(--text-3); }
-.window-status-bar__utility-button:hover { color: var(--text); background: var(--surface-2); }
 .window-status-bar .agent-status-bar__segment--action, .window-status-bar .global-system-notices__trigger { display: inline-flex; align-items: center; gap: var(--sp-1); height: 22px; padding: 0 var(--sp-1); border: 0; color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .window-status-bar button:focus-visible { outline-offset: -2px; }
 .window-status-bar__surface-switch { position: relative; padding-left: 40px; flex: 0 0 auto; display: flex; align-items: center; }
@@ -103,9 +102,13 @@
 .surface-navigation { height: 22px; display: flex; align-items: center; gap: var(--sp-2); overflow: visible; -webkit-app-region: no-drag; }
 .surface-navigation__surfaces { height: 22px; display: flex; align-items: center; gap: 2px; }
 .surface-navigation__slot { width: 26px; height: 22px; position: relative; display: inline-flex; flex: 0 0 26px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; color: var(--text-3); background: transparent; font: inherit; cursor: pointer; overflow: visible; transition: color .12s ease, background .12s ease, box-shadow .12s ease; }
-.surface-navigation__slot:hover { color: var(--text-2); background: var(--surface-2); }
-.surface-navigation__slot--surface.selected { color: var(--text); background: var(--surface-3); }
-.surface-navigation__slot:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 70%, transparent); outline-offset: -2px; }
+.surface-navigation__slot--launcher:hover { color: var(--text-2); background: var(--surface-2); }
+.surface-navigation__slot--launcher:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 70%, transparent); outline-offset: -2px; }
+.surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher), .window-status-bar__utilities > .window-status-bar__utility-button { border-radius: 4px; background: transparent; color: var(--text-3); box-shadow: none; transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease, outline-color var(--dur-fast) ease; }
+.surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):is(:hover, :active), .window-status-bar__utilities > .window-status-bar__utility-button:is(:hover, :active) { color: var(--text-2); background: color-mix(in srgb, var(--text) 3%, transparent); box-shadow: none; }
+.surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):is([aria-current='page'], [aria-expanded='true']) { color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):focus-visible, .window-status-bar__utilities > .window-status-bar__utility-button:focus-visible { outline: 1px solid color-mix(in srgb, var(--text) 60%, transparent); outline-offset: -2px; box-shadow: none; }
+.surface-navigation button > .surface-navigation__icon, .window-status-bar__utilities > .window-status-bar__utility-button > svg { width: 14px; height: 14px; flex: none; stroke-width: 1.7; }
 .surface-navigation__tooltip { position: fixed; z-index: var(--layer-tooltip); left: 0; top: 0; display: grid; width: max-content; max-width: calc(100vw - 16px); gap: 2px; padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); border-radius: 9px; color: var(--text); background: var(--surface-2); box-shadow: 0 10px 28px var(--scrim-2), inset 0 1px color-mix(in srgb, white 12%, transparent); opacity: 1; pointer-events: none; text-align: left; transform: translateY(-100%) scale(1); transform-origin: 0 100%; transition: opacity .12s ease, transform .14s var(--ease-enter, ease-out); }
 .surface-navigation__tooltip strong { color: var(--text); font-size: var(--fs-micro); font-weight: 600; line-height: 1.1; }
 .surface-navigation__tooltip small { color: var(--text-2); font-size: 10px; line-height: 1.1; }

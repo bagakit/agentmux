@@ -1,8 +1,10 @@
-.performance-trigger { display:inline-flex; flex-shrink:0; align-items:center; gap:var(--sp-2); height:22px; padding:0 var(--sp-3); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-2); font-size:var(--fs-meta); white-space:nowrap; cursor:pointer; }
-.performance-trigger:hover,.performance-trigger[aria-expanded=true] { background:var(--wash-3); color:var(--text); }
-.performance-trigger:focus-visible { outline:1px solid var(--focus-line); box-shadow:var(--focus-ring); outline-offset:-1px; }
-.window-status-bar__toolkits .performance-trigger { flex:0 1 auto; min-width:40px; max-width:112px; }
-.window-status-bar__toolkits .performance-trigger > svg { flex:none; }
+.performance-trigger { display:inline-flex; flex-shrink:0; align-items:center; justify-content:center; gap:var(--sp-2); height:22px; padding:0 var(--sp-2); border:0; border-radius:4px; background:transparent; color:var(--text-3); font-size:var(--fs-meta); white-space:nowrap; cursor:pointer; transition:color var(--dur-fast) ease,background-color var(--dur-fast) ease,outline-color var(--dur-fast) ease; }
+.performance-trigger:is(:hover,:active) { background:color-mix(in srgb,var(--text) 3%,transparent); color:var(--text-2); box-shadow:none; }
+.performance-trigger[aria-expanded=true] { background:color-mix(in srgb,var(--text) 7%,transparent); color:var(--text); }
+.performance-trigger:focus-visible { outline:1px solid color-mix(in srgb,var(--text) 60%,transparent); box-shadow:none; outline-offset:-2px; }
+.window-status-bar__toolkits .performance-trigger { flex:0 1 auto; min-width:0; max-width:112px; }
+.window-status-bar__toolkits .performance-trigger:not(:has(> span)) { flex:0 0 22px; width:22px; padding:0; }
+.window-status-bar__toolkits .performance-trigger > svg { flex:none; width:14px; height:14px; stroke-width:1.7; }
 .window-status-bar__toolkits .performance-trigger > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .performance-popover { position:fixed; z-index:var(--layer-popover); width:min(432px,calc(100vw - 24px)); max-height:min(620px,calc(100vh - 48px)); display:flex; flex-direction:column; overflow:hidden; color:var(--text); border:1px solid var(--overlay-line); border-radius:var(--radius-lg); background:linear-gradient(140deg,var(--wash-3),transparent 28%),var(--overlay-surface); box-shadow:var(--elev-2),var(--hl-strong); font-size:var(--fs-body); animation:performance-enter var(--dur-enter) var(--ease-enter); }
 .performance-header,.performance-observation,.performance-scopes,.performance-actions { backdrop-filter:blur(10px); }
