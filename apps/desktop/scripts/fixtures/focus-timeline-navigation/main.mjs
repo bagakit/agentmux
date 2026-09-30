@@ -19,6 +19,7 @@ try {
   const click = async selector => { const position = await point(selector); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...position, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 }) }
   const wheel = async (deltaX, deltaY = 0, modifiers = 0) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...await point('.recent-focus__time-scale'), deltaX, deltaY, modifiers })
   const shot = async name => {
+    await until(`(()=>{const preview=document.querySelector('.recent-focus__message-preview');if(!preview)return ${!['native-body', 'source-details'].includes(name)};const style=getComputedStyle(preview);return style.visibility==='visible'&&Number(style.opacity)>=.999&&!preview.getAnimations().some(animation=>animation.playState==='running')})()`)
     await win.webContents.executeJavaScript('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
     const header = await win.webContents.executeJavaScript(`(()=>{const h=document.querySelector('.recent-focus__header'),r=h.getBoundingClientRect(),v=document.querySelector('.recent-focus__viewport').getBoundingClientRect();const controls=[...h.querySelectorAll('button,select,input')].map(n=>({name:n.getAttribute('aria-label'),r:n.getBoundingClientRect().toJSON()}));return{height:r.height,viewportHeight:v.height,controls}})()`)
     assert.equal(header.height, 28); assert.ok(header.viewportHeight >= 66)
