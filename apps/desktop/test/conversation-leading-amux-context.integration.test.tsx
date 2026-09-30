@@ -151,7 +151,7 @@ it('actual ordinary Core Provider argv carriers retain both declarations and the
   const f = await fixture('claude', [...wires, originalPositive]); await draw(f)
   for (const [index, wire] of wires.entries()) {
     const parsed = parseAgentMuxMessagePrefix(wire)!; expect(parsed.declaredContexts).toHaveLength(2); expect(parsed.body).toBe('\n\nClarify goal')
-    const row = turn(f.ids[index]!); expect(disclosures(row)).toHaveLength(2); expect(row.querySelector('.log-turn__text > p')?.textContent).toBe('\n\nClarify goal'); await copy(row, wire)
+    const row = turn(f.ids[index]!); expect(disclosures(row)).toHaveLength(2); expect(row.querySelector('.log-turn__text > p')?.textContent).toBe('Clarify goal'); await copy(row, wire)
   }
   expect(disclosures(turn(f.ids[2]!))).toHaveLength(1)
 })
@@ -179,7 +179,7 @@ it('actual Claude quote, fenced and inline code, indentation and nonleading lite
   const continuation = parseAgentMuxMessagePrefix(indentedContinuation)!
   expect(continuation.declaredContexts).toHaveLength(1); expect(continuation.body).toBe('\n\n' + INDENTED_LITERAL)
   const row = turn(f.ids[6]!); expect(disclosures(row)).toHaveLength(1)
-  expect(row.querySelector('.log-turn__text > p')?.textContent).toBe('\n\n' + INDENTED_LITERAL); await copy(row, indentedContinuation)
+  expect(row.querySelector('.log-turn__text > p')?.textContent).toBe(INDENTED_LITERAL); await copy(row, indentedContinuation)
 })
 
 it('actual Activity and History share original reader records while disclosure, tail Range, DOM, scroll and stored draft survive rerender', async () => {
