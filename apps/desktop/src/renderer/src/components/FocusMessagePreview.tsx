@@ -137,7 +137,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       <p className="recent-focus__message-excerpt">{message.content.trim() || (resources.length ? resources.join(' · ') : 'Input has no recorded text')}</p>
       <footer className="recent-focus__message-meta"><span>{message.source.kind === 'native' ? 'Native record' : 'Submission record'}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
       <span className="recent-focus__message-hint">Click or press Enter to keep reading</span>
-    </> : <><p className="recent-focus__message-caption">{roleName} · {message.source.kind === 'native' ? 'Native record' : 'Submission record'}{message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? ' · Record time unknown' : ''}</p>
+    </> : <><p className="recent-focus__message-caption">To {targetName} · {roleName} · {message.source.kind === 'native' ? 'Native record' : 'Submission record'}{message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? ' · Record time unknown' : ''}</p>
     {agent ? <details className="recent-focus__sender-details"><summary>Sender Context · {sender?.name ?? 'Unavailable'}</summary><dl className="recent-focus__sender">
       <dt>Sender</dt><dd>{sender?.name ?? 'Context unavailable'}<small title={authorId}>{authorId}</small></dd>
       <dt>Current project</dt><dd>{project ?? 'Not recorded'}</dd>
