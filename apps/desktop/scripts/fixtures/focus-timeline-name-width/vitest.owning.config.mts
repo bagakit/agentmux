@@ -1,9 +1,12 @@
+import { realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import original from '../../../../../vitest.config'
+const root = resolve(import.meta.dirname, '../../../../..')
 export default defineConfig({
+  server: { fs: { allow: [root, ...['core', 'demand', 'layout'].map(name => realpathSync(resolve(root, 'node_modules/@agentmux', name)))] } },
   ...original,
   plugins: [...(original.plugins ?? []), {
     name: 'focus-name-width-loaded-source', enforce: 'pre',
