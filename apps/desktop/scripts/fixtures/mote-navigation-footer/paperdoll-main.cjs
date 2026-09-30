@@ -120,6 +120,29 @@ app.whenReady().then(async () => {
     const activeExpression = async expected => { await until(`window.motePaperdollProof.facts().ui.entry.motion.expression===${JSON.stringify(expected)}`, 'accurate expression ' + expected); return (await facts()).ui.entry.motion }
     const animate = async expected => { await activeExpression(expected); await until(`window.motePaperdollProof.facts().ui.entry.motion.animations.some(a=>a.state==='running')`, 'native animations for ' + expected) }
     const protectedSame = (before, after) => assert.deepEqual(after.protected, before.protected, 'Avatar actions/animation keep nonempty original draft/layout/Run/focus/mode facts')
+    const paintedEditor = async parts => {
+      await pause(180) // Observe the original control's completed 150ms style transition.
+      const current = await facts(), editor = current.ui.editor
+      assert.ok(editor); assert.equal(editor.groups.length, parts ? 7 : 1)
+      assert.equal(editor.groups[0].label, 'Mote avatar style'); assert.equal(editor.groups[0].buttons.length, 2)
+      if (parts) assert.deepEqual(editor.groups.slice(1).map(group => group.label), ['Face', 'Color', 'Eyes', 'Brows', 'Mouth', 'Detail'])
+      for (const group of editor.groups) {
+        assert.ok(group.buttons.length > 1); assert.equal(group.buttons.filter(button => button.selected).length, 1)
+        for (const button of group.buttons) {
+          assert.ok(button.rect.width > 0 && button.rect.height > 0); assert.equal(button.marks.length, 1)
+          const mark = button.marks[0]
+          assert.equal(mark.rect.width, 12); assert.equal(mark.rect.height, 12); assert.equal(mark.paths, 1)
+          assert.equal(mark.visibility, button.selected ? 'visible' : 'hidden')
+          if (button.selected) {
+            assert.notEqual(mark.display, 'none'); assert.ok(Number(mark.opacity) > 0)
+            assert.match(button.shadow, /inset/); assert.match(button.shadow, /1px/)
+            assert.ok(group.buttons.filter(other => !other.selected).some(other => other.shadow !== button.shadow), 'The selected contour is distinct from unselected controls')
+          }
+        }
+      }
+      assert.equal(editor.save.primary, true); assert.notEqual(editor.save.background, 'none'); assert.equal(editor.cancel.primary, false)
+      return current
+    }
     await until('window.motePaperdollProof?.ready&&window.motePaperdollProof.facts().ready', 'actual App initialized')
     const initial = await facts(); result.initial = initial
     assert.ok(Object.keys(initial.protected.tabs).length >= 6 && Object.keys(initial.protected.drafts).length >= 4)
@@ -130,6 +153,12 @@ app.whenReady().then(async () => {
       await capture('paperdoll-primary-default')
       await edit(); await click(dialogButton('Make a face')); await click(dialogButton('Eyes · spark')); await click(dialogButton('Color · peach')); await click(dialogButton('Brows · curious'))
       assert.equal((await facts()).icons[keyFor(primary)], undefined, 'The real editor preview is local until Save')
+      const facePreview = await paintedEditor(true)
+      await click(dialogButton('Icons & image')); const iconMode = await paintedEditor(false)
+      await click(dialogButton('Make a face')); const faceMode = await paintedEditor(true)
+      assert.deepEqual(faceMode.ui.editor.groups, facePreview.ui.editor.groups, 'Returning to face editing preserves all original selection and geometry')
+      protectedSame(baseline, faceMode); assert.deepEqual(faceMode.icons, baseline.icons)
+      check('actual-editor-painted-selections', { facePreview: facePreview.ui.editor, iconMode: iconMode.ui.editor, faceMode: faceMode.ui.editor })
       await capture('paperdoll-editor-preview')
       // Real keyboard activation of the original Save button; no script .click or direct store write.
       await locate(dialogButton('Save avatar')); await read(`(${dialogButton('Save avatar')}).focus()`); await key('Enter')
