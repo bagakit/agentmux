@@ -8,13 +8,17 @@ import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from './probe
 
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..'), require = createRequire(import.meta.url)
 const copy = await realpath(await mkdtemp('/tmp/amx-goals-maturity-mutation-')), copiedDesktop = join(copy, 'apps/desktop')
-const evidence = join(repository, '.tmp/goals-page-maturity-mutations', `attempt-${Date.now()}`)
+assert.ok(process.argv.slice(2).every(flag=>['--return-only','--density-only'].includes(flag)), 'Unknown maturity mutation mode')
+const densityOnly=process.argv.includes('--density-only')
+const evidenceRoot=process.env.AGENTMUX_GOALS_MUTATION_EVIDENCE_ROOT||join(repository,'.tmp/goals-page-maturity-mutations')
+const evidence = join(evidenceRoot, `attempt-${Date.now()}`)
+const densityBaseline=process.env.AGENTMUX_GOALS_DENSITY_BASELINE||join(process.env.AGENTMUX_GOALS_EVIDENCE_ROOT||join(repository,'.tmp/goals-surface'),'density-baseline.json')
 const component = 'src/renderer/src/components/GlobalBoardSurface.tsx', alignment = 'src/renderer/src/components/GoalAlignment.tsx', css = 'src/renderer/src/styles/goals.css'
 const inputs = [component, alignment, css, 'src/renderer/src/components/GoalsCommonActions.tsx', 'src/renderer/src/components/GoalProperties.tsx', 'src/renderer/src/lib/goal-presentation.ts', 'src/renderer/src/lib/workspace-projects.ts', 'test/goals-page-maturity.test.tsx', 'scripts/fixtures/goals-surface/entry.tsx', 'scripts/fixtures/goals-surface/maturity.cjs']
 const original = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(desktop, file))])))
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const hashes = values => Object.fromEntries([...values].map(([file, bytes]) => [file, digest(bytes)]))
-const receipt = { schema: 'agentmux.goals-page-maturity-mutations.v1', passed: false, sharedTreeMutations: 0, userRunTouched: false, sourceBefore: hashes(original), cases: [] }
+const receipt = { schema: 'agentmux.goals-page-maturity-mutations.v1', mode:densityOnly?'density':'maturity', passed: false, sharedTreeMutations: 0, userRunTouched: false, sourceBefore: hashes(original), cases: [] }
 const unitCases = [
   { label: 'current-row-fact-disconnected', file: component, before: 'goalNextStep(demand)', after: "'Open a goal'", test: 'states current facts in nonempty rows', assertion: 'Goal rows describe actual current target/result facts' },
   { label: 'selected-goal-common-owner-uncompacted', file: component, before: 'contextCompact={Boolean(selectedDemandId)}', after: 'contextCompact={false}', test: 'temporarily compacts the same common instance', assertion: 'Selected Goal compacts entry without replacing its draft owner' },
@@ -25,6 +29,10 @@ const renderCases = [
   { label: 'returned-focus-under-scrollbar', file: css, before: '.goals-common--managing .goals-common__manager { min-height: 0; overflow: auto; padding-inline-end: var(--sp-5); }', after: '.goals-common--managing .goals-common__manager { min-height: 0; overflow: auto; padding-inline-end: 0; }', test: 'return-only', assertion: 'Returned focus stays clear of the manager scrollbar' },
   { label: 'narrow-detail-container-query-self-targeted', file: css, before: '.goals-surface--detail-open .goals-layout { flex-direction: column; }', after: '.goals-surface--detail-open { flex-direction: column; }', test: 'narrow-layout-only', assertion: 'Selected Goal detail occupies a real readable viewport' },
   { label: 'reading-heading-hierarchy-flattened', file: css, before: '.goals-document h2 { display: flex; gap: var(--sp-4); margin: 0 0 var(--sp-4); color: var(--text); font-size: var(--fs-title);', after: '.goals-document h2 { display: flex; gap: var(--sp-4); margin: 0 0 var(--sp-4); color: var(--text); font-size: var(--fs-body);', assertion: 'Reading responsibilities have stronger heading hierarchy than prose' }
+]
+const densityCases=[
+  {label:'top-actions-restacked',file:css,before:'.goals-entry__actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));',after:'.goals-entry__actions { display: grid; grid-template-columns: minmax(0, 1fr);',test:'density-start-only',assertion:'Wide full original requests are arranged in parallel'},
+  {label:'detail-document-centered-away-from-boundary',file:css,before:'.goals-document { box-sizing: border-box; width: 100%; max-width: 960px; margin: 0;',after:'.goals-document { box-sizing: border-box; width: 100%; max-width: 960px; margin: 0 auto;',test:'density-detail-only',assertion:'Goal document starts 16–24px from the detail boundary'}
 ]
 async function unit(label, test) {
   const runEvidence = join(evidence, label); await mkdir(runEvidence, { recursive: true })
@@ -46,7 +54,7 @@ async function render(label, scope = 'legibility-only') {
     for (const entry of await readdir(output, { recursive: true, withFileTypes: true })) if (entry.isFile()) { const file = join(entry.parentPath, entry.name), bytes = await readFile(file); outputBytes += bytes.length; compiled[file.slice(output.length + 1)] = digest(bytes) }
     assert.ok(Object.keys(compiled).length > 0); await writeFile(join(runEvidence, 'compiled.json'), JSON.stringify(compiled, null, 2))
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-    const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'maturity.cjs'), join(output, 'index.html'), copy, runEvidence, scope], { temporaryRoot: copy, cwd: copy, env, timeoutMs: 60000, onLine: line => log.push(line) })
+    const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'maturity.cjs'), join(output, 'index.html'), copy, runEvidence, scope,...(densityOnly?[densityBaseline]:[])], { temporaryRoot: copy, cwd: copy, env, timeoutMs: 60000, onLine: line => log.push(line) })
     await writeFile(join(runEvidence, 'process.log'), log.join('\n'))
     return { outcome, render: JSON.parse(await readFile(join(runEvidence, 'render.json'), 'utf8')), evidence: runEvidence, compiledOutput: { files: Object.keys(compiled).length, bytes: outputBytes, removedAfterProcessExit: true } }
   } finally { await stopProbeProcesses(process.pid + 1000000000, copy); assert.deepEqual(await listProbeProcesses(process.pid + 1000000000, copy), []); await rm(output, { recursive: true, force: true }) }
@@ -84,12 +92,14 @@ try {
   assert.equal(text.split('export default defineConfig({').length - 1, 1)
   await writeFile(privateConfig, text.replace('export default defineConfig({', `export default defineConfig({\n  server: { fs: { allow: ${JSON.stringify([copy, repository])} } },`))
   receipt.privateVerificationBoundary = { sameOwningTests: true, sameDistFreshnessGuard: true, filesystemAllow: [copy, repository], reason: 'Linked exact workspace package URL assets stay readable from the private proof root.' }
-  if (!returnOnly) {
+  if (!returnOnly&&!densityOnly) {
     receipt.unitBaseline = await unit('unit-baseline-green'); assert.equal(receipt.unitBaseline.outcome.exitCode, 0); assert.equal(receipt.unitBaseline.report.success, true)
     for (const mutation of unitCases) await mutate(mutation, unit)
   }
-  receipt.renderBaseline = await render('render-baseline-green'); assert.equal(receipt.renderBaseline.outcome.exitCode, 0, JSON.stringify(receipt.renderBaseline.render.failure)); assert.equal(receipt.renderBaseline.render.passed, true)
-  for (const mutation of renderCases.filter(item => !returnOnly || item.label === 'returned-focus-under-scrollbar')) await mutate(mutation, render)
+  if(densityOnly){const bytes=await readFile(densityBaseline);receipt.densityBaseline={path:densityBaseline,sha256:digest(bytes),sourceCommit:JSON.parse(bytes).sourceCommit}}
+  receipt.renderBaseline = await render('render-baseline-green',densityOnly?'density-start-only':undefined); assert.equal(receipt.renderBaseline.outcome.exitCode, 0, JSON.stringify(receipt.renderBaseline.render.failure)); assert.equal(receipt.renderBaseline.render.passed, true)
+  for (const mutation of densityOnly?densityCases:renderCases.filter(item => !returnOnly || item.label === 'returned-focus-under-scrollbar')) await mutate(mutation, render)
+  if(densityOnly)assert.equal(receipt.cases.length,2,'Exactly two actual production density seams proved assertion RED and exact restore GREEN')
   receipt.sourceAfter = hashes(new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(desktop, file))])))); assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
   receipt.copyAfter = hashes(new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(copiedDesktop, file))])))); assert.deepEqual(receipt.copyAfter, receipt.sourceBefore)
   receipt.passed = true
