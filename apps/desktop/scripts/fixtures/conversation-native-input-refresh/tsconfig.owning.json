@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../test/conversation-native-input-refresh.integration.test.tsx",
+    "../../../test/session-history-observation-owners.test.ts",
+    "vitest.owning.config.mts",
+    "entry.tsx",
+    "captured-entry.tsx",
+    "../../../test/focus-native-user-messages.integration.test.tsx",
+    "../../../test/runtime-session-history.test.ts"
+  ]
+}
