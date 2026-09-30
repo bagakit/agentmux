@@ -54,19 +54,6 @@ export function isSystemArtifactPath(path: string): boolean {
   return [...SYSTEM_ARTIFACT_EXTENSIONS].some((extension) => name.endsWith(extension))
 }
 
-/** Return the path link containing a 1-based terminal cell column, if any. */
-export function terminalPathLinkAtCell(
-  text: string,
-  column: number,
-  workspaceRoot: string,
-  homeDir = ''
-): TerminalPathLink | null {
-  if (!Number.isFinite(column) || column < 1) return null
-  const match = detectTerminalPathLinks(text, workspaceRoot, homeDir).find((link) =>
-    column >= link.index + 1 && column <= link.index + link.length)
-  return match ?? null
-}
-
 /**
  * Path-token scanner.
  *   - The leading negative lookbehind anchors to a token start and, by excluding `/` and `:`,
