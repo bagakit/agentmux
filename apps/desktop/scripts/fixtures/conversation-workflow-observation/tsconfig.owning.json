@@ -1,0 +1,1 @@
+{"extends":"../../../tsconfig.test.json","include":["../../../src/renderer/src/global.d.ts","../../../test/conversation-workflow-observation.integration.test.tsx","vitest.owning.config.mts"]}

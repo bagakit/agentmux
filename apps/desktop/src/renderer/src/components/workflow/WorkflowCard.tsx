@@ -1,9 +1,9 @@
-import { useId, useState } from 'react'
+import { useId, useLayoutEffect, useState, type ReactNode } from 'react'
 import { ChevronRight, GitBranch } from 'lucide-react'
 import { WorkflowPhase } from './WorkflowPhase'
 import { WorkflowProgressRail } from './WorkflowProgressRail'
 import { WorkflowStatusGlyph } from './WorkflowStatusGlyph'
-import { workflowStatusLabel, type WorkflowSnapshot, type WorkflowVariant } from './types'
+import { workflowStatusLabel, type WorkflowSnapshot, type WorkflowVariant, type WorkflowObservationStatus, type WorkflowRecordedTime } from './types'
 import { WorkflowToolRow } from './WorkflowToolRow'
 import { workflowPresentation } from './presentation'
 
@@ -11,19 +11,79 @@ function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-')
 }
 
-export function WorkflowCard({
-  workflow,
-  variant = 'inline',
-  defaultExpanded,
-  expanded: expandedProp,
-  onExpandedChange
-}: {
+type SnapshotProps = {
   workflow: WorkflowSnapshot
   variant?: WorkflowVariant
   defaultExpanded?: boolean
   expanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
-}) {
+}
+
+type ObservationProps = {
+  observation: {
+    id: string
+    stepCount: number
+    counts?: { complete: number; streaming: number; failed: number; unknown: number }
+    status?: WorkflowObservationStatus
+    recordedTime: WorkflowRecordedTime
+    elapsed?: string
+    streaming?: boolean
+  }
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
+  children: ReactNode
+}
+
+export function WorkflowCard(props: SnapshotProps | ObservationProps) {
+  return 'observation' in props
+    ? <RecordedStepsCard {...props} />
+    : <WorkflowSnapshotCard {...props} />
+}
+
+/** The host owns the records and disclosure; a contiguous observation is not a workflow. */
+function RecordedStepsCard({ observation, expanded, onExpandedChange, children }: ObservationProps) {
+  const contentId = useId()
+  const [readOnce, setReadOnce] = useState(expanded)
+  useLayoutEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
+  if (observation.stepCount === 0) return null
+  const { recordedTime, status } = observation
+  return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}>
+    <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
+      aria-expanded={expanded} aria-controls={contentId} aria-description={recordedTime.offset}
+      onClick={() => onExpandedChange(!expanded)}>
+      <span className="log-fold__node"><ChevronRight size={12} className="wf-chev log-fold__chevron" /></span>
+      <span className="log-fold__label">
+        <span className="log-fold__time" title={recordedTime.offset}>
+          <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
+        </span>
+        <span className="log-fold__steps">{observation.stepCount} steps</span>
+        {observation.elapsed ? <span className="log-fold__elapsed">{observation.elapsed}</span> : null}
+        {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
+        {observation.streaming ? <span className="wf-chip"><WorkflowStatusGlyph status="running" />Streaming</span> : null}
+        {status === 'complete' ? <span className="wf-observation__recorded">Recorded</span> : null}
+        {status === undefined ? <span className="wf-observation__recorded">Status not recorded</span> : null}
+      </span>
+    </button>
+    {observation.counts ? <div className="wf-observation__summary" aria-label="Recorded step states">
+      <span className="wf-observation__caption">Recorded activity</span>
+      {observation.counts.complete > 0 ? <span className="wf-observation__stat" data-state="complete"><WorkflowStatusGlyph status="completed" />{observation.counts.complete} complete</span> : null}
+      {observation.counts.streaming > 0 ? <span className="wf-observation__stat" data-state="streaming"><WorkflowStatusGlyph status="running" />{observation.counts.streaming} streaming</span> : null}
+      {observation.counts.failed > 0 ? <span className="wf-observation__stat" data-state="failed"><WorkflowStatusGlyph status="failed" />{observation.counts.failed} failed</span> : null}
+      {observation.counts.unknown > 0 ? <span className="wf-observation__stat">{observation.counts.unknown} status not recorded</span> : null}
+    </div> : null}
+    <div id={contentId} className="wf-body wf-observation__body" hidden={!expanded} inert={!expanded}>
+      {expanded || readOnce ? children : null}
+    </div>
+  </article>
+}
+
+function WorkflowSnapshotCard({
+  workflow,
+  variant = 'inline',
+  defaultExpanded,
+  expanded: expandedProp,
+  onExpandedChange
+}: SnapshotProps) {
   const generatedId = useId()
   const contentId = `wf-card-${safeId(workflow.id)}-${safeId(generatedId)}`
   const presentation = workflowPresentation(workflow)

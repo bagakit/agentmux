@@ -1,10 +1,11 @@
-import type { AgentProviderId, AgentSessionHistoryContentPart, AgentTimelineItemStatus } from '@agentmux/core'
+import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ChevronRight, Copy } from 'lucide-react'
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { formatClock, formatOffset } from '../lib/activity-ruler'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { speakerForDisplay, type ConversationSpeaker } from '../lib/conversation-speaker'
+import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
+import { ConversationInputDetails } from './ConversationInputDetails'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
 import type { ReadPastedImage } from './ConversationImage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
@@ -20,6 +21,8 @@ export type ConversationMessageProps = {
   speaker?: ConversationSpeaker
   /** Current conversation identity, supplied by its host; never inferred from a name. */
   conversationSessionId?: string
+  inputSource?: AgentSessionUserMessageSource
+  describeSpeaker?: DescribeSpeaker
   name?: string
   providerId?: AgentProviderId
   content: string | readonly AgentSessionHistoryContentPart[]
@@ -84,7 +87,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  speaker: recordedSpeaker, conversationSessionId, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, inputSource, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const renderClock = timeFormatter ?? formatClock
@@ -263,6 +266,8 @@ export function ConversationMessage({
           })}
         </div>
       ) : null}
+      {isIncoming ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
+        declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} /> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
     </div>
   )
