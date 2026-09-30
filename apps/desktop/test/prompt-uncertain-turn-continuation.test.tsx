@@ -1,16 +1,20 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { ComposerOutbox } from '../src/renderer/src/components/ComposerOutbox'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
+let dispose: (() => void) | undefined
+beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
+afterAll(() => dispose?.())
 const dom = composerDOM()
 const unknownError = () => new Error('The previous turn has not been confirmed complete. Diagnostic: code=AGENT_TURN_END_UNCONFIRMED')
 
 it('the existing Send grants its exact head message without an additional continuation action', async () => {
+  vi.spyOn(api.sessions, 'refresh').mockResolvedValue(composerSession())
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(unknownError()).mockResolvedValue(undefined)
   const state = useAppStore.getState()
   state.enqueueAgentSteer('agent-1', 'first')
@@ -20,7 +24,7 @@ it('the existing Send grants its exact head message without an additional contin
   expect(pending).toHaveLength(2)
   expect(pending[0]).toMatchObject({ text: 'first', status: 'deferred', errorCode: 'AGENT_TURN_END_UNCONFIRMED' })
   const firstId = pending[0]!.operationId
-  await dom.render(<ComposerOutbox queued={pending.map((entry) => ({ id: entry.operationId,
+  await dom.render(<ComposerOutbox selectedId={firstId} onSelect={() => {}} queued={pending.map((entry) => ({ id: entry.operationId,
     text: entry.text, status: entry.status, deliverable: true
   }))} onSend={(id) => { void useAppStore.getState().sendQueuedAgentSteer('agent-1', id) }} />)
   expect(dom.container.textContent).toContain('Send explicitly steers this message')
@@ -30,8 +34,8 @@ it('the existing Send grants its exact head message without an additional contin
   expect(button).toBeDefined()
   await act(async () => { button!.click() })
   expect(submit.mock.calls).toEqual([
-    [composerSession().control, 'first', firstId, undefined, undefined],
-    [composerSession().control, 'first', firstId, undefined, { allowUncertainTurn: true }]
+    [composerSession().control, 'first', firstId, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, undefined, false],
+    [composerSession().control, 'first', firstId, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, { allowUncertainTurn: true }, false]
   ])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([pending[1]])
 })
@@ -39,6 +43,7 @@ it('the existing Send grants its exact head message without an additional contin
 it('waits for a fresh accepted native completion, without output or working retry storms', async () => {
   const session = composerSession()
   useAppStore.setState({ sessions: [session] })
+  vi.spyOn(api.sessions, 'refresh').mockResolvedValue(composerSession())
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(unknownError()).mockResolvedValue(undefined)
   useAppStore.getState().enqueueAgentSteer('agent-1', 'kept message')
   await useAppStore.getState().flushAgentSteerQueue('agent-1')
@@ -56,6 +61,6 @@ it('waits for a fresh accepted native completion, without output or working retr
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toHaveLength(1)
   status('done', 5)
   await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2))
-  expect(submit.mock.calls[1]).toEqual([session.control, 'kept message', id, undefined, undefined])
+  expect(submit.mock.calls[1]).toEqual([session.control, 'kept message', id, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, undefined, false])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toBeUndefined()
 })
