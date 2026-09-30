@@ -10,6 +10,7 @@ import { turnWorking } from './activity-working-state'
 import { clampStep } from './activity-step-summary'
 import { sessionRecentActivity } from './session-recency'
 import { sessionStatusLabel } from './session-presentation'
+import { launcherTimelineRecap, type LauncherRecap } from './launcher-resume'
 
 export type FocusBucket = 'attention' | 'working' | 'results' | 'idle'
 export type FocusContext = {
@@ -21,6 +22,8 @@ export type FocusContext = {
   runId: string; workingEnteredAt: number | null
   workspace: WorkspaceRecord | undefined
   originAddress?: string
+  recap: LauncherRecap | null
+  detailIsRecap: boolean
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
 function activityEntryTime(session: SessionSnapshot): number | undefined {
@@ -53,7 +56,8 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   const enteredAt = activityEntryTime(session)
   if (enteredAt !== undefined) activityTimes.push(enteredAt)
   const lastActivityAt = activityTimes.reduce<number | null>((last, time) => Number.isFinite(time) && time > 0 ? Math.max(last ?? 0, time) : last, null)
-  let detail = 'No activity details observed'
+  const recap = items.length ? launcherTimelineRecap(timeline) : null
+  let detail = 'No activity details observed', detailIsMessage = false
   if (session.kind === 'terminal' && (state === 'error' || state === 'exited' || state === 'disconnected')) {
     const facts = [session.status.exitReason === 'user-stopped' ? 'Stopped by you' : null,
       session.status.detail?.trim(), session.status.exitCode === undefined ? null : `Exit code ${session.status.exitCode}`].filter(Boolean)
@@ -63,6 +67,7 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   } else if (result && (bucket === 'results' || bucket === 'idle' && state === 'running')) {
     const response = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
     detail = state === 'running' ? `Response · ${response}` : response
+    detailIsMessage = true
   }
   else {
     const activity = sessionRecentActivity(session, items, session.workspacePath)
@@ -70,13 +75,18 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
     else if (session.kind === 'agent' && latest?.content && (latest.kind === 'user_message' || latest.kind === 'assistant_message')) {
       const label = latest.kind === 'user_message' ? 'Prompt' : 'Response'
       detail = `${label} · ${clampStep(latest.content.replace(/\s+/g, ' ').trim(), 'head', 140)}`
+      detailIsMessage = true
     } else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
     else if (state === 'done') detail = 'Ready for another prompt · No result observed'
   }
+  // The latest non-lifecycle record can only be the recap's record if its kind matches
+  // the helper's chosen kind and it is nonempty. A newer prompt is a different fact.
+  const detailIsRecap = Boolean(detailIsMessage && recap && latest?.content?.trim()
+    && latest.kind === (recap.source === 'Last assistant message' ? 'assistant_message' : 'user_message'))
   return { id: session.id, name, detail, state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt,
-    runId: session.control.run.runId, workingEnteredAt: workingEntryTime(session) }
+    runId: session.control.run.runId, workingEnteredAt: workingEntryTime(session), recap, detailIsRecap }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
@@ -124,7 +134,10 @@ function createFocusProjectionCache() {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
       } else {
         const next = context(session, timeline, name, workspace, topicId)
-        if (lane === null) next.detail = 'Mote identity is not confirmed · ' + next.detail
+        if (lane === null) {
+          next.detail = 'Mote identity is not confirmed · ' + next.detail
+          next.detailIsRecap = false
+        }
         model = old?.model && Object.keys(next).every(key => next[key as keyof FocusContext] === old.model![key as keyof FocusContext]) ? old.model : next
         rows.push(model)
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
@@ -143,4 +156,3 @@ function createFocusProjectionCache() {
 export function createFocusProjectionSelector() {
   return createFocusProjectionCache()
 }
-

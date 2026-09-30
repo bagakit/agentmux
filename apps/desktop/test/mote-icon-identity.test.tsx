@@ -72,11 +72,15 @@ describe('Mote vector identity', () => {
     expect(new Set(paths).size).toBe(1)
   })
 
-  it('mounts that mark in the real Mote tree row and the open creation menu', async () => {
-    vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
-    useAppStore.setState({ layouts: {}, tabs: {}, collapsedProjectGroups: {}, pinnedItems: {} })
+  it('keeps the primary PNG avatar and the custom Mote mark in the real tree and creation menu', async () => {
+    vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([{ id: 'launcher:custom-mote', title: 'Research Mote', summary: '', directoryPath: '/topics/topic--launcher--custom-mote', topicPath: '/topics/topic--launcher--custom-mote/topic.md', collaborators: [], soul: { path: '/topics/topic--launcher--custom-mote/SOUL.md', content: '# Research Mote', version: 'v1' } }])
+    const config = await api.config.get()
+    useAppStore.setState({ config: { ...config, workspaces: [workspace] }, layouts: {}, tabs: {}, collapsedProjectGroups: {}, pinnedItems: {}, scratchTopicSnapshots: {}, workspaceFileRevisions: {} })
     await act(async () => root.render(<><SpaceTopicsTree workspace={workspace} icons={{}} onChangeIcon={() => {}} /><SpaceCreateMenu onOpenFolder={async () => {}} /></>))
-    const tree = container.querySelector('[aria-label="Open Mote"] svg')
+    const primary = container.querySelector<HTMLImageElement>('[aria-label="Open Mote"] img')
+    expect(primary).not.toBeNull()
+    expect(primary?.getAttribute('src')).toContain('pmo-teams-topic-avatar.png')
+    const tree = container.querySelector('[aria-label="Open Mote · Research Mote"] svg')
     expect(tree).not.toBeNull()
     const contour = renderedMote(14).querySelector('path')!.getAttribute('d')
     expect(tree?.querySelector('path')?.getAttribute('d')).toBe(contour)

@@ -13,7 +13,7 @@ it('skips unrelated Store writes and derives only one changed context at both in
     const sessions=Array.from({length:sessionCount!},(_,i)=>new Proxy({...base,id:`session-${i}`,hostId:'local',workspacePath:'/focus-cost-0',status:{...base.status,state:'working' as const}},{get(target,key,receiver){if(key==='id')idReads++;return Reflect.get(target,key,receiver)}}))
     const timelines:Record<string,AgentTimelineSnapshot>={}
     for(let i=0;i<sessionCount!;i++)timelines[`session-${i}`]=new Proxy({agentSessionId:`session-${i}`,revision:1,items:[]},{get(target,key,receiver){if(key==='items')timelineReads[`session-${i}`]=(timelineReads[`session-${i}`]??0)+1;return Reflect.get(target,key,receiver)}})
-    const input={sessions,config:{...baseConfig,workspaces},timelines,agentNames:{}}
+    const input={sessions,config:{...baseConfig,workspaces},timelines,agentNames:{},scratchTopicSnapshots:{}}
     const select=createFocusProjectionSelector(), before=select(input)
     expect(before.contexts).toHaveLength(sessionCount!)
     pathReads=0;idReads=0;for(const id of Object.keys(timelineReads))delete timelineReads[id]
@@ -23,14 +23,14 @@ it('skips unrelated Store writes and derives only one changed context at both in
     expect(renamed.contexts[0]!.name).toBe('Changed only this task')
     expect(renamed.laneContexts).toBe(before.laneContexts)
     expect(renamed.contexts.slice(1)).toEqual(before.contexts.slice(1))
-    expect(pathReads).toBe(0)
+    expect(pathReads).toBe(1) // Existing scratch snapshot scope checks this one retained workspace.
     expect(timelineReads).toEqual({'session-0':2})
-    for(const id of Object.keys(timelineReads))delete timelineReads[id]
+    pathReads=0;for(const id of Object.keys(timelineReads))delete timelineReads[id]
     const changed=select({...input,agentNames:{'session-0':'Changed only this task'},sessions:sessions.map((session,index)=>index===0?{...session,status:{...session.status,state:'done' as const}}:session)})
     expect(changed.contexts[0]!.bucket).toBe('idle')
     expect(changed.laneContexts).not.toBe(renamed.laneContexts)
     expect(changed.laneContexts.slice(1)).toEqual(renamed.laneContexts.slice(1))
-    expect(pathReads).toBe(0);expect(timelineReads).toEqual({'session-0':2})
+    expect(pathReads).toBe(1);expect(timelineReads).toEqual({'session-0':2})
   }
 })
 
@@ -39,7 +39,8 @@ it('keeps PMO requests separate in the same cache and invalidates actual owner c
   const workspace={id:'__scratch__',hostId:'local',name:'Topics',path:'/focus-topics',kind:'folder' as const}
   const pmo={...base,id:'pmo',hostId:'local',workspacePath:'/focus-topics/topic--launcher--leader',status:{...base.status,state:'waiting' as const}}
   const execution={...base,id:'execution',hostId:'local',workspacePath:'/focus-topics/topic--launcher--task',status:{...base.status,state:'working' as const}}
-  const select=createFocusProjectionSelector(),input={sessions:[pmo,execution],config:{...config,workspaces:[workspace]},timelines:{},agentNames:{}}
+  const scratchTopicSnapshots={ [workspace.id]: {scope:JSON.stringify([workspace.hostId,workspace.path]),revision:1,reading:false,error:null,topics:[{id:'launcher:task',title:'Task',summary:'',directoryPath:execution.workspacePath,topicPath:execution.workspacePath+'/topic.md',collaborators:[]}] } }
+  const select=createFocusProjectionSelector(),input={sessions:[pmo,execution],config:{...config,workspaces:[workspace]},timelines:{},agentNames:{},scratchTopicSnapshots}
   const before=select(input)
   expect(before.contexts.map(row=>row.id)).toEqual(['execution'])
   expect(before.pmoAttention).toEqual(['pmo'])

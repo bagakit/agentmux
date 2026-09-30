@@ -33,7 +33,8 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 it('keeps unknown work out of Results and preserves the known Response over an older completed tool', async () => {
   const control = base.control, snapshot = useAppStore.getState().timelines.a
   await mount()
-  expect(row().dataset.bucket).toBe('idle'); expect(row().textContent).toContain('Response · The latest known response')
+  expect(row().dataset.bucket).toBe('idle'); expect(row().querySelector('.focus-context__recap')!.textContent).toBe('The latest known response')
+  expect(row().getAttribute('aria-label')).toContain('Last assistant message (timeline)')
   const preview = container.querySelector<HTMLElement>('[data-preview-session="a"]')!
   expect(preview.dataset.bucket).toBe('idle'); expect(preview.textContent).toContain('Response · The latest known response')
   expect(row().getAttribute('aria-label')).toContain('Status unknown'); expect(row().title).toContain('Status unknown')
@@ -65,7 +66,8 @@ it('shows and refreshes the existing Topic summary without replacing the live ca
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [{ id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', kind: 'folder', path: '/scratch' }] }, sessions: [{ ...base, workspacePath: topic.directoryPath, status: { ...base.status, state: 'working' } }] })))
   await mount()
   expect(summary().textContent).toBe(topic.summary)
-  expect(row().querySelector('.focus-context__detail')!.textContent).toBe('Bash pnpm test')
+  expect(row().querySelector('.focus-context__activity')!.textContent).toBe('Bash pnpm test')
+  expect(row().querySelector('.focus-context__recap')!.textContent).toBe('The latest known response')
   topics.mockResolvedValue([{ ...topic, summary: 'Preserve reading through reconnect' }])
   await act(async () => useAppStore.setState({ workspaceFileRevisions: { [SCRATCH_WORKSPACE_ID]: 1 } }))
   expect(summary().textContent).toBe('Preserve reading through reconnect')
@@ -116,7 +118,7 @@ it('keeps five stable status positions with zero counts and no repeated row empt
   expect(container.querySelectorAll('.focus-context')).toHaveLength(1)
   expect(container.textContent).not.toContain('Nothing here')
 })
-it('condenses pure disconnected projects into one counted drawer and returns to original Contexts', async () => {
+it('condenses all confirmed disconnected projects into one counted drawer and returns to original Contexts', async () => {
   await projectStates(); await mount()
   const sessions = useAppStore.getState().sessions, controls = sessions.map(s => s.control)
   const board = container.querySelector('.focus-project-board > .focus-project-lanes')!
@@ -124,11 +126,11 @@ it('condenses pure disconnected projects into one counted drawer and returns to 
   expect([...board.querySelectorAll<HTMLElement>('[data-project-id]')].map(el => el.dataset.projectId)).toEqual(['repo'])
   const drawer = container.querySelector<HTMLElement>('[aria-label="Disconnected projects"]'); expect(drawer).not.toBeNull()
   const toggle = drawer!.querySelector<HTMLButtonElement>('button')!
-  expect(toggle.textContent).toBe('Disconnected2 projects · 3 contexts'); expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(toggle.textContent).toBe('Disconnected3 projects · 4 contexts'); expect(toggle.getAttribute('aria-expanded')).toBe('false')
   expect(drawer!.querySelectorAll('[data-session-id]')).toHaveLength(0)
   await act(async () => toggle.click())
-  expect([...drawer!.querySelectorAll<HTMLElement>('[data-session-id]')].map(el => el.dataset.sessionId)).toEqual(['old-one', 'old-two', 'other-one'])
-  expect([...drawer!.querySelectorAll<HTMLElement>('[data-project-id]')].map(el => el.dataset.projectId)).toEqual(['old', 'other'])
+  expect([...drawer!.querySelectorAll<HTMLElement>('[data-session-id]')].map(el => el.dataset.sessionId)).toEqual(['mixed-offline', 'old-one', 'old-two', 'other-one'])
+  expect([...drawer!.querySelectorAll<HTMLElement>('[data-project-id]')].map(el => el.dataset.projectId)).toEqual(['repo', 'old', 'other'])
   await act(async () => row('old-two').click())
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('old-two'); expect(row('old-two').getAttribute('aria-pressed')).toBe('true')
   expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().sessions.map(s => s.control)).toEqual(controls)
@@ -138,16 +140,20 @@ it('keeps mixed projects in their original lane when state filtering hides every
   const board = container.querySelector('.focus-project-board > .focus-project-lanes')!
   expect(board).not.toBeNull()
   expect([...board.querySelectorAll<HTMLElement>('[data-project-id]')].map(el => el.dataset.projectId)).toEqual(['repo'])
-  const localToggle = board.querySelector<HTMLButtonElement>('.focus-recovery-toggle'); expect(localToggle).not.toBeNull(); expect(localToggle!.textContent).toBe('Show contexts1')
-  await act(async () => localToggle!.click()); expect(row('mixed-offline').closest('[aria-label="Disconnected projects"]')).toBeNull()
-  const drawerToggle = container.querySelector('[aria-label="Disconnected projects"] > button'); expect(drawerToggle).not.toBeNull()
-  expect(drawerToggle!.textContent).toBe('Disconnected2 projects · 3 contexts')
+  const localToggle = board.querySelector<HTMLButtonElement>('.focus-disconnected-entry'); expect(localToggle).not.toBeNull(); expect(localToggle!.textContent).toBe('1')
+  await act(async () => localToggle!.click()); expect(row('mixed-offline').closest('[aria-label="Disconnected projects"]')).not.toBeNull()
+  expect(board.querySelectorAll('.focus-context')).toHaveLength(0)
+  const drawerToggle = container.querySelector('[aria-label="Disconnected projects"] .focus-recovery-toggle'); expect(drawerToggle).not.toBeNull()
+  expect(drawerToggle!.textContent).toBe('Disconnected3 projects · 4 contexts')
 })
-it('search reveals retained project content automatically without changing the selected Context', async () => {
+it('search keeps retained project content compact until an explicit view action without changing the selected Context', async () => {
   await projectStates(); await mount()
   const input = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Design notes'); input.dispatchEvent(new Event('input', { bubbles: true })) })
-  expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(el => el.dataset.sessionId)).toEqual(['old-two'])
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(el => el.dataset.sessionId)).toEqual([])
+  const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] .focus-recovery-toggle'); expect(toggle).not.toBeNull()
+  await act(async () => toggle!.click())
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(el => el.dataset.sessionId)).toEqual(['mixed-offline', 'old-one', 'old-two', 'other-one'])
   expect(row('old-two').closest('[aria-label="Disconnected projects"]')).not.toBeNull()
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
   expect(container.textContent).not.toContain('No matching contexts')
@@ -156,14 +162,14 @@ it('bounds icon reads to new lane consumers when a retained project returns to t
   const appearance = vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })
   await projectStates(); await mount()
   expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo'])
-  const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] > button'); expect(toggle).not.toBeNull()
+  const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] .focus-recovery-toggle'); expect(toggle).not.toBeNull()
   await act(async () => toggle!.click())
-  expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'old', 'other'])
+  expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'repo', 'old', 'other'])
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => s.id === 'old-one' ? { ...s, processState: 'running', status: { ...s.status, state: 'working' } } : s) })))
-  expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'old', 'other', 'old'])
+  expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'repo', 'old', 'other', 'old'])
   expect(row('old-one').closest('[aria-label="Disconnected projects"]')).toBeNull()
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => ({ ...s, latestOutputBytes: 999, status: { ...s.status, observedAt: 999 } })) })))
-  expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'old', 'other', 'old'])
+  expect(appearance.mock.calls.map(args => args[0])).toEqual(['repo', 'repo', 'old', 'other', 'old'])
 })
 it('allocates each lane from its own state counts while keeping the same five meanings', async () => {
   await projectStates()
@@ -172,7 +178,7 @@ it('allocates each lane from its own state counts while keeping the same five me
   const lanes = [...container.querySelectorAll<HTMLElement>('.focus-project-board > .focus-project-lanes [data-lane-id]')]
   expect(lanes.map(lane => lane.dataset.projectId)).toEqual(['repo', 'old'])
   const groups = lanes.map(lane => lane.querySelector<HTMLElement>('.focus-project-lanes__groups')!)
-  expect(groups.map(group => group.style.getPropertyValue('--focus-state-columns'))).toEqual(['minmax(160px, 1fr) minmax(160px, 3fr) 36px 36px minmax(128px, 1fr)', '36px minmax(160px, 1fr) 36px 36px minmax(128px, 1fr)'])
+  expect(groups.map(group => [...group.querySelectorAll<HTMLElement>('.focus-context-group')].map(section => section.style.getPropertyValue('--focus-column-weight')))).toEqual([['1', '3', '0', '0', '1'], ['0', '1', '0', '0', '1']])
   expect(groups.map(group => [...group.querySelectorAll<HTMLElement>('.focus-context-group')].map(section => section.dataset.bucket))).toEqual([['attention', 'working', 'results', 'idle', 'disconnected'], ['attention', 'working', 'results', 'idle', 'disconnected']])
   expect(groups.map(group => [...group.querySelectorAll('.focus-context-group__header')].map(header => header.getAttribute('aria-label')))).toEqual([['Attention · 1', 'Working · 3', 'Results · 0', 'Idle / Recovery · 0', 'Disconnected · 1'], ['Attention · 0', 'Working · 1', 'Results · 0', 'Idle / Recovery · 0', 'Disconnected · 1']])
   expect(container.querySelector('.focus-state-columns')).toBeNull()

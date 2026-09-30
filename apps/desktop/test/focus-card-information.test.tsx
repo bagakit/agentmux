@@ -23,7 +23,7 @@ const message = (kind: 'user_message' | 'assistant_message', content: string, ti
 const tool = (command = 'pnpm test'): AgentTimelineItem => ({ id: 'tool-2', agentSessionId: 'a', kind: 'tool_call', status: 'complete', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: JSON.stringify({ command }), createdAt: 2, updatedAt: 2 })
 const timeline = (id: string, items: AgentTimelineItem[]): AgentTimelineSnapshot => ({ agentSessionId: id, revision: items.length, items })
 const row = (id = 'a') => { const found = container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`); expect(found).not.toBeNull(); return found! }
-const detail = (id = 'a') => row(id).querySelector('.focus-context__detail')!.textContent
+const detail = (id = 'a') => (row(id).querySelector('.focus-context__activity') ?? row(id).querySelector('.focus-context__detail'))!.textContent
 const preview = (id = 'a') => { const found = container.querySelector(`[data-preview-session="${id}"]`); expect(found).not.toBeNull(); return found!.textContent }
 async function mount() { await act(async () => root.render(createElement('div', null, createElement(GlobalFocusSurface), createElement(FocusNavigationPreview)))) }
 async function updateAgent(patch: Partial<Extract<SessionSnapshot, { kind: 'agent' }>>) { await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'a' ? { ...session, ...patch } as SessionSnapshot : session) }))) }
@@ -36,10 +36,11 @@ beforeEach(async () => {
   useAppStore.setState({ config: { ...config, workspaces: [{ id: 'repo', name: 'Repo', kind: 'folder', hostId: 'local', path: '/repo' }] }, sessions: [base, { ...base, id: 'b', control: { ...base.control, agentSessionId: 'b' } }], timelines: { a: timeline('a', [message('user_message', 'Repair scrolling', 1), tool(), message('assistant_message', 'Checking the profile')]) }, agentNames: { a: 'Scrolling', b: 'Loading' }, tabs: {}, providerCatalog: [], mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks() })
-it('shows the shared recent tool instead of a later ordinary message in Global and Preview', async () => {
+it('keeps the shared recent tool beside the observed recap and retains the original Preview activity', async () => {
   const fetch = vi.spyOn(api.sessions, 'timeline'); await mount()
   expect(detail()).toBe('Bash pnpm test'); expect(preview()).toContain('Bash pnpm test')
-  expect(row().textContent).not.toContain('Checking the profile'); expect(fetch).not.toHaveBeenCalled()
+  expect(row().querySelector('.focus-context__recap')!.textContent).toBe('Checking the profile')
+  expect(row().getAttribute('aria-label')).toContain('Last assistant message (timeline)'); expect(fetch).not.toHaveBeenCalled()
 })
 it('keeps the operation and relative file target without a second head truncation', async () => {
   await updateAgent({ workspacePath: '/repo/worktrees/scroll' })
@@ -76,10 +77,12 @@ it('preserves current result content and explicitly labels later prompt/response
   await updateAgent({ status: { ...base.status, state: 'done' } }); await mount()
   expect(row().dataset.bucket).toBe('results'); expect(detail()).toBe('Checking the profile')
   await act(async () => useAppStore.setState({ timelines: { a: timeline('a', [message('user_message', 'Now inspect loading', 4)]) } }))
-  expect(row().dataset.bucket).toBe('idle'); expect(detail()).toBe('Prompt · Now inspect loading')
+  expect(row().dataset.bucket).toBe('idle'); expect(detail()).toBe('Now inspect loading')
+  expect(row().getAttribute('aria-label')).toContain('Last prompt (timeline)')
   await updateAgent({ status: { ...base.status, state: 'working' } })
   await act(async () => useAppStore.setState({ timelines: { a: timeline('a', [message('assistant_message', 'Reading the logs', 5)]) } }))
-  expect(detail()).toBe('Response · Reading the logs'); expect(row().dataset.bucket).toBe('working')
+  expect(detail()).toBe('Reading the logs'); expect(row().dataset.bucket).toBe('working')
+  expect(row().getAttribute('aria-label')).toContain('Last assistant message (timeline)')
 })
 it('keeps missing work facts honest and makes the actual activity searchable', async () => {
   await mount(); expect(detail('b')).toBe('No activity details observed'); expect(row('b').dataset.bucket).toBe('working')
