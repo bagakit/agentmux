@@ -253,7 +253,9 @@ export function ConversationMessage({
                 {packetPart.reference ? <code className="log-turn__citation-ref">{packetPart.reference}</code> : null}
                 <MemoizedAgentMarkdown className="log-turn__packet-text" content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown
-              content={index === 0 && prefix ? prefix.body : part.text}
+              content={index === 0 && prefix
+                ? prefix.declaredContexts ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body
+                : part.text}
               workspaceRoot={workspaceRoot}
               homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}

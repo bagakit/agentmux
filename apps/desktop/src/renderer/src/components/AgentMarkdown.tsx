@@ -353,11 +353,11 @@ export function AgentMarkdown({
   // by every markdown signal, and it is also the single most common way an agent cites a path — so
   // skipping detection here would leave the most frequent case dead while the rare one worked.
   if (!looksLikeMarkdown(content)) {
-    return <p className={className}><TextWithFileReferences text={content} context={context} /></p>
+    return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
   }
   const blocks = parseAgentMarkdown(content)
   if (blocks.length === 0) {
-    return <p className={className}><TextWithFileReferences text={content} context={context} /></p>
+    return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
   }
   return (
     <div className={className ? `${className} md` : 'md'}>
