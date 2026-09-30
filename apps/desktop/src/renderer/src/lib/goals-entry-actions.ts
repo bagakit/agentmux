@@ -1,7 +1,7 @@
 import { isFolderWorkspace, type AppConfig, type WorkspaceRecord } from '../../../shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { executionFocusHistory, type AgentFocusContext } from './agent-focus'
-import { configuredExecutors } from './executors'
+import { primaryMoteExecutorId } from './primary-mote-executor'
 import { goalProjectContext, goalProjectContextText, type GoalProjectContext } from './goal-project-context'
 import { workspaceProjectId } from './workspace-projects'
 import { useAppStore } from '../store'
@@ -62,8 +62,10 @@ export function startGoalExploration(text: string, project?: GoalExplorationProj
   listeners.forEach(listener => listener())
   const state = useAppStore.getState()
   const prompt = project ? `${text}\n\n${goalProjectContextText(project)}` : text
-  const executorId = requestedExecutorId ?? configuredExecutors(state.config)[0]?.id
-  void state.createScratchTopic('mote', { prompt, ...(executorId ? { executorId } : {}) })
+  const executorId = requestedExecutorId ?? primaryMoteExecutorId(state)
+  void state.openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
+    newTab: true, reveal: false, initialRequest: { prompt, ...(executorId ? { executorId } : {}) }
+  })
     .then(() => resolve(), reject).finally(() => {
       if (flight === current) { flight = null; listeners.forEach(listener => listener()) }
     })

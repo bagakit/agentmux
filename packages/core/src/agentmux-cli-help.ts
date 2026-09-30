@@ -909,7 +909,8 @@ Usage:
   agentmux demand show --demand <demand-id>
   agentmux demand create --title <title> [--description <text>] [--project <project-id>] [--status <status>] [--priority <priority>]
     [--session <session-id>] [--risk low|medium|high|unknown] [--confirm automatic|user|pending] [--wiki-version <version>]
-  agentmux demand update --demand <demand-id> [--title <title>] [--status <status>] [--priority <priority>]
+  agentmux demand update --demand <demand-id> [--title <title>] [--description <text>] [--project <project-id>]
+    [--status <status>] [--priority <priority>] [--session <session-id>]
   agentmux demand update --demand <demand-id> --alignment <proposal-json>
   agentmux demand update --demand <demand-id> --grounding <proposal-json>
   agentmux demand assign --demand <demand-id> [--project <project-id>] [--executor <executor-id>] [--start]
@@ -922,6 +923,15 @@ Usage:
 
 ${DEMAND_CREATE_GUIDE}
 
+Update writes the same Demand; --session replaces its Session links with that exact Session.
+Use link-session to add without replacing existing links. Alignment and Grounding
+are proposals: they never supply the person's confirmation or acceptance.
+In the running Desktop, start (and assign --start) sends the Demand intent to its actual linked
+Agent, or launches the assigned Executor in its Project and links the returned Session.
+Read back the actual Session and delivery facts before repeating an unconfirmed request.
+assign without --start and handoff only record assignment/link facts. The separate filesystem
+domain CLI's metadata start is not this Desktop execution owner. A write, queue admission or
+launch receipt does not prove task acceptance or Goal completion.
 Demand is the Board identity. Session links are explicit execution facts; a Demand can have zero,
 one, or multiple linked Sessions.`],
   ['handoff', `Declare a communication handoff to another Agent Session

@@ -29,14 +29,16 @@ function session(id: string, workspacePath = '/repo'): Extract<SessionSnapshot, 
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } } }
 }
 const originalTab = createWorkbenchTab('original-tab', { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: 'repo', sessionId: 'healthy' })
+const primaryTab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary' }), topicId: PMO_TEAMS_TOPIC_ID }
 const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: 'teams', topicPath: 'teams/topic.md', collaborators: [], soul: { path: 'SOUL.md', content: '# SOUL', version: 'v1' } }
 let root: Root, container: HTMLDivElement, temporaryRoot: string, owner: ReturnType<typeof openDemandStore>
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-direct-goal-')); owner = openDemandStore({ root: temporaryRoot })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
-  useAppStore.setState({ ...baseline, config: structuredClone(config), sessions: [session('healthy')], demands: {}, selectedDemandId: null, mainSurface: 'board', activeWorkspaceId: null,
-    tabs: { [originalTab.id]: originalTab }, layouts: { repo: createWorkspaceLayout('original-group', [originalTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
+  useAppStore.setState({ ...baseline, config: structuredClone(config), sessions: [session('healthy'), session('primary', '/topics/topic--launcher--leader')], demands: {}, selectedDemandId: null, mainSurface: 'board', activeWorkspaceId: null,
+    agentFocus: { ...baseline.agentFocus, pmo: { sessionId: 'primary' } },
+    tabs: { [originalTab.id]: originalTab, [primaryTab.id]: primaryTab }, layouts: { repo: createWorkspaceLayout('original-group', [originalTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [primaryTab.id]) },
     agentComposerDrafts: { healthy: 'Original unsent draft' }, demandPmoTabIds: {}, pendingAgentLaunches: {}, error: null, errorNoticeContext: null })
   vi.spyOn(api.demands, 'create').mockImplementation(input => owner.create(input))
   vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
@@ -165,13 +167,15 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(vi.mocked(api.sessions.launchAgent).mock.calls.map(([input]) => input.prompt?.includes(`existing Goal ${id}`))).toEqual([true, true])
   })
 
-  it('keeps the saved Goal with no fictional Tab when no PMO Executor is configured', async () => {
+  it('keeps the saved Goal and its real dedicated launcher when the original bot configuration is unknown', async () => {
     useAppStore.setState({ config: { ...config, executors: {} } })
-    await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    const id = directGoalRequest()!.id
-    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(useAppStore.getState().demandPmoTabIds).toEqual({})
-    expect(Object.keys(useAppStore.getState().tabs)).toEqual([originalTab.id]); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
-    expect(container.querySelector('.goals-creation')?.textContent).toContain('目标已保存'); expect(container.querySelector('.goals-creation')?.textContent).not.toContain('same Tab')
+    await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
+    const goals = await owner.list(); expect(goals).toHaveLength(1)
+    const id = goals[0]!.id, state = useAppStore.getState(), tab = state.tabs[state.demandPmoTabIds[id]!]!
+    expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID); expect(tab.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
+    expect(state.agentComposerDrafts[tab.layout.activeRegionId]).toContain(`existing Goal ${id}`)
+    expect(state.error).toContain('primary Mote Agent configuration is unconfirmed')
+    expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tab.id)
   })
 
   it('preserves explicit Project and matching conditions while making the new shell visible', async () => {
@@ -306,12 +310,14 @@ describe('Goals direct PMO creation and reading surface', () => {
   it('does no default Goal render work for unrelated Session output and tab facts', async () => {
     const related = { id: 'linked', label: 'Linked Agent', status: { state: 'working' }, workspacePath: '/repo' } as SessionSnapshot
     const unrelated = { ...related, id: 'unrelated' }
-    useAppStore.setState({ demands: { 'goal:one': { ...goal(), sessionIds: ['linked'] } }, sessions: [related, unrelated], selectedDemandId: 'goal:one' })
+    const primary = useAppStore.getState().sessions
+    const tabs = useAppStore.getState().tabs
+    useAppStore.setState({ demands: { 'goal:one': { ...goal(), sessionIds: ['linked'] } }, sessions: [...primary, related, unrelated], selectedDemandId: 'goal:one' })
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'goals', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelector('[data-demand-id]')?.textContent).toContain('1 linked · working')
     expect(container.querySelector('.goals-execution__link')).toBeNull(); expect(container.querySelector('.agent-topology-summary')).toBeNull()
     const count = commits.mock.calls.length; expect(count).toBeGreaterThan(0)
-    await act(async () => useAppStore.setState({ sessions: [related, { ...unrelated, latestOutputBytes: 900000, updatedAt: 12 }], tabs: {} }))
+    await act(async () => useAppStore.setState({ sessions: [...primary, related, { ...unrelated, latestOutputBytes: 900000, updatedAt: 12 }], tabs: { ...tabs } }))
     expect(commits.mock.calls.length).toBe(count)
   })
 })

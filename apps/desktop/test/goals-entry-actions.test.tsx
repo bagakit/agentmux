@@ -4,12 +4,14 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
-import { goalExplorationPending } from '../src/renderer/src/lib/goals-entry-actions'
+import { goalExplorationPending, startGoalExploration } from '../src/renderer/src/lib/goals-entry-actions'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { executorDetectionKey, useAppStore } from '../src/renderer/src/store'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
@@ -23,6 +25,7 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', la
   workspaces: [scratch], executors: { configured: { providerId: 'codex', label: 'Configured Agent', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } },
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const oldTab = createWorkbenchTab('original-tab', { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: 'project', sessionId: 'original' })
+const primaryTab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary' }), topicId: PMO_TEAMS_TOPIC_ID }
 function session(id: string, workspacePath = '/alpha'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'configured', hostId: 'local', workspacePath, label: 'Configured Agent', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1,
     processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
@@ -33,28 +36,29 @@ function topic(id: string): ScratchTopicSnapshot { return { id, title: 'Untitled
 const pendingCleanup: Array<() => void> = []
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (cause: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); void promise.catch(() => {}); pendingCleanup.push(() => reject(new Error('Test cleanup'))); return { promise, resolve, reject } }
 function createdTab(): WorkbenchTab {
-  const created = Object.values(useAppStore.getState().tabs).filter(tab => tab.id !== oldTab.id)
+  const created = Object.values(useAppStore.getState().tabs).filter(tab => tab.id !== oldTab.id && tab.id !== primaryTab.id)
   expect(created).toHaveLength(1)
-  expect(created[0]!.topicId).toMatch(/^launcher:/)
+  expect(created[0]!.topicId).toBe(PMO_TEAMS_TOPIC_ID)
   return created[0]!
 }
 function MountedSurface() {
+  const [floating] = usePmoTeamsTopicFloatingState()
   const surface = useAppStore(state => state.mainSurface)
   const tabs = useAppStore(state => state.tabs)
   const layout = useAppStore(state => state.layouts[SCRATCH_WORKSPACE_ID])
-  if (surface === 'board') return <GlobalBoardSurface />
   const group = layout?.groups.find(group => group.id === layout.activeGroupId)
-  const tab = group?.activeTabId ? tabs[group.activeTabId] : undefined
+  const tab = floating.open && floating.targetTabId ? tabs[floating.targetTabId] : group?.activeTabId ? tabs[group.activeTabId] : undefined
   const region = tab?.regions[tab.layout.activeRegionId]
-  return tab && group && region?.kind === 'launcher' ? <NewTabSurface tabGroupId={group.id} tabId={tab.id} regionId={region.regionId} /> : <div data-agent-workface />
+  return <>{surface === 'board' ? <GlobalBoardSurface /> : null}{tab && group && region?.kind === 'launcher' ? <NewTabSurface tabGroupId={group.id} tabId={tab.id} regionId={region.regionId} /> : <div data-agent-workface />}</>
 }
 let root: Root, container: HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   window.localStorage.clear()
+  useLauncherState.setState({ executors: {}, persistenceIssue: null })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ ...baseline, config: structuredClone(config), loading: false, mainSurface: 'board', activeWorkspaceId: null,
-    sessions: [session('original')], tabs: { [oldTab.id]: oldTab }, layouts: { project: createWorkspaceLayout('original-group', [oldTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
+    sessions: [session('original'), session('primary', '/topics/topic--launcher--leader')], tabs: { [oldTab.id]: oldTab, [primaryTab.id]: primaryTab }, layouts: { project: createWorkspaceLayout('original-group', [oldTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [primaryTab.id]) },
     agentComposerDrafts: { original: 'original draft' }, demands: {}, selectedDemandId: null, agentFocus: structuredClone(EMPTY_AGENT_FOCUS),
     scratchTopicSnapshots: {}, workspaceFileRevisions: {}, pendingAgentLaunches: {}, executorDetections: {}, error: null, lastError: null, errorNoticeContext: null,
     prewarmTerminal: vi.fn(), detectExecutors: vi.fn(async () => {}) })
@@ -74,9 +78,70 @@ afterEach(async () => {
 async function mount() { await act(async () => root.render(<MountedSurface />)) }
 function action(id: string) { const node = container.querySelector<HTMLButtonElement>(`[data-goals-entry-action="${id}"]`); expect(node).not.toBeNull(); return node! }
 async function click(id: string) { await act(async () => action(id).click()) }
+async function launchAction() {
+  const expand = container.querySelector<HTMLButtonElement>('[aria-label="Expand Agents"]')
+  if (expand) await act(async () => expand.click())
+  const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Launch')
+  expect(start).toBeDefined()
+  return start!
+}
 function readyExecutor() { useAppStore.setState({ executorDetections: { [executorDetectionKey('local', 'configured')]: { state: 'ready', input: { executorId: 'configured', providerId: 'codex', command: 'codex', host: { id: 'local', kind: 'local', label: 'This Mac' } } } } }) }
 
 describe('Goals one-click requests through the mounted product and original owner', () => {
+  it('uses the real primary bot alias and Provider instead of the first configuration or selected custom Mote', async () => {
+    const actual = { ...session('primary', '/topics/topic--launcher--leader'), executorId: 'codex-2', providerId: 'claude' }
+    const custom = { ...createWorkbenchTab('custom-tab', { kind: 'agent', phase: 'attached', regionId: 'custom-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'custom' }), topicId: 'launcher:custom' }
+    useAppStore.setState({ config: { ...config, executors: { wrong: config.executors.configured!, 'codex-2': { ...config.executors.configured!, providerId: 'claude', label: 'My main bot', command: '/configured/claude', args: ['--actual'], env: { PRIVATE_SETTING: 'kept' } } } },
+      sessions: [session('original'), actual, session('custom', '/topics/topic--launcher--custom')], tabs: { [oldTab.id]: oldTab, [primaryTab.id]: primaryTab, [custom.id]: custom },
+      layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [custom.id, primaryTab.id]) },
+      agentFocus: { ...EMPTY_AGENT_FOCUS, pmo: { sessionId: actual.id } } })
+    await mount(); await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: custom.topicId, targetTabId: custom.id }))
+    expect(action('ideas').textContent).toContain('主 Mote · My main bot')
+    const createMote = vi.spyOn(useAppStore.getState(), 'createScratchTopic')
+    await click('ideas')
+    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'codex-2', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我有一些点子，我们开始尝试一个项目' }))
+    expect(createMote).not.toHaveBeenCalled(); expect(readPmoTeamsTopicFloatingState()).toMatchObject({ targetTopicId: PMO_TEAMS_TOPIC_ID })
+    const target = readPmoTeamsTopicFloatingState()!.targetTabId!
+    expect(target).not.toBe(primaryTab.id); expect(target).not.toBe(custom.id)
+    expect(useAppStore.getState().tabs[primaryTab.id]).toBe(primaryTab); expect(useAppStore.getState().tabs[custom.id]).toBe(custom)
+  })
+
+  it('sends in one click with zero Projects and no previous main bot, labelling the launcher choice as initial', async () => {
+    useAppStore.setState({ tabs: { [oldTab.id]: oldTab }, sessions: [session('original')], layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') } })
+    await mount(); expect(action('understand').textContent).toContain('首次选择 · Configured Agent')
+    await click('understand')
+    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'configured', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我还不知道能做什么，可以了解我并给我建议吗？' }))
+    expect(useAppStore.getState().demands).toEqual({}); expect(useAppStore.getState().config?.workspaces).toEqual([scratch])
+  })
+
+  it.each(['missing-session', 'deleted-config', 'changed-provider'] as const)('retains the primary request instead of using a cold default for %s', async mode => {
+    useAppStore.setState({ sessions: mode === 'missing-session' ? [session('original')] : useAppStore.getState().sessions,
+      config: { ...config, executors: { another: config.executors.configured!, ...(mode === 'deleted-config' ? {} : { configured: { ...config.executors.configured!, providerId: mode === 'changed-provider' ? 'claude' : 'codex' } }) } } })
+    await mount(); expect(action('understand').textContent).toContain('主 Mote 的 Agent 待确认'); await click('understand')
+    expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+    const tab = createdTab(); expect(tab.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
+    expect(useAppStore.getState().agentComposerDrafts[tab.layout.activeRegionId]).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
+  })
+
+  it('keeps an explicit Executor override and refuses a library Provider conflict without rewriting its body', async () => {
+    useAppStore.setState({ config: { ...config, executors: { configured: config.executors.configured!, explicit: { ...config.executors.configured!, providerId: 'claude', label: 'Explicit Agent' } },
+      composerShortcuts: [{ id: 'restricted', keyword: 'restricted', label: 'Restricted request', body: '完整的原始请求', providerId: 'claude' }], goalsCommonActions: { items: [{ kind: 'prompt', id: 'restricted' }], collapsed: false } } })
+    await mount(); const restricted = container.querySelector<HTMLButtonElement>('[data-goals-entry-action="restricted"]')!
+    expect(restricted).not.toBeNull(); expect(restricted.textContent).toContain('完整的原始请求'); expect(restricted.disabled).toBe(true)
+    expect(restricted.textContent).toContain('不适用 claude')
+    await act(async () => startGoalExploration('这个执行者是我明确选择的', undefined, 'explicit'))
+    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'explicit', prompt: '这个执行者是我明确选择的', scratchTopicId: PMO_TEAMS_TOPIC_ID }))
+  })
+
+  it('does not reopen or retarget the floating owner after the user closes it during preparation', async () => {
+    const preparation = deferred<ScratchTopicSnapshot>(); vi.mocked(api.scratch.ensureMote).mockReturnValueOnce(preparation.promise)
+    await mount(); await click('understand'); const tab = createdTab()
+    await act(async () => requestPmoTeamsTopicFloatingClose({ restoreFocus: false }))
+    expect(readPmoTeamsTopicFloatingState()?.open).toBe(false)
+    await act(async () => preparation.resolve(topic(PMO_TEAMS_TOPIC_ID)))
+    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scratchTopicId: PMO_TEAMS_TOPIC_ID }))
+    expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: false, targetTabId: tab.id })
+  })
   it.each([
     ['understand', '我还不知道能做什么，可以了解我并给我建议吗？'],
     ['ideas', '我有一些点子，我们开始尝试一个项目']
@@ -90,7 +155,8 @@ describe('Goals one-click requests through the mounted product and original owne
     const tab = createdTab(), state = useAppStore.getState(), region = tab.regions[tab.layout.activeRegionId]!
     expect(api.scratch.ensureMote).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, tab.topicId)
     expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'configured', scratchTopicId: tab.topicId, prompt: text, workspacePath: '/topics', hostId: 'local' }))
-    expect(region.kind).toBe('agent'); expect(state.mainSurface).toBe('workbench'); expect(container.querySelector('.goals-entry')).toBeNull()
+    expect(region.kind).toBe('agent'); expect(state.mainSurface).toBe('board'); expect(container.querySelector('.goals-entry')).not.toBeNull()
+    expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: tab.id })
     expect(state.agentComposerDrafts).toEqual({ original: 'original draft' }); expect(state.pendingAgentLaunches).toEqual({})
     expect(state.tabs[oldTab.id]).toBe(oldTab); expect(state.layouts.project).toBe(originalLayout); expect(state.agentFocus).toEqual(focus)
     expect(state.sessions.find(value => value.id === 'original')).toEqual(session('original')); expect(api.sessions.stop).not.toHaveBeenCalled()
@@ -107,7 +173,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(useAppStore.getState().agentComposerDrafts[tab.layout.activeRegionId]).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
     expect(container.querySelector('.launch-surface')?.textContent).toContain('Your request has not been sent')
     expect(api.sessions.launchAgent).not.toHaveBeenCalled()
-    await act(async () => useAppStore.getState().setMainSurface('board'))
+    await act(async () => root.render(<div />)); await mount()
     expect(action('ideas').disabled).toBe(true)
     expect(container.querySelector('.goals-entry__actions')?.getAttribute('aria-busy')).toBe('true')
     expect(container.querySelector('.goals-entry__preparing[role="status"]')?.textContent).toBe('正在准备对话…')
@@ -129,8 +195,8 @@ describe('Goals one-click requests through the mounted product and original owne
     const tab = createdTab(), regionId = tab.layout.activeRegionId
     expect(tab.topicPreparation).toBe('mote'); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     expect(container.querySelector('.launch-surface')?.textContent).toContain('Mote Topic preparation is unconfirmed')
+    const start = await launchAction()
     expect(container.querySelector('[role="textbox"]')?.textContent).toBe('我有一些点子，我们开始尝试一个项目')
-    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Launch agent')!
     expect(start).toBeDefined(); expect(start.disabled).toBe(false)
     await act(async () => start.click())
     expect(vi.mocked(api.scratch.ensureMote).mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, tab.topicId], [SCRATCH_WORKSPACE_ID, tab.topicId]])
@@ -155,7 +221,7 @@ describe('Goals one-click requests through the mounted product and original owne
     vi.mocked(api.sessions.launchAgent).mockRejectedValueOnce(new Error('Manual launch failed'))
     readyExecutor(); await mount(); await click('ideas')
     const tab = createdTab(), originalSurface = tab.regions[tab.layout.activeRegionId]
-    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Launch agent')!
+    const start = await launchAction()
     expect(start).toBeDefined(); await act(async () => start.click())
     const restored = useAppStore.getState().tabs[tab.id]!.regions[tab.layout.activeRegionId]
     expect(restored?.kind).toBe('launcher'); expect(restored).not.toBe(originalSurface); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
@@ -167,7 +233,7 @@ describe('Goals one-click requests through the mounted product and original owne
     const original = deferred<ScratchTopicSnapshot>(), manual = deferred<ScratchTopicSnapshot>()
     vi.mocked(api.scratch.ensureMote).mockReturnValueOnce(original.promise).mockReturnValueOnce(manual.promise)
     readyExecutor(); await mount(); await click('ideas'); const tab = createdTab()
-    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Launch agent')!
+    const start = await launchAction()
     expect(start).toBeDefined(); await act(async () => start.click())
     expect(useAppStore.getState().tabs[tab.id]?.regions[tab.layout.activeRegionId]?.kind).toBe('agent')
     await act(async () => original.resolve(topic(tab.topicId!)))
@@ -216,7 +282,8 @@ describe('Goals one-click requests through the mounted product and original owne
   it('does not rerender or read output when an unrelated Session changes', async () => {
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'entry', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelectorAll('[data-goals-entry-action]')).toHaveLength(2); commits.mockClear()
-    await act(async () => useAppStore.setState({ sessions: [session('original'), { ...session('unrelated'), latestOutputBytes: 999 }], timelines: { unrelated: { agentSessionId: 'unrelated', revision: 1, items: [] } } }))
+    const retained = useAppStore.getState().sessions
+    await act(async () => useAppStore.setState({ sessions: [...retained, { ...session('unrelated'), latestOutputBytes: 999 }], timelines: { unrelated: { agentSessionId: 'unrelated', revision: 1, items: [] } } }))
     expect(commits).not.toHaveBeenCalled()
   })
 

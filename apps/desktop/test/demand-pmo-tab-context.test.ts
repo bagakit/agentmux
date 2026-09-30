@@ -4,12 +4,14 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 import type { AppConfig } from '../src/shared/contracts.js'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { addTabPlacement } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
+import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'
 
 const initialState = useAppStore.getState()
 let dispose: (() => void) | undefined
@@ -41,6 +43,16 @@ const demand = {
   projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 1, source: 'default-topic' as const
 }
 
+function installPrimary() {
+  const state = useAppStore.getState()
+  const tab = { ...createWorkbenchTab('primary-tab', { regionId: 'primary-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary-session' }), topicId: PMO_TEAMS_TOPIC_ID }
+  const primary = { id: 'primary-session', kind: 'agent', executorId: 'codex', providerId: 'codex', hostId: 'local', workspacePath: '/scratch/topic--launcher--leader' }
+  const layout = state.layouts[SCRATCH_WORKSPACE_ID] ?? createWorkspaceLayout('scratch-group')
+  useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: tab }, sessions: [...state.sessions, primary as never],
+    agentFocus: { ...state.agentFocus, pmo: { sessionId: primary.id } },
+    layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: addTabPlacement(layout, layout.activeGroupId, tab.id)! } })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
@@ -60,6 +72,7 @@ describe('Demand dedicated PMO Tab context', () => {
       launchAgent: launchAgent as never
     })
 
+    installPrimary()
     const tabId = await useAppStore.getState().requestDemandPmoTask(demand.id, 'grill')
     const secondTabId = await useAppStore.getState().requestDemandPmoTask(secondDemand.id, 'grounding')
     const state = useAppStore.getState()
@@ -127,6 +140,9 @@ describe('Demand dedicated PMO Tab context', () => {
     await expect(useAppStore.getState().requestDemandPmoTask(quotedDemand.id, 'grounding')).resolves.toBe(tab.id)
     await vi.waitFor(() => { expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]).toMatchObject({ runId: 'healthy-run', status: 'deferred', error: 'Readiness not yet observed' }) })
     const retained = useAppStore.getState().agentSteerQueues[session.id]![0]!
+    expect(retained.text).toContain(MOTE_COORDINATION_ROLE)
+    expect(retained.text).toMatch(/^<amux from="amux">\n/)
+    expect(retained.text).toMatch(/<\/amux>\n\nAsk agent to check work$/)
     expectProjectPayload(retained.text)
     expect(retained.text).toContain("--demand 'goal'\"'\"'s-id'")
     expect(retained.text).toContain("criterion'\"'\"'s-id")
@@ -142,12 +158,40 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
   })
 
+  it('delivers the signed existing Goal exception on a healthy mapped Run despite missing bot configuration and unreadable metadata', async () => {
+    const active = { id: 'mapped-healthy', kind: 'agent', executorId: 'codex-2', providerId: 'claude', hostId: 'local', workspacePath: '/scratch/topic--launcher--leader',
+      control: { kind: 'agent', hostId: 'local', agentSessionId: 'mapped-healthy', run: { runId: 'original-healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null }
+    const current = { ...demand, title: 'Untitled goal', description: '我授权在 /tmp/agentmux-authorized-attempt 做一个小型可检查尝试；请建立最小初始指令，并派其他执行 Agent 完成。保留已有文件。' }
+    const tab = { ...createWorkbenchTab('mapped-tab', { kind: 'agent', phase: 'attached', regionId: 'mapped-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: active.id }), topicId: PMO_TEAMS_TOPIC_ID }
+    const metadata = vi.spyOn(api.scratch, 'readTopic').mockRejectedValue(new Error('Topic metadata unavailable'))
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(active as never)
+    vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Delivery receipt unconfirmed'))
+    const launch = vi.spyOn(api.sessions, 'launchAgent')
+    useAppStore.setState({ config: { ...config, executors: {} }, sessions: [active as never], demands: { [current.id]: current },
+      demandPmoTabIds: { [current.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [tab.id]) } })
+    await expect(useAppStore.getState().requestDemandPmoTask(current.id, 'grill')).resolves.toBe(tab.id)
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
+    const entries = useAppStore.getState().agentSteerQueues[active.id]!
+    expect(entries).toHaveLength(1)
+    const request = entries[0]!
+    expect(request.text).toContain(MOTE_COORDINATION_ROLE)
+    expect(request.text).toContain('An explicit New Goal may already have saved an undefined Demand: keep that existing ID')
+    expect(request.text).toContain(current.description); expect(request.text).toContain(`existing Goal ${current.id}`)
+    expect(request.text).toMatch(/^<amux from="amux">\n/); expect(request.text).toMatch(/<\/amux>\n\nClarify goal$/)
+    expect(metadata).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs[tab.id]).toBe(tab); expect(useAppStore.getState().sessions).toEqual([active])
+    await recordGoalCoordinationEvidence('mapped-existing-goal', { sessionId: active.id, runId: active.control.run.runId, goal: current, text: request.text,
+      outcome: 'retained delivery unconfirmed', operationId: request.operationId, userAction: 'Clarify goal' })
+  })
+
   it('freezes canonical Project and actual branch Workspace paths before Topic preparation awaits', async () => {
     let finish!: () => void
     vi.spyOn(api.scratch, 'ensureTopic').mockImplementation(async () => { await new Promise<void>(resolve => { finish = resolve }); return { id: PMO_TEAMS_TOPIC_ID } as never })
     const launch = vi.fn().mockResolvedValue(undefined)
     const assigned = { ...demand, projectId: workspaceProjectId(projectRoot), projectName: 'Shared name' }
     useAppStore.setState({ config: projectConfig, activeWorkspaceId: projectBranch.id, demands: { [assigned.id]: assigned }, demandPmoTabIds: {}, tabs: {}, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') }, launchAgent: launch })
+    installPrimary()
     const pending = useAppStore.getState().requestDemandPmoTask(assigned.id, 'grill')
     expect(finish).toBeTypeOf('function')
     useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] }, activeWorkspaceId: otherHostProject.id })
@@ -164,6 +208,7 @@ describe('Demand dedicated PMO Tab context', () => {
     const launch = vi.fn().mockResolvedValue(undefined)
     const assigned = { ...demand, projectId: workspaceProjectId(projectRoot) }
     useAppStore.setState({ config: projectConfig, activeWorkspaceId: otherHostProject.id, demands: { [assigned.id]: assigned }, demandPmoTabIds: {}, tabs: {}, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') }, launchAgent: launch })
+    installPrimary()
     await useAppStore.getState().requestDemandPmoTask(assigned.id, 'grounding')
     expect(launch).toHaveBeenCalledTimes(1)
     expectProjectPayload(launch.mock.calls[0]![1]!, projectRoot as typeof projectBranch)
@@ -172,13 +217,13 @@ describe('Demand dedicated PMO Tab context', () => {
 
   it('keeps mapped requests frozen and reports a deleted or ambiguous assigned Project without borrowing another one', async () => {
     const tab = { ...createWorkbenchTab('pmo-mapped', { regionId: 'region-mapped', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'session-mapped' }), topicId: PMO_TEAMS_TOPIC_ID }
-    let finish!: () => void
-    const opening = vi.fn().mockImplementationOnce(async () => { await new Promise<void>(resolve => { finish = resolve }) }).mockResolvedValue(undefined)
+    const opening = vi.fn().mockResolvedValue(undefined)
     const send = vi.fn().mockReturnValue(true), launch = vi.fn()
     const assigned = { ...demand, projectId: workspaceProjectId(projectRoot) }
     useAppStore.setState({ config: projectConfig, activeWorkspaceId: projectBranch.id, demands: { [assigned.id]: assigned }, demandPmoTabIds: { [assigned.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [tab.id]) }, openScratchTopic: opening, send, launchAgent: launch })
     const pending = useAppStore.getState().requestDemandPmoTask(assigned.id, 'grill')
-    useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] } }); finish(); await pending
+    useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] } }); await pending
+    expect(opening).not.toHaveBeenCalled()
     expect(send).toHaveBeenCalledTimes(1); expectProjectPayload(send.mock.calls[0]![1]!)
     await useAppStore.getState().requestDemandPmoTask(assigned.id, 'grounding')
     expect(send).toHaveBeenCalledTimes(2)

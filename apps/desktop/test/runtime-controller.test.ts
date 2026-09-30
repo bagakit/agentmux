@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,7 +26,10 @@ import {
 } from '@agentmux/core/agent-status'
 import type { WebContents } from 'electron'
 import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { ScratchTopics } from '../src/main/scratch-topics.js'
+import { composeAgentLaunchPrompt } from '@agentmux/core/agent-outbound-message'
+import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'
 
 const runtimeFixture = vi.hoisted(() => {
   const createdHosts: Array<{ id: string; dispose: ReturnType<typeof vi.fn> }> = []
@@ -117,8 +120,12 @@ const runtimeFixture = vi.hoisted(() => {
       appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) },
       acceptedThroughByte: Buffer.byteLength(data)
     }))
-    readonly createAgent = vi.fn(async (): Promise<AgentMuxAgentSession> => {
+    readonly createAgent = vi.fn(async (_input?: unknown): Promise<AgentMuxAgentSession> => {
       throw new Error('Agent launch fixture stopped after input capture')
+    })
+    readonly createAgentWithDelivery = vi.fn(async (input: unknown) => {
+      const session = await this.createAgent(input)
+      return { session, creation: session.creation ?? { createOperationId: 'fixture-create', initialPrompt: 'not-requested' as const } }
     })
     readonly createTerminal = vi.fn(async () => ({
       runId: 'terminal-run',
@@ -268,15 +275,15 @@ vi.mock('@agentmux/core', async () => {
   }
 })
 vi.mock('../src/main/host-factory.js', () => ({
-  createExecutionHost: vi.fn((host: { id: string }) => {
-    const created = { id: host.id, dispose: vi.fn(async () => {}) }
+  createExecutionHost: vi.fn((host: { id: string; kind: 'local' | 'ssh' }) => {
+    const created = { id: host.id, kind: host.kind, dispose: vi.fn(async () => {}) }
     runtimeFixture.createdHosts.push(created)
     return created
   })
 }))
 
 import { RuntimeController } from '../src/main/runtime-controller.js'
-import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
+import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
 
 const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
@@ -706,6 +713,37 @@ describe('RuntimeController configuration transaction', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('forwards the original main Mote notes through the public Core composer while keeping the visible exploration request raw', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-main-mote-notes-'))
+    try {
+      const workspace = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'folder' as const }
+      const topics = new ScratchTopics(), snapshot = await topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)
+      const directory = join(root, snapshot.directoryPath), soul = '# User-owned main Mote personality\nKeep this original identity.\n', wiki = '# User-owned guide\nPreserve these original notes.\n'
+      await writeFile(join(directory, 'SOUL.md'), soul); await writeFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), wiki)
+      const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+      const config: AppConfig = { ...localConfig, workspaces: [workspace], executors: {
+        wrong: { label: 'First other bot', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
+        'codex-2': { label: 'Original main bot', providerId: 'claude', command: '/original/claude', args: ['--original'], env: {}, injectAgentMuxGuide: false }
+      } }
+      const user = '我还不知道能做什么，可以了解我并给我建议吗？'
+      await expect(controller.launchAgent({ executorId: 'codex-2', hostId: 'local', workspacePath: root, scratchTopicId: PMO_TEAMS_TOPIC_ID,
+        agentSessionId: 'new-primary-discussion', prompt: user }, config)).rejects.toThrow('stopped after input capture')
+      expect(client.createAgent).toHaveBeenCalledTimes(1)
+      const input = client.createAgent.mock.calls[0]![0] as unknown as { agentMuxNote: string; prompt: string; providerId: string; executorId: string; injectAgentMuxGuide: boolean; workspacePath: string }
+      expect(input).toMatchObject({ providerId: 'claude', executorId: 'codex-2', prompt: user, injectAgentMuxGuide: false })
+      expect(input.agentMuxNote).toContain(MOTE_COORDINATION_ROLE); expect(input.agentMuxNote).toContain(soul.trim())
+      const wire = composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide, input.agentMuxNote)
+      expect(wire.text).toContain(`<amux from="amux">\n${input.agentMuxNote}`)
+      expect(wire.text).toMatch(new RegExp(`</amux>\\n\\n${user}$`))
+      expect(wire.systemContext).toContain(MOTE_COORDINATION_ROLE); expect(wire.systemContext).not.toContain(user)
+      expect(await readFile(join(directory, 'SOUL.md'), 'utf8')).toBe(soul); expect(await readFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), 'utf8')).toBe(wiki)
+      expect(await readdir(root)).toEqual([snapshot.directoryPath])
+      await recordGoalCoordinationEvidence('initial-main-mote', { executorId: input.executorId, providerId: input.providerId, workspacePath: input.workspacePath,
+        prompt: input.prompt, agentMuxNote: input.agentMuxNote, finalWire: wire.text, systemContext: wire.systemContext,
+        boundary: 'actual Main createAgent input, then actual public Core composeAgentLaunchPrompt; no process execution asserted' })
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('launches two Executors through one Provider with their own commands and arguments', async () => {
@@ -2692,15 +2730,12 @@ describe('RuntimeController configuration transaction', () => {
 
     /** 经由订阅读一帧——那是产品唯一的读取口（ipc.ts 的 resourceUsage:subscribe）。 */
     async function runsInOneFrame(sampler: ProcessResourceSampler): Promise<string[]> {
-      const runs: string[] = []
-      const stop = sampler.subscribe((snapshot) => {
-        runs.push(...snapshot.runs.map((run) => run.runId))
-      })
-      await vi.waitFor(() => expect(runs.length).toBeGreaterThanOrEqual(0))
-      await Promise.resolve()
-      await Promise.resolve()
-      stop()
-      return runs
+      let frame: ResourceSample | undefined
+      const stop = sampler.subscribe(snapshot => { frame = snapshot })
+      try {
+        await vi.waitFor(() => expect(frame?.processObservedAt).toBe(1_000_000))
+        return frame!.runs.map(run => run.runId)
+      } finally { stop() }
     }
 
     const processState = (runId: string, state: string, pid: number | null) => ({

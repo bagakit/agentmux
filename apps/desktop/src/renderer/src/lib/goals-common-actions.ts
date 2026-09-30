@@ -10,23 +10,25 @@ export const commonActionKey = (ref: GoalsCommonActionRef): string => `${ref.kin
 export const commonActionsDirectory = (config: AppConfig | null): GoalsCommonActionsConfig => config?.goalsCommonActions ?? DEFAULT_GOALS_COMMON_ACTIONS
 export type GoalsCommonAction = {
   ref: GoalsCommonActionRef; key: string; body: string; label: string
-  executor?: ConfiguredExecutor | undefined; project?: GoalExplorationProject; reason?: string; conditional?: boolean
+  executor?: ConfiguredExecutor | undefined; initialExecutor?: boolean; project?: GoalExplorationProject; reason?: string; conditional?: boolean
 }
 
 /** Resolve live library bytes and the exact configured target; never store another prompt body. */
-export function resolveGoalsCommonAction(ref: GoalsCommonActionRef, config: AppConfig | null, project: GoalExplorationProject | null): GoalsCommonAction {
+export function resolveGoalsCommonAction(ref: GoalsCommonActionRef, config: AppConfig | null, project: GoalExplorationProject | null, primaryExecutorId?: string, initialExecutor = false): GoalsCommonAction {
   const executors = configuredExecutors(config)
+  const primaryExecutor = executors.find(executor => executor.id === primaryExecutorId)
   const key = commonActionKey(ref)
   if (ref.kind === 'builtin') {
-    if (ref.id === 'next') return { ref, key, label: '项目的下一步', body: project ? goalExplorationNextText(project) : '根据项目情况，建议我下一步应该做什么', executor: executors[0], ...(project ? { project } : { conditional: true, reason: '打开过项目后显示' }) }
+    if (ref.id === 'next') return { ref, key, label: '项目的下一步', body: project ? goalExplorationNextText(project) : '根据项目情况，建议我下一步应该做什么', executor: primaryExecutor, initialExecutor, ...(project ? { project } : { conditional: true, reason: '打开过项目后显示' }) }
     const action = GOAL_EXPLORATION_ACTIONS.find(action => action.id === ref.id)!
-    return { ref, key, body: action.text, label: ref.id === 'understand' ? '了解我并给我建议' : '尝试一个项目', executor: executors[0] }
+    return { ref, key, body: action.text, label: ref.id === 'understand' ? '了解我并给我建议' : '尝试一个项目', executor: primaryExecutor, initialExecutor }
   }
   const prompt = resolveComposerShortcuts(config).find(prompt => prompt.id === ref.id)
   if (!prompt) return { ref, key, label: '指令已删除', body: '', reason: '原指令已从指令库删除，可以移出常用操作。' }
-  const executor = prompt.providerId ? executors.find(executor => executor.providerId === prompt.providerId) : executors[0]
-  return { ref, key, label: prompt.label, body: prompt.body, executor,
-    ...(prompt.providerId && !executor ? { reason: `没有配置适用 ${prompt.providerId} 的 Agent，请到设置中添加。` } : {}) }
+  const incompatible = prompt.providerId && primaryExecutor && primaryExecutor.providerId !== prompt.providerId
+  return { ref, key, label: prompt.label, body: prompt.body, executor: incompatible ? undefined : primaryExecutor, initialExecutor,
+    ...(incompatible ? { reason: `主 Mote 的 ${primaryExecutor.label} 不适用 ${prompt.providerId}，请先在主 Mote 中选择适用 Agent。` }
+      : prompt.providerId && !primaryExecutor ? { reason: `主 Mote 的 Agent 尚未确认，请先选择适用 ${prompt.providerId} 的 Agent。` } : {}) }
 }
 
 /** Only the body is required by this entry; helper fields meet the original library contract. */
