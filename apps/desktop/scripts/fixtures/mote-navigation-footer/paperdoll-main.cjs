@@ -100,7 +100,9 @@ app.whenReady().then(async () => {
     const facts = () => read('window.motePaperdollProof.facts()'), call = (method, ...args) => read(`window.motePaperdollProof[${JSON.stringify(method)}](...${JSON.stringify(args)})`)
     const until = async (expression, label) => { const deadline = Date.now() + 8000; do { if (await read(expression)) return; await pause(25) } while (Date.now() < deadline); throw new Error('Paperdoll stage did not settle: ' + label) }
     const input = (method, args) => win.webContents.debugger.sendCommand(method, args)
-    await input('Emulation.setFocusEmulationEnabled', { enabled: true })
+    let focusEmulationEnabled
+    const setFocusEmulation = async enabled => { await input('Emulation.setFocusEmulationEnabled', { enabled }); focusEmulationEnabled = enabled }
+    await setFocusEmulation(true)
     const node = selector => `document.querySelector(${JSON.stringify(selector)})`
     const button = label => `Array.from(document.querySelectorAll('button')).find(n=>n.getAttribute('aria-label')===${JSON.stringify(label)})`
     const dialogButton = label => `Array.from(document.querySelector('.space-icon-picker').querySelectorAll('button')).find(n=>n.textContent===${JSON.stringify(label)}||n.getAttribute('aria-label')===${JSON.stringify(label)})`
@@ -159,9 +161,31 @@ app.whenReady().then(async () => {
       // A real offscreen entry still keeps its expression, but native animations stop.
       await read(`(${entry}).style.transform='translateX(-200px)'`); await until('window.motePaperdollProof.facts().ui.entry.motion.motion==="off"', 'offscreen admission'); const offscreen = await facts(); assert.equal(offscreen.ui.entry.motion.animations.length, 0)
       await read(`(${entry}).style.transform=''`); await animate('idle')
-      win.hide(); await until('document.hidden&&window.motePaperdollProof.facts().ui.entry.motion.motion==="off"', 'document hidden admission'); const documentHidden = await facts(); assert.equal(documentHidden.ui.entry.motion.animations.length, 0)
-      win.showInactive(); await animate('idle')
-      check('actual-reduced-motion-offscreen-document-hidden', { reduced: reduced.ui.entry.motion, offscreen: offscreen.ui.entry.motion, documentHidden: documentHidden.ui.entry.motion })
+      // Electron keeps Page Visibility visible when background throttling is disabled or focus emulation is enabled.
+      // Temporarily admit real native hiding; restore the exact probe settings even on failed observation.
+      const visibilitySample = async () => ({ windowVisible: win.isVisible(), backgroundThrottling: win.webContents.getBackgroundThrottling(), focusEmulationEnabled,
+        page: await read('({ hidden: document.hidden, visibilityState: document.visibilityState })'), facts: await facts() })
+      const visibility = result.visibility = { before: await visibilitySample(), hidden: null, after: null }
+      assert.equal(visibility.before.windowVisible, true); assert.equal(visibility.before.page.hidden, false)
+      assert.equal(visibility.before.facts.ui.entry.motion.motion, 'on'); assert.ok(visibility.before.facts.ui.entry.motion.animations.length > 0)
+      try {
+        win.webContents.setBackgroundThrottling(true); await setFocusEmulation(false)
+        win.hide(); assert.equal(win.isVisible(), false)
+        visibility.hidden = await visibilitySample()
+        await until('document.hidden&&window.motePaperdollProof.facts().ui.entry.motion.motion==="off"', 'document hidden admission')
+        visibility.hidden = await visibilitySample()
+        assert.equal(visibility.hidden.windowVisible, false); assert.equal(visibility.hidden.page.hidden, true)
+        assert.equal(visibility.hidden.facts.ui.entry.motion.motion, 'off'); assert.equal(visibility.hidden.facts.ui.entry.motion.animations.length, 0)
+        protectedSame(visibility.before.facts, visibility.hidden.facts)
+      } finally {
+        win.showInactive(); win.webContents.setBackgroundThrottling(visibility.before.backgroundThrottling)
+        await setFocusEmulation(visibility.before.focusEmulationEnabled); visibility.after = await visibilitySample()
+      }
+      await animate('idle'); visibility.after = await visibilitySample()
+      assert.equal(visibility.after.windowVisible, visibility.before.windowVisible); assert.equal(visibility.after.page.hidden, false)
+      assert.equal(visibility.after.backgroundThrottling, visibility.before.backgroundThrottling); assert.equal(visibility.after.focusEmulationEnabled, visibility.before.focusEmulationEnabled)
+      protectedSame(visibility.before.facts, visibility.after.facts)
+      check('actual-reduced-motion-offscreen-document-hidden', { reduced: reduced.ui.entry.motion, offscreen: offscreen.ui.entry.motion, documentHidden: visibility.hidden.facts.ui.entry.motion, visibility })
       win.setContentSize(420, 820); await pause(100); await visible(); await click(button('Show Mote avatars only')); await capture('paperdoll-narrow-idle')
       await select(quiet); await edit(); await click(dialogButton('Make a face')); await click(dialogButton('Color · lavender')); await click(dialogButton('Save avatar'))
       await until('!document.querySelector(".space-icon-picker")', 'confirmed sleeping face')
