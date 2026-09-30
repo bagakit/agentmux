@@ -64,6 +64,31 @@ try {
   const costAfter = await state(); assert.deepEqual(costAfter.counts, costBefore.counts); assert.deepEqual(costAfter.controls, []); assert.equal(costAfter.draft, 'Keep the original draft')
   assert.equal(await js('window.coveragePinnedBody===document.querySelector("[data-input-preview-id]")&&getSelection().toString()===window.coverageSelection'), true)
   actual.cost200 = { before: costBefore, after: costAfter, actualActions: 200, pointerOrKeyboardRunControls: 0 }
+  // Qualify the complete requested eleven presets through original hit-tested buttons.
+  // This changes only the private verification driver, never production facts or Source.
+  const zoomBefore = await state(), zoomOptions = await js(`Array.from(document.querySelector('[aria-label="Focus window size"]').options, option => [option.value, option.text])`)
+  assert.deepEqual(zoomOptions, [['0.5','30m'],['1','1h'],['2','2h'],['4','4h'],['6','6h'],['8','8h'],['12','12h'],['18','18h'],['24','24h'],['36','1.5d'],['48','2d']])
+  await wheel('.recent-focus__time-scale', -100); await until(`coverageSceneState().start<${zoomBefore.start}`)
+  const historical = await state(), historicalAnchor = historical.start + (historical.end - historical.start) * .75, zoomSteps = []
+  const zoomStep = async (direction, hours) => {
+    await click(`[aria-label="Zoom ${direction} Focus timeline"]`)
+    await until(`Number(document.querySelector('[aria-label="Focus window size"]').value)===${hours}`)
+    const value = await state()
+    assert.equal(value.end-value.start, hours*3600000)
+    assert.equal(value.start+(value.end-value.start)*.75, historicalAnchor)
+    assert.deepEqual(value.counts, zoomBefore.counts); assert.deepEqual(value.controls, [])
+    assert.equal(value.draft, zoomBefore.draft)
+    const retained = await js('({sameNode:window.coveragePinnedBody===document.querySelector("[data-input-preview-id]"),selection:getSelection().toString(),draft:document.querySelector("#original-draft").value})')
+    assert.equal(retained.sameNode, true); assert.equal(retained.selection, actual.pinBefore.selection); assert.equal(retained.draft, 'Keep the original draft')
+    zoomSteps.push({direction,hours,start:value.start,end:value.end,retained})
+  }
+  for(const hours of [2,1,.5]) await zoomStep('in',hours)
+  const lowerDisabled = await js(`document.querySelector('[aria-label="Zoom in Focus timeline"]').disabled`); assert.equal(lowerDisabled,true)
+  for(const hours of [1,2,4,6,8,12,18,24,36,48]) await zoomStep('out',hours)
+  const upperDisabled = await js(`document.querySelector('[aria-label="Zoom out Focus timeline"]').disabled`); assert.equal(upperDisabled,true)
+  await shot('wide-eleven-presets-48h')
+  for(const hours of [36,24,18,12,8,6,4]) await zoomStep('in',hours)
+  actual.zoomPresets = { options:zoomOptions, lowerDisabled,upperDisabled,historicalAnchor,steps:zoomSteps,before:zoomBefore,after:await state(),controls:[] }
   await key('Escape', 'Escape', 27); await until('!document.querySelector(".recent-focus__message-preview")')
   const beforeVertical = await state(); await wheel('.recent-focus__time-scale', 0, 1000)
   await until('coverageSceneState().scroll.top+coverageSceneState().scroll.client>=coverageSceneState().scroll.height-1')
