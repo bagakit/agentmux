@@ -201,14 +201,24 @@ it('does not turn Now-window display ticks or unrelated output into metadata, pa
 it('retains previously read bodies with honest unavailable coverage after real Store eviction, without restoring the retired Run', async () => {
   const h = await fixture(); await h.render(); await h.selectSource(); await h.wait(() => expect(h.inputs()).toHaveLength(4))
   await act(async () => h.inputs()[0]!.click()); const body = document.querySelector('[data-input-preview-id]')!
+  expect(body).not.toBeNull()
+  const textNodes = document.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+  let selectedText = textNodes.nextNode()
+  while (selectedText && !selectedText.textContent?.includes(BODY)) selectedText = textNodes.nextNode()
+  expect(selectedText).not.toBeNull()
+  const range = document.createRange(); range.selectNodeContents(selectedText!)
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+  const selected = selection.toString(); expect(selected).toContain(BODY)
   expect((await h.client.sessionHistorySources()).map(source => source.agentSessionId)).toEqual(['archived-0'])
   await h.store.retireRuns(Array.from({ length: 256 }, (_, index) => ({ runId: `extra-retired-${index}` })))
   expect(await h.client.sessionHistorySources()).toEqual([])
   await h.button('Refresh source')
   await h.wait(() => expect(document.querySelector('.recent-focus__input-error')?.textContent).toMatch(/not stored|unknown|unavailable|retained/i))
   expect(h.inputs().filter(item => item.textContent!.includes(BODY))).toHaveLength(3)
-  // Explicit refresh clears the selected message, not the previously read canonical records.
-  expect(body.isConnected).toBe(false); expect(h.markers()).toHaveLength(2); h.noRuntime()
+  // A failed explicit refresh keeps the same inspected content and Range, with honest unavailable coverage.
+  expect(document.querySelector('[data-input-preview-id]')).toBe(body)
+  expect(selection.toString()).toBe(selected); expect(selection.getRangeAt(0)).toBe(range)
+  expect(h.markers()).toHaveLength(2); h.noRuntime()
 })
 
 it('keeps the old snapshot and preview Range when a real readonly source changes until explicit refresh', async () => {

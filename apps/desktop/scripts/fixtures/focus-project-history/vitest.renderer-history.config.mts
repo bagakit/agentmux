@@ -17,6 +17,7 @@ export default defineConfig({
       if (!file.startsWith(`${root}/apps/desktop/src/renderer/src/`) || !/\.[cm]?[jt]sx?$/u.test(file)) return
       const originalCode = code, mutation = process.env.AGENTMUX_RETIRED_FOCUS_MUTATION
       const changes: Record<string, [string, string, string]> = {
+        'clear-retained-selection': ['components/RecentFocusTimeline.tsx', 'onRefresh: () => { if (historical)', 'onRefresh: () => { setPreview(current => current ? { ...current, message: undefined } : current); if (historical)'],
         'readonly-disconnected': ['components/RecentFocusTimeline.tsx', 'const inputReference = inputSource?.reference', 'const inputReference = inputContext ? inputSource?.reference : undefined'],
         'current-members-only': ['lib/focus-history-timeline.ts', 'for (const readonlyInputTrack of readonlyInputTracks) {', 'for (const readonlyInputTrack of readonlyInputTracks) { if (!contexts.some(context => context.id === readonlyInputTrack.sessionId)) continue;'],
         'equal-body-merge': ['components/RecentFocusTimeline.tsx', 'projected.filter(item => item.agentSessionId === inputReference?.agentSessionId)', 'projected.filter((item, index) => item.agentSessionId === inputReference?.agentSessionId && projected.findIndex(other => other.content === item.content) === index)']

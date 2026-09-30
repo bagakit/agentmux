@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const args = process.argv.slice(2), slice = args[args.indexOf('--slice') + 1]
-if (slice !== 'retained-focus') throw new Error('This verifier currently owns only retained-focus; complete-history is a separate Task.')
+if (slice === 'complete-history') {
+  await verifyCompleteHistory()
+  process.exit(process.exitCode ?? 0)
+}
+if (slice !== 'retained-focus') throw new Error('Select retained-focus or complete-history.')
 const directory = resolve(root, `.tmp/focus-project-history-source-${Date.now()}`)
 mkdirSync(directory, { recursive: true })
 const sourcePaths = [
@@ -96,4 +100,123 @@ try {
   writeFileSync(resolve(directory, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`)
   console.error(receipt.error)
   process.exitCode = 1
+}
+
+async function verifyCompleteHistory() {
+  const digest = bytes => createHash('sha256').update(bytes).digest('hex')
+  const output = resolve(root, process.env.AGENTMUX_FOCUS_CLOSED_OUTPUT ?? `.tmp/focus-closed-session-history-${Date.now()}`)
+  mkdirSync(output, { recursive: true })
+  const paths = [
+    'apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx',
+    'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx',
+    'apps/desktop/src/renderer/src/lib/focus-history-sources.ts',
+    'apps/desktop/src/renderer/src/lib/focus-history-timeline.ts',
+    'apps/desktop/src/renderer/src/lib/focus-history-identity.ts',
+    'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',
+    'apps/desktop/src/renderer/src/lib/workbench-view-close.ts',
+    'apps/desktop/src/renderer/src/store.ts',
+    'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/ipc.ts',
+    'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts',
+    'apps/desktop/src/renderer/src/styles/focus.css',
+    'apps/desktop/test/focus-closed-session-history.test.tsx',
+    'apps/desktop/scripts/fixtures/focus-project-history/vitest.closed-session.config.mts',
+    'apps/desktop/scripts/fixtures/focus-project-history/tsconfig.closed-session.json',
+    'apps/desktop/scripts/verify-focus-closed-session-history-gui.mjs',
+    'apps/desktop/scripts/verify-focus-project-history.mjs'
+  ]
+  const bind = () => Object.fromEntries(paths.map(path => [path, digest(readFileSync(resolve(root, path)))]))
+  const receipt = { schema: 'agentmux.focus-closed-session-history-qualification.v1', slice: 'complete-history',
+    passed: false, sourcePass: false, taskDone: false, before: bind(), stages: [],
+    boundary: 'Public Core/private Runtime/actual Run, built-in Reader, production registered IPC/preload and mounted Workbench/Focus owning. GUI qualification requires separately bound two ordinary complete-Main processes and independent actual images. Not upstream Vendor writer, full Focus, packaging or user installation.' }
+  const save = () => writeFileSync(resolve(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
+  function command(label, argv, mutation) {
+    const report = resolve(output, `${label}.json`), loaded = resolve(output, `${label}.loaded.jsonl`)
+    const env = { ...process.env, AGENTMUX_FOCUS_CLOSED_LOADED_SOURCE: loaded }
+    delete env.AGENTMUX_FOCUS_CLOSED_MUTATION
+    if (mutation) env.AGENTMUX_FOCUS_CLOSED_MUTATION = mutation
+    const actual = argv ?? [process.execPath, 'node_modules/vitest/vitest.mjs', 'run', '--config',
+      'apps/desktop/scripts/fixtures/focus-project-history/vitest.closed-session.config.mts', '--maxWorkers=1', '--reporter=json', `--outputFile=${report}`]
+    const result = spawnSync(actual[0], actual.slice(1), { cwd: root, env, encoding: 'utf8', timeout: 120_000, maxBuffer: 4 * 1024 * 1024 })
+    writeFileSync(resolve(output, `${label}.log`), (result.stdout ?? '') + (result.stderr ?? ''))
+    const stage = { label, command: actual, exitCode: result.status, error: result.error?.message, mutation: mutation ?? null }
+    receipt.stages.push(stage); save()
+    if (argv) {
+      if (result.status !== 0) throw new Error(`${label}: failed; original output retained`)
+    } else {
+      const tests = JSON.parse(readFileSync(report)), assertions = tests.testResults.flatMap(file => file.assertionResults)
+      if (!assertions.length) throw new Error(`${label}: nonempty actual assertions required`)
+      const modules = readFileSync(loaded, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+      const relevant = modules.filter(item => Object.hasOwn(receipt.before, item.path))
+      if (!relevant.length) throw new Error(`${label}: no product module actually loaded`)
+      for (const item of relevant) if (item.originalSHA256 !== receipt.before[item.path]) throw new Error(`Moving Source: ${item.path}`)
+      Object.assign(stage, { population: assertions.length, passed: tests.numPassedTests, failed: tests.numFailedTests,
+        reportSHA256: digest(readFileSync(report)), loadedSHA256: digest(readFileSync(loaded)) })
+      if (mutation) {
+        const changed = relevant.filter(item => item.mutation === mutation && item.sha256 !== item.originalSHA256)
+        const failed = assertions.filter(item => item.status === 'failed')
+        if (result.status === 0 || !changed.length || !failed.length || failed.some(item => !item.failureMessages.some(message => message.includes('AssertionError')))) throw new Error(`${label}: actual loaded semantic AssertionRED required`)
+        stage.loadedMutants = changed; stage.assertionFailures = failed.map(item => item.fullName)
+      } else {
+        if (result.status !== 0 || !tests.success || assertions.some(item => item.status !== 'passed')) throw new Error(`${label}: all nonempty actual product assertions must pass`)
+        for (const item of relevant) if (item.sha256 !== item.originalSHA256) throw new Error(`${label}: restored Source must actually load`)
+      }
+    }
+    save(); console.log(`${label}: actual exit ${result.status}`)
+    return stage
+  }
+  function artifact(environment) {
+    const file = process.env[environment]
+    if (!file) throw new Error(`${environment}: exact actual receipt required; Source alone is not whole Task`)
+    const bytes = readFileSync(resolve(root, file))
+    return { path: resolve(root, file), sha256: digest(bytes), value: JSON.parse(bytes) }
+  }
+  try {
+    const baseline = command('owning')
+    for (const mutation of ['readonly-disconnected', 'current-members-only', 'equal-body-merge']) {
+      if (command(mutation, undefined, mutation).population !== baseline.population) throw new Error(`${mutation}: changed population`)
+      if (command(`${mutation}-exact-restore`).population !== baseline.population) throw new Error(`${mutation}: restore changed population`)
+    }
+    command('retired-reader-adjacent', [process.execPath, 'node_modules/vitest/vitest.mjs', 'run', '--config',
+      'apps/desktop/scripts/fixtures/focus-project-history/vitest.renderer-history.config.mts', '--maxWorkers=1'])
+    command('production-types', [process.execPath, 'node_modules/typescript/bin/tsc', '--noEmit', '-p', 'apps/desktop/tsconfig.json'])
+    command('owning-types', [process.execPath, 'node_modules/typescript/bin/tsc', '--noEmit', '-p', 'apps/desktop/scripts/fixtures/focus-project-history/tsconfig.closed-session.json'])
+    const seams = {
+      historyCatalogue: ['apps/desktop/src/main/ipc.ts', "args.runtime.sessionHistorySources()"],
+      readonlyPage: ['apps/desktop/src/main/ipc.ts', 'args.runtime.sessionHistoryPage(session, options, config)'],
+      actualTabClose: ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'await closeTab(workspaceId, group.id, tabId, { keepAgentSessions })'],
+      stopOwner: ['apps/desktop/src/renderer/src/store.ts', 'await api.sessions.stop(resource.control)'],
+      pureProjector: ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'projectSessionUserMessages({'],
+      productionTimeline: ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', '<RecentFocusTimeline ']
+    }
+    receipt.callers = Object.fromEntries(Object.entries(seams).map(([name, [path, needle]]) => {
+      const source = readFileSync(resolve(root, path), 'utf8'), index = source.indexOf(needle)
+      if (index < 0) throw new Error(`${name}: nondefinition product caller missing`)
+      return [name, { path, needle, line: source.slice(0, index).split('\n').length }]
+    }))
+    receipt.sourcePass = true; save()
+    if (args.includes('--source-only')) receipt.pending = ['Two bound ordinary complete-Main GUI processes, three healthy Run/PID/ACK and actual independent image review']
+    else {
+      const gui = artifact('AGENTMUX_FOCUS_CLOSED_GUI_RECEIPT'), review = artifact('AGENTMUX_FOCUS_CLOSED_VISUAL_REVIEW')
+      if (!gui.value.passed || gui.value.schema !== 'agentmux.focus-closed-session-history-gui.v1') throw new Error('An actual complete-history GUI receipt is required')
+      if (gui.value.processes.length !== 2 || gui.value.processes[0].pid === gui.value.processes[1].pid || gui.value.processes[1].seedCount !== 0) throw new Error('Two ordinary processes and zero second seed required')
+      if (gui.value.healthyRuns.length !== 3 || gui.value.healthyRuns.some(run => !run.sameId || !run.samePid || !run.ack)) throw new Error('Three actual healthy original Run/PID/ACK receipts required')
+      if (gui.value.historyControlDelta.create || gui.value.historyControlDelta.resume || gui.value.historyControlDelta.stop) throw new Error('Readonly history must not control archived Runs')
+      if (!gui.value.defaultCloseRetired || !gui.value.keepSessionPreserved || !gui.value.neverFocusedArchivedSource || !gui.value.restoredBodyAndLayout) throw new Error('Actual ordinary close, native/captured and restore facts required')
+      for (const path of paths.slice(0, 13)) if (gui.value.source[path] !== receipt.before[path]) throw new Error(`GUI/Source mismatch: ${path}`)
+      command('gui-main-ancestry', ['git', 'merge-base', '--is-ancestor', gui.value.candidate, 'HEAD'])
+      if (!gui.value.cleanup?.privateRootRemoved || gui.value.cleanup.errors?.length || gui.value.cleanup.remainingOwnedProcesses?.length) throw new Error('Ordinary private GUI cleanup must complete without remaining processes')
+      if (!gui.value.compile?.candidate || gui.value.compile.candidate !== gui.value.candidate) throw new Error('Ordinary GUI must consume its exact complete-Main build candidate')
+      if (review.value.verdict !== 'pass' || !review.value.reviewerAgentId || review.value.sceneReceiptSHA256 !== gui.sha256) throw new Error('Independent exact ordinary GUI review required')
+      if (gui.value.images.length < 4) throw new Error('Nonempty actual wide/narrow ordinary GUI images required')
+      for (const image of gui.value.images) {
+        const file = resolve(gui.path, '..', image.path)
+        if (digest(readFileSync(file)) !== image.sha256 || !review.value.viewedImages.some(viewed => viewed.sha256 === image.sha256 && viewed.observation?.trim())) throw new Error(`${image.path}: exact actual independent image observation required`)
+      }
+      receipt.gui = gui; receipt.visualReview = review; receipt.taskDone = true
+    }
+    receipt.after = bind()
+    if (JSON.stringify(receipt.before) !== JSON.stringify(receipt.after)) throw new Error('Owned complete-history Source moved during qualification')
+    receipt.passed = true
+  } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
+  finally { save(); console.log(JSON.stringify({ sourcePass: receipt.sourcePass, passed: receipt.passed, taskDone: receipt.taskDone, receipt: relative(root, resolve(output, 'receipt.json')) })) }
 }
