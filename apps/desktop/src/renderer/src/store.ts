@@ -491,6 +491,7 @@ type AppState = {
   focusTimelineRuler: FocusRulerPreferences
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
   focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection): void
+  selectExecutionFocusReference(reference: WorkbenchProjectionSelection, expected: Pick<AgentFocusContext['execution'], 'sessionId' | 'reference'>): void
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
@@ -4668,6 +4669,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({ agentFocus: id !== null && !state.sessions.some((session) => session.id === id)
       ? focusExecution(state.agentFocus, id)
       : focusSessionContext(state, id, undefined, reference) }))
+  },
+  selectExecutionFocusReference(reference, expected) {
+    const state = get(), execution = state.agentFocus.execution
+    if (state.mainSurface !== 'agents' || !expected.sessionId || execution.sessionId !== expected.sessionId ||
+      (expected.reference
+        ? !sameWorkbenchProjectionSelection(execution.reference ?? null, expected.reference)
+        : execution.reference !== undefined)) return
+    const { overlays } = readDesktopPresentation({ surface: 'focus', mainSurface: 'agents', space: null, goalId: null }, state.tabs)
+    if (overlays.settings === true || overlays.quickSwitcher === true) return
+    const layout = state.layouts[reference.displayWorkspaceId]
+    const group = layout?.groups.find(item => item.id === reference.groupId)
+    const tab = state.tabs[reference.tabId]
+    if (!layout || !group || !groupIds(layout.root).includes(group.id) || !group.tabOrder.includes(reference.tabId) ||
+      !tab?.regions[reference.regionId]) return
+    const topicsWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+    try {
+      const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicsWorkspace) ?? [])
+      if (!catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) return
+    } catch (error) {
+      get().reportError(error, { kind: 'indeterminate', summary: 'The selected work surface directory could not be confirmed. The original Session and work surface are retained.' })
+      return
+    }
+    if (sameWorkbenchProjectionSelection(execution.reference ?? null, reference)) return
+    set({ agentFocus: { ...state.agentFocus, execution: { ...execution, reference } } })
   },
   focusPmoSession(id) {
     set((state) => {

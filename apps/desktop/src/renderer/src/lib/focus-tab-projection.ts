@@ -31,7 +31,9 @@ export function executionFocusPresentation(
   }
   const choices = [...references.values()]
   const reference = execution.reference ?? (choices.length === 1 ? choices[0] : undefined)
-  if (!reference || !choices.some(choice => sameWorkbenchProjectionSelection(choice, reference))) return {
+  const confirmed = reference && tabs[reference.tabId]?.regions[reference.regionId] &&
+    catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))
+  if (!confirmed) return {
     projection: null, references: choices,
     issue: execution.reference
       ? 'The selected Tab or Region occurrence is no longer confirmed. Its exact reference and Session are kept; choose an available location.'
