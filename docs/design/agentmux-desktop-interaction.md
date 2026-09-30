@@ -10,7 +10,7 @@
 - **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；显式创建后记录真实 Goal 草稿，待澄清的想法由 Mote 整理目标与完成标准，具体闭环见《Goals 的 Grill 与 Grounding》。Demand 仍是持久化实体与控制协议身份，Goal 状态与执行 Session 状态独立。
 - **Survey** 是浏览调查的临时 Zone 工作面，以 Browser 为默认起点并复用原 Tab / Region 内容；多个 Topic 关系、网页输入与既有 Browser 管理在同一处可达，后续搜索和知识库方向见《Survey、临时 Zone 工作面与知识入口》。
 
-PMO 作为独立协调入口，和 Space、Focus、Goals、Survey 的工作/功能导航分开；Settings 打开既有设置面，不改变当前工作面选中状态和执行焦点。Settings、Toolkit、快捷键帮助与状态提醒的右侧工具归属和排列统一见《Toolkit 与官方 Performance 工具》。窄窗口保留全部入口与需要用户处理的状态，长摘要可以收紧，控件不能重叠或被裁掉；这些规则不依赖 Project Rail 是否可见。底栏高度与局部尺寸约束只定义在密度 SSOT《左下角导航与右下角工具组》。
+PMO 作为独立协调入口，和 Space、Focus、Goals、Survey 的工作/功能导航分开；Settings 打开既有设置面，不改变当前工作面选中状态和执行焦点。Settings 的入口归属，以及 Toolkit、快捷键帮助与状态提醒的右侧工具排列，统一见《Toolkit 与官方 Performance 工具》。窄窗口保留全部入口与需要用户处理的状态，长摘要可以收紧，控件不能重叠或被裁掉；这些规则不依赖 Project Rail 是否可见。底栏高度与局部尺寸约束只定义在密度 SSOT《左下角导航与右下角工具组》。
 
 ### Zone→Tabs→Regions 的实体与展示绑定
 
@@ -1354,7 +1354,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 ### Toolkit 与官方 Performance 工具
 
-用户要可自行扩展的 Toolkit：「配置一个工具和对应的图标」，包含脚本、Agent 任务、定时执行和交互按钮；hover 能看执行结果与动作，配置和操作也能通过 CLI 完成。用户随后明确：「toolkit 还是默认在 statusbar 从右往左排列吧，和左侧功能区区分」。左侧只保原工作/功能导航；Settings、Toolkit、快捷键帮助与状态提醒共用右侧 utilities group。Settings 是最靠右的稳定管理锚，Performance 紧邻其左侧，Toolkit 默认由右向左增长；快捷键帮助与状态提醒位于 Toolkit 左侧。摆放方向不改变文字方向、原焦点、原生 Tab / Shift+Tab 与输入语义，不新增排序配置、registry 或 RTL 文本。UI 与 CLI 使用同一配置、执行与结果 owner；查看、hover 或保存配置不隐含执行副作用或开启定时任务。未交付触发能力须明确其实际范围。
+用户要可自行扩展的 Toolkit：「配置一个工具和对应的图标」，包含脚本、Agent 任务、定时执行和交互按钮；hover 能看执行结果与动作，配置和操作也能通过 CLI 完成。用户随后明确：「toolkit 还是默认在 statusbar 从右往左排列吧，和左侧功能区区分」。用户最新纠正：「设置还是放左边」。Settings 的唯一普通入口回到左侧功能导航末端，使用同一设置导航 owner；打开或再次点击收起既有设置面，不改变当前工作面选中状态、原输入或工作面。Toolkit 仍与左侧功能区分开，位于右侧 utilities group，默认由右向左增长，Performance 位于右端工具位；快捷键帮助与状态提醒留在右侧、位于 Toolkit 左侧。Settings 不留第二个右侧入口；不把设置开合伪装成主工作面选中。摆放方向不改变文字方向、原焦点、原生 Tab / Shift+Tab 与输入语义，不新增排序配置、registry 或 RTL 文本。UI 与 CLI 使用同一配置、执行与结果 owner；查看、hover 或保存配置不隐含执行副作用或开启定时任务。未交付触发能力须明确其实际范围。
 
 用户进一步确认「performance 就属于一种内置 toolkit」，要求所需查询信息开放 CLI，官方 Performance 通过脚本组合这些 CLI 完成。该脚本随产品发布，可查看但用户不可编辑、覆盖或替换其内置身份；展示内容、启停、样式与布局可配置。Performance 真实经过公开查询、官方脚本和通用 Toolkit 结果展示，不能在 UI 保留另一条绕过脚本的私有取数路径。官方代码只读不等于扩大执行权限；Performance 自身只查询观察。
 
