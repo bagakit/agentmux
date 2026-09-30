@@ -277,19 +277,77 @@ app.whenReady().then(async () => {
       await locate(menuItem('Restore Mote')); await key('Escape', 27)
       const spaceRestore = node('[aria-label="Restore Mote Analyst with a long persistent name"]')
       const label = `${spaceRow}.querySelector('.project-rail-row__identity > small')`
-      const labelFits = `(() => {const n=${label};if(!n||n.textContent!=='Archived')return false;const range=document.createRange();range.selectNodeContents(n);return n.getBoundingClientRect().width+1>=range.getBoundingClientRect().width;})()`
-      assert.equal(await read(labelFits), true, 'Archived label is fully readable beside the long original name')
+      const labelGeometry = async () => read(`(() => {
+        const row=${spaceRow},n=${label},identity=n?.parentElement,strong=identity?.querySelector('strong'),rail=row?.closest('.project-rail-shell');
+        if(!row||!n||n.textContent!=='Archived'||strong?.textContent!=='Analyst with a long persistent name'||!rail)throw new Error('Original nonempty archived Space row is required');
+        const rect=node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}},range=document.createRange();range.selectNodeContents(n);
+        const box=rect(n),text=rect(range),css=getComputedStyle(n),titleRange=document.createRange();titleRange.selectNodeContents(strong);
+        return {viewport:{width:innerWidth,height:innerHeight},rail:rect(rail),row:rect(row),identity:rect(identity),name:{text:strong.textContent,box:rect(strong),range:rect(titleRange)},
+          label:{text:n.textContent,box,range:text,flex:css.flex,flexShrink:css.flexShrink,minWidth:css.minWidth,overflow:css.overflow},
+          fits:box.width>0&&box.height>0&&text.width>0&&text.height>0&&box.width+1>=text.width&&box.right<=rect(identity).right+1&&box.right<=rect(row).right+1};
+      })()`)
       const style = fs.readFileSync(path.join(repository, 'apps/desktop/src/renderer/src/styles/chrome.css'), 'utf8')
       const rule = '.space-mote-row .project-rail-row__identity > small { flex: 0 0 auto; }'
       assert.equal(style.split(rule).length, 2, 'Exactly one actual archive status rule is consumed')
       const mutantStyle = style.replace(rule, rule.replace('0 0 auto', '0 1 auto'))
-      const inserted = await win.webContents.insertCSS(mutantStyle)
-      await read('new Promise(resolve=>requestAnimationFrame(resolve))')
-      assert.equal(await read(labelFits), false, 'Actual stylesheet mutation reproduces the clipped Archived label')
-      await win.webContents.removeInsertedCSS(inserted)
-      await read('new Promise(resolve=>requestAnimationFrame(resolve))')
-      assert.equal(await read(labelFits), true, 'Original actual stylesheet restores the readable label')
-      result.checks.push({ name: 'actual-archive-label-source-style-mutation-red-restored-green', passed: true, sourceSha256: hash(style), mutatedSha256: hash(mutantStyle), selector: '.space-mote-row .project-rail-row__identity > small', original: true, mutated: false, restored: true })
+      const selector = '.space-mote-row .project-rail-row__identity > small'
+      const loadedRule = `(() => {const found=[...document.styleSheets].flatMap(sheet=>[...sheet.cssRules].filter(rule=>rule.selectorText===${JSON.stringify(selector)}));
+        if(found.length!==1)throw new Error('Exactly one loaded original archive status rule is required');return found[0];})()`
+      const originalRule = await read(`(() => {const rule=${loadedRule};return {stylesheet:rule.parentStyleSheet.href,style:rule.style.cssText,flex:rule.style.flex,priority:rule.style.getPropertyPriority('flex')};})()`)
+      assert.equal(originalRule.flex, '0 0 auto', 'The actual loaded rule is the original Source flex block')
+      const compiledStyle = fs.readFileSync(fileURLToPath(originalRule.stylesheet))
+      assert.equal(compiledStyle.toString().split(rule).length, 2, 'The actual loaded compiled stylesheet contains exactly this owning Source block')
+      const separator = node('[role="separator"][aria-label="Resize Projects"]')
+      const originalWidth = Number(await read(`${separator}.getAttribute('aria-valuenow')`))
+      assert.ok(Number.isFinite(originalWidth) && originalWidth > 0)
+      const beforeLabelProbe = await facts(), proof = result.archiveLabelProbe = { selector, sourceSha256: hash(style), mutatedSha256: hash(mutantStyle),
+        compiledStylesheetSha256: hash(compiledStyle), originalRule, originalWidth, boundaries: [] }
+      const originalLabel = await labelGeometry(); proof.original = originalLabel
+      assert.equal(originalLabel.label.flexShrink, '0'); assert.equal(originalLabel.fits, true, 'Archived label is fully readable beside the long original name')
+      const returnToSpaceRow = async () => {
+        await click(spaceRow, 'right'); await until(`${menuItem('Restore Mote')}!==undefined`, 'original Space menu after real sidebar resize')
+        await key('Escape', 27); await until(`document.activeElement===${spaceRow}`, 'original Space row receives cancelled menu focus')
+      }
+      const focusSeparator = async () => {
+        const budget = await read('document.querySelectorAll("button,input,textarea,select,a[href],[tabindex]").length')
+        assert.ok(budget > 0, 'Real keyboard navigation consumes nonempty controls')
+        for (let count = 0; count <= budget; count++) {
+          if (await read(`document.activeElement===${separator}`)) return
+          await key('Tab', 9)
+        }
+        throw new Error('The original Resize Projects keyboard control is not reachable')
+      }
+      try {
+        for (const [name, keyboard, code, attribute] of [['wide', 'End', 35, 'aria-valuemax'], ['narrow', 'Home', 36, 'aria-valuemin']]) {
+          await focusSeparator(); const width = Number(await read(`${separator}.getAttribute(${JSON.stringify(attribute)})`))
+          await key(keyboard, code); await until(`Number(${separator}.getAttribute('aria-valuenow'))===${width}`, 'real sidebar ' + name + ' boundary')
+          await returnToSpaceRow(); const geometry = await labelGeometry(); proof.boundaries.push({ name, width, geometry })
+          assert.ok(Math.abs(geometry.rail.width - width) < 1, 'The original sidebar really reaches its supported boundary')
+          assert.equal(geometry.label.flexShrink, '0'); assert.equal(geometry.fits, true, 'Original Archived label is fully readable at the ' + name + ' boundary')
+        }
+        await read(`${loadedRule}.style.setProperty('flex','0 1 auto',${JSON.stringify(originalRule.priority)})`)
+        await read('new Promise(resolve=>requestAnimationFrame(resolve))')
+        proof.mutated = await labelGeometry()
+        assert.equal(proof.mutated.label.flexShrink, '1', 'The actual owning rule mutation takes effect on the original Space label')
+        assert.equal(proof.mutated.fits, false, 'Actual stylesheet mutation reproduces the clipped Archived label')
+      } finally {
+        await read(`${loadedRule}.style.cssText=${JSON.stringify(originalRule.style)}`)
+        assert.equal(await read(`${loadedRule}.style.cssText`), originalRule.style, 'The original owning Source rule is exactly restored')
+        const width = Number(await read(`${separator}.getAttribute('aria-valuenow')`))
+        if (width !== originalWidth) {
+          const point = await locate(separator), end = { x: point.x + originalWidth - width, y: point.y }
+          await input('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+          await input('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
+          await input('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, ...end })
+          await input('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...end })
+          await until(`Number(${separator}.getAttribute('aria-valuenow'))===${originalWidth}`, 'original sidebar width restored through real drag')
+        }
+        await returnToSpaceRow(); proof.restored = await labelGeometry()
+        assert.equal(proof.restored.label.flexShrink, '0'); assert.equal(proof.restored.fits, true, 'Original actual stylesheet restores the readable label')
+        assert.ok(Math.abs(proof.restored.rail.width - originalWidth) < 1)
+        protectedEqual(await facts(), beforeLabelProbe, 'Real sidebar boundary probe keeps original work, focus identity and drafts')
+      }
+      result.checks.push({ name: 'actual-archive-label-source-style-mutation-red-restored-green', passed: true, ...proof, original: true, mutated: false, restored: true })
       await locate(spaceRestore); await capture('archive-space-discover-restore')
       const beforeSpaceRestore = await facts()
       await click(spaceRestore)
