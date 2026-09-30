@@ -159,7 +159,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     if (requested.kind === 'surface' && actual.surface !== requested.surface) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'space') {
       const { kind: _, ...parent } = requested
-      if (actual.surface !== 'space' || !actual.space || Object.entries(parent).some(([key, id]) => actual.space![key as keyof AgentMuxDesktopSpaceSelection] !== id)) {
+      if (actual.surface !== 'space' || !actual.space || Object.entries(parent).some(([key, id]) => actual.space![(key === 'displayWorkspaceId' ? 'workspaceId' : key) as keyof AgentMuxDesktopSpaceSelection] !== id)) {
         fail('Space receipt parent identities are mismatched.', code)
       }
     }
