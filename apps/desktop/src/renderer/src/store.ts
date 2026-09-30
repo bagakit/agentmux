@@ -503,6 +503,7 @@ type AppState = {
   confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
   acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean): Promise<void>
   createDemand(input: {
+    id?: string
     title: string
     description?: string
     projectId?: string | null
@@ -2283,6 +2284,9 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
     ].join('\n\n')
   }
   const focusPmoTabSession = (tabId: string): void => {
+    const current = get()
+    if (current.mainSurface !== state.mainSurface || current.selectedDemandId !== state.selectedDemandId ||
+      current.activeWorkspaceId !== state.activeWorkspaceId || current.agentFocus.pmo !== state.agentFocus.pmo) return
     const tab = get().tabs[tabId]
     const surface = tab?.regions[tab.layout.activeRegionId]
     if (surface?.kind !== 'agent') return
@@ -2317,6 +2321,7 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
         `Title: ${demand.title}`,
         `Description: ${demand.description || '(empty)'}`
       ].join('\n\n')
+      get().setAgentComposerDraft(mappedTab.layout.activeRegionId, contextPrompt)
       await get().launchAgent(executorId, contextPrompt, groupId, {
         tabId: mappedTab.id,
         regionId: mappedTab.layout.activeRegionId
@@ -2335,17 +2340,18 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
   const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
   const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
   if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
-  set((next) => ({
-    tabs: { ...next.tabs, [tab.id]: tab },
-    layouts: { ...next.layouts, [workspace.id]: nextLayout },
-    demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id }
-  }))
   const contextPrompt = [
     buildPmoPrompt(),
     `This is a fresh dedicated PMO context for Demand ${demand.id}.`,
     `Title: ${demand.title}`,
     `Description: ${demand.description || '(empty)'}`
   ].join('\n\n')
+  set((next) => ({
+    tabs: { ...next.tabs, [tab.id]: tab },
+    layouts: { ...next.layouts, [workspace.id]: nextLayout },
+    demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id },
+    agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: contextPrompt }
+  }))
   await get().launchAgent(executorId, contextPrompt, currentLayout.activeGroupId, {
     tabId: tab.id,
     regionId: tab.layout.activeRegionId
@@ -4725,6 +4731,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : { alignmentRevision: demand.alignment?.revision ?? 1, summary: 'Observed results', checks: [{ criterionId: demand.alignment?.criteria[0]?.id ?? 'criterion-1', outcome: 'unknown', evidence: [], note: 'State what remains unverified.' }] }
     const prompt = [
       `You are Mote for existing Goal ${demand.id}. This is a new user request for ${mode === 'grill' ? 'Grill: align the goal' : 'Grounding: align the results'}.`,
+      ...(!demand.alignment && !demand.description.trim() ? ['This is an existing undefined Goal draft. Its placeholder title is not the user’s intent. Ask what they want to achieve and update this same Goal ID; do not invent an outcome, success criteria or human approval.'] : []),
       'Preserve the user’s original intent. Do not create another Goal, invent requirements, or overwrite description with your summary.',
       mode === 'grill'
         ? 'Discuss only choices that change the goal. Propose a readable summary, stable success criterion IDs, and actual unresolved questions. The person confirms the goal in Goals.'
@@ -4737,7 +4744,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return openGoalPmo(demandId, prompt)
   },
   async createDemand(input) {
+    const presentation = get()
     let receipt = await api.demands.create({
+      ...(input.id === undefined ? {} : { id: input.id }),
       title: input.title.trim(),
       description: input.description ?? '',
       ...(input.status === undefined ? {} : { status: input.status }),
@@ -4756,7 +4765,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const decisionLog: AgentMuxDemandDecision[] = []
     const publish = (): void => {
       const record = { ...demandRecordFromFilesystem(receipt.demand), source: input.source ?? 'default-topic', decisionLog: [...decisionLog] }
-      set(state => ({ demands: { ...state.demands, [id]: record }, selectedDemandId: id }))
+      set(state => ({ demands: { ...state.demands, [id]: record },
+        ...(state.mainSurface === presentation.mainSurface && state.activeWorkspaceId === presentation.activeWorkspaceId &&
+          (state.selectedDemandId === presentation.selectedDemandId || state.selectedDemandId === id) ? { selectedDemandId: id } : {}) }))
     }
     publish()
     try {
@@ -4829,7 +4840,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async refreshDemand(id) {
     const facts = await api.demands.list()
     const demand = facts.find(demand => demand.id === id)
-    if (!demand) throw new Error('The Goal owner did not return this goal. Its saved view is kept; retry loading the current proposal.')
+    if (!demand) throw Object.assign(new Error(get().demands[id] ? 'The Goal owner did not return this goal. Its saved view is kept; retry loading the current proposal.' : 'The complete Goal owner read confirms this ID is not saved. Save this same ID explicitly to continue.'), { code: 'GOAL_OWNER_NOT_FOUND' })
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(demand, state.demands[id]) } }))
   },
   deleteDemand(id) {
