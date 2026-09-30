@@ -9,7 +9,7 @@ export default defineConfig({
   ...original,
   root,
   esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
-  cacheDir: resolve(root, '.bagakit/feature-tracker/conversation-quality-artifacts/T003/cache'),
+  cacheDir: resolve(root, '.bagakit/feature-tracker/conversation-input-cards-artifacts/T003/cache'),
   plugins: [...(original.plugins ?? []), {
     name: 'conversation-annotation-loaded-source',
     enforce: 'pre',
@@ -19,6 +19,9 @@ export default defineConfig({
       const before = code
       const mutation = process.env.AGENTMUX_CONVERSATION_ANNOTATION_MUTATION
       const changes: Record<string, { file: string; from: string; to: string }> = {
+        'close-discards': { file: 'ConversationAnnotationNote.tsx', from: 'onClick={close}><X', to: 'onClick={discard}><X' },
+        'truncate-passage': { file: 'ConversationAnnotationNote.tsx', from: 'aria-label="Selected passage">{edit.target.quote}</blockquote>', to: 'aria-label="Selected passage">{edit.target.quote.slice(0, 12)}</blockquote>' },
+        'failure-clears-note': { file: 'ConversationAnnotationNote.tsx', from: 'setError(`Could not add note to reply draft:', to: "setNote(''); setError(`Could not add note to reply draft:" },
         'wrong-range': { file: 'ConversationAnnotationNote.tsx', from: 'left: rect.left, top: rect.bottom - 1', to: 'left: 0, top: rect.bottom - 1' },
         'empty-range': { file: 'ConversationAnnotationNote.tsx', from: 'Array.from(target.range.getClientRects())', to: '([] as DOMRect[])' },
         'drop-id': { file: 'SessionPane.tsx', from: 'Regarding message ${JSON.stringify(annotation.messageId)}:', to: 'Regarding this message:' }

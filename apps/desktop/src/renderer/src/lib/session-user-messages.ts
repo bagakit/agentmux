@@ -155,6 +155,8 @@ export function useSessionUserMessages(
   options?: { enabled?: boolean }
 ): {
   messages: AgentSessionUserMessage[]
+  /** The same bounded Provider page, observed by this consumer's current control. */
+  nativeHistoryPage: AgentSessionHistoryPage | null
   nextCursor: string | null
   hasMore: boolean
   loading: boolean
@@ -174,7 +176,8 @@ export function useSessionUserMessages(
   const committedSnapshotRef = useRef<{
     key: string
     messages: AgentSessionUserMessage[]
-  }>({ key: '', messages: [] })
+    nativeHistoryPage: AgentSessionHistoryPage | null
+  }>({ key: '', messages: [], nativeHistoryPage: null })
 
   useEffect(() => {
     if (!sessionKey || !control) return
@@ -242,6 +245,12 @@ export function useSessionUserMessages(
 
   // Non-speculative read during render: do not create entry on uncommitted/aborted renders
   const entry = sessionKey ? sessionRegistry.get(sessionKey) : undefined
+  const committed = committedSnapshotRef.current.key === sessionKey ? committedSnapshotRef.current : null
+  // Pause observation, not the already presented record. Keep the last same-control
+  // page through a pending/failed revalidation; another identity never inherits it.
+  const nativeHistoryPage = !isAgent || !control || !sessionKey ? null
+    : active ? entry?.historyPage ?? committed?.nativeHistoryPage ?? null
+    : committed?.nativeHistoryPage ?? null
 
   let messages: AgentSessionUserMessage[] = []
 
@@ -274,13 +283,15 @@ export function useSessionUserMessages(
     if (active && sessionKey) {
       committedSnapshotRef.current = {
         key: sessionKey,
-        messages
+        messages,
+        nativeHistoryPage
       }
     }
-  }, [active, sessionKey, messages])
+  }, [active, sessionKey, messages, nativeHistoryPage])
 
   return {
     messages,
+    nativeHistoryPage,
     nextCursor: entry?.nextCursor ?? null,
     hasMore: Boolean(entry?.nextCursor),
     loading: active ? (entry?.loading ?? false) : false,

@@ -47,6 +47,7 @@
 @import './activity.css';
 @import './activity-conversation.css';
 @import './conversation-tool-trace.css';
+@import './conversation-native-reasoning.css';
 @import './session-history.css';
 @import './workflow.css';
 @import './conversation-avatar.css';
