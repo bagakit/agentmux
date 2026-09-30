@@ -90,7 +90,8 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     const passage = document.querySelector<HTMLDetailsElement>('.conversation-annotation-note__passage')!
     const textarea = document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
     expect(passage).not.toBeNull(); expect(passage.open).toBe(false)
-    expect(passage.querySelector('summary')!.textContent).toContain('Selected passage')
+    expect(passage.querySelector('summary')!.getAttribute('aria-label')).toBe('Selected passage')
+    expect(passage.querySelector('summary')!.textContent).toContain('repeated phrase')
     await act(async () => passage.querySelector('summary')!.click()); await flush()
     expect(passage.open).toBe(true)
     expect(passage.querySelector('.log-turn__annotation-quote')!.textContent).toBe(quote)
@@ -132,10 +133,9 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(useAppStore.getState().agentComposerDrafts.a).toContain(`> ${quoted.replace(/\n/gu, '\n> ')}\n\nNote: Rendered range`)
   })
   it('mounts and closes the real floating branch without errors or late autofocus on position recovery', async () => {
-    // Controlled geometry explicitly models this Pane's real side-gutter CSS;
-    // browser qualification below uses unmodified DOM geometry.
+    // Controlled wide Pane geometry; the popover never reserves a text gutter.
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('.log-turn__body')) return new DOMRect(0, 0, this.closest('[data-conversation-note="side"]') ? 480 : 800, 600)
+      if (this.matches('.log-turn__body')) return new DOMRect(0, 0, 800, 600)
       if (this.matches('.log-turn__annotation')) return new DOMRect(0, 0, 300, 160)
       return new DOMRect(0, 0, 800, 600)
     })
@@ -145,7 +145,10 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     await render(pane()); const selected = await select(body()); await typeNote()
     const editor = document.querySelector<HTMLElement>('.log-turn__annotation')!
     expect(editor.dataset.anchorState).toBe('range'); expect(editor.style.visibility).toBe('visible')
-    expect(parseFloat(editor.style.left)).toBeGreaterThanOrEqual(480)
+    expect(editor.style.position).toBe('fixed')
+    expect(editor.closest('.window-overlay-host')).not.toBeNull()
+    expect(host.querySelector('.agent-surface')!.hasAttribute('data-conversation-note')).toBe(false)
+    expect(body().getBoundingClientRect().width).toBe(800)
     const other = document.createElement('input'); document.body.append(other); other.focus()
     await scrollTo(900); await scrollTo(130)
     expect(document.activeElement).toBe(other); expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
@@ -160,7 +163,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
   })
   it('does not steal another control focus when the first real position computation resolves late', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('.log-turn__body')) return new DOMRect(0, 0, this.closest('[data-conversation-note="side"]') ? 480 : 800, 600)
+      if (this.matches('.log-turn__body')) return new DOMRect(0, 0, 800, 600)
       if (this.matches('.log-turn__annotation')) return new DOMRect(0, 0, 300, 160)
       return new DOMRect(0, 0, 800, 600)
     })
@@ -210,7 +213,10 @@ describe('Actual conversation Range -> following note -> original reply draft', 
   })
   it('follows a narrow reference layout shift without a viewport resize and cleans up after closing', async () => {
     await render(pane()); const selected = await select(body()); await typeNote()
-    expect(document.querySelector<HTMLElement>('.log-turn__annotation')!.dataset.anchorState).toBe('range-docked')
+    const editor = document.querySelector<HTMLElement>('.log-turn__annotation')!
+    expect(editor.dataset.anchorState).toBe('range')
+    expect(editor.style.position).toBe('fixed')
+    expect(editor.closest('.window-overlay-host')).not.toBeNull()
     expect(positioning.referenceUpdates.size).toBeGreaterThan(0)
     const other = document.createElement('input'); document.body.append(other); other.focus()
     // Controlled library notification for a moved reference. The accompanying
@@ -263,6 +269,40 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(body().querySelector('p')!.firstChild).toBe(selected.node)
     expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
     expect(document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!.value).toBe('Keep this exact target')
+  })
+  it('keeps reading focus and releases an untouched selection when switching to Terminal', async () => {
+    await render(pane())
+    const text = body().querySelector<HTMLElement>('.log-turn__text')!
+    text.focus()
+    const selected = await select(body())
+    expect(document.activeElement).toBe(text)
+    expect(window.getSelection()!.toString()).toBe('repeated phrase')
+    expect(document.querySelector('.log-turn__annotation')!.closest('.window-overlay-host')).not.toBeNull()
+    expect(body().querySelector('p')!.firstChild).toBe(selected.node)
+    expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
+    await act(async () => useAppStore.getState().setViewMode('a', 'terminal')); await flush()
+    expect(document.querySelector('.log-turn__annotation')).toBeNull()
+    expect(window.getSelection()!.rangeCount).toBe(0)
+    expect(positioning.referenceUpdates.size).toBe(0)
+    await act(async () => useAppStore.getState().setViewMode('a', 'activity')); await flush()
+    expect(document.querySelector('.log-turn__annotation')).toBeNull()
+    expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(0)
+    expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
+  })
+  it('stops hidden Range geometry while preserving an edited note for the same Session', async () => {
+    await render(pane()); await select(body()); await typeNote('Keep this hidden draft')
+    const geometry = vi.spyOn(Range.prototype, 'getClientRects')
+    await act(async () => useAppStore.getState().setViewMode('a', 'terminal')); await flush()
+    geometry.mockClear()
+    await act(async () => { host.querySelector('.activity-feed')?.dispatchEvent(new Event('scroll')); window.dispatchEvent(new Event('resize')) }); await flush()
+    expect(geometry).toHaveBeenCalledTimes(0)
+    expect(positioning.referenceUpdates.size).toBe(0)
+    expect(document.querySelector('.log-turn__annotation')).toBeNull()
+    await act(async () => useAppStore.getState().setViewMode('a', 'activity')); await flush()
+    const editor = document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
+    expect(editor).not.toBeNull(); expect(editor.value).toBe('Keep this hidden draft')
+    expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
+    expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
   })
   it('retains a detached Range honestly without matching its quote to replacement text', async () => {
     await render(pane()); await select(body()); await typeNote()

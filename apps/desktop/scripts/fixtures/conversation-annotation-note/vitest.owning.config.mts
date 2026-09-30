@@ -19,6 +19,8 @@ export default defineConfig({
       const before = code
       const mutation = process.env.AGENTMUX_CONVERSATION_ANNOTATION_MUTATION
       const changes: Record<string, { file: string; from: string; to: string }> = {
+        'selection-focus': { file: 'ConversationAnnotationNote.tsx', from: 'focusRequested.current = null\n      setEdit({ target', to: 'focusRequested.current = { origin: document.activeElement }\n      setEdit({ target' },
+        'retain-empty-selection': { file: 'ConversationAnnotationNote.tsx', from: 'if (!note.trim()) { setEdit(null); setError(null) }', to: 'if (false) { setEdit(null); setError(null) }' },
         'close-discards': { file: 'ConversationAnnotationNote.tsx', from: 'onClick={close}><X', to: 'onClick={discard}><X' },
         'truncate-passage': { file: 'ConversationAnnotationNote.tsx', from: 'aria-label="Selected passage">{edit.target.quote}</blockquote>', to: 'aria-label="Selected passage">{edit.target.quote.slice(0, 12)}</blockquote>' },
         'failure-clears-note': { file: 'ConversationAnnotationNote.tsx', from: 'setError(`Could not add note to reply draft:', to: "setNote(''); setError(`Could not add note to reply draft:" },
