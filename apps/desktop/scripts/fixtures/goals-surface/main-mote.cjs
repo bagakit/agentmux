@@ -1,0 +1,51 @@
+const assert = require('node:assert/strict')
+module.exports = async ({evaluate,size,click,capture,waitFor,result,visibleDirectPmo}) => {
+ const selector = value => `document.querySelector(${JSON.stringify(value)})`
+ const close = () => click(selector('[aria-label="Close Mote"]'))
+ const readConversation = async () => {
+  const before=await evaluate(`({mode:${selector('[data-pmo-teams-topic-floating] [data-agent-surface-mode]')}?.dataset.agentSurfaceMode,hasViewChoice:Boolean(${selector('[data-pmo-teams-topic-floating] [aria-label="Show Activity"]')})})`)
+  if(before.hasViewChoice) await click(selector('[data-pmo-teams-topic-floating] [aria-label="Show Activity"]'))
+  result.observations.push({scene:'actual-user-conversation-view-choice',before})
+ }
+ await evaluate('goalsMainMote.seed()'); await size(1280)
+ assert.ok(await evaluate('document.querySelector("[data-goals-entry-action=ideas]").textContent.includes("主 Mote · 原主 bot")'))
+ await capture('1280-light-primary-mote-entry',1280);await size(620);await capture('620-light-primary-mote-entry',620)
+ await evaluate('goalsVisual.appearance("dark")');await click('document.querySelector("[data-goals-entry-action=ideas]")')
+ await waitFor('!goalsMainMote.facts().pending && goalsMainMote.facts().region?.kind==="agent"')
+ const common=await evaluate('goalsMainMote.facts()')
+ assert.equal(common.topicId,'launcher:leader');assert.equal(common.requests.length,1);assert.equal(common.requests[0].executorId,'codex-2')
+ assert.equal(common.requests[0].prompt,'我有一些点子，我们开始尝试一个项目');assert.equal(common.original.control.run.runId,'main-mote-original-run');assert.notEqual(common.tabId,common.primaryTab.id)
+ assert.deepEqual(Object.keys(common.goals),[]);assert.deepEqual([...new Set(common.preparations)],['launcher:leader'])
+ await visibleDirectPmo(common.tabId)
+ await capture('620-dark-primary-mote-exploration-launch',620);await size(1280);await visibleDirectPmo(common.tabId);await capture('1280-dark-primary-mote-exploration-launch',1280);await size(620)
+ await readConversation()
+ try { await waitFor('document.querySelector("[data-pmo-teams-topic-floating]").textContent.includes("我有一些点子，我们开始尝试一个项目")') }
+ catch(error) {
+  result.observations.push({scene:'common-conversation-readiness-failed',dom:await evaluate('({text:document.querySelector("[data-pmo-teams-topic-floating]").textContent,html:document.querySelector("[data-pmo-teams-topic-floating]").outerHTML,facts:goalsMainMote.facts()})')})
+  await capture('620-dark-primary-mote-conversation-diagnostic',620)
+  throw error
+ }
+ await capture('620-dark-primary-mote-exploration',620);await size(1280);await visibleDirectPmo(common.tabId);await capture('1280-dark-primary-mote-exploration',1280)
+ result.observations.push({scene:'actual-common-primary-discussion',facts:common});await close()
+ await click('document.querySelector("button[data-new-goal]")');await waitFor('goalsMainMote.facts().directRequest===null && Object.keys(goalsMainMote.facts().goals).length===1')
+ const goal=await evaluate('goalsMainMote.facts()'),id=Object.keys(goal.goals)[0]
+ assert.equal(goal.topicId,'launcher:leader');assert.notEqual(goal.tabId,common.tabId);assert.equal(goal.requests.length,2);assert.equal(goal.requests[1].executorId,'codex-2');assert.equal(goal.mapping[id],goal.tabId)
+ assert.ok(goal.requests[1].prompt.includes(`existing Goal ${id}`));await visibleDirectPmo(goal.tabId)
+ await capture('1280-dark-primary-mote-new-goal-launch',1280);await size(620);await visibleDirectPmo(goal.tabId);await capture('620-dark-primary-mote-new-goal-launch',620);await size(1280);await readConversation()
+ await waitFor(`document.querySelector("[data-pmo-teams-topic-floating]").textContent.includes(${JSON.stringify(`existing Goal ${id}`)})`)
+ await capture('1280-dark-primary-mote-new-goal',1280);await size(620);await visibleDirectPmo(goal.tabId);await capture('620-dark-primary-mote-new-goal',620)
+ result.observations.push({scene:'actual-independent-goal-primary-discussion',facts:goal});await close()
+ await evaluate('goalsMainMote.seed("cold")');await size(620)
+ assert.ok(await evaluate('document.querySelector("[data-goals-entry-action=understand]").textContent.includes("首次选择 · 原主 bot")'))
+ await capture('620-light-primary-mote-cold-entry',620);await click('document.querySelector("[data-goals-entry-action=understand]")')
+ await waitFor('!goalsMainMote.facts().pending && goalsMainMote.facts().region?.kind==="agent"')
+ const cold=await evaluate('goalsMainMote.facts()');assert.equal(cold.requests.length,1);assert.equal(cold.requests[0].prompt,'我还不知道能做什么，可以了解我并给我建议吗？');assert.deepEqual(Object.keys(cold.goals),[])
+ await visibleDirectPmo(cold.tabId);await capture('620-light-primary-mote-cold-launch',620);await readConversation();await waitFor('document.querySelector("[data-pmo-teams-topic-floating]").textContent.includes("我还不知道能做什么，可以了解我并给我建议吗？")');await capture('620-light-primary-mote-cold-discussion',620);result.observations.push({scene:'actual-cold-primary-discussion',facts:cold});await close()
+ await evaluate('goalsMainMote.seed("unknown")');await size(1280);await click('document.querySelector("[data-goals-entry-action=understand]")');await waitFor('!goalsMainMote.facts().pending')
+ const unknown=await evaluate('goalsMainMote.facts()');assert.equal(unknown.topicId,'launcher:leader');assert.equal(unknown.requests.length,0);assert.equal(unknown.region.kind,'launcher');assert.equal(unknown.draft,'我还不知道能做什么，可以了解我并给我建议吗？')
+ await visibleDirectPmo(unknown.tabId)
+ const expand=await evaluate(`Boolean(${selector('[data-pmo-teams-topic-floating] [aria-label="Expand Agents"]')})`)
+ if(expand)await click(selector('[data-pmo-teams-topic-floating] [aria-label="Expand Agents"]'))
+ await capture('1280-light-primary-mote-unknown',1280);await size(620);await visibleDirectPmo(unknown.tabId);await capture('620-light-primary-mote-unknown',620)
+ result.observations.push({scene:'actual-unknown-primary-owner',facts:unknown});assert.equal(result.frames.length,15)
+}
