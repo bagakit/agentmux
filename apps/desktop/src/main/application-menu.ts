@@ -23,7 +23,7 @@ import type { MenuItemConstructorOptions } from 'electron'
  * TerminalView 的粘贴注释——渲染层故意不接管 Cmd/Ctrl+V，靠原生 Paste 落到 xterm 的 textarea）。删掉
  * Edit 菜单，终端就粘贴不了。所以只保留 appMenu / editMenu 这两段不含危险加速键的整段 role，其余手搭。
  */
-export function applicationMenuTemplate(isMac: boolean, rollbackFrontend?: () => void): MenuItemConstructorOptions[] {
+export function applicationMenuTemplate(isMac: boolean, rollbackFrontend?: () => void, recoverInterface?: () => void): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = []
   // appMenu 自带 Quit（Cmd+Q），不含 Cmd+W；mac 上有了它就不需要单独的 File 菜单——默认 File 菜单在
   // mac 上几乎只剩「Close Window」这一个 Cmd+W 项，正是要避开的东西，干脆整段不要。
@@ -45,6 +45,7 @@ export function applicationMenuTemplate(isMac: boolean, rollbackFrontend?: () =>
       { type: 'separator' },
       { role: 'togglefullscreen' },
       { role: 'toggleDevTools' },
+      ...(recoverInterface ? [{ type: 'separator' as const }, { label: 'Recover interface', click: recoverInterface }] : []),
       ...(rollbackFrontend ? [{ type: 'separator' as const }, { label: 'Revert frontend update', click: rollbackFrontend }] : [])
     ]
   })
