@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { BrowserWindow } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { registerWindowStatePersistence } from '../src/main/window-state-persistence.js'
+import { prepareWindowWorkbenchForQuit, registerWindowStatePersistence } from '../src/main/window-state-persistence.js'
 import type { WindowGeometryStore } from '../src/main/window-geometry-store.js'
 import type { WindowGeometry } from '../src/main/window-geometry.js'
 
@@ -85,5 +85,54 @@ describe('window state persistence owner', () => {
 
     emitter.emit('close')
     expect(flushStorageData).not.toHaveBeenCalled()
+  })
+})
+
+describe('window workbench quit preparation', () => {
+  function quitWindow() {
+    const contentsEvents = new EventEmitter()
+    let crashed = false
+    const executeJavaScript = vi.fn(async () => {})
+    const window = {
+      isDestroyed: () => false,
+      webContents: Object.assign(contentsEvents, {
+        isDestroyed: () => false,
+        isCrashed: () => crashed,
+        executeJavaScript
+      })
+    } as unknown as BrowserWindow
+    return { window, contentsEvents, executeJavaScript, crash: () => { crashed = true; contentsEvents.emit('render-process-gone') } }
+  }
+
+  it('does not demand impossible JavaScript persistence from a crashed Renderer', async () => {
+    const f = quitWindow()
+    f.crash()
+    await expect(prepareWindowWorkbenchForQuit(f.window)).resolves.toBeUndefined()
+    expect(f.executeJavaScript).not.toHaveBeenCalled()
+  })
+
+  it('completes ordinary persistence while the Renderer is alive', async () => {
+    const f = quitWindow()
+    await prepareWindowWorkbenchForQuit(f.window)
+    expect(f.executeJavaScript).toHaveBeenCalledWith('window.agentmuxPrepareRendererUpdate("quit")')
+    expect(f.contentsEvents.listenerCount('render-process-gone')).toBe(0)
+  })
+
+  it('keeps a live Renderer save failure visible rather than pretending it died', async () => {
+    const f = quitWindow()
+    f.executeJavaScript.mockRejectedValueOnce(new Error('Storage is unavailable'))
+    await expect(prepareWindowWorkbenchForQuit(f.window)).rejects.toThrow('Storage is unavailable')
+    expect(f.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(f.contentsEvents.listenerCount('render-process-gone')).toBe(0)
+  })
+
+  it('releases a pending impossible save immediately when the Renderer actually goes away', async () => {
+    const f = quitWindow()
+    f.executeJavaScript.mockImplementationOnce(() => new Promise(() => {}))
+    const preparing = prepareWindowWorkbenchForQuit(f.window)
+    expect(f.executeJavaScript).toHaveBeenCalledTimes(1)
+    f.crash()
+    await preparing
+    expect(f.contentsEvents.listenerCount('render-process-gone')).toBe(0)
   })
 })

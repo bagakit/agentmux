@@ -22,6 +22,7 @@ import { reportStartupFailureAndExit, startupFailureExitIo } from './startup-fai
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
 import { registerWindowResizeEvents } from './window-resize-events.js'
+import { registerRendererCrashRecovery } from './renderer-crash-recovery.js'
 import { WindowGeometryStore } from './window-geometry-store.js'
 import { clampGeometryToVisibleArea, windowConstructorGeometry } from './window-geometry.js'
 import { liveVisibleAreas } from './window-visible-area.js'
@@ -97,6 +98,7 @@ function startPrimaryInstance(): void {
   let rendererUpdates: RendererUpdates | null = null
   let allowingQuit = false
   let workbenchWindow: BrowserWindow | null = null
+  let recoverInterface: (() => Promise<void>) | null = null
   // Every window entry point shares this read, including a second launch during startup.
   const environmentReady = hydrateProcessEnvironmentFromLoginShell().then((result) => {
     const warning = loginShellEnvironmentWarning(result)
@@ -177,8 +179,9 @@ function startPrimaryInstance(): void {
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     workbenchWindow = window
+    recoverInterface = registerRendererCrashRecovery(window, dialog, () => app.quit(), () => ownerDisposal !== null)
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
-    window.once('closed', () => { if (workbenchWindow === window) workbenchWindow = null })
+    window.once('closed', () => { if (workbenchWindow === window) { workbenchWindow = null; recoverInterface = null } })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
@@ -439,7 +442,7 @@ function startPrimaryInstance(): void {
     // 主键位（原生加速键在按键进渲染进程前就被 AppKit 处理，渲染层 preventDefault 拦不住）。这份模板
     // 不含任何绑 Cmd+W 的 role，同时保留 Edit 菜单——终端粘贴走的是原生 Paste role。菜单是应用级、
     // 全窗口共享的，建窗前设一次即可。
-    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', () => { void rendererUpdates?.rollback().catch((error) => dialog.showErrorBox('Frontend rollback', String(error))) })))
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', () => { void rendererUpdates?.rollback().catch((error) => dialog.showErrorBox('Frontend rollback', String(error))) }, () => { void recoverInterface?.() })))
     if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
     await createWindow(appReadyAtMs)
     app.on('activate', () => {
