@@ -20,7 +20,7 @@ export default defineConfig({
         'ignore-conflict': ['lib/focus-history-timeline.ts', 'const identity = fact.conflict ? undefined : fact.observed.identity', 'const identity = fact.observed.identity'],
         'ignore-host': ['lib/focus-history-timeline.ts', 'const observed = observations.get(referenceKey(reference))', 'const observed = [...observations.values()].find(item => item.sessionId === reference.agentSessionId)'],
         'invent-project': ['lib/focus-history-timeline.ts', 'identity: undefined, key: trackKey(reference.agentSessionId, undefined)', "identity: { name: reference.agentSessionId, kind: 'agent' as const, providerId: null, hostId: reference.hostId, workspacePath: '', project: { id: 'current-project', name: 'Current Project' } }, key: trackKey(reference.agentSessionId, undefined)"],
-        'metadata-tracks': ['components/RecentFocusTimeline.tsx', 'const readonlyInputTrack = readonlyInputTrackId ? observedInputTrack : undefined', 'const readonlyInputTrack = observedInputTrack']
+        'metadata-tracks': ['components/RecentFocusTimeline.tsx', 'const visibleInputTracks = useMemo(() => readInputTracks.filter(source => source.messages.some(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt) && message.recordedAt >= range.start && message.recordedAt <= Math.min(now, range.end))), [readInputTracks, range, now])', 'const visibleInputTracks = useMemo(() => inputReference ? [resolveFocusInputTrack(observations, inputReference)] : [], [readInputTracks, range, now])']
       }
       if (mutation) {
         const change = changes[mutation]
