@@ -152,11 +152,8 @@ function DesktopApp() {
   }, [surveyVisible, focusVisible, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
   const surveyCatalog = spatialDirectory.catalog
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
-    const state = useAppStore.getState()
-    if (state.mainSurface !== 'agents') return
-    const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
-    if (surface && isSessionSurface(surface)) state.focusExecutionSession(surface.sessionId, reference)
-  }, [])
+    useAppStore.getState().selectExecutionFocusReference(reference, agentFocus.execution)
+  }, [agentFocus.execution])
   const focusPresentation = useMemo(() => mainSurface === 'agents'
     ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference)
     : { projection: null, issue: null, references: [] },
