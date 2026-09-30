@@ -1,6 +1,6 @@
 import '../monaco'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { AlertTriangle, Code, Eye, FolderOpen, GitCompare, RefreshCw, Save, WrapText } from 'lucide-react'
+import { AlertTriangle, Check, Code, Eye, FolderOpen, GitCompare, MoreHorizontal, RefreshCw, Save, WrapText } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -24,6 +24,7 @@ import { regionCaretFocusTargets } from '../lib/region-focus'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import * as DropdownMenu from './HoverDropdownMenu'
 import { GitDiffCanvas } from './GitDiffCanvas'
 import { EditorReleasedState } from './EditorReleasedState'
 
@@ -360,64 +361,21 @@ export function EditorPane({
       data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
     >
       <header className="editor-header">
-        <span title={document.path}>{document.path}</span>
+        <span className="editor-header__path" title={document.path}>{document.path}</span>
         <div className="editor-header__actions">
-          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <Code size={13} /> : <Eye size={13} />}{previewing ? 'Source' : 'Preview'}</button> : null}
-          {extraActions}
-          {/* Word wrap: a discoverable entry point for the Alt+Z chord, reflecting the global bit.
-              aria-pressed makes the toggle state legible to the behavior test and to screen readers. */}
-          <button
-            className={`small-button ${wordWrap ? 'small-button--active' : ''}`}
-            aria-pressed={wordWrap}
-            title="Toggle word wrap (Alt+Z)"
-            onClick={() => toggleWordWrap()}
-          >
-            <WrapText size={13} /> Wrap
-          </button>
-          {/* Diff is a display mode of this file Region, not a separate tab. This toggles between the
-              editable buffer and the HEAD-vs-worktree diff of the same file. */}
-          <button
-            className={`small-button ${regionMode === 'diff' ? 'small-button--active' : ''}`}
-            aria-pressed={regionMode === 'diff'}
-            title="Toggle diff against HEAD"
-            onClick={() =>
-              void setRegionMode(
-                surface.regionId,
-                surface.workspaceId,
-                surface.path,
-                regionMode === 'diff' ? 'edit' : 'diff'
-              )
-            }
-          >
-            <GitCompare size={13} /> Diff
-          </button>
-          {regionMode === 'diff' ? (
-            <button
-              className="small-button"
-              disabled={Boolean(regionDiff?.loading)}
-              title="Reload diff"
-              onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}
-            >
-              <RefreshCw size={13} /> {regionDiff?.loading ? 'Loading…' : 'Refresh'}
-            </button>
-          ) : conflict ? (
-            <>
-              <button className="small-button" disabled={saving} onClick={() => void reload(tabId, surface.regionId)}>
-                <RefreshCw size={13} /> Reload
-              </button>
-              <button className="small-button small-button--warning" disabled={saving} onClick={() => void overwrite(tabId, surface.regionId)}>
-                <Save size={13} /> {saving ? 'Overwriting…' : 'Overwrite'}
-              </button>
-            </>
-          ) : issue?.kind === 'read-error' ? (
-            <button className="small-button" disabled={saving} onClick={() => void reload(tabId, surface.regionId)}>
-              <RefreshCw size={13} /> Retry
-            </button>
-          ) : (
-            <button className="small-button" disabled={!dirty || saving} onClick={() => void save(tabId, surface.regionId)}>
-              <Save size={13} /> {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
-            </button>
-          )}
+          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <Code size={13} /> : <Eye size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
+          {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><RefreshCw size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
+            : conflict ? <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
+              : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">Retry</span></button>
+                : <button className="small-button" disabled={!dirty || saving} title={saving ? 'Saving file' : dirty ? 'Save file' : 'File saved'} aria-label={saving ? 'Saving file' : dirty ? 'Save file' : 'File saved'} onClick={() => void save(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}</span></button>}
+          <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
+            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8}>
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} />Word wrap <span className="editor-menu-shortcut">Alt+Z</span><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} />Diff against HEAD<DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} />Reload from disk</DropdownMenu.Item> : null}
+              {extraActions ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{extraActions}</> : null}
+            </DropdownMenu.Content></DropdownMenu.Portal>
+          </DropdownMenu.Root>
         </div>
       </header>
       {issue ? (

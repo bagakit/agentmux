@@ -23,6 +23,7 @@ const monacoSpy = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/renderer/src/monaco.js', () => ({}))
+vi.mock('monaco-editor', () => ({}))
 vi.mock('@monaco-editor/react', async () => {
   // Monaco 的常量取自共享 helper（真值，附来源）而不是在这里手抄：EditorPane 每加一个注册，手抄的那份
   // 就少一个常量，而缺常量会让注册**抛**，把红打在与被测接线无关的地方。

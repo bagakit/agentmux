@@ -1,0 +1,102 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@agentmux/core/runtime": [
+        "packages/core/src/runtime.ts"
+      ],
+      "@agentmux/core/control": [
+        "packages/core/src/control.ts"
+      ],
+      "@agentmux/core/timeline": [
+        "packages/core/src/session-timeline.ts"
+      ],
+      "@agentmux/core/session-user-messages": [
+        "packages/core/src/session-user-messages.ts"
+      ],
+      "@agentmux/core/launch-option": [
+        "packages/core/src/agent-launch-option.ts"
+      ],
+      "@agentmux/core/agent-status": [
+        "packages/core/src/agent-status-freshness.ts"
+      ],
+      "@agentmux/core/agent-message-render": [
+        "packages/core/src/agent-message-render.ts"
+      ],
+      "@agentmux/core/agent-session-id": [
+        "packages/core/src/agent-session-id.ts"
+      ],
+      "@agentmux/core/provider-id": [
+        "packages/core/src/agent-provider-id.ts"
+      ],
+      "@agentmux/core/risk-tier": [
+        "packages/core/src/risk-tier.ts"
+      ],
+      "@agentmux/core/run-status": [
+        "packages/core/src/agent-run-status.ts"
+      ],
+      "@agentmux/core/terminal-continuation": [
+        "packages/core/src/terminal-continuation.ts"
+      ],
+      "@agentmux/core/agent-prompt-budget": [
+        "packages/core/src/agent-prompt-budget.ts"
+      ],
+      "@agentmux/core/prompt-condition": [
+        "packages/core/src/agent-prompt-condition.ts"
+      ],
+      "@agentmux/core/workbench-layout-preset": [
+        "packages/core/src/workbench-layout-preset.ts"
+      ],
+      "@agentmux/core/bracketed-paste": [
+        "packages/core/src/bracketed-paste.ts"
+      ],
+      "@agentmux/core/continuous-progress": [
+        "packages/core/src/continuous-progress.ts"
+      ],
+      "@agentmux/core/continuous-progress-scheduler": [
+        "packages/core/src/continuous-progress-scheduler.ts"
+      ],
+      "@agentmux/core/agent-interaction-state": [
+        "packages/core/src/agent-interaction-state.ts"
+      ],
+      "@agentmux/demand": [
+        "packages/demand/src/index.ts"
+      ],
+      "@agentmux/demand/store": [
+        "packages/demand/src/demand-store.ts"
+      ],
+      "@agentmux/demand/types": [
+        "packages/demand/src/demand-types.ts"
+      ],
+      "@agentmux/demand/cli": [
+        "packages/demand/src/cli.ts"
+      ],
+      "@agentmux/demand/goals": [
+        "packages/demand/src/goals.ts"
+      ],
+      "@agentmux/layout": [
+        "packages/layout/src/index.ts"
+      ]
+    },
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "strict": true
+  },
+  "include": [
+    "literals.tsx",
+    "../../../src/renderer/src/global.d.ts",
+    "../../survey-collection.test.ts",
+    "../../survey-surface.test.tsx",
+    "../../note-survey-presentation.test.tsx",
+    "../../survey-zone-controls.test.tsx",
+    "../../file-preview-pane.test.tsx",
+    "../../editor-wordwrap-wiring.test.tsx",
+    "../../editor-diff-wiring.test.tsx"
+  ]
+}

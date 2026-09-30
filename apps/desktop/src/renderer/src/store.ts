@@ -491,6 +491,8 @@ type AppState = {
   setSurveyZoneCollected(zoneId: string, collected: boolean): boolean
   surveyToolsOpen: boolean
   surveySidebarWidth: number
+  surveySidebarCollapsed: boolean
+  setSurveySidebarCollapsed(collapsed: boolean): void
   setSurveySidebarWidth(width: number): void
   setSurveyZoneSelection(selection: SurveyZoneSelection | null): void
   setSurveyToolsOpen(open: boolean): void
@@ -1848,6 +1850,7 @@ type PersistedAppState = {
   surveyCollectedZones?: Record<string, true>
   noteBlockSelections?: Record<string, NoteBlockTarget>
   focusTimelineNameWidth?: number
+  surveySidebarCollapsed?: boolean
   surveySidebarWidth?: number
   focusTimelineHeight?: number
   focusTimelineRuler?: FocusRulerPreferences
@@ -1875,6 +1878,7 @@ export type RestoredUiState = Pick<
   | 'surveyZoneSelection'
   | 'surveyCollectedZones'
   | 'noteBlockSelections'
+  | 'surveySidebarCollapsed'
   | 'surveySidebarWidth'
   | 'projectRailOpen'
   | 'collapsedProjectGroups'
@@ -1955,6 +1959,7 @@ export function restorePersistedUiState(
     | 'surveyZoneSelection'
     | 'surveyCollectedZones'
     | 'noteBlockSelections'
+    | 'surveySidebarCollapsed'
     | 'surveySidebarWidth'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
@@ -1981,6 +1986,7 @@ export function restorePersistedUiState(
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
+    surveySidebarCollapsed: restoredBoolean(persisted.surveySidebarCollapsed, false),
     surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
@@ -2034,6 +2040,7 @@ function selectPersistedInputs(state: AppState) {
     mainSurface: state.mainSurface,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
+    surveySidebarCollapsed: state.surveySidebarCollapsed,
     surveySidebarWidth: state.surveySidebarWidth,
     agentFocus: state.agentFocus,
     focusTimelineNameWidth: state.focusTimelineNameWidth,
@@ -2454,6 +2461,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   mainSurface: 'workbench',
   surveyZoneSelection: null,
   surveyCollectedZones: {},
+  surveySidebarCollapsed: false,
+  setSurveySidebarCollapsed(surveySidebarCollapsed) { set({ surveySidebarCollapsed }) },
   surveySidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH,
   setSurveySidebarWidth(width) {
     set({ surveySidebarWidth: clampSurveySidebarWidth(width) })
