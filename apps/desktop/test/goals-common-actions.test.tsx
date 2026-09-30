@@ -70,7 +70,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await mount()
     const requests = [...dom.container.querySelectorAll('.goals-entry__request')].map(node => node.textContent)
     expect(requests).toEqual(['我还不知道能做什么，可以了解我并给我建议吗？', '我有一些点子，我们开始尝试一个项目'])
-    expect(dom.container.querySelectorAll('.goals-common__hero img')).toHaveLength(1)
+    expect(dom.container.querySelectorAll('.goals-common__heading img')).toHaveLength(1)
     expect(dom.container.querySelector('.goals-common__heading')!.textContent).toContain('常用操作')
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
     expect(action('builtin:next')).toBeNull()

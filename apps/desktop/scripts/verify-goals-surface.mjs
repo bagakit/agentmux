@@ -14,7 +14,7 @@ const density=process.argv.includes('--density-only')||process.argv.includes('--
 assert.ok(!density||process.argv.includes('--maturity'),'Density uses the actual maturity Renderer fixture')
 const evidenceRoot=process.env.AGENTMUX_GOALS_EVIDENCE_ROOT||join(repository,'.tmp/goals-surface')
 const privateRoot=await mkdtemp('/tmp/amx-goals-visual-'), evidence=join(evidenceRoot,`attempt-${Date.now()}`)
-const densityBaseline=process.env.AGENTMUX_GOALS_DENSITY_BASELINE||join(repository,'.local/goals-density-20261004-qKAD/density-baseline.json')
+const densityBaseline=process.env.AGENTMUX_GOALS_DENSITY_BASELINE||join(evidenceRoot,'density-baseline.json')
 const ownedSources = ['src/renderer/src/lib/goals-entry-actions.ts', 'src/renderer/src/lib/workbench-tabs.ts', 'src/renderer/src/components/NewTabSurface.tsx', 'src/renderer/src/store.ts', 'src/renderer/src/components/GlobalBoardSurface.tsx', 'src/renderer/src/components/GoalDetail.tsx', 'src/renderer/src/components/GoalAlignment.tsx', 'src/renderer/src/components/GoalProperties.tsx', 'src/renderer/src/components/GoalExecution.tsx', 'src/renderer/src/lib/goal-presentation.ts', 'src/renderer/src/styles/goals.css', 'src/renderer/src/styles/tokens.css', 'src/renderer/src/styles/index.css', 'scripts/fixtures/goals-surface/entry.tsx', 'scripts/fixtures/goals-surface/main.cjs', 'scripts/fixtures/goals-surface/controls.cjs']
 if(process.argv.includes('--common-actions')||process.argv.includes('--maturity'))ownedSources.push('src/renderer/src/components/GoalsCommonActions.tsx','src/renderer/src/lib/goals-common-actions.ts','src/renderer/src/lib/goals-common-actions-config.ts','src/shared/contracts.ts','src/shared/composer-shortcut-library.ts','src/shared/config-edit.ts','scripts/fixtures/goals-surface/common-actions.cjs','resources/settings-banner.png')
 if(process.argv.includes('--maturity'))ownedSources.push('scripts/fixtures/goals-surface/maturity.cjs','src/renderer/src/lib/session-presentation.ts','src/renderer/src/lib/workspace-projects.ts')
@@ -26,6 +26,7 @@ const result={schema:'agentmux.goals-visual-capture.v1',captureOnly:true,aesthet
 try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=process.env.AGENTMUX_GOALS_SOURCE_COMMIT||(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
   result.sourceBefore=await sourceHashes()
+  if(density&&!process.argv.includes('--density-before-only')){const bytes=await readFile(densityBaseline),baseline=JSON.parse(bytes);result.densityBaseline={path:densityBaseline,sha256:hash(bytes),sourceCommit:baseline.sourceCommit,sourceBefore:baseline.sourceBefore};assert.ok(Object.keys(baseline.sourceBefore).length>0,'Measured prior layout has nonempty Source identity')}
   const outDir=join(privateRoot,'renderer')
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,minify:false,sourcemap:true,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
   const compiled={};for(const entry of await readdir(outDir,{recursive:true,withFileTypes:true})){if(entry.isFile()){const p=join(entry.parentPath,entry.name);compiled[p.slice(outDir.length+1)]=hash(await readFile(p))}}
