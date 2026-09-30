@@ -86,7 +86,8 @@ try {
   const types = await run('types', join(root, 'node_modules/.bin/tsc'), ['--noEmit', '-p', typeConfig])
   assert.equal(types.code, 0, types.output); receipt.types = { code: types.code, log: types.log }
   await mkdir(compiled, { recursive: true })
-  const require = createRequire(join(root, 'packages/core/package.json'))
+  const desktopRequire = createRequire(join(root, 'apps/desktop/package.json'))
+  const require = createRequire(desktopRequire.resolve('vite/package.json'))
   const { build } = await import(pathToFileURL(require.resolve('esbuild')).href)
   const aliases = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, join(root, value[0])]))
   const plugin = { name: 'owning-source-exports', setup(builder) {
