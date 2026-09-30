@@ -138,7 +138,7 @@ describe('Mote shortcut current context', () => {
     expect(dialog.dataset.moteTargetSession).toBe(current.id)
     expect(dialog.dataset.moteStatus).toBe('Working')
     expect(dialog.getAttribute('aria-label')).toBe('Mote · PMO · Ship the target goal')
-    expect(useAppStore.getState().viewModes[current.id]).toBe('terminal')
+    expect(useAppStore.getState().viewModes[current.id]).toBe('activity')
     await act(async () => button('Close Mote').click()); await settle()
     expect(document.activeElement).toBe(input)
     expect(saved().targetTabId).toBe(currentTab.id)
@@ -290,7 +290,7 @@ describe('Mote shortcut current context', () => {
     expect(useAppStore.getState().agentComposerDrafts[other.id]).toBeUndefined()
   })
 
-  it('defaults an unselected Agent view to conversation and preserves a later Terminal choice', async () => {
+  it('defaults an unselected Agent view to conversation and returns to it on explicit reopening', async () => {
     useAppStore.setState({ viewModes: {} })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
@@ -298,7 +298,7 @@ describe('Mote shortcut current context', () => {
     expect(effectiveSessionViewMode(useAppStore.getState(), current.id)).toBe('activity')
     await act(async () => useAppStore.getState().setViewMode(current.id, 'terminal'))
     await act(async () => button('Close Mote').click()); await act(async () => button('Open Mote').click()); await settle()
-    expect(useAppStore.getState().viewModes[current.id]).toBe('terminal')
+    expect(useAppStore.getState().viewModes[current.id]).toBe('activity')
   })
 
   it('keeps a preparation failure beside the healthy target and can retry the same context', async () => {

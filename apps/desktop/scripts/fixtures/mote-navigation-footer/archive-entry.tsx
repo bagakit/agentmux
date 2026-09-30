@@ -7,6 +7,7 @@ import { prepareRendererUpdate, useAppStore } from '../../../src/renderer/src/st
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { readPmoTeamsTopicFloatingState } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
+import { effectiveSessionViewMode } from '../../../src/renderer/src/lib/session-presentation'
 import { scratchTopicKind } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
@@ -132,12 +133,18 @@ function protectedFacts() {
 function facts() {
   const panel = document.getElementById('pmo-teams-topic-floating-panel'), state = useAppStore.getState()
   const prompt = panel?.querySelector<HTMLTextAreaElement>('[aria-label="Message Agent"]') ?? null
+  const sessionId = panel?.dataset.moteTargetSession
+  const surface = panel?.querySelector<HTMLElement>('[data-agent-surface-mode]') ?? null
+  const activity = surface?.querySelector<HTMLElement>('.activity-feed') ?? null
   return { ready: !!document.querySelector('.app-shell') && !state.loading, phase, protected: protectedFacts(),
     calls: copy(calls), errors: [...errors], events: copy(events), snapshot: copy(state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]),
     floating: copy(readPmoTeamsTopicFloatingState()), saved: JSON.parse(localStorage.getItem(savedMoteKey) ?? 'null'),
     initialization: { ordinaryCalls: 1, seedApplied: phase === 'seed', initialDurable, initialFloating, afterOrdinaryInitialize },
     ui: { visible: panel?.matches(':popover-open') ?? false, topicId: panel?.dataset.moteTargetTopic,
-      tabId: panel?.dataset.moteTargetTab, rail: panel?.dataset.moteNavigation, rect: rectangle(panel),
+      tabId: panel?.dataset.moteTargetTab, regionId: panel?.dataset.moteTargetRegion, sessionId,
+      mode: { effective: sessionId ? effectiveSessionViewMode(state, sessionId) : null, surface: surface?.dataset.agentSurfaceMode ?? null,
+        surfaceRect: rectangle(surface), activityRect: rectangle(activity), activityText: activity?.textContent ?? null },
+      rail: panel?.dataset.moteNavigation, rect: rectangle(panel),
       choices: [...(panel?.querySelectorAll<HTMLElement>('[data-mote-topic-id]') ?? [])].map(node => node.dataset.moteTopicId),
       archivedNotice: panel?.querySelector('[data-mote-archived]')?.textContent ?? null,
       input: prompt ? { token: token(prompt), text: prompt.value ?? prompt.textContent, rect: rectangle(prompt) } : null,
