@@ -19,7 +19,8 @@ const product = [
   'apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx',
   'apps/desktop/src/renderer/src/components/ConversationMessage.tsx', 'apps/desktop/src/renderer/src/components/ConversationMessageAvatar.tsx',
   'apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx', 'apps/desktop/src/renderer/src/lib/conversation-speaker.ts',
-  'apps/desktop/src/renderer/src/lib/conversation-sender-details.ts', 'apps/desktop/src/renderer/src/lib/session-user-messages.ts'
+  'apps/desktop/src/renderer/src/lib/conversation-sender-details.ts', 'apps/desktop/src/renderer/src/lib/session-user-messages.ts',
+  'apps/desktop/src/renderer/src/styles/focus.css'
 ]
 const sourcePaths = [...product, ...['entry.mjs', 'main.mjs', 'preload.cjs', 'index.html'].map(file =>
   `apps/desktop/scripts/fixtures/focus-conversation-metadata-consumer/${file}`)]
@@ -43,12 +44,25 @@ try {
       ...(before === code ? {} : { instrumentation: 'explicit-detail-read-counter' }) })
     if (before !== code) return { code, map: null }
   } }
+  const cssBinder = { postcssPlugin: 'actual-focus-metadata-css-source', OnceExit(css) {
+    const inputs = new Map()
+    css.walk(node => {
+      const input = node.source?.input
+      if (input?.file !== path.join(root, product.at(-1))) return
+      const item = inputs.get(input.file) ?? { input, nodes: 0 }
+      item.nodes++; inputs.set(input.file, item)
+    })
+    for (const { input, nodes } of inputs.values()) loaded.push({ path: path.relative(root, input.file),
+      originalSHA256: hash(input.css), sha256: hash(input.css), bytes: Buffer.byteLength(input.css), nodes,
+      source: 'actual-postcss-import-input' })
+  } }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', plugins: [binder],
+    css: { postcss: { plugins: [cssBinder] } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true,
       rollupOptions: { input: path.join(fixture, 'index.html') } } })
-  for (const file of product) assert.ok(loaded.some(item => item.path === file && item.originalSHA256 === receipt.inputs[file] && item.bytes > 0))
   receipt.actualLoadedModules = loaded
+  for (const file of product) assert.ok(loaded.some(item => item.path === file && item.originalSHA256 === receipt.inputs[file] && item.bytes > 0), `Actual loaded Source not bound: ${file}`)
   for (const file of ['main.mjs', 'preload.cjs']) await fs.copyFile(path.join(fixture, file), path.join(privateRoot, file))
   const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry =>
     entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
@@ -63,6 +77,21 @@ try {
   receipt.actual = { ...JSON.parse(await fs.readFile(path.join(evidence, 'scene.json'), 'utf8')), result }
   assert.equal(result.timedOut, false); assert.equal(result.exitCode, 0, receipt.actual.failure?.message)
   assert.equal(receipt.actual.passed, true); assert.deepEqual(receipt.actual.controls, [])
+  const loadedCSS = loaded.filter(item => item.path === product.at(-1))
+  assert.equal(loadedCSS.length, 1); assert.ok(loadedCSS[0].nodes > 0)
+  assert.equal(loadedCSS[0].originalSHA256, receipt.inputs[product.at(-1)])
+  assert.equal(loadedCSS[0].sha256, loadedCSS[0].originalSHA256)
+  assert.equal(receipt.actual.loadedCSS.rules.length, 1)
+  for (const stylesheet of receipt.actual.loadedCSS.stylesheets) {
+    const relativePath = path.relative(privateRoot, new URL(stylesheet.href).pathname)
+    assert.ok(relativePath.endsWith('.css')); assert.ok(receipt.compiled[relativePath])
+    stylesheet.compiledPath = relativePath; stylesheet.compiledSHA256 = receipt.compiled[relativePath]
+  }
+  assert.equal(receipt.actual.headerCover.counterfactual.failure.name, 'AssertionError')
+  assert.equal(receipt.actual.headerCover.restored.validationStyles, 0)
+  receipt.counterfactualImages = [{ path: receipt.actual.headerCover.counterfactual.image,
+    sha256: hash(await fs.readFile(path.join(evidence, receipt.actual.headerCover.counterfactual.image))),
+    boundary: 'Actual compiled-page CSS counterfactual: only changed header top/margin/padding are reset to the original computed values. Not an independent compile of the old Source.' }]
   for (const frame of receipt.actual.frames) receipt.images.push({ path: frame.image, width: frame.width,
     sha256: hash(await fs.readFile(path.join(evidence, frame.image))) })
   assert.deepEqual(await binding(), receipt.inputs); receipt.passed = true

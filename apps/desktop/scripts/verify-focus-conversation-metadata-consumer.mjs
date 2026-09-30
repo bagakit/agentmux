@@ -17,6 +17,7 @@ const sourcePaths = [
   'apps/desktop/src/renderer/src/lib/conversation-speaker.ts',
   'apps/desktop/src/renderer/src/lib/conversation-sender-details.ts',
   'apps/desktop/src/renderer/src/lib/session-user-messages.ts',
+  'apps/desktop/src/renderer/src/styles/focus.css',
   'apps/desktop/test/focus-conversation-metadata-consumer.test.tsx',
   'apps/desktop/scripts/fixtures/focus-conversation-metadata-consumer/vitest.owning.config.mts'
 ]
@@ -109,8 +110,20 @@ try {
     const bytes = readFileSync(resolve(root, sceneFile)), scene = JSON.parse(bytes)
     const reviewBytes = readFileSync(resolve(root, reviewFile)), review = JSON.parse(reviewBytes)
     assert.equal(scene.passed, true); assert.ok(scene.images.length >= 4)
-    for (const file of sourcePaths.slice(0, 8)) assert.equal(scene.inputs[file], receipt.before[file])
+    for (const file of sourcePaths.slice(0, 9)) assert.equal(scene.inputs[file], receipt.before[file])
     assert.equal(scene.cleanup.privateRootRemoved, true)
+    const css = scene.actualLoadedModules.filter(item => item.path === sourcePaths[8])
+    assert.equal(css.length, 1); assert.ok(css[0].nodes > 0)
+    assert.equal(css[0].originalSHA256, receipt.before[sourcePaths[8]])
+    assert.equal(css[0].sha256, css[0].originalSHA256)
+    assert.equal(scene.actual.loadedCSS.rules.length, 1); assert.ok(scene.actual.loadedCSS.stylesheets.length > 0)
+    for (const stylesheet of scene.actual.loadedCSS.stylesheets)
+      assert.equal(stylesheet.compiledSHA256, scene.compiled[stylesheet.compiledPath])
+    assert.equal(scene.actual.headerCover.counterfactual.failure.name, 'AssertionError')
+    assert.equal(scene.actual.headerCover.restored.validationStyles, 0)
+    assert.equal(scene.actual.headerCover.restored.covered, true)
+    assert.ok(scene.actual.frames.length > 0)
+    for (const frame of scene.actual.frames) assert.equal(frame.validationStyles, 0)
     assert.equal(review.verdict, 'pass'); assert.ok(review.reviewerAgentId?.length > 0)
     assert.equal(review.sceneReceiptSHA256, hash(bytes))
     for (const image of scene.images) {

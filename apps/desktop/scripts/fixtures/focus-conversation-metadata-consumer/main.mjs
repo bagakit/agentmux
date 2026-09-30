@@ -42,7 +42,15 @@ app.whenReady().then(async () => {
       const geometry = await js(`(()=>{const p=document.querySelector('.recent-focus__message-preview'),d=p.querySelector('section[aria-label="Message details"]'),h=p.querySelector('header'),close=p.querySelector('[aria-label="Close message"]');return{panel:p.getBoundingClientRect().toJSON(),header:h.getBoundingClientRect().toJSON(),details:d?.getBoundingClientRect().toJSON(),close:close.getBoundingClientRect().toJSON(),scrollHeight:p.scrollHeight,clientHeight:p.clientHeight}})()`)
       const state = await js('focusMetadataSceneState()'), image = name + '.png'
       await fs.writeFile(path.join(evidence, image), (await win.webContents.capturePage()).toPNG())
-      actual.frames.push({ image, width: await js('innerWidth'), geometry, state })
+      const validationStyles = await js('document.querySelectorAll("style[data-focus-header-counterfactual]").length')
+      assert.equal(validationStyles, 0, 'No validation CSS remains in final product frames')
+      actual.frames.push({ image, width: await js('innerWidth'), geometry, state, validationStyles })
+    }
+    const headerMetrics = () => js(`(()=>{const p=document.querySelector('.recent-focus__message-preview'),h=p.querySelector(':scope > header'),title=h.querySelector('strong'),close=h.querySelector('[aria-label="Close message"]'),details=p.querySelector('section[aria-label="Message details"]'),css=getComputedStyle(h),panel=p.getBoundingClientRect().toJSON(),header=h.getBoundingClientRect().toJSON(),border=parseFloat(getComputedStyle(p).borderTopWidth),point={x:panel.x+panel.width/2,y:panel.y+border+.5},hit=document.elementFromPoint(point.x,point.y);return{panel,header,border,title:title.getBoundingClientRect().toJSON(),close:close.getBoundingClientRect().toJSON(),details:details?.getBoundingClientRect().toJSON(),stickyTop:css.top,computed:{marginTop:css.marginTop,marginRight:css.marginRight,marginBottom:css.marginBottom,marginLeft:css.marginLeft,paddingTop:css.paddingTop,paddingRight:css.paddingRight,paddingBottom:css.paddingBottom,paddingLeft:css.paddingLeft},point,hit:hit?.tagName,covered:header.top<=panel.top+border+.01&&header.left<=panel.left+border+.01&&header.right>=panel.right-border-.01&&!!hit&&h.contains(hit),scrollTop:p.scrollTop,validationStyles:document.querySelectorAll('style[data-focus-header-counterfactual]').length}})()`)
+    const assertHeaderCover = metrics => {
+      assert.equal(metrics.border, 1, 'Actual panel border is the allowed coverage boundary')
+      assert.ok(metrics.scrollTop > 0, 'Actual Info panel must be scrolled')
+      assert.equal(metrics.covered, true, 'Scrolled sticky header must cover the inner panel top without old rows leaking above it')
     }
     const agentMarker = '.recent-focus__message[data-message-author="agent"]', info = '[data-input-preview-id] [aria-label="Message details"]'
     await until('window.focusMetadataSceneState&&focusMetadataSceneState().markerIDs.length===4')
@@ -61,11 +69,42 @@ app.whenReady().then(async () => {
     win.setContentSize(332, 840); await until('innerWidth===332'); await shot('agent-info-332')
     actual.resizedContinuity = await js('({body:metadataBody===document.querySelector(".log-turn__body"),range:getSelection().rangeCount===1&&getSelection().getRangeAt(0)===metadataRange,text:getSelection().toString(),original:metadataSelection})')
     assert.deepEqual(actual.resizedContinuity, actual.infoContinuity)
+    actual.loadedCSS = await js(`(()=>{const h=document.querySelector('.recent-focus__message-preview > header'),stylesheets=[...document.styleSheets].filter(s=>s.href),rules=stylesheets.flatMap(s=>[...s.cssRules].filter(r=>r.selectorText?.includes('[data-interactive=')&&r.selectorText.endsWith(' > header')&&h.matches(r.selectorText)).map(r=>({href:s.href,selector:r.selectorText,cssText:r.cssText,margin:r.style.margin,padding:r.style.padding,top:r.style.top})));return{stylesheets:stylesheets.map(s=>({href:s.href,rules:s.cssRules.length})),rules}})()`)
+    assert.equal(actual.loadedCSS.rules.length, 1, 'Exactly one real compiled interactive-header rule must be loaded')
+    assert.ok(actual.loadedCSS.rules[0].margin.length > 0); assert.ok(actual.loadedCSS.rules[0].padding.length > 0)
+    actual.headerCover = { initial: await headerMetrics(), counterfactual: {}, restored: null,
+      boundary: 'One compile of repaired Source. The old computed margin/padding are reproduced only by this uniquely scoped validation rule in the actual compiled page.' }
+    const counterRule = '.recent-focus__message-preview[data-interactive="true"] > header { top: 0; margin: 0; padding: 0; }'
+    await js(`(()=>{const s=document.createElement('style');s.dataset.focusHeaderCounterfactual='original-computed-header';s.textContent=${JSON.stringify(counterRule)};document.head.append(s)})()`)
+    await paint()
+    actual.headerCover.counterfactual.rule = counterRule
+    actual.headerCover.counterfactual.initial = await headerMetrics()
+    assert.equal(actual.headerCover.counterfactual.initial.validationStyles, 1)
+    assert.equal(actual.headerCover.counterfactual.initial.stickyTop, '0px')
+    assert.deepEqual(Object.values(actual.headerCover.counterfactual.initial.computed), Array(8).fill('0px'))
+    for (const part of ['title', 'close', 'details']) for (const dimension of ['x', 'y', 'width', 'height'])
+      assert.equal(actual.headerCover.initial[part][dimension], actual.headerCover.counterfactual.initial[part][dimension], `Original ${part} initial flow/position is preserved`)
+
     const popupPoint = await js('(()=>{const r=document.querySelector(".recent-focus__message-preview").getBoundingClientRect();return{x:r.left+10,y:r.top+r.height/2}})()')
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...popupPoint, deltaX: 0, deltaY: 800 })
     await until('(()=>{const p=document.querySelector(".recent-focus__message-preview"),n=p.querySelector(":scope > button:last-child"),r=n.getBoundingClientRect(),b=p.getBoundingClientRect();return r.top>=b.top&&r.bottom<=b.bottom&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===n})()')
     actual.scrolledContinuity = await js('({body:metadataBody===document.querySelector(".log-turn__body"),range:getSelection().rangeCount===1&&getSelection().getRangeAt(0)===metadataRange,text:getSelection().toString(),original:metadataSelection})')
     assert.deepEqual(actual.scrolledContinuity, actual.infoContinuity); assert.deepEqual(actual.reads, beforeReads)
+    actual.headerCover.counterfactual.scrolled = await headerMetrics()
+    actual.headerCover.counterfactual.image = 'header-top-strip-red-332.png'
+    await fs.writeFile(path.join(evidence, actual.headerCover.counterfactual.image), (await win.webContents.capturePage()).toPNG())
+    assert.throws(() => assertHeaderCover(actual.headerCover.counterfactual.scrolled), error => {
+      assert.equal(error.name, 'AssertionError')
+      actual.headerCover.counterfactual.failure = { name: error.name, message: error.message, stack: error.stack }; return true
+    }, 'Original header computation must produce a real coverage AssertionRED')
+    await js(`(()=>{const styles=document.querySelectorAll('style[data-focus-header-counterfactual]');if(styles.length!==1)throw new Error('Counterfactual rule is not unique');styles[0].remove()})()`)
+    await paint()
+    actual.headerCover.restored = await headerMetrics(); assertHeaderCover(actual.headerCover.restored)
+    assert.equal(actual.headerCover.restored.validationStyles, 0)
+    actual.headerCover.continuity = await js('({body:metadataBody===document.querySelector(".log-turn__body"),range:getSelection().rangeCount===1&&getSelection().getRangeAt(0)===metadataRange,text:getSelection().toString(),original:metadataSelection})')
+    assert.deepEqual(actual.headerCover.continuity, actual.infoContinuity); assert.deepEqual(actual.reads, beforeReads)
+    assert.equal((await js('focusMetadataSceneState()')).draft, 'Keep the original draft')
+    assert.equal(await js('(()=>{const p=document.querySelector(".recent-focus__message-preview"),n=p.querySelector(":scope > button:last-child"),r=n.getBoundingClientRect(),b=p.getBoundingClientRect();return r.top>=b.top&&r.bottom<=b.bottom&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===n})()'), true)
     await shot('agent-info-bottom-332')
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...popupPoint, deltaX: 0, deltaY: -800 })
     await until('document.querySelector(".recent-focus__message-preview").scrollTop===0')
