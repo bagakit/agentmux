@@ -50,6 +50,7 @@ const fakeElectron = vi.hoisted(() => {
       on: vi.fn(), removeListener: vi.fn(),
       checkHandler: null as null | ((...args: any[]) => boolean),
       requestHandler: null as null | ((...args: any[]) => void),
+      setDevicePermissionHandler: vi.fn(),
       setPermissionCheckHandler: vi.fn((handler: (...args: any[]) => boolean) => {
         this.session.checkHandler = handler
       }),

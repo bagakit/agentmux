@@ -16,7 +16,7 @@ vi.mock('electron', async () => {
     readonly id = native.views.length + 41
     url = ''; destroyed = false; attached = false; clicks = 0
     onDownloadClick?: () => Promise<void>
-    readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} })
+    readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     readonly mainFrame = { framesInSubtree: [] }
     readonly debugger = Object.assign(new EventEmitter(), {

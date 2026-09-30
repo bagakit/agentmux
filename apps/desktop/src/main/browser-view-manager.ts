@@ -35,6 +35,7 @@ import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './b
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
+import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
@@ -2266,7 +2267,6 @@ export class BrowserViewManager {
       entry.visible = false
       void entry.feedback?.clear()
       entry.view.setVisible(false)
-      cancelBrowserWebAuthnAccounts(entry.view.webContents)
       return
     }
     // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
@@ -2302,6 +2302,8 @@ export class BrowserViewManager {
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
     if (!entry) return this.releasedEntries.delete(id)
+    cancelBrowserWebAuthnAccounts(entry.view.webContents)
+    cancelBrowserWebAuthnAccess(entry.view.webContents)
     this.revokePresentationCapture(entry, 'source-released')
     if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
     entry.captureId = null
@@ -2528,11 +2530,12 @@ export class BrowserViewManager {
         nodeIntegration: false
       }
     })
-    view.webContents.session.setPermissionCheckHandler(() => false)
-    view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     const session = view.webContents.session
     if (!this.webAuthnSessions.has(session)) {
-      this.webAuthnSessions.set(session, registerBrowserWebAuthnAccounts(session, contents => this.webAuthnOwner(contents)))
+      const resolveOwner = (contents: WebContents): BrowserWebAuthnOwner | null => this.webAuthnOwner(contents)
+      const releaseAccess = registerBrowserWebAuthnAccess(session, resolveOwner)
+      const releaseAccounts = registerBrowserWebAuthnAccounts(session, resolveOwner)
+      this.webAuthnSessions.set(session, () => { releaseAccess(); releaseAccounts() })
     }
     return view
   }
@@ -2544,12 +2547,12 @@ export class BrowserViewManager {
     const profileId = entry.profileId
     const navigationId = entry.navigationId
     const ownsRequest = (): boolean => this.owns(entry, view) && entry.profileId === profileId && entry.navigationId === navigationId
+    const currentBounds = (): BrowserBounds | null => this.nativeOwner(entry.id)?.bounds ?? null
     return {
       window: this.window,
-      bounds: this.nativeOwner(entry.id)?.bounds ?? null,
+      get bounds() { return currentBounds() },
       isCurrent: () => ownsRequest() && !contents.isDestroyed() &&
-        this.nativeOwner(entry.id)?.view === view && !this.window.isDestroyed() &&
-        this.window.isVisible() && !this.window.isMinimized(),
+        !this.window.isDestroyed(),
       report: message => {
         // Hidden original pages keep their notice. Visibility never changes the request's owner.
         if (!ownsRequest()) return

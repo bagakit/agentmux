@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from '../src/main/browser-operation-feedback.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import { mkdtempSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
@@ -73,7 +74,7 @@ const fakeElectron = vi.hoisted(() => {
     readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>()
     readonly session = {
       listeners: new Map<string, ((...args: unknown[]) => void)[]>(),
-      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(),
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), setDevicePermissionHandler: vi.fn(),
       on(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]); return this },
       removeListener(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, (this.listeners.get(event) ?? []).filter(item => item !== listener)); return this },
       emit(event: string, ...args: unknown[]) { for (const listener of [...this.listeners.get(event) ?? []]) listener(...args) },
@@ -522,7 +523,10 @@ describe('runScript waiting follows the Core capability effects', () => {
       expect(phases).toEqual(['waiting', 'running'])
       expect(report.outcome.kind).toBe('completed')
       expect(sentEvents().at(-1)?.browser.activity.operation.phase).toBe('completed')
-      expect(contents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled()
+      // Existing operation feedback uses its own isolated world; waiting must not
+      // execute a second business script through this native boundary.
+      expect(contents.executeJavaScriptInIsolatedWorld.mock.calls
+        .filter(([worldId]) => worldId !== BROWSER_OPERATION_FEEDBACK_WORLD_ID)).toEqual([])
     } finally { release(); manager.dispose() }
   }, 30_000)
 

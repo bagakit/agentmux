@@ -22,6 +22,7 @@ const native = vi.hoisted(() => {
   class Session extends Emitter {
     setPermissionCheckHandler = vi.fn()
     setPermissionRequestHandler = vi.fn()
+    setDevicePermissionHandler = vi.fn()
   }
   let nextFrame = 1
   class Frame {
@@ -67,6 +68,9 @@ const native = vi.hoisted(() => {
     visible = true
     minimized = false
     focused = true
+    focus = vi.fn()
+    show = vi.fn()
+    restore = vi.fn()
     webContents = { isDestroyed: () => false, send: vi.fn() }
     contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
     isDestroyed() { return this.destroyed }
@@ -110,6 +114,7 @@ vi.mock('electron', () => ({ Menu: native.Menu, webContents: { fromFrame: native
 import { registerBrowserWebAuthnAccounts, cancelBrowserWebAuthnAccounts } from '../src/main/browser-webauthn-accounts.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
+import { acquireBrowserWebAuthnWindowMenu, releaseBrowserWebAuthnWindowMenu } from '../src/main/browser-webauthn-window-menu.js'
 
 const releases: Array<() => void> = []
 const temporaryRoots: string[] = []
@@ -170,25 +175,38 @@ function assertClean(f: Fixture) {
   expect(f.window.listenerCount('closed')).toBe(0)
   expect(f.window.listenerCount('hide')).toBe(0)
   expect(f.window.listenerCount('minimize')).toBe(0)
+  expect(f.window.listenerCount('focus')).toBe(0)
+  expect(f.window.listenerCount('show')).toBe(0)
+  expect(f.window.listenerCount('restore')).toBe(0)
 }
 
 describe('原 Session 的 WebAuthn 账户选择', () => {
-  it('单账户也等待明确点选，菜单属于原窗口与 Browser bounds，来源用实际 frame origin', () => {
+  it.each(['visible', 'hidden-page', 'hidden-window', 'minimized', 'unfocused'] as const)('单合法账户 %s 直接继续同一原请求，不加菜单批准或抢焦点', mode => {
     const f = fixture(); register(f)
+    if (mode === 'hidden-page') f.owner.bounds = null
+    if (mode === 'hidden-window') f.window.visible = false
+    if (mode === 'minimized') f.window.minimized = true
+    if (mode === 'unfocused') f.window.focused = false
     f.frame.url = 'about:blank'
     const r = request(f, [accounts[0]!])
     expect(r.event.preventDefault).not.toHaveBeenCalled()
-    expect(r.callback).not.toHaveBeenCalled()
-    expect(r.menu!.items.map(item => item.label ?? item.type)).toEqual([
-      '选择 rp.example.invalid 的账户', '来源：https://frame.example.invalid', 'separator', '第一账户', 'separator', '取消'
-    ])
-    expect(r.menu!.options).toMatchObject({ window: f.window, frame: f.frame, x: 240, y: 102 })
-    accountItem(r.menu!).click!()
     expect(r.callback.mock.calls).toEqual([['original-account-one']])
-    expect(r.menu!.closePopup.mock.calls).toEqual([[f.window]])
-    r.menu!.options.callback()
-    accountItem(r.menu!).click!()
-    expect(r.callback).toHaveBeenCalledTimes(1)
+    expect(native.Menu.instances).toEqual([])
+    expect(f.window.focus).not.toHaveBeenCalled()
+    expect(f.window.show).not.toHaveBeenCalled()
+    expect(f.window.restore).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    assertClean(f)
+  })
+
+  it.each(['empty', 'whitespace', 'duplicate'] as const)('%s 非法候选不删除后猜单个账户', mode => {
+    const f = fixture(); register(f)
+    const values = mode === 'duplicate' ? [accounts[0]!, { ...accounts[1]!, credentialId: accounts[0]!.credentialId }]
+      : [accounts[0]!, { credentialId: mode === 'empty' ? '' : '   ', name: 'invalid@example.invalid' }]
+    const r = request(f, values)
+    expect(r.callback.mock.calls).toEqual([[null]])
+    expect(native.Menu.instances).toEqual([])
+    expect(f.owner.report).toHaveBeenCalledWith(expect.stringContaining('候选无效'))
     assertClean(f)
   })
 
@@ -196,6 +214,11 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     const f = fixture(); register(f)
     const supplied = accounts.map(value => ({ ...value }))
     const r = request(f, supplied)
+    expect(r.callback).not.toHaveBeenCalled()
+    expect(r.menu!.items.map(item => item.label ?? item.type)).toEqual([
+      '选择 rp.example.invalid 的账户', '来源：https://frame.example.invalid', 'separator', '第一账户', 'second@example.invalid', 'separator', '取消'
+    ])
+    expect(r.menu!.options).toMatchObject({ window: f.window, frame: f.frame, x: 240, y: 102 })
     supplied[1]!.credentialId = 'foreign-mutated-account'
     accountItem(r.menu!, 'second@example.invalid').click!()
     expect(r.callback.mock.calls).toEqual([['original-account-two']])
@@ -218,7 +241,7 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(labels.join(' ')).not.toContain('\u202e')
     r.menu!.items[4]!.click!()
     expect(r.callback.mock.calls).toEqual([['private-id-two']])
-    const short = request(f, [{ credentialId: 'private-id-three', displayName: 'A\n\u202e&B' }])
+    const short = request(f, [{ credentialId: 'private-id-three', displayName: 'A\n\u202e&B' }, accounts[1]!])
     expect(short.menu!.items[3]!.label).toBe('A  &&B')
     short.menu!.items[3]!.click!()
     expect(short.callback.mock.calls).toEqual([['private-id-three']])
@@ -268,12 +291,8 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(native.Menu.instances).toEqual([])
   })
 
-  it.each(['hidden-page', 'hidden-window', 'minimized', 'unfocused', 'stale-owner', 'detached', 'destroyed-frame'] as const)('%s 就地告知，不到另一个工作面弹选择', mode => {
+  it.each(['stale-owner', 'detached', 'destroyed-frame'] as const)('%s 真正失效，不到另一个工作面弹选择', mode => {
     const f = fixture(); register(f)
-    if (mode === 'hidden-page') f.owner.bounds = null
-    if (mode === 'hidden-window') f.window.visible = false
-    if (mode === 'minimized') f.window.minimized = true
-    if (mode === 'unfocused') f.window.focused = false
     if (mode === 'stale-owner') f.current.value = false
     if (mode === 'detached') f.frame.detached = true
     if (mode === 'destroyed-frame') f.frame.destroyed = true
@@ -281,6 +300,54 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(r.callback.mock.calls).toEqual([[null]])
     expect(native.Menu.instances).toEqual([])
     if (mode !== 'detached' && mode !== 'destroyed-frame') expect(f.owner.report).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['hidden-page', 'hidden-window', 'minimized', 'unfocused'] as const)('%s 保留 pending，原 owner 恢复后只弹一次，用当前 bounds 且不抢焦点', mode => {
+    const f = fixture(); register(f)
+    let bounds = mode === 'hidden-page' ? null : { x: 40, y: 70, width: 400, height: 200 }
+    Object.defineProperty(f.owner, 'bounds', { get: () => bounds })
+    if (mode === 'hidden-window') f.window.visible = false
+    if (mode === 'minimized') f.window.minimized = true
+    if (mode === 'unfocused') f.window.focused = false
+    const r = request(f)
+    const unrelated = fixture()
+    vi.advanceTimersByTime(1_000)
+    expect(r.callback).not.toHaveBeenCalled()
+    expect(native.Menu.instances).toEqual([])
+    expect(f.owner.report.mock.calls).toEqual([[expect.stringContaining('正在等待')]])
+    expect(native.fromFrame.mock.calls.map(call => call[0])).not.toContain(unrelated.frame)
+    bounds = { x: 90, y: 130, width: 250, height: 24 }
+    f.window.visible = true; f.window.minimized = false; f.window.focused = true
+    f.window.emit('focus'); f.window.emit('show'); f.window.emit('restore')
+    vi.advanceTimersByTime(1_000)
+    expect(native.Menu.instances).toHaveLength(1)
+    const menu = native.Menu.instances[0]!
+    expect(menu.popup).toHaveBeenCalledTimes(1)
+    expect(menu.options).toMatchObject({ window: f.window, frame: f.frame, x: 215, y: 154 })
+    expect(f.window.focus).not.toHaveBeenCalled()
+    expect(f.window.show).not.toHaveBeenCalled()
+    expect(f.window.restore).not.toHaveBeenCalled()
+    accountItem(menu, 'second@example.invalid').click!()
+    expect(r.callback.mock.calls).toEqual([['original-account-two']])
+    assertClean(f)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['timeout', 'unregister', 'navigation', 'owner', 'detached'] as const)('后台等待期间 %s 真正收尾，恢复不能重新弹出', mode => {
+    const f = fixture(); const release = register(f)
+    f.window.focused = false
+    const r = request(f)
+    if (mode === 'timeout') vi.advanceTimersByTime(60_000)
+    if (mode === 'unregister') release()
+    if (mode === 'navigation') f.contents.emit('did-start-navigation', { isMainFrame: true, frame: f.frame })
+    if (mode === 'owner') { f.current.value = false; vi.advanceTimersByTime(250) }
+    if (mode === 'detached') { f.frame.detached = true; vi.advanceTimersByTime(250) }
+    expect(r.callback.mock.calls).toEqual([[null]])
+    f.window.focused = true; f.window.emit('focus')
+    vi.advanceTimersByTime(1_000)
+    expect(native.Menu.instances).toEqual([])
+    assertClean(f)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it.each(['owner', 'url', 'origin', 'token', 'parent', 'from-frame'] as const)('回点重验 %s，旧点选不能作用新文档或 view/profile/navigation', mode => {
@@ -308,13 +375,12 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     assertClean(f)
   })
 
-  it.each(['detached', 'destroyed', 'hidden', 'replaced-owner'] as const)('无导航事件的 %s 在相关 pending 检查内结束，不扫其他 Browser', mode => {
+  it.each(['detached', 'destroyed', 'replaced-owner'] as const)('无导航事件的 %s 在相关 pending 检查内结束，不扫其他 Browser', mode => {
     const f = fixture(); register(f)
     const r = request(f)
     const unrelated = fixture()
     if (mode === 'detached') f.frame.detached = true
     if (mode === 'destroyed') f.frame.destroyed = true
-    if (mode === 'hidden') f.owner.bounds = null
     if (mode === 'replaced-owner') f.current.value = false
     vi.advanceTimersByTime(250)
     expect(r.callback.mock.calls).toEqual([[null]])
@@ -322,7 +388,7 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     assertClean(f)
   })
 
-  it.each(['destroyed', 'render-process-gone', 'closed', 'hide', 'minimize'] as const)('%s 生命周期收尾 exact-once', event => {
+  it.each(['destroyed', 'render-process-gone', 'closed'] as const)('%s 生命周期收尾 exact-once', event => {
     const f = fixture(); register(f)
     const r = request(f)
     if (event === 'destroyed' || event === 'render-process-gone') f.contents.emit(event)
@@ -340,8 +406,102 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     f.window.focused = false
     vi.advanceTimersByTime(500)
     expect(r.callback).not.toHaveBeenCalled()
+    expect(native.Menu.instances).toHaveLength(1)
+    expect(r.menu!.popup).toHaveBeenCalledTimes(1)
     accountItem(r.menu!).click!()
     expect(r.callback.mock.calls).toEqual([['original-account-one']])
+  })
+
+  it.each(['hide', 'minimize', 'hidden-page'] as const)('已开菜单的 %s 原生 dismiss 保留原请求，旧菜单回调不结束恢复后的选择', mode => {
+    const f = fixture(); register(f)
+    const r = request(f)
+    const old = r.menu!
+    if (mode === 'hide') f.window.visible = false
+    if (mode === 'minimize') f.window.minimized = true
+    if (mode === 'hidden-page') f.owner.bounds = null
+    f.window.emit(mode)
+    vi.advanceTimersByTime(250)
+    expect(old.closePopup.mock.calls).toEqual([[f.window]])
+    const other = {}
+    expect(acquireBrowserWebAuthnWindowMenu(f.window as never, other)).toBe(true)
+    releaseBrowserWebAuthnWindowMenu(f.window as never, other)
+    old.options.callback()
+    expect(r.callback).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1_000)
+    expect(native.Menu.instances).toHaveLength(1)
+    f.window.visible = true; f.window.minimized = false; f.window.focused = true
+    f.owner.bounds = { x: 20, y: 60, width: 200, height: 80 }
+    f.window.emit('focus'); vi.advanceTimersByTime(500)
+    expect(native.Menu.instances).toHaveLength(2)
+    const restored = native.Menu.instances[1]!
+    expect(restored.popup).toHaveBeenCalledTimes(1)
+    old.options.callback(); accountItem(old).click!(); accountItem(old, '取消').click!()
+    expect(r.callback).not.toHaveBeenCalled()
+    accountItem(restored, 'second@example.invalid').click!()
+    expect(r.callback.mock.calls).toEqual([['original-account-two']])
+    assertClean(f)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('后台返回不重置原60秒预算', () => {
+    const f = fixture(); register(f)
+    f.window.focused = false
+    const r = request(f)
+    vi.advanceTimersByTime(59_750)
+    f.window.focused = true; f.window.emit('focus')
+    expect(native.Menu.instances).toHaveLength(1)
+    vi.advanceTimersByTime(250)
+    expect(r.callback.mock.calls).toEqual([[null]])
+    expect(f.owner.report).toHaveBeenCalledWith(expect.stringContaining('超时'))
+    assertClean(f)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('窗口 hide 的原生 dismiss callback 先于窗口事件也保留原请求', () => {
+    const f = fixture(); register(f)
+    const r = request(f)
+    f.window.visible = false
+    r.menu!.options.callback()
+    const other = {}
+    expect(acquireBrowserWebAuthnWindowMenu(f.window as never, other)).toBe(true)
+    releaseBrowserWebAuthnWindowMenu(f.window as never, other)
+    f.window.emit('hide')
+    expect(r.callback).not.toHaveBeenCalled()
+    expect(r.menu!.closePopup).not.toHaveBeenCalled()
+    f.window.visible = true; f.window.emit('show')
+    expect(native.Menu.instances).toHaveLength(2)
+    r.menu!.options.callback()
+    expect(r.callback).not.toHaveBeenCalled()
+    accountItem(native.Menu.instances[1]!, 'second@example.invalid').click!()
+    expect(r.callback.mock.calls).toEqual([['original-account-two']])
+    assertClean(f)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('同窗口的 foreign token 阻止账户菜单，旧token release 不释放新选择', () => {
+    const f = fixture(); register(f)
+    const first = {}, second = {}
+    releases.push(() => releaseBrowserWebAuthnWindowMenu(f.window as never, second))
+    expect(acquireBrowserWebAuthnWindowMenu(f.window as never, first)).toBe(true)
+    const r = request(f)
+    expect(r.callback).not.toHaveBeenCalled()
+    expect(native.Menu.instances).toEqual([])
+    releaseBrowserWebAuthnWindowMenu(f.window as never, first)
+    expect(acquireBrowserWebAuthnWindowMenu(f.window as never, second)).toBe(true)
+    releaseBrowserWebAuthnWindowMenu(f.window as never, first)
+    vi.advanceTimersByTime(250)
+    expect(native.Menu.instances).toEqual([])
+    expect(r.callback).not.toHaveBeenCalled()
+    releaseBrowserWebAuthnWindowMenu(f.window as never, second)
+    vi.advanceTimersByTime(250)
+    expect(native.Menu.instances).toHaveLength(1)
+    accountItem(native.Menu.instances[0]!).click!()
+    expect(r.callback.mock.calls).toEqual([['original-account-one']])
+    const next = {}
+    expect(acquireBrowserWebAuthnWindowMenu(f.window as never, next)).toBe(true)
+    releaseBrowserWebAuthnWindowMenu(f.window as never, next)
+    assertClean(f)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('同 displayName 的账户显示不同 name，缺失名字用局部序号，不展示凭据 ID', () => {
@@ -375,6 +535,9 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(r.callback.mock.calls).toEqual([[null]])
     assertClean(f)
     expect(vi.getTimerCount()).toBe(0)
+    const other = {}
+    expect(acquireBrowserWebAuthnWindowMenu(f.window as never, other)).toBe(true)
+    releaseBrowserWebAuthnWindowMenu(f.window as never, other)
   })
 
   it('notice 或原 callback 抛异常仍先清状态，回调不重复且下一次可继续', () => {
@@ -473,7 +636,7 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(b.callback.mock.calls).toEqual([['original-account-one']])
   })
 
-  it('真实 BrowserViewManager.create → Session event → hide-cancel 的产品入口闭合', async () => {
+  it('真实 BrowserViewManager.create → Session event → hide/resume/close 的产品入口闭合', async () => {
     const root = mkdtempSync(join(tmpdir(), 'amx-webauthn-owning-')); temporaryRoots.push(root)
     const window = new native.Window()
     const manager = new BrowserViewManager(window as never,
@@ -487,6 +650,7 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(native.View.instances.length).toBe(2)
     expect(first!.webContents.session).toBe(second!.webContents.session)
     expect(first!.webContents.session.listenerCount('select-webauthn-account')).toBe(1)
+    expect(first!.webContents.session.listenerCount('select-hid-device')).toBe(1)
     manager.setBounds('browser-one', { x: 20, y: 80, width: 320, height: 200 })
     manager.setBounds('browser-two', { x: 380, y: 80, width: 320, height: 200 })
     const f = { session: first!.webContents.session, contents: first!.webContents, frame: first!.webContents.mainFrame } as Fixture
@@ -497,12 +661,75 @@ describe('原 Session 的 WebAuthn 账户选择', () => {
     expect(r.callback).not.toHaveBeenCalled()
     manager.setBounds('browser-one', null)
     expect(first!.visible).toBe(false)
-    expect(r.callback.mock.calls).toEqual([[null]])
+    vi.advanceTimersByTime(250)
+    expect(r.menu!.closePopup.mock.calls).toEqual([[window]])
+    r.menu!.options.callback()
+    expect(r.callback).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(500)
+    manager.setBounds('browser-one', { x: 70, y: 100, width: 234.5, height: 120 })
+    vi.advanceTimersByTime(250)
+    const resumed = native.Menu.instances.at(-1)!
+    expect(resumed.options).toMatchObject({ window, x: 188, y: 132 })
+    accountItem(resumed, 'second@example.invalid').click!()
+    expect(r.callback.mock.calls).toEqual([['original-account-two']])
     const updates = window.webContents.send.mock.calls.map(call => call[1] as { type?: string; browser?: { id: string; activity?: { warning?: string } } })
       .filter(event => event.type === 'updated' && event.browser?.id === 'browser-one')
     expect(updates.length).toBeGreaterThan(0)
-    expect(updates.at(-1)!.browser!.activity?.warning).toContain('账户选择已取消')
+    expect(updates.some(update => update.browser?.activity?.warning?.includes('正在等待'))).toBe(true)
+    const closing = request(f)
+    manager.close('browser-one')
+    expect(closing.callback.mock.calls).toEqual([[null]])
+    closing.menu!.options.callback()
+    expect(closing.callback).toHaveBeenCalledTimes(1)
     manager.dispose()
     expect(first!.webContents.session.listenerCount('select-webauthn-account')).toBe(0)
+    expect(first!.webContents.session.listenerCount('select-hid-device')).toBe(0)
+  })
+
+  it.each(['account-first', 'device-first'] as const)('真实 BVM Session %s 两认证事件在同窗口轮流呈现，旧菜单不能释放新选择', async order => {
+    const root = mkdtempSync(join(tmpdir(), 'amx-webauthn-window-')); temporaryRoots.push(root)
+    const window = new native.Window()
+    const manager = new BrowserViewManager(window as never,
+      { defaultProfileId: () => 'default', resolvePartition: profile => `persist:webauthn-window-${profile}` },
+      new BrowserRefLedgerStore(join(root, 'ledger.json')),
+      { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: () => {} })
+    releases.push(() => manager.dispose())
+    await manager.create('original-browser', 'https://generic-auth.example.invalid/')
+    manager.setBounds('original-browser', { x: 20, y: 80, width: 320, height: 200 })
+    const view = native.View.instances.at(-1)!
+    const f = { session: view.webContents.session, contents: view.webContents, frame: view.webContents.mainFrame } as Fixture
+    const deviceCallback = vi.fn()
+    const devices = [
+      { deviceId: 'source-device-one', name: '通用安全密钥一', collections: [{ usagePage: 0xf1d0 }] },
+      { deviceId: 'source-device-two', name: '通用安全密钥二', collections: [{ usagePage: 0xf1d0 }] }
+    ]
+    const deviceRequest = () => f.session.emit('select-hid-device', { preventDefault: vi.fn() }, { frame: f.frame, deviceList: devices }, deviceCallback)
+    let account: ReturnType<typeof request>
+    if (order === 'account-first') { account = request(f); deviceRequest() }
+    else { deviceRequest(); account = request(f) }
+    expect(native.Menu.instances).toHaveLength(1)
+    expect(account.callback).not.toHaveBeenCalled()
+    expect(deviceCallback).not.toHaveBeenCalled()
+    const first = native.Menu.instances[0]!
+    accountItem(first, order === 'account-first' ? '第一账户' : '通用安全密钥一').click!()
+    vi.advanceTimersByTime(250)
+    expect(native.Menu.instances).toHaveLength(2)
+    const second = native.Menu.instances[1]!
+    expect(second.options).toMatchObject({ window, frame: f.frame, x: 180, y: 112 })
+    expect(second.popup).toHaveBeenCalledTimes(1)
+    first.options.callback(); accountItem(first, '取消').click!()
+    expect(order === 'account-first' ? deviceCallback : account.callback).not.toHaveBeenCalled()
+    accountItem(second, order === 'account-first' ? '通用安全密钥二' : 'second@example.invalid').click!()
+    expect(account.callback.mock.calls).toEqual([[order === 'account-first' ? 'original-account-one' : 'original-account-two']])
+    expect(deviceCallback.mock.calls).toEqual([[order === 'account-first' ? 'source-device-two' : 'source-device-one']])
+    expect(window.focus).not.toHaveBeenCalled()
+    expect(window.show).not.toHaveBeenCalled()
+    const token = {}
+    expect(acquireBrowserWebAuthnWindowMenu(window as never, token)).toBe(true)
+    releaseBrowserWebAuthnWindowMenu(window as never, token)
+    manager.dispose()
+    expect(f.session.listenerCount('select-webauthn-account')).toBe(0)
+    expect(f.session.listenerCount('select-hid-device')).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
