@@ -12,7 +12,18 @@ const renderer = 'apps/desktop/src/renderer/src/'
 const survey = `${renderer}components/GlobalSurveySurface.tsx`, workbench = `${renderer}components/WorkspaceWorkbench.tsx`
 const app = `${renderer}App.tsx`, projection = `${renderer}lib/workbench-projection.ts`, store = `${renderer}store.ts`
 const tests = ['apps/desktop/test/survey-surface.test.tsx', 'apps/desktop/test/survey-zone-controls.test.tsx', 'apps/desktop/test/browser-tools-density.test.tsx']
+const sidebarSlice = process.argv[process.argv.indexOf('--slice') + 1] === 'sidebar'
+const only = process.argv.includes('--only') ? new Set(process.argv[process.argv.indexOf('--only') + 1].split(',')) : null
 const mutations = [
+  { slice: 'sidebar', label: 'sidebar-groups-by-display-instead-of-resource', file: survey, before: 'const resource = resourceWorkspaces.get(zone.workspaceId)', after: 'const resource = resourceWorkspaces.get(activeWorkspaceId!)' },
+  { slice: 'sidebar', label: 'sidebar-project-opens-first-worktree', file: survey, before: 'project?.preferredWorkspaceId ?? null', after: 'project?.workspaces[0]?.id ?? null' },
+  { slice: 'sidebar', label: 'sidebar-pointer-commit-disconnected', file: survey, before: 'setWidth: setSidebarWidth, deltaSign: 1', after: 'setWidth: () => {}, deltaSign: 1' },
+  { slice: 'sidebar', label: 'sidebar-keyboard-disconnected', file: survey, before: 'if (next === null) return', after: 'if (true) return' },
+  { slice: 'sidebar', label: 'sidebar-ignores-available-space', file: `${renderer}lib/survey-sidebar-width.ts`, before: 'availableWidth > 0 ?', after: 'false ?' },
+  { slice: 'sidebar', label: 'sidebar-preference-not-restored', file: store, before: 'surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH)', after: 'surveySidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH' },
+  { slice: 'sidebar', label: 'sidebar-preference-not-saved', file: store, before: 'surveySidebarWidth: state.surveySidebarWidth,', after: 'surveySidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH,' },
+  { slice: 'sidebar', label: 'sidebar-save-failure-silenced', file: store, before: '// Commit only the finished presentation gesture through the existing save owner.\n    void saveWorkbenchSelection(false)', after: '// Mutated: no original save receipt is requested.\n    void 0' },
+  { slice: 'sidebar', label: 'sidebar-operation-details-hidden', file: `${renderer}components/SurveyZoneItem.tsx`, before: '{activityDetails}</div>', after: '</div>' },
   { label: 'session-status-rebuilds-spatial-directory', file: app, before: 'const byId = sessionPresentationById(state.sessions)', after: 'return state.sessions\n    const byId = sessionPresentationById(state.sessions)' },
   { label: 'same-address-replaced-slot-loses-content', file: `${renderer}components/StableWorkbenchView.tsx`, before: '}) // The original layout can replace a slot without changing its exact address.', after: '}, [homeId, targetId, host, showHomeNotice])' },
   { label: 'direct-region-paints-parent-tab', file: projection, before: "if (scope.entity.kind === 'region') return { layout: null,", after: 'if (false) return { layout: null,' },
@@ -29,7 +40,8 @@ const mutations = [
   { label: 'restart-zone-reference-erased', file: store, before: 'surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection)', after: 'surveyZoneSelection: null' },
   { label: 'topic-discovery-error-hidden-by-save', file: survey, before: '{topicSnapshot?.error ? <div>{topicSnapshot.error}</div> : null}', after: 'null' }
 ]
-const sources = [app, survey, workbench, projection, store, `${renderer}lib/survey-workface.ts`, `${renderer}lib/workbench-presentation.ts`, `${renderer}components/StableWorkbenchView.tsx`, `${renderer}components/SurveyTopicRelations.tsx`, `${renderer}components/SurveyZoneItem.tsx`, `${renderer}styles/survey.css`, 'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/scripts/verify-survey-browser-workface-mutations.mjs']
+const selectedMutations = mutations.filter(mutation => (!only || only.has(mutation.label)) && (sidebarSlice ? mutation.slice === 'sidebar' : mutation.slice !== 'sidebar') && (!process.argv.includes('--region-only') || mutation.label === 'direct-region-paints-parent-tab') && (!process.argv.includes('--placement-only') || mutation.label === 'same-address-replaced-slot-loses-content') && (!process.argv.includes('--catalog-only') || mutation.label === 'session-status-rebuilds-spatial-directory'))
+const sources = [app, survey, workbench, projection, store, `${renderer}lib/survey-workface.ts`, `${renderer}lib/survey-sidebar-width.ts`, `${renderer}lib/workbench-presentation.ts`, `${renderer}components/StableWorkbenchView.tsx`, `${renderer}components/SurveyTopicRelations.tsx`, `${renderer}components/SurveyZoneItem.tsx`, `${renderer}styles/survey.css`, 'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/scripts/verify-survey-browser-workface-mutations.mjs']
 const inputs = [...new Set([...sources, ...tests])]
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const original = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(root, file))])))
@@ -48,6 +60,8 @@ const run = async label => {
 }
 try {
   await mkdir(evidence, { recursive: true })
+  assert.ok(selectedMutations.length > 0, 'The requested mutation selection must not be empty.')
+  if (only) assert.deepEqual([...only].sort(), selectedMutations.map(mutation => mutation.label).sort(), 'Every --only name must match the actual selected mutation source.')
   for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file))
   await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
   await symlink(join(root, 'packages'), join(copy, 'packages'))
@@ -64,7 +78,7 @@ plugins: [{ name: 'actual-private-source-load', enforce: 'pre', transform(source
 test: { include: ${JSON.stringify(tests)}, setupFiles: ['vitest.setup.ts'], globalSetup: [${JSON.stringify(join(root, 'vitest.dist-freshness.ts'))}] } });\n`)
 
   const baseline = await run('baseline-green'); assert.equal(baseline.code, 0, baseline.output)
-  for (const mutation of mutations.filter(mutation => (!process.argv.includes('--region-only') || mutation.label === 'direct-region-paints-parent-tab') && (!process.argv.includes('--placement-only') || mutation.label === 'same-address-replaced-slot-loses-content') && (!process.argv.includes('--catalog-only') || mutation.label === 'session-status-rebuilds-spatial-directory'))) {
+  for (const mutation of selectedMutations) {
     const source = original.get(mutation.file).toString()
     assert.equal(source.split(mutation.before).length - 1, 1, `Unique actual Source anchor: ${mutation.label}`)
     observedSource = mutation.file

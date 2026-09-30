@@ -64,7 +64,8 @@ import { surveyInitialZoneSelection, type SurveyZoneSelection } from '../src/ren
 import { projectWorkbenchProjection, type WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { directoryIdentity } from '../src/shared/space-addresses'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, restorePersistedUiState } from '../src/renderer/src/store'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -98,6 +99,7 @@ beforeEach(() => {
     return new DOMRect(survey ? 200 : 250, 48, 600, 500)
   })
   useAppStore.setState({ loading: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench',
+    surveySidebarWidth: 220,
     surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: composerConfig, activeWorkspaceId: workspace.id,
     sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]) },
     agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
@@ -222,6 +224,69 @@ it('keeps the spatial projection stable for status clocks and unreferenced Sessi
   expect(observation.survey.at(-1)!.catalog).toBe(hidden.catalog)
   expect(api.browser.create).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   expect(useAppStore.getState().tabs[mixed.id]!.regions[agent.regionId]).toEqual(agent)
+})
+
+it('groups original Zones by the existing resource Project owner and keeps worktrees, Scratch and unknown sources exact', async () => {
+  const branch = { ...workspace, id: 'branch-workspace', kind: 'worktree' as const, path: '/repo/.worktrees/research', repoPath: '/repo', branch: 'research' }
+  const remote = { ...workspace, id: 'remote-workspace', hostId: 'remote' }
+  const different = { ...workspace, id: 'different-workspace', path: '/different' }
+  const scratch = { ...workspace, id: SCRATCH_WORKSPACE_ID, path: '/topics', name: 'Scratch' }
+  const unknown = createWorkbenchTab('unknown-resource-tab', { ...pageC, workspaceId: 'missing-workspace', browserId: 'unknown-browser', regionId: 'unknown-resource-region' })
+  unknown.space = { zoneId: 'retained-unknown-zone', spaceId: directoryIdentity('local', '/missing') }
+  const additional = [branch, remote, different, scratch].map(resource => createWorkbenchTab(`tab-${resource.id}`, { ...pageC, workspaceId: resource.id, browserId: `browser-${resource.id}`, regionId: `region-${resource.id}` }))
+  const topics = ['a', 'b'].map(id => ({ id, title: 'Same Topic', summary: '', directoryPath: `/topics/${id}`, topicPath: `/topics/${id}/topic.md`, collaborators: [] }))
+  const originalZone = originalZoneId(), rootSpace = directoryIdentity(workspace.hostId, workspace.path)
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [branch, workspace, remote, different, scratch] },
+    tabs: Object.fromEntries([mixed, ...additional, unknown].map(tab => [tab.id, tab])),
+    layouts: Object.fromEntries([workspace, branch, remote, different, scratch, { id: 'missing-workspace' }].map(resource => [resource.id, createWorkspaceLayout(`group-${resource.id}`, resource.id === workspace.id ? [mixed.id] : resource.id === 'missing-workspace' ? [unknown.id] : [`tab-${resource.id}`])])),
+    spaceZoneBindings: { [originalZone]: { spaceId: rootSpace, workspaceId: workspace.id, relations: Object.fromEntries(topics.map(topic => [directoryIdentity(scratch.hostId, topic.directoryPath), true])) } },
+    scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1, topics, error: null, reading: false } } })
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
+  const source = vi.spyOn(useAppStore.getState(), 'selectWorkspace').mockResolvedValue(undefined)
+  await dom.render(<App />); await enterSurvey(); await choose(originalZone)
+  const grouped = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-project-id]')]
+  expect(grouped.map(group => [group.dataset.surveyProjectId, group.querySelectorAll('[data-survey-zone-id]').length])).toEqual([
+    [workspaceProjectId(workspace), 2], [workspaceProjectId(remote), 1], [workspaceProjectId(different), 1], ['scratch', 1], ['unknown', 1]])
+  const original = useAppStore.getState()
+  expect(grouped[0]!.querySelector('header button')!.textContent).toBe(workspace.name)
+  expect(grouped[0]!.querySelector('[data-survey-zone-id]')!.textContent).not.toContain('No Topic links')
+  expect(grouped[0]!.querySelector('[data-survey-zone-id]')!.textContent).not.toContain('Human control')
+  expect(grouped.at(-1)!.textContent).toContain('Unknown source'); expect(grouped.at(-1)!.querySelector('[aria-label="Resource unknown"]')).not.toBeNull()
+  expect(grouped.at(-1)!.querySelector('.survey-item strong')!.textContent).toBe('Same title')
+  await act(async () => grouped[0]!.querySelector<HTMLButtonElement>('header button')!.click())
+  expect(source).toHaveBeenCalledExactlyOnceWith(workspace.id)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(original.surveyZoneSelection); expect(useAppStore.getState().tabs).toBe(original.tabs)
+  expect(useAppStore.getState().layouts).toBe(original.layouts); expect(api.browser.create).not.toHaveBeenCalled(); healthy()
+})
+
+it('resizes the actual Survey sidebar with pointer and keyboard while preserving its original work surface and saved preference in narrow space', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
+  const sidebar = dom.container.querySelector<HTMLElement>('[aria-label="Survey items"]')!, handle = sidebar.querySelector<HTMLElement>('[aria-label="Resize Survey items"]')!
+  const state = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!, field = address()
+  await fill(field, 'Original sidebar input'); field.setSelectionRange(2, 9)
+  expect(handle.getAttribute('aria-orientation')).toBe('vertical'); expect(sidebar.style.width).toBe('220px')
+  await act(async () => handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 220 })))
+  await act(async () => { window.dispatchEvent(new MouseEvent('mousemove', { clientX: 260 })); await new Promise(requestAnimationFrame) })
+  expect(sidebar.style.width).toBe('260px'); expect(useAppStore.getState().surveySidebarWidth).toBe(220)
+  await act(async () => window.dispatchEvent(new MouseEvent('mouseup')))
+  expect(useAppStore.getState().surveySidebarWidth).toBe(260)
+  for (const [key, width] of [['ArrowRight', 276], ['End', 280], ['Home', 176], ['ArrowLeft', 176]] as const) {
+    await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })))
+    expect(useAppStore.getState().surveySidebarWidth).toBe(width); expect(handle.getAttribute('aria-valuenow')).toBe(String(width))
+  }
+  await act(async () => useAppStore.getState().setSurveySidebarWidth(400))
+  expect(sidebar.style.width).toBe('280px'); expect(useAppStore.getState().surveySidebarWidth).toBe(400)
+  const saved = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+  expect(saved.surveySidebarWidth).toBe(400); expect(restorePersistedUiState(composerConfig, saved).surveySidebarWidth).toBe(400)
+  expect(restorePersistedUiState(composerConfig, { ...saved, surveySidebarWidth: Number.NaN }).surveySidebarWidth).toBe(220)
+  expect(useAppStore.getState().layouts).toBe(state.layouts); expect(useAppStore.getState().tabs).toBe(state.tabs)
+  await dom.click('[aria-label="Space: show terminal and file workbench"]'); await enterSurvey()
+  expect(sidebar.style.width).toBe('280px'); expect(useAppStore.getState().surveySidebarWidth).toBe(400)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original); expect(address()).toBe(field); expect(field.value).toBe('Original sidebar input')
+  expect([field.selectionStart, field.selectionEnd]).toEqual([2, 9]); expect(useAppStore.getState().layouts).toEqual(state.layouts)
+  expect(projectPersistedWorkbench(useAppStore.getState())).toEqual(projectPersistedWorkbench(state))
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(state.surveyZoneSelection)
+  expect(api.browser.create).not.toHaveBeenCalled(); healthy()
 })
 
 it('controls Tab and Region selection without moving Space focus or the original editor caret', async () => {
@@ -424,6 +489,33 @@ it('consumes real Topic relations by exact same-name IDs and retains cancellatio
   await act(async () => checkbox().click())
   expect(change).toHaveBeenLastCalledWith(originalZoneId(), spaceB, false)
   expect(useAppStore.getState().tabs[mixed.id]).toBe(mixed); expect(useAppStore.getState().mainSurface).toBe('survey'); healthy()
+})
+
+it('keeps the live sidebar width and original work surface when its original save owner reports a host failure', async () => {
+  const state = useAppStore.getState()
+  useAppStore.setState({ restoredWorkbench: projectPersistedWorkbench(state) })
+  vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig); vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+  vi.mocked(api.browser.create).mockImplementation(async id => id === browser.id ? browser : { ...browser, ...pageB, id })
+  const dispose = await realInitialize()
+  try {
+    await dom.render(<App />); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
+    const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!, selected = before.surveyZoneSelection
+    // Settle the prior selection through the original unload writer, then hold its trailing
+    // debounce. The completed gesture itself must request a receipt, rather than borrowing a
+    // later unrelated write's warning.
+    await act(async () => window.dispatchEvent(new Event('pagehide')))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const flush = vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(new Error('Sidebar save is temporarily unavailable.'))
+    await dom.click('[aria-label="Resize Survey items"]')
+    const handle = dom.container.querySelector('[aria-label="Resize Survey items"]')!
+    await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+    expect(useAppStore.getState().workbenchSaveWarning).toContain('Sidebar save is temporarily unavailable.')
+    expect(flush).toHaveBeenCalled(); expect(useAppStore.getState().surveySidebarWidth).toBe(236)
+    expect(slot().querySelector('.retained-workbench-view')).toBe(original); expect(useAppStore.getState().surveyZoneSelection).toBe(selected)
+    expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(dom.container.textContent).toContain('Sidebar save is temporarily unavailable.'); expect(api.sessions.stop).not.toHaveBeenCalled()
+  } finally { vi.useRealTimers(); dispose() }
 })
 
 it('does not let a delayed new item steal a later explicit Zone selection', async () => {

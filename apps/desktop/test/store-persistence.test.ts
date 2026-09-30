@@ -207,15 +207,20 @@ describe('Renderer persistence boundary', () => {
       // 换行开关和 projectRailOpen/toolsOpen 走同一条 restoredBoolean 校验，所以同样喂坏值：
       // 只把它加进下面的期望值（不喂坏值）等于只守「它在场」，而它自己那条取值校验无人守。
       projectRailWidth: Number.NaN,
+      surveySidebarWidth: Number.NaN,
       editorWordWrap: 'on' as never
     })).toEqual({
       activeWorkspaceId: 'workspace-a',
+      workbenchSpaceSelection: null,
       mainSurface: 'workbench',
+      surveyZoneSelection: null,
+      surveySidebarWidth: 220,
       projectRailOpen: true,
       projectRailWidth: 210,
       collapsedProjectGroups: {},
       explorerCollapsed: {},
       pinnedItems: {},
+      spaceObjectIcons: {},
       toolsOpen: true,
       workspaceTool: 'files-branches',
       toolDockWidth: 440,
