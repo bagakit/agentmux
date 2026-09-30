@@ -11,7 +11,8 @@
 .space-icon-picker__automatic { justify-self: start; }
 .space-icon-picker__error { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .space-icon-picker footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-3); }
-.space-icon-picker__save { color: var(--text); background: var(--surface-3); }
+.space-icon-picker__save:not(.primary-button) { color: var(--text); background: var(--surface-3); }
+.space-icon-picker__save.primary-button { padding: var(--sp-2) var(--sp-4); }
 
 .space-object-icon__avatar { width: 14px; height: 14px; border-radius: 50%; object-fit: cover; }
 .mote-avatar-file { position: relative; justify-self: start; cursor: pointer; }
@@ -31,7 +32,10 @@
 .space-object-icon > .mote-face { width: 20px; height: 20px; }
 .mote-chooser__name .space-object-icon > .mote-face { width: 26px; height: 26px; }
 .mote-avatar-source { display: flex; gap: var(--sp-3); }
-.mote-avatar-source [aria-pressed="true"], .mote-face-editor button[aria-pressed="true"] { border-color: var(--green); color: var(--text); background: var(--surface-3); }
+.mote-avatar-source button, .mote-face-editor button { position: relative; }
+.mote-avatar-selection-mark { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-2); pointer-events: none; visibility: hidden; }
+.mote-avatar-source button[aria-pressed="true"] > .mote-avatar-selection-mark,
+.mote-face-editor button[aria-pressed="true"] > .mote-avatar-selection-mark { visibility: visible; }
 .mote-face-editor { display: grid; gap: var(--sp-3); }
 .mote-face-editor__preview { justify-self: center; width: 100px; height: 100px; margin-block: var(--sp-2); }
 .mote-face-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
