@@ -182,6 +182,8 @@ export function SessionPane({
     nativeHistoryPage,
     loading: userMessagesLoading,
     error: userMessagesError,
+    observationError: userMessagesObservationError,
+    windowFrozen: userMessagesWindowFrozen,
     hasMore: hasEarlierUserRecords,
     refresh: refreshUserMessages
   } = useSessionUserMessages(
@@ -492,6 +494,8 @@ export function SessionPane({
       userMessageRead={{
         loading: userMessagesLoading,
         error: userMessagesError,
+        observationError: userMessagesObservationError,
+        windowFrozen: userMessagesWindowFrozen,
         hasMore: hasEarlierUserRecords,
         onRetry: () => { void refreshUserMessages() },
         onReadEarlier: openHistory
