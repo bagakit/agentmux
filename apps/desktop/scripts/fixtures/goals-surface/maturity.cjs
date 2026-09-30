@@ -66,7 +66,7 @@ async function densityScenes(){
  }
  await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280)
  const facts=await evaluate('goalsVisual.facts()');assert.equal(facts.ids.length,6);assert.ok(facts.criteria>0&&facts.reports>0&&facts.checks>0,'Mixed target/result collections are nonempty');await densityStart('mixed',defaults,baseline);await capture('1280-dark-density-mixed',1280)
- await evaluate('goalsVisual.seedCommon("project")');await size(1280)
+ await evaluate('goalsVisual.seedCommon("project")');if(scope==='density-list-only')await evaluate('goalsVisual.appearance("dark")');await size(1280)
  await densityStart('project',[...defaults,'根据最近的项目情况，建议我下一步应该做什么'],baseline);await capture('1280-dark-density-project',1280)
  if(scope==='density-list-only'){assert.equal(result.frames.length,2,'Only the two original wide density list scenes are captured');return}
  await scenario('proposal',1280,'dark');await densityDetail('wide-detail');await capture('1280-dark-density-detail',1280)
