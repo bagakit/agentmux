@@ -8,6 +8,7 @@ import type { NoteBlockTarget } from '../../shared/note-document'
 import type { FileOpenPlacement } from './lib/file-workbench-state'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
+import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
@@ -2275,6 +2276,7 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
   const state = get()
   const demand = state.demands[demandId]
   if (!demand) throw new Error(`Demand ${demandId} is unavailable`)
+  const projectContext = goalProjectContextText(goalProjectContext(state.config, demand.projectId, state.activeWorkspaceId), demand.projectId)
   const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
   if (!workspace) throw new Error('Scratch workspace is unavailable')
   const executorId = Object.keys(state.config?.executors ?? {})[0]
@@ -2288,6 +2290,7 @@ async function openGoalPmo(demandId: string, prompt?: string): Promise<string> {
     )
     return [
       prompt?.trim() || MOTE_COORDINATION_ROLE,
+      projectContext,
       executionContext
     ].join('\n\n')
   }
