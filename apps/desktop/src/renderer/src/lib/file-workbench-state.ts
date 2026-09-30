@@ -73,12 +73,23 @@ function withoutIssue(
   return next
 }
 
+/** Same-call owner facts; false from openFile remains the existing navigation verdict. */
+export type FileOpenResult = {
+  placement: { status: 'created' | 'reused' | 'none' | 'unconfirmed'; tabId: string | null; regionId: string | null }
+  data: { kind: 'text' | 'media-preview' | 'binary-preview' | 'not-file' | 'failed' | 'unconfirmed'; reason: string | null }
+  navigation: 'background' | 'applied' | 'cancelled' | 'unconfirmed'
+}
+
 export type FileOpenPlacement = {
   displayWorkspaceId: string
   space: { spaceId: string; zoneId: string }
   resource: { hostId: string; path: string }
   projection?: import('./workbench-projection').WorkbenchProjection
   reference?: import('./workbench-projection').WorkbenchProjectionSelection
+  focus?: boolean
+  fileOnly?: boolean
+  selection?: import('@agentmux/core').AgentMuxDesktopSpaceSelection
+  onResult?: (result: FileOpenResult) => void
 }
 
 /** An existing File Region is an exact address, not an instruction to create another Tab. */
@@ -117,7 +128,7 @@ export function reduceFileSurfaceOpened(
   if (!layout) return state
   if (placement?.reference) {
     if (!fileOpenReferenceMatches(state, workspaceId, path, preferredTabGroupId, placement)) throw new Error('The original File Region reference is unconfirmed; no substitute Tab was created.')
-    if (placement.projection) return state
+    if (placement.projection || placement.focus === false) return state
     const reference = placement.reference, tab = state.tabs[reference.tabId]!
     return { ...state,
       tabs: { ...state.tabs, [tab.id]: { ...tab, layout: { ...tab.layout, activeRegionId: reference.regionId } } },
@@ -143,13 +154,13 @@ export function reduceFileSurfaceOpened(
   return {
     ...state,
     tabs: { ...state.tabs, [tab.id]: tab },
-    lastActiveFileByWorkspace: placement?.projection ? state.lastActiveFileByWorkspace : { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
+    lastActiveFileByWorkspace: placement?.projection || placement?.focus === false ? state.lastActiveFileByWorkspace : { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
     layouts: {
       ...state.layouts,
       [displayId]: placement ? (() => {
         const placed = addTabOccurrence(layout, targetTabGroupId, tabId)
         if (!placed) throw new Error('The exact file display Group is unavailable.')
-        return placement.projection ? placed : activateTab(placed, targetTabGroupId, tabId)
+        return placement.projection || placement.focus === false ? placed : activateTab(placed, targetTabGroupId, tabId)
       })() : existingTabGroupId
         ? activateTab(layout, targetTabGroupId, tabId)
         : addTab(layout, targetTabGroupId, tabId)

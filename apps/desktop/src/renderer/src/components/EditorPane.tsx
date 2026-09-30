@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { wordWrapOption } from '../lib/editor-diff'
+import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import {
@@ -85,7 +86,6 @@ export function EditorPane({
   released = false,
   visible = true,
   preview,
-  previewing = false,
   onTogglePreview,
   extraActions
 }: {
@@ -94,7 +94,6 @@ export function EditorPane({
   released?: boolean
   visible?: boolean
   preview?: ReactNode
-  previewing?: boolean
   onTogglePreview?: () => void
   extraActions?: ReactNode
 }) {
@@ -133,8 +132,9 @@ export function EditorPane({
   // Diff is a display MODE of this same file Region, not a separate surface kind: it carries no
   // identity beyond the file it compares, so it lives as per-Region ephemeral state keyed by regionId
   // (never persisted — a diff depends on git HEAD and is transient; reopening returns to edit).
-  const regionMode = useAppStore((state) => state.editorRegionModes[surface.regionId] ?? 'edit')
-  const regionDiff = useAppStore((state) => state.editorRegionDiffs[surface.regionId])
+  const regionMode = useAppStore((state) => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, issue?.kind === 'binary'))
+  const previewing = regionMode === 'preview'
+  const regionDiff = useAppStore((state) => Object.hasOwn(state.editorRegionDiffs, surface.regionId) ? state.editorRegionDiffs[surface.regionId] : undefined)
   const setRegionMode = useAppStore((state) => state.setEditorRegionMode)
   const reloadDiff = useAppStore((state) => state.reloadRegionDiff)
   const monacoTheme = useMonacoTheme()

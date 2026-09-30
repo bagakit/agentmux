@@ -5,11 +5,16 @@ import { warmLauncherId } from './lib/warm-terminal-preview'
 import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
 import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
-import type { FileOpenPlacement } from './lib/file-workbench-state'
+import type { FileOpenPlacement, FileOpenResult } from './lib/file-workbench-state'
+import type { EditorRegionMode } from './lib/file-region-presentation'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
+import { executeWorkfaceAgentView } from './lib/workface-agent-view'
+import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
+import { executeWorkfaceFileOpen } from './lib/workface-file-open'
+import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
@@ -607,7 +612,7 @@ type AppState = {
    * 不持久化：diff 依赖 git HEAD，是一个瞬时视图；重开该回到编辑态而不是复活一个可能已过期的 diff。
    * 缺省即 'edit'。生命周期随 Region：Region 关掉时由 reconcile/close 出口一并清掉，不留孤儿。
    */
-  editorRegionModes: Record<string, 'edit' | 'diff'>
+  editorRegionModes: Record<string, EditorRegionMode>
   /**
    * 每个文件 Region 已加载的 diff 负载（含加载中/失败态），按 regionId 存。由 `loadRegionDiff` 从既有
    * `window.agentmux.git.diff`（HEAD blob vs 工作区）取——不新开任何 git shell-out。与 editorRegionModes
@@ -725,14 +730,14 @@ type AppState = {
   clearCloseRegionRequest(nonce: number): void
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
-  setViewMode(sessionId: string, mode: ViewMode): void
+  setViewMode(sessionId: string, mode: ViewMode, options?: { focus?: boolean }): void
   /** 翻转编辑器换行的全局位。 */
   toggleEditorWordWrap(): void
   /**
    * 把一个文件 Region 切到 diff 模式并（若还没有）加载它的 diff；再次调用（mode 'edit'）切回编辑。
    * diff 两侧走既有 git.diff 桥，不新开 shell-out。regionId 承载模式，workspaceId+path 定位文件。
    */
-  setEditorRegionMode(regionId: string, workspaceId: string, path: string, mode: 'edit' | 'diff'): Promise<void>
+  setEditorRegionMode(regionId: string, workspaceId: string, path: string, mode: EditorRegionMode): Promise<void>
   /** 重新拉取一个已在 diff 模式的 Region 的 diff（用户点「刷新」，或改动落盘后想看最新差异）。 */
   reloadRegionDiff(regionId: string, workspaceId: string, path: string): Promise<void>
   /**
@@ -3170,6 +3175,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
+    if (request.operation === 'agent.view') return await executeWorkfaceAgentView({
+      get, setViewMode: (...args) => get().setViewMode(...args), save: saveWorkbenchSelection
+    }, request)
+    if (request.operation === 'space.swap') return await executeWorkfaceRegionSwap({
+      get, swapRegions: (...args) => get().swapRegions(...args),
+      closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
+    }, request)
+    if (request.operation === 'open.file') return await executeWorkfaceFileOpen({
+      get,
+      topics: async () => get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+        ? await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) : [],
+      openFile: (...args) => get().openFile(...args),
+      closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
+    }, request)
+    if (request.operation === 'space.view') return await executeWorkfaceFileView({
+      get, setEditorRegionMode: (...args) => get().setEditorRegionMode(...args),
+      closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
+    }, request)
     if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv' || request.operation === 'space.bind' || request.operation === 'space.unbind') {
       return await executeSpatialControl({
         get,
@@ -4563,10 +4586,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }))
   },
-  setViewMode(sessionId, mode) {
+  setViewMode(sessionId, mode, options) {
     set((state) => ({
       viewModes: { ...state.viewModes, [sessionId]: mode },
-      agentFocus: focusSessionContext(state, sessionId)
+      ...(options?.focus === false ? {} : { agentFocus: focusSessionContext(state, sessionId) })
     }))
   },
   toggleEditorWordWrap() {
@@ -4576,7 +4599,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({ editorRegionModes: { ...state.editorRegionModes, [regionId]: mode } }))
     // Only entering diff triggers a load, and only when this Region has no diff yet — switching back
     // and forth must not refetch. An explicit refresh goes through reloadRegionDiff.
-    if (mode === 'diff' && !get().editorRegionDiffs[regionId]) {
+    if (mode === 'diff' && !Object.hasOwn(get().editorRegionDiffs, regionId)) {
       await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
     }
   },
@@ -5078,37 +5101,66 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const navigation = get()
     const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
     const displayId = placement?.displayWorkspaceId ?? workspaceId
+    const background = placement?.focus === false
+    const canonicalTabId = workspaceId ? fileTabId(workspaceId, path) : null
+    const exactRegionId = placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
+    const originalTab = canonicalTabId && Object.hasOwn(navigation.tabs, canonicalTabId) ? navigation.tabs[canonicalTabId] : undefined
+    let expectedSurface = exactRegionId ? originalTab?.regions[exactRegionId] : undefined
+    let result: FileOpenResult = { placement: { status: 'unconfirmed', tabId: null, regionId: null },
+      data: { kind: 'unconfirmed', reason: null }, navigation: background ? 'background' : 'unconfirmed' }
+    const rememberPlacement = () => {
+      if (!canonicalTabId || !exactRegionId) return
+      const tab = get().tabs[placement?.reference?.tabId ?? canonicalTabId]
+      const surface = tab?.regions[exactRegionId]
+      if (!expectedSurface && surface?.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path) expectedSurface = surface
+    }
+    try {
     const layout = displayId ? navigation.layouts[displayId] : undefined
     if (!workspaceId || !layout || placement && (!tabGroupId || !groupIds(layout.root).includes(tabGroupId) || !layout.groups.some(group => group.id === tabGroupId))) return false
     const resourceCurrent = () => {
       const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
-      return !placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path && fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement)
+      const currentLayout = displayId ? get().layouts[displayId] : undefined
+      const currentTab = canonicalTabId ? get().tabs[placement?.reference?.tabId ?? canonicalTabId] : undefined
+      return (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
+        currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
+        fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement)) &&
+        (!placement?.onResult || !expectedSurface || exactRegionId && currentTab?.regions[exactRegionId] === expectedSurface)
     }
     if (!resourceCurrent()) return false
-    if (!placement?.projection && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
-    const intentVersion = ++fileOpenIntentVersion
-    fileOpenNavigationUnsubscribe?.()
+    if (!background && !placement?.projection && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+    const intentVersion = background ? fileOpenIntentVersion : ++fileOpenIntentVersion
+    if (!background) fileOpenNavigationUnsubscribe?.()
     const selected = fileNavigationSelection(navigation)
     let cancelled = false
-    const unsubscribe = useAppStore.subscribe(function observeFileNavigation(state) {
+    const unsubscribe = background ? () => {} : useAppStore.subscribe(function observeFileNavigation(state) {
       if (fileNavigationSelection(state) !== selected) {
         cancelled = true
         releaseNavigation()
       }
     })
-    fileOpenNavigationUnsubscribe = unsubscribe
+    if (!background) fileOpenNavigationUnsubscribe = unsubscribe
     const releaseNavigation = () => {
       unsubscribe()
       if (fileOpenNavigationUnsubscribe === unsubscribe) fileOpenNavigationUnsubscribe = undefined
     }
-    const mayReveal = () => intentVersion === fileOpenIntentVersion && !cancelled && resourceCurrent()
+    const mayReveal = () => (background || intentVersion === fileOpenIntentVersion && !cancelled) && resourceCurrent()
     const selectProjection = () => {
+      if (background) return
       // This is an explicit original File action, not discovery or arbitrary selection.
       const document = get().documents[documentKey(workspaceId, path)]
       if (navigation.mainSurface === 'survey' && placement?.projection?.presentationId === 'survey-workbench' &&
         placement.projection.entity.kind === 'zone' && placement.projection.entity.zoneId === placement.space.zoneId &&
         path.endsWith(NOTE_FILE_EXTENSION) && document && parseNoteFile(document).status === 'valid') {
         get().setSurveyZoneCollected(placement.space.zoneId, true)
+      }
+      if (placement?.focus === true && placement.selection && resourceCurrent()) {
+        const choice = placement.selection
+        if (!choice.tabId || !choice.regionId || !choice.groupId) return
+        get().focusRegion(choice.workspaceId, choice.tabId, choice.regionId, 'pointer', choice.groupId)
+        set({ activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench', workbenchSpaceSelection: choice,
+          regionCaretFocus: null, workbenchNavigationInputPolicy: 'preserve' })
+        result.navigation = 'applied'
+        return
       }
       if (placement?.reference && !placement.projection) {
         set({ activeWorkspaceId: displayId!, mainSurface: 'workbench' })
@@ -5163,19 +5215,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
         const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
         set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? undefined : topicId, placement))
+        rememberPlacement()
+        result.data = { kind: 'text', reason: null }
         selectProjection()
-        return intentVersion === fileOpenIntentVersion
+        return !background && intentVersion === fileOpenIntentVersion
       }
       // Media has a File identity, but never a UTF-8 buffer. Only its visible pane reads bytes.
       const format = workspaceFilePreviewFormat(path)
-      if ((format && !format.sourceEditable) || get().documentIssues[key]?.kind === 'binary') {
+      if (!placement?.fileOnly && format && !format.sourceEditable || get().documentIssues[key]?.kind === 'binary') {
         if (!mayReveal()) return false
         releaseNavigation()
         const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
         const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
         set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? undefined : topicId, placement))
+        rememberPlacement()
+        result.data = { kind: get().documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'media-preview', reason: null }
         selectProjection()
-        return intentVersion === fileOpenIntentVersion
+        return !background && intentVersion === fileOpenIntentVersion
       }
       while (!get().documents[key]) {
         let request = fileOpenRequests.get(key)
@@ -5220,7 +5276,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 if (placement?.reference) return result.status === 'read'
                   ? reduceDocumentAttached(state, workspaceId, path, result.document)
                   : reduceDocumentLoadFailed(state, workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength })
-                const opened = result.status === 'read'
+                const opened = format && !format.sourceEditable
+                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? undefined : topicId, placement)
+                  : result.status === 'read'
                   ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? undefined : topicId, placement)
                   : reduceDocumentLoadFailed(
                     reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? undefined : topicId, placement),
@@ -5239,13 +5297,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   } }
                 }
               })
-              if (result.status === 'binary') await api.files.unobserve(workspaceId, path)
+              rememberPlacement()
+              if (result.status === 'binary' || format && !format.sourceEditable) await api.files.unobserve(workspaceId, path)
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
                 await refreshFileDocument(workspaceId, path, openedLifetime)
               }
               return true
             } catch (error) {
+              result.data = { kind: 'failed', reason: presentError(error) }
               get().reportError(error)
               return false
             } finally {
@@ -5256,7 +5316,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         const opened = await request
         if (opened === 'directory') {
-          if (mayReveal()) {
+          result.data = { kind: 'not-file', reason: 'The requested path is a directory; no File was created.' }
+          result.placement = { status: 'none', tabId: null, regionId: null }
+          if (!placement?.fileOnly && mayReveal()) {
             releaseNavigation()
             get().updateFileExplorerState(workspaceId, (current) => revealFileExplorerPath(current, path))
             set({ activeWorkspaceId: workspaceId, workspaceTool: 'files-branches', toolsOpen: true, mainSurface: 'workbench' })
@@ -5265,7 +5327,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         if (!opened) return false
         const state = get(), currentLayout = state.layouts[displayId!]
-        if ((state.documents[key] || state.documentIssues[key]?.kind === 'binary') && currentLayout) {
+        result.data = { kind: format && !format.sourceEditable ? 'media-preview' : state.documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'text', reason: null }
+        if ((state.documents[key] || state.documentIssues[key]?.kind === 'binary' || format && !format.sourceEditable) && currentLayout) {
           if (!mayReveal()) return false
           releaseNavigation()
           const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
@@ -5273,13 +5336,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set((current) => current.documents[key]
             ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? undefined : topicId, placement)
             : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? undefined : topicId, placement))
+          rememberPlacement()
           selectProjection()
-          return intentVersion === fileOpenIntentVersion
+          return !background && intentVersion === fileOpenIntentVersion
         }
         if (!joinedRequest) return false
       }
       return false
     } catch (error) {
+      result.data = { kind: 'failed', reason: presentError(error) }
       get().reportError(error)
       return false
     } finally {
@@ -5305,6 +5370,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 撤的动作走 `clearDocumentRevealTarget`——EditorPane 消费完之后调的也是它。就地再写一份
       // delete 会让「怎么撤一个 target」有两处取值层，必然漂移。
       if (location && !get().documents[key]) get().clearDocumentRevealTarget(key)
+    }
+    } finally {
+      if (placement?.onResult) {
+        const tabId = placement.reference?.tabId ?? canonicalTabId
+        const tab = tabId && Object.hasOwn(get().tabs, tabId) ? get().tabs[tabId] : undefined
+        const surface = exactRegionId ? tab?.regions[exactRegionId] : undefined
+        const member = displayId && tabId && get().layouts[displayId]?.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(tabId))
+        if (expectedSurface && surface === expectedSurface && surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path && member) {
+          result.placement = { status: originalTab ? 'reused' : 'created', tabId: tabId!, regionId: exactRegionId! }
+        } else if (result.data.kind !== 'not-file') result.placement = { status: result.data.kind === 'failed' && !expectedSurface ? 'none' : 'unconfirmed', tabId: null, regionId: null }
+        if (!background && result.navigation !== 'applied' && (result.data.kind === 'text' || result.data.kind === 'media-preview' || result.data.kind === 'binary-preview')) result.navigation = 'cancelled'
+        placement.onResult(result)
+      }
     }
   },
   async attachPersistedFileDocument(workspaceId, path) {

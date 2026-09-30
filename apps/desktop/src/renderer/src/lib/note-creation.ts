@@ -33,6 +33,7 @@ import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, zoneContext } from './space-agent-control'
+import { zoneFileResource } from './zone-file-resource'
 import { groupIds } from '@agentmux/layout'
 
 export function noteCreationResourceMatches(config: AppConfig | null, target: NoteCreationTarget): boolean {
@@ -76,10 +77,6 @@ export function noteCreationTarget(state: Parameters<typeof spatialCatalog>[0], 
   const zone = catalog.zones.find(item => item.zoneId === (tab?.zoneId ?? defaultZoneId))
   if (!zone || zone.kind === 'unknown' || zone.workspaceId !== workspace.id || zone.hostId !== workspace.hostId || !zone.directoryPath) throw new Error('The Note Zone birth directory is unknown. Its draft and original target are retained.')
   const sourceSpaceId = zoneContext(state, topics, zone)
-  const root = workspace.path.replace(/\/+$/, '') || '/', directory = zone.directoryPath.replace(/\/+$/, '') || '/'
-  const prefix = root === '/' ? '/' : `${root}/`
-  if (directory !== root && !directory.startsWith(prefix)) throw new Error('The confirmed Note resource directory is outside the original Files scope.')
-  const relativeDirectory = directory === root ? '' : directory.slice(prefix.length)
-  if (relativeDirectory.split('/').some(segment => segment === '.' || segment === '..' || segment.includes('\\'))) throw new Error('The confirmed Note resource path cannot be represented in the original Files scope.')
-  return { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath: directory, relativeDirectory, zoneId: zone.zoneId, sourceSpaceId, displayWorkspaceId, groupId: input.groupId }
+  const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone)
+  return { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath, relativeDirectory, zoneId: zone.zoneId, sourceSpaceId, displayWorkspaceId, groupId: input.groupId }
 }

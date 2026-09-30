@@ -52,9 +52,9 @@ Intents:
   diagnostics Inspect the Desktop crash log or explicitly request it in the file manager.
   pmo         Give PMO Teams a bounded global snapshot and precise drill-downs.
   demand      List and update Board Demands and their explicit Session links.
-  agent       Open an Agent, rename its desktop alias, or read that alias.
-  space       Discover, inspect, move presentations, or rename an exact Tab.
-  open        Open a Terminal or Browser at one exact spatial destination.
+  agent       Open an Agent, inspect or rename its alias, and select its presentation mode.
+  space       Discover and control spatial presentations, file modes, and Region positions.
+  open        Open a File, Terminal, or Browser at one exact spatial destination.
   browser     Drive an already-open Browser by running a program in it.
   send        Send one prompt to an exact Session or uniquely resolved presentation target.
   deliveries  Explicitly check and acknowledge your durable incoming message batch.
@@ -401,6 +401,7 @@ Usage:
   agentmux agent open --help
   agentmux agent rename --session <exact-session-id> (--name <text>|--clear)
   agentmux agent inspect --session <exact-session-id>
+  agentmux agent view --session <exact-session-id> [--mode terminal|activity]
 
 Use agent open to create an Agent in a Zone or add a presentation of an existing Session.
 Discover exact Executor IDs with agentmux list agents and destinations with agentmux space ls.
@@ -467,6 +468,8 @@ Usage:
   agentmux space inspect --space <id>|--zone <id>|--tab <id>|--region <id>
   agentmux space inspect --request <request-id>
   agentmux space mv --from-region <id> --expect-session <id> <destination>
+  agentmux space view --region <exact-region-id> [--mode source|diff|preview]
+  agentmux space swap --region <exact-region-id> --with <exact-region-id>
   agentmux space rename --tab <exact-tab-id> (--name <text>|--clear)
   agentmux space bind|unbind --zone <id> --space <id>
   agentmux space bind|unbind --tab <id> --display-workspace <id> --group <id>
@@ -584,19 +587,70 @@ Usage: agentmux dispatch show --source-message <message-id>
 Either currently authorized participant can inspect the durable open time, actual reply
 IDs and waiting fact. Missing referenced messages or historical identity produce an explicit
 unavailable error; this never affects ordinary Agent input or other recipients' messages.`],
-  ['open', `Open a Terminal or Browser at one exact destination
+  ['open', `Open a File, Terminal, or Browser at one exact destination
 
 Usage:
+  agentmux open file --path <Zone-relative-path> --zone <zone-id> [--space <space-id>] [--display-workspace <id> --group <id>] [--focus]
   agentmux open terminal [--command <shell-command>] <destination>
   agentmux open browser --url <url> <destination>
 
-Exactly one destination is required:
+Terminal and Browser require exactly one destination:
   --left-of <region-id|self>      --right-of <region-id|self>
   --above <region-id|self>        --below <region-id|self>
   --tab <tab-id|self> --new-tab   --in-region <launcher-region-id>
 
 Terminal shell command and Browser URL are delivered once to their respective owner.
 Agent creation uses agentmux agent open and its Space/Zone destination grammar.`],
+  ['open.file', `Open or reuse a file through its original Zone and document owner
+
+Usage: agentmux open file --path <Zone-relative-path> --zone <exact-zone-id> [--space <exact-space-id>] [--display-workspace <id> --group <id>] [--focus] [--request-id <id>]
+
+Discover exact IDs with space ls. Paths are literal relative to the Zone's actual directory,
+including Topic/Mote homes, then mapped to the existing Workspace file service. The command
+opens its canonical File Tab, including a Zone's first Tab. Explicit display placement needs
+both Workspace and Group; extra parents must agree. Existing content is never overwritten.
+
+Placement is background by default. --focus requests navigation while preserving eligible
+input; late completion cannot take navigation back from the user. Resource, file data, actual
+placement and navigation are separate receipt facts. Bookmarks open as source, directories
+are refused, media/binary use their actual preview. A failed read retains any created surface.
+Save failure retains applied state; partial/unknown/refused exits nonzero with the typed report.
+A lost receipt is unconfirmed: inspect current placement before deciding, do not blindly reopen.`],
+  ['agent.view', `Read or change one exact Agent Session's presentation preference
+
+Usage: agentmux agent view --session <exact-session-id> [--mode terminal|activity] [--request-id <id>]
+
+Without --mode this only reads the stored override, effective mode and affected Regions and
+locations. A change affects every presentation of that SID and persists through the original
+preference owner. A retained AgentRegion remains valid while Session facts are unconfirmed.
+No readiness probe, lifecycle change, navigation or caret transfer is requested. An old input
+DOM may lose eligibility when the presentation changes; the command does not refocus it.
+Read and unchanged outcomes are distinct from changed/partial/unknown/refused. Save failure
+keeps the applied mode; a flush request never claims disk acknowledgement.`],
+  ['space.view', `Read or change one exact File Region's presentation mode
+
+Usage: agentmux space view --region <exact-region-id> [--mode source|diff|preview] [--request-id <id>]
+
+Without --mode this reads current facts only: it does not load content, fetch diff or save.
+The original Region owner selects one actual body and menu state. Markdown, SVG and Note
+text support source/diff/preview; ordinary text and HTML source support source/diff, while
+media and known binary support preview only. Unknown data is reported as unconfirmed.
+
+Mode application and preview/diff content availability are separate facts. Switching keeps
+the document, drafts and Region view state, without saving the file or navigating. Other
+Regions of the same document keep their mode. Modes are transient: normal restart restores
+the original work surface with its format default. partial/unknown/refused exits nonzero.`],
+  ['space.swap', `Exchange two exact Region positions within one Tab entity
+
+Usage: agentmux space swap --region <exact-region-id> --with <exact-region-id> [--request-id <id>]
+
+Both Regions must belong to the same Tab. Multiple display occurrences share that entity's
+layout; the receipt lists their affected locations. Only positions change: tree ratios,
+active Region identity, contents, Session/Run, cwd and drafts remain. Cross-Tab, missing,
+closing and ambiguous targets are refused before writing. A self exchange is unchanged.
+No navigation or caret transfer is requested. Real input eligibility follows its presentation.
+Read the actual beforeOrder/afterOrder and save facts. Save failure retains the exchange.
+After a lost receipt inspect the current Tab; never repeat blindly, since swapping again undoes it.`],
   ['open.terminal', `Open a Terminal
 
 Usage: agentmux open terminal [--command <shell-command>] <destination>
@@ -1092,6 +1146,25 @@ main-visible presentation or input transfer. Floating, covered, pending and unkn
 remain explicit; navigation never closes a Mote or dismisses an overlay automatically.
 Use agentmux inspect --client to observe the current state after navigation. See focus --help
 for the complete Space/Zone/Tab/Region, Goal and Surface selectors.
+
+## Open files and control the existing work surface
+
+\`\`\`bash
+agentmux open file --path docs/notes.md --zone <zone-id>
+agentmux agent view --session <exact-session-id> --mode activity
+agentmux space view --region <file-region-id> --mode diff
+agentmux space swap --region <region-id> --with <other-region-id>
+\`\`\`
+
+Run each entry with --help and discover exact IDs with space ls. File paths start at the
+Zone directory, including a Topic/Mote home. File open defaults to background; --focus
+explicitly requests navigation while preserving eligible input. Terminal/Activity belongs
+to the Session and affects all its presentations; source/diff/preview belongs to the File
+Region and affects its occurrences. Omit --mode for a read with no I/O or save side effects.
+Swap exchanges two positions of the same Tab entity without moving execution directories.
+Inspect typed outcomes, content availability and save facts. Unknown/partial/refused exits
+nonzero while retaining the original work. A lost receipt never authorizes automatic replay;
+especially do not repeat a swap, which would undo an already applied exchange.
 
 ## Open a Terminal or Browser
 
