@@ -19,7 +19,7 @@ type Facts = {
 }
 
 export type SessionProjectFileContext = {
-  kind: 'session' | 'goal' | 'unconfirmed'
+  kind: 'session' | 'goal' | 'unassigned' | 'unconfirmed'
   workspaceRoot: string
   homeDir: string
   goalId?: string
@@ -78,9 +78,9 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
       issue = ids.length > 1 ? 'More than one Goal refers to this PMO Tab.'
         : !goal ? 'The Goal association for this PMO Tab is unavailable.'
         : !occurrence || !session ? 'The original PMO Region or display occurrence is unconfirmed.'
-        : !project ? 'The associated Project, Workspace or Host is unconfirmed.' : undefined
+        : goal.projectId && !project ? 'The associated Project, Workspace or Host is unconfirmed.' : undefined
     }
-    const kind = seenGoal ? issue ? 'unconfirmed' : 'goal' : 'session'
+    const kind = seenGoal ? issue ? 'unconfirmed' : project ? 'goal' : 'unassigned' : 'session'
     const root = kind === 'goal' ? project!.path : kind === 'session' && session
       ? workspaceRootForPath(state.config, session) ?? '' : ''
     const hostId = kind === 'goal' ? project!.hostId : session?.hostId
