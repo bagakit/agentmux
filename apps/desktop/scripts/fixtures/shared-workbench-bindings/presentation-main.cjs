@@ -29,7 +29,9 @@ app.whenReady().then(async()=>{try{
     window.setContentSize(width,800);await pause(180)
     const f=await facts();preserved(f);assert.deepEqual(f.reference,{displayWorkspaceId:'display-b',groupId:'display-exact-group',tabId:'explicit-exact-tab',regionId:'exact-r2'})
     const geometry=await read(`(()=>{const e=document.querySelector('.focused-tab-workspace'),r=e.getBoundingClientRect();const leaves=[...e.querySelectorAll('[data-fixture-session]')].map(v=>{const q=v.getBoundingClientRect();return {width:q.width,height:q.height}});return {width:r.width,height:r.height,leaves,groups:[...e.querySelectorAll('[data-pane-group-id]')].map(g=>g.dataset.paneGroupId)}})()`)
-    assert.deepEqual(geometry.groups,['display-exact-group'],'Only the exact Group occurrence is presented');
+    assert.deepEqual(geometry.groups,[],'Tab-level content does not render its parent Group chrome');
+    assert.equal(await read("document.querySelectorAll('.focused-tab-workspace .pane-tabbar').length"),0,'Focus title band is not duplicated by Group tabs');
+    assert.deepEqual(await read("[...document.querySelectorAll('.focused-tab-workspace .workbench-tab-slot')].map(e=>[e.dataset.workbenchGroupId,e.dataset.workbenchTabId])"),[['display-exact-group','explicit-exact-tab']],'One exact original Tab slot');
     assert.ok(geometry.width>0&&geometry.height>0&&geometry.leaves.length===2&&geometry.leaves.every(r=>r.width>0&&r.height>0),'Original whole Tab and two Regions are drawn')
     await shot('exact-'+width+'.png',width);receipt.phases.push({phase:'exact-focus',width,facts:f,geometry})
   }
