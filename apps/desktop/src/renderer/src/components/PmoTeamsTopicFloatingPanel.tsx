@@ -224,7 +224,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     positionRef.current = position
     const stop = autoUpdate(anchor, panel, () => { void position() })
     return () => { disposed = true; stop(); if (positionRef.current === position) positionRef.current = undefined }
-  }, [visible, floating.size?.width, floating.size?.height, railMode])
+  }, [visible, floating.size?.width, floating.size?.height, railMode, scratch, topics])
   useEffect(() => {
     if (!floating.preview) return
     const dismiss = (event: KeyboardEvent) => {

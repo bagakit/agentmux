@@ -4,7 +4,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen,
   resolvePmoTeamsTopicFloatingSize, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating.js'
-import { createMoteApp } from './fixtures/mote-app'
+import { createMoteApp, settleMoteApp } from './fixtures/mote-app'
+import { moteTopics } from './fixtures/mote-workface'
+import { useAppStore } from '../src/renderer/src/store'
+
+const positionedAnchors = vi.hoisted(() => [] as Element[])
 
 // happy-dom has no layout. Supply only the available-space boundary while
 // exercising the real App, Panel event handlers and floating persistence owner.
@@ -13,6 +17,7 @@ vi.mock('@floating-ui/dom', async importOriginal => {
   return { ...actual, computePosition: async (...args: Parameters<typeof actual.computePosition>) => {
     const [reference, floating, options] = args
     if (!floating.hasAttribute('data-pmo-teams-topic-floating')) return actual.computePosition(reference, floating, options)
+    positionedAnchors.push(reference as Element)
     for (const middleware of options?.middleware ?? []) if (middleware && middleware.name === 'size')
       middleware.options.apply({ availableWidth: 400, availableHeight: 450 })
     return { x: 8, y: 8, placement: 'top-start', strategy: 'fixed', middlewareData: {} }
@@ -28,9 +33,35 @@ function Owner() {
 }
 const current = () => JSON.parse(container.querySelector('output')!.textContent!)
 beforeEach(async () => {
+  positionedAnchors.length = 0
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   localStorage.clear(); container = document.createElement('div'); document.body.append(container)
   root = createRoot(container); await act(async () => root.render(createElement(Owner)))
+})
+
+it('the mounted Panel rebinds the actual footer button replaced by a late Topic directory receipt', async () => {
+  await act(async () => root.unmount()); root = createRoot(container)
+  const app = createMoteApp()
+  let finish!: (topics: typeof moteTopics) => void
+  const directory = new Promise<typeof moteTopics>(resolve => { finish = resolve })
+  app.listTopics.mockImplementation(() => directory)
+  useAppStore.setState({ scratchTopicSnapshots: {} })
+  const originalExecution = useAppStore.getState().agentFocus.execution
+  const originalRuns = useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control }))
+  expect(originalRuns).toHaveLength(5)
+  try {
+    await app.mount(); const originalAnchor = app.entry()
+    await act(async () => requestPmoTeamsTopicFloatingOpen()); await settleMoteApp()
+    expect(positionedAnchors.at(-1)).toBe(originalAnchor)
+    await act(async () => finish(moteTopics)); await settleMoteApp()
+    const currentAnchor = app.entry()
+    expect(currentAnchor).not.toBe(originalAnchor); expect(originalAnchor.isConnected).toBe(false)
+    expect(positionedAnchors.at(-1)).toBe(currentAnchor)
+    expect(app.panel().matches(':popover-open')).toBe(true)
+    expect(useAppStore.getState().agentFocus.execution).toBe(originalExecution)
+    expect(useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control }))).toEqual(originalRuns)
+    expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+  } finally { await act(async () => finish(moteTopics)); await app.dispose() }
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); localStorage.clear(); vi.restoreAllMocks() })
 
