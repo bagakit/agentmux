@@ -49,6 +49,9 @@ import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
 import { projectWorkbenchProjection, workbenchProjectionSlotId, type WorkbenchProjection } from './lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget } from './lib/workbench-presentation'
+import { ordinaryWorkbenchViewTargets, workbenchResourceTabs } from './lib/workbench-resource-display'
+import { activeTopicIdFromLayout, layoutForActiveTopic } from './lib/scratch-topic-layout'
+import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
 import { isSessionSurface } from './lib/workbench-surface-kinds'
 
@@ -83,6 +86,7 @@ function DesktopApp() {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
   const tabs = useAppStore((state) => state.tabs)
+  const resourceWorkspaces = useMemo(() => workbenchResourceTabs(tabs), [tabs])
   const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
@@ -181,6 +185,21 @@ function DesktopApp() {
   }, [surveySelection, surveyCatalog, selectSurveyReference])
   const surveyProjectedLayout = useMemo(() => surveyProjection ? projectWorkbenchProjection(layouts[surveyProjection.displayWorkspaceId], tabs, surveyProjection) : null,
     [surveyProjection, layouts, tabs])
+  const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
+  const currentOrdinaryLayout = activeWorkspaceId ? layouts[activeWorkspaceId] : undefined
+  const retainedOrdinaryLayout = useRef<{ workspaceId: string; layout: NonNullable<typeof currentOrdinaryLayout> } | null>(null)
+  if (currentOrdinaryLayout && activeWorkspaceId) retainedOrdinaryLayout.current = { workspaceId: activeWorkspaceId, layout: currentOrdinaryLayout }
+  const ordinaryLayout = currentOrdinaryLayout ?? (retainedOrdinaryLayout.current?.workspaceId === activeWorkspaceId ? retainedOrdinaryLayout.current.layout : undefined)
+  const ordinaryTargets = useMemo(() => {
+    const layout = ordinaryLayout
+    if (!layout || !activeWorkspaceId || mainSurface !== 'workbench' || settingsRoute) return {}
+    const choice = workbenchSpaceSelection?.workspaceId === activeWorkspaceId ? workbenchSpaceSelection : null
+    const held = retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
+    const topicId = choice?.topicId ?? held?.topicId ?? activeTopicIdFromLayout(layout, tabs)
+    const displayed = layoutForLogicalRegionFocus(layoutForActiveTopic(layout, tabs, topicId,
+      !(activeWorkspaceId === SCRATCH_WORKSPACE_ID && choice?.topicId)), tabs, held)
+    return ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId)
+  }, [activeWorkspaceId, ordinaryLayout, tabs, mainSurface, settingsRoute, workbenchSpaceSelection, retainedSpatialFocus])
   const viewTargets = useMemo<Readonly<Record<string, WorkbenchViewTarget>>>(() => {
     const targets: Record<string, WorkbenchViewTarget> = { ...moteViewTargets }
     if (surveyVisible && surveyProjection && surveyProjectedLayout?.layout) {
@@ -203,9 +222,10 @@ function DesktopApp() {
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
       }
     }
+    for (const [tabId, target] of Object.entries(ordinaryTargets)) if (!targets[tabId]) targets[tabId] = target
     return targets
   }, [moteViewTargets, surveyVisible, surveyProjection, surveyProjectedLayout, surveyToolsOpen, narrowControls, selectSurveyReference,
-    focusVisible, focusProjection, focusTab, selectFocusReference])
+    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
   useEffect(() => {
     if (mainSurface === 'survey') setSurveyVisited(true)
@@ -271,7 +291,7 @@ function DesktopApp() {
   // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
   // registry rule as a project instead of being filtered out after a Topic click.
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
-    fileEditingProbe || candidate.id === activeWorkspaceId || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
+    fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
