@@ -1,7 +1,7 @@
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation, AgentMuxSpatialSave, AgentMuxZoneFact } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import { ArrowUpRight, Globe2, LoaderCircle, Plus, SlidersHorizontal, X } from 'lucide-react'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUpRight, Bot, CircleHelp, Globe2, Layers3, LoaderCircle, MousePointer2, Plus, SlidersHorizontal, X } from 'lucide-react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import { browserOpenError } from '../lib/browser-open-feedback'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -16,6 +16,10 @@ import { SurveyZoneItem } from './SurveyZoneItem'
 import { SurveyTopicRelations } from './SurveyTopicRelations'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { isScratchWorkspaceId } from '../../../shared/contracts'
+import { projectWorkspaces } from '../lib/workspace-projects'
+import { surveySidebarBounds } from '../lib/survey-sidebar-width'
+import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
 
 function saveNotice(save: AgentMuxSpatialSave): string {
   const confirmed = save.localStorageWritten && save.storageFlushRequested
@@ -37,6 +41,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const toolsOpen = useAppStore(state => state.surveyToolsOpen)
   const setSelection = useAppStore(state => state.setSurveyZoneSelection)
   const setToolsOpen = useAppStore(state => state.setSurveyToolsOpen)
+  const sidebarWidth = useAppStore(state => state.surveySidebarWidth)
+  const setSidebarWidth = useAppStore(state => state.setSurveySidebarWidth)
   const selectWorkspace = useAppStore(state => state.selectWorkspace)
   const topicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const topicSnapshot = topicSnapshots[SCRATCH_WORKSPACE_ID]
@@ -46,10 +52,31 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     subscribe: visible ? useAppStore.subscribe : () => () => {} }), [visible])
   const tabs = useStore(store, state => state.tabs)
   const layouts = useStore(store, state => state.layouts)
+  const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
   const currentZone = catalog?.zones.find(zone => zone.zoneId === selection?.zoneId)
   const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? activeWorkspaceId : null)
-  const workspace = config?.workspaces.find(workspace => workspace.id === resourceWorkspaceId)
+  const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
   const items = useMemo(() => catalog ? surveyZoneItems(catalog, selection) : [], [catalog, selection])
+  const groups = useMemo(() => {
+    const workspaces = config?.workspaces ?? []
+    const projects = projectWorkspaces(workspaces.filter(workspace => !isScratchWorkspaceId(workspace.id)))
+    const byWorkspace = new Map(projects.flatMap(project => project.workspaces.map(workspace => [workspace.id, project] as const)))
+    const grouped = new Map<string, { id: string; name: string; workspaceId: string | null; description: string; zones: AgentMuxZoneFact[] }>()
+    for (const zone of items) {
+      const resource = resourceWorkspaces.get(zone.workspaceId)
+      const project = resource ? byWorkspace.get(resource.id) : undefined
+      const scratch = resource && isScratchWorkspaceId(resource.id)
+      const id = scratch ? 'scratch' : project?.id ?? 'unknown'
+      let group = grouped.get(id)
+      if (!group) {
+        group = { id, name: scratch ? 'Scratch' : project?.name ?? 'Unknown source', workspaceId: scratch ? resource.id : project?.preferredWorkspaceId ?? null,
+          description: scratch ? `${resource.hostId}\n${resource.path}` : project ? `${project.hostId}\n${project.repoPath}` : 'The original resource Workspace is not confirmed. Items and references are kept.', zones: [] }
+        grouped.set(id, group)
+      }
+      group.zones.push(zone)
+    }
+    return [...grouped.values()]
+  }, [config?.workspaces, items, resourceWorkspaces])
   const tabsByZone = useMemo(() => {
     const result = new Map<string, string[]>()
     for (const tab of catalog?.tabs ?? []) if (tab.zoneId) {
@@ -69,6 +96,33 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [navigationChoices, setNavigationChoices] = useState<AgentMuxSpaceLocation[]>([])
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
+  const managementRef = useRef<HTMLElement>(null)
+  const resizeHandle = useRef<HTMLDivElement>(null)
+  const [availableWidth, setAvailableWidth] = useState(0)
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current
+    if (!visible || !surface) return
+    const measure = () => {
+      const width = surface.getBoundingClientRect().width
+      if (!width) return
+      const management = toolsOpen ? managementRef.current : null
+      const occupied = management && getComputedStyle(management).position !== 'absolute' ? management.getBoundingClientRect().width : 0
+      setAvailableWidth(width - occupied)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(surface)
+    if (managementRef.current) observer.observe(managementRef.current)
+    return () => observer.disconnect()
+  }, [visible, toolsOpen, controlsCoverPage])
+  const { minWidth, maxWidth } = surveySidebarBounds(availableWidth)
+  const effectiveSidebarWidth = clampSidebarResizeWidth(sidebarWidth, minWidth, maxWidth)
+  const reportDraftWidth = useCallback((width: number) => {
+    resizeHandle.current?.setAttribute('aria-valuenow', String(clampSidebarResizeWidth(width, minWidth, maxWidth)))
+  }, [minWidth, maxWidth])
+  const { containerRef: sidebarRef, isResizing, onResizeStart } = useSidebarResize<HTMLElement>({
+    isOpen: true, width: sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth, maxWidth, onDraftWidthChange: reportDraftWidth
+  })
   const intent = useRef(0)
   const failedCreation = useRef<{ zone: AgentMuxZoneFact; reference: WorkbenchProjectionSelection | null; surface: WorkbenchSurface | null } | null>(null)
   useLayoutEffect(() => { intent.current += 1 }, [visible, selection, activeWorkspaceId])
@@ -93,7 +147,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (names.length === 1) return names[0]!
     const browsers = (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? workbenchSurfaces(tabs[id]!).filter(surface => surface.kind === 'browser') : [])
     if (browsers.length === 1 && browsers[0]?.kind === 'browser') return browsers[0].title || (browsers[0].url === 'about:blank' ? 'New survey item' : browsers[0].url)
-    return config?.workspaces.find(workspace => workspace.id === zone.workspaceId)?.name ?? 'Original work surface'
+    return zone.branch ?? (names.length ? `${names.length} tabs` : 'Retained work surface')
   }
 
   function activity(zone: AgentMuxZoneFact) {
@@ -108,9 +162,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     })
     const kinds = new Set(labels)
     const agents = surfaces.filter(surface => surface.kind === 'agent').length
-    return <span title={labels.map((label, index) => `${browsers[index]!.regionId}: ${label}`).join('\n')}>
-      {browsers.length === 1 && !agents ? labels[0] : `${browsers.length ? `${browsers.length} browsers` : `${surfaces.length} regions`}${agents ? ` · ${agents} agents` : ''}${browsers.length ? ` · ${kinds.size === 1 ? labels[0] : 'Mixed control'}` : ''}`}
-    </span>
+    const description = browsers.length === 1 && !agents ? labels[0] : `${browsers.length ? `${browsers.length} browsers` : `${surfaces.length} regions`}${agents ? ` · ${agents} agents` : ''}${browsers.length ? ` · ${kinds.size === 1 ? labels[0] : 'Mixed control'}` : ''}`
+    const detail = labels.map((label, index) => `${browsers[index]!.regionId}: ${label}`).join('\n')
+    const unknown = labels.some(label => label.startsWith('Control unknown'))
+    const Icon = unknown ? CircleHelp : labels.some(label => label.startsWith('Agent operating')) ? Bot
+      : browsers.length > 0 && kinds.size === 1 && labels[0] === 'Human control' && !agents ? MousePointer2 : Layers3
+    return { summary: <span title={detail} aria-label={description}><Icon size={12} aria-hidden="true" />{unknown ? <span>Restoring</span> : browsers.length + agents > 1 ? <span>{browsers.length + agents}</span> : null}</span>,
+      details: <span>{description}{detail ? `\n${detail}` : ''}</span> }
   }
 
   function chooseZone(zoneId: string): void {
@@ -202,18 +260,31 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }, [catalog, selection?.zoneId])
 
   return <section ref={surfaceRef} className="global-survey-surface" aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
-    <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-      <div className="survey-workspace" title={workspace ? `${workspace.hostId}\n${workspace.path}` : undefined}><Globe2 size={16} /><span><small>New items in</small><strong>{workspace?.name ?? 'Choose a resource workspace in Space'}</strong></span></div>
-      <button type="button" className="survey-new-page" aria-label="New survey item" disabled={opening || !workspace} onClick={() => void openBrowser('about:blank', true)}>
+    <aside ref={sidebarRef} className={`survey-tabs${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
+      <button type="button" className="survey-new-page" aria-label="New survey item" title={workspace ? `New item in ${workspace.name}` : 'Choose a resource workspace in Space'} disabled={opening || !workspace} onClick={() => void openBrowser('about:blank', true)}>
         {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>New item</span>
       </button>
       <div className="survey-page-list">
-        {items.map(zone => <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} selected={selection?.zoneId === zone.zoneId}
-          sourceWorkspace={config?.workspaces.find(workspace => workspace.id === zone.workspaceId) ?? null} relatedTopics={catalog ? surveyZoneTopicFacts(catalog, zone.zoneId).relatedTopics : null}
-          activity={activity(zone)} onSelect={chooseZone} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />)}
+        {groups.map(group => <section key={group.id} className="survey-project-group" data-survey-project-id={group.id} aria-label={`Survey project: ${group.name}`}>
+          <header>{group.workspaceId ? <button type="button" className="survey-project-source" aria-label={`Open source project: ${group.name}, ${group.description.replaceAll('\n', ', ')}`} title={group.description}
+            onClick={() => { intent.current += 1; void selectWorkspace(group.workspaceId!) }}><span>{group.name}</span><ArrowUpRight size={11} aria-hidden="true" /></button> : <span title={group.description}>{group.name}</span>}</header>
+          {group.zones.map(zone => {
+            const status = activity(zone)
+            return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} selected={selection?.zoneId === zone.zoneId}
+              sourceWorkspace={resourceWorkspaces.get(zone.workspaceId) ?? null} relatedTopics={catalog ? surveyZoneTopicFacts(catalog, zone.zoneId).relatedTopics : null}
+              activity={status.summary} activityDetails={status.details} onSelect={chooseZone} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
+          })}
+        </section>)}
       </div>
       <div className="survey-controls"><button type="button" aria-label="Browser management" aria-expanded={toolsOpen} aria-controls="survey-management" disabled={!workspace} onClick={() => setToolsOpen(!toolsOpen)}><SlidersHorizontal size={14} /><span>Browser tools</span></button>
-        {workspace ? <button type="button" onClick={() => { intent.current += 1; void selectWorkspace(workspace.id) }}>Return to Space</button> : null}</div>
+        {workspace ? <button type="button" aria-label="Return to Space" onClick={() => { intent.current += 1; void selectWorkspace(workspace.id) }}><ArrowUpRight size={14} /><span>Return to Space</span></button> : null}</div>
+      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
+        aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveSidebarWidth} onMouseDown={onResizeStart}
+        onKeyDown={event => {
+          const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveSidebarWidth - 16 : event.key === 'ArrowRight' ? effectiveSidebarWidth + 16 : null
+          if (next === null) return
+          event.preventDefault(); event.stopPropagation(); setSidebarWidth(next)
+        }} />
     </aside>
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
@@ -233,7 +304,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             : <div role="status" className="survey-restore-notice">The original work surface and precise references are kept. Choose an available location, or continue recovery in Space.</div>}
         </>}
       </div>
-      {workspace && (toolsVisited || toolsOpen) ? <aside id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>
+      {workspace && (toolsVisited || toolsOpen) ? <aside ref={managementRef} id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>
         <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><X size={14} /></button></header><SurveyBrowserTools workspace={workspace} visible={visible && toolsOpen} />
       </aside> : null}
     </div>

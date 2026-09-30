@@ -1,10 +1,11 @@
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
-import { ArrowUpRight, Layers3 } from 'lucide-react'
+import { ArrowUpRight, CircleHelp, Layers3, Link2, MoreHorizontal } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
+import * as DropdownMenu from './HoverDropdownMenu'
 
 /** Survey navigation only; the caller supplies original entity, resource and relationship facts. */
-export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, relatedTopics, activity, onSelect, onOpenWorkspace }: {
+export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, relatedTopics, activity, activityDetails, onSelect, onOpenWorkspace }: {
   zone: AgentMuxZoneFact
   title: string
   selected: boolean
@@ -13,6 +14,7 @@ export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, related
   relatedTopics: readonly AgentMuxSpaceFact[] | null
   /** Scoped original Browser/Core facts, including mixed or unknown status. */
   activity: ReactNode
+  activityDetails: ReactNode
   onSelect(zoneId: string): void
   onOpenWorkspace(workspaceId: string): void
 }) {
@@ -28,15 +30,21 @@ export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, related
     <button type="button" className="survey-item" aria-label={`Show survey item: ${title}`}
       aria-current={selected ? 'true' : undefined} title={title} onClick={() => onSelect(zone.zoneId)}>
       <Layers3 size={14} aria-hidden="true" />
-      <span><strong>{title}</strong><small title={topicNames} aria-label={topicNames ? `${topicSummary}: ${topicNames}` : topicSummary}>{topicSummary}</small></span>
+      <strong>{title}</strong>
+      <span className="survey-item-meta">
+        {topics === null ? <small title={topicSummary} aria-label={topicSummary}><Link2 size={11} aria-hidden="true" /></small> : topics.length ? <small title={topicNames} aria-label={`${topicSummary}: ${topicNames}`}><Link2 size={11} aria-hidden="true" />{topics.length}</small> : null}
+        {!sourceWorkspace ? <small title="Resource unknown" aria-label="Resource unknown"><CircleHelp size={11} aria-hidden="true" /></small> : null}
+        <span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span>
+      </span>
     </button>
-    <div className="survey-item-meta">
-      {sourceWorkspace ? <button type="button" className="survey-item-source"
-        aria-label={`Open source Workspace: ${sourceWorkspace.name}, ${sourceWorkspace.hostId}, ${sourceWorkspace.path}`} title={resourceDescription}
-        onClick={() => onOpenWorkspace(sourceWorkspace.id)}>
-        <span>{sourceWorkspace.name}</span><ArrowUpRight size={10} aria-hidden="true" />
-      </button> : <span className="survey-item-source" title={resourceDescription}>Resource unknown</span>}
-      <span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span>
-    </div>
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild><button type="button" className="survey-item-details" aria-label={`Details for survey item: ${title}`} title="Item details"><MoreHorizontal size={13} aria-hidden="true" /></button></DropdownMenu.Trigger>
+      <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu survey-topic-menu" align="start" sideOffset={4} collisionPadding={8}>
+        <DropdownMenu.Label className="survey-topic-menu__label">{title}</DropdownMenu.Label>
+        <div className="survey-item-details-content"><span>{resourceDescription}</span><span>{topicSummary}</span>{topics?.map(topic => <span key={topic.spaceId}>{topic.name} · {topic.hostId} · {topic.directoryPath}</span>)}{activityDetails}</div>
+        {sourceWorkspace ? <DropdownMenu.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${sourceWorkspace.name}, ${sourceWorkspace.hostId}, ${sourceWorkspace.path}`}
+          onSelect={() => onOpenWorkspace(sourceWorkspace.id)}><ArrowUpRight size={13} /><span>Open resource Workspace</span></DropdownMenu.Item> : null}
+      </DropdownMenu.Content></DropdownMenu.Portal>
+    </DropdownMenu.Root>
   </div>
 }
