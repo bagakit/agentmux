@@ -505,7 +505,7 @@ export function SessionPane({
       workspaceRoot={fileContext.workspaceRoot}
       homeDir={fileContext.homeDir}
       fileReferenceNotice={fileReferenceNotice}
-      {...(fileContext.kind !== 'unconfirmed' ? { openWorkspaceFile: openProjectFile } : {})}
+      {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
       readPastedImage={readPastedImage}
       openHttpLink={onProseLinkClick}
       {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}

@@ -34,6 +34,8 @@ import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
+import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
+import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
 
 export function NewTabSurface({
   tabGroupId,
@@ -49,6 +51,7 @@ export function NewTabSurface({
 }) {
   const presentationActive = useWorkbenchPresentationActive()
   const [executorId, setExecutorId] = useState('codex')
+  const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   // 草稿存进 store，按 regionId 归属。启动的一瞬间本组件就被换成 pending agent surface 而卸载，
   // 若草稿只活在组件里，启动失败翻回 launcher（reduceSessionLaunchFailed 沿用同一 regionId）就会
@@ -100,6 +103,10 @@ export function NewTabSurface({
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
   const topicPreparation = useAppStore(state => tabId ? state.tabs[tabId]?.topicPreparation : undefined)
+  const primaryBotUnconfirmed = useAppStore(state => Boolean(tabId && prompt && state.tabs[tabId]?.topicId === PMO_TEAMS_TOPIC_ID &&
+    primaryMoteHasBot(state) && !primaryMoteExecutorId(state)))
+  const explicitExecutorChoice = manualChoice?.regionId === regionId && manualChoice?.executorId === executorId
+  const displayedExecutorId = primaryBotUnconfirmed && !explicitExecutorChoice ? '' : executorId
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
@@ -164,11 +171,12 @@ export function NewTabSurface({
   const saveSection = useLauncherState(state => state.setSection)
   const saveExecutor = useLauncherState(state => state.selectExecutor)
   const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
-  const selectedExecutor = executors.find(executor => executor.id === executorId)
+  const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
     if (workspace) saveSection(workspace.id, section, mode)
   }
   function chooseExecutor(id: string) {
+    setManualChoice({ regionId, executorId: id })
     setExecutorId(id)
     if (workspace) saveExecutor(workspace.id, id)
   }
@@ -176,7 +184,7 @@ export function NewTabSurface({
 
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
   // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
-  const selectedProviderId = executors.find((executor) => executor.id === executorId)?.providerId
+  const selectedProviderId = selectedExecutor?.providerId
   const toolsScope = JSON.stringify([regionId, workspace?.id, selectedProviderId])
   const feedback = useComposerFeedback(toolsScope)
   const launchOptions = useMemo(
@@ -243,11 +251,12 @@ export function NewTabSurface({
   const readiness = {
     hasWorkspace: Boolean(workspace),
     busy: busy !== null,
-    installedExecutorCount: installedExecutors.length
+    installedExecutorCount: primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
   }
   // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
   // launchOptionSelection 或那两个名字，就变成「用鼠标点带着精调启动、用键盘发就丢掉精调」。
   function launchFromLauncher(): void {
+    if (!launcherCanLaunch(readiness)) return
     void run('agent', () => launchAgent(
       executorId,
       expandSemanticReferences(prompt),
@@ -282,6 +291,13 @@ export function NewTabSurface({
     <section className="launch-surface" data-agent-section={sections.agents}>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
 
+      {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: 'Primary Mote Agent is unconfirmed',
+        mode: 'Your request has not been sent. The same Mote, Region and complete draft are kept.',
+        restore: explicitExecutorChoice && selectedExecutor ? `You chose ${selectedExecutor.label}. Launch here sends the preserved request with this Agent.`
+          : 'Choose an Agent explicitly, then Launch here; or wait for the original bot facts to recover.'
+      } }} /> : null}
+
       {topicPreparation || (executors.length === 0 && prompt) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: topicPreparation ? 'Mote Topic preparation is unconfirmed' : 'No Agent Executor is configured',
         mode: `${executors.length === 0 ? 'No Agent Executor is configured. ' : ''}Your request has not been sent. ${topicPreparation ? 'The same Topic, Region and complete draft are kept.' : 'The same Region and complete draft are kept.'}`,
@@ -291,7 +307,7 @@ export function NewTabSurface({
 
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
         {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
-          <AgentAvatar executorId={executorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ChevronRight size={14} />
+          <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ChevronRight size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} disabled={busy !== null} /> : null}
@@ -304,12 +320,12 @@ export function NewTabSurface({
       {sections.agents === 'expanded' ? <>
         <div className="agent-catalog" aria-label="Agent executors">
           <div className="agent-picks">
-            {installedExecutors.map(executor => <button type="button" key={executor.id} aria-pressed={executor.id === executorId}
-              className={`agent-pick ${executor.id === executorId ? 'agent-pick--selected' : ''}`}
+            {installedExecutors.map(executor => <button type="button" key={executor.id} aria-pressed={executor.id === displayedExecutorId}
+              className={`agent-pick ${executor.id === displayedExecutorId ? 'agent-pick--selected' : ''}`}
               title={`${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`} onClick={() => chooseExecutor(executor.id)}>
               <AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /><strong>{executor.label}</strong>
               {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" aria-label={executorDetectionLabel(executor.detection)}>?</span> : null}
-              {executor.id === executorId ? <Check size={12} className="agent-pick__check" /> : null}
+              {executor.id === displayedExecutorId ? <Check size={12} className="agent-pick__check" /> : null}
             </button>)}
             {unavailableExecutors.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable} onClick={() => setShowUnavailable(value => !value)}>{showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailableExecutors.length}`}<ChevronDown size={12} /></button> : null}
             {!executors.length ? <div className="agent-catalog__empty">No Agent is configured. Add one in Settings to launch here.</div> : !installedExecutors.length ? <div className="agent-catalog__empty">Configured Agent commands were not found on this host. Recheck after installation.</div> : null}
