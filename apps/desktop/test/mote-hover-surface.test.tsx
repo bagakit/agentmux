@@ -324,7 +324,7 @@ describe('one operative Mote hover surface', () => {
     await act(async () => useAppStore.setState({ spaceObjectIcons: { [key]: 'brain' } }))
     expect(choice(customMoteId).querySelector('[data-space-icon-source="manual"]')?.getAttribute('data-space-icon')).toBe('brain')
     const execution = useAppStore.getState().agentFocus.execution, drafts = useAppStore.getState().agentComposerDrafts
-    const original = container.querySelector(`[data-activity-session="${customAgent.id}"]`)
+    const original = container.querySelector(`[data-workbench-tab-id="${customTab.id}"] [data-agent-surface-mode="activity"]`)
     expect(original).not.toBeNull()
     await click(choice(customMoteId))
     expect(panel().dataset.moteTargetTopic).toBe(customMoteId)
@@ -332,7 +332,8 @@ describe('one operative Mote hover surface', () => {
     expect(panel().dataset.moteTargetRegion).toBe('custom-region')
     expect(panel().dataset.moteTargetSession).toBe(customAgent.id)
     expect(panel().dataset.moteStatus).toBe(entry().dataset.moteStatus)
-    expect(panel().querySelector(`[data-activity-session="${customAgent.id}"]`)).toBe(original)
+    expect(panel().querySelector('[data-agent-surface-mode="activity"]')).toBe(original)
+    expect(panel().querySelector(`[data-activity-session="${customAgent.id}"]`)).not.toBeNull()
     expect(panel().querySelectorAll('[data-activity-session]')).toHaveLength(1)
     expect(panel().querySelector('[aria-label="Message Agent"]')?.textContent).toBe('Analyst unsent')
     expect(useAppStore.getState().agentFocus.execution).toEqual(execution)
@@ -343,7 +344,7 @@ describe('one operative Mote hover surface', () => {
     expect(panel().querySelector('.pmo-teams-topic-floating__title')).toBeNull()
     expect(entry().title).toBe('')
     await click(panel().querySelector<HTMLButtonElement>('[aria-label="Send"]')!)
-    expect(send).toHaveBeenCalledExactlyOnceWith(customAgent.id, 'Analyst unsent', expect.any(Function))
+    expect(send).toHaveBeenCalledExactlyOnceWith(customAgent.id, 'Analyst unsent', expect.any(Function), 'manual')
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
     await click(entry()); await click(entry())
     expect(panel().dataset.moteTargetTab).toBe(customTab.id)
@@ -367,6 +368,9 @@ describe('one operative Mote hover surface', () => {
     await click(entry()); await hover()
     expect(panel().querySelector('[data-agent-surface-mode="terminal"]')).not.toBeNull()
     expect(panel().querySelector('[aria-label="Show Activity"]')).not.toBeNull()
+    await click(entry())
+    expect(panel().querySelector('[data-agent-surface-mode="activity"]')).not.toBeNull()
+    expect(useAppStore.getState().viewModes[defaultAgent.id]).toBe('activity')
   })
 
   it('opens explicitly from keyboard focus and returns to the same entry without reopening a preview', async () => {
@@ -388,7 +392,8 @@ describe('one operative Mote hover surface', () => {
       ...(state !== 'bound' ? { tabs: withoutCustom } : {}), mainSurface: 'agents' })
     await mount(true)
     const attention = container.querySelector<HTMLButtonElement>('.focus-pmo-attention')!
-    expect(attention?.textContent).toContain('Mote · 1 to review')
+    expect(attention?.textContent).toContain(moteTopics.find(topic => topic.id === customMoteId)!.title)
+    expect(attention?.textContent).toContain('1 to review')
     const original = useAppStore.getState().agentFocus.execution
     await act(async () => {
       if (state === 'unknown') useAppStore.setState({ sessions: useAppStore.getState().sessions.filter(session => session.id !== customAgent.id) })
