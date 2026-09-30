@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vite/client", "vitest/globals"],
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/core": ["packages/core/src/index.ts"],
+      "@agentmux/core/control": ["packages/core/src/control.ts"],
+      "@agentmux/layout": ["packages/layout/src/index.ts"]
+    }
+  },
+  "include": ["../../../src/renderer/src/components/BrowserAddressInput.tsx", "../../../src/renderer/src/components/BrowserPane.tsx",
+    "../../../src/renderer/src/components/LauncherSecondarySurfaces.tsx", "../../../src/renderer/src/components/GlobalSurveySurface.tsx",
+    "../../../src/renderer/src/global.d.ts", "../../../test/browser-address-input.test.tsx", "../../../test/browser-address-input-callers.test.tsx"]
+}
