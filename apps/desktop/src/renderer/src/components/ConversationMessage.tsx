@@ -29,6 +29,7 @@ export type ConversationMessageProps = {
   timeFormatter?: (timestamp: number) => string
   origin?: number
   workspaceRoot?: string
+  homeDir?: string
   openWorkspaceFile?: OpenWorkspaceFile
   readPastedImage?: ReadPastedImage
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
@@ -83,7 +84,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  speaker: recordedSpeaker, conversationSessionId, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const renderClock = timeFormatter ?? formatClock
@@ -232,6 +233,7 @@ export function ConversationMessage({
             return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}><MemoizedAgentMarkdown
               content={index === 0 && prefix ? prefix.body : part.text}
               workspaceRoot={workspaceRoot}
+              homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
               {...(readPastedImage ? { readPastedImage } : {})}
               {...(openHttpLink ? { openHttpLink } : {})}
@@ -245,6 +247,7 @@ export function ConversationMessage({
                 key={key}
                 part={part}
                 workspaceRoot={workspaceRoot}
+                homeDir={homeDir}
                 traceId={traceDisclosureKey(messageId, key)}
                 {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
                 {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})}
