@@ -714,6 +714,8 @@ setInterval(tick,100);
 }
 const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
   goalsDirectPmoAttempt: goalsDirectPmoProof && goalsEntryFixture ? { sourceBefore: goalsEntryFixture.sourceBefore,
+    observationScope: { mode: 'ordinary-recovery', stepBudgetMs: 45_000, totalBudgetMs: 240_000, stressClaimed: false },
+    originalOutputBeforeRestart: goalsEntryFixture.originalOutput ?? null,
     normal: goalsEntryFixture.normal ?? null, failedGoal: goalsEntryFixture.failedGoal ?? null,
     failedMapping: goalsEntryFixture.failed ?? null, preparationFailure: goalsEntryFixture.preparationFailure ?? null } : null,
   pressureProducer, pressureFinal, pressureQualification, failure: failure ? { name: failure.name, message: failure.message } : null, cleanup }
