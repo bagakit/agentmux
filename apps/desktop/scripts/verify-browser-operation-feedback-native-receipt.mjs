@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { consumeFrameBindingIncrement } from './browser-feedback-frame-binding-receipt.mjs'
 
 // This consumes originals. A private Browser/profile restart cannot certify Desktop/Core recovery.
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -345,6 +346,28 @@ async function independentReview(receiptBytes, receipt, images, root, reviewPath
   }
 }
 
+async function frameBindingReview(receiptBytes, receipt, images, reviewPath) {
+  const review = await json(resolve(reviewPath))
+  assert.equal(review.schema, 'agentmux.browser-feedback-independent-visual-review.v1')
+  assert.equal(review.scope, 'private-native-browser-frame-binding-increment')
+  assert.equal(review.receiptSha256, sha(receiptBytes))
+  assert.equal(review.independent, true)
+  assert.equal(review.passed, true)
+  assert.equal(review.nativeComplete, false)
+  assert.equal(review.taskComplete, false)
+  assert.match(review.reviewer, /^\/root\/[a-z0-9_]+$/)
+  assert.notEqual(review.reviewer, receipt.author)
+  assert.notEqual(review.reviewer, receipt.actualExecutor)
+  assert.equal(review.images.length, images.length)
+  for (const image of images) {
+    const viewed = review.images.find(item => item.path === image.path && item.sha256 === image.sha256 && item.phase === image.phase && item.label === image.label)
+    assert.ok(viewed?.viewed === true && viewed.passed === true && viewed.assessment?.length > 0)
+    assert.equal(viewed.bytes, image.bytes)
+    assert.equal(viewed.presentationTimestampEstablished, false)
+    assert.equal(viewed.composedOsWindowCertified, false)
+  }
+}
+
 async function main(args = process.argv.slice(2)) {
   const option = name => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1] }
   const receiptPath = resolve(option('--receipt') ?? 'docs/reviews/evidence/browser-operation-feedback-native/receipt.json')
@@ -354,6 +377,18 @@ async function main(args = process.argv.slice(2)) {
 try {
   const receiptBytes = await readFile(receiptPath)
   const receipt = JSON.parse(receiptBytes)
+  if (option('--scope') === 'frame-binding-increment') {
+    const consumed = await consumeFrameBindingIncrement(receipt, original)
+    const reviewPath = option('--review')
+    if (reviewPath) await frameBindingReview(receiptBytes, receipt, consumed.images, reviewPath)
+    console.log(JSON.stringify({ receipt: receiptPath, scope: 'frame-binding-increment',
+      partialNativePassed: consumed.partialNativePassed, taskComplete: false,
+      independentAestheticReview: reviewPath ? 'passed' : 'pending',
+      movements: consumed.movements, pending: consumed.pending.filter(item => !reviewPath || item !== 'independent aesthetic review'),
+      note: 'Original pixels prove cue/phase compatibility and directed intermediate travel. Candidate reads do not certify a compositor timestamp or unique same-frame owner.' }, null, 2))
+    process.exitCode = 2
+    return
+  }
   const motionIncrement = option('--scope') === 'motion-increment'
   assert.equal(receipt.schema, motionIncrement ? 'agentmux.browser-operation-feedback-native.v2' : 'agentmux.browser-operation-feedback-native.v1')
   assert.match(receipt.author, /^\/root\/[a-z0-9_]+$/)

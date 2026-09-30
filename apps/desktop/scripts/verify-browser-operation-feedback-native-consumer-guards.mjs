@@ -360,7 +360,8 @@ async function verify() {
       } }
     ]
     for (const group of groups) {
-      const candidate = group.change(source), path = join(privateRoot, group.name + '.mjs')
+      const candidate = replaceOnce(group.change(source), "'./browser-feedback-frame-binding-receipt.mjs'",
+        JSON.stringify(resolve(dirname(consumerPath), 'browser-feedback-frame-binding-receipt.mjs'))), path = join(privateRoot, group.name + '.mjs')
       privateBytes += Buffer.byteLength(candidate)
       assert.ok(privateBytes <= 2 * 1024 * 1024)
       await writeFile(path, candidate, { flag: 'wx' })
