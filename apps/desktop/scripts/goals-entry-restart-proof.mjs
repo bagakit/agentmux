@@ -389,8 +389,11 @@ export async function proveOriginalRunOutput({ client, cdp, session, run, baseli
   const ref = { kind: 'agent', hostId: 'local', agentSessionId: session.agentSessionId, run: session.run }
   const attached = await cdp.evaluate(`window.agentmux.sessions.attach(${JSON.stringify(ref)}, 0)`)
   try {
-    const bytes = replayBytes(attached)
-    assert.equal(attached.gap, null); assert.ok(bytes.length > 0)
+    // Desktop attachment hydrates the terminal snapshot; its byte replay can be empty.
+    // Read ordered history through the existing lease's public raw replay operation.
+    const retained = await cdp.evaluate(`window.agentmux.sessions.replay(${JSON.stringify(attached.attachmentId)}, 0)`)
+    const bytes = replayBytes(retained)
+    assert.equal(attached.gap, null); assert.equal(retained.gap, null); assert.ok(bytes.length > 0)
     assert.ok(bytes.subarray(0, baseline.outputBytes).equals(Buffer.from(baseline.outputBase64, 'base64')), 'The original output byte prefix survives ordinary process restart')
     assert.equal(attached.session.control.run.runId, baseline.runId)
     const before = attached.session
