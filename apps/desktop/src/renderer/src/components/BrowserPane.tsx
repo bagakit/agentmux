@@ -44,6 +44,7 @@ import {
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
 import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
@@ -138,6 +139,10 @@ export function BrowserPane({
   }
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
   const [addressError, setAddressError] = useState<string | null>(null)
+  const addressInput = useRef<BrowserAddressInputHandle>(null)
+  const addressDraftEdited = useRef(false)
+  const addressBrowser = useRef(tab.browserId)
+  const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -176,9 +181,13 @@ export function BrowserPane({
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
   useEffect(() => {
-    setAddress(tab.url === 'about:blank' ? '' : tab.url)
-    setAddressError(null)
-  }, [tab.url])
+    if (addressBrowser.current !== tab.browserId || !addressDraftEdited.current) {
+      addressBrowser.current = tab.browserId
+      addressDraftEdited.current = false
+      setAddress(tab.url === 'about:blank' ? '' : tab.url)
+      setAddressError(null)
+    }
+  }, [tab.url, tab.browserId])
 
   // History and replay belong to the Browser identity. A Region can reuse this pane while switching
   // tabs, so never leave a previous Browser's selected operation or replay plan attached to the new page.
@@ -384,10 +393,11 @@ export function BrowserPane({
     }
   }
 
-  function navigateAddress(): void {
-    if (!address.trim()) return
+  function navigateAddress(submittedAddress: string): void {
+    if (!submittedAddress.trim()) return
+    addressDraftEdited.current = false
     setAddressError(null)
-    void run(() => api.browser.navigate(tab.browserId, address), cause => {
+    void run(() => api.browser.navigate(tab.browserId, submittedAddress), cause => {
       setAddressError(`Page could not open: ${presentError(cause)}. Your input and page are kept; retry here.`)
     })
   }
@@ -717,7 +727,7 @@ export function BrowserPane({
         className="browser-toolbar"
         onSubmit={(event) => {
           event.preventDefault()
-          navigateAddress()
+          addressInput.current?.submit()
         }}
       >
         <button
@@ -736,11 +746,11 @@ export function BrowserPane({
         </button>
         {inSurvey && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
           <Globe2 size={13} />
-          <input
-            aria-label="Browser address"
-            value={address}
-            placeholder="Search or enter an address"
-            onChange={(event) => { setAddress(event.target.value); setAddressError(null) }}
+          <BrowserAddressInput
+            ref={addressInput} aria-label="Browser address" value={address} placeholder="Search or enter an address"
+            historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
+            onValueChange={value => { addressDraftEdited.current = true; setAddress(value); setAddressError(null) }}
+            onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
         </label>}
         <BrowserOperationStatus
@@ -883,6 +893,7 @@ export function BrowserPane({
           </DropdownMenu.Root>
       </form>
       {addressError ? <p className="browser-address-error" role="alert">{addressError}</p> : null}
+      {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。
           原生 WebContentsView 跟随 stage 的真实矩形，详情不覆盖页面。 */}
@@ -967,8 +978,10 @@ export function BrowserPane({
           </div>
         ) : tab.url === 'about:blank' ? (
           inSurvey ? <div className="survey-start browser-empty"><Globe2 size={30} aria-hidden="true" />
-            <form className="survey-start-input" onSubmit={event => { event.preventDefault(); navigateAddress() }}>
-              <input aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address} onChange={event => { setAddress(event.target.value); setAddressError(null) }} />
+            <form className="survey-start-input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
+              <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
+                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
+                onValueChange={value => { addressDraftEdited.current = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
               <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
             </form>
           </div> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>

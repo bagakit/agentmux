@@ -97,6 +97,17 @@
 .browser-toolbar label { min-width: 96px; height: 28px; flex: 1; display: flex; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: 11px "SFMono-Regular", monospace; }
+.browser-address-history { position: fixed; z-index: var(--layer-popover); overflow: auto; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: var(--fs-micro)/1.5 var(--font-sans); pointer-events: auto; box-shadow: var(--elev-2); }
+.browser-address-history > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2); color: var(--text-3); }
+.browser-address-history ul { margin: 0; padding: 0; list-style: none; }
+.browser-address-history li { display: flex; min-width: 0; align-items: center; border-radius: var(--radius-sm); }
+.browser-address-history li[aria-selected="true"], .browser-address-history li:hover { background: var(--surface-3); color: var(--text); }
+.browser-address-history button { min-height: 24px; border: 0; border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.browser-address-history button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.browser-address-history button:disabled { opacity: .4; cursor: default; }
+.browser-address-history__choose { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.browser-address-history__delete { flex: none; display: grid; place-items: center; color: var(--text-3); }
+.browser-address-history > p { margin: var(--sp-2); color: var(--text-3); }
 .browser-toolbar > .browser-toolbar__more--optional { display: none; }
 @container browser-pane (max-width: 620px) {
   .browser-toolbar > .browser-toolbar__secondary { display: none; }

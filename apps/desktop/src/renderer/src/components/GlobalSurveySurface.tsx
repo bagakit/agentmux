@@ -11,6 +11,7 @@ import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowse
 import { type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { workbenchSurfaces, type WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { SurveyBrowserTools } from './SurveyBrowserTools'
 import { SurveyZoneItem } from './SurveyZoneItem'
 import { SurveyTopicRelations } from './SurveyTopicRelations'
@@ -35,6 +36,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
   const config = useAppStore(state => state.config)
+  const browserInput = useRef<BrowserAddressInputHandle>(null)
+  const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
   const selection = useAppStore(state => state.surveyZoneSelection)
@@ -302,9 +305,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
         {creationNotice ? <p className="survey-relation-notice">{creationNotice}</p> : null}
         {!selection ? <div className="survey-start" aria-label="Start browsing"><Globe2 size={30} aria-hidden="true" />
-          <form className="survey-start-input" onSubmit={event => { event.preventDefault(); if (query.trim()) void openBrowser(query) }}>
-            <input value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" onChange={event => { setQuery(event.target.value); setError(null) }} />
-            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><small>{workspace?.name ?? 'Choose a resource workspace in Space to start browsing'}</small>
+          <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
+            <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
+            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}<small>{workspace?.name ?? 'Choose a resource workspace in Space to start browsing'}</small>
         </div> : <>
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
             This work surface is outside the Survey list. Its content and selection are kept.

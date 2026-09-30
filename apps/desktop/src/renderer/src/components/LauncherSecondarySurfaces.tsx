@@ -4,6 +4,8 @@ import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { useAppStore } from '../store'
 import { EMPTY_LAUNCHER_DRAFT, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { InlineComposer } from './InlineComposer'
+import { useRef, useState } from 'react'
+import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { TerminalView } from './TerminalView'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 
@@ -31,10 +33,12 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   const revealCreatedNote = useAppStore(state => state.revealCreatedNote)
   const retryCreatedNote = useAppStore(state => state.retryCreatedNote)
   const projection = useWorkbenchBrowserPresentation().projection
+  const browserInput = useRef<BrowserAddressInputHandle>(null)
+  const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
   const disabled = !workspace || busy !== null
   function openTerminal() { void onRun('terminal', () => promoteWarmTerminal(tabGroupId, launcherRef)) }
-  function openBrowser() { void onRun('browser', () => createBrowser(tabGroupId, launcherRef, draft.browser.trim() || 'about:blank')) }
+  function openBrowser(submittedAddress: string) { void onRun('browser', () => createBrowser(tabGroupId, launcherRef, submittedAddress.trim() || 'about:blank')) }
   function openNote(content?: string) {
     void onRun('note', async () => {
       const references = projection?.selection.filter(reference => reference.displayWorkspaceId === projection.displayWorkspaceId && reference.tabId === launcherRef?.tabId && reference.regionId === launcherRef.regionId)
@@ -52,7 +56,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   }
   const labels = { terminal: 'Terminal', browser: 'Browser', note: 'Note' }
   const icons = { terminal: SquareTerminal, browser: Globe2, note: NotebookPen }
-  const actions = { terminal: openTerminal, browser: openBrowser, note: () => openNote() }
+  const actions = { terminal: openTerminal, note: () => openNote() }
   function header(kind: UtilityKind) {
     const Icon = icons[kind], expanded = sections[kind] === 'expanded'
     return <header className="launcher-utility__head">
@@ -75,7 +79,8 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
         </section> : null}
         <div className="launch-surface-quick-grid">
           {sections.browser !== 'hidden' ? <section className="launcher-utility" data-section="browser" data-mode={sections.browser}>{header('browser')}
-            {sections.browser === 'expanded' ? <form className="launcher-browser-input" onSubmit={event => { event.preventDefault(); if (!disabled) openBrowser() }}><Globe2 size={14} /><input aria-label="Browser address or search" value={draft.browser} disabled={busy === 'browser'} placeholder="Search or enter a URL" onChange={event => setDraft('browser', event.target.value)} /><button type="submit" className="icon-button" disabled={disabled} data-agentmux-action={DESKTOP_ACTIONS.openBrowser} aria-label="Go to Browser address or search" title="Open address or search"><ArrowUpRight size={14} /></button></form> : null}
+            {sections.browser === 'expanded' ? <form className="launcher-browser-input" onSubmit={event => { event.preventDefault(); if (!disabled) browserInput.current?.submit() }}><Globe2 size={14} /><BrowserAddressInput ref={browserInput} aria-label="Browser address or search" value={draft.browser} disabled={busy === 'browser'} submitDisabled={disabled} placeholder="Search or enter a URL" historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => setDraft('browser', value)} onSubmit={openBrowser} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} /><button type="submit" className="icon-button" disabled={disabled} data-agentmux-action={DESKTOP_ACTIONS.openBrowser} aria-label="Go to Browser address or search" title="Open address or search"><ArrowUpRight size={14} /></button></form> : null}
+            {inputHistoryNotice ? <p className="launcher-persistence-notice" role="status">{inputHistoryNotice}</p> : null}
           </section> : null}
           {sections.note !== 'hidden' ? <section className="launcher-utility" data-section="note" data-mode={sections.note}>{header('note')}
             {sections.note === 'expanded' ? <><div className="composer launcher-note-composer"><InlineComposer aria-label="Note draft" value={draft.note} onValueChange={value => setDraft('note', value)} disabled={false} autoFocus={false} onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.isComposing && !disabled) { event.preventDefault(); openNote(draft.note) } }} placeholder="Capture a thought…" /></div><footer className="launcher-note-actions"><span>Note · {workspace?.name ?? 'Current workspace'}</span><button type="button" className="small-button" disabled={disabled} onClick={() => openNote(draft.note)}>{busy === 'note' ? 'Saving…' : 'Save & open note'}<ArrowUpRight size={12} /></button></footer></> : null}
