@@ -1535,6 +1535,24 @@ export function WorkspaceWorkbench({
     notice={{ kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: zoneLayout.issues.join(' '),
       restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }} /> : null
   if (!layout) return projection ? <div className="workspace-workbench" data-workbench-pending-owner>{projectionNotice}</div> : null
+  // Tab-level callers supply their own title band. The original View owner still
+  // holds the Region tree; this exact slot does not recreate its Group chrome.
+  if (viewOwnership === 'projection' && projection?.entity.kind === 'tab') {
+    const reference = projection.selection.length === 1 ? projection.selection[0] : undefined
+    const group = reference && layout.groups.find(group => group.id === reference.groupId)
+    const tab = tabs[projection.entity.tabId]
+    const confirmed = reference && tab && reference.displayWorkspaceId === workspaceId &&
+      reference.tabId === tab.id && group?.activeTabId === tab.id &&
+      !projectionContext?.unsupportedTabIds.has(tab.id)
+    return <WorkbenchProjectionContext.Provider value={projectionContext}>
+      <div ref={workbenchRef} className="workspace-workbench">
+        {projectionNotice}
+        {confirmed ? <div id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
+          data-workbench-tab-id={tab.id} data-workbench-group-id={reference.groupId} className="workbench-tab-slot" />
+          : <div role="status" className="workbench-restore-notice">The exact Tab occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
+      </div>
+    </WorkbenchProjectionContext.Provider>
+  }
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
   const rootIsLeaf = layout.root.type === 'leaf'
   const workbench = (

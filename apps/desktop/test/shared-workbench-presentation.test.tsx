@@ -149,8 +149,10 @@ it('actual App → Focus retains the explicit non-first Tab/Group/Region occurre
       sourceParent: content[0]!.closest('.retained-workbench-view')?.parentElement?.id,
       executionSessionId: useAppStore.getState().agentFocus.execution.sessionId }
     expect((actual as { sourceParent: string }).sourceParent).toBe(workbenchProjectionSlotId('focus-workbench-slot', requested))
-    expect([...focusSlot.querySelectorAll('[data-pane-group-id]')].map(group => group.getAttribute('data-pane-group-id'))).toEqual([requested.groupId])
-    expect(focusSlot.querySelector(`[data-pane-group-id="${requested.groupId}"] [data-workbench-region-id="${requested.regionId}"]`)?.classList.contains('workbench-region--active')).toBe(true)
+    expect(focusSlot.querySelectorAll('.pane-tabbar')).toHaveLength(0)
+    expect(focusSlot.querySelectorAll('[data-pane-group-id]')).toHaveLength(0)
+    expect([...focusSlot.querySelectorAll('.workbench-tab-slot')].map(slot => [slot.getAttribute('data-workbench-group-id'), slot.getAttribute('data-workbench-tab-id')])).toEqual([[requested.groupId, exact.id]])
+    expect(focusSlot.querySelector(`[data-workbench-group-id="${requested.groupId}"] [data-workbench-region-id="${requested.regionId}"]`)?.classList.contains('workbench-region--active')).toBe(true)
     const focused = useAppStore.getState()
     expect(focused.layouts).toBe(primary.layouts)
     expect(focused.tabs).toBe(primary.tabs)

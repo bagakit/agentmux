@@ -96,42 +96,42 @@ it('actual File pointer selects its original occurrence without changing Agent/h
     for (const read of Object.values(reads)) expect(read).not.toHaveBeenCalled()
   } finally { await f.close() }
 })
-it('actual New Tab presents the one original Launcher and keeps semantic Agent and primary selection', async () => {
+it('Tab-level Focus has no parent Group chrome and keeps the original mixed Tab during resource restoration', async () => {
   const f = await fixture()
   try {
-    const before = useAppStore.getState(), button = f.container.querySelector<HTMLButtonElement>('.focused-tab-workspace button[title="New tab"]')
-    expect(button).not.toBeNull()
-    const originalLeaf = f.container.querySelector('[data-selection-leaf="explicit-exact-tab/exact-r2"]')
+    const before = useAppStore.getState(), slot = f.container.querySelector('.focused-tab-workspace')!
+    expect(slot).not.toBeNull()
+    expect(slot.querySelectorAll('[data-workbench-region-id]')).toHaveLength(2)
+    expect(slot.querySelectorAll('.pane-tabbar')).toHaveLength(0)
+    expect(slot.querySelectorAll('button[title="New tab"]')).toHaveLength(0)
+    expect(f.container.querySelectorAll('.workspace-workbench-registry .pane-tabbar').length).toBeGreaterThan(0)
+    const originalLeaf = slot.querySelector('[data-selection-leaf="explicit-exact-tab/exact-r2"]')
     expect(originalLeaf).not.toBeNull()
-    // Retained original placement still discloses an incomplete owner handshake.
     const { [f.resource.id]: _resourceLayout, ...remainingLayouts } = before.layouts
     await act(async () => useAppStore.setState({ layouts: remainingLayouts }))
     expect(f.container.querySelector('.focused-tab-workspace .workbench-restore-notice')?.textContent).toContain('still restoring')
     expect(f.container.querySelector('[data-selection-leaf="explicit-exact-tab/exact-r2"]')).toBe(originalLeaf)
     await act(async () => useAppStore.setState({ layouts: before.layouts }))
     expect(f.container.querySelector('.focused-tab-workspace .workbench-restore-notice')).toBeNull()
-    await act(async () => button!.click())
-    const after = useAppStore.getState(), created = Object.keys(after.tabs).filter(id => !before.tabs[id])
-    expect(created).toHaveLength(1); const tab = after.tabs[created[0]!]!
-    expect(Object.values(tab.regions)).toEqual([expect.objectContaining({ kind: 'launcher' })])
-    expect(after.agentFocus.execution.reference).toEqual({ ...f.reference, tabId: tab.id, regionId: tab.layout.activeRegionId })
-    expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(tab.id)
-    expect(f.container.querySelector('.focused-tab-workspace .launch-surface'), f.container.querySelector('.focused-tab-workspace')!.innerHTML).not.toBeNull()
-    expect(f.container.querySelector('.focused-tab-workspace .workbench-restore-notice')).toBeNull()
-    expect(after.sessions).toBe(before.sessions); expect(after.agentFocus.execution.sessionId).toBe(f.session.id)
-    expect(after.agentFocus.execution.history).toBe(before.agentFocus.execution.history)
-    expect(after.activeWorkspaceId).toBe(before.activeWorkspaceId); expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
-    for (const [id, layout] of Object.entries(before.layouts)) {
-      expect(after.layouts[id]!.activeGroupId).toBe(layout.activeGroupId)
-      expect(after.layouts[id]!.groups.map(group => [group.id, group.activeTabId])).toEqual(layout.groups.map(group => [group.id, group.activeTabId]))
-    }
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
   } finally { await f.close() }
 })
 it('the original Launcher submit keeps its resource Workspace and exact display Group at the real API boundary', async () => {
   const f = await fixture()
   try {
-    const newTab = f.container.querySelector<HTMLButtonElement>('.focused-tab-workspace button[title="New tab"]')!
-    expect(newTab).not.toBeNull(); await act(async () => newTab.click())
+    const before = useAppStore.getState(), held = before.agentFocus.execution
+    // Create through the existing original Store owner, then explicitly select
+    // that Tab occurrence. A Tab-level presentation does not mint parent chrome.
+    let created: string | null = null
+    await act(async () => {
+      created = useAppStore.getState().openLauncher({ workspaceId: f.resource.id,
+        displayWorkspaceId: f.display.id, tabGroupId: f.reference.groupId, reveal: false })
+      expect(created).not.toBeNull()
+      const tab = useAppStore.getState().tabs[created!]!
+      useAppStore.getState().selectExecutionFocusReference({ ...f.reference, tabId: tab.id, regionId: tab.layout.activeRegionId }, held)
+    })
     const state = useAppStore.getState(), reference = state.agentFocus.execution.reference!
     expect(f.container.querySelector('.focused-tab-workspace .launch-surface')).not.toBeNull()
     const submit = vi.fn(state.launchAgent)
@@ -150,6 +150,15 @@ it('the original Launcher submit keeps its resource Workspace and exact display 
     expect(useAppStore.getState().activeWorkspaceId).toBe(state.activeWorkspaceId)
     expect(useAppStore.getState().layouts[f.display.id]!.groups.find(group => group.id === f.reference.groupId)!.tabOrder).toContain(reference.tabId)
     expect(useAppStore.getState().sessions.find(session => session.id === f.session.id)?.control).toBe(f.session.control)
+    const after = useAppStore.getState()
+    expect(after.agentFocus.execution.sessionId).toBe(held.sessionId)
+    expect(after.agentFocus.execution.history).toBe(held.history)
+    expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(after.activeWorkspaceId).toBe(before.activeWorkspaceId)
+    for (const [id, layout] of Object.entries(before.layouts)) {
+      expect(after.layouts[id]!.activeGroupId).toBe(layout.activeGroupId)
+      expect(after.layouts[id]!.groups.map(group => [group.id, group.activeTabId])).toEqual(layout.groups.map(group => [group.id, group.activeTabId]))
+    }
   } finally { await f.close() }
 })
 it('rejects the late old held tuple and old semantic Agent intent without overwriting newer local selection', async () => {

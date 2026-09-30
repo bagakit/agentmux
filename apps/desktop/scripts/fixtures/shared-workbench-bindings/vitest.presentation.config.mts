@@ -7,6 +7,12 @@ import assert from 'node:assert/strict'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations = {
+  'wrong-tab-content-slot': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',
+    'id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}',
+    "id={workbenchProjectionSlotId(effectiveViewHostPrefix, { ...reference, groupId: 'wrong-group' })}"],
+  'restore-tab-group-chrome': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',
+    "if (viewOwnership === 'projection' && projection?.entity.kind === 'tab') {",
+    'if (false) {'],
   'drop-presentation-context': ['apps/desktop/src/renderer/src/App.tsx',
     "headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,",
     "headerPortalTargetId: 'focus-workspace-slot-header',"],
