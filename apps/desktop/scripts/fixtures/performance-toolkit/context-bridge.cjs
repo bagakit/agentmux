@@ -26,7 +26,7 @@ const port = {
   }
 }
 let stop=()=>{}
-let window,consoleMessages=[]
+let window,consoleMessages=[],preferences,collected=0,passedCases=0
 async function until(fn) {
   for (let n=0;n<200;n++) { try { return fn() } catch (error) { if(n===199)throw error;await new Promise(resolve=>setTimeout(resolve,10)) } }
 }
@@ -35,10 +35,21 @@ async function run() {
   const {registerToolkitIpc}=await import(require('node:url').pathToFileURL(process.env.AGENTMUX_TOOLKIT_BRIDGE_MAIN).href)
   stop=registerToolkitIpc(port,(channel,handler)=>ipcMain.handle(channel,handler))
   window = new BrowserWindow({show:false,width:96,height:96,webPreferences:{preload:process.env.AGENTMUX_TOOLKIT_BRIDGE_PRELOAD,
-    contextIsolation:true,nodeIntegration:false,sandbox:false}})
+    contextIsolation:true,nodeIntegration:false,sandbox:true}})
+  preferences=window.webContents.getLastWebPreferences()
+  assert.equal(preferences.contextIsolation,true)
+  assert.equal(preferences.nodeIntegration,false)
+  assert.equal(preferences.sandbox,true)
   window.webContents.on('console-message',(_event,...args)=>consoleMessages.push(args))
   window.webContents.on('preload-error',(_event,preloadPath,error)=>consoleMessages.push({preloadPath,error:String(error),stack:error.stack}))
-  await window.loadURL('data:text/html,<meta charset="utf-8"><title>Private Toolkit bridge proof</title>')
+  const html=path.join(directory,'bridge.html')
+  fs.writeFileSync(html,'<!doctype html><meta charset="utf-8"><title>Private Toolkit bridge proof</title>')
+  await window.loadFile(html)
+  collected++
+  assert.equal(await window.webContents.executeJavaScript('window.isSecureContext'),true,
+    'Product file origin must provide a secure context for preload WebCrypto')
+  assert.equal(await window.webContents.executeJavaScript('typeof window.agentmux'),'object',
+    'Actual sandboxed product preload must publish its public bridge')
   const early=await window.webContents.executeJavaScript(`(() => {
     window.framesSeen=0;window.endSeen=[];
     const lease=window.agentmux.toolkit.observe(()=>window.framesSeen++,reason=>window.endSeen.push(reason));
@@ -52,7 +63,9 @@ async function run() {
   assert.deepEqual([...leases],[],'Establishment close must release its actual Main lease')
   assert.equal(await window.webContents.executeJavaScript('window.framesSeen'),0,'Disposed Renderer receives no late callback')
   assert.equal(observations.filter(e=>e.event==='disposed').length,1,'Duplicate dispose is idempotent')
+  passedCases++
   const earlyEvents=observations.splice(0)
+  collected++
   mode='delayed'
   await window.webContents.executeJavaScript('(() => {window.lease=window.agentmux.toolkit.observe(()=>window.framesSeen++,reason=>window.endSeen.push(reason));return true})()')
   await until(()=>assert.equal(leases.size,1,'Positive actual bridge consumer must be nonempty'))
@@ -60,6 +73,8 @@ async function run() {
   assert.equal(await window.webContents.executeJavaScript('window.framesSeen'),1,'Healthy actual Source callback crosses isolated bridge')
   await window.webContents.executeJavaScript('window.lease.dispose()')
   await until(()=>assert.equal(leases.size,0))
+  passedCases++
+  collected++
   mode='failure'
   await window.webContents.executeJavaScript('(() => {window.agentmux.toolkit.observe(()=>window.framesSeen++,reason=>window.endSeen.push(reason));return true})()')
   let ends=[]
@@ -67,11 +82,14 @@ async function run() {
   assert.equal(ends.length,1,'Establishment failure must reach typed API onEnd exactly once')
   assert.match(ends[0],/Actual bridge establishment failed\./u,'Source failure must survive the real Electron error envelope')
   assert.equal(await window.webContents.executeJavaScript('window.framesSeen'),1)
-  fs.writeFileSync(path.join(directory,'bridge-result.json'),JSON.stringify({contextIsolation:true,nodeIntegration:false,
-    collected:3,early,earlyEvents,events:observations,ends,leases:[...leases],consoleMessages},null,2)+'\n')
+  passedCases++
+  fs.writeFileSync(path.join(directory,'bridge-result.json'),JSON.stringify({contextIsolation:preferences.contextIsolation,
+    nodeIntegration:preferences.nodeIntegration,sandbox:preferences.sandbox,collected,passedCases,
+    early,earlyEvents,events:observations,ends,leases:[...leases],consoleMessages},null,2)+'\n')
 }
 run().then(()=>{stop();window?.destroy();app.quit()}).catch(error=>{
   fs.writeFileSync(path.join(directory,'bridge-failure.json'),JSON.stringify({name:error.name,message:error.message,stack:error.stack,
-    events:observations,leases:[...leases],consoleMessages},null,2)+'\n')
+    collected,passedCases,preferences:preferences&&{contextIsolation:preferences.contextIsolation,
+      nodeIntegration:preferences.nodeIntegration,sandbox:preferences.sandbox},events:observations,leases:[...leases],consoleMessages},null,2)+'\n')
   console.error(error);stop();window?.destroy();app.exit(1)
 })
