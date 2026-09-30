@@ -55,14 +55,17 @@ export function workbenchProjectionSlotId(prefix: string, reference: Pick<Workbe
   return `${prefix}:${JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId])}`
 }
 
+/** One exact Region occurrence; sibling Regions never share its target slot. */
+export function workbenchRegionProjectionSlotId(prefix: string, reference: WorkbenchProjectionSelection): string {
+  return `${prefix}:${JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId, reference.regionId])}`
+}
+
 /** Read-only projection of the original layout algebra and authoritative typed membership. */
 export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, tabs: Readonly<Record<string, WorkbenchTab>>, scope: WorkbenchProjection, activeGroupId: string | null = null): {
   layout: WorkspaceLayout | null
   issues: string[]
   unsupportedTabIds: ReadonlySet<string>
 } {
-  if (scope.entity.kind === 'region') return { layout: null,
-    issues: ['Direct Region presentation is not available in the original content owner yet. The exact Region reference and its siblings are kept; open the original Tab to continue.'], unsupportedTabIds: new Set() }
   const issues: string[] = []
   const memberIds = workbenchProjectionTabIds(scope)
   const entityKnown = scope.entity.kind === 'zone' ? Boolean(workbenchProjectionZone(scope)) : memberIds.size > 0

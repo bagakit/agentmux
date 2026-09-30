@@ -1201,6 +1201,8 @@ Mote 展开反馈、选择区内的完整 Space/收起动作与独立标题行�
 
 ### Space 与 Focus 全局工作面
 
+Focus 的“只看此 Region／返回整个 Tab”是原顶部动作中的紧凑层级切换，默认完整 Tab；不增加第二标题行、常驻工具栏或嵌套内容框。单 Region 呈现保原内容、菜单与关闭命中区，准确来源在需要时可读；其原地址、输入／草稿、兄弟叶与成本边界只见交互合同《Zone→Tabs→Regions 的实体与展示绑定》。
+
 Tab 级投影只保当前展示位置的一行身份／操作带，不再套上层 Group 页签工具带；标题可由调用位置提供，内部原 Regions 正文与焦点不以 CSS 隐藏或重挂换层次。行为引用交互 SSOT《Zone→Tabs→Regions 的实体与展示绑定》。
 
 顶级入口的名称和职责见交互合同《左下角导航、Space 与 Goals》。Space 表达工作现场，不把 Session 生命周期误当作顶级导航。Focus 和 Goals 都是全局表面，打开后 Project Rail 不占空间；Project 归属在内容中以紧凑元数据表达。Agents 引力图的具体布局属于独立 Feature，当前表面先保持可扫描和可恢复。

@@ -36,8 +36,10 @@ function columnFor(context: FocusContext): FocusColumn {
     ? 'disconnected' : context.bucket
 }
 
-export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets }: {
+export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets, regionOnly, onToggleRegion }: {
   presentation?: ExecutionFocusPresentation
+  regionOnly?: boolean | undefined
+  onToggleRegion?: (() => void) | undefined
   directoryIssue?: string | null
   viewTargets?: Readonly<Record<string, WorkbenchViewTarget>>
 } = {}) {
@@ -58,7 +60,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const layouts = useAppStore(state => state.layouts)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const projection = presentation?.projection ?? null
-  const selectedTab = projection?.entity.kind === 'tab' ? tabs[projection.entity.tabId] ?? null : null
+  const selectedTab = projection?.selection.length === 1 ? tabs[projection.selection[0]!.tabId] ?? null : null
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
@@ -133,7 +135,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     </div></>
   }
   return <section className={`global-board-surface global-focus-surface ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" style={{ '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
-    <FocusToolbar selectedId={selectedId} selected={selected} tab={selectedTab} onReview={() => setRequestId(selectedId)} onCloseWorkspace={closeWorkspace}>
+    <FocusToolbar selectedId={selectedId} selected={selected} tab={selectedTab} onReview={() => setRequestId(selectedId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>

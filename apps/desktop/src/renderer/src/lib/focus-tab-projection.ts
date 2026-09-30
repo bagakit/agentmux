@@ -16,7 +16,8 @@ export function executionFocusPresentation(
   execution: AgentFocusContext['execution'],
   tabs: Readonly<Record<string, WorkbenchTab>>,
   catalog: AgentMuxSpaceCatalog | null,
-  onSelect: WorkbenchProjection['onSelect']
+  onSelect: WorkbenchProjection['onSelect'],
+  level: 'tab' | 'region' = 'tab'
 ): ExecutionFocusPresentation {
   if (!execution.sessionId) return { projection: null, issue: null, references: [] }
   if (!catalog) return { projection: null, issue: 'The original work surface directory is still restoring. Its Session and exact reference are kept.', references: [] }
@@ -41,7 +42,7 @@ export function executionFocusPresentation(
         ? 'This Session has more than one work surface. Choose the exact location to open in Focus.'
         : 'No work surface occurrence is currently confirmed for this Session. Its identity is kept.'
   }
-  return { projection: { entity: { kind: 'tab', tabId: reference.tabId }, presentationId: 'focus-workbench',
+  return { projection: { entity: level === 'region' ? { kind: 'region', regionId: reference.regionId } : { kind: 'tab', tabId: reference.tabId }, presentationId: 'focus-workbench',
     displayWorkspaceId: reference.displayWorkspaceId,
     catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
     selection: [reference], onSelect },

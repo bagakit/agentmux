@@ -63,6 +63,7 @@ export function useReleasedBrowserRegionIds(): ReadonlySet<string> {
 type CoordinatorOptions = {
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined
+  projectedVisibleRegionIds?: ReadonlySet<string> | undefined
   measurementActive?: boolean
   parkingEnabled?: boolean
 }
@@ -71,6 +72,7 @@ type CoordinatorOptions = {
 export function useSurfaceMemoryBudget({
   workbenchVisible,
   projectedVisibleTabIds,
+  projectedVisibleRegionIds,
   measurementActive = false,
   parkingEnabled = true
 }: CoordinatorOptions): SurfaceMemoryBudgetState {
@@ -89,9 +91,9 @@ export function useSurfaceMemoryBudget({
       savingDocuments,
       activeWorkspaceId,
       workbenchVisible,
-      projectedVisibleTabIds
+      projectedVisibleTabIds, projectedVisibleRegionIds
     }),
-    [activeWorkspaceId, dirtyDocuments, documents, layouts, savingDocuments, tabs, workbenchVisible, projectedVisibleTabIds]
+    [activeWorkspaceId, dirtyDocuments, documents, layouts, savingDocuments, tabs, workbenchVisible, projectedVisibleTabIds, projectedVisibleRegionIds]
   )
   const candidateKey = useMemo(
     () => candidates.map((candidate) => [
