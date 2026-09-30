@@ -526,10 +526,10 @@ function DesktopApp() {
         />
       ) : null}
       <footer className="window-status-bar">
-        <div className="window-status-bar__surface-switch"><SurfaceSwitch onCloseSettings={closeSettings} /></div>
+        <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
           <GlobalSystemNotices nativeOverlayWarning={nativeOverlayWarning} />
-          <WindowUtilityBar settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} toolkit={<PerformancePanel />} />
+          <WindowUtilityBar toolkit={<PerformancePanel />} />
         </div>
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

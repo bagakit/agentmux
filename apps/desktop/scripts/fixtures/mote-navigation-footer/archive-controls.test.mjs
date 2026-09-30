@@ -9,7 +9,7 @@ import ts from 'typescript'
 
 const repository = resolve(import.meta.dirname, '../../../../..')
 const paths = ['apps/desktop/scripts/fixtures/mote-navigation-footer/archive-main.cjs',
-  'apps/desktop/src/renderer/src/components/WindowUtilityBar.tsx', 'apps/desktop/src/renderer/src/App.tsx']
+  'apps/desktop/src/renderer/src/components/TopRowChrome.tsx', 'apps/desktop/src/renderer/src/App.tsx']
 const [probe, owner, caller] = await Promise.all(paths.map(path => readFile(join(repository, path), 'utf8')))
 const inputs = Object.fromEntries(paths.map((path, index) => [path, createHash('sha256').update([probe, owner, caller][index]).digest('hex')]))
 
@@ -50,7 +50,7 @@ test('compact actions proof distinguishes the owning declaration, computed flex 
   console.log(relative(repository, join(evidence, 'receipt.json')))
 })
 
-test('archive uses the single real Settings button from the mounted WindowUtilityBar owner', async () => {
+test('archive uses the single real Settings button from the mounted SurfaceSwitch owner', async () => {
   const start = probe.indexOf('    const panel = '), end = probe.indexOf('\n', start)
   assert.ok(start >= 0 && end > start, 'The actual control declaration must be nonempty')
   const block = probe.slice(start, end)
@@ -64,19 +64,19 @@ test('archive uses the single real Settings button from the mounted WindowUtilit
     ts.forEachChild(node, visit)
   }
   visit(tree)
-  assert.equal(buttons.length, 1, 'The actual utility owner must contain exactly one Settings button')
+  assert.equal(buttons.length, 1, 'The actual navigation owner must contain exactly one Settings button')
   const button = buttons[0], container = button.parent.parent
   assert.ok(ts.isJsxElement(container), 'The original Settings button has its actual JSX container')
-  assert.equal(container.openingElement.tagName.getText(tree), 'div')
+  assert.equal(container.openingElement.tagName.getText(tree), 'nav')
   assert.match(attribute(button, 'onClick').initializer.expression.getText(tree), /settings\.open\('overview'\)/)
   const callerTree = ts.createSourceFile(paths[2], caller, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const calls = []
   function visitCaller(node) {
-    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(callerTree) === 'WindowUtilityBar') calls.push(node)
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(callerTree) === 'SurfaceSwitch') calls.push(node)
     ts.forEachChild(node, visitCaller)
   }
   visitCaller(callerTree)
-  assert.equal(calls.length, 1, 'The real App must mount this exact utility owner')
+  assert.equal(calls.length, 1, 'The real App must mount this exact navigation owner')
   const window = new Window()
   try {
     function element(opening) {
@@ -90,7 +90,7 @@ test('archive uses the single real Settings button from the mounted WindowUtilit
     const matches = value => {
       const found = [...window.document.querySelectorAll(value)]
       assert.equal(found.length, 1, 'The archive selector must find the single original Settings control')
-      assert.equal(found[0], control, 'The archive probe uses its original public utility button')
+      assert.equal(found[0], control, 'The archive probe uses its original public navigation button')
     }
     matches(selector(block))
     const old = block.replace(selector(block), '.surface-navigation__settings[aria-label="Settings"]')

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { PanelLeft, PanelsTopLeft, RadioTower } from 'lucide-react'
+import { useContext, useEffect, useState } from 'react'
+import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
+import { SettingsNavigation } from './SettingsNavigation'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
@@ -121,9 +122,11 @@ export function TopBreadcrumb() {
   )
 }
 
-export function SurfaceSwitch({ onCloseSettings }: {
+export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
+  settingsOpen?: boolean
   onCloseSettings?: () => void
 }) {
+  const settings = useContext(SettingsNavigation)!
   const mainSurface = useAppStore((state) => state.mainSurface)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const [tooltip, setTooltip] = useState<{ id: string; left: number; top: number } | null>(null)
@@ -210,6 +213,17 @@ export function SurfaceSwitch({ onCloseSettings }: {
         <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface').map(renderPlugin)}
         </div>
+        <button
+          type="button"
+          className="surface-navigation__slot"
+          aria-label="Settings"
+          title="Settings"
+          aria-expanded={settingsOpen}
+          data-settings-section="overview"
+          onClick={() => settingsOpen ? onCloseSettings?.() : settings.open('overview')}
+        >
+          <Settings2 className="surface-navigation__icon" size={14} aria-hidden="true" />
+        </button>
       </nav>
       {activePlugin && tooltip ? (
         <WindowOverlayPortal layer="tooltip">

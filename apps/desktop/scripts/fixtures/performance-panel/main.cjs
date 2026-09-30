@@ -20,7 +20,7 @@ app.whenReady().then(async()=>{
     current = await configStore.get()
     const owner = new ConfigOwner({read:()=>current,save:next=>configStore.save(next),publish:saved=>{current=saved;win?.webContents.send('proof:config:changed',saved)}})
     ipcMain.handle('proof:setup',async(_event,preview)=>{
-      if(phase==='control') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
+      if(phase==='control'||phase==='placement') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
         workspaces:[...preview.workspaces,...current.workspaces.filter(workspace=>!preview.workspaces.some(item=>item.id===workspace.id))],
         appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{performance:{enabled:true,statusBar:'label'}},
         composerShortcuts:[{id:'original',keyword:'original',label:'Original authored prompt',body:'Original saved body remains exact.'}]})) }
@@ -84,11 +84,11 @@ app.whenReady().then(async()=>{
     const scene=async(width,theme)=>{win.setContentSize(width,900);await read('window.performanceScene.theme('+JSON.stringify(theme)+')');await until('innerWidth==='+width+'&&document.documentElement.dataset.appearance==='+JSON.stringify(theme));await settle()}
     const capture=async(file,description)=>{
       await settle()
-      const geometry=await read('(()=>{const p=document.querySelector(".performance-popover"),s=document.querySelector(".window-status-bar"),t=document.querySelector(".performance-trigger"),r=p?.getBoundingClientRect(),rect=q=>document.querySelector(q)?.getBoundingClientRect().toJSON();return{width:innerWidth,height:innerHeight,overflow:document.documentElement.scrollWidth-innerWidth,panel:r?.toJSON(),footer:s?.getBoundingClientRect().toJSON(),trigger:t?.getBoundingClientRect().toJSON(),settings:rect(".window-status-bar__utilities [aria-label=Settings]"),keyboard:rect("[aria-label=\\"Keyboard shortcuts\\"]"),navigation:rect(".surface-navigation__surfaces"),text:p?.textContent,role:p?.getAttribute("role"),focus:document.activeElement?.getAttribute("aria-label"),animationCount:p?[...p.querySelectorAll("*"),p].flatMap(n=>n.getAnimations()).filter(a=>a.playState==="running").length:0}})()')
+      const geometry=await read('(()=>{const p=document.querySelector(".performance-popover"),s=document.querySelector(".window-status-bar"),t=document.querySelector(".performance-trigger"),r=p?.getBoundingClientRect(),rect=q=>document.querySelector(q)?.getBoundingClientRect().toJSON();return{width:innerWidth,height:innerHeight,overflow:document.documentElement.scrollWidth-innerWidth,panel:r?.toJSON(),footer:s?.getBoundingClientRect().toJSON(),trigger:t?.getBoundingClientRect().toJSON(),settings:rect(".surface-navigation [aria-label=Settings]"),keyboard:rect("[aria-label=\\"Keyboard shortcuts\\"]"),navigation:rect(".surface-navigation__surfaces"),text:p?.textContent,role:p?.getAttribute("role"),focus:document.activeElement?.getAttribute("aria-label"),animationCount:p?[...p.querySelectorAll("*"),p].flatMap(n=>n.getAnimations()).filter(a=>a.playState==="running").length:0}})()')
       assert.equal(geometry.overflow,0,'实际App无横溢');assert.equal(geometry.role,'dialog')
       assert.ok(geometry.panel.width>0&&geometry.panel.x>=0&&geometry.panel.right<=geometry.width+1,'原浮窗位于实际viewport')
       assert.ok(geometry.panel.top>=0&&geometry.panel.bottom<=geometry.footer.top+1,'实际浮窗不遮状态栏入口')
-      assert.ok(geometry.navigation.right<=geometry.keyboard.left&&geometry.keyboard.right<=geometry.trigger.left&&geometry.trigger.right<=geometry.settings.left,'实际功能区在左、Toolkit紧邻最右Settings')
+      assert.ok(geometry.navigation.right<=geometry.settings.left&&geometry.settings.right<=geometry.keyboard.left&&geometry.keyboard.right<=geometry.trigger.left&&geometry.trigger.right<=geometry.footer.right,'实际Settings在左、Toolkit为右端工具位')
       const png=(await win.webContents.capturePage()).toPNG();fs.writeFileSync(path.join(evidence,file),png);raw.frames.push({file,sha256:createHash('sha256').update(png).digest('hex'),description,geometry})
     }
     await until('window.performanceScene?.ready&&!!document.querySelector(".performance-trigger")&&!!document.querySelector(".xterm-helper-textarea")')
@@ -144,43 +144,71 @@ app.whenReady().then(async()=>{
       raw.surface=surface;raw.restart={exactSurface:true,attachmentCount:await read('window.performanceScene.attachments.length')}
     } else {
       assert.equal(leases.size,0,'icon/label关闭不观察')
-      assert.equal(await read('document.querySelector(".performance-trigger").closest(".window-status-bar__toolkits").nextElementSibling?.getAttribute("aria-label")'),'Settings','实际App唯一入口在Settings左')
+      assert.equal(await read('document.querySelectorAll(".window-status-bar [aria-label=Settings]").length'),1,'实际App唯一Settings入口')
+      assert.equal(await read('document.querySelector(".window-status-bar__right [aria-label=Settings]")'),null,'右侧不保留Settings副本')
       raw.statusbarGeometry=[]
       for(const width of [1480,640,320]) {
         await scene(width,'dark')
-        let anchor
+        let anchor, navigationAnchor, rightAnchor
         for(const variant of ['label','icon','disabled']) {
           await read('window.performanceScene.preferences('+JSON.stringify(variant!=='disabled')+','+JSON.stringify(variant==='icon'?'icon':'label')+')');await settle()
-          const geometry=await read('(()=>{const s=document.querySelector(".window-status-bar__utilities [aria-label=Settings]"),t=document.querySelector(".performance-trigger"),n=document.querySelector(".surface-navigation__surfaces"),k=document.querySelector("[aria-label=\\"Keyboard shortcuts\\"]");return{width:innerWidth,overflow:document.documentElement.scrollWidth-innerWidth,settings:s.getBoundingClientRect().toJSON(),navigation:n.getBoundingClientRect().toJSON(),keyboard:k.getBoundingClientRect().toJSON(),trigger:t?.getBoundingClientRect().toJSON(),label:t?.getAttribute("aria-label"),text:t?.textContent,spanWidth:t?.querySelector("span")?.getBoundingClientRect().width,leftSettings:n.querySelector("[aria-label=Settings],.performance-trigger")!==null}})()')
-          assert.equal(geometry.overflow,0);assert.equal(geometry.leftSettings,false)
-          assert.ok(geometry.navigation.right<=geometry.keyboard.left,'左功能导航与右管理组不交叠')
-          if(anchor)assert.deepEqual(geometry.settings,anchor,'icon/label/disabled不移动最右Settings锚')
-          else anchor=geometry.settings
-          await point(q('.window-status-bar__utilities [aria-label="Settings"]'));await point(q('[aria-label="Keyboard shortcuts"]'))
+          const geometry=await read('(()=>{const s=document.querySelector(".surface-navigation [aria-label=Settings]"),t=document.querySelector(".performance-trigger"),n=document.querySelector(".surface-navigation__surfaces"),k=document.querySelector("[data-shortcut-help-open]"),u=document.querySelector(".window-status-bar__utilities");return{width:innerWidth,overflow:document.documentElement.scrollWidth-innerWidth,settings:s?.getBoundingClientRect().toJSON(),navigation:n.getBoundingClientRect().toJSON(),navigationButtons:[...n.querySelectorAll("button")].map(b=>({label:b.getAttribute("aria-label"),bounds:b.getBoundingClientRect().toJSON()})),utilities:u.getBoundingClientRect().toJSON(),keyboard:k.getBoundingClientRect().toJSON(),trigger:t?.getBoundingClientRect().toJSON(),label:t?.getAttribute("aria-label"),text:t?.textContent,spanWidth:t?.querySelector("span")?.getBoundingClientRect().width,settingsConnected:!!s?.isConnected&&s.checkVisibility(),settingsCount:document.querySelectorAll(".window-status-bar [aria-label=Settings]").length,settingsAfterGroup:s?.previousElementSibling===n,settingsAriaCurrent:s?.hasAttribute("aria-current"),rightSettings:!!document.querySelector(".window-status-bar__right [aria-label=Settings]"),rightToolkit:!t||!!t.closest(".window-status-bar__right .window-status-bar__toolkits")}})()')
+          assert.equal(geometry.overflow,0);assert.equal(geometry.settingsCount,1);assert.equal(geometry.settingsConnected,true);assert.equal(geometry.settingsAfterGroup,true);assert.equal(geometry.settingsAriaCurrent,false);assert.equal(geometry.rightSettings,false);assert.equal(geometry.rightToolkit,true)
+          assert.equal(geometry.navigationButtons.length,4,'原Work surfaces四按钮不混入Settings')
+          for(const bounds of [geometry.settings,geometry.keyboard,geometry.navigation,...geometry.navigationButtons.map(b=>b.bounds),...(geometry.trigger?[geometry.trigger]:[])])assert.ok(bounds.width>0&&bounds.height>0&&bounds.x>=0&&bounds.right<=width,'实际connected控件正面积且在viewport')
+          assert.ok(geometry.navigation.right<=geometry.settings.left&&geometry.settings.right<=geometry.keyboard.left,'左功能导航/Settings与右工具区不交叠')
+          if(anchor){assert.deepEqual(geometry.settings,anchor,'icon/label/disabled不移动左Settings');assert.deepEqual(geometry.navigationButtons,navigationAnchor,'工具宽度不移动原功能导航');assert.equal(geometry.utilities.right,rightAnchor,'右工具组锚稳定')}
+          else {anchor=geometry.settings;navigationAnchor=geometry.navigationButtons;rightAnchor=geometry.utilities.right}
+          await point(q('.surface-navigation [aria-label="Settings"]'));await point(q('[data-shortcut-help-open]'))
           if(variant==='disabled')assert.equal(geometry.trigger,undefined,'关闭配置移除Toolkit入口')
-          else {assert.equal(geometry.label,'Performance');assert.ok(geometry.keyboard.right<=geometry.trigger.left&&geometry.trigger.right<=geometry.settings.left);await point(q('.performance-trigger'))
+          else {assert.equal(geometry.label,'Performance');assert.ok(geometry.keyboard.right<=geometry.trigger.left&&geometry.trigger.right<=geometry.utilities.right);await point(q('.performance-trigger'))
             if(variant==='label'){assert.equal(geometry.text,'Performance');assert.ok(geometry.spanWidth>=20,'窄窗label保可见文字与完整accessible name')}
             else assert.equal(geometry.text,'')}
           raw.statusbarGeometry.push({variant,...geometry})
         }
       }
+      assert.equal(raw.statusbarGeometry.length,9,'三宽三显示配置非空九组')
       await read('window.performanceScene.preferences(true,"label")');await scene(1480,'dark')
-      const keyboardTargets=await read('[...document.querySelectorAll(".surface-navigation__surfaces button,.window-status-bar__utilities button")].filter(n=>n.checkVisibility()).map(n=>n.getAttribute("aria-label"))')
-      assert.ok(keyboardTargets.length>=7&&keyboardTargets.every(Boolean),'实际两组可见键盘入口非空且具名')
+      const requiredTargets=await read('[...document.querySelectorAll(".surface-navigation button,.window-status-bar__utilities button")].filter(n=>n.isConnected&&n.checkVisibility()).map(n=>n.getAttribute("aria-label"))')
+      assert.equal(requiredTargets.length,7,'实际四功能加Settings/Keyboard/Performance七入口');assert.ok(requiredTargets.every(Boolean),'每个原入口具名')
+      const keyboardTargets=await read('[...document.querySelectorAll(".surface-navigation button,.window-status-bar__right button")].filter(n=>n.isConnected&&n.checkVisibility()).map(n=>n.getAttribute("aria-label"))')
+      assert.ok(keyboardTargets.length>=7&&requiredTargets.every(label=>keyboardTargets.includes(label)),'原七入口都在真实Footer焦点序列中，保现System notifications邻接')
       raw.statusbarKeyboard=[]
       for(const width of [1480,640,320]) {
         await scene(width,'dark');await click(q('.performance-trigger'));await key('Escape')
         assert.equal(await read('document.activeElement===document.querySelector(".performance-trigger")'),true,'显式浮窗Escape真实回入口')
         const reached=new Set(['Performance']),nativeTab=[]
-        for(let i=0;i<20&&keyboardTargets.some(label=>label!=='Settings'&&!reached.has(label));i++) {
+        for(const expected of keyboardTargets.slice(0,-1).reverse()) {
           win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['shift']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['shift']});await settle()
-          const focus=await read('document.activeElement.getAttribute("aria-label")');nativeTab.push({direction:'backward',focus});if(keyboardTargets.includes(focus))reached.add(focus)
+          const focus=await read('document.activeElement.getAttribute("aria-label")');assert.equal(focus,expected,'原生ShiftTab准确到connected可见邻接控件');nativeTab.push({direction:'backward',focus});reached.add(focus)
         }
-        await click(q('.performance-trigger'));await key('Escape');await key('Tab')
-        const focus=await read('document.activeElement.getAttribute("aria-label")');nativeTab.push({direction:'forward',focus});reached.add(focus)
+        for(const expected of keyboardTargets.slice(1)) {await key('Tab');const focus=await read('document.activeElement.getAttribute("aria-label")');assert.equal(focus,expected,'原生Tab准确到connected可见邻接控件');nativeTab.push({direction:'forward',focus});reached.add(focus)}
         assert.deepEqual([...reached].sort(),[...keyboardTargets].sort(),'原生Tab/ShiftTab可达两组全部入口')
-        raw.statusbarKeyboard.push({width,targets:keyboardTargets,reached:[...reached],nativeTab})
+        raw.statusbarKeyboard.push({width,requiredTargets,targets:keyboardTargets,reached:[...reached],nativeTab})
       }
+      if(phase==='placement') {
+        raw.qualificationScope='settings-left-placement-only'
+        raw.boundary='仅本次左右归属/实际Footer/七原生控件与Settings开合、原工作面保持；不签full hidden/restart/joined/T004。'
+        await scene(1480,'dark')
+        const mainSurface=await read('window.performanceScene.mainSurface()')
+        await read('window.originalPlacementTerminal=document.querySelector(".xterm-helper-textarea")')
+        await click(q('.surface-navigation [aria-label="Settings"]'))
+        await until('document.querySelector(".settings-page")?.dataset.settingsPage==="overview"')
+        assert.equal(await read('window.performanceScene.mainSurface()'),mainSurface,'Settings打开不改变原mainSurface')
+        assert.equal(await read('document.querySelector(".surface-navigation [aria-label=Settings]").getAttribute("aria-expanded")'),'true')
+        await click(q('.surface-navigation [aria-label="Settings"]'))
+        await until('!document.querySelector(".settings-page")')
+        await click(q('.surface-navigation [aria-label="Settings"]'));await key('Escape')
+        await until('!document.querySelector(".settings-page")')
+        assert.equal(await read('window.performanceScene.mainSurface()'),mainSurface,'Settings再次点击及Escape保原mainSurface')
+        assert.equal(await read('window.originalPlacementTerminal===document.querySelector(".xterm-helper-textarea")&&window.originalPlacementTerminal.isConnected'),true,'Settings开合保原xterm输入节点')
+        for(const [width,theme,file] of [[1480,'dark','1480-dark-placement.png'],[1480,'light','1480-light-placement.png'],[640,'dark','640-dark-placement.png'],[320,'dark','320-dark-placement.png'],[320,'light','320-light-placement.png']]) {
+          await scene(width,theme);await click(q('.performance-trigger'));await capture(file,'Settings left / Toolkit right / complete actual App Footer');await close()
+        }
+        raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface,'有限placement开合保原Tab/Region/Session/layout/focus/draft snapshot')
+        raw.settings={unique:true,left:true,rightDuplicate:false,openClose:true,escape:true,sameMainSurface:mainSurface,sameTerminalInputNode:true}
+        assert.equal(leases.size,0,'本次placement关闭无自己的观察lease')
+      } else {
       await scene(1480,'dark')
       // Fresh点击：不得只通过先hover再click规避hidden元素无法接焦点。
       await click(q('.performance-trigger'))
@@ -275,6 +303,7 @@ app.whenReady().then(async()=>{
       assert.equal(leases.size,0)
       raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface,'所有tool操作保原工作面/healthy Session/draft')
       raw.script={path:asset,sha256:scriptSHA}
+      }
     }
     raw.nativeEvents=await read('window.performanceScene.events')
     assert.ok(raw.nativeEvents.some(event=>event.isTrusted&&event.key==='Tab')||phase==='restart'||phase==='joined','原生事件非空正控')
