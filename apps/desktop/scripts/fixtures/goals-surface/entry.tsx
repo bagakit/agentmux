@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { projectLinksPreview } from './project-links'
+import { mainMotePreview } from './main-mote'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
@@ -129,3 +130,5 @@ Object.assign(window, { goalsVisual: { seed,
   facts: () => { const state = useAppStore.getState(), entries = Object.values(state.demands); return { selected: state.selectedDemandId, ids: Object.keys(state.demands), criteria: entries.reduce((count, goal) => count + (goal.alignment?.criteria.length ?? 0), 0), reports: entries.filter(goal => goal.grounding).length, checks: entries.reduce((count, goal) => count + (goal.grounding?.checks.length ?? 0), 0), runs: state.sessions.filter(session => sessions.some(original => original.id === session.id)).map(session => session.control) } } } })
 
 Object.assign(window, { goalsProjectLinks: projectLinksPreview(initial, mode => root?.render(<App key={`project-links-${mode}`} />)) })
+
+Object.assign(window, { goalsMainMote: mainMotePreview(initial, () => root?.render(<App key="main-mote" />)) })

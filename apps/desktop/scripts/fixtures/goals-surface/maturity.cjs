@@ -3,15 +3,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence, scope, baselineFile] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope==='direct-goal-only' ? 'direct-goal' : scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
+const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope==='goal-main-mote-only' ? 'goal-main-mote' : scope==='direct-goal-only' ? 'direct-goal' : scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
 let win
-async function phase(name) { if(scope==='direct-goal-only') await fs.writeFile(path.join(evidence,'phase.json'), JSON.stringify({phase:name,at:Date.now()})) }
+async function phase(name) { if(['direct-goal-only','goal-main-mote-only'].includes(scope)) await fs.writeFile(path.join(evidence,'phase.json'), JSON.stringify({phase:name,at:Date.now()})) }
 const evaluate = expression => win.webContents.executeJavaScript(expression)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function waitFor(expression) { for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(25)}throw new Error('Timed out: '+expression) }
 async function paint(){ await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await delay(70) }
 async function size(width){await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:780,deviceScaleFactor:1,mobile:false});await paint()}
-async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();let appearance;if(scope==='direct-goal-only'){appearance=await evaluate('({config:goalsVisual.directFacts().appearance,dom:document.documentElement.dataset.appearance,colorScheme:document.documentElement.style.colorScheme})');const expected=name.split('-')[1];assert.deepEqual(appearance,{config:expected,dom:expected,colorScheme:expected},'Frame theme is the actual Config and painted DOM theme')}const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,...(appearance?{appearance}:{}),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
+async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();let appearance;if(['direct-goal-only','goal-main-mote-only'].includes(scope)){appearance=await evaluate('({config:goalsVisual.directFacts().appearance,dom:document.documentElement.dataset.appearance,colorScheme:document.documentElement.style.colorScheme})');const expected=name.split('-')[1];assert.deepEqual(appearance,{config:expected,dom:expected,colorScheme:expected},'Frame theme is the actual Config and painted DOM theme')}const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,...(appearance?{appearance}:{}),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
 const button = label => `([...document.querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)} || node.getAttribute('aria-label')===${JSON.stringify(label)}))`
 async function click(expression){const point=await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});await paint()}
 async function insert(selector,text){await click(`document.querySelector(${JSON.stringify(selector)})`);await win.webContents.debugger.sendCommand('Input.insertText',{text});await paint()}
@@ -128,6 +128,8 @@ app.whenReady().then(async()=>{
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
   if(scope==='project-links-only'){
    await require('./project-links.cjs')({evaluate,size,click,capture,waitFor,result})
+  }else if(scope==='goal-main-mote-only'){
+   await require('./main-mote.cjs')({evaluate,size,click,capture,waitFor,result,visibleDirectPmo})
   }else if(scope==='direct-goal-only'){
    await directScenes()
   }else if(scope?.startsWith('density')){
