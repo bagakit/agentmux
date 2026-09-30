@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "../../../src/**/*.ts",
+    "../../../src/**/*.tsx",
+    "../../../*.ts",
+    "../../../test/focus-native-observation-service.test.tsx"
+  ]
+}

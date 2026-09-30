@@ -17,6 +17,7 @@ export type FocusMessageReader = {
   onContext(id: string): void; onMessage(message: AgentSessionUserMessage): void
   onContinue(): void; onRefresh(): void
   sourceCoverage?: string; sourceError?: string | null; onMoreSources?: (() => void) | undefined; onRefreshSources?: () => void
+  serviceNotice?: string | null; windowFrozen?: boolean
 }
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
@@ -121,7 +122,8 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       {reader.onMoreSources || reader.sourceError ? <div className="recent-focus__input-actions">{reader.onMoreSources ? <button type="button" onClick={reader.onMoreSources}>Show more input sources</button> : null}{reader.sourceError && reader.onRefreshSources ? <button type="button" onClick={reader.onRefreshSources}>Retry input sources</button> : null}</div> : null}
       <p role="status" className="recent-focus__input-coverage">{reader.loading ? 'Reading input records… ' : ''}{reader.coverage}</p>
       {reader.error ? <p role="status" className="recent-focus__input-error">{reader.error} Existing records and live input are preserved.</p> : null}
-      <div className="recent-focus__input-actions"><button type="button" disabled={reader.loading || !reader.canContinue} onClick={reader.onContinue}>Read earlier records</button><button type="button" disabled={reader.loading} onClick={reader.onRefresh}>Refresh source</button></div>
+      {reader.serviceNotice ? <p role="status" className="recent-focus__input-coverage" data-input-observation-notice>{reader.serviceNotice}</p> : null}
+      <div className="recent-focus__input-actions"><button type="button" disabled={reader.loading || !reader.canContinue} onClick={reader.onContinue}>Read earlier records</button><button type="button" disabled={reader.loading} onClick={reader.onRefresh}>{reader.windowFrozen ? 'Read latest records' : 'Refresh source'}</button></div>
       <div className="recent-focus__input-list" aria-label="Available input records">{reader.messages.map(item => {
         const itemSpeaker = speakerOfUserMessage(item)
         const itemIdentity = describeSpeaker(itemSpeaker)
