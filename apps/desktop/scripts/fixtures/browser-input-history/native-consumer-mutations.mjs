@@ -10,13 +10,14 @@ const sourcePath = resolve(root, 'apps/desktop/scripts/verify-browser-input-hist
 const testPath = resolve(root, 'apps/desktop/scripts/fixtures/browser-input-history/native-consumer.test.mjs')
 const output = resolve(process.argv[2] ?? 'docs/reviews/evidence/browser-input-history-native-consumer-source-2026-10-04/attempt-1')
 const source = await readFile(sourcePath, 'utf8'), hash = bytes => createHash('sha256').update(bytes).digest('hex')
+const helperPath = resolve(root, 'apps/desktop/scripts/browser-input-history-component-evidence.mjs'), helper = await readFile(helperPath)
 const mutations = [
   ['false-receipt-native-task-block-flipped',
     "scope: 'readonly-entry-and-original-integrity', passed: false, nativePassed: false, taskComplete: false,\n    adapterImplemented: false",
     "scope: 'readonly-entry-and-original-integrity', passed: true, nativePassed: true, taskComplete: true,\n    adapterImplemented: true"],
   ['cli-nonhelp-success-exit', 'process.exitCode = 2', 'process.exitCode = 0'],
   ['strict-arguments-removed',
-    "assert.ok(args.length === 2 && args[0] === '--receipt' && typeof args[1] === 'string' && args[1] && !args[1].startsWith('--'),\n        'Only --receipt <original.json> is accepted')", 'void args'],
+    "assert.ok([2, 4].includes(args.length) && args[0] === '--receipt' && typeof args[1] === 'string' && args[1] && !args[1].startsWith('--') &&\n        (args.length === 2 || args[2] === '--visual-review' && typeof args[3] === 'string' && args[3] && !args[3].startsWith('--')),\n        'Only --receipt <original.json> [--visual-review <review.json>] is accepted')", 'void args'],
   ['nonempty-json-guard-removed', "assert.ok(Object.keys(receipt).length > 0, 'Receipt fields are nonempty')", 'void receipt'],
   ['record-type-guard-removed', "assert.ok(receipt && typeof receipt === 'object' && !Array.isArray(receipt), 'A receipt is a nonempty record')", 'void receipt'],
   ['utf8-corruption-accepted', "new TextDecoder('utf-8', { fatal: true }).decode(bytes)", "bytes.toString('utf8')"],
@@ -37,6 +38,7 @@ async function run(label) {
   return { exit: result.status, signal: result.signal, error: result.error?.message, assertionRed: /ERR_ASSERTION/.test(log), log: label + '.log' }
 }
 try {
+  await writeFile(resolve(scratch, 'browser-input-history-component-evidence.mjs'), helper)
   await writeFile(copy, source)
   await writeFile(resolve(output, 'consumer-original.mjs'), source)
   packet.baseline = await run('baseline-green')

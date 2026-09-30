@@ -1,0 +1,6 @@
+body { background: var(--bg); color: var(--text); font: var(--fs-base)/1.5 var(--font-sans); }
+.history-native-fixture { margin: 20px; height: calc(100% - 40px); }
+.history-native-fixture__label { color: var(--text-3); font-size: var(--fs-micro); margin-bottom: 12px; }
+.history-native-fixture .browser-toolbar { height: 36px; padding: 0; }
+.history-native-fixture__stage { position: absolute; top: 98px; left: 20px; right: 20px; bottom: 20px; }
+.history-native-fixture__notice { color: var(--text-3); font-size: var(--fs-micro); }
