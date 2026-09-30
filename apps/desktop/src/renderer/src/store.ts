@@ -33,7 +33,7 @@ import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
-import { restoredSurveyZoneSelection, surveySelectReference, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type SurveyBrowserTarget } from './lib/survey-workface'
+import { restoredSurveyCollection, restoredSurveyZoneSelection, surveySelectReference, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type SurveyBrowserTarget } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -472,6 +472,9 @@ type AppState = {
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
   surveyZoneSelection: SurveyZoneSelection | null
+  /** Explicit display membership only, independent of automatic Browser discovery. */
+  surveyCollectedZones: Record<string, true>
+  setSurveyZoneCollected(zoneId: string, collected: boolean): boolean
   surveyToolsOpen: boolean
   surveySidebarWidth: number
   setSurveySidebarWidth(width: number): void
@@ -1827,6 +1830,7 @@ type PersistedAppState = {
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
   surveyZoneSelection?: SurveyZoneSelection | null
+  surveyCollectedZones?: Record<string, true>
   noteBlockSelections?: Record<string, NoteBlockTarget>
   focusTimelineNameWidth?: number
   surveySidebarWidth?: number
@@ -1854,6 +1858,7 @@ export type RestoredUiState = Pick<
   | 'activeWorkspaceId'
   | 'mainSurface'
   | 'surveyZoneSelection'
+  | 'surveyCollectedZones'
   | 'noteBlockSelections'
   | 'surveySidebarWidth'
   | 'projectRailOpen'
@@ -1933,7 +1938,8 @@ export function restorePersistedUiState(
     | 'activeWorkspaceId'
     | 'mainSurface'
     | 'surveyZoneSelection'
-  | 'noteBlockSelections'
+    | 'surveyCollectedZones'
+    | 'noteBlockSelections'
     | 'surveySidebarWidth'
     | 'projectRailOpen'
     | 'collapsedProjectGroups'
@@ -1958,6 +1964,7 @@ export function restorePersistedUiState(
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
+    surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
     surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
     projectRailOpen: restoredBoolean(persisted.projectRailOpen, true),
@@ -2011,6 +2018,7 @@ function selectPersistedInputs(state: AppState) {
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
     surveyZoneSelection: state.surveyZoneSelection,
+    surveyCollectedZones: state.surveyCollectedZones,
     surveySidebarWidth: state.surveySidebarWidth,
     agentFocus: state.agentFocus,
     focusTimelineNameWidth: state.focusTimelineNameWidth,
@@ -2426,6 +2434,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentNames: {},
   mainSurface: 'workbench',
   surveyZoneSelection: null,
+  surveyCollectedZones: {},
   surveySidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH,
   setSurveySidebarWidth(width) {
     set({ surveySidebarWidth: clampSurveySidebarWidth(width) })
@@ -2434,6 +2443,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   surveyToolsOpen: false,
   setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection }) },
+  setSurveyZoneCollected(zoneId, collected) {
+    const state = get()
+    if ((state.surveyCollectedZones[zoneId] === true) === collected) return true
+    if (collected) {
+      const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch) ?? []
+      const zone = spatialCatalog(state, topics).zones.find(zone => zone.zoneId === zoneId)
+      if (!zone || zone.kind === 'unknown') return false
+      set({ surveyCollectedZones: { ...state.surveyCollectedZones, [zoneId]: true } })
+    } else {
+      const { [zoneId]: _removed, ...surveyCollectedZones } = state.surveyCollectedZones
+      set({ surveyCollectedZones })
+    }
+    return true
+  },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   openSurveyBrowserTools(target) {
     const state = get()
@@ -5076,6 +5100,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const mayReveal = () => intentVersion === fileOpenIntentVersion && !cancelled && resourceCurrent()
     const selectProjection = () => {
+      // This is an explicit original File action, not discovery or arbitrary selection.
+      const document = get().documents[documentKey(workspaceId, path)]
+      if (navigation.mainSurface === 'survey' && placement?.projection?.presentationId === 'survey-workbench' &&
+        placement.projection.entity.kind === 'zone' && placement.projection.entity.zoneId === placement.space.zoneId &&
+        path.endsWith(NOTE_FILE_EXTENSION) && document && parseNoteFile(document).status === 'valid') {
+        get().setSurveyZoneCollected(placement.space.zoneId, true)
+      }
       if (placement?.reference && !placement.projection) {
         set({ activeWorkspaceId: displayId!, mainSurface: 'workbench' })
         return
@@ -5636,6 +5667,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!currentResource || currentResource.hostId !== originalResource.hostId || currentResource.path !== originalResource.path) throw new Error('The Note resource changed before creation. The original draft is retained.')
     } catch (error) { receipt = { ...receipt, ...(retrying ? { target: previous.target, path: previous.path } : {}), status: 'error', issue: presentError(error) }; publish(); return receipt }
     const target = receipt.target
+    if (captured.mainSurface === 'survey' && projection?.presentationId === 'survey-workbench' &&
+      projection.entity.kind === 'zone' && projection.entity.zoneId === target.zoneId && target.zoneId) {
+      get().setSurveyZoneCollected(target.zoneId, true)
+    }
     const content = JSON.stringify(newNoteDocument(draft, noteId, blockId), null, 2)
     publish()
     const named = await createNoteWithAvailableName(new Date(receipt.createdAt), async name => {
