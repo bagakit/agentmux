@@ -105,7 +105,7 @@ export function ConversationMessage({
   const isIncoming = speaker?.role === 'human' || isPeerAgent
   const prefix = useMemo(() => isIncoming && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
     [isIncoming, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
-  const isDeclaredSender = prefix !== null && recordedSpeaker?.role === 'unknown'
+  const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
   const described = speaker?.role === 'agent' ? describeSpeaker?.(speaker) : undefined
@@ -230,7 +230,7 @@ export function ConversationMessage({
         </span> : null}
         {isIncoming || speaker?.role === 'agent' ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
           declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} /> : null}
-        {prefix && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
+        {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div>
       {isSystemContext && hasContent ? <button type="button" className="log-turn__system-toggle"
@@ -241,7 +241,12 @@ export function ConversationMessage({
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {parts.map((part, index) => {
             const key = partKey(part)
-            return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>{index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
+            return part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
+              {index === 0 ? prefix?.declaredContexts?.map((context, contextIndex) => <details key={contextIndex} className="log-turn__declared-context">
+                <summary><ChevronRight size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${contextIndex + 1}` : ''}</summary>
+                <pre>{context.raw}</pre>
+              </details>) : null}
+              {index === 0 && prefix?.declaredContexts && prefix.body.length === 0 ? null : index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
               ? <MemoizedAgentMarkdown key={packetIndex} className="log-turn__packet-text" content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
               : <blockquote key={packetIndex} className="log-turn__citation"><span className="log-turn__citation-from">{packetPart.from}</span>

@@ -1,0 +1,26 @@
+{
+  "schema": "agentmux.leading-amux-actual-argv-inputs.v1",
+  "inputs": [
+    {
+      "path": "apps/desktop/scripts/fixtures/conversation-leading-amux-context/S-0UGHOknlgXBuHi.argv.complete-wire.txt",
+      "original": {
+        "path": "home/.local/share/bagakit/delivery-evidence/goals-direct-pmo-20261004/main-bot-resume/impl/amux-reading-proposal/S-0UGHOknlgXBuHi.argv.complete-wire.txt",
+        "sha256": "9dc673efa8c2296812afe76eb5574aea4c3d4e73a8f816683ef7fd620cde7689",
+        "bytes": 15906
+      },
+      "bytes": 15906,
+      "sha256": "9dc673efa8c2296812afe76eb5574aea4c3d4e73a8f816683ef7fd620cde7689"
+    },
+    {
+      "path": "apps/desktop/scripts/fixtures/conversation-leading-amux-context/Hi3wvkx3KVQh6THI.argv.complete-wire.txt",
+      "original": {
+        "path": "home/.local/share/bagakit/delivery-evidence/goals-direct-pmo-20261004/main-bot-resume/impl/amux-reading-proposal/Hi3wvkx3KVQh6THI.argv.complete-wire.txt",
+        "sha256": "e2080b96ee631b3d285f9338092ec685932cb6af9b565ff98f3b54de15b07138",
+        "bytes": 15906
+      },
+      "bytes": 15906,
+      "sha256": "e2080b96ee631b3d285f9338092ec685932cb6af9b565ff98f3b54de15b07138"
+    }
+  ],
+  "scope": "Actual private ordinary Core/Provider argv carriers. Original Clarify goal tail preserved; no human/vendor-writer claim."
+}
