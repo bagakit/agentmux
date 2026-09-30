@@ -206,7 +206,7 @@
 .composer { anchor-name: --composer-mailbox; anchor-scope: --composer-mailbox; }
 
 .composer-mailbox__dot { display: inline-block; width: var(--sp-2); height: var(--sp-2); flex-shrink: 0; border-radius: 50%; background: var(--red); }
-.composer-mailbox__unread { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: calc(var(--sp-7) / 2); max-width: 100%; height: calc(var(--sp-7) / 2); padding: 0; border-radius: var(--radius); background: var(--red); color: var(--surface-0); font-size: var(--fs-micro); font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.composer-mailbox__unread { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: var(--fs-micro); max-width: 100%; height: var(--fs-micro); padding: 0; border-radius: var(--radius); background: var(--red); color: var(--surface-0); font-size: var(--fs-micro); font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .composer-mailbox__progress { position: absolute; bottom: 0; left: 0; color: var(--text-2); background: var(--surface-2); border-radius: var(--radius-sm); }
 .composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
 .composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }

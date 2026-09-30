@@ -34,9 +34,20 @@ async function badgeGeometry() {
   assert.equal(text.fontSize, '10px'); assert.ok(text.rects.length > 0 && text.text.length > 0);
   assert.equal(text.color, await evaluate(`(()=>{const e=document.createElement('span');e.style.color=getComputedStyle(document.documentElement).getPropertyValue('--surface-0').trim();return e.style.color})()`), 'Badge ink follows the actual light/dark surface token');
   for (const r of text.rects) assert.ok(r.x >= g.badge.x - 0.5 && r.right <= g.badge.right + 0.5 && r.top >= g.badge.y - 1 && r.bottom <= g.badge.bottom + 1, 'Complete unread text Range is readable inside its badge');
-  return { ...g, text };
+  assert.ok(g.badge.height === 10 || g.badge.height === 11, 'Unread badge compact red background height is 10px or readable 11px');
+  if (text.text === '1') assert.equal(g.badge.width, g.badge.height, 'Single unread digit uses the compact minimal square');
+  const area = { actual: g.badge.width * g.badge.height, original12: Math.max(12, g.badge.width) * 12 };
+  assert.ok(area.actual < area.original12, 'Unread badge actual red background area is smaller than its original 12px envelope');
+  return { ...g, text, area };
 }
-async function frame(scene, name) { await painted(); const file = `${scene.width}-${scene.appearance}-${scene.mode}-${name}.png`, bytes = (await win.webContents.capturePage()).toPNG(); assert.ok(bytes.length > 0); await fs.writeFile(path.join(evidence, file), bytes); result.frames.push({ scene, file }); }
+async function frame(scene, name) {
+  // A hidden Electron window can capture a stale canvas layer after the badge's DOM update.
+  // Refresh only the private fixture's mounted xterms and observe their actual render before capture.
+  const terminalPaint = await evaluate(`(()=>{const terminals=(globalThis.resultReadyTerminals??[]).filter(entry=>!entry.disposed&&entry.terminal.element?.isConnected);if(!terminals.length)throw Error('No actual mounted Terminal to paint');return Promise.all(terminals.map(entry=>new Promise((done,reject)=>{const terminal=entry.terminal;let lease;const timer=setTimeout(()=>{lease?.dispose();reject(Error('Actual Terminal render did not arrive'))},2000);lease=terminal.onRender(range=>{clearTimeout(timer);lease.dispose();done({id:entry.id,rows:terminal.rows,...range})});terminal.refresh(0,terminal.rows-1)})))})()`);
+  assert.ok(terminalPaint.length > 0);
+  await painted(); const file = `${scene.width}-${scene.appearance}-${scene.mode}-${name}.png`, bytes = (await win.webContents.capturePage()).toPNG(); assert.ok(bytes.length > 0);
+  await fs.writeFile(path.join(evidence, file), bytes); result.frames.push({ scene, file, terminalPaint });
+}
 async function scene(scene) {
   result.stage = scene;
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: scene.width * 2 + 1, height: 750, deviceScaleFactor: 1, mobile: false });
