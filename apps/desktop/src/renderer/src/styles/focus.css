@@ -67,6 +67,12 @@
 .focus-workspace-resize-handle:hover, .focus-workspace-resize-handle:focus-visible { background: var(--line); outline: none; }
 .global-focus-surface .global-session-workspace { flex: 0 0 var(--focus-workspace-width, calc(61.8% - 6px)); width: var(--focus-workspace-width, calc(61.8% - 6px)); min-width: 0; min-height: 0; overflow: hidden; animation: none; }
 .focused-tab-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; width: 100%; overflow: hidden; }
+.global-focus-surface .focus-location-recovery { align-items: stretch; justify-content: flex-start; overflow-y: auto; text-align: left; padding: var(--sp-3); }
+.focus-location-recovery .service-window { flex: none; }
+.focus-location-choices { display: flex; flex-direction: column; min-width: 0; gap: var(--sp-1); }
+.focus-location-choices .focus-location-choice { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-width: 0; height: auto; padding: var(--sp-2) var(--sp-3); gap: 2px; text-align: left; white-space: normal; }
+.focus-location-choice strong { color: var(--text-1); font-size: var(--fs-meta); font-weight: 500; overflow-wrap: anywhere; }
+.focus-location-choice small { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 /* One scroll canvas keeps ruler, clip lanes and fixed identity gutters aligned. */
 .recent-focus { position: relative; flex: none; height: 96px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface-1); }
 .recent-focus[data-mode='collapsed'] { height: 28px; }

@@ -9,6 +9,7 @@ import type { FileOpenPlacement } from './lib/file-workbench-state'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
+import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
@@ -489,7 +490,7 @@ type AppState = {
   setFocusTimelineHeight(height: number): void
   focusTimelineRuler: FocusRulerPreferences
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
-  focusExecutionSession(id: string | null): void
+  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection): void
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
@@ -913,9 +914,10 @@ type AppState = {
  * reveals, so Agent and Terminal Sessions share one execution MRU while PMO stays isolated.
  */
 function focusSessionContext(
-  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config' | 'agentNames' | 'timelines' | 'scratchTopicSnapshots'>,
+  state: Pick<AppState, 'agentFocus' | 'sessions' | 'config' | 'agentNames' | 'timelines' | 'scratchTopicSnapshots' | 'tabs' | 'layouts'>,
   sessionId: string | null,
-  observedSession?: SessionSnapshot
+  observedSession?: SessionSnapshot,
+  reference?: WorkbenchProjectionSelection
 ): AgentFocusContext {
   if (sessionId === null) return focusExecution(state.agentFocus, null)
   const session = observedSession ?? state.sessions.find((candidate) => candidate.id === sessionId)
@@ -927,7 +929,16 @@ function focusSessionContext(
     ? focusPmo(state.agentFocus, sessionId)
     : focusExecution(state.agentFocus, sessionId, Date.now(), session
       ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id])
-      : undefined)
+      : undefined, reference && confirmedFocusReference(state, sessionId, reference) ? reference : undefined)
+}
+
+function confirmedFocusReference(state: Pick<AppState, 'tabs' | 'layouts'>, sessionId: string,
+  reference: WorkbenchProjectionSelection): boolean {
+  const layout = state.layouts[reference.displayWorkspaceId]
+  const group = layout?.groups.find(item => item.id === reference.groupId)
+  const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
+  return Boolean(layout && group && groupIds(layout.root).includes(group.id) && group.tabOrder.includes(reference.tabId) &&
+    surface && isSessionSurface(surface) && surface.sessionId === sessionId)
 }
 
 // In-flight filesystem reads share the original snapshot owner. No identity registry is stored.
@@ -3101,7 +3112,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout, tabGroupId, tabId)
       },
-      ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId) } : {}),
+      ...(focusedSessionId && activeRegion ? { agentFocus: focusSessionContext(state, focusedSessionId, undefined,
+        { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId: activeRegion.regionId }) } : {}),
       ...(surface?.kind === 'file'
         ? { lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: surface.path } }
         : {})
@@ -4289,7 +4301,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const focusedTab = focusWorkbenchTabRegion(tab, regionId)
         return { regionCaretFocus: null,
           ...(focusedTab === tab ? {} : { tabs: { ...state.tabs, [tabId]: focusedTab } }),
-          ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId) } : {}) }
+          ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId, undefined,
+            { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) } : {}) }
       })
       return
     }
@@ -4308,7 +4321,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(regionFocusClaimsCaret(cause)
         ? { regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce } }
         : { regionCaretFocus: null }),
-      ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId) } : {})
+      ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId, undefined,
+        { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) } : {})
     }))
   },
   clearRegionCaretFocus(nonce) {
@@ -4638,10 +4652,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     set({ mainSurface })
   },
-  focusExecutionSession(id) {
+  focusExecutionSession(id, reference) {
+    if (id && reference) {
+      const state = get()
+      if (!confirmedFocusReference(state, id, reference)) return
+      const topicsWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      try {
+        const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicsWorkspace) ?? [])
+        if (!catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) return
+      } catch (error) {
+        get().reportError(error, { kind: 'indeterminate', summary: 'The selected work surface directory could not be confirmed. The original Session and work surface are retained.' })
+        return
+      }
+    }
     set((state) => ({ agentFocus: id !== null && !state.sessions.some((session) => session.id === id)
       ? focusExecution(state.agentFocus, id)
-      : focusSessionContext(state, id) }))
+      : focusSessionContext(state, id, undefined, reference) }))
   },
   focusPmoSession(id) {
     set((state) => {

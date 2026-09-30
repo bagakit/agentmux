@@ -1580,16 +1580,19 @@ export function WorkspaceWorkbench({
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const projection = viewTargets?.[tab.id]
         const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
-        const tabVisible = (targetId !== null && (focusTab?.id === tab.id ? visible : projection?.surface === 'survey' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
+        const tabVisible = (targetId !== null && (focusTab?.id === tab.id ? visible : projection?.surface === 'survey' || projection?.surface === 'focus' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
         return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
           active={focusTab?.id === tab.id ? true : projection?.active ?? true}
           survey={projection?.surface === 'survey'} controlsOpen={projection?.controlsOpen ?? false}
           onBrowserControlConfirmation={onBrowserControlConfirmation}
           homeNotice={projection && focusTab?.id !== tab.id && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-              step: 'Selected View is in Mote',
-              mode: 'This Tab is selected here. Its original View remains in the floating window.',
-              restore: 'Close Mote to return this View to Space.'
+              step: projection.surface === 'focus' ? 'Selected View is in Focus' : projection.surface === 'survey' ? 'Selected View is in Survey' : 'Selected View is in Mote',
+              mode: projection.surface === 'focus' || projection.surface === 'survey'
+                ? 'This Tab is selected here. Its original View remains in the named presentation.'
+                : 'This Tab is selected here. Its original View remains in the floating window.',
+              restore: projection.surface === 'focus' ? 'Close Focus workspace to return this View to Space.'
+                : projection.surface === 'survey' ? 'Return to Space to see the original View.' : 'Close Mote to return this View to Space.'
             } }} />
           </div> : undefined}
           onSelectRegion={projection?.onSelectRegion}
@@ -1599,9 +1602,9 @@ export function WorkspaceWorkbench({
           {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
           {ownerId ? <WorkbenchRegionTree
             tab={tab} groupId={ownerId}
-            headerPortalTargetId={focusTab?.id === tab.id && targetId && storedLayout && ownerByTab.has(tab.id) &&
+            headerPortalTargetId={(focusTab?.id === tab.id || projection?.surface === 'focus') && targetId && storedLayout && ownerByTab.has(tab.id) &&
               tab.layout.root.type === 'leaf' && tab.regions[tab.layout.root.regionId]?.kind === 'agent'
-              ? `${targetId}-header` : null}
+              ? projection?.headerPortalTargetId ?? `${targetId}-header` : null}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}
