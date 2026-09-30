@@ -5,7 +5,7 @@ import type { WorkspaceRecord } from '../../../shared/contracts'
 import * as DropdownMenu from './HoverDropdownMenu'
 
 /** Survey navigation only; the caller supplies original entity, resource and relationship facts. */
-export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, relatedTopics, activity, activityDetails, onSelect, onOpenWorkspace }: {
+export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, relatedTopics, activity, activityDetails, collected, onCollectedChange, onSelect, onOpenWorkspace }: {
   zone: AgentMuxZoneFact
   title: string
   selected: boolean
@@ -15,6 +15,8 @@ export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, related
   /** Scoped original Browser/Core facts, including mixed or unknown status. */
   activity: ReactNode
   activityDetails: ReactNode
+  collected: boolean
+  onCollectedChange(collected: boolean): void
   onSelect(zoneId: string): void
   onOpenWorkspace(workspaceId: string): void
 }) {
@@ -41,6 +43,8 @@ export function SurveyZoneItem({ zone, title, selected, sourceWorkspace, related
       <DropdownMenu.Trigger asChild><button type="button" className="survey-item-details" aria-label={`Details for survey item: ${title}`} title="Item details"><MoreHorizontal size={13} aria-hidden="true" /></button></DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu survey-topic-menu" align="start" sideOffset={4} collisionPadding={8}>
         <DropdownMenu.Label className="survey-topic-menu__label">{title}</DropdownMenu.Label>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={collected} disabled={!collected && zone.kind === 'unknown'}
+          onSelect={event => event.preventDefault()} onCheckedChange={checked => onCollectedChange(checked === true)}>Keep in Survey</DropdownMenu.CheckboxItem>
         <div className="survey-item-details-content"><span>{resourceDescription}</span><span>{topicSummary}</span>{topics?.map(topic => <span key={topic.spaceId}>{topic.name} · {topic.hostId} · {topic.directoryPath}</span>)}{activityDetails}</div>
         {sourceWorkspace ? <DropdownMenu.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${sourceWorkspace.name}, ${sourceWorkspace.hostId}, ${sourceWorkspace.path}`}
           onSelect={() => onOpenWorkspace(sourceWorkspace.id)}><ArrowUpRight size={13} /><span>Open resource Workspace</span></DropdownMenu.Item> : null}

@@ -38,6 +38,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
   const selection = useAppStore(state => state.surveyZoneSelection)
+  const collected = useAppStore(state => state.surveyCollectedZones)
+  const setCollected = useAppStore(state => state.setSurveyZoneCollected)
   const toolsOpen = useAppStore(state => state.surveyToolsOpen)
   const setSelection = useAppStore(state => state.setSurveyZoneSelection)
   const setToolsOpen = useAppStore(state => state.setSurveyToolsOpen)
@@ -56,7 +58,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const currentZone = catalog?.zones.find(zone => zone.zoneId === selection?.zoneId)
   const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? activeWorkspaceId : null)
   const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
-  const items = useMemo(() => catalog ? surveyZoneItems(catalog, selection) : [], [catalog, selection])
+  const items = useMemo(() => catalog ? surveyZoneItems(catalog, collected) : [], [catalog, collected])
   const groups = useMemo(() => {
     const workspaces = config?.workspaces ?? []
     const projects = projectWorkspaces(workspaces.filter(workspace => !isScratchWorkspaceId(workspace.id)))
@@ -174,7 +176,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   function chooseZone(zoneId: string): void {
     if (!catalog) return
     intent.current += 1
-    setSelection(surveyInitialZoneSelection(catalog, zoneId, layouts, tabs, activeWorkspaceId))
+    const held = useAppStore.getState().surveyZoneSelection
+    if (held?.zoneId !== zoneId) setSelection(surveyInitialZoneSelection(catalog, zoneId, layouts, tabs, activeWorkspaceId))
     setError(null); setNavigationChoices([])
   }
   function chooseReference(reference: WorkbenchProjectionSelection): void {
@@ -196,6 +199,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         const created = await before.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })
         preparation = { zone: created.zone, reference: null, surface: null }
         failedCreation.current = preparation
+        if (!useAppStore.getState().setSurveyZoneCollected(created.zone.zoneId, true)) {
+          throw new Error('The original exploration was created, but its resource is now unconfirmed. Its exact target is kept.')
+        }
         setCreationNotice(`Item created locally. ${saveNotice(created.save)}${created.issues.length ? ` ${created.issues.map(issue => issue.message).join(' ')}` : ''}`)
       }
       if (!preparation.reference) {
@@ -265,6 +271,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>New item</span>
       </button>
       <div className="survey-page-list">
+        {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
+          <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
+          <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
+        </div>)}
         {groups.map(group => <section key={group.id} className="survey-project-group" data-survey-project-id={group.id} aria-label={`Survey project: ${group.name}`}>
           <header>{group.workspaceId ? <button type="button" className="survey-project-source" aria-label={`Open source project: ${group.name}, ${group.description.replaceAll('\n', ', ')}`} title={group.description}
             onClick={() => { intent.current += 1; void selectWorkspace(group.workspaceId!) }}><span>{group.name}</span><ArrowUpRight size={11} aria-hidden="true" /></button> : <span title={group.description}>{group.name}</span>}</header>
@@ -272,6 +282,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             const status = activity(zone)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} selected={selection?.zoneId === zone.zoneId}
               sourceWorkspace={resourceWorkspaces.get(zone.workspaceId) ?? null} relatedTopics={catalog ? surveyZoneTopicFacts(catalog, zone.zoneId).relatedTopics : null}
+              collected={collected[zone.zoneId] === true} onCollectedChange={value => { if (!setCollected(zone.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
               activity={status.summary} activityDetails={status.details} onSelect={chooseZone} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
           })}
         </section>)}
@@ -295,6 +306,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             <input value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" onChange={event => { setQuery(event.target.value); setError(null) }} />
             <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><small>{workspace?.name ?? 'Choose a resource workspace in Space to start browsing'}</small>
         </div> : <>
+          {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
+            This work surface is outside the Survey list. Its content and selection are kept.
+            <button type="button" className="small-button" onClick={() => { if (!setCollected(currentZone.zoneId, true)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}>Keep in Survey</button>
+          </div> : null}
           {currentZone ? <SurveyTopicRelations zone={currentZone} topics={topics} relatedTopics={related.relatedTopics} unknownRelatedSpaces={related.unknownRelatedSpaces}
             pendingSpaceId={selectedStatus?.pendingSpaceId ?? null} error={selectedStatus?.error} notice={selectedStatus?.notice || topicSnapshot?.error ? <>{selectedStatus?.notice ? <div>{selectedStatus.notice}</div> : null}{topicSnapshot?.error ? <div>{topicSnapshot.error}</div> : null}</> : null}
             onLinkChange={(spaceId, linked) => void changeRelation(spaceId, linked)} onOpenTopic={openTopic} /> : <div role="status" className="survey-restore-notice">The original Zone reference is retained while its owner restores.</div>}

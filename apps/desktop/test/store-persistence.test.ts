@@ -215,6 +215,7 @@ describe('Renderer persistence boundary', () => {
       workbenchSpaceSelection: null,
       mainSurface: 'workbench',
       surveyZoneSelection: null,
+      surveyCollectedZones: {},
       noteBlockSelections: {},
       surveySidebarWidth: 220,
       projectRailOpen: true,
