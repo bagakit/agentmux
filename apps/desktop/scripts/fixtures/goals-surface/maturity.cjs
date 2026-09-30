@@ -3,14 +3,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence, scope, baselineFile] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
+const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope==='direct-goal-only' ? 'direct-goal' : scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
 let win
+async function phase(name) { if(scope==='direct-goal-only') await fs.writeFile(path.join(evidence,'phase.json'), JSON.stringify({phase:name,at:Date.now()})) }
 const evaluate = expression => win.webContents.executeJavaScript(expression)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function waitFor(expression) { for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(25)}throw new Error('Timed out: '+expression) }
 async function paint(){ await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await delay(70) }
 async function size(width){await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:780,deviceScaleFactor:1,mobile:false});await paint()}
-async function capture(name,width){if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
+async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();const bytes=(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
 const button = label => `([...document.querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)} || node.getAttribute('aria-label')===${JSON.stringify(label)}))`
 async function click(expression){const point=await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});await paint()}
 async function insert(selector,text){await click(`document.querySelector(${JSON.stringify(selector)})`);await win.webContents.debugger.sendCommand('Input.insertText',{text});await paint()}
@@ -70,14 +71,55 @@ async function densityScenes(){
  await evaluate('goalsVisual.seedMaturity();goalsVisual.appearance("dark")');await size(1280);await click(button('管理'));await click(button('新增操作'));await insert('[data-common-editor] textarea','先读取真实记录，再建议一次可验证的小尝试。');await evaluate('window.originalDensityEditor=document.querySelector("[data-common-editor] textarea");goalsVisual.holdConfigSave()');await click(button('保存操作'));await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")');await evaluate('goalsVisual.finishConfigSave(true)');await waitFor('Boolean(document.querySelector(".goals-common__context-feedback")?.textContent.includes("保存未完成"))');await size(620);await visibleDetail('density-compact-error');await capture('620-dark-density-compact-error',620);await click(button('回到常用操作'))
  assert.equal(await evaluate('window.originalDensityEditor===document.querySelector("[data-common-editor] textarea")'),true,'Density retains the original mounted editor');assert.equal(await evaluate('document.querySelector("[data-common-editor] textarea").value'),'先读取真实记录，再建议一次可验证的小尝试。');assert.equal(await evaluate('document.activeElement.textContent.trim()'),'保存操作');const focus=await evaluate(`(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),p=e.closest('.goals-common__manager').getBoundingClientRect();return {top:r.top,bottom:r.bottom,right:r.right,scrollTop:p.top,scrollBottom:p.bottom,scrollRight:p.right,scrollbar:parseFloat(getComputedStyle(e.closest('.goals-common__manager'),'::-webkit-scrollbar').width),outline:getComputedStyle(e).outlineWidth}})()`);assert.ok(focus.top>=focus.scrollTop&&focus.bottom<=focus.scrollBottom&&focus.right<=focus.scrollRight-focus.scrollbar,'Original returned Save stays fully visible away from the scrollbar');assert.equal(focus.outline,'2px');result.observations.push({scene:'manager-return',focus});await capture('620-dark-density-manager-return',620);assert.equal(result.frames.length,10)
 }
+async function visibleDirectPmo(tabId) {
+ await phase('waiting-for-painted-dedicated-pmo');await waitFor(`(()=>{const e=document.querySelector('[data-pmo-teams-topic-floating]');if(!e)return false;const r=e.getBoundingClientRect();return e.matches(':popover-open') && getComputedStyle(e).visibility==='visible' && e.dataset.moteTargetTab===${JSON.stringify(tabId)} && r.width>200 && r.height>200})()`)
+ const panel=await evaluate(`(()=>{const e=document.querySelector('[data-pmo-teams-topic-floating]'),r=e.getBoundingClientRect();return {tabId:e.dataset.moteTargetTab,regionId:e.dataset.moteTargetRegion,popover:e.matches(':popover-open'),visibility:getComputedStyle(e).visibility,left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight}})()`)
+ assert.ok(panel.left>=0 && panel.top>=0 && panel.right<=panel.viewportWidth+1 && panel.bottom<=panel.viewportHeight+1,'Actual dedicated PMO is painted within this viewport')
+ result.observations.push({scene:'painted-dedicated-pmo',panel});await paint()
+}
+async function directScenes() {
+ await evaluate('goalsVisual.seedDirect();goalsVisual.appearance("light")');await size(1280)
+ assert.equal(await evaluate('document.querySelectorAll("[data-demand-id]").length'),0)
+ await capture('1280-light-direct-empty',1280)
+ await click(button('Goal filters'));await evaluate(`(()=>{const e=document.querySelector('[aria-label="Filter project"]');e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`);await click(button('Goal filters'))
+ await evaluate('goalsVisual.appearance("dark")');await click('document.querySelector("button[data-new-goal]")')
+ await waitFor('goalsVisual.directFacts().request===null && Boolean(goalsVisual.directFacts().tabId)')
+ const created=await evaluate('goalsVisual.directFacts()')
+ assert.deepEqual(created.creates,[created.goal.id]);assert.equal(created.goal.description,'');assert.equal(created.goal.status,'backlog');assert.equal(created.goal.alignment,undefined);assert.equal(created.topicId,created.pmoTopic)
+ assert.equal(created.launches.length,1);assert.ok(created.launches[0].prompt.includes(`existing Goal ${created.goal.id}`));assert.ok(created.launches[0].prompt.includes('existing undefined Goal draft'));assert.equal(created.floating.targetTabId,created.tabId)
+ assert.equal(await evaluate('document.querySelector("[data-demand-id]").classList.contains("goals-row--undefined")'),true)
+ result.observations.push({scene:'actual-new-goal',facts:created});await visibleDirectPmo(created.tabId);await capture('1280-dark-direct-goal-pmo',1280)
+ await size(620);assert.equal((await evaluate('goalsVisual.directFacts()')).goal.id,created.goal.id);await visibleDirectPmo(created.tabId);await capture('620-dark-direct-goal-pmo',620)
+ await click(button('Close Mote'));await evaluate('goalsVisual.appearance("light")');await visibleDetail('direct-returned-goal');await capture('620-light-direct-returned-goal',620)
+ await evaluate('goalsVisual.seedDirect("save-unknown")');await size(1280);await click('document.querySelector("button[data-new-goal]")')
+ await waitFor('goalsVisual.directFacts().request?.phase==="save" && !goalsVisual.directFacts().request.pending')
+ const unknown=await evaluate('goalsVisual.directFacts()');assert.equal(unknown.goal,undefined);assert.equal(unknown.tabId,undefined);assert.equal(unknown.creates.length,1);assert.equal(unknown.launches.length,0)
+ assert.ok(await evaluate('document.querySelector(".goals-creation").textContent.includes("重新读取目标")'))
+ result.observations.push({scene:'save-unknown',facts:unknown});await capture('1280-light-direct-save-unknown',1280);await size(620);await capture('620-light-direct-save-unknown',620)
+ await evaluate('goalsVisual.restoreDirectService()');await click(button('重新读取目标'));await waitFor('goalsVisual.directFacts().request===null')
+ const readback=await evaluate('goalsVisual.directFacts()');assert.equal(readback.goal.id,unknown.request.id);assert.deepEqual(readback.creates,[unknown.request.id]);assert.equal(readback.launches.length,1)
+ await click(button('Close Mote'));await evaluate('goalsVisual.seedDirect("pmo");goalsVisual.appearance("dark")');await size(620);await click('document.querySelector("button[data-new-goal]")')
+ await waitFor('goalsVisual.directFacts().request?.phase==="pmo" && !goalsVisual.directFacts().request.pending')
+ const failed=await evaluate('goalsVisual.directFacts()');assert.equal(failed.surface.kind,'launcher');assert.ok(failed.draft.includes(`existing Goal ${failed.goal.id}`));assert.equal(failed.floating.targetTabId,failed.tabId)
+ result.observations.push({scene:'pmo-failure',facts:failed});await visibleDirectPmo(failed.tabId);await capture('620-dark-direct-pmo-unknown',620)
+ await click(button('Close Mote'));await evaluate('goalsVisual.restoreDirectService()');await click(button('重试专属讨论'));await waitFor('goalsVisual.directFacts().request===null')
+ assert.equal((await evaluate('goalsVisual.directFacts()')).tabId,failed.tabId);await click(button('Close Mote'))
+ await evaluate('goalsVisual.proposeDirectGoal()');await evaluate('goalsVisual.appearance("light")');await size(1280)
+ const proposal=await evaluate('goalsVisual.directFacts()');assert.equal(proposal.goal.id,failed.goal.id);assert.deepEqual(proposal.creates,[failed.goal.id]);assert.equal(proposal.goal.alignment.criteria.length,1);assert.equal(proposal.goal.alignment.confirmedAt,null)
+ assert.equal(await evaluate('document.querySelector("[data-demand-id]").classList.contains("goals-row--undefined")'),false)
+ result.observations.push({scene:'same-goal-proposal',facts:proposal});await capture('1280-light-direct-same-goal-proposal',1280)
+ assert.equal(result.frames.length,8)
+}
 app.whenReady().then(async()=>{
  try{
   await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1280,height:780,webPreferences:{sandbox:false,backgroundThrottling:false}})
   win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push({message:details.message,line:details.lineNumber,source:details.sourceId})})
-  await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
-  await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===6')
+  await phase('loading-compiled-renderer');await win.loadFile(html);await phase('loaded-compiled-renderer');win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+  await phase('waiting-for-original-mounted-goals');await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===6');await phase('original-goals-mounted')
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
-  if(scope?.startsWith('density')){
+  if(scope==='direct-goal-only'){
+   await directScenes()
+  }else if(scope?.startsWith('density')){
    await densityScenes()
   }else if(scope==='before-only'){
    await scenario('confirmed',1280,'dark');await waitFor('Boolean(document.querySelector("[data-goal-summary]"))')

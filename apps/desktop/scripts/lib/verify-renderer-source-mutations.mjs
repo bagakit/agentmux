@@ -5,10 +5,10 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile
 import { dirname, join, resolve } from 'node:path'
 
 /** Run exact Renderer tests against private copied sources; never mutate the shared worktree. */
-export async function verifyRendererSourceMutations({ name, tests, sources, mutations }) {
+export async function verifyRendererSourceMutations({ name, tests, sources, mutations, evidenceRoot }) {
   const root = resolve(import.meta.dirname, '../../../..')
   const copy = await realpath(await mkdtemp('/tmp/amx-renderer-mutation-'))
-  const evidence = join(root, '.tmp', name)
+  const evidence = evidenceRoot ? join(evidenceRoot, name) : join(root, '.tmp', name)
   const digest = bytes => createHash('sha256').update(bytes).digest('hex')
   const inputs = [...new Set([...tests, ...sources])]
   const original = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(root, file))])))

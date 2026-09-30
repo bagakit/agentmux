@@ -3,9 +3,11 @@ import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
 import { EMPTY_AGENT_FOCUS } from '../../../src/renderer/src/lib/agent-focus'
+import { directGoalRequest } from '../../../src/renderer/src/lib/goals-direct-pmo'
+import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { projectWorkspaces } from '../../../src/renderer/src/lib/workspace-projects'
 import { applyConfigEdit } from '../../../src/shared/config-edit'
 import type { ComposerShortcut, GoalsCommonActionRef } from '../../../src/shared/contracts'
@@ -40,6 +42,24 @@ function phase(mode: string): DemandRecord {
 const confirm = api.demands.confirmAlignment
 const ensureTopic = api.scratch.ensureTopic
 const ensureMote = api.scratch.ensureMote
+const createGoal = api.demands.create, readGoals = api.demands.list, updateGoal = api.demands.update, launchGoalPmo = api.sessions.launchAgent
+let directFailure: 'save-unknown' | 'pmo' | null = null
+let directCreates: string[] = [], directLaunches: { prompt: string; topicId?: string }[] = []
+function seedDirect(mode?: 'save-unknown' | 'pmo') {
+  if (directGoalRequest()) throw new Error('Settle the previous actual direct Goal operation before reseeding')
+  requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); seed('empty'); directFailure = mode ?? null; directCreates = []; directLaunches = []
+  api.demands.create = async input => { directCreates.push(input.id!); const saved = await createGoal(input); if (directFailure === 'save-unknown') throw new Error('目标已交给保存服务，但回执尚未收到。请读取同一个目标确认。'); return saved }
+  // Preview native transport mirrors the durable alignment receipt shape; real filesystem and Main proofs stay in owning/native tests.
+  api.demands.update = async (id, patch) => { const receipt = await updateGoal(id, patch); if (patch.alignment) receipt.demand.alignment = { ...patch.alignment, revision: (useAppStore.getState().demands[id]?.alignment?.revision ?? 0) + 1, confirmedAt: null }; return receipt }
+  api.demands.list = async () => { if (directFailure === 'save-unknown') throw new Error('保存服务暂时无法读取。请求 ID 已保留，请稍后重新读取。'); return readGoals() }
+  api.sessions.launchAgent = async input => { directLaunches.push({ prompt: input.prompt ?? '', ...(input.scratchTopicId ? { topicId: input.scratchTopicId } : {}) }); if (directFailure === 'pmo') throw new Error('专属 Agent 的启动回执尚未确认。此目标和原启动区保留，请重试。'); return launchGoalPmo(input) }
+}
+function directFacts() {
+  const state = useAppStore.getState(), id = state.selectedDemandId ?? directGoalRequest()?.id, goal = id ? state.demands[id] : undefined
+  const tabId = id ? state.demandPmoTabIds[id] : undefined, tab = tabId ? state.tabs[tabId] : undefined
+  return { request: directGoalRequest(), goal, tabId, regionId: tab?.layout.activeRegionId, surface: tab?.regions[tab.layout.activeRegionId], topicId: tab?.topicId,
+    draft: tab ? state.agentComposerDrafts[tab.layout.activeRegionId] : undefined, creates: [...directCreates], launches: [...directLaunches], floating: readPmoTeamsTopicFloatingState(), pmoTopic: PMO_TEAMS_TOPIC_ID }
+}
 let finishPreparation: (() => Promise<void>) | undefined
 let root: ReturnType<typeof createRoot> | undefined
 let configSaveFailure = false
@@ -88,6 +108,8 @@ function seed(mode = 'many') {
 seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed,
+  seedDirect, directFacts, restoreDirectService: () => { directFailure = null },
+  proposeDirectGoal: async () => { const id = useAppStore.getState().selectedDemandId; if (!id) throw new Error('No actual Goal selected'); await useAppStore.getState().updateDemand(id, { title: '让我从一个小项目开始了解 Agent', alignment: { summary: '先找到一个我愿意尝试的小项目，再判断下一步。', criteria: [{ id: 'first-try', text: '完成一次小尝试，并能说清楚想继续探索什么。' }], openQuestions: [] } }) },
   seedMaturity: () => {
     seed('many')
     const variants = [goals[0]!, phase('questions'), phase('proposal'), phase('confirmed'), phase('results'), phase('unknown')]
