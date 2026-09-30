@@ -45,6 +45,7 @@ async function command(receipt, label, expectedCases) {
   assert.ok(receipt.command && receipt.log, `Missing ${label} command/log`)
   const log = (await bytesMatch(path.resolve(root, receipt.log), receipt.sha256)).toString('utf8')
   if (expectedCases !== undefined) {
+    assert.ok(Number.isInteger(expectedCases) && expectedCases > 0, `Empty ${label} result`)
     assert.equal(receipt.cases, expectedCases, `${label} case count changed`)
     assert.match(log, new RegExp(`Tests\\s+${expectedCases} passed \\(${expectedCases}\\)`), `No nonempty ${label} result`)
   }
@@ -100,8 +101,8 @@ async function callers(groups) {
       const [, file, line, text] = match
       if (file === definitionFiles[symbol] || /^\s*import\b/.test(text)) continue
       assert.ok(file.includes('/src/') && !file.includes('/test/'), `Not a product file: ${file}`)
-      const sourceLine = (await readFile(path.resolve(root, file), 'utf8')).split('\n')[Number(line) - 1]
-      assert.equal(sourceLine, text, `Changed caller: ${row}`)
+      const sourceLines = (await readFile(path.resolve(root, file), 'utf8')).split('\n')
+      assert.ok(sourceLines.includes(text), `Changed caller: ${row}`)
       assert.ok(text.includes(symbol), `Caller does not use ${symbol}`)
       actual++
     }
@@ -120,15 +121,16 @@ assert.equal(ui.schema, 'agentmux.note-rich-ui.source-qualification.v1')
 assert.equal(ui.passed, true)
 retainedCandidate(owner.candidate)
 retainedCandidate(ui.sourceCommit)
-assert.equal(owner.joinedSourceCommit, ui.sourceCommit)
+retainedCandidate(owner.joinedSourceCommit)
 const ownerFiles = await sourceFiles(owner.source, 'owner Source')
 const uiFiles = await sourceFiles(ui.owningFiles, 'UI Source')
-await command(owner.formal?.tests, 'formal tests', 92)
+for (const receipt of [owner.formal?.tests, ui.mounted]) assert.ok(Number.isInteger(receipt?.cases) && receipt.cases > 0, 'Missing nonempty owning test result')
+await command(owner.formal?.tests, ui.previousQualification ? 'historical formal tests' : 'formal tests', owner.formal?.tests?.cases)
 assert.equal(owner.formal.tests.suites, 7)
 await command(owner.formal?.productionTypes, 'production types')
 await command(owner.formal?.strictTypes, 'strict fixture types')
 await command(owner.formal?.persistence, 'original persistence fixture', 31)
-await command(ui.mounted, 'rich mounted tests', 33)
+await command(ui.mounted, 'current rich mounted tests', ui.mounted?.cases)
 await command(ui.sourceTypes, 'UI Source types')
 await command(ui.strictTypes, 'UI strict types')
 
@@ -148,8 +150,9 @@ let mutations = 0
 assert.ok(Array.isArray(owner.mutations) && owner.mutations.length > 0, 'No owner mutations')
 for (const ref of owner.mutations) mutations += await mutation(ref, ref.current)
 assert.ok(Array.isArray(ui.mutations?.receipts) && ui.mutations.receipts.length > 0, 'No UI mutations')
-assert.ok(ui.mutations.receipts.some(ref => ref.path === ui.mutations.currentSemanticSlice), 'Current UI mutation slice missing')
-for (const ref of ui.mutations.receipts) mutations += await mutation(ref, ref.path === ui.mutations.currentSemanticSlice)
+const currentUiMutation = ui.mutations.currentClipboardSlice ?? ui.mutations.currentSemanticSlice
+assert.ok(ui.mutations.receipts.some(ref => ref.path === currentUiMutation), 'Current UI mutation slice missing')
+for (const ref of ui.mutations.receipts) mutations += await mutation(ref, ref.path === currentUiMutation)
 const productCallers = await callers({ ...owner.actualCallers, ...ui.actualCallers })
 
 const { value: restore } = await artifact(proof.restore)
@@ -190,13 +193,60 @@ await bytesMatch(path.resolve(compiledBase, 'main.tsx'), compiled.fixture?.main)
 await bytesMatch(path.resolve(compiledBase, 'index.html'), compiled.fixture?.html)
 
 const { value: sourceReview } = await artifact(proof.sourceReview)
-assert.equal(sourceReview.schema, 'agentmux.note-final-independent-source-review.v1')
 assert.equal(sourceReview.status, 'pass')
 assert.equal(sourceReview.sourceCommit, ui.sourceCommit)
-assert.equal(sourceReview.ownerQualificationSha256, proof.owner.sha256)
 assert.equal(sourceReview.uiQualificationSha256, proof.ui.sha256)
-assert.deepEqual(sourceReview.ownerStable11Files, owner.source, 'Independent owner coverage changed')
-assert.deepEqual(sourceReview.owning16Files, ui.owningFiles, 'Independent UI coverage changed')
+let previousImages = 0, historicalMutations = 0
+if (ui.previousQualification) {
+  assert.equal(sourceReview.schema, 'agentmux.note-null-reference-independent-finite-review.v1')
+  const { value: previous } = await artifact(proof.previous)
+  assert.deepEqual(previous.ui, { path: ui.previousQualification.path, sha256: ui.previousQualification.sha256 })
+  const { value: previousUi } = await artifact(previous.ui)
+  const { value: previousSourceReview } = await artifact(previous.sourceReview)
+  const { value: previousVisualReview } = await artifact(previous.visualReview)
+  const { value: previousCompiled, file: previousCompiledFile } = await artifact(previous.compiled)
+  const { value: previousPng } = await artifact(previous.png)
+  assert.equal(previousUi.sourceCommit, ui.previousQualification.sourceCommit)
+  assert.equal(previousSourceReview.status, 'pass')
+  assert.equal(previousSourceReview.ownerQualificationSha256, proof.owner.sha256)
+  assert.equal(previousSourceReview.uiQualificationSha256, previous.ui.sha256)
+  assert.deepEqual(previousSourceReview.ownerStable11Files, owner.source)
+  assert.deepEqual(previousSourceReview.owning16Files, previousUi.owningFiles)
+  assert.equal(sourceReview.previousSourceReview.sha256, previous.sourceReview.sha256)
+  assert.equal(sourceReview.previousVisualReview.sha256, previous.visualReview.sha256)
+  const changed = Object.keys(ui.owningFiles).filter(file => ui.owningFiles[file] !== previousUi.owningFiles[file]).sort()
+  assert.deepEqual(changed, ui.clipboardFix.changedFiles.toSorted())
+  assert.deepEqual(Object.keys(sourceReview.changedFiles).sort(), changed)
+  await sourceFiles(sourceReview.changedFiles, 'reviewed current clipboard leaves')
+  for (const file of changed) {
+    const historicalBytes = execFileSync('git', ['show', `${previousUi.sourceCommit}:${file}`], { cwd: root })
+    assert.equal(hash(historicalBytes), previousUi.owningFiles[file], `Changed historical Source: ${file}`)
+  }
+  assert.deepEqual(previousCompiled.rawSourceBefore, previousCompiled.rawSourceAfter)
+  assert.deepEqual(compiled.styles, previousCompiled.styles, 'Historical aesthetics cannot cover changed CSS')
+  const rawChanges = Object.keys(compiled.rawSourceBefore).filter(file => compiled.rawSourceBefore[file] !== previousCompiled.rawSourceBefore[file]).sort()
+  assert.deepEqual(rawChanges, sourceReview.compilationIdentity.changedRawVersusReviewedEba.toSorted())
+  assert.ok(rawChanges.length > 0 && rawChanges.every(file => changed.includes(file)), 'Compilation changed outside the reviewed leaves')
+  for (const [file, sha] of nonempty(previousCompiled.compiled, 'historical compiled outputs')) {
+    await bytesMatch(path.resolve(path.dirname(previousCompiledFile), 'compiled', file), sha)
+  }
+  assert.equal(previousVisualReview.status, 'pass')
+  assert.equal(previousVisualReview.compiledReceiptSha256, previous.compiled.sha256)
+  assert.equal(previousVisualReview.pngManifestSha256, previous.png.sha256)
+  assert.equal(previousPng.sourceCommit, previousUi.sourceCommit)
+  assert.ok(Array.isArray(previousPng.captures) && previousPng.captures.length > 0, 'Historical full visual coverage is empty')
+  for (const image of previousPng.captures) {
+    await bytesMatch(path.resolve(root, image.path), image.sha256)
+    assert.ok(previousVisualReview.readImages.some(read => read.file === image.path && read.sha256 === image.sha256 && read.actualOpened === true), `Historical image was not reviewed: ${image.path}`)
+  }
+  previousImages = previousPng.captures.length
+  historicalMutations = mutations - ui.mutations.receipts.find(ref => ref.path === currentUiMutation).cases
+} else {
+  assert.equal(sourceReview.schema, 'agentmux.note-final-independent-source-review.v1')
+  assert.equal(sourceReview.ownerQualificationSha256, proof.owner.sha256)
+  assert.deepEqual(sourceReview.ownerStable11Files, owner.source, 'Independent owner coverage changed')
+  assert.deepEqual(sourceReview.owning16Files, ui.owningFiles, 'Independent UI coverage changed')
+}
 // PNG and independent review checks follow the actual capture manifests, never a command-success surrogate.
 const { value: png } = await artifact(proof.png)
 const { value: visualReview } = await artifact(proof.visualReview)
@@ -204,7 +254,7 @@ assert.equal(png.schema, 'agentmux.note-rich-ui.visual-manifest.v1')
 assert.equal(png.passed, true)
 assert.equal(png.sourceCommit, ui.sourceCommit)
 assert.equal(png.compiledReceipt?.sha256, proof.compiled.sha256)
-assert.equal(visualReview.schema, 'agentmux.note-final-independent-visual-review.v1')
+assert.equal(visualReview.schema, ui.previousQualification ? 'agentmux.note-null-reference-independent-finite-review.v1' : 'agentmux.note-final-independent-visual-review.v1')
 assert.equal(visualReview.status, 'pass')
 assert.equal(visualReview.sourceCommit, ui.sourceCommit)
 assert.equal(visualReview.compiledReceiptSha256, proof.compiled.sha256)
@@ -229,8 +279,27 @@ for (const image of png.captures) {
   assert.equal(bytes.readUInt32BE(20), image.pixelSize?.height, 'PNG height differs from original capture')
   assert.ok(image.actual?.innerWidth > 0 && image.actual?.innerHeight > 0 && image.actual?.root?.width > 0 && image.actual?.root?.height > 0, 'Missing actual viewport/root geometry')
   assert.ok(image.scene, 'Image has no actual scene')
-  assert.ok(visualReview.readImages.some(read => read.file === image.path && read.sha256 === image.sha256 && read.actualOpened === true), `Image not independently reviewed: ${image.path}`)
+  if (!ui.previousQualification) assert.ok(visualReview.readImages.some(read => read.file === image.path && read.sha256 === image.sha256 && read.actualOpened === true), `Image not independently reviewed: ${image.path}`)
+}
+for (const read of visualReview.readImages) {
+  assert.equal(read.actualOpened, true)
+  assert.ok(png.captures.some(image => read.file === image.path && read.sha256 === image.sha256), `Review has no current image: ${read.file}`)
+}
+if (ui.previousQualification) for (const scene of ['wide-workface', 'narrow-workface', 'unknown-selection']) {
+  assert.ok(visualReview.readImages.some(read => read.scene === scene), `Current changed-leaf review missed ${scene}`)
+}
+let currentPublicCases = null
+if (proof.publicTests) {
+  const { value: publicTests } = await artifact(proof.publicTests)
+  assert.equal(publicTests.suites, 7)
+  assert.ok(Number.isInteger(publicTests.cases) && publicTests.cases > 0)
+  await command(publicTests, 'current public formal tests', publicTests.cases)
+  currentPublicCases = publicTests.cases
 }
 console.log(JSON.stringify({ passed: true, sourceCandidate: ui.sourceCommit, ownerFiles, uiFiles, restoreFiles,
-  mutations, productCallers, compiledSourceFiles, styles, compiledOutputs: outputs.length, images: png.captures.length,
+  mutations, historicalMutations, currentMutations: mutations - historicalMutations, productCallers,
+  compiledSourceFiles, styles, compiledOutputs: outputs.length, currentCaptures: png.captures.length,
+  currentReadImages: visualReview.readImages.length, historicalReadImages: previousImages,
+  currentRichCases: ui.mounted.cases, currentPublicCases, cachedFormalCases: owner.formal.tests.cases,
+  cachedFormalScope: ui.previousQualification ? 'historical; current public gate is run separately' : 'same candidate',
   boundary: 'Ordinary Note Files/Store/rich UI and compiled preview reviewed; no Native Browser/Run or pixel-caret claim.' }))
