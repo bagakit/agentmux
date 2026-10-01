@@ -4,6 +4,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { formatRegionAddress } from '../../../src/renderer/src/lib/agent-address'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import type { AgentSessionHistoryPage, AgentTimelineItem, ContinuousProgressLoop } from '@agentmux/core'
 
 const workspaceId = useAppStore.getState().activeWorkspaceId!
@@ -66,14 +67,19 @@ function naming() {
 }
 const probe = {
   names,
-  progress(state: 'inactive' | 'active' | 'paused' | 'unconfirmed') {
+  appearance(mode: 'dark' | 'light') { applyAppAppearance(mode) },
+  progress(state: 'inactive' | 'active' | 'paused' | 'unconfirmed' | 'stopped', full = false) {
     const loop: ContinuousProgressLoop = { loopId: 'visual-progress', hostId: first.hostId, agentSessionId: first.id,
       providerId: first.providerId, workspacePath: first.workspacePath, intervalMs: 1_800_000,
       prompt: 'Continue the current task without replacing user input.', nextCheckAt: Date.parse('2026-10-03T12:00:00Z'),
-      status: state === 'inactive' ? 'stopped' : state === 'active' ? 'active' : 'paused',
+      status: state === 'inactive' || state === 'stopped' ? 'stopped' : state === 'active' ? 'active' : 'paused',
       ...(state === 'unconfirmed' ? { lastOutcome: 'unknown' as const,
         lastDecision: 'Previous continuation delivery is unconfirmed. No retry has been sent.' }
-        : state === 'paused' ? { lastDecision: 'Paused while the user is editing.' } : {}) }
+        : state === 'paused' ? { lastDecision: 'Paused while the user is editing.' } : {}),
+      ...(full ? { prompt: Array.from({ length: 12 }, (_, index) => `Saved continuation line ${index + 1}: keep the original user input and finish the assigned task.`).join('\n'),
+        taskSource: { root: '/private/visual-task-source', ownerId: 'visual-task', readerPath: '/private/visual-task-source/feature-tracker.sh' },
+        lastTickAt: Date.parse('2026-10-03T11:30:00Z'),
+        lastDecision: Array.from({ length: 14 }, (_, index) => `Original decision line ${index + 1}: the input owner is unchanged and the complete reason remains readable.`).join('\n') } : {}) }
     progressLoops = state === 'inactive' ? [] : [loop]
     flushSync(() => { for (const listener of progressListeners) listener(loop) })
   },

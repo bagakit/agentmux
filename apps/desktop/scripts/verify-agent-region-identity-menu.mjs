@@ -31,7 +31,7 @@ async function compiled(directory){
   for(const entry of entries){if(!entry.isFile())continue;const path=join(entry.parentPath,entry.name);files[path.slice(directory.length+1)]=hash(await readFile(path))}
   assert.ok(Object.keys(files).length>0,'The actual private renderer outputs are nonempty');return files
 }
-async function renderer(label,probe='complete'){
+async function renderer(label,probe='complete',unreadableProgressActions=false){
   const directory=join(evidence,label), outDir=join(privateRoot,label);await mkdir(directory,{recursive:true})
   const xtermFile=require.resolve('@xterm/xterm'), wrapper=join(privateRoot,'record-xterm.mjs')
   await writeFile(wrapper,`import xterm from ${JSON.stringify(xtermFile)};
@@ -39,7 +39,7 @@ async function renderer(label,probe='complete'){
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
   const cssPath=join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
-  const loadedSourceInputs={},importedStyleInputs={}
+  const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[]
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
@@ -54,7 +54,16 @@ async function renderer(label,probe='complete'){
     },async generateBundle(){
       for(const file of this.getWatchFiles())if(file.startsWith(join(desktop,'src')+'/')&&file.endsWith('.css'))importedStyleInputs[file.slice(repository.length+1)]=hash(await readFile(file))
     }}],
-    define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},
+    css:{postcss:{plugins:[{postcssPlugin:'private-progress-controls',async Once(sheet){
+      if(!unreadableProgressActions)return
+      const declarations=[]
+      sheet.walkDecls('font',declaration=>{if(declaration.source?.input.file===cssPath&&declaration.parent.selector==='.continuous-progress-panel__actions button')declarations.push(declaration)})
+      if(!declarations.length)return
+      assert.equal(declarations.length,1,'Actual imported Progress control font is unique and nonempty')
+      assert.equal(declarations[0].value,'inherit')
+      declarations[0].value='0px sans-serif'
+      progressCssMutations.push({path:cssPath.slice(repository.length+1),selector:'.continuous-progress-panel__actions button',property:'font',from:'inherit',to:'0px sans-serif',productionWritten:false})
+    }}]}},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},
     build:{outDir,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
   const compiledFiles=await compiled(outDir),terminalWrapperSha256=hash(await readFile(wrapper))
   assert.ok(Object.keys(loadedSourceInputs).length>0,'Actual renderer input collection is nonempty')
@@ -62,7 +71,8 @@ async function renderer(label,probe='complete'){
   const cssKey=cssPath.slice(repository.length+1),cssAfter=await readFile(cssPath)
   assert.equal(importedStyleInputs[cssKey],hash(cssBefore),'The compiled renderer watches the exact owner CSS')
   assert.equal(hash(cssAfter),hash(cssBefore),'The owner CSS stays unchanged through compilation')
-  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
+  assert.equal(progressCssMutations.length,unreadableProgressActions?1:0,'Requested actual Progress CSS mutation is applied exactly once')
+  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
   const log=[]
   const outcome=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),join(outDir,'index.html'),privateRoot,directory,probe],{
@@ -133,6 +143,13 @@ try{
   const swapOnly=process.argv.includes('--swap-render-only')
   result.render=await renderer('fixed',visualOnly?(terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
+    if(progressLayoutOwning){
+      const red=await renderer('progress-controls-red','composer-layout-owning',true)
+      assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,/Progress action text is readable/)
+      const restored=await renderer('progress-controls-restored','composer-layout-owning')
+      assert.equal(restored.outcome.exitCode,0,JSON.stringify(restored.rendered.failure));assert.equal(restored.rendered.passed,true)
+      result.mutations.push({label:'actual-progress-control-text-hidden',red,restored,productionWritten:false})
+    }
     await writeFile(join(evidence,'review.md'),[
       '# 本次采图：等待独立 Agent 实际看图',
       '',

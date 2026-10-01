@@ -104,6 +104,17 @@ async function composerVisual(layoutOwning=false) {
   const form=`${control}.querySelector('form')`
   async function frame(width,state){
     result.stage={width,state};await waitFor(visible(editor));await waitFor(visible(trigger));await painted()
+    if(layoutOwning&&state.startsWith('progress-')&&!state.endsWith('-closed'))assert.equal(await evaluate(`${progressTab}.getAttribute('aria-selected')`),'true','The captured Progress scene is the actual selected page')
+    if(layoutOwning&&/^progress-(active|paused|unconfirmed)-open$/.test(state)){
+      const actions=await evaluate(`Array.from(${control}.querySelectorAll('.continuous-progress-panel__actions button')).map(button=>{
+        const text=Array.from(button.childNodes).find(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim()),range=document.createRange();range.selectNodeContents(text)
+        return{label:button.textContent.trim(),fontSize:parseFloat(getComputedStyle(button).fontSize),textHeight:range.getBoundingClientRect().height,disabled:button.disabled}
+      })`)
+      assert.equal(actions.length,3,'Actual Progress control observations are nonempty')
+      assert.deepEqual(actions.map(action=>action.label),[state==='progress-active-open'?'Pause':'Resume','Check now','Stop loop'])
+      for(const action of actions){assert.ok(action.fontSize>=12&&action.textHeight>=12,'Progress action text is readable at the current body font')}
+      result.progressActions??=[];result.progressActions.push({width,state,actions})
+    }
     const file=`${width}-composer-${state}.png`,png=await capture(file.slice(0,-4))
     result.frames.push({width,state,file,png})
     if(layoutOwning&&state==='progress-open'){
@@ -152,6 +163,7 @@ async function composerVisual(layoutOwning=false) {
   }
   async function dismiss(){
     await key('Escape','Escape',27);await waitFor(`!${mailbox}.matches(':popover-open')`)
+    result.progressDismissals??=[];result.progressDismissals.push(await evaluate(`({activeTag:document.activeElement?.tagName,activeClass:document.activeElement?.className,activeLabel:document.activeElement?.getAttribute('aria-label'),sameTrigger:document.activeElement===${trigger}})`))
     assert.equal(await evaluate(`document.activeElement===${trigger}`),true,'Native Escape returns focus to the same Mailbox trigger')
   }
   const readForm=()=>evaluate(`Array.from(${form}.elements).filter(node=>node.matches('input,textarea')).map(node=>node.type==='checkbox'?node.checked:node.value)`)
@@ -160,6 +172,7 @@ async function composerVisual(layoutOwning=false) {
     await waitFor(`${composer}.querySelector('.composer-tools').dataset.mode===${JSON.stringify(expected)}`)
   }
   for(const width of [640,320]){
+    if(layoutOwning)await evaluate(`identityMenu.appearance(${JSON.stringify(width===640?'dark':'light')})`)
     result.stage={width,state:'one-line-short'};await evaluate("identityMenu.progress('inactive')");await seed(width);await waitFor(visible(editor));await waitFor(`${trigger}?.dataset.progressState==='inactive'`)
     await draft('Review this workspace and keep the current draft.');await frame(width,'one-line-short')
     await phase('current');await frame(width,'tools-short')
@@ -173,6 +186,20 @@ async function composerVisual(layoutOwning=false) {
       await fill(`${form}.querySelector('[aria-label="${label}"]')`,text)
     const settings=await readForm();assert.deepEqual(settings,['17','继续当前任务，保留用户输入。',true,'/private/visual-task-source','visual-task','/private/visual-task-source/feature-tracker.sh'])
     await frame(width,'progress-filled')
+    if(layoutOwning){
+      const target=`${control}.querySelector('[data-progress-details="target"]')`
+      await evaluate(`${target}.querySelector('summary').scrollIntoView({block:'nearest',container:'nearest'})`);await painted()
+      const gesture=await evaluate(`(()=>{const summary=${target}.querySelector('summary'),r=summary.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{selected:${progressTab}.getAttribute('aria-selected'),open:${target}.open,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?.outerHTML,sameTarget:summary.contains(hit),scroll:${mailbox}.querySelector('.composer-mailbox__content').scrollTop}})()`)
+      result.progressTargetGestures??=[];result.progressTargetGestures.push(gesture)
+      assert.equal(gesture.sameTarget,true,'The actual Target summary is hit before native disclosure')
+      await click(`${target}.querySelector('summary')`)
+      assert.equal(await evaluate(`${target}.open`),true)
+      const expected=await evaluate(`identityMenu.progressFacts().reads.find(target=>target.agentSessionId==='session-codex')`)
+      assert.ok(expected,'The actual target read is nonempty')
+      assert.deepEqual(await evaluate(`Array.from(${target}.querySelectorAll('dd')).map(node=>node.textContent)`),['Codex (codex)',expected.hostId,expected.agentSessionId,expected.workspacePath])
+      await evaluate(`${target}.querySelector('dd:last-child').scrollIntoView({block:'nearest',container:'nearest'})`);await frame(width,'progress-target-details')
+      await evaluate(`${target}.querySelector('summary').scrollIntoView({block:'nearest',container:'nearest'})`);await painted();await click(`${target}.querySelector('summary')`);assert.deepEqual(await readForm(),settings)
+    }
     await click(`${mailbox}.querySelector('[role="tab"][id$="-inbox-tab"]')`)
     await waitFor(`${progressTab}.getAttribute('aria-selected')==='false'`);await click(progressTab)
     assert.deepEqual(await readForm(),settings,'Switching message/Progress pages preserves the actual unsent settings')
@@ -186,10 +213,45 @@ async function composerVisual(layoutOwning=false) {
       await evaluate(`identityMenu.progress(${JSON.stringify(state)})`);await waitFor(`${trigger}.dataset.progressState===${JSON.stringify(state)}`)
       await frame(width,`progress-${state}-closed`);await openProgress();await frame(width,`progress-${state}-open`);await dismiss()
     }
+    if(layoutOwning){
+      await evaluate("identityMenu.progress('active',true)");await openProgress()
+      const decision=`${control}.querySelector('.continuous-progress-panel__decision p')`
+      await evaluate(`${decision}.scrollIntoView({block:'end',container:'nearest'})`)
+      assert.match(await evaluate(`${decision}.textContent`),/Original decision line 14:/)
+      await frame(width,'progress-decision-tail')
+      const configuration=`${control}.querySelector('[data-progress-details="configuration"]')`
+      await evaluate(`${configuration}.querySelector('summary').scrollIntoView({block:'nearest',container:'nearest'})`);await painted();await click(`${configuration}.querySelector('summary')`)
+      assert.equal(await evaluate(`${configuration}.open`),true)
+      assert.equal(await evaluate(`${configuration}.querySelector('.continuous-progress-control__prompt').textContent`),Array.from({length:12},(_,index)=>`Saved continuation line ${index+1}: keep the original user input and finish the assigned task.`).join('\n'))
+      await evaluate(`${configuration}.querySelector('.continuous-progress-control__prompt').scrollIntoView({block:'end',container:'nearest'})`);await painted()
+      const tail=await evaluate(`(()=>{const prompt=${configuration}.querySelector('.continuous-progress-control__prompt'),text=prompt.firstChild,range=document.createRange(),start=text.textContent.lastIndexOf('\\n')+1;range.setStart(text,start);range.setEnd(text,text.textContent.length);const content=range.toString(),clip=${mailbox}.querySelector('.composer-mailbox__content').getBoundingClientRect(),r=range.getBoundingClientRect(),words=[];for(const match of content.matchAll(/\\S+/g)){const word=document.createRange();word.setStart(text,start+match.index);word.setEnd(text,start+match.index+match[0].length);const bounds=word.getBoundingClientRect();words.push({text:match[0],top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right})}return{text:content,words,rect:{top:r.top,bottom:r.bottom,left:r.left,right:r.right},clip:{top:clip.top,bottom:clip.bottom,left:clip.left,right:clip.right},source:Array.from(${configuration}.querySelectorAll('dd')).at(-1).textContent}})()`)
+      result.progressSavedTails??=[];result.progressSavedTails.push({width,...tail})
+      assert.equal(tail.text,'Saved continuation line 12: keep the original user input and finish the assigned task.')
+      assert.ok(tail.words.length>0,'The complete saved final line has nonempty original words')
+      // pre-wrap can hang spaces at a wrap boundary; each actual word must fit without relaxing the clip.
+      for(const word of tail.words)assert.ok(word.top>=tail.clip.top&&word.bottom<=tail.clip.bottom&&word.left>=tail.clip.left&&word.right<=tail.clip.right,'The saved continuation final complete line is readable in the actual scroll clip: '+word.text)
+      assert.equal(tail.source,'/private/visual-task-source/feature-tracker.sh')
+      await frame(width,'progress-saved-prompt-tail')
+      await evaluate(`Array.from(${configuration}.querySelectorAll('dd')).at(-1).scrollIntoView({block:'end',container:'nearest'})`);await painted()
+      assert.equal(await evaluate(`(()=>{const source=Array.from(${configuration}.querySelectorAll('dd')).at(-1),r=source.getBoundingClientRect(),clip=${mailbox}.querySelector('.composer-mailbox__content').getBoundingClientRect();return r.top>=clip.top&&r.bottom<=clip.bottom})()`),true,'The complete saved source is readable in the actual scroll clip')
+      await frame(width,'progress-saved-configuration-tail');await dismiss()
+    }
     result.progressBehavior??=[];result.progressBehavior.push({width,settings,observationsBefore,observationsAfter:await evaluate('identityMenu.progressFacts()'),terminalBefore,terminalAfter:await evaluate('identityMenu.terminal()')})
   }
   assert.ok(result.frames.length>0,'Actual composer scenes are nonempty')
   if(layoutOwning)assert.equal(result.progressLayouts?.length,2,'Both actual widths have a nonempty form observation')
+  if(layoutOwning){
+    await evaluate("identityMenu.appearance('dark');identityMenu.progress('paused')");await seed(320)
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:641,height:430,deviceScaleFactor:1,mobile:false})
+    await waitFor(visible(editor));await painted();await openProgress()
+    const before=await evaluate('identityMenu.terminal()')
+    const controls=`${control}.querySelector('.continuous-progress-panel__actions')`
+    await evaluate(`${controls}.scrollIntoView({block:'nearest',container:'nearest'})`);await frame(320,'progress-short-controls')
+    assert.equal(await evaluate(visible(`${controls}.querySelector('button')`)),true)
+    assert.equal(await evaluate(visible(`${mailbox}.querySelector('[aria-label="Close mailbox"]')`)),true)
+    await dismiss();assert.deepEqual(await evaluate('identityMenu.terminal()'),before,'Short Progress retains the same terminal and rows')
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:641,height:740,deviceScaleFactor:1,mobile:false})
+  }
 }
 async function terminalLoadingVisual() {
   result.captureOnly=true;result.aestheticReview='not-performed';result.loadingLayouts=[]

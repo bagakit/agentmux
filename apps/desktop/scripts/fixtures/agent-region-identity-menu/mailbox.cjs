@@ -13,7 +13,7 @@ module.exports = async function mailboxProof({ win, evaluate, waitFor, visible, 
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
   const focus = () => evaluate(`(()=>{const s=getSelection();return{editor:document.activeElement===${editor},anchor:s?.anchorOffset,focus:s?.focusOffset,text:${editor}.textContent}})()`)
   const unread = name => evaluate(`Boolean(${tab(name)}.querySelector('.composer-mailbox__dot'))`)
-  const rows = name => evaluate(`Array.from(${folder(name)}.querySelectorAll('.composer-mailbox__messages > li > p')).map(e=>e.textContent)`)
+  const rows = name => evaluate(`Array.from(${folder(name)}.querySelectorAll('${name === 'outbox' ? '.composer-mailbox__history ' : ''}.composer-mailbox__row[data-record-key] > .composer-mailbox__preview')).map(e=>e.textContent)`)
   async function hover() {
     await away(); await mouse(await point(trigger))
     try { await waitFor(opened) } catch (error) { assert.fail('Actual Mailbox mouse hover opens the native panel: ' + error.message) }
@@ -21,6 +21,10 @@ module.exports = async function mailboxProof({ win, evaluate, waitFor, visible, 
   }
   async function close() { await key('Escape', 'Escape', 27); await waitFor(closed) }
   async function choose(name) { await evaluate(`${tab(name)}.scrollIntoView({block:'nearest'})`); await click(tab(name)); await waitFor(`${tab(name)}.getAttribute('aria-selected')==='true'`); await painted() }
+  async function reveal(target) {
+    await evaluate(`${target}.scrollIntoView({block:'nearest',container:'nearest'})`); await painted()
+    assert.equal(await evaluate(`(()=>{const target=${target},r=target.getBoundingClientRect();return target.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`),true,'The actual mailbox action is visible and hit before clicking')
+  }
   async function frame(width, state) {
     await painted(); const file = `${width}-composer-${state}.png`, png = await capture(file.slice(0, -4))
     result.frames.push({ width, state, file, png })
@@ -73,29 +77,30 @@ module.exports = async function mailboxProof({ win, evaluate, waitFor, visible, 
     await waitFor(`${folder('outbox')}.textContent.includes('native-without-time')`)
     const outgoing = ['timeline-new', 'native-new', 'timeline-tie-a', 'timeline-tie-b', 'native-old', 'timeline-old', 'native-without-time']
     assert.deepEqual(await rows('outbox'), outgoing, 'Actual mixed-source history is uniformly newest first with stable ties and missing time last')
-    const pending = await evaluate(`Array.from(${folder('outbox')}.querySelectorAll('.composer-outbox li > span:first-child')).map(e=>e.textContent)`)
+    const pending = await evaluate(`Array.from(${folder('outbox')}.querySelectorAll('.composer-outbox .composer-mailbox__row[data-record-key] > .composer-mailbox__preview')).map(e=>e.textContent)`)
     assert.deepEqual(pending, ['queue-first', 'queue-second'], 'Pending messages retain their actual delivery order')
-    assert.equal(await evaluate(`(${folder('outbox')}.querySelector('.composer-outbox').compareDocumentPosition(${folder('outbox')}.querySelector('.composer-mailbox__messages')) & Node.DOCUMENT_POSITION_FOLLOWING)!==0`), true)
-    await click(`${folder('outbox')}.querySelector('.composer-mailbox__boundary button')`)
+    assert.equal(await evaluate(`(${folder('outbox')}.querySelector('.composer-outbox').compareDocumentPosition(${folder('outbox')}.querySelector('.composer-mailbox__history')) & Node.DOCUMENT_POSITION_FOLLOWING)!==0`), true)
+    const earlier=`([...${folder('outbox')}.querySelectorAll('.composer-mailbox__history .composer-mailbox__boundary button')].find(button=>button.textContent==='Load earlier messages'))`
+    await reveal(earlier);await click(earlier)
     await waitFor(`${folder('outbox')}.textContent.includes('native-earlier')`)
     const afterEarlier = [...outgoing.slice(0, -1), 'native-earlier', outgoing.at(-1)]
     assert.deepEqual(await rows('outbox'), afterEarlier, 'Earlier paging preserves newest-first display and original missing-time entry')
     await frame(width, 'mailbox-recent-outbox')
-    const copy = `${folder('outbox')}.querySelector('.composer-outbox > p + button')`
-    await evaluate(`${copy}.scrollIntoView({block:'nearest'})`); await click(copy)
+    const copy = `([...${folder('outbox')}.querySelectorAll('.composer-outbox > button')].find(button=>button.textContent==='Copy all'))`
+    await reveal(copy); await click(copy)
     await waitFor(`identityMenu.facts().clipboard.at(-1)==='queue-first\\n\\nqueue-second'`)
     assert.deepEqual((await evaluate('identityMenu.facts()')).queues, before.facts.queues, 'Copying pending messages does not reorder or send them')
 
     await choose('system')
     await waitFor(`!${tab('system')}.querySelector('.composer-mailbox__dot')`)
-    const system = await evaluate(`Array.from(${folder('system')}.querySelectorAll('.composer-notice')).map(e=>({step:e.querySelector('strong').textContent,time:e.querySelector('time')?.dateTime??null,text:e.textContent}))`)
+    const system = await evaluate(`Array.from(${folder('system')}.querySelectorAll('.composer-mailbox__row[data-record-key]')).map(e=>({step:e.querySelector('strong').textContent,time:e.querySelector('time')?.dateTime??null,text:e.textContent}))`)
     assert.equal(system.length, 3, 'Native System observations contain both known owners and the unknown queue')
     assert.deepEqual(system.map(item => item.time), ['2026-10-03T10:20:00.000Z', '2026-10-03T10:10:00.000Z', null])
     assert.match(system[2].text, /Time not recorded/i, 'Unknown queue time is disclosed rather than inferred from enqueuedAt')
     await frame(width, 'mailbox-recent-system')
     await evaluate(`identityMenu.mailboxConnectionTime(Date.parse('2026-10-03T10:30:00Z'))`); await painted()
     assert.equal(await unread('system'), false, 'Changing display time alone does not mark a notice unread')
-    assert.equal(await evaluate(`${folder('system')}.querySelector('.composer-notice time').dateTime`), '2026-10-03T10:30:00.000Z')
+    assert.equal(await evaluate(`${folder('system')}.querySelector('.composer-mailbox__row[data-record-key] time').dateTime`), '2026-10-03T10:30:00.000Z')
 
     await choose('progress')
     const form = `${folder('progress')}.querySelector('form')`, minutes = `${form}.querySelector('input[type="number"]')`

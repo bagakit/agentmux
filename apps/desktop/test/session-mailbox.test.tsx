@@ -596,7 +596,7 @@ it('projects loop status without adding unread or pending mail, switching pages,
   expect(trigger().getAttribute('aria-label')).toContain('1 pending')
   await act(async () => resolveList([]))
   expect(trigger().getAttribute('data-progress-state')).toBe('inactive')
-  expect(mailbox().querySelector('[id$="-progress"]')?.textContent).toContain('Not enabled.')
+  expect(mailbox().querySelector('[id$="-progress"] .continuous-progress-control__heading')?.textContent).toContain('Not enabled')
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Outbox (1)')
   for (const loop of [progressLoop(), progressLoop('paused'), { ...progressLoop('paused'), lastOutcome: 'unknown' as const }]) {
