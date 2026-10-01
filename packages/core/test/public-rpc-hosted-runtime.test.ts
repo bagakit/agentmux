@@ -13,6 +13,7 @@ import type { AgentMuxClientEvent, AgentProviderSessionHistoryObservationContext
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcError, type AgentMuxRpcConnection, type AgentMuxRpcFrame } from '../src/public-rpc-wire.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
 
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -20,8 +21,8 @@ const catalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], lo
 function invocation<T extends AgentMuxHostedInvocation>(value: T): T {
   return encodeHostedValue(value) as T
 }
-async function hostedFixture() {
-  const core = await rpcOwnerFixture(['source-agent', 'recipient-agent'])
+async function hostedFixture(ids = ['source-agent', 'recipient-agent']) {
+  const core = await rpcOwnerFixture(ids)
   cleanups.push(() => core.close())
   core.inner.kernel.identity = () => ({ buildIdentity: 'private-sdk-fixture', protocolVersion: 1, daemonInstanceId: 'original-sdk-owner' })
   const inputs: Array<{ runId: string; data: number[] }> = []
@@ -46,6 +47,48 @@ async function endpoint(options: AgentMuxControlServerOptions = {}) {
   return { owner, path, url: () => `http://127.0.0.1:${owner.httpAddress!.port}/` }
 }
 describe('one public service borrowed by a long-lived Runtime Host', () => {
+  it('preserves a large retained Session bootstrap through the real Hosted consumer', async () => {
+    const ids = Array.from({ length: 127 }, (_, index) => `session-${String(index).padStart(3, '0')}`)
+    const f = await hostedFixture(ids)
+    for (const previous of await loadAgentSessions(f.store)) {
+      await f.store.compareAndSwap(previous, { ...previous,
+        retiredRuns: Array.from({ length: 16 }, (_, index) => ({ runId: `${previous.agentSessionId}-original-run-${index}-${'a'.repeat(96)}` })) })
+      await f.client.refreshAgentSession(previous.agentSessionId, previous.run)
+    }
+    const original = f.client.agentSessions()
+    expect(Buffer.byteLength(JSON.stringify(f.hosted.bootstrap()))).toBeGreaterThan(256 * 1024)
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } })
+    cleanups.push(() => rpc.dispose())
+    const reader = await connectHostedAgentMux({ rpc })
+    cleanups.push(() => reader.dispose())
+    expect(reader.agentSessions()).toEqual(original)
+    expect(reader.agentSessions()).toHaveLength(127)
+    expect(f.inputs).toEqual([])
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  }, 15_000)
+  it.each(['unix', 'http'] as const)('preserves a large ordered Run replay over the real %s Hosted consumer', async transport => {
+    const f = await hostedFixture(), runId = 'run-recipient-agent'
+    const bytes = new TextEncoder().encode('Original ordered output.\n'.repeat(32_768))
+    f.inner.kernel.replay = vi.fn(async () => ({ run: { ...f.run(runId), latestOutputBytes: bytes.byteLength }, gap: null,
+      terminal: { type: 'not-requested' }, resizeRevision: 7,
+      replay: [{ type: 'data', runId, startByte: 0, endByte: bytes.byteLength, data: new TextDecoder().decode(bytes), dataBytes: bytes }] }))
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
+      http: { host: '127.0.0.1', port: 0, token: 'large-original-replay' } })
+    const rpc = await connectAgentMuxRpc({ endpoint: transport === 'unix'
+      ? { transport, path: h.path } : { transport, url: h.url(), token: 'large-original-replay' } })
+    cleanups.push(() => rpc.dispose())
+    const reader = await connectHostedAgentMux({ rpc })
+    cleanups.push(() => reader.dispose())
+    const replay = await reader.readRunReplay({ runId }, 0, 'raw')
+    expect(Buffer.byteLength(JSON.stringify(encodeHostedValue(replay)))).toBeGreaterThan(256 * 1024)
+    expect(replay.replay).toEqual([{ type: 'data', runId, startByte: 0, endByte: bytes.byteLength,
+      data: new TextDecoder().decode(bytes), dataBytes: bytes }])
+    expect(f.inner.kernel.replay).toHaveBeenCalledExactlyOnceWith(runId, 0, 'raw')
+    expect(f.client.agentSession('recipient-agent').run).toEqual({ runId })
+    expect(f.inputs).toEqual([])
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  })
   it.each(['not_applied', 'unknown', 'prompt readiness is unconfirmed'])('preserves original Core detail %s over actual Unix and HTTP wire', async detail => {
     const error = Object.assign(new AgentMuxError('Original owner decision.', 'AGENT_PROMPT_STATE_UNCONFIRMED', detail), {
       details: { actualOwner: 'original' }, candidates: [{ identity: 'unchanged' }]

@@ -5,7 +5,7 @@ export { rpcRecord } from './rpc-data.js'
 export type { JSONRPCRequest, JSONRPCResponse, JSONRPCID } from 'json-rpc-2.0'
 
 export type AgentMuxRpcFrame = JSONRPCResponse | JSONRPCRequest
-export const AGENTMUX_RPC_MAX_MESSAGE_BYTES = 256 * 1024
+export const AGENTMUX_RPC_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 export class AgentMuxRpcError extends AgentMuxError {
   constructor(message: string, code: string, readonly rpcCode: number,
     readonly details?: unknown, readonly candidates?: unknown, detail?: string,

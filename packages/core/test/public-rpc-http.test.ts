@@ -150,6 +150,22 @@ it('shares one bounded line decoder across fragmented UTF-8 and complete adjacen
   expect(() => new AgentMuxRpcLines().accept(new Uint8Array(AGENTMUX_RPC_MAX_MESSAGE_BYTES + 1), () => {})).toThrow('bounded frame budget')
 })
 
+it('accepts the exact shared frame budget and rejects one extra byte in both directions', () => {
+  const frame = { jsonrpc: '2.0', id: 'boundary', result: '' }
+  frame.result = 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES - Buffer.byteLength(JSON.stringify(frame)))
+  const encoded = rpcEncode(frame), bytes = new TextEncoder().encode(encoded)
+  expect(bytes.byteLength - 1).toBe(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
+  const decoder = new AgentMuxRpcLines(), values: unknown[] = []
+  for (let offset = 0; offset < bytes.byteLength; offset += 65_536) decoder.accept(bytes.subarray(offset, offset + 65_536), value => values.push(value))
+  decoder.end()
+  expect(values).toEqual([frame])
+  expect(() => rpcEncode({ ...frame, result: frame.result + 'x' })).toThrow('bounded frame budget')
+  const oversized = new AgentMuxRpcLines(), consume = vi.fn()
+  oversized.accept(new Uint8Array(AGENTMUX_RPC_MAX_MESSAGE_BYTES), consume)
+  expect(() => oversized.accept(Uint8Array.of(120), consume)).toThrow('bounded frame budget')
+  expect(consume).not.toHaveBeenCalled()
+})
+
 it('bundles the actual exported HTTP leaf for browsers with a nonempty graph and no Node imports', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   expect(pkg.exports['./public-rpc-http']).toEqual({ types: './dist/public-rpc-http.d.ts', import: './dist/public-rpc-http.js' })
