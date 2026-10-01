@@ -28,7 +28,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const ordinary = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local && !entry.stream)
     expect(ordinary.length).toBeGreaterThan(0)
     for (const entry of ordinary) {
-      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], entry.method === 'browser.task.run' ? '{"fresh":"input"}' : 'return await snapshot()')
+      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], entry.method === 'browser.task.batch' ? '{"parameters":{"fresh":"input"},"items":[{"id":"ITEM","parameters":{"fresh":"item"}}]}' : entry.method === 'browser.task.run' ? '{"fresh":"input"}' : 'return await snapshot()')
       expect(result.code, entry.method + ': ' + result.stderr).toBe(1)
       expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, operation: entry.method, error: { code: 'CLI_ROUTE_PROBE' } })
     }

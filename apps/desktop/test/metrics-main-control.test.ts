@@ -5,19 +5,26 @@ import { EventEmitter } from 'node:events'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
 
 const fixture = vi.hoisted(() => ({ directory: process.env.AGENTMUX_METRICS_EVIDENCE ?? process.cwd(), handlers: new Map<string, (...args: any[]) => unknown>(),
   ipc: new (class { listeners = new Map<string, Set<Function>>() })(),
+  controlOptions: undefined as AgentMuxControlServerOptions | undefined,
   rendererRequest: undefined as undefined | ((request: any) => void), rendererCancel: undefined as undefined | ((request: any) => void) }))
-vi.mock('electron', () => ({ app: { getPath: () => fixture.directory },
+vi.mock('electron', () => ({ app: { getPath: () => fixture.directory, getAppPath: () => fixture.directory },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel),
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
+  AgentMuxControlServer: class {
+    constructor(options: AgentMuxControlServerOptions) { fixture.controlOptions = options }
+    async start() {} async stop() {}
+  }
+}))
 vi.mock('@agentmux/demand', async original => ({ ...await original(), openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
@@ -28,8 +35,8 @@ vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: clas
 } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
-import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
-import { requestAgentMuxControl } from '@agentmux/core'
+import { AgentMuxMemoryAgentSessionStore, type AgentMuxControlServerOptions } from '@agentmux/core'
+import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { parseMetricsObservation } from '@agentmux/core/control'
 import { registerIpc } from '../src/main/ipc'
 import { RuntimeController } from '../src/main/runtime-controller'
@@ -65,25 +72,26 @@ function samplerState(sampler: ProcessResourceSampler) {
   const owner = sampler as unknown as { subscribers: Set<unknown>; timer: unknown }
   return { consumers: owner.subscribers.size, timer: owner.timer !== null }
 }
+function capturedControlOptions(): AgentMuxControlServerOptions | undefined { return fixture.controlOptions }
 function startCli(directory: string, command: 'get' | 'watch') {
-  expect(process.env.AGENTMUX_METRICS_CLI).toBeTruthy()
-  const child = spawn(process.execPath, [process.env.AGENTMUX_METRICS_CLI!, 'metrics', command], {
-    env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: directory }, stdio: ['ignore', 'pipe', 'pipe'] })
+  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/agentmux')
+  const child = spawn(process.execPath, [cli, '--endpoint', `unix://${join(directory, 'control.sock')}`, 'system', 'metrics', command], {
+    env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
   children.push(child)
   let stdout = '', stderr = ''
   let closed = false
   child.stdout!.on('data', chunk => { stdout += chunk.toString() }); child.stderr!.on('data', chunk => { stderr += chunk.toString() })
   child.once('close', () => { closed = true })
+  const frames = () => stdout.split('\n').filter(Boolean).map(line => JSON.parse(line))
   return { child, get closed() { return closed }, get stdout() { return stdout }, get stderr() { return stderr },
-    frames: () => stdout.split('\n').filter(Boolean).map(line => JSON.parse(line)),
+    frames, snapshots: () => frames().filter(frame => frame.method === 'system.subscription.event' && frame.params.event.type === 'snapshot'),
     errors: () => stderr.split('\n').filter(Boolean).map(line => JSON.parse(line)) }
 }
 async function registered() {
   const directory = await mkdtemp(join(tmpdir(), 'agentmux-metrics-main-'))
   fixture.directory = directory; fixture.handlers.clear(); fixture.ipc.listeners.clear()
-  const priorDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
-  process.env.AGENTMUX_RUNTIME_DIRECTORY = directory
-  cleanup.push(async () => { if (priorDirectory === undefined) delete process.env.AGENTMUX_RUNTIME_DIRECTORY; else process.env.AGENTMUX_RUNTIME_DIRECTORY = priorDirectory; await rm(directory, { recursive: true, force: true }) })
+  fixture.controlOptions = undefined
+  cleanup.push(async () => { await rm(directory, { recursive: true, force: true }) })
   const storage = join(directory, 'selected-runtime'); await mkdir(storage); await writeFile(join(storage, 'retained'), 'retained factual bytes')
   const configStore = new ConfigStore(join(directory, 'config.json'))
   await configStore.save(structuredClone(DEFAULT_CONFIG))
@@ -138,9 +146,17 @@ async function registered() {
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
     scratchTopics: {} as any, workspaceFiles: { dispose: async () => {} } as any })
   cleanup.push(dispose)
+  const controlOptions = capturedControlOptions()
+  expect(controlOptions?.metrics).toBeDefined()
+  const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
+  const socket = join(directory, 'control.sock')
+  const server = new core.AgentMuxControlServer({ ...controlOptions!, coreClients: () => [] }, socket)
+  await server.start(); cleanup.push(() => server.stop())
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+  cleanup.push(() => rpc.dispose())
   events.get('local')!({ type: 'process-state', state: 'running', pid: 100, run: { runId: 'healthy-run', hostId: 'local' } })
   events.get('remote')!({ type: 'process-state', state: 'running', pid: 777, run: { runId: 'remote-run', hostId: 'remote' } })
-  return { directory, sampler, runtime, configBefore, configStore, resourceReads, diagnostics, readTable, sender,
+  return { directory, sampler, runtime, rpc, configBefore, configStore, resourceReads, diagnostics, readTable, sender,
     stop, input, attach, resume, get rendererReads() { return rendererReads }, tick: () => { clock += 1000 }, dispose }
 }
 
@@ -151,8 +167,10 @@ describe('registered Main metrics and actual CLI', () => {
     const first = startCli(f.directory, 'watch'), second = startCli(f.directory, 'watch')
     await waitFor(() => { expect(first.frames().length + first.errors().length).toBeGreaterThan(0); expect(second.frames().length + second.errors().length).toBeGreaterThan(0) })
     expect(first.errors()).toEqual([]); expect(second.errors()).toEqual([])
-    await waitFor(() => expect(first.frames().filter(frame => frame.event === 'snapshot').length).toBeGreaterThan(0))
-    await waitFor(() => expect(second.frames().filter(frame => frame.event === 'snapshot').length).toBeGreaterThan(0))
+    expect(first.frames()[0]).toMatchObject({ jsonrpc: '2.0', result: { method: 'system.metrics.watch', subscriptionId: expect.any(String),
+      initial: { observation: { schema: 'agentmux.metrics.v1' } } } })
+    expect(second.frames()[0]).toMatchObject({ jsonrpc: '2.0', result: { method: 'system.metrics.watch', subscriptionId: expect.any(String),
+      initial: { observation: { schema: 'agentmux.metrics.v1' } } } })
     expect(samplerState(f.sampler)).toEqual({ consumers: 2, timer: true })
     expect(f.readTable).toHaveBeenCalledTimes(1)
     expect(f.resourceReads).toHaveBeenCalledTimes(2) // Once per connected host, once for the shared observation.
@@ -161,7 +179,7 @@ describe('registered Main metrics and actual CLI', () => {
     const get = startCli(f.directory, 'get')
     await waitFor(() => expect(get.closed).toBe(true))
     expect(get.errors()).toEqual([]); expect(get.frames()).toHaveLength(1)
-    expect(get.frames()[0]).toMatchObject({ ok: true, operation: 'metrics.get' })
+    expect(get.frames()[0]).toMatchObject({ ok: true, operation: 'system.metrics.get' })
     expect(samplerState(f.sampler).consumers).toBe(2)
     const snapshot = parseMetricsObservation(get.frames()[0].result.observation)
     expect(snapshot.process.data).toHaveLength(1)
@@ -170,22 +188,29 @@ describe('registered Main metrics and actual CLI', () => {
     expect(snapshot.runtime.data![0]!.runtimeStorageObservedAt).toBeTypeOf('number')
     expect(snapshot.runtime.data![1]!.process).toMatchObject({ cpuPercent: null, rssKib: null })
     expect(snapshot.renderer.data).toMatchObject({ window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: { monacoEditors: null, monacoModels: null } })
+    const direct = await f.rpc.call('system.metrics.get', {})
+    expect(direct.observation.process.data).toEqual(snapshot.process.data)
+    expect(f.readTable).toHaveBeenCalledTimes(1); expect(f.resourceReads).toHaveBeenCalledTimes(2)
     const third = startCli(f.directory, 'watch')
-    await waitFor(() => expect(third.frames().filter(frame => frame.event === 'snapshot').length).toBeGreaterThan(0))
+    await waitFor(() => expect(third.frames().length + third.errors().length).toBeGreaterThan(0))
     expect(third.errors()).toEqual([])
+    expect(third.frames()[0]).toMatchObject({ jsonrpc: '2.0', result: { method: 'system.metrics.watch', initial: { observation: { schema: 'agentmux.metrics.v1' } } } })
     expect(samplerState(f.sampler).consumers).toBe(3)
     f.tick(); await vi.advanceTimersByTimeAsync(1000)
     await waitFor(() => expect(f.readTable).toHaveBeenCalledTimes(2))
     expect(f.resourceReads).toHaveBeenCalledTimes(2); expect(f.diagnostics).toHaveBeenCalledTimes(1)
     expect(f.rendererReads).toBe(2)
-    await waitFor(() => expect(first.frames().filter(frame => frame.event === 'snapshot').length).toBeGreaterThan(1))
-    await waitFor(() => expect(second.frames().filter(frame => frame.event === 'snapshot').length).toBeGreaterThan(1))
+    await waitFor(() => expect(first.snapshots().length).toBeGreaterThan(0))
+    await waitFor(() => expect(second.snapshots().length).toBeGreaterThan(0))
     const raw = first.frames()
-    expect(raw[0]).toMatchObject({ event: 'attached', operation: 'metrics.watch', ok: true })
-    const frames = raw.filter(frame => frame.event === 'snapshot')
-    expect(frames.length).toBeGreaterThan(1)
-    expect(new Set(raw.map(frame => frame.requestId)).size).toBe(1)
-    expect(frames.at(-1)!.result.observation.runtime.lastSuccessAt).toBe(snapshot.runtime.lastSuccessAt)
+    expect(raw[0]).toMatchObject({ jsonrpc: '2.0', id: expect.any(String), result: { method: 'system.metrics.watch', subscriptionId: expect.any(String) } })
+    expect(raw.length).toBeGreaterThan(1)
+    const frames = first.snapshots()
+    expect(frames.length).toBeGreaterThan(0)
+    expect(new Set(raw.slice(1).map(frame => frame.params.subscriptionId))).toEqual(new Set([raw[0].result.subscriptionId]))
+    expect(raw.slice(1).map(frame => frame.params.method)).toEqual(raw.slice(1).map(() => 'system.metrics.watch'))
+    expect(raw.slice(1).map(frame => frame.params.sequence)).toEqual(raw.slice(1).map((_, index) => index + 1))
+    expect(frames.at(-1)!.params.event.data.runtime.lastSuccessAt).toBe(snapshot.runtime.lastSuccessAt)
     first.child.kill('SIGINT'); await waitFor(() => expect(first.closed).toBe(true))
     expect(samplerState(f.sampler).consumers).toBe(2)
     third.child.kill('SIGINT'); await waitFor(() => expect(third.closed).toBe(true))
@@ -204,27 +229,32 @@ describe('registered Main metrics and actual CLI', () => {
   })
   it('current window destruction ends a live CLI watch and releases immediately', async () => {
     const f = await registered(), watch = startCli(f.directory, 'watch')
-    await waitFor(() => expect(watch.frames().filter(frame => frame.event === 'snapshot').length + watch.errors().length).toBeGreaterThan(0))
+    await waitFor(() => expect(watch.frames().length + watch.errors().length).toBeGreaterThan(0))
     expect(watch.errors()).toEqual([])
     f.sender.destroyed = true; f.sender.emit('destroyed')
     await waitFor(() => expect(watch.closed).toBe(true))
     expect(samplerState(f.sampler)).toEqual({ consumers: 0, timer: false })
-    expect(watch.frames().at(-1)).toMatchObject({ event: 'end', result: { reason: 'owner-closed' } })
+    expect(watch.frames().at(-1)).toMatchObject({ jsonrpc: '2.0', method: 'system.subscription.event',
+      params: { method: 'system.metrics.watch', event: { type: 'end', data: {} } } })
   })
   it('an actual CLI stdout pipe disconnect ends consumption without a further sampling period', async () => {
     const f = await registered()
     vi.useFakeTimers({ toFake: ['setInterval','clearInterval'] })
     const watch = startCli(f.directory, 'watch')
-    await waitFor(() => expect(watch.frames().filter(frame => frame.event === 'snapshot').length + watch.errors().length).toBeGreaterThan(0))
+    await waitFor(() => expect(watch.frames().length + watch.errors().length).toBeGreaterThan(0))
     expect(watch.errors()).toEqual([])
     expect(samplerState(f.sampler)).toEqual({ consumers: 1, timer: true })
     watch.child.stdout!.destroy()
     // One real write discovers EPIPE; release must not depend on another period.
     f.tick(); await vi.advanceTimersByTimeAsync(1000)
     await waitFor(() => expect(watch.closed).toBe(true))
+    await record({ case: 'stdout-disconnect-before-receipt-parse', raw: watch.stdout, error: watch.stderr,
+      consumers: samplerState(f.sampler), exitCode: watch.child.exitCode,
+      stopCalls: f.stop.mock.calls.length, inputCalls: f.input.mock.calls.length })
     expect(watch.child.exitCode).toBe(1)
+    expect(() => watch.errors()).not.toThrow()
     expect(watch.errors()).toHaveLength(1)
-    expect(watch.errors()[0]).toMatchObject({ ok: false, operation: 'metrics.watch' })
+    expect(watch.errors()[0]).toMatchObject({ ok: false, operation: 'system.metrics.watch' })
     expect(samplerState(f.sampler)).toEqual({ consumers: 0, timer: false })
     const reads = f.readTable.mock.calls.length
     await vi.advanceTimersByTimeAsync(5000)

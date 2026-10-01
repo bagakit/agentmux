@@ -22,6 +22,9 @@ function write(value: unknown, stream: NodeJS.WritableStream = process.stdout, b
   }
 }
 let operationId: string | undefined
+const outputClosed = new AbortController()
+let outputFailed = false
+let failureReported = false
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
@@ -53,6 +56,7 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
   const interrupted = () => { controller.abort(); finish() }
   process.once('SIGINT', interrupted)
   process.once('SIGTERM', interrupted)
+  outputClosed.signal.addEventListener('abort', interrupted, { once: true })
   let opened: { dispose(): Promise<void> } | undefined
   try {
     opened = await client.subscribe(method, params, {
@@ -71,6 +75,7 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
   } finally {
     process.off('SIGINT', interrupted)
     process.off('SIGTERM', interrupted)
+    outputClosed.signal.removeEventListener('abort', interrupted)
     await opened?.dispose()
   }
 }
@@ -150,7 +155,9 @@ async function main(): Promise<number> {
     return partial(method, result) ? 1 : 0
   } finally { await client.dispose() }
 }
-void main().then(code => { process.exitCode = code }, error => {
+function reportFailure(error: unknown): void {
+  if (failureReported) return
+  failureReported = true
   const source = error && typeof error === 'object' ? error as Record<string, unknown> : null
   const { args } = (() => { try { return agentMuxCliArguments(process.argv.slice(2)) } catch { return { args: [] } } })()
   write({
@@ -159,9 +166,16 @@ void main().then(code => { process.exitCode = code }, error => {
     error: {
       code: typeof source?.code === 'string' ? source.code : 'AGENTMUX_FAILED',
       message: error instanceof Error ? error.message : typeof source?.message === 'string' ? source.message : String(error),
+      ...(source?.detail === undefined ? {} : { detail: source.detail }),
       ...(source?.details === undefined ? {} : { details: source.details }),
       ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
     }
   }, process.stderr)
   process.exitCode = 1
+}
+process.stdout.on('error', () => {
+  outputFailed = true
+  outputClosed.abort()
+  reportFailure(new AgentMuxError('CLI output consumer disconnected; reconnect using the original cursor.', 'CONTROL_UNAVAILABLE'))
 })
+void main().then(code => { if (!outputFailed) process.exitCode = code }, reportFailure)
