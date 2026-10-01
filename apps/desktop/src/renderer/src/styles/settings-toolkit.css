@@ -36,7 +36,8 @@
 .settings-content__scroll[data-settings-pane='toolkit'] { padding-inline: max(var(--sp-7), calc((100% - 960px) / 2)); }
 [data-settings-page='toolkit'] .settings-content__header { width: min(100%, calc(960px + var(--sp-7) * 2)); }
 .toolkit-workbench { container-type: inline-size; container-name: toolkit-settings; }
-.toolkit-workbench__toolbar { justify-content: flex-end; border-bottom: 1px solid var(--line-soft); padding-bottom: var(--sp-3); }
+.toolkit-workbench__toolbar { flex-wrap: wrap; justify-content: flex-end; border-bottom: 1px solid var(--line-soft); padding-bottom: var(--sp-3); }
+.toolkit-workbench__intro { flex: 1 1 180px; margin: 0; color: var(--text-2); font-size: var(--fs-body); }
 .toolkit-workbench__body { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: var(--sp-7); }
 .toolkit-library, .toolkit-workbench__detail { min-width: 0; }
 .toolkit-library__search { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); color: var(--text-3); }
@@ -114,6 +115,8 @@
 .toolkit-editor__footer .settings-pane-actions { position: static; }
 .toolkit-workbench__empty { padding: var(--sp-7); color: var(--text-3); }
 .toolkit-workbench__empty > svg { color: var(--accent); }
+.toolkit-workbench__empty h3 { margin-block: var(--sp-4) var(--sp-3); color: var(--text); font: 600 var(--fs-display)/1.4 var(--font-sans); letter-spacing: -.02em; }
+.toolkit-workbench__empty p { max-width: 40ch; color: var(--text-2); line-height: 1.6; }
 @container toolkit-settings (max-width: 660px) {
   .toolkit-workbench__body { grid-template-columns: minmax(0, 1fr); }
   .toolkit-workbench[data-view='editor'] .toolkit-library { display: none; }
@@ -138,7 +141,6 @@
 .toolkit-library__directory { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
 .toolkit-template__identity { display: flex; align-items: flex-start; gap: var(--sp-4); padding-block: var(--sp-4); }
-.toolkit-library__item[data-tool-template][aria-pressed='true'] { background: var(--wash-3); }
 .toolkit-template__identity > svg { flex: none; margin-top: var(--sp-2); color: var(--accent); }
 .toolkit-template__identity h3 { margin: 0 0 var(--sp-2); color: var(--text); font: 600 var(--fs-display)/1.4 var(--font-sans); }
 .toolkit-template__identity p { margin: 0; color: var(--text-2); line-height: 1.6; }

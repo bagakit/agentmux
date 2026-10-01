@@ -26,3 +26,6 @@
 .toolkit-overflow__item > span { min-width: 0; overflow-wrap: anywhere; }
 .toolkit-overflow__back { align-self: flex-start; margin: var(--sp-4) var(--sp-6) 0; }
 .toolkit-result summary:focus-visible, .toolkit-overflow__item:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.toolkit-result__identity { min-width: 0; }
+.toolkit-result__identity > small { display: block; margin-bottom: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.toolkit-result__identity > h2 { overflow-wrap: anywhere; }
