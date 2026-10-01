@@ -38,10 +38,7 @@ afterEach(async () => {
 })
 const args = (mode?: string, id = targetSid) => ['agent', 'view', '--session', id, ...(mode === undefined ? [] : ['--mode', mode])]
 async function view(mode?: string, id = targetSid, code = 0) {
-  const receipt = await fixture!.run(args(mode, id), code)
-  expect(receipt.operation).toBe('agent.view')
-  if (receipt.operation !== 'agent.view') throw new Error('Wrong Agent view receipt.')
-  return receipt.result
+  return await fixture!.run('agent.view', args(mode, id), code)
 }
 function panes(id = targetSid) {
   return <><div data-pane="first"><SessionPane sessionId={id} surfaceKind="agent" interactiveResize={false} visible
@@ -60,6 +57,11 @@ function modes() {
 const saved = { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
 
 describe.skipIf(restoring)('Agent view through compiled CLI and actual consumers', () => {
+  it('rejects a canonical CLI reply for another expected method without changing the original workface', async () => {
+    const before = protectedFacts()
+    await expect(fixture!.run('file.view', args())).rejects.toThrow(/expected.*agent.view.*file.view/)
+    expect(protectedFacts()).toEqual(before); expect(fixture!.flush).not.toHaveBeenCalled(); fixture!.noLifecycle()
+  })
   it('reads current default and every original reference without a write, save, snapshot or navigation', async () => {
     const setter = vi.spyOn(useAppStore.getState(), 'setViewMode'), before = protectedFacts()
     const activeElement = vi.spyOn(document, 'activeElement', 'get')
@@ -88,7 +90,9 @@ describe.skipIf(restoring)('Agent view through compiled CLI and actual consumers
     for (const name of ['first', 'second']) {
       const pane = container.querySelector(`[data-pane="${name}"]`)!
       expect(pane.querySelector('.activity-feed')).not.toBeNull()
-      expect(pane.querySelector('[data-private-terminal]')).toBeNull()
+      const terminal = pane.querySelector<HTMLElement>('[data-private-terminal]')!
+      expect(terminal).not.toBeNull(); expect(terminal.closest('[hidden][inert]')).not.toBeNull()
+      expect(desktopElementVisible(terminal)).toBe(false)
       expect(pane.querySelector('button[aria-label="Show Terminal"]')).not.toBeNull()
       expect(pane.querySelector('[aria-label="Message Agent"]')?.textContent).toBe('Original unsent target draft')
     }
@@ -122,7 +126,8 @@ describe.skipIf(restoring)('Agent view through compiled CLI and actual consumers
     await act(async () => { result = await view('activity', targetSid, 1) })
     expect(result).toMatchObject({ storedOverride: 'activity', effectiveMode: 'activity', changed: true, outcome: 'partial', save: saved })
     expect(result.issues.map(issue => issue.code)).toEqual(['INPUT_PRESERVATION_UNCONFIRMED'])
-    expect(input.isConnected).toBe(false); expect(modes()).toEqual(['activity', 'activity', 'terminal'])
+    expect(input.isConnected).toBe(true); expect(input.closest('[hidden][inert]')).not.toBeNull()
+    expect(desktopElementVisible(input)).toBe(false); expect(modes()).toEqual(['activity', 'activity', 'terminal'])
     expect(focus).not.toHaveBeenCalled(); expect(blur).not.toHaveBeenCalled()
     expect(protectedFacts()).toEqual(before); fixture!.noLifecycle()
   })

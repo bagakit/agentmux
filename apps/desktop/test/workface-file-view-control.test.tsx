@@ -42,8 +42,7 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); expect(workfaceMonacoModelCount()).toBe(modelBaseline); container.remove(); await fixture?.stop(); fixture = undefined
   delete (window as Partial<Window>).agentmux; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 async function arrange(path = 'shared.md', opaqueId?: string) {
-  const receipt = await fixture!.run(['open', 'file', '--zone', zoneFor('resource').zoneId, '--path', path])
-  expect(receipt.operation).toBe('open.file')
+  await fixture!.run('file.open', ['file', 'open', '--zone', zoneFor('resource').zoneId, '--path', path])
   currentId = fileTabId('resource', path); currentRegion = opaqueId ?? initialWorkbenchRegionId(currentId); otherRegion = 'file-neighbor-region'
   let tab = opaqueId ? createWorkbenchTab(currentId, { kind: 'file', regionId: opaqueId, workspaceId: 'resource', path }) : useAppStore.getState().tabs[currentId]!
   const space = useAppStore.getState().tabs[currentId]!.space
@@ -55,8 +54,7 @@ async function arrange(path = 'shared.md', opaqueId?: string) {
   return tab
 }
 async function view(mode?: string, region = currentRegion, code = 0) {
-  const receipt = await fixture!.run(['space', 'view', '--region', region, ...(mode ? ['--mode', mode] : [])], code)
-  expect(receipt.operation).toBe('space.view'); if (receipt.operation !== 'space.view') throw new Error('Wrong File view report.'); return receipt.result
+  return await fixture!.run('file.view', ['file', 'view', '--region', region, ...(mode ? ['--mode', mode] : [])], code)
 }
 function file(region: string) { const surface = useAppStore.getState().tabs[currentId]?.regions[region]; expect(surface?.kind).toBe('file'); return surface as FileWorkbenchSurface }
 async function mount() {
@@ -99,7 +97,21 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
   it('uses the same original Preview and Diff controls so SVG/Note-style default preview cannot mask a selected Diff', async () => {
     await arrange('toggle.md'); await mount()
     const first = container.querySelector('[data-file-view="first"]')!
-    const click = async (label: string) => { const button = [...first.querySelectorAll('button')].find(node => node.textContent?.trim() === label); expect(button).toBeDefined(); await act(async () => button!.click()) }
+    const click = async (label: string) => {
+      if (label === 'Diff') {
+        const trigger = first.querySelector<HTMLButtonElement>('button[aria-label="File options"]')!
+        expect(trigger).not.toBeNull()
+        await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(node => node.textContent?.includes('Diff against HEAD'))
+        expect(item).toBeDefined()
+        await act(async () => item!.click())
+        await act(async () => item!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+        return
+      }
+      const ariaLabel = label === 'Preview' ? 'Preview current content' : 'Show source'
+      const button = first.querySelector<HTMLButtonElement>('button[aria-label="' + ariaLabel + '"]')
+      expect(button).not.toBeNull(); await act(async () => button!.click())
+    }
     await click('Preview'); expect(canvases()).toEqual(['preview', 'preview', 'source'])
     await click('Diff'); expect(canvases()).toEqual(['diff', 'diff', 'source']); expect((await view()).effectiveMode).toBe('diff')
     await click('Diff'); expect(canvases()).toEqual(['source', 'source', 'source'])

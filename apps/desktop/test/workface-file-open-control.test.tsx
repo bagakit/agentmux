@@ -41,13 +41,10 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); expect(workfaceMonacoModelCount()).toBe(modelBaseline); container.remove(); await fixture?.stop(); fixture = undefined
   vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 function args(path: string, workspaceId = 'resource', extra: string[] = []) {
-  return ['open', 'file', '--zone', zoneFor(workspaceId, workspaceId === SCRATCH_WORKSPACE_ID).zoneId, '--path', path, ...extra]
+  return ['file', 'open', '--zone', zoneFor(workspaceId, workspaceId === SCRATCH_WORKSPACE_ID).zoneId, '--path', path, ...extra]
 }
 async function open(path: string, workspaceId = 'resource', extra: string[] = [], code = 0) {
-  const receipt = await fixture!.run(args(path, workspaceId, extra), code)
-  expect(receipt.operation).toBe('open.file')
-  if (receipt.operation !== 'open.file') throw new Error('Wrong File open receipt.')
-  return receipt.result
+  return await fixture!.run('file.open', args(path, workspaceId, extra), code)
 }
 function protectedFacts() { const state = useAppStore.getState(); return { activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
   agentFocus: state.agentFocus, drafts: state.agentComposerDrafts, sessions: state.sessions, retained: state.retainedSpatialFocus, policy: state.workbenchNavigationInputPolicy } }
