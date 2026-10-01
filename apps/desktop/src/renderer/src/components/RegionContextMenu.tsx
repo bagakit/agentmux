@@ -1,6 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { Copy, Crosshair, Replace, Send, SquareArrowOutUpRight } from 'lucide-react'
 import { createContext, useContext, type ReactNode } from 'react'
+import type { AgentSharingMetadata } from '@agentmux/core/sharing'
 import { formatMessagingAddress, formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
@@ -72,6 +73,7 @@ export type RegionCopyModel = {
 export function createRegionCopyModel({
   regionId,
   agentSessionId,
+  sharingMetadata,
   writeClipboardText,
   splitMenu,
   swapMenu,
@@ -79,6 +81,7 @@ export function createRegionCopyModel({
 }: {
   regionId: string
   agentSessionId: string | null
+  sharingMetadata?: (() => AgentSharingMetadata) | undefined
   writeClipboardText(text: string): Promise<void>
   splitMenu?: readonly WorkbenchSplitMenuEntry[]
   swapMenu?: readonly RegionSwapMenuEntry[]
@@ -103,16 +106,15 @@ export function createRegionCopyModel({
     ...(agentSessionId
       ? {
           // 交接入口按意图命名：用户想的是"把这个 Agent 交给别人"，不是"我要哪一层身份"。
-          // 点击发生在某一格上，我们知道是哪一格而接收方不知道，所以这里解析成 Region 地址——
-          // 消歧做在源头。这与眼下分没分屏无关：知道就给，下一秒分屏了这个地址依然指得准。
+          // 名片用稳定 SID 收信；点击发生在准确一格上，另附这个 Region，不根据 SID 猜空间位置。
           handoff: {
             label: 'Message this Agent' as const,
             onSelect: async () =>
-              copy(formatMessagingAddress({ agentSessionId, regionId }), 'Message this Agent')
+              copy(formatMessagingAddress({ agentSessionId, regionId, ...sharingMetadata?.() }), 'Message this Agent')
           },
           sessionAddress: {
             label: 'Copy Session Address' as const,
-            onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Session Address')
+            onSelect: async () => copy(formatSessionAddress(agentSessionId, sharingMetadata?.()), 'Copy Session Address')
           }
         }
       : {})
@@ -259,6 +261,7 @@ export function RegionContextMenu({
   children,
   regionId,
   agentSessionId,
+  sharingMetadata,
   writeClipboardText,
   splitMenu,
   swapMenu,
@@ -267,6 +270,7 @@ export function RegionContextMenu({
   children: ReactNode
   regionId: string
   agentSessionId: string | null
+  sharingMetadata?: (() => AgentSharingMetadata) | undefined
   writeClipboardText(text: string): Promise<void>
   /**
    * 分屏与重排那一节。来自 `workbenchSplitMenuEntries`——与 Tab 条上的 Split 下拉、Tab 的右键
@@ -299,6 +303,7 @@ export function RegionContextMenu({
   const model = createRegionCopyModel({
     regionId,
     agentSessionId,
+    sharingMetadata,
     writeClipboardText,
     splitMenu,
     swapMenu,

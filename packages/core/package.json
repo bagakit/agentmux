@@ -20,6 +20,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./sharing": {
+      "types": "./dist/sharing.d.ts",
+      "import": "./dist/sharing.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -110,6 +114,7 @@
     }
   },
   "bin": {
+    "amux": "./bin/amux",
     "agentmux": "./bin/agentmux",
     "ctxmux": "./vendor/ctxmux/darwin-arm64/bin/ctxmux",
     "ctxmuxd": "./vendor/ctxmux/darwin-arm64/bin/ctxmuxd"

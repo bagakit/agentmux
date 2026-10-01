@@ -5,6 +5,7 @@ import { useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'
 import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
+import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
 import { statusDotTier } from '../lib/attention-event'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -64,6 +65,7 @@ export function RosterRowView({
   // 复用 agent-address 的 formatter，不在 Roster 里重写寻址。写剪贴板走共用出口，失败必报。
   const menuActions = agentRosterMenuActions({
     sessionId: row.sessionId,
+    sharingMetadata: () => resolveAgentSharingMetadata(row.sessionId, useAppStore.getState()),
     writeClipboardText: async (text) => {
       await copyTextToClipboard(text, reportError)
     }

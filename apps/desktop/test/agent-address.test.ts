@@ -23,137 +23,53 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 
-// 复制出去的是一个寻址方式，不是一个 id。判据只有一条：接收方仅凭这段文本，
-// 能不能不问人、不查文档就完成寻址。因此每条断言都在问"这段文本自足吗"，
-// 而不是"字符串长得对不对"。
-
-// 名片的对象命令必须自足：发送带正文，检查带选择器，恢复发现列实际 Session。
+// Card hints and recovery commands must be executable, with a nonempty scan.
 const RUNNABLE: readonly RegExp[] = [
-  /^agentmux agent send --to-(?:session|region|tab)=\S.* --text ./u,
-  /^agentmux agent inspect --(?:session|run|provider-native|acp-native)=\S/u,
-  /^agentmux space inspect --(?:region|tab)=\S/u,
-  /^agentmux agent ls$/u
+  /^amux agent send --to-session=\S.* --text ./u,
+  /^amux space inspect --(?:region|tab)=\S/u,
+  /^amux agent ls$/u,
+  /^amux --skill$/u
 ]
-
-/** 恢复文本里那条"列出活着的 Agent"的命令。是 sessions 不是 agents——后者列的是配好的 executor 类型。 */
-const LIST_SESSIONS_COMMAND = 'agentmux agent ls'
-
-/** 一段文本里每一行 `agentmux …` 都必须能跑；返回检查过的行数，供调用方防"一行都没检查"。 */function assertEveryCommandRunnable(text: string, where: string): number {
+const LIST_SESSIONS_COMMAND = 'amux agent ls'
+function assertEveryCommandRunnable(text: string, where: string): number {
   let seen = 0
-  for (const line of text.split('\n')) {
-    if (!line.startsWith('agentmux')) continue
+  for (const raw of text.split('\n')) {
+    const line = raw.startsWith('# ') ? raw.slice(2) : raw
+    if (!line.startsWith('amux ')) continue
     seen += 1
-    expect(RUNNABLE.some((shape) => shape.test(line)), `跑不了的命令：${where} → ${line}`).toBe(true)
+    expect(RUNNABLE.some(shape => shape.test(line)), `${where}: ${line}`).toBe(true)
   }
   return seen
 }
 
-describe('Session 地址：哪个 Agent', () => {
-  const address = formatSessionAddress('agent-7')
-
-  it('说清目标是哪一层身份，而不是甩一个裸 id', () => {
-    expect(address).toContain('agent-7')
-    expect(address).toMatch(/Session/u)
+describe('compact sharing cards', () => {
+  it('uses a semantic SID and preserves the exact clicked Region as context', () => {
+    const card = formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
+    expect(card).toContain('--- amux : IDCard ---\nID: agent-7\nExe: ? | ?\nRegion: region:pane-2')
+    expect(card).toContain("# amux agent send --to-session='agent-7' --text \"...\"")
+    expect(card).not.toContain('--to-region')
+    expect(formatMessagingAddress({ agentSessionId: 'agent-7' })).toBe(formatSessionAddress('agent-7'))
   })
 
-  it('给出可直接执行的命令，用既有 flag', () => {
-    expect(address).toContain("agentmux agent send --to-session='agent-7'")
-    expect(address).toContain("agentmux agent inspect --session='agent-7'")
-  })
-})
-
-describe('Region 地址：屏幕上哪一格', () => {
-  const address = formatRegionAddress('region:pane-2')
-
-  it('给出 --to-region 命令', () => {
-    expect(address).toContain("agentmux agent send --to-region='region:pane-2'")
-    expect(address).toContain("agentmux space inspect --region='region:pane-2'")
-  })
-
-  it('说明它在分屏下无歧义地指向那一格', () => {
-    // 这正是 Region 地址存在的理由：Tab 地址在多 Agent 时有歧义，它没有。
-    expect(address).toMatch(/split|Region/u)
-    expect(address).toContain('空间位置')
-  })
-})
-
-describe('View 地址：哪张完整工作面', () => {
-  const address = formatTabAddress('view:abc')
-
-  it('给出 --to-tab 命令', () => {
-    expect(address).toContain("agentmux agent send --to-tab='view:abc'")
-    expect(address).toContain("agentmux space inspect --tab='view:abc'")
-  })
-
-  it('如实声明它只在该 View 承载唯一 Agent 时可用于 Agent 寻址', () => {
-    expect(address).toContain('恰好一个不同的 Agent Session ID')
-    expect(address).toContain('同一 SID 的多个 Region 投影仍是一个 Agent')
-  })
-
-  it('多 Agent 时引导用 Region 地址，而不是把消歧甩给接收方', () => {
-    // 旧 handoff 让接收方先 inspect、撞了 MESSAGE_TARGET_NOT_UNIQUE 再自己挑 candidate。
-    // 歧义只在源头可见——复制时我们知道用户点的是哪一格，接收方不知道。
-    expect(address).toMatch(/Region/u)
-    expect(address).not.toContain('MESSAGE_TARGET_NOT_UNIQUE')
-    expect(address).not.toContain('candidates')
-  })
-})
-
-describe('shell 转义：粘贴即可执行', () => {
-  it('复制出的三级地址，每一行命令都真能跑', () => {
-    // 恢复侧早有这条，复制侧一直没有——而"粘贴即可执行"本就是复制这件事的全部意义。
-    // 缺口是实测撞出来的：把命令出口的 `--text` 改名，只有 tab-control-handoff.test.ts 里
-    // 一条断言变红，本文件三个地址 describe 纹丝不动；它们只 toContain 到 id 就收手了。
-    let seen = 0
-    for (const [where, address] of [
-      ['session', formatSessionAddress("a'b c")],
-      ['region', formatRegionAddress("a'b c")],
-      ['view', formatTabAddress("a'b c")]
-    ] as const) {
-      seen += assertEveryCommandRunnable(address, where)
+  it('keeps spatial cards typed and discoverable without guessing an Agent', () => {
+    for (const [kind, card, selector] of [
+      ['Region', formatRegionAddress('region:2'), "--region='region:2'"],
+      ['Tab', formatTabAddress('tab:2'), "--tab='tab:2'"]
+    ]) {
+      expect(card).toContain(`--- amux : ${kind} ---`)
+      expect(card).toContain(`# amux space inspect ${selector}`)
+      expect(card).toContain('# amux --skill\n-----')
+      expect(card).not.toContain('agent send')
     }
-    // 每个地址至少一条 send、一条 inspect。少于 6 说明扫描本身漏了，不是命令都合格。
-    expect(seen).toBeGreaterThanOrEqual(6)
   })
 
-  it('转义带单引号与空格的 id', () => {
-    const address = formatSessionAddress("--evil id$'quoted")
-    expect(address).toContain(`--to-session='--evil id$'"'"'quoted'`)
-  })
-
-  it('三级地址用同一套转义', () => {
-    const nasty = "a'b c"
-    expect(formatRegionAddress(nasty)).toContain(`--to-region='a'"'"'b c'`)
-    expect(formatTabAddress(nasty)).toContain(`--to-tab='a'"'"'b c'`)
-  })
-})
-
-describe('交接入口：按意图命名，替用户解析出最精确的地址', () => {
-  // 用户想的是"把这个 Agent 交给别人"，不是"我要 Region 还是 Session"。解析顺序只有一条规则：
-  // 指向某一格分屏时给 Region，目标唯一时给 Session。两条分支都要有断言。
-
-  it('点击的 Agent 用 SID 发送，准确 Region 另给检查导航和移动模板', () => {
-    const handoff = formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
-    expect(handoff).toContain(formatSessionAddress('agent-7'))
-    expect(handoff).toContain("agentmux agent send --to-session='agent-7'")
-    expect(handoff).toContain("agentmux space inspect --region='region:pane-2'")
-    expect(handoff).toContain("agentmux space focus --region='region:pane-2'")
-    expect(handoff).toContain('导航默认保留当前输入')
-    expect(handoff).toContain('agentmux space ls')
-    expect(handoff).toContain("模板：agentmux space mv --from-region='region:pane-2' --expect-session='agent-7' --zone='<zone-id>' --new-tab")
-    expect(handoff).not.toContain('--to-region')
-  })
-
-  it('没有那一格时给 Session 地址——它跨 View 稳定', () => {
-    const handoff = formatMessagingAddress({ agentSessionId: 'agent-7' })
-    expect(handoff).toBe(formatSessionAddress('agent-7'))
-    expect(handoff).toContain("agentmux agent send --to-session='agent-7'")
-    expect(handoff).not.toContain('--to-region')
-  })
-
-  it('同一 Session 从交接入口与复制入口产出的地址逐字一致', () => {
-    // 同一份真相的两个入口，不是两套格式。
-    expect(formatMessagingAddress({ agentSessionId: "a'b" })).toBe(formatSessionAddress("a'b"))
+  it('checks all six printed hints and escapes shell targets consistently', () => {
+    const target = "a'b c"
+    const cards = [formatSessionAddress(target), formatRegionAddress(target), formatTabAddress(target)]
+    expect(cards.reduce((seen, card) => seen + assertEveryCommandRunnable(card, 'card'), 0)).toBe(6)
+    expect(cards[0]).toContain(`--to-session='a'"'"'b c'`)
+    expect(cards[1]).toContain(`--region='a'"'"'b c'`)
+    expect(cards[2]).toContain(`--tab='a'"'"'b c'`)
   })
 })
 
@@ -167,8 +83,8 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       ]
     })
     // 收件人按 SID 已确定；语义发送不猜第一个投影。
-    expect(recovery).toContain("agentmux agent send --to-session='agent-a'")
-    expect(recovery).toContain("agentmux agent send --to-session='agent-b'")
+    expect(recovery).toContain("amux agent send --to-session='agent-a'")
+    expect(recovery).toContain("amux agent send --to-session='agent-b'")
     // 判据是"能不能直接跑"，所以必须是完整命令而不是裸 id。
     expect(recovery).not.toMatch(/^\s*region:1\s*$/mu)
   })
@@ -176,7 +92,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
   it('一个 Agent 都没有，与"有多个"是不同的下一步', () => {
     const recovery = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates: [] })
     // 没有目标可挑，给出的必须是"怎么才能有一个"，而不是一份空清单。
-    expect(recovery).not.toContain('agentmux agent send --to-')
+    expect(recovery).not.toContain('amux agent send --to-')
     expect(recovery).toMatch(/没有 Agent/u)
   })
 
@@ -196,7 +112,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     const notOpen = addressingRecovery({ code: 'TAB_NOT_OPEN' })
     expect(unknown).toContain('当前未观察到')
     expect(unknown).toContain('不能据此确认它已退出或被回收')
-    expect(unknown).toContain('agentmux agent ls')
+    expect(unknown).toContain('amux agent ls')
     expect(notOpen).toContain('当前没有打开这个 Tab 或 Region')
     expect(notOpen).toContain('不代表其中的 Agent Session 已结束')
     expect(notOpen).not.toContain('View')
@@ -241,7 +157,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     // 在这里栽过一次：诊断对（裸 inspect 跑不了），开的药方错。所以单独钉住这一条。
     for (const code of ['UNKNOWN_AGENT_SESSION', 'TAB_NOT_OPEN', 'MESSAGE_TARGET_NOT_AGENT']) {
       const recovery = addressingRecovery({ code })
-      expect(recovery).toContain('agentmux agent ls')
+      expect(recovery).toContain('amux agent ls')
       expect(recovery).not.toContain('agentmux settings executors ls')
     }
   })
@@ -464,7 +380,7 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
       candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
     })
     // 从复制出的地址里取出那一行 send 命令，它必须原样出现在恢复文本里。
-    const sendLine = copied.split('\n').find((line) => line.startsWith('agentmux agent send '))
+    const sendLine = copied.split('\n').map(line => line.replace(/^# /u, '')).find((line) => line.startsWith('amux agent send '))
     expect(sendLine).toBeDefined()
     expect(recovered).toContain(sendLine!)
   })
@@ -476,7 +392,7 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     })
     const sessionSendLine = formatSessionAddress('agent-a')
       .split('\n')
-      .find((line) => line.startsWith('agentmux agent send '))
+      .map(line => line.replace(/^# /u, '')).find((line) => line.startsWith('amux agent send '))
     expect(sessionSendLine).toBeDefined()
     expect(recovered).toContain(sessionSendLine!)
     expect(recovered).not.toContain('--to-region')
@@ -487,7 +403,7 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     // 这条锁住的是另一件事：两侧各自都有**独立的字面断言**钉住命令长什么样。
     // Agent 名片和候选恢复都钉住语义 SID；显式 Region 地址仍有独立的空间用途。
     const sessionId = 'agent-a'
-    const literal = `agentmux agent send --to-session='${sessionId}'`
+    const literal = `amux agent send --to-session='${sessionId}'`
     expect(formatSessionAddress(sessionId)).toContain(literal)
     expect(
       addressingRecovery({
@@ -497,68 +413,33 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
     ).toContain(literal)
   })
 
-  it('仓库里不存在第二处拼接寻址命令', () => {
-    // 上面两条证明当下一致，但挡不住有人另写一份拼接、且恰好写得一样。这条锁住结构：
-    // 整个 renderer 里 `agentmux agent send --to-` 这种字面拼接只允许出现在本模块的命令出口。
-    const module = readFileSync(new URL('../src/renderer/src/lib/agent-address.ts', import.meta.url), 'utf8')
-    const code = module.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/(^|[^:])\/\/[^\n]*/gu, '$1')
-    const literalSends = code.match(/agentmux agent send /gu) ?? []
-    expect(literalSends).toHaveLength(1)
-    // 带 flag 的 inspect 也只允许拼一次。
-    const flaggedInspects = code.match(/agentmux \$\{kind[^\n]+ inspect /gu) ?? []
-    expect(flaggedInspects).toHaveLength(1)
-    // `agent ls` 是第三种命令形状（恢复文本里的 Session 旁路），同样只允许有一处字面。
-    // 它不带 id，所以不是"寻址"拼接，但它一样会漂——上面两条挡不住它写成两份。
-    const listSessions = code.match(/agentmux agent ls/gu) ?? []
-    expect(listSessions).toHaveLength(1)
-    // 裸 `agentmux inspect`（不带 flag、不带子命令）跑不了：CLI 要求恰好一个选择器 flag。
-    // 它一旦出现在恢复文本里就是一条死路，所以这里直接禁掉。
-    expect(code).not.toMatch(/agentmux (?:inspect|list|send)\b/u)
-  })
-
-  // 上面那条只读本模块一个文件：它锁住的是"出口内部只拼一次"，够不着"别的文件没有另拼一份"——
-  // 而后者才是这条不变量真正要防的事。有人在 store.ts 里手拼一句 `agentmux agent send --to-region=...`，
-  // 上面那条纹丝不动。所以这里把扫描面抬到整棵 renderer 源码树。
   const RENDERER_SRC = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
-  const SOLE_ASSEMBLER = 'lib/agent-address.ts'
-  // 动词命令，或三个 send flag 之一。注释里描述规则的文字不是规则本身，先去注释（沿用
-  // rendered-class-has-rule.test.ts 的写法；`[^:]` 是为了不误伤 `https://` 里的双斜杠）。
-  const ASSEMBLY = /agentmux\s+(?:agent|space)\s+(?:send|inspect)\b|--to-(?:tab|region|session)\b/u
-
+  const CORE_OWNER = new URL('../../../packages/core/src/sharing.ts', import.meta.url)
+  const ASSEMBLY = /(?:amux|agentmux)\s+(?:agent|space)\s+(?:send|inspect)\b/u
   function sourceFiles(dir: string): string[] {
-    const out: string[] = []
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
       const path = `${dir}/${entry.name}`
-      if (entry.isDirectory()) out.push(...sourceFiles(path))
-      else if (/\.tsx?$/u.test(entry.name)) out.push(path)
-    }
-    return out
+      return entry.isDirectory() ? sourceFiles(path) : /\.tsx?$/u.test(entry.name) ? [path] : []
+    })
   }
-
   function withoutComments(source: string): string {
     return source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/(^|[^:])\/\/[^\n]*/gu, '$1')
   }
-
-  it('整棵 renderer 源码树里只有寻址出口拼命令', () => {
-    const offenders: string[] = []
-    for (const file of sourceFiles(RENDERER_SRC)) {
-      const relative = file.slice(RENDERER_SRC.length + 1)
-      if (relative === SOLE_ASSEMBLER) continue
-      withoutComments(readFileSync(file, 'utf8')).split('\n').forEach((line, index) => {
-        if (ASSEMBLY.test(line)) offenders.push(`${relative}:${index + 1}  ${line.trim()}`)
-      })
-    }
-    // 报出 file:line 而不是只给个数字——漂移点要一眼看得到，否则红了还得自己找。
-    expect(offenders, `寻址命令只能在 ${SOLE_ASSEMBLER} 拼接，这些文件另拼了一份：\n${offenders.join('\n')}`).toEqual([])
+  it('Core owns command assembly and the nonempty renderer scan has no duplicate', () => {
+    const owner = withoutComments(readFileSync(CORE_OWNER, 'utf8'))
+    expect(owner.match(/amux agent send /gu)).toHaveLength(1)
+    expect(owner.match(/amux agent ls/gu)).toHaveLength(1)
+    expect(ASSEMBLY.test(owner)).toBe(true)
+    const files = sourceFiles(RENDERER_SRC)
+    expect(files.length).toBeGreaterThan(100)
+    expect(files).toContain(`${RENDERER_SRC}/lib/agent-address.ts`)
+    const offenders = files.filter(file => ASSEMBLY.test(withoutComments(readFileSync(file, 'utf8'))))
+    expect(offenders).toEqual([])
+    const adapter = readFileSync(`${RENDERER_SRC}/lib/agent-address.ts`, 'utf8')
+    expect(adapter.match(/from '@agentmux\/core\/sharing'/gu)).toHaveLength(2)
+    expect(adapter).toContain('agentSessionSendCommand(candidate.agentSessionId)')
   })
 
-  it('自检：扫描面真的覆盖到了寻址出口本身', () => {
-    // 少了这条，上面那条会以最难发现的方式假绿：路径写错、后缀过滤写错、去注释把整个文件吃空，
-    // 任何一种都让 offenders 恒为空数组，而"没扫到"和"扫过了没问题"打印出来一模一样。
-    const files = sourceFiles(RENDERER_SRC).map((file) => file.slice(RENDERER_SRC.length + 1))
-    expect(files).toContain(SOLE_ASSEMBLER)
-    expect(ASSEMBLY.test(withoutComments(readFileSync(`${RENDERER_SRC}/${SOLE_ASSEMBLER}`, 'utf8')))).toBe(true)
-  })
 })
 
 describe('入口接线：菜单真的调用了交接出口，并且真的把它画出来', () => {
@@ -571,7 +452,7 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
       new URL('../src/renderer/src/components/RegionContextMenu.tsx', import.meta.url),
       'utf8'
     )
-    expect(source).toContain('formatMessagingAddress({ agentSessionId, regionId })')
+    expect(source).toContain('formatMessagingAddress({ agentSessionId, regionId, ...sharingMetadata?.() })')
 
     // 「造了不画等于没有」这件事现在真跑得到：菜单画的是 model.entries，那份清单是可执行的数据。
     // 此前这里是两条 toContain('model.handoff.onSelect' / '.label') 的文本断言，而文本看不见
@@ -605,7 +486,7 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
       new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
       'utf8'
     )
-    expect(source).toContain('formatMessagingAddress({ agentSessionId })')
+    expect(source).toContain('formatMessagingAddress({ agentSessionId, ...sharingMetadata?.() })')
 
     // 与 Region 侧同一条路：菜单画的是 model.entries，那份清单是可执行的数据，故"造了不画"跑得到。
     // 此前这里是两条 toContain('copyModel.handoff.onSelect' / '.label') 的文本断言，而文本看不见
@@ -677,10 +558,10 @@ describe('入口接线：菜单真的调用了交接出口，并且真的把它�
     // 先钉住"五条都结算了"。否则微任务没排干时 messages 是短数组，下面的循环会少跑几轮却依然全绿。
     expect(messages).toHaveLength(failures.length)
     // 每种寻址失败都带上了能直接跑的下一步，而不只是"发生了什么"。
-    expect(messages[0]).toContain("agentmux agent send --to-session='agent-a'")
+    expect(messages[0]).toContain("amux agent send --to-session='agent-a'")
     // 这三条拿不到 tab/region id，给的是 Session 旁路——它带子命令，真能跑。原来这里断言的是
     // `toContain('agentmux inspect')`，而裸 inspect 跑不了，那句话分不清能跑与不能跑。
-    for (const index of [1, 2, 3]) expect(messages[index]).toContain('agentmux agent ls')
+    for (const index of [1, 2, 3]) expect(messages[index]).toContain('amux agent ls')
     // 原始 message 不能被恢复文本顶掉——"怎么办"是附加，不是替代。
     expect(messages[2]).toContain('Tab target is not currently open.')
     // 不是寻址失败的码保持原样：一句通用套话会盖住真正的原因。

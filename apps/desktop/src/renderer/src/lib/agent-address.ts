@@ -1,135 +1,14 @@
-/**
- * 地址的唯一出处。
- *
- * 复制一个 id 和复制一个**寻址方式**是两件事。裸 id 把工作留给了接收方：它得先猜出这是哪一层
- * 身份，再去想该配哪个 flag，最后才谈得上寻址——而那正是这次复制本该省掉的一步。所以这里产出的
- * 每一段文本都自带命令，接收方粘贴即可执行。
- *
- * 三级地址回答三个不同的问题，绝不互为别名：
- *   - Session 回答"哪个 Agent"，跨 Tab 稳定，可同时投影到多个 Region 与多个 Tab；
- *   - Region 回答"屏幕上哪一格"，是分屏下唯一无歧义的展示身份；
- *   - Tab 回答"哪张完整工作面"，按不同 SID 消歧；多个 Region 可以展示同一个 SID。
- *
- * 三个入口共用这里，不各自拼字符串——同一个 Session 的发送与检查命令从各菜单复制出来必须
- * 逐字一致；准确位置另行标明，那是同一份真相的两个入口，不是两套格式。
- */
-
-/** 按 shell 语义转义，使带空格或单引号的 id 粘贴即可执行。 */
-function shellArgument(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`
-}
-
-/**
- * 寻址命令的唯一出处。
- *
- * 三级地址与失败恢复都从这里取命令文本，谁都不自己拼。这不是为了少写几行——复制出去的地址和
- * 失败时给出的下一步必须**逐字一致**，否则接收方会看到同一件事的两种写法；而两处拼接一定会各自
- * 演进，漂移的那天不会有任何测试变红。改这里的格式，复制与恢复两侧的断言必须同时红。
- *
- * flag 只用已被 CLI 与 Control 面接受的那套（`--to-session` / `--to-region` / `--to-tab` 及
- * `inspect` 的对应 flag），不为任何新入口发明第二套语法。
- */
-const ADDRESS_FLAGS = {
-  session: { send: '--to-session', inspect: '--session' },
-  region: { send: '--to-region', inspect: '--region' },
-  tab: { send: '--to-tab', inspect: '--tab' }
-} as const
-
-type AddressKind = keyof typeof ADDRESS_FLAGS
-
-/** 发消息给这个地址的命令。 */
-function sendCommand(kind: AddressKind, id: string): string {
-  return `agentmux agent send ${ADDRESS_FLAGS[kind].send}=${shellArgument(id)} --text "..."`
-}
-
-/** 查看这个地址的命令。 */
-function inspectCommand(kind: AddressKind, id: string): string {
-  return `agentmux ${kind === 'session' ? 'agent' : 'space'} inspect ${ADDRESS_FLAGS[kind].inspect}=${shellArgument(id)}`
-}
-
-/**
- * 列出还活着的 Agent Session。
- *
- * `agent ls` 列真实 Session；配置好的 Executor 由 `settings executors ls` 发现，
- * 不是此刻活着的 Session——名字像，答非所问。
- */
-const LIST_SESSIONS = 'agentmux agent ls'
-
-/**
- * 哪个 Agent。
- *
- * Session 是 Provider 语义身份，与它此刻显示在哪张 View 的哪一格无关，因此这是唯一一个
- * 在 View 被关掉、被移动、被分屏之后依然指向同一个 Agent 的地址。
- */
-export function formatSessionAddress(agentSessionId: string): string {
-  return `AgentMux Agent Session ${agentSessionId}
-
-这是 Agent 的语义身份，与它显示在哪张 Tab、哪一格无关；一个 Session 可以有多个展示位置。
-
-发消息给它：
-${sendCommand('session', agentSessionId)}
-
-查看它：
-${inspectCommand('session', agentSessionId)}`
-}
-
-/**
- * 屏幕上哪一格。
- *
- * 一张 View 分屏承载多个 Agent 时，View 地址本身是歧义的，而 Region 地址不是。歧义只在源头
- * 可见——复制发生时我们知道用户点的是哪一格，接收方不知道——所以此时就该给出 Region 地址，
- * 而不是让接收方自己去 inspect 消歧。
- */
-export function formatRegionAddress(regionId: string): string {
-  return `AgentMux Region ${regionId}
-
-这是 Tab 里准确的一格。它指向空间位置，其中的内容可能更换；它不是 Agent 的语义身份。
-
-发消息给这一格里的 Agent：
-${sendCommand('region', regionId)}
-
-查看这一格：
-${inspectCommand('region', regionId)}`
-}
-
-/** 完整 Tab；按不同 SID 判定语义收件人，多个 Region 可以展示同一个 SID。 */
-export function formatTabAddress(tabId: string): string {
-  return `AgentMux Tab ${tabId}
-
-这是一张完整工作面。语义发送要求其中恰好一个不同的 Agent Session ID；同一 SID 的多个 Region 投影仍是一个 Agent。
-有多个不同 SID 时，在目标 Agent 的 Region 上右键取得它的名片。
-
-发消息给它（前提如上）：
-${sendCommand('tab', tabId)}
-
-查看它（列出它的每一格）：
-${inspectCommand('tab', tabId)}`
-}
-
-/** Agent 名片始终按 SID 发送；准确 Region 另给空间操作，不根据 SID 猜位置。 */
-export function formatMessagingAddress(target: {
-  agentSessionId: string
-  regionId?: string
-}): string {
-  const session = formatSessionAddress(target.agentSessionId)
-  if (target.regionId === undefined) return session
-  return `${session}
-
-已知空间位置：Region ${target.regionId}
-这是复制时点击的投影。导航默认保留当前输入；空间移动不改变 Session、Run 或执行目录。
-
-查看这一格：
-${inspectCommand('region', target.regionId)}
-
-在主面选择这一格（保留当前输入）：
-agentmux space focus --region=${shellArgument(target.regionId)}
-
-列出可选择的目标空间：
-agentmux space ls
-
-移动这一格的模板（先选择目标 Zone，替换 <zone-id> 后执行）：
-模板：agentmux space mv --from-region=${shellArgument(target.regionId)} --expect-session=${shellArgument(target.agentSessionId)} --zone='<zone-id>' --new-tab`
-}
+/** Desktop error guidance consumes the same public sharing commands as copied cards. */
+import {
+  agentSessionSendCommand,
+  AMUX_AGENT_LIST_COMMAND as LIST_SESSIONS
+} from '@agentmux/core/sharing'
+export {
+  formatSessionAddress,
+  formatRegionAddress,
+  formatTabAddress,
+  formatMessagingAddress
+} from '@agentmux/core/sharing'
 
 /**
  * 寻址失败时的下一步。
@@ -234,7 +113,7 @@ function formatTargetNotUnique(
 先在这张 Tab 里启动一个 Agent，或改为在承载 Agent 的那一格上操作。`
   }
   // 语义收件人已经确定；不为发送猜第一个空间投影。
-  const lines = candidates.map((candidate) => sendCommand('session', candidate.agentSessionId))
+  const lines = candidates.map((candidate) => agentSessionSendCommand(candidate.agentSessionId))
   return `这张 Tab 承载多个不同的 Agent Session，--to-tab 无法唯一指定收件人。选择一个 Agent：
 
 ${lines.join('\n')}`

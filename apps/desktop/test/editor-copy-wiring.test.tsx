@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+// @vitest-environment happy-dom
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -201,7 +202,7 @@ describe('点了真的把正确文本写进剪贴板（run 变 no-op / 产错文
     monacoSpy.rangeText = 'const x = 1'
     mount()
     run('agentmux.copyAgentContext')
-    expect(lastCopiedText()).toBe('src/app.ts:3-6\n```typescript\nconst x = 1\n```\n')
+    expect(lastCopiedText()).toBe('--- amux : File ---\nsrc/app.ts:3-6\n```typescript\nconst x = 1\n```\n\n-----')
   })
 
   it('复制失败不会静默：走的是共用出口，错误进 reportError', async () => {

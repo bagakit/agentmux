@@ -428,6 +428,9 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       expect(dependencyArchives.length).toBeGreaterThan(0)
       const packedPaths = metadata.files.map((file) => file.path)
       expect(packedPaths).toContain('bin/agentmux')
+      expect(packedPaths).toContain('bin/amux')
+      expect(packedPaths).toContain('dist/sharing.js')
+      expect(packedPaths).toContain('dist/sharing.d.ts')
       expect(packedPaths).not.toContain('bin/agentmuxd.js')
       expect(packedPaths).toContain('dist/index.d.ts')
       expect(packedPaths).toContain('vendor/ctxmux/darwin-arm64/manifest.json')
@@ -486,6 +489,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         },
         bin: {
           agentmux: './bin/agentmux',
+          amux: './bin/amux',
           ctxmux: './vendor/ctxmux/darwin-arm64/bin/ctxmux',
           ctxmuxd: './vendor/ctxmux/darwin-arm64/bin/ctxmuxd'
         }

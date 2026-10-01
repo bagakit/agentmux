@@ -67,10 +67,10 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     // 退化成 Session 地址会丢掉"是哪一格"，那正是这个入口要保住的信息。
     expect(writeClipboardText).not.toHaveBeenCalledWith(formatSessionAddress('agent-7'))
     const copied = writeClipboardText.mock.calls[0]![0]
-    expect(copied).toContain("agentmux send --to-session='agent-7'")
-    expect(copied).toContain("agentmux focus --region='region:pane-2'")
-    expect(copied).toContain("--from-region='region:pane-2' --expect-session='agent-7'")
-    expect(copied).toContain('模板：')
+    expect(copied).toContain("amux agent send --to-session='agent-7'")
+    expect(copied).toContain('Region: region:pane-2')
+    expect(copied).toContain('# amux --skill')
+    expect(copied).not.toContain('space mv')
     expect(copied).not.toContain('--to-region')
   })
 

@@ -10,6 +10,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { formatSessionAddress } from '../src/renderer/src/lib/agent-address'
+import { resolveAgentSharingMetadata } from '../src/renderer/src/lib/agent-sharing-metadata'
 import { chooseFocusFilter } from './fixtures/focus-filter-menu'
 
 const commits = vi.hoisted(() => ({ rows: {} as Record<string, number> }))
@@ -122,14 +123,42 @@ it('copies the exact second same-name Session with no guessed Region or lifecycl
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), source = useAppStore.getState()
   await mount(); await open()
   expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Message this Agent', 'Copy Session Address'])
-  await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId))
+  await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId, resolveAgentSharingMetadata(secondId, source)))
   expect(copy.mock.calls[0]![0]).not.toContain('region:'); expect(useAppStore.getState().agentFocus).toBe(source.agentFocus)
   expect(useAppStore.getState().sessions).toBe(source.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(source.agentComposerDrafts)
+})
+it('copies the clicked same-name context with its own Provider and current Executor label', async () => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const entries = await api.providers.list(), original = useAppStore.getState().config!
+  const provider = entries.find(entry => entry.id === agent.providerId)
+  expect(provider).toBeDefined()
+  await act(async () => useAppStore.setState(state => ({
+    providerCatalog: [{ ...provider!, label: 'Shared Provider' }],
+    config: { ...original, executors: {
+      author: { ...original.executors[agent.executorId]!, label: 'Author Executor' },
+      reviewer: { ...original.executors[agent.executorId]!, label: 'Review Executor' }
+    } },
+    sessions: state.sessions.map(session => session.kind === 'agent'
+      ? { ...session, executorId: session.id === secondId ? 'reviewer' : 'author' } : session)
+  })))
+  await mount(); await open(secondId)
+  await act(async () => useAppStore.setState(state => ({ config: {
+    ...state.config!, executors: { ...state.config!.executors,
+      reviewer: { ...state.config!.executors.reviewer!, label: 'Renamed Review Executor' }
+    }
+  } })))
+  await choose('Copy Session Address')
+  expect(copy).toHaveBeenCalledTimes(1)
+  const text = copy.mock.calls[0]![0]
+  expect(text).toContain(`ID: ${secondId}\n`)
+  expect(text).toContain('Exe: Shared Provider | Renamed Review Executor\n')
+  expect(text).not.toContain('Author Executor')
+  expect(text).not.toContain('region:')
 })
 it('opens with Shift+F10, uses the same messaging address and returns Escape to the exact trigger', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await mount(); await open(secondId, true); await choose('Message this Agent')
-  expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId))
+  expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId, resolveAgentSharingMetadata(secondId, useAppStore.getState())))
   await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(row(secondId))))
   await open(secondId, true); await act(async () => menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   await act(async () => vi.waitFor(() => expect(document.querySelector('.focus-context-menu')).toBeNull()))
