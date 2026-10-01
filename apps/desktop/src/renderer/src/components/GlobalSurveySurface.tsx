@@ -333,44 +333,49 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       notice: selectedStatus?.notice || topicSnapshot?.error ? <>{selectedStatus?.notice}{topicSnapshot?.error}</> : null,
       onLinkChange: (spaceId, linked) => void changeRelation(spaceId, linked), onOpenTopic: openTopic } : null}
     {...(selection && tabViewControl ? { tabViewControl } : {})}
-    {...(currentZone ? { onRename: () => setRenamingZoneId(currentZone.zoneId) } : {})}
+    {...(currentZone ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
     onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
     onManageBrowsers={() => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
   const panelUnconfirmed = !!selection && !selection.active && retainedLocations.length > 0
   const relationMessage = [selectedStatus?.error, selectedStatus?.notice, topicSnapshot?.error].filter(Boolean).join('\n')
+  const contentControlsVisible = Boolean(tabViewControl?.active || navigationChoices.length || panelUnconfirmed || selectedStatus?.pendingSpaceId || relationMessage)
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
-    <aside ref={sidebarRef} className={`survey-tabs${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-      <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New exploration" title={workspace ? `Start browsing in ${workspace.name}` : 'Choose a resource workspace in Space'} disabled={opening || !workspace} onClick={() => void openBrowser('about:blank', true)}>
-        {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>Explore</span>
-      </button><button type="button" className="survey-icon-button" aria-label="New note exploration" title="Start with a note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /></button><button type="button" className="survey-icon-button" aria-label="Hide Survey items" title="Hide Survey items" onClick={() => setSidebarCollapsed(true)}><PanelLeftClose size={16} /></button></div>
-      <div className="survey-page-list">
-        {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
-          <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
-          <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
-        </div>)}
-        {items.map(zone => {
-          const status = activity(zone)
-          return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
-            activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
-            onRename={name => { const applied = useAppStore.getState().setSurveyExplorationName(zone.zoneId, name); if (!applied) setError('The exploration source is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
-        })}
+    <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
+      {sidebarCollapsed ? <button type="button" className="survey-icon-button" aria-label="Show Survey items" title="Show Survey items" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={16} /></button> : null}
+      <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
+        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New exploration" title={workspace ? `Start browsing in ${workspace.name}` : 'Choose a resource workspace in Space'} disabled={opening || !workspace} onClick={() => void openBrowser('about:blank', true)}>
+          {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>Explore</span>
+        </button><button type="button" className="survey-icon-button" aria-label="New note exploration" title="Start with a note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /></button><button type="button" className="survey-icon-button" aria-label="Hide Survey items" title="Hide Survey items" onClick={() => setSidebarCollapsed(true)}><PanelLeftClose size={16} /></button></div>
+        <div className="survey-page-list">
+          {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
+            <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
+            <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
+          </div>)}
+          {items.map(zone => {
+            const status = activity(zone)
+            return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
+              activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
+              onRename={name => { const applied = useAppStore.getState().setSurveyExplorationName(zone.zoneId, name); if (!applied) setError('The exploration source is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
+          })}
+        </div>
+      </aside>
+      <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
+        {options}
+        {selection ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Add a note in this exploration' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
       </div>
-
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
+        hidden={sidebarCollapsed}
         aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveSidebarWidth} onMouseDown={onResizeStart}
         onKeyDown={event => {
           const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveSidebarWidth - 16 : event.key === 'ArrowRight' ? effectiveSidebarWidth + 16 : null
           if (next === null) return
           event.preventDefault(); event.stopPropagation(); setSidebarWidth(next)
         }} />
-    </aside>
+    </nav>
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
-        <header className="survey-view-controls" >
-          {sidebarCollapsed ? <button type="button" className="survey-icon-button" aria-label="Show Survey items" title="Show Survey items" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={16} /></button> : null}
-          {options}
-          {selection ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Add a note in this exploration' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
+        <header className="survey-view-controls" hidden={!contentControlsVisible}>
           {tabViewControl?.active ? <button type="button" className="survey-tab-view" aria-label="Show full Survey item" title="Return to all original Tabs and Groups" onClick={tabViewControl.onToggle}><PanelsTopLeft size={14} /><span>All tabs</span></button> : null}
           {navigationChoices.length ? <SurveyPanelChoices choices={navigationChoices} facts={{ config, layouts, tabs }} mode="button" visible={visible && !controlsCoverPage} topic open onOpenChange={open => { if (!open) setNavigationChoices([]) }} onSelect={location => void openLocation(location)} /> : null}
           {panelUnconfirmed ? <div className="survey-panel-status"><span role="status">Panel not confirmed</span>
