@@ -20,7 +20,8 @@ import {
   SlidersHorizontal,
   Wrench
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { createPortal } from 'react-dom'
+import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   BROWSER_VIEWPORT_PRESETS,
   type BrowserScreenshotCapture,
@@ -65,6 +66,8 @@ import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
 import { presentError } from '../lib/error-presentation'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
+import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 
 const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
@@ -92,9 +95,15 @@ export function BrowserPane({
   yieldToFocusRing = false,
   presentationTargetId,
   controlPanelOpen,
-  onControlConfirmation
+  onControlConfirmation,
+  presentations = [],
+  renderPresentationFrame,
+  onPresentationInputSelected
 }: {
   tab: BrowserWorkbenchSurface
+  presentations?: readonly WorkbenchBrowserPresentation[] | undefined
+  renderPresentationFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
+  onPresentationInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
   visible: boolean
   /** Main-owned WebContentsView is released for a long-hidden, rebuildable Region. */
   released?: boolean
@@ -120,6 +129,22 @@ export function BrowserPane({
   const openFile = useAppStore((state) => state.openFile)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
+  const media = useBrowserPresentationCapture(tab.browserId)
+  const [presentationHosts, setPresentationHosts] = useState<ReadonlyMap<string, HTMLElement>>(() => new Map())
+  const presentationKey = presentations.map(presentation => presentation.occurrence.presentationId).join('\n')
+  useLayoutEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      const hosts = new Map<string, HTMLElement>()
+      for (const presentation of presentations) {
+        const host = document.getElementById(presentation.stageHostId)
+        if (host) hosts.set(presentation.occurrence.presentationId, host)
+      }
+      setPresentationHosts(hosts)
+    })
+    return () => { cancelled = true }
+  }, [presentationKey, presentationTargetId])
   const stageRef = useRef<HTMLDivElement>(null)
   // 焦点结论用 ref 承接，边界同步那条 effect 从 ref 读它而不订阅它（#545）：直接把 prop 放进那条
   // effect 的依赖数组会让它在每次焦点切换时拆了重建，中间闪一帧（见那条 effect 的注释）。ref 保证
@@ -139,7 +164,7 @@ export function BrowserPane({
   }
   const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
   const [addressError, setAddressError] = useState<string | null>(null)
-  const addressInput = useRef<BrowserAddressInputHandle>(null)
+  const addressInputs = useRef(new Map<string, ReturnType<typeof createRef<BrowserAddressInputHandle>>>())
   const addressDraftEdited = useRef(false)
   const addressBrowser = useRef(tab.browserId)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
@@ -286,7 +311,7 @@ export function BrowserPane({
 
   useLayoutEffect(() => {
     const stage = stageRef.current
-    if (!stage) return
+    if (!stage || presentations.length > 0) return
     let frame = 0
     const synchronizer = new LatestBrowserBoundsSynchronizer(
       async (bounds) => await api.browser.setBounds(tab.browserId, bounds),
@@ -360,7 +385,7 @@ export function BrowserPane({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [elementSelection, released, restoring, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible])
+  }, [elementSelection, released, restoring, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible, presentations.length])
 
   useLayoutEffect(() => {
     // Portal children run before their host moves. Rebind against connected ancestors after that
@@ -721,7 +746,103 @@ export function BrowserPane({
     )
   }
 
-  return (
+  const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
+    const key = presentation?.occurrence.presentationId ?? tab.browserId
+    let addressInput = addressInputs.current.get(key)
+    if (!addressInput) { addressInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(key, addressInput) }
+    const visible = presentation?.visible ?? true
+    const inSurvey = presentation?.target.surface === 'survey'
+    const blocked = released || restoring || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
+      Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
+    const stageContent = <>
+
+        {screenshot ? (
+          visible && !released && !restoring ?
+          <ScreenshotEditor
+            anchor={stageRef.current}
+            image={screenshot.image}
+            busy={screenshotBusy}
+            onCancel={cancelScreenshot}
+            onComplete={(input) => void copyScreenshot(input)}
+          /> : null
+        ) : elementSelection ? (
+          <section className="browser-selection-result" aria-label="Selected element context">
+            <header><ScanSearch size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
+            <dl>
+              <div><dt>Element</dt><dd>{`<${elementSelection.tagName}>${elementSelection.role ? ` · ${elementSelection.role}` : ''}`}</dd></div>
+              <div><dt>Selector</dt><dd>{elementSelection.selector || 'No stable selector'}</dd></div>
+              <div><dt>Text</dt><dd>{elementSelection.text || 'No visible text'}</dd></div>
+            </dl>
+            <label>
+              <span>Annotation note</span>
+              <ComposerTextarea
+                aria-label="Annotation note"
+                value={annotationNote}
+                maxLength={1_000}
+                placeholder="What should the Agent notice about this element?"
+                onValueChange={setAnnotationNote}
+              />
+            </label>
+            <footer>
+              <button className="small-button" type="button" onClick={cancelElementSelection}>Cancel</button>
+              <button className="small-button" type="button" onClick={() => void copyElementContext()}><Copy size={12} /> Copy context</button>
+              <button className="primary-button" type="button" onClick={addElementAnnotation}><Check size={12} /> Add annotation</button>
+            </footer>
+          </section>
+        ) : tab.appLinkPrompt ? (
+          <div className="pane-state browser-app-link-prompt">
+            <ArrowUpRight size={20} />
+            <strong>Open this link in another app?</strong>
+            <span>
+              This page wants to hand <code>{tab.appLinkPrompt.scheme}:</code> links to an app on your
+              computer. AgentMux cannot show them itself.
+            </span>
+            <small className="browser-app-link-prompt__url">{tab.appLinkPrompt.url}</small>
+            <label className="browser-app-link-prompt__remember">
+              <input
+                type="checkbox"
+                checked={rememberAppLink}
+                onChange={(event) => setRememberAppLink(event.target.checked)}
+              />
+              <span>Remember for every <code>{tab.appLinkPrompt.scheme}:</code> link</span>
+            </label>
+            <div className="browser-app-link-prompt__actions">
+              <button
+                className="small-button"
+                type="button"
+                onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, false, rememberAppLink))}
+              >Not now</button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, true, rememberAppLink))}
+              >Open</button>
+            </div>
+          </div>
+        ) : tab.error ? (
+          <div className="pane-state pane-state--error">
+            <AlertTriangle size={20} />
+            <strong>Page could not be loaded</strong>
+            <span>{tab.error}</span>
+            <button className="small-button" type="button" onClick={() => void run(async () => {
+              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId)
+              return browser.error ? await api.browser.reload(tab.browserId) : browser
+            })}><RefreshCw size={12} /> Retry</button>
+          </div>
+        ) : tab.url === 'about:blank' ? (
+          inSurvey ? <div className="survey-start browser-empty"><Globe2 size={30} aria-hidden="true" />
+            <form className="survey-start-input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
+              <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
+                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
+                onValueChange={value => { addressDraftEdited.current = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
+              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
+            </form>
+          </div> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
+        ) : __AGENTMUX_WEB_PREVIEW__ ? (
+          <div className="browser-preview"><Globe2 size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
+        ) : null}
+    </>
+    return (
     <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`}>
       <form
         className="browser-toolbar"
@@ -902,93 +1023,12 @@ export function BrowserPane({
         ...(annotationSync.cause ? { cause: annotationSync.cause } : {}), available: annotationSync.available, visible
       }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
       <div className="browser-body">
-      <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>
-        {screenshot ? (
-          visible && !released && !restoring ?
-          <ScreenshotEditor
-            anchor={stageRef.current}
-            image={screenshot.image}
-            busy={screenshotBusy}
-            onCancel={cancelScreenshot}
-            onComplete={(input) => void copyScreenshot(input)}
-          /> : null
-        ) : elementSelection ? (
-          <section className="browser-selection-result" aria-label="Selected element context">
-            <header><ScanSearch size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
-            <dl>
-              <div><dt>Element</dt><dd>{`<${elementSelection.tagName}>${elementSelection.role ? ` · ${elementSelection.role}` : ''}`}</dd></div>
-              <div><dt>Selector</dt><dd>{elementSelection.selector || 'No stable selector'}</dd></div>
-              <div><dt>Text</dt><dd>{elementSelection.text || 'No visible text'}</dd></div>
-            </dl>
-            <label>
-              <span>Annotation note</span>
-              <ComposerTextarea
-                aria-label="Annotation note"
-                value={annotationNote}
-                maxLength={1_000}
-                placeholder="What should the Agent notice about this element?"
-                onValueChange={setAnnotationNote}
-              />
-            </label>
-            <footer>
-              <button className="small-button" type="button" onClick={cancelElementSelection}>Cancel</button>
-              <button className="small-button" type="button" onClick={() => void copyElementContext()}><Copy size={12} /> Copy context</button>
-              <button className="primary-button" type="button" onClick={addElementAnnotation}><Check size={12} /> Add annotation</button>
-            </footer>
-          </section>
-        ) : tab.appLinkPrompt ? (
-          <div className="pane-state browser-app-link-prompt">
-            <ArrowUpRight size={20} />
-            <strong>Open this link in another app?</strong>
-            <span>
-              This page wants to hand <code>{tab.appLinkPrompt.scheme}:</code> links to an app on your
-              computer. AgentMux cannot show them itself.
-            </span>
-            <small className="browser-app-link-prompt__url">{tab.appLinkPrompt.url}</small>
-            <label className="browser-app-link-prompt__remember">
-              <input
-                type="checkbox"
-                checked={rememberAppLink}
-                onChange={(event) => setRememberAppLink(event.target.checked)}
-              />
-              <span>Remember for every <code>{tab.appLinkPrompt.scheme}:</code> link</span>
-            </label>
-            <div className="browser-app-link-prompt__actions">
-              <button
-                className="small-button"
-                type="button"
-                onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, false, rememberAppLink))}
-              >Not now</button>
-              <button
-                className="primary-button"
-                type="button"
-                onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, true, rememberAppLink))}
-              >Open</button>
-            </div>
-          </div>
-        ) : tab.error ? (
-          <div className="pane-state pane-state--error">
-            <AlertTriangle size={20} />
-            <strong>Page could not be loaded</strong>
-            <span>{tab.error}</span>
-            <button className="small-button" type="button" onClick={() => void run(async () => {
-              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId)
-              return browser.error ? await api.browser.reload(tab.browserId) : browser
-            })}><RefreshCw size={12} /> Retry</button>
-          </div>
-        ) : tab.url === 'about:blank' ? (
-          inSurvey ? <div className="survey-start browser-empty"><Globe2 size={30} aria-hidden="true" />
-            <form className="survey-start-input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
-              <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
-                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
-                onValueChange={value => { addressDraftEdited.current = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
-              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
-            </form>
-          </div> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
-        ) : __AGENTMUX_WEB_PREVIEW__ ? (
-          <div className="browser-preview"><Globe2 size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
-        ) : null}
-      </div>
+      {presentation && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={presentation}
+        inputSelected={presentation.target.surface === 'space' && presentation.occurrence.location.groupId === useAppStore.getState().layouts[presentation.occurrence.location.displayWorkspaceId]?.activeGroupId}
+        onInputSelected={() => onPresentationInputSelected?.(presentation.target)}
+        blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
+        : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}
+
       {timelineOpen ? (
         <aside className="browser-trace-rail" aria-label="Browser activity trace">
           <BrowserDemonstrationSurface
@@ -1106,4 +1146,17 @@ export function BrowserPane({
       </div>
     </section>
   )
+  }
+  const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? presentations[0]
+  return <>
+    {renderPane(primary)}
+    {presentations.filter(presentation => presentation !== primary).map(presentation => {
+      const host = presentationHosts.get(presentation.occurrence.presentationId)
+      return host && renderPresentationFrame ? createPortal(renderPresentationFrame(renderPane(presentation), presentation.target), host, presentation.occurrence.presentationId) : null
+    })}
+    <ServiceWindowNotice notice={media.notice ? { kind: 'indeterminate', notice: {
+      step: 'Live Browser capture is unconfirmed', mode: media.notice,
+      restore: 'Reopen this presentation to retry the live preview. The original Browser page remains available.'
+    } } : null} />
+  </>
 }

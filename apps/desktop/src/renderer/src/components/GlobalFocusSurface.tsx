@@ -25,7 +25,7 @@ import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
-import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
+import type { WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
 
@@ -41,7 +41,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   regionOnly?: boolean | undefined
   onToggleRegion?: (() => void) | undefined
   directoryIssue?: string | null
-  viewTargets?: Readonly<Record<string, WorkbenchViewTarget>>
+  viewTargets?: WorkbenchViewTargets
 } = {}) {
   const contextSelector = useMemo(createFocusProjectionSelector, [])
   const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))

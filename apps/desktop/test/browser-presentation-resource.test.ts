@@ -25,7 +25,9 @@ const native = vi.hoisted(() => {
     send = vi.fn()
     focus = vi.fn()
     setWindowOpenHandler = vi.fn()
-    getZoomFactor = () => 0.9
+    zoom = 0.9
+    getZoomFactor = () => this.zoom
+    sendInputEvent = vi.fn((input: any) => { this.emit('input-event', {}, input) })
     setZoomFactor = vi.fn()
     disableDeviceEmulation = vi.fn()
     enableDeviceEmulation = vi.fn()
@@ -75,10 +77,10 @@ afterEach(() => { for (const release of cleanup.splice(0)) release() })
 const geometry = { visible: true as const, bounds: { x: 24, y: 36, width: 480, height: 240 } }
 const occurrence = (id: string): BrowserPresentationOccurrence => ({ presentationId: id,
   location: { displayWorkspaceId: 'foreign-space', groupId: 'group-' + id, tabId: 'same-tab', regionId: 'same-region' } })
-async function fixture() {
+async function fixture(focused = true) {
   const root = mkdtempSync(join(tmpdir(), 'browser-presentation-resource-'))
   const app = new native.Contents(), views: InstanceType<typeof native.View>[] = []
-  const window = { webContents: app, isDestroyed: () => false, contentView: {
+  const window = { webContents: app, isDestroyed: () => false, isFocused: () => focused, contentView: {
     addChildView: (view: InstanceType<typeof native.View>) => views.push(view),
     removeChildView: (view: InstanceType<typeof native.View>) => { views.splice(views.indexOf(view), 1) }
   } }
@@ -87,7 +89,7 @@ async function fixture() {
     new BrowserRefLedgerStore(join(root, 'ledger.json')),
     { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: () => {} })
   cleanup.push(() => { manager.dispose(); rmSync(root, { recursive: true }) })
-  await manager.create('browser', 'https://generic.example/one', 'resource-space')
+  const browser = await manager.create('browser', 'https://generic.example/one', 'resource-space')
   const source = views[0]!, frame = app.mainFrame
   const register = (id: string, value = geometry) => manager.registerPresentation(app as never, frame as never,
     { browserId: 'browser', occurrence: occurrence(id), geometry: value })
@@ -101,7 +103,7 @@ async function fixture() {
     expect(result).toHaveLength(1)
     return result[0]
   }
-  return { manager, app, frame, source, views, register, events, request }
+  return { manager, app, frame, source, views, register, events, request, browser }
 }
 
 it('rejects foreign requester, child frame and invalid occurrence/bounds without touching the original page', async () => {
@@ -145,7 +147,7 @@ it('hides/removes one lease without revoking another visible consumer or closing
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)
   expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
   f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
-  f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId)
+  await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId, { kind: 'select' })
   f.manager.updatePresentation(f.app as never, f.frame as never, a.leaseId, { visible: false })
   f.manager.removePresentation(f.app as never, f.frame as never, a.leaseId)
   expect(f.events()).toEqual([
@@ -160,7 +162,7 @@ it('moves only the original Native view on explicit selection and updates only t
   f.manager.updatePresentation(f.app as never, f.frame as never, b.leaseId,
     { visible: true, bounds: { ...geometry.bounds, x: 550 } })
   expect(f.source.bounds.width).toBe(0)
-  f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId)
+  await f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId, { kind: 'select' })
   expect(f.source.bounds).toEqual({ ...geometry.bounds, x: 550 })
   f.manager.updatePresentation(f.app as never, f.frame as never, a.leaseId, geometry)
   expect(f.source.bounds.x).toBe(550)
@@ -232,4 +234,134 @@ it('disposes only its requester handler/listeners and cannot arm an ended owner'
   expect(f.app.session.display).toBeNull()
   expect(f.app.listeners.get('did-start-navigation')?.size).toBe(0)
   expect(() => f.register('after')).toThrow('Untrusted')
+})
+
+
+async function firstPressFixture() {
+  const f = await fixture(), a = f.register('A'), b = f.register('B', { visible: true,
+    bounds: { x: 560, y: 36, width: 720, height: 320 } })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId, { kind: 'select' })
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['actual-video'] })
+  const prepare = () => f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId, {
+    kind: 'prepare-first-press', captureId: capture.captureId, navigationId: f.browser.navigationId,
+    down: { x: 0.25, y: 0.5 }, button: 'left', clickCount: 1, modifiers: [] })
+  const prepared = await prepare()
+  expect(prepared.outcome).toBe('prepared')
+  if (prepared.outcome !== 'prepared') throw new Error('Nonempty actual prepared scope')
+  const commit = (id = prepared.inputScopeId) => f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId,
+    { kind: 'commit-first-press', inputScopeId: id, up: { x: 0.3, y: 0.6 }, modifiers: ['shift'] })
+  return { ...f, a, b, prepared, prepare, commit }
+}
+
+it('dispatches one complete gesture in the original viewport before resize, including nonunit zoom and different target size', async () => {
+  const f = await firstPressFixture(), observed: any[] = []
+  expect(f.source.webContents.sendInputEvent).not.toHaveBeenCalled()
+  expect(f.source.bounds).toEqual(geometry.bounds)
+  f.source.webContents.sendInputEvent.mockImplementation(input => {
+    observed.push({ input, bounds: { ...f.source.bounds }, zoom: f.source.webContents.getZoomFactor() })
+    f.source.webContents.emit('input-event', {}, input)
+  })
+  expect(f.prepared.sourceViewport).toEqual({ width: 480, height: 240, zoomFactor: 0.9 })
+  expect(await f.commit()).toEqual({ outcome: 'input-dispatched', inputScopeId: f.prepared.inputScopeId })
+  expect(observed).toEqual([
+    { input: { type: 'mouseDown', x: 120, y: 120, button: 'left', clickCount: 1, modifiers: [] }, bounds: geometry.bounds, zoom: 0.9 },
+    { input: { type: 'mouseUp', x: 144, y: 144, button: 'left', clickCount: 1, modifiers: ['shift'] }, bounds: geometry.bounds, zoom: 0.9 }
+  ])
+  expect(f.source.bounds).toEqual({ x: 560, y: 36, width: 720, height: 320 })
+  expect(await f.commit()).toEqual({ outcome: 'already-dispatched', inputScopeId: f.prepared.inputScopeId })
+  expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+})
+it('cancels a prepared scope with zero page input and preserves the healthy original view', async () => {
+  const f = await firstPressFixture()
+  expect(await f.manager.activatePresentation(f.app as never, f.frame as never, f.b.leaseId,
+    { kind: 'cancel-first-press', inputScopeId: f.prepared.inputScopeId })).toEqual({ outcome: 'cancelled', inputScopeId: f.prepared.inputScopeId })
+  expect((await f.commit()).outcome).toBe('cancelled')
+  expect(f.source.webContents.sendInputEvent).not.toHaveBeenCalled()
+  expect(f.source.webContents.dead).toBe(false); expect(f.source.bounds).toEqual(geometry.bounds)
+})
+it.each(['navigation', 'target-geometry', 'source-zoom', 'target-hidden'] as const)('rejects a changed %s before any page input', async change => {
+  const f = await firstPressFixture()
+  if (change === 'navigation') await f.source.webContents.loadURL('https://generic.example/new')
+  if (change === 'source-zoom') f.source.webContents.zoom = 1.2
+  if (change === 'target-geometry') f.manager.updatePresentation(f.app as never, f.frame as never, f.b.leaseId,
+    { visible: true, bounds: { x: 580, y: 36, width: 720, height: 320 } })
+  if (change === 'target-hidden') f.manager.updatePresentation(f.app as never, f.frame as never, f.b.leaseId, { visible: false })
+  expect((await f.commit()).outcome).toBe('input-unconfirmed')
+  expect(f.source.webContents.sendInputEvent).not.toHaveBeenCalled()
+  expect(f.source.webContents.dead).toBe(false); expect(f.source.bounds).toEqual(geometry.bounds)
+})
+it('rejects an obsolete scope after a new prepare and prevents concurrent duplicate dispatch', async () => {
+  const f = await firstPressFixture(), fresh = await f.prepare()
+  expect(fresh.outcome).toBe('prepared')
+  if (fresh.outcome !== 'prepared') throw new Error('Nonempty replacement scope')
+  expect((await f.commit()).outcome).toBe('input-unconfirmed')
+  const first = f.commit(fresh.inputScopeId), duplicate = f.commit(fresh.inputScopeId)
+  expect((await first).outcome).toBe('input-dispatched')
+  expect((await duplicate).outcome).toBe('input-unconfirmed')
+  expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+})
+it('does not move the healthy page when Native delivery cannot be observed, or replay an uncertain dispatch', async () => {
+  const f = await firstPressFixture()
+  f.source.webContents.sendInputEvent.mockImplementation(() => {})
+  expect((await f.commit()).outcome).toBe('input-unconfirmed')
+  expect((await f.commit()).outcome).toBe('input-unconfirmed')
+  expect(f.source.bounds).toEqual(geometry.bounds)
+  expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+  expect(f.source.webContents.dead).toBe(false)
+})
+
+it('does not mistake an unrelated mouse-up for the one-shot delivery barrier', async () => {
+  const f = await firstPressFixture()
+  f.source.webContents.sendInputEvent.mockImplementation(input => {
+    if (input.type === 'mouseUp') f.source.webContents.emit('input-event', {}, { ...input, x: 3, y: 4 })
+  })
+  expect((await f.commit()).outcome).toBe('input-unconfirmed')
+  expect(f.source.bounds).toEqual(geometry.bounds)
+  expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+})
+it('rejects out-of-frame points, invented modifiers and an unknown scope before page input', async () => {
+  const f = await firstPressFixture()
+  expect((await f.commit('foreign-scope')).outcome).toBe('input-unconfirmed')
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, f.b.leaseId,
+    { kind: 'commit-first-press', inputScopeId: f.prepared.inputScopeId, up: { x: 1, y: 0.5 }, modifiers: [] })).rejects.toThrow('captured frame')
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, f.b.leaseId,
+    { kind: 'commit-first-press', inputScopeId: f.prepared.inputScopeId, up: { x: 0.5, y: 0.5 }, modifiers: ['invented'] as never })).rejects.toThrow('modifiers')
+  expect(f.source.webContents.sendInputEvent).not.toHaveBeenCalled()
+})
+
+// Narrow regressions for the actual App A-hidden/B-visible input condition.
+// Electron transport is isolated here; this does not sign an OS foreground or page-effect result.
+async function hiddenSourceFixture(focused = true) {
+  const f = await fixture(focused), a = f.register('A'), b = f.register('B', {visible:true,bounds:{x:560,y:36,width:720,height:320}})
+  await f.manager.activatePresentation(f.app as never,f.frame as never,a.leaseId,{kind:'select'})
+  const capture=f.manager.armPresentationCapture(f.app as never,f.frame as never,a.leaseId)
+  expect(f.request()).toEqual({video:f.source.webContents.mainFrame})
+  f.manager.ackPresentationCapture(f.app as never,f.frame as never,capture.captureId,{outcome:'ready',trackIds:['original-track']})
+  f.manager.updatePresentation(f.app as never,f.frame as never,a.leaseId,{visible:false})
+  expect(f.source.getVisible()).toBe(false)
+  expect(f.source.getBounds()).toEqual(geometry.bounds)
+  expect(f.events().filter(event=>event.type==='capture-revoked')).toEqual([])
+  const prepare=()=>f.manager.activatePresentation(f.app as never,f.frame as never,b.leaseId,{kind:'prepare-first-press',captureId:capture.captureId,navigationId:f.browser.navigationId,down:{x:0.25,y:0.5},button:'left',clickCount:1,modifiers:[]})
+  return {...f,b,prepare}
+}
+it('hidden original source permits the visible exact B gesture in the original viewport with a focused requester',async()=>{
+  const f=await hiddenSourceFixture(),prepared=await f.prepare()
+  expect(prepared.outcome).toBe('prepared')
+  if(prepared.outcome!=='prepared')throw Error('Actual prepared scope is nonempty')
+  const observations:unknown[]=[]
+  f.source.webContents.sendInputEvent.mockImplementation(input=>{observations.push({input,bounds:f.source.getBounds(),visible:f.source.getVisible()});f.source.webContents.emit('input-event',{},input)})
+  const result=await f.manager.activatePresentation(f.app as never,f.frame as never,f.b.leaseId,{kind:'commit-first-press',inputScopeId:prepared.inputScopeId,up:{x:0.3,y:0.6},modifiers:[]})
+  expect(result).toEqual({outcome:'input-dispatched',inputScopeId:prepared.inputScopeId})
+  expect(observations).toEqual([
+    {input:{type:'mouseDown',x:120,y:120,button:'left',clickCount:1,modifiers:[]},bounds:geometry.bounds,visible:false},
+    {input:{type:'mouseUp',x:144,y:144,button:'left',clickCount:1,modifiers:[]},bounds:geometry.bounds,visible:false}])
+  expect(f.source.getVisible()).toBe(true);expect(f.views).toEqual([f.source]);expect(f.source.webContents.dead).toBe(false)
+})
+it('hidden original source still refuses an unfocused requester without page input',async()=>{
+  const f=await hiddenSourceFixture(false)
+  expect(await f.prepare()).toMatchObject({outcome:'input-unconfirmed',reason:'window-not-focused'})
+  expect(f.source.webContents.sendInputEvent).not.toHaveBeenCalled()
+  expect(f.source.getVisible()).toBe(false);expect(f.source.webContents.dead).toBe(false)
 })

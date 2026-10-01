@@ -31,7 +31,7 @@ window.resourceProof = {
       browserId: 'original-browser', occurrence: { presentationId: 'private-' + index,
         location: { displayWorkspaceId: 'private-space', groupId: 'group-' + index, tabId: 'same-tab', regionId: 'same-region' } },
       geometry: geometry(index) }))
-    await api.activatePresentation(leases[0].leaseId)
+    await api.activatePresentation(leases[0].leaseId, { kind: 'select' })
     return { snapshot, leases }
   },
   async acquireInitial() { await acquire(0); return capture },
