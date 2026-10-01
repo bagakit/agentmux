@@ -13,9 +13,10 @@ app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const scratch = { id: '__scratch__', hostId: 'local', name: 'Topics', path: path.join(privateRoot, 'topics'), kind: 'folder' as const }
 const folder = { id: 'private-folder', hostId: 'local', name: 'Private project', path: path.join(privateRoot, 'folder'), kind: 'folder' as const }
 const recencyFolders = generation.folderRecency.map((fact: any) => ({ ...fact, hostId: 'local', path: path.join(privateRoot, fact.directory), kind: 'folder' as const }))
+const manualFolder = generation.manualFolder ? { ...generation.manualFolder, hostId: 'local', path: path.join(privateRoot, generation.manualFolder.directory), kind: 'folder' as const } : null
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }],
   executors: { probe: { providerId: 'codex', label: 'Private boundary', command: 'unused-fixture', args: [], env: {}, injectAgentMuxGuide: false } },
-  workspaces: [scratch, folder, ...recencyFolders], appearance: { terminalTheme: 'graphite' },
+  workspaces: [scratch, folder, ...recencyFolders, ...(manualFolder ? [manualFolder] : [])], appearance: { terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const topicStore = new ScratchTopics()
 const calls: any[] = []
@@ -43,7 +44,7 @@ ipcMain.handle('space-appearance:request', async (_event, operation, ...args) =>
   const call: any = { operation, args, at: Date.now() }
   calls.push(call)
   switch (operation) {
-    case 'setup': return { config, phase }
+    case 'setup': return { config, phase, manualFolder }
     case 'topics': assert.equal(args[0], scratch.id); return topicStore.list(scratch)
     case 'topic': assert.equal(args[0], scratch.id); return topicStore.read(scratch, args[1])
     case 'ensure-topic': assert.equal(args[0], scratch.id); return topicStore.ensure(scratch, args[1])
@@ -99,11 +100,14 @@ app.whenReady().then(async () => {
     } while (Date.now() < deadline)
     throw new Error(`Private fixture condition did not settle: ${source}`)
   }
-  const capture = async (scene: string) => {
+  const settle = async () => {
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     await read('Promise.allSettled(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation=>animation.finished))')
     // Hidden private windows keep drawing; wait for the compositor after the DOM frame settles.
     await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  const capture = async (scene: string) => {
+    await settle()
     const ui = await read('window.spaceAppearanceUi()')
     const dialog = await read(`(() => { const node=document.querySelector('[role="dialog"]');if(!node)return null;const r=node.getBoundingClientRect(),s=getComputedStyle(node);return {x:r.x,y:r.y,width:r.width,height:r.height,display:s.display,visibility:s.visibility,position:s.position} })()`)
     if (dialog) assert.ok(dialog.width > 0 && dialog.height > 0 && dialog.position === 'fixed' && dialog.visibility === 'visible', 'The actual shared picker is laid out visibly')
@@ -112,6 +116,66 @@ app.whenReady().then(async () => {
     await fs.writeFile(path.join(output, file), bytes)
     result.images.push({ file, sha256: hash(bytes), scene, phase, pid: process.pid, generation: generation.id,
       processGeneration: result.processGeneration, ui, dialog })
+  }
+  const captureFolderRecency = async (themes: readonly string[]) => {
+    await until(`window.spaceAppearanceUi().targets.filter(one => ${JSON.stringify(recencyFolders.map((one: any) => one.id))}.includes(one.workspaceId) && (one.detectedImage || one.monogram)).length === ${recencyFolders.length}`)
+    result.folderRecency = { facts: recencyFolders.map((one: any) => ({ workspaceId: one.id, agentSessionId: `agent-${one.id}`, asset: one.asset, tone: one.tone, source: one.source, observedAt: one.observedAt })), frames: [] }
+    for (const theme of themes) for (const [frame, width, height, railWidth] of [['normal-folder-recency', 1380, 840, 240], ['narrow-folder-recency', 1000, 720, 180]] as const) {
+      const scene = `${theme === 'light' ? 'light-' : ''}${frame}`
+      win.setContentSize(width, height)
+      await read(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}; document.querySelector('[data-space-appearance-rail]').style.width='${railWidth}px'`)
+      await until(`innerWidth === ${width} && innerHeight === ${height} && window.spaceAppearanceUi().rail?.width === ${railWidth}`)
+      await settle()
+      const ui = await read('window.spaceAppearanceUi()')
+      assert.equal(ui.rail.width, railWidth)
+      assert.ok(ui.rail.height > 0)
+      const rows = ui.targets.filter((one: any) => recencyFolders.some((folder: any) => folder.id === one.workspaceId))
+      assert.equal(rows.length, recencyFolders.length, 'The whole nonempty controlled Folder cohort is actually rendered')
+      assert.equal(new Set(rows.filter((one: any) => one.detectedImage).map((one: any) => one.detectedImage)).size, 2)
+      const monograms = rows.filter((one: any) => one.monogram !== null)
+      assert.equal(monograms.length, mode === 'folder-recency-presentation' ? 8 : 0)
+      if (monograms.length) assert.deepEqual([...new Set(monograms.map((one: any) => one.monogram))].sort(), ['N', 'P'])
+      for (const fact of recencyFolders) {
+        const row = rows.find((one: any) => one.workspaceId === fact.id)
+        assert.equal(row.recency, fact.tone)
+        const bounds = row.identityBounds
+        assert.ok(bounds.width > 0 && bounds.height > 0)
+        assert.ok(bounds.x >= ui.rail.x && bounds.x + bounds.width <= ui.rail.x + ui.rail.width)
+        assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= height, 'Every identity is actually inside the captured viewport')
+        if (row.monogram !== null) {
+          assert.equal(row.detectedImage, null, 'Confirmed no source image, not a generated project asset')
+          assert.ok(row.hue.length > 0 && Number.isFinite(Number(row.hue)))
+          assert.equal(row.opacity, 1, 'Quiet glyphs remain readable')
+          assert.match(row.filter, fact.tone === 'full' ? /^saturate\(0?\.8\)$/ : fact.tone === 'subdued' ? /^saturate\(0?\.65\)$/ : /^saturate\(0?\.2\)$/)
+          const ink = theme === 'light' ? fact.tone === 'full' ? '40% 36%' : fact.tone === 'subdued' ? '32% 40%' : '20% 44%'
+            : fact.tone === 'full' ? '52% 74%' : fact.tone === 'subdued' ? '42% 70%' : '28% 66%'
+          const expected = await read(`(() => { const node=document.createElement('span');node.style.color='hsl(${row.hue} ${ink})';document.body.append(node);const color=getComputedStyle(node).color;node.remove();return color })()`)
+          const actualRgb = row.color.match(/[\d.]+/g)?.map(Number), expectedRgb = expected.match(/[\d.]+/g)?.map(Number)
+          assert.equal(actualRgb?.length, 3); assert.equal(expectedRgb?.length, 3)
+          // Existing color transitions can retain one 8-bit rounding step after finish.
+          // This binds the native color band; independent image review judges visual quality.
+          for (let channel = 0; channel < 3; channel += 1) assert.ok(Math.abs(actualRgb![channel] - expectedRgb![channel]) <= 1, 'Actual Chromium paint consumes the selected theme and recency band')
+          row.expectedInk = { hsl: `hsl(${row.hue} ${ink})`, rgb: expected, maximumChannelRounding: 1 }
+        } else {
+          assert.equal(row.opacity, fact.tone === 'full' ? 1 : fact.tone === 'subdued' ? .95 : .85)
+          if (fact.tone === 'full') assert.equal(row.filter, 'none')
+          else assert.match(row.filter, fact.tone === 'subdued' ? /^saturate\(0?\.65\) brightness\(0?\.92\)$/ : /^saturate\(0?\.2\)$/)
+        }
+        assert.match(row.title, fact.tone === 'unknown' ? /activity time unknown/ : fact.tone === 'quiet' ? /over 12 hours ago/ : fact.tone === 'full' ? /within 1 hour/ : /1–12 hours ago/)
+        assert.equal(calls.filter(call => call.operation === 'appearance' && call.args[0] === fact.id).length, 1, 'Recency never re-probes appearance')
+      }
+      if (manualFolder) {
+        const manual = ui.targets.find((one: any) => one.workspaceId === manualFolder.id)
+        assert.equal(manual.source, 'manual'); assert.equal(manual.icon, manualFolder.manualIcon)
+        assert.equal(manual.recency, undefined); assert.equal(manual.monogram, null)
+        assert.equal(calls.filter(call => call.operation === 'appearance' && call.args[0] === manualFolder.id).length, 0)
+      }
+      result.folderRecency.frames.push({ scene, theme, width, height, railWidth, rail: ui.rail, rows })
+      await capture(scene)
+    }
+    win.setContentSize(1380, 840)
+    await read("document.documentElement.dataset.appearance='dark'; document.querySelector('[data-space-appearance-rail]').style.width='240px'")
+    await until('innerWidth === 1380 && innerHeight === 840')
   }
   try {
     win = new BrowserWindow({ width: 1380, height: 840, useContentSize: true, show: false,
@@ -127,6 +191,16 @@ app.whenReady().then(async () => {
     assert.deepEqual(initial.ui.regions, ['original-agent-region', 'original-background-region', 'original-file-region', 'original-idle-region', 'original-mote-region'])
     assert.ok(initial.ui.targets.length >= 5, 'All three object kinds and real Topics overview must be rendered')
     result.initial = initial
+    if (mode === 'folder-recency-presentation') {
+      await read('window.spaceAppearanceBoundary.request("release-appearance")')
+      await captureFolderRecency(['dark', 'light'])
+      result.final = await read('({state:window.spaceAppearanceState(),ui:window.spaceAppearanceUi()})')
+      assert.deepEqual(result.final.state.workface, initial.state.workface)
+      assert.deepEqual(result.final.ui.regions, initial.ui.regions)
+      result.workface = { before: initial.state.workface, after: result.final.state.workface, preserved: true }
+      result.passed = true
+      return
+    }
     const expectedFile = path.join(privateRoot, 'expected.json')
     const expected = phase === 'seed' ? { workface: initial.state.workface, icons: {}, targets: [] as any[] }
       : JSON.parse(await fs.readFile(expectedFile, 'utf8'))
@@ -276,36 +350,7 @@ app.whenReady().then(async () => {
       await capture('automatic-readback')
     }
     if (phase === 'auto-restore') {
-      await until(`window.spaceAppearanceUi().targets.filter(one => ${JSON.stringify(recencyFolders.map((one: any) => one.id))}.includes(one.workspaceId) && one.detectedImage).length === ${recencyFolders.length}`)
-      result.folderRecency = { facts: recencyFolders.map((one: any) => ({ workspaceId: one.id, agentSessionId: `agent-${one.id}`, tone: one.tone, source: one.source, observedAt: one.observedAt })), frames: [] }
-      for (const [scene, width, height, railWidth] of [['normal-folder-recency', 1380, 840, 240], ['narrow-folder-recency', 1000, 720, 180]] as const) {
-        win.setContentSize(width, height)
-        await read(`document.querySelector('[data-space-appearance-rail]').style.width = '${railWidth}px'`)
-        await until(`innerWidth === ${width} && innerHeight === ${height} && window.spaceAppearanceUi().rail?.width === ${railWidth}`)
-        const ui = await read('window.spaceAppearanceUi()')
-        assert.equal(ui.rail.width, railWidth, 'The actual Space Sidebar, not only the window, reaches the intended normal/narrow width')
-        assert.ok(ui.rail.height > 0)
-        const rows = ui.targets.filter((one: any) => recencyFolders.some((folder: any) => folder.id === one.workspaceId))
-        assert.equal(rows.length, 8, 'Both actual image assets expose all four recency facts')
-        assert.equal(new Set(rows.map((one: any) => one.detectedImage)).size, 2)
-        for (const fact of recencyFolders) {
-          const row = rows.find((one: any) => one.workspaceId === fact.id)
-          assert.equal(row.recency, fact.tone)
-          assert.ok(row.imageBounds.width > 0 && row.imageBounds.height > 0)
-          assert.ok(row.imageBounds.x >= ui.rail.x && row.imageBounds.x + row.imageBounds.width <= ui.rail.x + ui.rail.width)
-          assert.ok(row.imageBounds.y >= 0 && row.imageBounds.y + row.imageBounds.height <= height, 'Every recency image is actually inside the captured native viewport')
-          assert.equal(row.opacity, fact.tone === 'full' ? 1 : fact.tone === 'subdued' ? .95 : .85)
-          if (fact.tone === 'full') assert.equal(row.filter, 'none')
-          else assert.match(row.filter, fact.tone === 'subdued' ? /^saturate\(0?\.65\) brightness\(0?\.92\)$/ : /^saturate\(0?\.2\)$/)
-          assert.match(row.title, fact.tone === 'unknown' ? /activity time unknown/ : fact.tone === 'quiet' ? /over 12 hours ago/ : fact.tone === 'full' ? /within 1 hour/ : /1–12 hours ago/)
-          assert.equal(calls.filter(call => call.operation === 'appearance' && call.args[0] === fact.id).length, 1, 'Recency never re-probes appearance')
-        }
-        result.folderRecency.frames.push({ scene, width, height, railWidth, rail: ui.rail, rows })
-        await capture(scene)
-      }
-      win.setContentSize(1380, 840)
-      await read("document.querySelector('[data-space-appearance-rail]').style.width = '240px'")
-      await until('innerWidth === 1380 && innerHeight === 840')
+      await captureFolderRecency(['dark'])
     }
     await read('window.spaceAppearanceFlush()')
     result.final = await read('({state:window.spaceAppearanceState(),ui:window.spaceAppearanceUi()})')

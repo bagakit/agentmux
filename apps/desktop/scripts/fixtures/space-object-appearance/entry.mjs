@@ -10,6 +10,7 @@ import { GlobalSystemNotices } from '../../../src/renderer/src/components/Global
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { folderSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import '../../../src/renderer/src/styles/index.css'
 
 const request = window.spaceAppearanceBoundary.request
@@ -91,6 +92,11 @@ if (setup.phase === 'seed') {
     documents: { [fileKey]: { ...originalFile.document, content: `${originalFile.document.content}\nOriginal unsaved file note\n` } },
     dirtyDocuments: { [fileKey]: true } })
   useAppStore.getState().setAgentComposerDraft('private-live-agent', 'Original unsent draft survives restart')
+  if (setup.manualFolder) {
+    const manual = setup.manualFolder
+    const target = folderSpaceIconTarget({ hostId: manual.hostId, repoPath: manual.path, name: manual.name })
+    useAppStore.setState({ spaceObjectIcons: { [target.key]: manual.manualIcon } })
+  }
 }
 
 window.spaceAppearanceState = () => {
@@ -121,11 +127,15 @@ window.spaceAppearanceUi = () => ({
   })(),
   targets: [...document.querySelectorAll('[data-space-icon-target]')].map(node => {
     const icon = node.querySelector('[data-space-icon-source]') ?? node.closest('.project-rail-row-shell')?.querySelector('[data-space-icon-source]')
-    const image = icon?.querySelector('img'), style = image ? getComputedStyle(image) : null, bounds = image?.getBoundingClientRect()
+    const image = icon?.querySelector('img'), monogram = icon?.hasAttribute('data-monogram') ? icon : null
+    const painted = image ?? monogram, style = painted ? getComputedStyle(painted) : null, bounds = painted?.getBoundingClientRect()
     return { key: node.dataset.spaceIconTarget, workspaceId: node.dataset.workspaceId, text: node.textContent, source: icon?.dataset.spaceIconSource,
-      icon: icon?.dataset.spaceIcon, detectedImage: image?.getAttribute('src') ?? null, recency: image?.dataset.folderIconRecency,
+      icon: icon?.dataset.spaceIcon, detectedImage: image?.getAttribute('src') ?? null, recency: painted?.dataset.folderIconRecency,
+      monogram: monogram?.textContent ?? null, hue: monogram?.style.getPropertyValue('--folder-icon-hue') ?? null,
+      color: style?.color, backgroundColor: style?.backgroundColor,
       filter: style?.filter, opacity: style ? Number(style.opacity) : null, title: icon?.title,
-      imageBounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
+      identityBounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
+      imageBounds: image && bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
       selected: node.getAttribute('aria-current'), attention: node.closest('[data-space-entry]')?.querySelector('.project-activity')?.getAttribute('aria-label') }
   }),
   dialog: document.querySelector('[role="dialog"]')?.textContent ?? null,
