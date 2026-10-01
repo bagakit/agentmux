@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import '../src/renderer/src/styles/chrome.css'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 // The actual App route and ProjectRail stay mounted. Native workbench surfaces are outside this color projection.
