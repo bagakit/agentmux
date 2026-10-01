@@ -13,8 +13,11 @@ import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history
 const fixture = vi.hoisted(() => ({
   historyPage: vi.fn(), write: vi.fn(), clipboard: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
   resizeObservers: [] as Array<() => void>,
-  state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
+  state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [], hosts: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
     timelines: {}, agentNames: {}, viewModes: {}, regionCaretFocus: null,
+    tabs: {}, layouts: {}, demandPmoTabIds: {}, demands: {}, scratchTopicSnapshots: {},
+    spaceZoneBindings: {}, spatialRequests: {}, localHome: '', noticeReadReceipts: {},
+    acquireNativeSurfaceOverlay: vi.fn(), releaseNativeSurfaceOverlay: vi.fn(),
     clearRegionCaretFocus: vi.fn(), focusRegion: vi.fn(), appendAgentComposerDraft: vi.fn(), refreshSession: vi.fn(),
     recoverSession: vi.fn(), respondInteraction: vi.fn(), openFile: vi.fn(), reportError: vi.fn(), openHttpLink: vi.fn() }
 }))
@@ -23,7 +26,7 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: {
   ui: { writeClipboardText: fixture.clipboard }
 } }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign(
-  (select: (state: typeof fixture.state) => unknown) => select(fixture.state), { getState: () => fixture.state }
+  (select: (state: typeof fixture.state) => unknown) => select(fixture.state), { getState: () => fixture.state, setState: (update: (state: typeof fixture.state) => Partial<typeof fixture.state>) => Object.assign(fixture.state, update(fixture.state)) }
 ) }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => {
   useEffect(() => { fixture.terminalMount(); return () => fixture.terminalUnmount() }, [])
@@ -37,7 +40,7 @@ const control: AgentSessionControl = {kind:'agent',hostId:'local',agentSessionId
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
   id: control.agentSessionId, hostId:'local',workspacePath:_hygiene_fixturePath("synthetic"),label:'Reader',createdAt:1,updatedAt:1,
   processState:'running',status:{state:'running',source:'run-process',observedAt:1},latestOutputBytes:0,
-  kind:'agent',providerId:'codex',executorId:'codex',control,
+  kind:'agent',providerId:'codex',executorId:'codex',agentSessionUpdatedAt:1,control,
   capabilities:{terminal:true,timeline:'complete-events',permission:'observe',providerResume:true,replyCorrelation:'none'}
 }
 function page(id: string, nextCursor: string | null, overrides: Partial<AgentSessionHistoryPage> = {}): AgentSessionHistoryPage {
@@ -53,7 +56,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { fixture.resizeObservers.push(callback) } observe() {} disconnect() {} })
   fixture.state.sessions = [session]
   fixture.state.recoveryCandidates = []
-  fixture.historyPage.mockResolvedValue(page('latest','older-1'))
+  fixture.historyPage.mockReset().mockResolvedValue(page('latest','older-1'))
+  fixture.state.recoverSession.mockReset().mockResolvedValue(undefined)
   fixture.clipboard.mockResolvedValue(undefined)
   container = document.createElement('div'); document.body.append(container); root=createRoot(container)
 })
@@ -90,9 +94,11 @@ it('keeps the native history entry reachable when the Agent Run is unavailable',
   fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 1 } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
-  expect(fixture.historyPage).not.toHaveBeenCalled()
+  expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith({ hostId: control.hostId, agentSessionId: control.agentSessionId }, { limit: 6 })
   await openAgentHistory(container)
-  expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith(control, undefined)
+  expect(fixture.historyPage.mock.calls).toEqual([
+    [{ hostId: control.hostId, agentSessionId: control.agentSessionId }, { limit: 6 }], [control, undefined]
+  ])
   expect(container.textContent).toContain('body latest')
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
   expect(fixture.write).not.toHaveBeenCalled()
@@ -114,7 +120,8 @@ it('keeps a missing Run readable with a direct restore action when the independe
   fixture.historyPage.mockRejectedValue(new Error('Native reader unavailable'))
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
-  expect(fixture.historyPage).not.toHaveBeenCalled()
+  expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith({ hostId: control.hostId, agentSessionId: control.agentSessionId }, { limit: 6 })
+  expect(container.textContent).toContain('Recap could not be read.')
   await openAgentHistory(container)
   expect(container.textContent).toContain('Idle time is unknown')
   expect(container.textContent).toContain('History read failed: Native reader unavailable')
@@ -123,6 +130,34 @@ it('keeps a missing Run readable with a direct restore action when the independe
   expect(fixture.terminalMount).not.toHaveBeenCalled()
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
   expect(fixture.write).not.toHaveBeenCalled()
+  expect(button('Resume').disabled).toBe(false)
+  await act(async () => button('Resume').click())
+  expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
+})
+
+it('keeps the real pending SessionPane stage and Resume independent of a hanging recap, including resume in progress', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'interrupted' }]
+  let completeRecap!: (value: AgentSessionHistoryPage) => void
+  let completeRestore!: () => void
+  fixture.historyPage.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>(done => { completeRecap = done }))
+  fixture.state.recoverSession.mockImplementationOnce(() => new Promise<void>(done => { completeRestore = done }))
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(container.textContent).toContain('Ready to restore')
+  expect(container.textContent).toContain('Reading saved conversation…')
+  const resume = button('Resume')
+  expect(resume.disabled).toBe(false)
+  await act(async () => resume.click())
+  expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  expect(container.textContent).toContain('Ready to restore')
+  expect(button('Resuming…').disabled).toBe(true)
+  await act(async () => completeRecap(page('resume-recap', null)))
+  expect(container.textContent).toContain('Last assistant message · Native conversation')
+  expect(container.textContent).toContain('body resume-recap')
+  expect(container.textContent).toContain('Ready to restore')
+  await act(async () => completeRestore())
+  expect(button('Resume').disabled).toBe(false)
+  expect(fixture.write).not.toHaveBeenCalled()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
 })
 
 it('does not start independent history reads for a hidden pending view', async () => {
@@ -130,6 +165,15 @@ it('does not start independent history reads for a hidden pending view', async (
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible={false} linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(fixture.historyPage).not.toHaveBeenCalled()
   expect(fixture.terminalMount).not.toHaveBeenCalled()
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+})
+
+it('does not read or show recap on a parked pending SessionPane', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'interrupted' }]
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible parked linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(container.textContent).toContain('Ready to restore')
+  expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
+  expect(fixture.historyPage).not.toHaveBeenCalled()
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
 })
 
@@ -183,8 +227,9 @@ it('uses the shared message owner for ordered native parts, exact copy and host 
     workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink} />))
   const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'))
   expect(rows.map(row => row.dataset.historyItemId)).toEqual(['native-user', 'native-assistant', 'native-activity'])
-  expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['unknown', 'agent', null])
-  expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['Input', 'Reader', 'Tool observation'])
+  // The recorded native author remains unknown; the current shared display default is You.
+  expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['human', 'agent', null])
+  expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['You', 'Reader', 'Tool observation'])
   expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-status'))).toEqual([null, null, null])
   expect(rows.map(row => row.querySelector('.log-turn__time')?.textContent ?? null)).toEqual([null, new Date(0).toTimeString().slice(0, 8), null])
   const body = rows[0]!.querySelector('.log-turn__body')!
