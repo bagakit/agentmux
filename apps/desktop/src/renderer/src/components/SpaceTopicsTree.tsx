@@ -1,5 +1,5 @@
 import { ArchiveRestore, NotebookText, Pin, NotebookPen } from 'lucide-react'
-import { useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
@@ -12,7 +12,7 @@ import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import { orderTopics, partitionPinned } from '../lib/topic-order'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import type { ActivityContextInput } from '../lib/activity-groups'
-import { useAppStore } from '../store'
+import { fileNavigationSelection, useAppStore } from '../store'
 import { matchesSpaceQuery } from '../lib/space-tree-navigation'
 import { topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -67,12 +67,39 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   async function openOverview(): Promise<void> {
     try { await selectWorkspace(workspace.id); setWorkspaceTool('files-branches') } catch (cause) { reportError(cause) }
   }
-  async function openMote(id: string, edit = false): Promise<void> {
+  const pendingOpen = useRef<AbortController | null>(null)
+  useEffect(() => () => pendingOpen.current?.abort(), [])
+  async function openMote(id: string, edit = false): Promise<boolean> {
+    pendingOpen.current?.abort()
+    const controller = new AbortController(); pendingOpen.current = controller
+    const selected = fileNavigationSelection(useAppStore.getState())
+    const cancel = () => controller.abort()
+    const unsubscribe = useAppStore.subscribe(state => {
+      if (fileNavigationSelection(state) !== selected) cancel()
+    })
+    // FocusScope and our own reveal restore focus without a new human intent.
+    const events = ['pointerdown', 'keydown', 'input'] as const
+    for (const event of events) document.addEventListener(event, cancel, true)
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true; unsubscribe()
+      for (const event of events) document.removeEventListener(event, cancel, true)
+      controller.signal.removeEventListener('abort', release)
+    }
+    controller.signal.addEventListener('abort', release, { once: true })
     try {
       await api.scratch.ensureMote(workspace.id, id)
-      await openTopic(id, workspace.id)
+      if (controller.signal.aborted) return false
+      // The original Topic owner fences its own read/reveal. Stop observing before
+      // handing it navigation, so its accepted activation is never self-cancelled.
+      release()
+      const opened = await openTopic(id, workspace.id, { signal: controller.signal })
+      if (!opened || controller.signal.aborted) return false
       if (edit) await openFile(`${scratchTopicDirectoryName(id)}/${MOTE_SOUL_PATH}`, undefined, undefined, workspace.id)
-    } catch (cause) { reportError(cause) }
+      return true
+    } catch (cause) { reportError(cause); return false }
+    finally { release(); if (pendingOpen.current === controller) pendingOpen.current = null }
   }
 
   function section(label: 'Motes' | 'Topics', objects: typeof motes) {
@@ -111,9 +138,9 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon} {...(isMote ? {
           moteActions: { pinned: isPinned, onTogglePin: togglePin, onEdit: editMote,
             onRename: () => { renameId.current = topic.id; setRenameTarget(topic) },
-            onNewDiscussion: () => { void openMote(id).then(() => { const state = useAppStore.getState(); const layout = state.layouts[workspace.id]
+            onNewDiscussion: () => { void openMote(id).then(opened => { if (!opened) return; const state = useAppStore.getState(); const layout = state.layouts[workspace.id]
               if (layout) state.openLauncher({ workspaceId: workspace.id, tabGroupId: layout.activeGroupId, topicId: id, reveal: true }) }) },
-            onMaterials: () => { void openMote(id).then(() => { setWorkspaceTool('files-branches'); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { ...useAppStore.getState().explorerCollapsed, [workspace.id]: false } }) }) }
+            onMaterials: () => { void openMote(id).then(opened => { if (!opened) return; setWorkspaceTool('files-branches'); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { ...useAppStore.getState().explorerCollapsed, [workspace.id]: false } }) }) }
           }, moteArchive: {
           archived, disabled: archive.pending === id || id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
           ...(id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),

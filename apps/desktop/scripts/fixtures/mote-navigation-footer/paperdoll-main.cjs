@@ -6,6 +6,7 @@ const { app, BrowserWindow, ipcMain, nativeImage } = require('electron')
 const [html, privateRoot, evidence, phase, refinementMode, chooserMode] = process.argv.slice(2)
 const refinement = refinementMode === 'refinement'
 const fromChooser = chooserMode === 'from-chooser'
+const avatarColor = process.env.AGENTMUX_MOTE_AVATAR_COLOR === '1'
 assert.ok(['seed', 'restore'].includes(phase), 'Exactly two private paperdoll phases')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -130,6 +131,31 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(evidence, file), bytes)
       ;(result.refinement ??= { frames: [], gaze: [] }).frames.push({ name, file, sha256: hash(bytes), captureStartedAt, captureFinishedAt, facts: await facts() })
     }
+    const colorProof = async stage => {
+      if (!avatarColor) return
+      const observation = await read(`(() => {
+        const reference=document.createElement('span');reference.style.color='var(--purple)';document.body.append(reference);const purple=getComputedStyle(reference).color;reference.remove();
+        const rows=Array.from(document.querySelectorAll('.space-object-icon[data-space-icon-kind="mote"][data-space-icon-source]')).map(n=>{
+          const paint=n.querySelector('img')||n.querySelector('svg');if(!paint)return null;const r=paint.getBoundingClientRect();if(!(r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.x<innerWidth&&r.y<innerHeight))return null;
+          const ancestors=[];for(let p=paint.parentElement;p;p=p.parentElement){const s=getComputedStyle(p);ancestors.push({tag:p.tagName,class:p.className,opacity:s.opacity,filter:s.filter,display:s.display});}
+          const style=getComputedStyle(paint),root=getComputedStyle(n),choice=n.closest('[data-mote-topic-id]'),entry=n.closest('[data-pmo-teams-topic-launcher]');
+          return {owner:entry?'footer':choice?'float':n.closest('[data-mote-author]')?'author':n.closest('.project-rail')?'space':'other',topicId:entry?.querySelector('button')?.dataset.moteTargetTopic||choice?.dataset.moteTopicId||n.closest('[data-mote-author]')?.dataset.moteAuthor,
+            source:n.dataset.spaceIconSource,paint:paint.tagName==='IMG'?'image':paint.classList.contains('mote-face')?'face':'glyph',image:paint.getAttribute('src'),fill:paint.getAttribute('fill'),color:root.color,filter:style.filter,opacity:style.opacity,selected:choice?.getAttribute('aria-pressed'),status:choice?.dataset.moteStatus||entry?.querySelector('button')?.dataset.moteStatus,expression:n.closest('[data-mote-expression]')?.dataset.moteExpression,
+            rect:{x:r.x,y:r.y,width:r.width,height:r.height},ancestors};
+        }).filter(Boolean);return {purple,rows,theme:document.documentElement.dataset.appearance};
+      })()`)
+      assert.ok(observation.rows.length>0,'Actual visible identity set must be nonempty: '+stage)
+      assert.ok(observation.purple,'The current theme identity token is resolved')
+      for(const row of observation.rows){
+        assert.equal(row.filter,'none','Original avatar color is unfiltered: '+stage);assert.equal(row.opacity,'1','Original avatar opacity is retained: '+stage)
+        for(const parent of row.ancestors){assert.equal(parent.filter,'none','Identity ancestor does not desaturate its child');assert.equal(parent.opacity,'1','Identity ancestor does not fade its child')}
+        if(row.paint==='glyph')assert.equal(row.color,observation.purple,'Seed/manual identity follows the same stable theme accent')
+      }
+      ;(result.avatarColor??={samples:[]}).samples.push({stage,...observation})
+      check('actual-mote-identity-color-'+stage,observation)
+      await extraFrame('avatar-color-'+stage)
+      return observation
+    }
     const gazeFace = async (selector, label, expected = 'identity') => {
       const measure = () => read(`(() => { const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw new Error('Actual face consumer missing');const r=n.getBoundingClientRect();return { sampledAt:performance.now(),x:r.x,y:r.y,width:r.width,height:r.height,face:n.querySelector('.mote-face').outerHTML,follow:getComputedStyle(n.querySelector('.mote-face__gaze-follow')).transform,neck:getComputedStyle(n.querySelector('.mote-face__neck')).transform,brows:getComputedStyle(n.querySelector('.mote-face__brow-follow')).transform,awake:getComputedStyle(n.querySelector('.mote-face__awake-eyes')).display,expression:n.dataset.moteExpression } })()`)
       const original = await measure(), baseline = await facts()
@@ -252,6 +278,7 @@ app.whenReady().then(async () => {
     }
     await until('window.motePaperdollProof?.ready&&document.querySelector("[data-pmo-teams-topic-launcher] button [data-mote-expression]")&&window.motePaperdollProof.facts().ready', 'actual App initialized with its original motion consumer')
     const initial = await facts(); result.initial = initial
+    await colorProof('closed-original')
     if(fromChooser)await extraFrame('avatar-joint-original-entry')
     assert.ok(Object.keys(initial.protected.tabs).length >= 6 && Object.keys(initial.protected.drafts).length >= 4)
     assert.equal(initial.bridgeSubscriptions, 1, 'The original router has one transport subscription')
@@ -259,6 +286,8 @@ app.whenReady().then(async () => {
       await open(); const baseline = await facts()
       assert.equal(baseline.ui.entry.source, 'automatic'); assert.match(baseline.ui.entry.image, /pmo-teams-topic-avatar/)
       await capture('paperdoll-primary-default')
+      const originalColors=await colorProof('opened-original')
+      if(avatarColor){assert.ok(originalColors.rows.filter(row=>row.paint==='image').length>=2);assert.ok(originalColors.rows.some(row=>row.paint==='glyph'&&row.topicId===quiet),'Original sleeping seed is a visible product consumer')}
       await edit(); await click(dialogButton('Make a face')); await click(dialogButton('Eyes · spark')); await click(dialogButton('Color · peach')); await click(dialogButton('Brows · curious'))
       assert.equal((await facts()).icons[keyFor(primary)], undefined, 'The real editor preview is local until Save')
       const facePreview = await paintedEditor(true)
@@ -283,6 +312,9 @@ app.whenReady().then(async () => {
       await until('!document.querySelector(".space-icon-picker")', 'confirmed face Save')
       const saved = await facts(); assert.equal(saved.icons[keyFor(primary)].eyes, 'spark'); assert.equal(saved.icons[keyFor(primary)].palette, 'peach'); protectedSame(baseline, saved)
       await open(); await animate('thinking')
+      const mixedColors=await colorProof('face-image-seed')
+      if(avatarColor){assert.ok(mixedColors.rows.some(row=>row.paint==='face'));assert.ok(mixedColors.rows.some(row=>row.paint==='image'));assert.ok(mixedColors.rows.some(row=>row.paint==='glyph'))
+        await select(custom);await colorProof('selected-image');await select(primary)}
       if(fromChooser) await chooserAvatar()
       const beforeTool = await facts()
       const start = await call('timeline', 'actual-tool', 'start'); await animate('tool')
@@ -308,6 +340,7 @@ app.whenReady().then(async () => {
       const idle = await facts(); assert.equal(idle.ui.entry.motion.expression, 'idle')
       await input('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }); await until('window.motePaperdollProof.facts().ui.entry.motion.motion==="off"', 'reduced-motion admission')
       const reduced = await facts(); assert.equal(reduced.ui.entry.motion.animations.length, 0); protectedSame(idle, reduced)
+      await colorProof('reduced')
       await input('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }); await animate('idle')
       // A real offscreen entry still keeps its expression, but native animations stop.
       await read(`(${entry}).style.transform='translateX(-200px)'`); await until('window.motePaperdollProof.facts().ui.entry.motion.motion==="off"', 'offscreen admission'); const offscreen = await facts(); assert.equal(offscreen.ui.entry.motion.animations.length, 0)
@@ -339,7 +372,9 @@ app.whenReady().then(async () => {
       if (refinement) visibility.scope = 'Background-only private probe never shows a native window; native page-hidden is not claimed. The connected motion owner has separate document-hidden regression evidence.'
       check(refinement ? 'actual-reduced-motion-offscreen-background-probe' : 'actual-reduced-motion-offscreen-document-hidden', { reduced: reduced.ui.entry.motion, offscreen: offscreen.ui.entry.motion, documentHidden: visibility.hidden?.facts.ui.entry.motion ?? null, visibility })
       win.setContentSize(420, 820); await pause(100); await visible(); await click(button('Show Mote avatars only')); await capture('paperdoll-narrow-idle')
-      await select(quiet); await edit(); await click(dialogButton('Make a face')); await click(dialogButton('Color · lavender')); await click(dialogButton('Save avatar'))
+      await colorProof('narrow')
+      await select(quiet);const sleepingSeed=await colorProof('sleep-seed');if(avatarColor){const footer=sleepingSeed.rows.find(row=>row.owner==='footer');assert.equal(footer.paint,'glyph');assert.equal(footer.status,'No Agent yet');assert.equal(footer.expression,'sleep')}
+      await edit(); await click(dialogButton('Make a face')); await click(dialogButton('Color · lavender')); await click(dialogButton('Save avatar'))
       await until('!document.querySelector(".space-icon-picker")', 'confirmed sleeping face')
       await open(); await animate('sleep')
       if (refinement) await gazeFace('[data-pmo-teams-topic-launcher] button [data-mote-expression]', 'sleep-entry', 'sleep')
@@ -351,12 +386,14 @@ app.whenReady().then(async () => {
       assert.deepEqual(initial.icons, seed.flushed.facts.icons, 'Fresh process ordinary initialization reads the exact saved choices')
       protectedSame(seed.flushed.facts, initial); assert.deepEqual(result.image, seed.image, 'Same original custom image survives the fresh process')
       win.setContentSize(420, 820); await open(); await animate('sleep'); await capture('paperdoll-restored-sleep')
+      await colorProof('restored-sleep')
       const sleep = await facts(); assert.equal(sleep.ui.topicId, quiet); assert.ok(sleep.ui.entry.motion.animations.length > 0)
       await click(button('Close Mote')); await until('!window.motePaperdollProof.facts().ui.visible', 'hidden panel');
       const hidden = await facts(); assert.equal(hidden.ui.faces.filter(face => face.rect?.width > 0 && face.rect?.height > 0).length, 1, 'Only the always-visible entry consumes motion; hidden chooser is unmounted')
       check('fresh-process-and-hidden-face', { initial: initial.initialization, hidden: hidden.ui.faces })
       await select(primary); await call('status', 'unknown'); await activeExpression('unknown')
       const unknown = await facts(); assert.equal(unknown.ui.entry.motion.animations.filter(animation => animation.name !== null).length, 0)
+      await colorProof('unknown')
       await edit(); await click(dialogButton('Mouth · grin')); saveFailure = true; await click(dialogButton('Save avatar'))
       await until('!!document.querySelector(".space-icon-picker [role=alert]")', 'explicit unconfirmed notice')
       const failed = await facts(); assert.deepEqual(failed.icons, unknown.icons, 'Unconfirmed Save keeps all original chosen faces'); protectedSame(unknown, failed)
@@ -365,6 +402,12 @@ app.whenReady().then(async () => {
       const confirmed = await facts(); assert.equal(confirmed.icons[keyFor(primary)].mouth, 'grin'); protectedSame(failed, confirmed)
       await select(custom); assert.equal((await facts()).ui.entry.source, 'image', 'Original custom user image retains precedence')
       assert.ok((await facts()).ui.entry.image.startsWith('data:image/png;base64,')); await select(primary)
+      if(avatarColor){
+        win.setContentSize(980,820);await pause(120);const beforeSpace=await facts();await click(button('Open Mote Space'));await until('!window.motePaperdollProof.facts().ui.visible','actual Space entry');await call('showSpaceNavigation');await pause(180)
+        const spaceColors=await colorProof('space-current-identity');assert.ok(spaceColors.rows.some(row=>row.owner==='space'),'Actual Space tree identity receives the same color rule')
+        const afterSpace=await facts();assert.deepEqual(afterSpace.icons,beforeSpace.icons);assert.deepEqual(afterSpace.protected.drafts,beforeSpace.protected.drafts);assert.deepEqual(afterSpace.protected.controls,beforeSpace.protected.controls);assert.deepEqual(afterSpace.protected.tabs,beforeSpace.protected.tabs)
+        check('color-through-original-space-entry',{before:beforeSpace.protected,after:afterSpace.protected});await open()
+      }
       await call('exactRestoring'); await activeExpression('unknown'); assert.equal((await facts()).ui.entry.motion.animations.filter(animation => animation.name !== null).length, 0)
       check('save-failure-retry-image-and-restoring', { failed: failed.ui, confirmed: confirmed.icons, final: (await facts()).ui })
     }

@@ -509,7 +509,7 @@ function SurfaceContent({
 }: {
   surface: WorkbenchSurface
   tabId: string
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -540,7 +540,7 @@ function SurfaceContent({
         onPresentationSelected={onBrowserInputSelected}
         linkOrigin={{
           workspaceId: surface.workspaceId,
-          tabGroupId: groupId,
+          ...(groupId ? { tabGroupId: groupId } : {}),
           tabId,
           regionId: surface.regionId,
           sessionId: surface.sessionId
@@ -585,6 +585,10 @@ function SurfaceContent({
   // render a sixth kind as an empty start page — the pane looks fine and does the wrong thing, with no
   // compile error. Naming the case lets `assertUnreachableSurface` refuse to type-check that day.
   if (surface.kind === 'launcher') {
+    if (!groupId) return <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      step: 'Original launcher retained', mode: 'Its Group placement is not confirmed. No new Session has been started.',
+      restore: 'Choose an existing discussion or the original Group in Space before starting work here.'
+    } }} />
     return (
       <NewTabSurface
         tabGroupId={groupId}
@@ -601,7 +605,7 @@ type RegionSwapTargets = Parameters<typeof regionSwapMenuEntries>[0]['regions']
 
 function WorkbenchRegionTree(props: {
   tab: WorkbenchTab
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -640,7 +644,7 @@ function WorkbenchRegionNode({
   nodePath: string
   tab: WorkbenchTab
   swapTargets: RegionSwapTargets
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -718,7 +722,7 @@ function WorkbenchRegionContent({
   node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
   tab: WorkbenchTab
   swapTargets: RegionSwapTargets
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -956,7 +960,7 @@ function WorkbenchRegionBranch({
   nodePath: string
   tab: WorkbenchTab
   swapTargets: RegionSwapTargets
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
@@ -1431,6 +1435,51 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
   return direction ? { groupId: pane.dataset.paneGroupId!, direction } : null
 }
 
+/** No replacement selection: confirmed discussion controls remain available beside the exact retained target. */
+function MoteRetainedDiscussion({ workbenchRef, workspaceId, tabs, layout, original, targetTabId, viewHostPrefix, onNewTab }: {
+  workbenchRef: React.RefObject<HTMLDivElement | null>; workspaceId: string
+  tabs: Readonly<Record<string, WorkbenchTab>>; layout: WorkspaceLayout | undefined
+  original: WorkbenchTab | undefined; targetTabId: string; viewHostPrefix: string
+  onNewTab(groupId: string): void
+}) {
+  const mote = useContext(MoteWorkfaceContext)
+  const navigation = useMoteNavigationWidth(Boolean(mote))
+  const open = !original || navigation.open
+  const groups = layout?.groups.filter(group => group.tabOrder.length > 0) ?? []
+  return <div ref={workbenchRef} className="workspace-workbench workspace-workbench--merged" data-mote-retained-reference={targetTabId}
+    data-mote-navigation-open={mote ? String(open) : undefined} data-mote-navigation-narrow={mote ? String(navigation.narrow) : undefined}
+    onKeyDown={mote ? navigation.onKeyDown : undefined}>
+    <header className="pane-tabbar pane-tabbar--root">
+      {mote && original ? <button type="button" className="pane-action mote-navigation-toggle" aria-label="Show Mote discussions"
+        aria-expanded={open} onClick={navigation.toggle}><PanelLeft size={14} /></button> : null}
+      {original ? <MoteDiscussionTitle tab={original} /> : <span className="mote-discussion-title">Choose a discussion</span>}
+    </header>
+    <div className="service-disclosure-home">
+      <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['local:retained-discussion', workspaceId, targetTabId]),
+        id: 'retained-discussion', occurrence: targetTabId, cause: 'placement-unconfirmed', visible: true }}
+        notice={{ kind: 'indeterminate', notice: {
+          step: 'Original Tab retained', mode: original ? 'The original discussion is kept here. Its Group placement is not confirmed.'
+            : 'The saved discussion is not currently available. Its reference and your existing Sessions are kept.',
+          restore: 'Choose an existing discussion below, or reopen its original location in Space.'
+        } }} />
+    </div>
+    <div ref={navigation.ref} className={mote ? 'pane-content pane-content--mote' : 'pane-content'}>
+      {mote ? <aside className="mote-conversations" aria-label={mote.topic.title + ' discussions'}>
+        <MoteWorkfaceNavigation root onNewTab={() => { if (layout) onNewTab(layout.activeGroupId) }}>
+          {groups.map(group => <SortableContext key={group.id} items={group.tabOrder} strategy={verticalListSortingStrategy}>
+            <div className="mote-conversations__tabs">{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
+              workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} />] : [])}</div>
+          </SortableContext>)}
+        </MoteWorkfaceNavigation>
+      </aside> : null}
+      <div className="pane-body">
+        {original ? <div id={`${viewHostPrefix}:${targetTabId}`} data-workbench-tab-id={targetTabId} className="workbench-tab-slot" />
+          : <div className="pane-state"><strong>Choose a discussion</strong><span>Your existing discussions remain available.</span></div>}
+      </div>
+    </div>
+  </div>
+}
+
 export function WorkspaceWorkbench({
   workspaceId,
   interactiveResize = false,
@@ -1616,13 +1665,13 @@ export function WorkspaceWorkbench({
         state.reportError(new Error('The exact Zone resource Group is unavailable here. Existing content is kept; create its Tab from the original resource workface.'))
         return
       }
-      const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, tabGroupId: groupId, zoneId: zone.zoneId, reveal: false })
+      const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, ...(groupId ? { tabGroupId: groupId } : {}), zoneId: zone.zoneId, reveal: false })
       const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
       if (tab) projection.onSelect({ displayWorkspaceId: workspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId })
       return
     }
     const projectedTopicId = topicId ?? moteContext?.topic.id ?? (layout ? activeTopicIdFromLayout(layout, tabs) : undefined)
-    const tabId = openLauncher({ workspaceId, tabGroupId: groupId,
+    const tabId = openLauncher({ workspaceId, ...(groupId ? { tabGroupId: groupId } : {}),
       ...(projectedTopicId ? { topicId: projectedTopicId } : {}), reveal: viewOwnership === 'owner' })
     if (tabId) onTabSelect?.(tabId)
   }
@@ -1638,11 +1687,13 @@ export function WorkspaceWorkbench({
   }
   const projectedTab = projectionTabId ? tabs[projectionTabId] : undefined
   if (viewOwnership === 'projection' && !projection && projectionTabId && (!projectedTab || projectedTab.workspaceId !== workspaceId ||
-    topicId && projectedTab.topicId !== topicId || !ownerByTab.has(projectionTabId))) {
-    return <div ref={workbenchRef} className="workspace-workbench">
-      <div role="status" className="workbench-restore-notice">Original Tab retained · Its placement in this context is not available · Reopen this context in Space to continue recovery</div>
-      <div id={`${viewHostPrefix}:${projectionTabId}`} data-workbench-tab-id={projectionTabId} className="workbench-tab-slot" />
-    </div>
+    topicId && projectedTab.topicId !== topicId || !homeReferences.get(projectionTabId))) {
+    const original = projectedTab?.workspaceId === workspaceId && (!topicId || projectedTab.topicId === topicId) ? projectedTab : undefined
+    return <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart}
+      onDragMove={onDragMove} onDragEnd={onDragEnd} onDragCancel={() => { setActiveDrag(null); setSplitTarget(null) }}>
+      <MoteRetainedDiscussion workbenchRef={workbenchRef} workspaceId={workspaceId} tabs={tabs} layout={layout ?? undefined}
+        original={original} targetTabId={projectionTabId} viewHostPrefix={viewHostPrefix} onNewTab={newTab} />
+    </DndContext>
   }
   const projectionNotice = zoneLayout?.issues.length ? <ServiceWindowNotice
     notice={{ kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: zoneLayout.issues.join(' '),
@@ -1761,16 +1812,21 @@ export function WorkspaceWorkbench({
           projection={tabProjection?.projection}
           reference={targetId === null ? homeReferences.get(tab.id) ?? undefined : projection?.reference}
           retainedRegionId={tabProjection?.retainedRegionId ?? (targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null)}>
-          {originalOwnerId && !confirmedDisplayGroup && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
-          {ownerId ? <WorkbenchRegionTree
-            tab={tab} groupId={ownerId} regionTarget={regionTarget}
+          {originalOwnerId && !confirmedDisplayGroup && !homeReferences.get(tab.id) && !tabProjection ? <ServiceWindowNotice
+            disclosure={{ scope: JSON.stringify(['local:retained-tab-placement', workspaceId, tab.id]), id: 'tab-placement',
+              occurrence: tab.id, cause: 'placement-unconfirmed', visible: tabVisible }}
+            notice={{ kind: 'indeterminate', notice: { step: 'Original display location unconfirmed',
+              mode: 'The original Tab and Regions remain available. Group placement is not confirmed.',
+              restore: 'Choose its original location in Space to restore placement-dependent actions.' } }} /> : null}
+          <WorkbenchRegionTree
+            tab={tab} groupId={confirmedDisplayGroup ?? homeReferences.get(tab.id)?.groupId} regionTarget={regionTarget}
             headerPortalTargetId={projection?.surface === 'focus' && targetId && storedLayout && ownerByTab.has(tab.id) &&
               tab.layout.root.type === 'leaf' && tab.regions[tab.layout.root.regionId]?.kind === 'agent'
               ? projection?.headerPortalTargetId ?? `${targetId}-header` : null}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}
-          /> : <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />}
+          />
         </StableWorkbenchView>
         </WorkbenchBrowserTargetsContext.Provider>
       })}

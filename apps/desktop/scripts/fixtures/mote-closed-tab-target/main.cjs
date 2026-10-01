@@ -6,6 +6,7 @@ const { app, BrowserWindow } = require('electron')
 const [html, privateRoot, phase, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
+const retainedSurface = process.env.MOTE_CLOSED_TAB_RETAINED_SURFACE === '1'
 const result = { passed: false, pid: process.pid, phase, frames: [], userRunTouched: false,
   boundary: 'Complete production App and real ordinary durable initialization; controlled public Session/API facts only. No Native Browser, Core/ctxmux or actual CLI survival claim.' }
 app.on('window-all-closed', () => { result.unexpectedWindowClosure = { step: result.step }; result.passed = false })
@@ -23,7 +24,7 @@ app.whenReady().then(async () => {
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write('Renderer: ' + message + '\n') })
     result.step = 'load-complete-production-App'
-    await bounded(win.loadFile(html, { query: { phase } }), result.step)
+    await bounded(win.loadFile(html, { query: { phase, retained: retainedSurface ? '1' : '0' } }), result.step)
     const read = expression => bounded(win.webContents.executeJavaScript(expression), 'Renderer observation')
     const until = async expression => {
       const deadline = Date.now() + 10000
@@ -74,7 +75,111 @@ app.whenReady().then(async () => {
     const forbidden = current => current.calls.filter(call => ['stop', 'launchAgent', 'launchTerminal', 'write', 'submitPrompt'].includes(call.operation))
     result.initial = await facts()
     assert.equal(result.initial.initialization.initializeCalls, 1)
-    if (phase === 'seed') {
+    if (retainedSurface) {
+      const primary = 'launcher:leader', target = 'mote-primary-tab', neighbor = 'mote-neighbor-tab'
+      const retained = () => read(`(()=>{const p=${panel},e=p.querySelector('.composer__editor .tiptap'),w=p.querySelector('[data-mote-workface]'),r=e?.getBoundingClientRect(),hit=r?document.elementFromPoint(r.x+r.width/2,r.y+r.height/2):null;return{topic:w?.dataset.moteWorkface,tab:p.dataset.moteTargetTab,notice:!!p.querySelector('.service-window'),body:!!p.querySelector('[data-message-id="private-mote-reply"]'),draft:e?.textContent,editorWidth:r?.width,editorHit:!!e&&!!hit&&(e===hit||e.contains(hit)),sameEditor:e===window.retainedOriginalEditor,discussions:p.textContent.includes('Discussions'),choices:[...p.querySelectorAll('.mote-conversations button.workbench-tab')].map(e=>e.dataset.workbenchTabId)}})()`)
+      const selectDiscussion = async id => {
+        const navigation = panel + '.querySelector(".mote-navigation-toggle")'
+        if (await read(navigation + '?.getAttribute("aria-expanded")==="false"')) await click(navigation)
+        await click(panel + '.querySelector(' + JSON.stringify('.mote-conversations button[data-workbench-tab-id="' + id + '"]') + ')')
+        return visible(primary, id)
+      }
+      const space = () => read(`(()=>{const w=document.querySelector('.workspace-workbench-slot[data-visible="true"] [data-mote-workface]'),e=w?.querySelector('.composer__editor .tiptap'),r=e?.getBoundingClientRect(),hit=r?document.elementFromPoint(r.x+r.width/2,r.y+r.height/2):null;return{topic:w?.dataset.moteWorkface,identity:w?.querySelector('.mote-conversations__identity strong')?.textContent,discussions:w?.textContent.includes('Discussions'),draft:e?.textContent,editorWidth:r?.width,editorHit:!!e&&!!hit&&(e===hit||e.contains(hit)),sameEditor:e===window.retainedOriginalEditor,identityWidth:w?.querySelector('.mote-conversations__identity strong')?.getBoundingClientRect().width,navigationWidth:w?.querySelector('.mote-conversations')?.getBoundingClientRect().width,tabs:[...w?.querySelectorAll('.mote-conversations button.workbench-tab')??[]].map(e=>e.dataset.workbenchTabId)}})()`)
+      const ensureSpaceNavigation = async () => {
+        // Let the original width observer choose its initial narrow state before
+        // the explicit user toggle; otherwise its initial effect can close it.
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const toggle = `document.querySelector('.workspace-workbench-slot[data-visible="true"] .mote-navigation-toggle')`
+        if (await read(toggle + '?.getAttribute("aria-expanded")==="false"')) await click(toggle)
+        await until(`document.querySelector('.workspace-workbench-slot[data-visible="true"] [data-mote-navigation-open="true"] .mote-conversations')?.getBoundingClientRect().width>0`)
+      }
+      if (phase === 'seed') {
+        result.step = 'known-original-Tab-with-unconfirmed-Group-keeps-original-body'
+        await visible(primary, target)
+        await until(panel + '.querySelector("[data-message-id=private-mote-reply]") && ' + panel + '.querySelector(".composer__editor .tiptap")')
+        await read('window.retainedOriginalEditor=' + panel + '.querySelector(".composer__editor .tiptap")')
+        const before = await facts()
+        await read('window.closedTabProof.suspendOriginalPlacement()')
+        await until(panel + `.querySelector('[data-mote-retained-reference="mote-primary-tab"]')`)
+        result.unplaced = await visible(primary, target)
+        result.unplacedQualification = await retained()
+        for (const key of ['tabs', 'drafts', 'outbox', 'runs', 'viewModes']) assert.deepEqual(result.unplaced[key], before[key], 'Unconfirmed placement retains original ' + key)
+        assert.equal(result.unplacedQualification.notice, true); assert.equal(result.unplacedQualification.body, true)
+        assert.equal(result.unplacedQualification.sameEditor, true); assert.equal(result.unplacedQualification.editorHit, true)
+        assert.equal(result.unplacedQualification.draft, 'Original unsent draft · mote-primary')
+        assert.equal(result.unplacedQualification.discussions, true)
+        await capture('wide-original-unconfirmed-placement')
+        win.setContentSize(640, 680); await until('innerWidth===640')
+        result.unplacedNarrow = await retained(); assert.equal(result.unplacedNarrow.editorHit, true)
+        assert.equal(result.unplacedNarrow.draft, 'Original unsent draft · mote-primary')
+        await capture('narrow-original-unconfirmed-placement')
+        win.setContentSize(1100, 760); await until('innerWidth===1100')
+        await read('window.closedTabProof.restoreOriginalPlacement()')
+        await until('!' + panel + '.querySelector("[data-mote-retained-reference]")')
+        result.step = 'actual-SpaceTopicsTree-Mote-click-clears-only-original-stale-choice'
+        await click(panel + `.querySelector('[aria-label="Close Mote"]')`)
+        await until('!' + panel + '.matches(":popover-open")')
+        await read('window.closedTabProof.showOriginalSpaceTree()')
+        await until(`document.querySelector('[data-space-nav="topic:launcher:leader"]')`)
+        const beforeTree = await facts()
+        await click(`document.querySelector('[data-space-nav="topic:launcher:leader"]')`)
+        await until(`document.querySelector('.workspace-workbench-slot[data-visible="true"] [data-mote-workface="launcher:leader"] .composer__editor .tiptap')`)
+        await ensureSpaceNavigation()
+        result.spaceTree = await space()
+        assert.equal(result.spaceTree.topic, primary); assert.equal(result.spaceTree.identity, 'Mote')
+        assert.equal(result.spaceTree.discussions, true); assert.ok(result.spaceTree.identityWidth > 0 && result.spaceTree.navigationWidth > 0, 'Original Mote identity and Discussions are visibly presented'); assert.equal(result.spaceTree.editorHit, true); assert.equal(result.spaceTree.sameEditor, true)
+        assert.equal(result.spaceTree.draft, 'Original unsent draft · mote-primary')
+        assert.deepEqual(result.spaceTree.tabs, [target, neighbor])
+        const afterTree = await facts(); assert.equal(afterTree.selection, null)
+        assert.deepEqual(afterTree.tabs, beforeTree.tabs); assert.deepEqual(afterTree.drafts, beforeTree.drafts)
+        assert.ok(afterTree.calls.some(call=>call.operation==='ensureMote' && call.topicId===primary), 'Actual tree route ensured the original Mote')
+        await capture('wide-actual-Space-tree-Mote-workface')
+        win.setContentSize(640, 680); await until('innerWidth===640')
+        await ensureSpaceNavigation(); result.spaceTreeNarrow = await space()
+        assert.ok(result.spaceTreeNarrow.navigationWidth > 0 && result.spaceTreeNarrow.identityWidth > 0); assert.equal(result.spaceTreeNarrow.editorHit, true); assert.equal(result.spaceTreeNarrow.draft, result.spaceTree.draft)
+        await capture('narrow-actual-Space-tree-Mote-workface')
+        win.setContentSize(1100, 760); await until('innerWidth===1100')
+        result.step = 'actual-floating-Open-in-Space-keeps-exact-original-Tab'
+        await click(entry); await visible(primary, target)
+        await click(panel + '.querySelector("button[aria-label=\'Open Mote Space\']")')
+        await until('!' + panel + '.matches(":popover-open")')
+        await ensureSpaceNavigation(); result.openSpace = await space()
+        assert.equal(result.openSpace.topic, primary); assert.ok(result.openSpace.navigationWidth > 0 && result.openSpace.identityWidth > 0); assert.equal(result.openSpace.sameEditor, true)
+        assert.equal(result.openSpace.editorHit, true); assert.equal(result.openSpace.draft, result.spaceTree.draft)
+        assert.deepEqual((await facts()).tabs, beforeTree.tabs)
+        await capture('wide-actual-Open-in-Space-original-discussion')
+        await click(entry); await visible(primary, target)
+        result.step = 'missing-saved-target-is-kept-until-explicit-original-discussion-choice'
+        const beforeMissing = await facts()
+        await read('window.closedTabProof.showUnknown()')
+        await visible(primary, 'saved-unavailable-tab')
+        result.missing = await retained()
+        assert.equal(result.missing.notice, true); assert.equal(result.missing.body, false)
+        assert.deepEqual(result.missing.choices, [target, neighbor]); assert.equal(result.missing.discussions, true)
+        for (const key of ['tabs', 'drafts', 'outbox', 'runs', 'viewModes']) assert.deepEqual((await facts())[key], beforeMissing[key])
+        await capture('wide-missing-original-with-actionable-Discussions')
+        win.setContentSize(640, 680); await until('innerWidth===640')
+        await capture('narrow-missing-original-with-actionable-Discussions')
+        win.setContentSize(1100, 760); await until('innerWidth===1100')
+        result.final = await selectDiscussion(neighbor)
+        assert.deepEqual(result.final.tabs, beforeMissing.tabs); assert.deepEqual(result.final.drafts, beforeMissing.drafts)
+        assert.deepEqual(result.final.runs, beforeMissing.runs)
+        await capture('wide-explicit-original-discussion-selection')
+      } else {
+        result.step = 'second-real-process-restores-explicit-original-discussion-selection'
+        const prior = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8')).final
+        const current = await visible(primary, neighbor)
+        assert.equal(current.initialization.seedApplied, false)
+        assert.equal(current.initialization.initialFloating.targetTabId, neighbor)
+        assert.ok(current.initialization.initialDurable?.state.restoredWorkbench)
+        for (const key of ['tabs', 'layouts', 'drafts', 'outbox', 'viewModes', 'activeWorkspaceId', 'mainSurface']) assert.deepEqual(current[key], prior[key], 'Restart keeps original ' + key)
+        assert.deepEqual(current.runs, prior.runs); assert.deepEqual(current.focus.execution, prior.focus.execution)
+        assert.ok(current.calls.some(call=>call.operation==='recover' && call.sessionId==='mote-neighbor' && call.runId==='original-run-mote-neighbor'))
+        await until(panel + '.querySelector(".composer__editor .tiptap")?.textContent==="Original unsent draft · mote-neighbor"')
+        await capture('wide-restarted-explicit-original-discussion')
+        result.final = await facts()
+      }
+    } else if (phase === 'seed') {
       assert.equal(result.initial.initialization.seedApplied, true)
       assert.deepEqual(Object.keys(result.initial.tabs).sort(), ['custom-mote-tab', 'mote-neighbor-tab', 'mote-primary-tab', 'original-project-tab'])
       await visible('launcher:leader', 'mote-primary-tab')
@@ -281,9 +386,9 @@ app.whenReady().then(async () => {
     assert.deepEqual(result.final.outbox, result.initial.outbox)
     assert.deepEqual(result.final.runs, result.initial.runs)
     assert.deepEqual(forbidden(result.final), [])
-    assert.equal(result.final.tabs['mote-primary-tab'], undefined); assert.equal(result.final.tabs['custom-mote-tab'], undefined)
+    if (!retainedSurface) { assert.equal(result.final.tabs['mote-primary-tab'], undefined); assert.equal(result.final.tabs['custom-mote-tab'], undefined) }
     result.step = 'wait-real-durable-writer-before-exit'
-    await until('(()=>{const s=JSON.parse(localStorage.getItem("agentmux-workbench-v1"))?.state,c=window.closedTabProof.facts();return !!s?.restoredWorkbench?.tabs["original-project-tab"] && !s.restoredWorkbench.tabs["mote-primary-tab"] && !s.restoredWorkbench.tabs["custom-mote-tab"] && JSON.stringify(s.restoredWorkbench.layouts)===JSON.stringify(c.layouts) && JSON.stringify(s.agentComposerDrafts)===JSON.stringify(c.drafts) && JSON.stringify(s.agentFocus.execution)===JSON.stringify(c.focus.execution) && s.activeWorkspaceId===c.activeWorkspaceId && s.mainSurface===c.mainSurface && JSON.stringify(s.viewModes)===JSON.stringify(c.viewModes) && JSON.parse(localStorage.getItem("agentmux.leader-topic-floating.v1")).targetTabId===null})()')
+    await until('(()=>{const s=JSON.parse(localStorage.getItem("agentmux-workbench-v1"))?.state,c=window.closedTabProof.facts();return !!s?.restoredWorkbench?.tabs["original-project-tab"] && JSON.stringify(Object.keys(s.restoredWorkbench.tabs).sort())===JSON.stringify(Object.keys(c.tabs).sort()) && JSON.stringify(s.restoredWorkbench.layouts)===JSON.stringify(c.layouts) && JSON.stringify(s.agentComposerDrafts)===JSON.stringify(c.drafts) && JSON.stringify(s.agentFocus.execution)===JSON.stringify(c.focus.execution) && s.activeWorkspaceId===c.activeWorkspaceId && s.mainSurface===c.mainSurface && JSON.stringify(s.viewModes)===JSON.stringify(c.viewModes) && JSON.stringify(JSON.parse(localStorage.getItem("agentmux.leader-topic-floating.v1")))===JSON.stringify(c.floating)})()')
     await win.webContents.session.flushStorageData()
     result.durable = await read('JSON.parse(localStorage.getItem("agentmux-workbench-v1"))')
     assert.equal(result.unexpectedWindowClosure, undefined)

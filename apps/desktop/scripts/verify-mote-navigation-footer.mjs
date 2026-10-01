@@ -13,6 +13,7 @@ const require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
 const avatarRefinement = process.env.AGENTMUX_AVATAR_REFINEMENT === '1'
 const avatarFromChooser = process.env.AGENTMUX_AVATAR_FROM_CHOOSER === '1'
+const avatarColor = process.env.AGENTMUX_MOTE_AVATAR_COLOR === '1'
 assert.ok(!avatarFromChooser || avatarRefinement, 'Joint chooser proof uses the background-only avatar refinement mode')
 let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, moteIdentity = false, moteArchive = false, motePaperdoll = false, reuseRenderer = null
 if (args[0] === '--reuse') {
@@ -39,6 +40,7 @@ if (args.length) {
     'narrow-long-names-all-motes-cards', 'narrow-avatars-custom-original-draft',
     'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
 }
+assert.ok(!avatarColor || motePaperdoll && avatarRefinement, 'Color proof extends the maintained background-only paperdoll driver')
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-presentation-'))
 const evidence = join(repository, '.tmp/mote-navigation-footer', ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -360,6 +362,12 @@ try {
     assert.equal(result.renderer.phases.length, 2)
     assert.ok(result.renderer.phases[0].renderer.dynamic.tool.length >= 3, 'Real intermediate tool frames are nonempty')
     for (const frame of result.renderer.phases[0].renderer.dynamic.tool) assert.equal(hash(await readFile(join(evidence, 'seed', frame.file))), frame.sha256)
+    if (avatarColor) {
+      for (const { phase, renderer } of result.renderer.phases) {
+        assert.ok(renderer.avatarColor?.samples.length >= (phase === 'seed' ? 7 : 3), 'Actual identity color observations are nonempty in both processes')
+        for (const frame of renderer.refinement.frames) assert.equal(hash(await readFile(join(evidence, phase, frame.file))), frame.sha256, 'Supplemental actual color/motion frame is byte-bound')
+      }
+    }
   } else if (moteArchive) {
     assert.ok(result.renderer.checks.length >= 10, 'Archive proof has actual controls, original FS, failure and both process results')
     assert.equal(result.renderer.phases.length, 2)
@@ -461,6 +469,7 @@ try {
     motePaperdoll ? '# Mote face and truthful expressions — independent actual look pending' : moteArchive ? '# Mote archive and same-object restore — independent actual look pending' : moteIdentity ? '# Mote avatars and primary identity — independent actual look pending' : '# Mote rail / footer / Settings — independent actual look pending', '',
     `Capture passed: ${result.passed}. Stage: ${result.stage}. This is ${moteArchive || motePaperdoll ? 'one private Renderer compilation consumed by two private processes' : 'a single private Renderer capture'}, not native/OS/Core Run sign-off.`, '',
     ...(result.renderer?.frames ?? []).map(frame => `- ${frame.name}: [Actual complete Renderer frame](${frame.file}) — ${frame.sha256}`), '',
+    ...(avatarColor ? result.renderer.phases.flatMap(({ phase, renderer }) => renderer.refinement.frames.filter(frame => frame.name.startsWith('avatar-color-')).map(frame => `- ${frame.name}: [Actual complete identity color frame](${phase}/${frame.file}) — ${frame.sha256}`)) : []),
     motePaperdoll ? 'Open all six full frames and original native-animation intermediate frames. Review original dragon/image, compact real face editor, saved thinking/tool face, narrow Idle, new-process sleep, unknown and actionable save failure. React profiling commit evidence concerns actual product face consumers, while original App events still update. No Core Run or user App recovery claim.' : moteArchive ? 'Open all five complete frames. Review actual Archive menu inside the native HTML popover, wide cards/narrow avatars, selected archived original input with Restore, Space Show archived/same-object recovery, and compact actionable failure/unknown notice. Fresh-process original tabs/layout/drafts and actual FS readback are in seed/restore receipts. No old matrix, healthy Core Run or native-stage claim.' : moteIdentity ? 'Open all six complete frames. Review the same primary/custom images at 980/420 in cards/avatars, the original circle crop and actionable saving-unconfirmed dialog, visible primary identity, retained real input and same full Space identity. Current Source owners and real private filesystem asset proof are bounded in renderer.json; no healthy App/Core Run claim.' : floatingResize ? 'Open all five complete frames. Review actual corner handle discoverability/hit area, 10px top/right frame, wide/narrow card/avatar original workface, advisory storage failure and usable original input. Only floating resize scope is new.' : footerOnly ? 'Open all five complete frames. Review actual nonzero Focus counts and neighbors at 320/420/560/980, dark/light 320, complete low bar/Mote circle and right-side actions. Only the Footer count supplement is new.' :
       'Open every frame. Review both rail forms, complete objects and original input, narrow long names, dark/light boundary, low bar and complete circle/status/focus, and Settings operability.',
     'Original inputs/raw CSS/compiled bytes and actual geometry/events are in receipt.json. Capture success does not constitute aesthetic approval.'

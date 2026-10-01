@@ -6,13 +6,13 @@ import { join, relative, resolve } from 'node:path'
 
 const repository = resolve(import.meta.dirname, '../../..')
 const args = process.argv.slice(2), slice = args[0] === '--slice' ? args[1] : 'workspace'
-assert.ok(args.length === 0 || args.length === 2 && ['overlays', 'identity-actions'].includes(slice), 'Use [--slice overlays|identity-actions]')
+assert.ok(args.length === 0 || args.length === 2 && ['overlays', 'identity-actions', 'retained-surface'].includes(slice), 'Use [--slice overlays|identity-actions|retained-surface]')
 const evidence = join(repository, '.tmp/mote-chat-workspace', slice + '-' + globalThis.crypto.randomUUID())
 await mkdir(join(repository, '.tmp'), { recursive: true }); await mkdir(evidence, { recursive: true })
 const clone = await mkdtemp(join(repository, '.tmp/mote-chat-source-'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const src = 'apps/desktop/src/renderer/src/'
-const tests = slice === 'overlays' ? ['mote-floating-actions.test.tsx', 'window-overlay-host-cost.test.tsx', 'native-overlay-regions.test.ts', 'native-overlay-pointer.test.tsx', 'window-overlay-layer-contract.test.tsx'] : slice === 'identity-actions' ? ['mote-identity-actions.test.tsx'] : ['mote-chat-workspace.test.tsx', 'mote-file-scope.test.tsx', 'mote-conversation-identity.test.tsx', 'mote-navigation-rail.test.tsx', 'mote-closed-tab-target.test.tsx', 'mote-default-dialogue.test.tsx']
+const tests = slice === 'retained-surface' ? ['mote-chat-workspace.test.tsx', 'mote-closed-tab-target.test.tsx', 'open-http-link-store.test.ts', 'session-placement.test.ts'] : slice === 'overlays' ? ['mote-floating-actions.test.tsx', 'window-overlay-host-cost.test.tsx', 'native-overlay-regions.test.ts', 'native-overlay-pointer.test.tsx', 'window-overlay-layer-contract.test.tsx'] : slice === 'identity-actions' ? ['mote-identity-actions.test.tsx'] : ['mote-chat-workspace.test.tsx', 'mote-file-scope.test.tsx', 'mote-conversation-identity.test.tsx', 'mote-navigation-rail.test.tsx', 'mote-closed-tab-target.test.tsx', 'mote-default-dialogue.test.tsx']
 const result = { schema: 'agentmux.mote-chat-workspace-owning.v1', passed: false, slice,
   userAppOrRunTouched: false, callers: {}, cases: [], limitations: [
     'Actual App/Workbench/Composer and file/close owners with controlled external APIs. DOM popover transport is controlled; actual Chromium top-layer hit testing and independent visual review remain separate evidence.',
@@ -36,7 +36,16 @@ async function sources(directory) {
   }
   return found
 }
-const mutations = slice === 'overlays' ? [
+const mutations = slice === 'retained-surface' ? [
+  ['retained-discussion-controls', 'components/WorkspaceWorkbench.tsx', '<MoteRetainedDiscussion workbenchRef={workbenchRef} workspaceId={workspaceId} tabs={tabs} layout={layout ?? undefined}\n        original={original} targetTabId={projectionTabId} viewHostPrefix={viewHostPrefix} onNewTab={newTab} />', '<div>Original Tab retained</div>', 'mote-chat-workspace.test.tsx'],
+  ['exact-saved-unknown-target', 'lib/pmo-teams-topic-floating.ts', 'if (floating.targetTabId) return floating.targetTabId', 'if (floating.targetTabId && tabs[floating.targetTabId]) return floating.targetTabId', 'mote-chat-workspace.test.tsx'],
+  ['unplaced-original-view', 'lib/pmo-teams-topic-floating.ts', 'hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true', 'hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:wrong`, active: floating.open, visible: true', 'mote-chat-workspace.test.tsx'],
+  ['mounted-region-without-group', 'components/WorkspaceWorkbench.tsx', '  const { tab } = props\n  const sessions = useWorkbenchTabSessions(tab)', '  if (!props.groupId) return <div />\n  const { tab } = props\n  const sessions = useWorkbenchTabSessions(tab)', 'mote-chat-workspace.test.tsx'],
+  ['unconfirmed-old-group-is-not-current', 'components/WorkspaceWorkbench.tsx', 'groupId={confirmedDisplayGroup ?? homeReferences.get(tab.id)?.groupId}', 'groupId={ownerId}', 'mote-chat-workspace.test.tsx'],
+  ['explicit-topic-replaces-old-space-choice', 'store.ts', 'if (current.retainedSpatialFocus || current.workbenchSpaceSelection) set', 'if (false) set', 'mote-chat-workspace.test.tsx'],
+  ['late-topic-read-keeps-later-intent', 'store.ts', ' && !laterIntent', '', 'mote-chat-workspace.test.tsx'],
+  ['late-mote-preparation-keeps-later-intent', 'components/SpaceTopicsTree.tsx', 'const cancel = () => controller.abort()', 'const cancel = () => {}', 'mote-chat-workspace.test.tsx']
+] : slice === 'overlays' ? [
   ['native-top-layer-route', 'components/WindowOverlayHost.tsx', 'host.showPopover()', 'void host', 'mote-floating-actions.test.tsx'],
   ['cancel-does-not-close', 'components/WorkspaceWorkbench.tsx', 'onCancel={() => !closing && setPendingClose(null)}', 'onCancel={() => void closing}', 'mote-floating-actions.test.tsx'],
   ['original-close-target', 'components/WorkspaceWorkbench.tsx', 'closeTabs(pendingClose.tabIds, keepAgentSessions)', "closeTabs(['neighbor-tab'], keepAgentSessions)", 'mote-floating-actions.test.tsx'],
@@ -68,7 +77,7 @@ try {
     await mkdir(resolve(clone, path, '..'), { recursive: true }); await symlink(join(repository, path), join(clone, path), 'dir')
   }
   const product = await sources(join(repository, 'apps/desktop/src')); assert.ok(product.length > 0, 'The actual product caller source set is nonempty')
-  const definitions = slice === 'overlays' ? [['resolveOverlayContainer', 'components/WindowOverlayHost.tsx'], ['ConfirmationDialog', 'components/ConfirmationDialog.tsx']] : slice === 'identity-actions' ? [['MoteRenameDialog', 'components/MoteRenameDialog.tsx'], ['renameScratchTopic', 'store.ts'], ['SpaceObjectContextMenu', 'components/SpaceObjectContextMenu.tsx']] : [['MoteWorkface', 'components/MoteWorkface.tsx'], ['useMoteMaterialsActions', 'lib/mote-materials-actions.ts'], ['useMoteWorkfaceScope', 'lib/mote-workface.ts'], ['fileExplorerContains', 'lib/file-explorer-scope.ts'], ['useMoteConversationOwner', 'lib/mote-conversation-identity.ts'], ['moteConversationIdentity', 'lib/mote-conversation-identity.ts'], ['fileNavigationSelection', 'store.ts'], ['subscribePmoTeamsTopicFloatingState', 'lib/pmo-teams-topic-floating.ts']]
+  const definitions = slice === 'retained-surface' ? [['WorkspaceWorkbench', 'components/WorkspaceWorkbench.tsx'], ['SpaceTopicsTree', 'components/SpaceTopicsTree.tsx'], ['pmoTeamsTopicFloatingViewTargets', 'lib/pmo-teams-topic-floating.ts'], ['fileNavigationSelection', 'store.ts'], ['createSessionProjectFileContextSelector', 'lib/session-project-file-context.ts']] : slice === 'overlays' ? [['resolveOverlayContainer', 'components/WindowOverlayHost.tsx'], ['ConfirmationDialog', 'components/ConfirmationDialog.tsx']] : slice === 'identity-actions' ? [['MoteRenameDialog', 'components/MoteRenameDialog.tsx'], ['renameScratchTopic', 'store.ts'], ['SpaceObjectContextMenu', 'components/SpaceObjectContextMenu.tsx']] : [['MoteWorkface', 'components/MoteWorkface.tsx'], ['useMoteMaterialsActions', 'lib/mote-materials-actions.ts'], ['useMoteWorkfaceScope', 'lib/mote-workface.ts'], ['fileExplorerContains', 'lib/file-explorer-scope.ts'], ['useMoteConversationOwner', 'lib/mote-conversation-identity.ts'], ['moteConversationIdentity', 'lib/mote-conversation-identity.ts'], ['fileNavigationSelection', 'store.ts'], ['subscribePmoTeamsTopicFloatingState', 'lib/pmo-teams-topic-floating.ts']]
   for (const [symbol, definition] of definitions) {
     const hits = []
     for (const file of product) if (relative(repository, file) !== src + definition) {

@@ -29,6 +29,8 @@ async function files(directory) {
 }
 const avatar = 'test/mote-paperdoll-avatar.test.tsx', state = 'test/mote-paperdoll-state.test.tsx', motion = 'test/mote-avatar-motion.test.tsx'
 const variants = [
+  ['mote-avatar-color-inherits-dimming', 'apps/desktop/src/renderer/src/styles/chrome.css', 'test/mote-avatar-color.test.tsx', 'original image colors reach', s => s.replace('.space-object-icon[data-space-icon-kind="mote"] img { filter: none; opacity: 1; }', '.space-object-icon[data-space-icon-kind="mote"] img { filter: saturate(.2); opacity: .85; }')],
+  ['mote-avatar-fallback-loses-color', 'apps/desktop/src/renderer/src/styles/chrome.css', 'test/mote-avatar-color.test.tsx', 'fallback and manual identity', s => s.replace('.space-object-icon[data-space-icon-kind="mote"] { color: var(--purple); }', '.space-object-icon[data-space-icon-kind="mote"] { color: var(--text-3); }')],
   ['source-switch-resets-crop', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', 'test/mote-avatar-identity.test.tsx', 'source pages retain', s => s.replace('MoteAvatarCrop key={preview.revision}', "MoteAvatarCrop key={editingFace ? 'face' : preview.revision}")],
   ['face-is-not-first', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('setEditingFace(Boolean(target?.avatarTarget))', 'setEditingFace(false)')],
   ['save-invisible-alternative', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('let choice = draft', 'let choice = alternativeDraft')],
@@ -82,6 +84,7 @@ try {
   }
   const sourceFiles = await files(join(repository, 'apps/desktop/src')); assert.ok(sourceFiles.length > 0)
   for (const [symbol, definition, pattern] of [
+    ['SpaceObjectIcon identity', 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', /<SpaceObjectIcon\s/],
     ['observeMoteMotion', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', /\bobserveMoteMotion\(/],
     ['LiquidSelectionSurface', 'apps/desktop/src/renderer/src/components/settings/LiquidSelectionSurface.tsx', /<LiquidSelectionSurface\s/],
     ['MoteFace', 'apps/desktop/src/renderer/src/components/MoteFace.tsx', /<MoteFace\s/],

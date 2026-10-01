@@ -6,7 +6,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { workbenchProjectionSlotId } from './workbench-projection'
 import { tabGroupForTab } from './workbench-tabs'
 import { layoutForActiveTopic } from './scratch-topic-layout'
-import type { WorkbenchViewTarget, WorkbenchViewTargets } from './workbench-presentation'
+import { workbenchHomePresentationReferences, type WorkbenchViewTarget, type WorkbenchViewTargets } from './workbench-presentation'
 import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { effectiveSessionViewMode, sessionPresentationById } from './session-presentation'
@@ -138,11 +138,16 @@ export function pmoTeamsTopicFloatingViewTargets(
   floating: PmoTeamsTopicFloatingState, tabs: Readonly<Record<string, WorkbenchTab>>,
   layout: WorkspaceLayout | undefined, pmoSessionId: string | null
 ): WorkbenchViewTargets | undefined {
-  if (!(floating.open || floating.preview) || !layout) return undefined
+  if (!(floating.open || floating.preview)) return undefined
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
   const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layout, pmoSessionId)
   const tab = tabId ? tabs[tabId] : undefined
-  if (!tab || tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId || !tabGroupForTab(layout, tab.id)) return undefined
+  if (!tab || tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId) return undefined
+  // Entity and Regions are known; its display location is not. Keep the original View
+  // available without claiming a spatial reference or inventing a Group membership.
+  if (!layout || !workbenchHomePresentationReferences(layout, SCRATCH_WORKSPACE_ID, tabs).get(tab.id)) return { [tab.id]: [{
+    hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true, surface: 'mote'
+  }] }
   const targets: Record<string, WorkbenchViewTarget[]> = {}
   for (const group of layoutForActiveTopic(layout, tabs, topicId, false, tabId).groups) {
     const member = group.activeTabId ? tabs[group.activeTabId] : undefined

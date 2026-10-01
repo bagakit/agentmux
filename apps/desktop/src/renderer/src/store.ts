@@ -818,7 +818,7 @@ type AppState = {
   createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; executorId?: string }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
   setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<void>
-  openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
+  openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<boolean>
   renameScratchTopic(topicId: string, title: string, workspaceId?: string): Promise<ScratchTopicSnapshot>
   /**
    * 给一个 Agent 设用户手改名（传空清除，交还派生链）。只写 `agentNames[sessionId]`，不碰 session id、
@@ -5642,7 +5642,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
     )
     const reveal = options?.reveal ?? true
-    if (reveal && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+    if (reveal && !options?.signal?.aborted) {
+      const current = get()
+      if (current.retainedSpatialFocus || current.workbenchSpaceSelection) set({ retainedSpatialFocus: null,
+        workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+    }
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
@@ -5683,7 +5687,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
         throw cause
       }
-      if (get().tabs[tab.id]?.regions[regionId] !== initialSurface) return
+      if (get().tabs[tab.id]?.regions[regionId] !== initialSurface) return false
       set(current => {
         const currentTab = current.tabs[tab.id]
         if (!currentTab?.topicPreparation || currentTab.regions[regionId] !== initialSurface) return current
@@ -5692,7 +5696,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       if (request?.executorId) await get().launchAgent(request.executorId, request.prompt, groupId, { tabId: tab.id, regionId })
       else if (request) get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. Your request has not been sent; choose an Agent and Start agent in this same Region.'), { kind: 'indeterminate' })
-      return
+      return true
     }
     // Reveal the durable Scratch shell before reading Topic metadata. Filesystem reads are a
     // preparation step, not permission to hide the workbench: if the read is slow or fails, the
@@ -5719,9 +5723,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       })
     }
-    const snapshot = await api.scratch.readTopic(workspace.id, topicId)
+    const selected = fileNavigationSelection(get())
+    let laterIntent = false, released = false
+    let unsubscribe = () => {}
+    const events = ['pointerdown', 'keydown', 'input'] as const
+    const inputOwner = typeof document === 'undefined' ? null : document
+    const release = () => {
+      if (released) return
+      released = true; unsubscribe()
+      if (reveal) for (const event of events) inputOwner?.removeEventListener(event, cancel, true)
+      options?.signal?.removeEventListener('abort', cancel)
+    }
+    const cancel = () => { laterIntent = true; release() }
+    if (reveal) {
+      unsubscribe = useAppStore.subscribe(current => { if (fileNavigationSelection(current) !== selected) cancel() })
+      for (const event of events) inputOwner?.addEventListener(event, cancel, true)
+      options?.signal?.addEventListener('abort', cancel, { once: true })
+      if (options?.signal?.aborted) cancel()
+    }
+    let snapshot: ScratchTopicSnapshot | null
+    try { snapshot = await api.scratch.readTopic(workspace.id, topicId) }
+    finally { release() }
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
-    const mayReveal = reveal && !options?.signal?.aborted
+    const mayReveal = reveal && !options?.signal?.aborted && !laterIntent
+    if (reveal && !mayReveal) return false
     let createdLauncher: WorkbenchTab | undefined
     let placementFailed = false
     set((current) => {
@@ -5788,6 +5813,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         regionId: createdLauncher.layout.activeRegionId
       })
     }
+    return true
   },
   async renameScratchTopic(topicId, title, requestedWorkspaceId) {
     const state = get()
@@ -6735,7 +6761,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         placementError = new Error('Workspace layout is unavailable')
         return current
       }
-      const originGroup = findGroup(layout, placementOrigin.tabGroupId)
+      const originGroup = placementOrigin.tabGroupId ? findGroup(layout, placementOrigin.tabGroupId) : undefined
       if (!originGroup || !groupIds(layout.root).includes(originGroup.id)) {
         placementError = new Error('Link origin Tab Group is no longer available')
         return current
@@ -6745,14 +6771,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           placementOrigin.workspaceId,
           layout,
           current.tabs,
-          placementOrigin.tabGroupId
+          originGroup.id
         )
         const createdTab = createWorkbenchTab(tabId, pendingLauncher)
         const tab = topicId ? { ...createdTab, topicId } : createdTab
         // 落点判定收在 addTabPlacement 里（同一族缺陷的唯一判据）。原先这里写的是
         // `nextLayout === layout` 的身份比较——对这条路径恰好等价，但那个判据认不出
         // 「Tab 已在别处、activateTab 返回同一对象」，换到别的调用点就会把正常路径判成失败。
-        const nextLayout = addTabPlacement(layout, placementOrigin.tabGroupId, tabId)
+        const nextLayout = addTabPlacement(layout, originGroup.id, tabId)
         if (!nextLayout) {
           placementError = new Error('Link destination Tab could not be created')
           return current
@@ -6796,7 +6822,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!planned) throw placementError ?? new Error('Link destination could not be created')
 
     try {
-      await get().createBrowser(placementOrigin.tabGroupId, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId)
+      await get().createBrowser(placementOrigin.tabGroupId!, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId)
     } catch (error) {
       set((current) => {
         const liveTab = current.tabs[tabId]

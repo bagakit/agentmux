@@ -11,6 +11,7 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const fixture = join(desktop, 'scripts/fixtures/mote-closed-tab-target'), require = createRequire(join(desktop, 'package.json'))
 const affectedEmptyOnly = process.argv.includes('--affected-empty-only')
 const overlayActions = process.argv.includes('--overlay-actions')
+const retainedSurface = process.argv.includes('--retained-surface')
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-closed-tab-'))
 const evidence = join(repository, '.tmp/mote-closed-tab-target', ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -38,7 +39,7 @@ const binding = { name: 'bind-closed-tab-current-source', enforce: 'pre', async 
 } }
 let controlledApiTransforms = 0
 const result = { schema: 'agentmux.mote-closed-tab-proof.v1', passed: false, aestheticReview: 'not-performed', userRunTouched: false,
-  phases: [], affectedEmptyOnly, privateProfile: join(privateRoot, 'user-data'), cleanup: null,
+  phases: [], affectedEmptyOnly, retainedSurface, privateProfile: join(privateRoot, 'user-data'), cleanup: null,
   limitations: ['Only controlled public Session/API facts. Real ordinary initialize consumes durable workbench and requests exact retained Session/Run recovery in the second process; no Core/ctxmux/CLI survival claim.',
     'Complete production desktop App branch; no Browser Region is seeded and no Native Browser input/composition claim is made. CDP exercises real Chromium controls, not hardware or OS IME.',
     'Lightweight isolated Renderer compilation, not a formal build/package/install. Screenshot success does not constitute independent aesthetic approval.'] }
@@ -89,7 +90,7 @@ try {
   result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
   result.compiled = compiled; result.controlledApiTransforms = controlledApiTransforms
-  const env = { ...process.env, MOTE_CLOSED_TAB_AFFECTED_EMPTY_ONLY: affectedEmptyOnly ? '1' : '0', MOTE_CLOSED_TAB_OVERLAY_ACTIONS: overlayActions ? '1' : '0' }; delete env.ELECTRON_RUN_AS_NODE
+  const env = { ...process.env, MOTE_CLOSED_TAB_AFFECTED_EMPTY_ONLY: affectedEmptyOnly ? '1' : '0', MOTE_CLOSED_TAB_OVERLAY_ACTIONS: overlayActions ? '1' : '0', MOTE_CLOSED_TAB_RETAINED_SURFACE: retainedSurface ? '1' : '0' }; delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['seed', 'restore']) {
     for (const [file, digest] of Object.entries(compiled)) assert.equal(hash(await readFile(join(outDir, file))), digest, 'Both processes consume immutable compile: '+file)
     const logs = []
