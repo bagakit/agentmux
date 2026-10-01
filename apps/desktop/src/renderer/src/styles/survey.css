@@ -37,6 +37,12 @@
 .survey-navigation button:focus-visible, .survey-management header button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .survey-navigation button:disabled { opacity: .5; cursor: default; }
 .survey-page-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-1); }
+.survey-note-capture { flex: none; min-width: 0; max-height: 45%; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.survey-note-capture > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.survey-note-capture > header strong { font-size: var(--fs-meta); font-weight: 500; }
+.survey-note-capture__input { min-height: 88px; max-height: 160px; overflow: auto; margin: 0; padding: var(--sp-2) var(--sp-3); background: var(--surface-1); border-radius: var(--radius-sm); }
+.survey-note-capture > footer { display: flex; justify-content: flex-end; }
+.survey-note-capture > footer button { display: flex; align-items: center; gap: var(--sp-2); }
 .survey-item-row { position: relative; min-width: 0; flex: none; border-radius: var(--radius-sm); }
 .survey-item-row:hover { background: var(--wash-1); }
 .survey-item-row[data-selected="true"] { background: var(--surface-3); }
