@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
-import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
+import type { BrowserPageTransport } from '../src/main/browser-page-transport.js'
 
 /**
  * 派发层的判据：**够不着的东西必须说出来**，以及三类 ref 失败各自说到下一步为止。
@@ -14,7 +14,7 @@ import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 function fakeSession(overrides: Partial<{
   frameDiscoveryFailure: string | null
   nodes: unknown[]
-}> = {}): BrowserCdpSession {
+}> = {}): BrowserPageTransport {
   const nodes = overrides.nodes ?? [
     {
       nodeId: '1',
@@ -37,9 +37,8 @@ function fakeSession(overrides: Partial<{
     frames: new Map(),
     endedReason: null,
     frameDiscoveryFailure: overrides.frameDiscoveryFailure ?? null,
-    observe: () => () => {},
-    detach: () => {}
-  } as unknown as BrowserCdpSession
+    observe: () => () => {}
+  }
 }
 
 /**
@@ -49,7 +48,7 @@ function fakeSession(overrides: Partial<{
  * 跨轮认领由 browser-ref-ledger.test.ts 单独判。给一个真账本会让这里的失败断言变成"自愈没成功"，
  * 而那是另一条判据。
  */
-function dispatchOn(session: BrowserCdpSession, navigationId = 'nav-1'): ReturnType<typeof createBrowserPageDispatch> {
+function dispatchOn(session: BrowserPageTransport, navigationId = 'nav-1'): ReturnType<typeof createBrowserPageDispatch> {
   return createBrowserPageDispatch({
     session,
     pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId }),
@@ -63,7 +62,7 @@ function dispatchOn(session: BrowserCdpSession, navigationId = 'nav-1'): ReturnT
 
 /** 同上，但 `pageInfo` 由调用方给——导航相关的几条要在中途换身份。 */
 function dispatchWith(
-  session: BrowserCdpSession,
+  session: BrowserPageTransport,
   pageInfo: () => { url: string; title: string; navigationId: string },
   gotoUrl: () => Promise<void> = async () => {}
 ): ReturnType<typeof createBrowserPageDispatch> {
@@ -172,7 +171,7 @@ describe('页面自己抛了，不许读成成功', () => {
       frameDiscoveryFailure: null,
       observe: () => () => {},
       detach: () => {}
-    } as unknown as BrowserCdpSession
+    } as unknown as BrowserPageTransport
 
     const dispatch = dispatchOn(session)
     const snapshot = (await dispatch('snapshot', [])) as { nodes: { ref: string }[] }
@@ -196,7 +195,7 @@ describe('页面自己抛了，不许读成成功', () => {
       frameDiscoveryFailure: null,
       observe: () => () => {},
       detach: () => {}
-    } as unknown as BrowserCdpSession
+    } as unknown as BrowserPageTransport
 
     await expect(dispatchOn(session)('js', ['nope()'])).rejects.toThrow(/nope is not defined/)
   })
@@ -216,7 +215,7 @@ describe('CDP 逃生口必须把协议结果交回 Agent', () => {
       frameDiscoveryFailure: null,
       observe: () => () => {},
       detach: () => {}
-    } as unknown as BrowserCdpSession
+    } as unknown as BrowserPageTransport
 
     await expect(dispatchOn(session)('cdp', ['Runtime.evaluate', { expression: '2 + 2' }]))
       .resolves.toBe(result)
@@ -231,7 +230,7 @@ describe('CDP 逃生口必须把协议结果交回 Agent', () => {
       frameDiscoveryFailure: null,
       observe: () => () => {},
       detach: () => {}
-    } as unknown as BrowserCdpSession
+    } as unknown as BrowserPageTransport
 
     await expect(dispatchOn(session)('cdp', ['Target.activateTarget', { targetId: 'target-1' }]))
       .rejects.toThrow('Target closed')
@@ -261,7 +260,7 @@ describe('导航之后旧快照必须被丢掉', () => {
       frameDiscoveryFailure: null,
       observe: () => () => {},
       detach: () => {}
-    } as unknown as BrowserCdpSession
+    } as unknown as BrowserPageTransport
 
     const dispatch = dispatchWith(
       session,
@@ -326,7 +325,7 @@ describe('elementContext 真的走派发层：脱敏、且「不是元素」自�
 
   /** 记下 `Runtime.callFunctionOn` 收到的声明，并按需返回一份 raw 或 null。 */
   function elementContextSession(callReturn: unknown): {
-    session: BrowserCdpSession
+    session: BrowserPageTransport
     declarations: string[]
   } {
     const declarations: string[] = []
@@ -348,7 +347,7 @@ describe('elementContext 真的走派发层：脱敏、且「不是元素」自�
       frameDiscoveryFailure: null,
       observe: () => () => {},
       detach: () => {}
-    } as unknown as BrowserCdpSession
+    } as unknown as BrowserPageTransport
     return { session, declarations }
   }
 

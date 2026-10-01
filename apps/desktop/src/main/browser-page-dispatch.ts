@@ -1,7 +1,7 @@
 import type { BrowserPageNode, BrowserPageSnapshot } from '../shared/contracts.js'
 import type { BrowserScopedSnapshot, BrowserSnapshotObservation } from '../shared/browser-snapshot-query.js'
 import type { BrowserReplayTarget } from '../shared/browser-operation.js'
-import type { BrowserCdpSession } from './browser-cdp-session.js'
+import type { BrowserPageTransport } from './browser-page-transport.js'
 import { captureBrowserPageSnapshot, type BrowserPageCapture, type BrowserPageSnapshotInput } from './browser-page-snapshot.js'
 import { parseBrowserSnapshotQuery, projectBrowserSnapshot, type NormalizedBrowserSnapshotQuery } from './browser-snapshot-query.js'
 import { healRef, ledgerFromSnapshot, type BrowserRefLedger } from './browser-ref-ledger.js'
@@ -35,7 +35,7 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 
 /** 一次驱动期间，这一层需要从 Browser 那里知道的东西。传闭包而不是传整个 manager：依赖收到最小。 */
 export type BrowserPageContext = {
-  session: BrowserCdpSession
+  session: BrowserPageTransport
   /** 当前页面身份。每次调用现取——导航可能发生在两次页面函数之间。 */
   pageInfo(): { url: string; title: string; navigationId: string }
   /** 导航到一个地址，等它停下来。 */
@@ -59,7 +59,7 @@ export type BrowserPageContext = {
   /** Main rechecks original stop/control/view after resolving a handle, before an action is sent. */
   beforeAction?(): void
   /** Passive feedback uses the actually resolved node/sender, never old-ref lookup or input values. */
-  actionFeedback?(node: BrowserPageNode, send: BrowserCdpSession['sendCommand']): Promise<void>
+  actionFeedback?(node: BrowserPageNode, send: BrowserPageTransport['sendCommand']): Promise<void>
   /** Result source identity lives in storage; a continuation run supplies only its current authorization. */
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
   /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */

@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "baseUrl": "../../../../..",
+    "paths": { "@agentmux/core/control": ["packages/core/src/control.ts"] }
+  },
+  "include": [
+    "../../../src/main/browser-page-transport.ts",
+    "../../../src/main/browser-cdp-session.ts",
+    "../../../src/main/browser-page-dispatch.ts",
+    "../../../test/browser-page-dispatch.test.ts"
+  ]
+}

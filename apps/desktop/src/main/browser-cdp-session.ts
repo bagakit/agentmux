@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
+import type { BrowserPageTransport } from './browser-page-transport.js'
 
 /**
  * 一次驱动期间的 CDP 会话：attach、拿到每个 frame 的 sender、用完 detach。
@@ -17,7 +18,7 @@ import type { BrowserCdpSender } from './browser-page-snapshot.js'
 /** 跨域 iframe 各自是独立 target，要各自 attach 才够得着。一层不够——iframe 里还能再套 iframe。 */
 const AUTO_ATTACH_PARAMS = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }
 
-export class BrowserCdpSession {
+export class BrowserCdpSession implements BrowserPageTransport {
   /** sessionId → OOPIF target sender；同进程多个文档共用 sender。主 frame 不在这里（它就是 {@link sendCommand}）。 */
   private readonly frameSenders = new Map<string, BrowserCdpSender>()
   /** 非 null 表示会话已经没了，值是原因。之后每一次 send 都要拿它说话，而不是发出去等一句泛化错误。 */
