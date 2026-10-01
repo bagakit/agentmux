@@ -162,6 +162,12 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     const trigger = element('[aria-label="Exploration options"]')
     await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
     expect(element('[aria-label^="Open resource Workspace:"]').getAttribute('aria-label')).toContain(expected)
+    const details = element('[aria-label="Item details"]')
+    await act(async () => details.focus()); await key(details, 'ArrowRight')
+    const body = element('.survey-item-details-content')
+    expect(body.textContent).toContain(`One\n${host.id}\n${expected}\nBranch: main`)
+    expect(body.textContent).toContain('1 linked Topic')
+    expect(body.textContent).toContain(`Topic · ${host.id} · ${expected}`)
     const sub = element('[aria-label="Link Topics"]')
     await act(async () => sub.focus()); await key(sub, 'ArrowRight')
     const checkbox = element('[role="menuitemcheckbox"][data-survey-topic-id="topic-one"]')
@@ -171,6 +177,7 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     await act(async () => checkbox.click())
     expect(link).toHaveBeenCalledExactlyOnceWith('topic-one', true)
     expect(topic.directoryPath).toBe(path)
+    expect(workspace.path).toBe(path)
   })
 
   it.each(modes)('request, continuous-progress target and Settings retain original machine path: %j %s', async (host, absolute, expected) => {
