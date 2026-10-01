@@ -33,6 +33,7 @@
 
 :root {
   color-scheme: dark;
+  --window-controls-inset: 80px;
   /* 底色脱离纯黑，给阴影留出向下的空间；五层 surface 拉开可辨明度阶梯 */
   --bg: #0c0e12;
   --surface-0: #111419;
