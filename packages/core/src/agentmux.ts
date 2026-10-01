@@ -38,6 +38,7 @@ import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDel
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { settingsResourceBudget } from './settings-resource-json.js'
+import { parseToolkitCommand } from './toolkit-cli.js'
 import { parseSpaceControlRequest, spaceControlId } from './space-control-parser.js'
 import { parseDesktopFocusRequest } from './desktop-focus-parser.js'
 
@@ -1280,13 +1281,23 @@ async function endpointCommand(args: readonly string[]): Promise<number> {
 }
 
 async function toolkitCommand(args: readonly string[]): Promise<number> {
-  const [verb, tool] = args
-  if (!verb || !['list','get','script','run','stop','watch'].includes(verb) ||
-    (verb === 'list' ? args.length !== 1 : args.length !== 2 || tool !== 'performance')) {
-    throw cliError('Run agentmux toolkit --help for official tool operations.')
+  const command = await parseToolkitCommand(args)
+  if ((command.operation === 'toolkit.run' && command.toolId !== 'performance' && command.input === undefined) ||
+      (command.operation === 'toolkit.stop' && command.toolId !== 'performance' && command.executionId === undefined)) {
+    // Capture the exact observed baseline. Concurrent changes are conflicts, never automatic retries.
+    const current = await requestAgentMuxControl({ ...requestBase(), operation: 'toolkit.get', toolId: command.toolId })
+    if (current.operation !== 'toolkit.get' || current.result.snapshot.kind !== 'script' || current.result.snapshot.toolId !== command.toolId) {
+      throw new AgentMuxError('Toolkit returned another tool or result kind.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    const snapshot = current.result.snapshot
+    if (command.operation === 'toolkit.run') command.input = {
+      invocationId: randomUUID(), expectedRevision: snapshot.definition.revision,
+      expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null
+    }
+    else command.executionId = snapshot.admission?.executionId ?? null
   }
-  const request: ToolkitRequest = { ...requestBase(), operation: ('toolkit.' + verb) as ToolkitRequest['operation'], toolId: 'performance' }
-  if (verb !== 'watch') {
+  const request: ToolkitRequest = { ...requestBase(), ...command }
+  if (request.operation !== 'toolkit.watch') {
     const receipt = await requestAgentMuxControl(request)
     printSuccess(receipt.operation, receipt.result); return 0
   }

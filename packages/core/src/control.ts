@@ -875,6 +875,9 @@ export const AGENTMUX_CONTROL_MAX_MESSAGE_BYTES = 256 * 1024
  * owner 已坏或写入未提交。
  */
 const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+  'toolkit.add': 'long',
+  'toolkit.update': 'long',
+  'toolkit.remove': 'long',
   'toolkit.list': 'short',
   'toolkit.get': 'short',
   'toolkit.script': 'short',

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Code2, Cpu, Layers, Pause, Play, Settings2, X } from 'lucide-react'
 import { LiquidSelectionSurface } from '../settings/LiquidSelectionSurface'
 import type { MetricsSource, RunUsage } from '@agentmux/core/control'
-import type { ToolkitSnapshot } from '../../../../shared/toolkit'
+import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 
 export type RunContext = { label: string; context: string; state: string; workspace?: string; provider?: string }
 export const runKey = (run: Pick<RunUsage, 'hostId' | 'runId'>) => JSON.stringify([run.hostId, run.runId])
@@ -57,7 +57,7 @@ function RunRow({ run, context, onToggle }: { run: RunUsage; context: RunContext
 }
 
 export function PerformanceOverview({ snapshot, contexts, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript, onVisibleRunKeysChange }: {
-  snapshot: ToolkitSnapshot | null; contexts: Record<string, RunContext>; close(): void
+  snapshot: ToolkitMetricsSnapshot | null; contexts: Record<string, RunContext>; close(): void
   paused?: boolean; pending?: boolean; error?: string | null; onPause?(): void; onConfigure(): void; onViewScript(): void
   onVisibleRunKeysChange?(keys: readonly string[]): void
 }) {
@@ -69,7 +69,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
   const openRuns = useRef(new Set<string>())
   const list = useRef<HTMLDivElement>(null)
   const [runTrend, setRunTrend] = useState<{ key: string; lastSourceAt: number | null; points: { at: number; cpu: number | null; rss: number | null }[] }>({ key: '', lastSourceAt: null, points: [] })
-  const [appTrend, setAppTrend] = useState<{ executionId: string | null; lastSourceAt: number | null; resumePending: boolean; points: ToolkitSnapshot['trend'] }>({ executionId: null, lastSourceAt: null, resumePending: false, points: [] })
+  const [appTrend, setAppTrend] = useState<{ executionId: string | null; lastSourceAt: number | null; resumePending: boolean; points: ToolkitMetricsSnapshot['trend'] }>({ executionId: null, lastSourceAt: null, resumePending: false, points: [] })
   const observation = snapshot?.observation
   const app = observation?.app.data
   const appGroups = useMemo(() => [...(app?.groups ?? [])].sort((a, b) => (b.cpuPercent ?? -1) - (a.cpuPercent ?? -1) || a.role.localeCompare(b.role)), [app?.groups])
@@ -95,7 +95,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
     if (!snapshot) return
     setAppTrend(previous => {
       const incoming = snapshot.trend.slice(-60)
-      const numeric = (point: ToolkitSnapshot['trend'][number]) => point.appCpuPercent !== null || point.appRssKib !== null
+      const numeric = (point: ToolkitMetricsSnapshot['trend'][number]) => point.appCpuPercent !== null || point.appRssKib !== null
       if (previous.executionId !== snapshot.executionId) {
         let lastSourceAt: number | null = null
         for (let index = incoming.length - 1; index >= 0; index--) {
@@ -182,7 +182,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
   </>
   return <>
     <header className="performance-header"><div className="performance-title"><Cpu size={15} /><h2>Performance</h2><span className="performance-official">Official</span></div>
-      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-performance-close onClick={close}><X size={14} /></button></header>
+      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><X size={14} /></button></header>
     <div className="performance-observation"><span className="performance-status" data-state={paused ? 'paused' : error ? 'failed' : snapshot?.state}><i />{state}</span><span>{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span></div>
     <div className="performance-scopes" role="group" aria-label="Resource scope" data-paused={paused}>
       <LiquidSelectionSurface selected={scope} active={!paused} targetAttribute="data-settings-target" />

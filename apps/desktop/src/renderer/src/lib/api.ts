@@ -1038,6 +1038,9 @@ const mockApi: AgentMuxDesktopApi = {
   toolkit: {
     list: async () => { throw new Error('Toolkit requires the Desktop Main owner.') },
     get: async () => { throw new Error('Toolkit requires the Desktop Main owner.') },
+    add: async () => { throw new Error('Toolkit configuration requires the Desktop Main owner.') },
+    update: async () => { throw new Error('Toolkit configuration requires the Desktop Main owner.') },
+    remove: async () => { throw new Error('Toolkit configuration requires the Desktop Main owner.') },
     script: async () => { throw new Error('Toolkit requires the packaged official script.') },
     run: async () => { throw new Error('Toolkit execution requires the Desktop Main owner.') },
     stop: async () => { throw new Error('Toolkit execution requires the Desktop Main owner.') },
