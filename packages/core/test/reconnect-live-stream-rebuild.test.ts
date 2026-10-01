@@ -46,6 +46,7 @@ type KernelDataEvent = { type: 'resized'; runId: string; cols: number; rows: num
 
 function runningRun(runId: string, overrides: Partial<CtxmuxAdapterRun> = {}): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: 'codex',
@@ -226,7 +227,7 @@ describe('T-001 重连后重建实时字节泵', () => {
 
     kernel.configureRuns([runningRun('run-1', { latestOutputBytes: 106 })])
     // attach 快照带回掉线期间缓冲的字节 [100,106)——这是 replay 那条，用来证「不跳过掉线期间的区段」。
-    kernel.configureAttach('run-1', {
+    kernel.configureAttach('run-1', { terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0,
       run: runningRun('run-1', { latestOutputBytes: 106 }),
       replay: [{ startByte: 100, data: 'REPLAY' }]
     })
@@ -437,7 +438,7 @@ describe('owner geometry across reconnect', () => {
   it.each([true, false])('raw known=%s snapshot size is not fabricated into a historical resize', async (known) => {
     const { events, state, kernel } = await fixture([storedSession()])
     kernel.configureRuns([runningRun('run-1')])
-    kernel.configureAttach('run-1', {
+    kernel.configureAttach('run-1', { terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0,
       run: runningRun('run-1', { cols: known ? 132 : null, rows: known ? 45 : null, latestOutputBytes: 6 }),
       replay: [{ startByte: 0, data: 'REPLAY' }]
     })

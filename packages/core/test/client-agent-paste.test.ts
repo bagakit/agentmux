@@ -57,6 +57,7 @@ async function fixture(providerId: 'codex' | 'claude' | 'generic' = 'codex', pen
   inner.kernel.identity = () => ({ daemonInstanceId: 'paste-daemon' })
   const cursors = new Map<string, number>([['paste-run', 31]])
   const run = (runId: string): CtxmuxAdapterRun => ({
+    nativeService: null,
     runId, lifecycleOperationId: null, program: providerId, args: [], workspacePath: '/synthetic',
     pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0

@@ -879,7 +879,7 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - **真正的数据完整性或不变量失败仍需 fail closed**。无法确认 WAL 已安全回收、SQLite 报告 corruption、磁盘空间不足或 checkpoint 在有界窗口内持续失败时，界面要保留原投影并给出可操作的服务窗告示；不得静默丢掉 Run、Session 或布局，也不得手工删除/截断用户状态。
 - **健康边界必须可观测**。ctxmux 对外给出可区分的 recovered、busy-retry-exhausted、disk-full 与 corruption 结果；Desktop 的 Terminal/Resume 入口沿用同一结果分类，不把所有底层错误折叠成“Agent resume unavailable”。
 - **持久化故障回归必须是隔离注入，而不是破坏宿主**。测试在临时 state-dir 中注入一次可控的 SQLite I/O 失败，验证 mutation 的失败分类、后续写入的边界以及 daemon 重启后的恢复；不得填满宿主磁盘、触碰用户 runtime、杀掉宿主应用或把测试故障伪装成真实用户数据损坏。
-- **ctxmux 的 daemon、CLI、SDK 与 manifest 必须作为同一个精确 artifact 升级**。协议代际变化由 ctxmux SDK 在 Core 私有适配边界解码，Desktop 与 Core 公共 API 继续只看 ordered bytes；不得只替换 binary、混用不同 protocol 的 SDK，或为了保留旧代际在 AgentMux 维护私有 backport/兼容层。
+- **ctxmux 的 daemon、CLI、SDK 与 manifest 必须作为同一个精确 artifact 升级**。协议代际变化由 ctxmux SDK 在 Core 私有适配边界解码，Desktop 与 Core 公共 API 继续只看 ordered bytes；不得只替换 binary、混用不同 protocol 的 SDK，或为了保留旧代际在 AgentMux 维护私有 backport/兼容层。 用户先问「看看当前 terminal 是否接入了最新的 ~/proj/priv/bagaking/ctxmux」，随后要求「可以接入最新的吗?」：当前 Terminal 使用的最新版须绑定该源库 main 的同一精确提交、真实 build 身份与公开协议，随包候选和实际 serving 分别核验，构建或安装成功不能冒充当前 Terminal 已切换。升级保留健康 Run、原 durable Tab／Group／Region／焦点和分割布局，恢复沿《分层更新与回切》及《活 Runtime 的升级归属使用当下事实》的原资格；schema／handoff 不支持或探测结果未知时只暂缓后台切换并持续说明现运行版本、失败步骤及恢复动作，不用 HUP 试探、迁移、fallback、另起空 Runtime 或停止健康 Agent 来制造成功。
 
 ### Browser 工作面
 

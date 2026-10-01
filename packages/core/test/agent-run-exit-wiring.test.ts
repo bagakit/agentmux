@@ -19,6 +19,7 @@ type ClientInternals = {
 
 function exitedRun(runId: string, code: number, signal: string | null): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: 'bash',

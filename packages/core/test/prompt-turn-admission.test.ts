@@ -166,6 +166,7 @@ async function harness(mode: Mode) {
 
   function run() {
     return {
+      native_service: null,
       id: runId,
       spec: { program: process.execPath, args: [], cwd: dir, env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] },
       lineage: null,

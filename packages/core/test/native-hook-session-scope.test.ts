@@ -407,6 +407,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
       })
 
       const run = {
+        native_service: null,
         id: runId,
         spec: { program: 'scoped-agent', args: [], cwd: workspacePath, env: {} },
         lineage: null,

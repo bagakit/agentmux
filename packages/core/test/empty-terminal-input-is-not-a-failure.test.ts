@@ -61,6 +61,7 @@ function storedSession(): AgentMuxStoredAgentSession {
  */
 function run(): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'claude',

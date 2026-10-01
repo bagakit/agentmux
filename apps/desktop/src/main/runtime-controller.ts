@@ -258,6 +258,7 @@ function projectSession(
         ? { terminalOutputChannel: structuredClone(subject.agentSession.terminalOutputChannel) }
         : {}),
       processState: run.state,
+      nativeService: structuredClone(run.nativeService),
       ...runInterruptionFact(run),
       status,
       ...(pending ? { pendingInteraction: structuredClone(pending.request) } : {}),
@@ -286,6 +287,7 @@ function projectSession(
     createdAt: run.observedAt,
     updatedAt: observedAt,
     processState: run.state,
+    nativeService: structuredClone(run.nativeService),
     ...runInterruptionFact(run),
     status: processStatus,
     latestOutputBytes: run.latestOutputBytes,

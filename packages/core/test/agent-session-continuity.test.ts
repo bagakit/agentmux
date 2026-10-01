@@ -42,6 +42,7 @@ function session(providerId = 'codex'): AgentMuxAgentSession {
 
 function run(state: AgentMuxRun['state'] = 'running'): AgentMuxRun {
   return {
+    nativeService: null,
     runId: 'run-1',
     kind: 'agent',
     providerId: 'codex',
@@ -331,6 +332,7 @@ function continuityRun(
   workspacePath: string
 ): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: 'codex',
@@ -694,6 +696,7 @@ function promptRun(
   state: CtxmuxAdapterRun['state'] = { type: 'running' }
 ): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId: 'prompt-run',
     lifecycleOperationId: null,
     program: 'codex',
@@ -741,7 +744,7 @@ function renderedComposerObservation(content: string): PromptObservation {
     gap: null,
     // The Runtime fixture owns a fresh blank screen at original byte zero plus the exact replay tail.
     // Restore bytes are synthetic and do not advance that original byte cursor.
-    terminal: { type: 'basic-vt', checkpoint: { runId: 'prompt-run', throughByte: 0,
+    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'prompt-run', throughByte: 0,
       resizeRevision: 0, size: { cols: 80, rows: 24 } },
       restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
     resizeRevision: 0,
@@ -756,7 +759,7 @@ function silentObservation(): PromptObservation {
     replay: [],
     gap: null,
     // This Run has emitted no output or resize; its owner-confirmed empty checkpoint is still valid.
-    terminal: { type: 'basic-vt', checkpoint: { runId: 'prompt-run', throughByte: 0,
+    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'prompt-run', throughByte: 0,
       resizeRevision: 0, size: { cols: 80, rows: 24 } },
       restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
     resizeRevision: 0,

@@ -10,6 +10,7 @@ import type {
   AgentMuxRun,
   AgentMuxRunDataEvent,
   AgentMuxRunExitEvent,
+  AgentMuxNativeService,
   AgentTimelineCommit,
   NormalizedHookEvent
 } from './types.js'
@@ -73,6 +74,26 @@ export class AgentMuxClientEventPublisher {
         observedAt: run.observedAt,
         run: runRef(run)
       }
+    })
+    if (run.nativeService !== null) this.publishRunService(run, run.nativeService, run.observedAt, agentSessionId)
+  }
+
+  publishRunService(run: { runId: string }, nativeService: AgentMuxNativeService, observedAt: number, agentSessionId?: string): void {
+    const evidence: AgentMuxEvidence = { source: 'run-process', observedAt, run: runRef(run) }
+    const scope = agentSessionId === undefined ? {} : { agentSessionId }
+    this.publish({ type: 'run-service', ...scope, run: runRef(run), nativeService, evidence })
+    const unavailable = nativeService.owner.type === 'stopped' && nativeService.owner.reason !== 'historical' ||
+      nativeService.output.type === 'unavailable' && nativeService.output.reason !== 'historical' ||
+      nativeService.input.phase.type === 'unavailable' && nativeService.input.phase.reason !== 'historical'
+    if (unavailable) this.publish({
+      type: 'agent-error', ...scope, code: 'CTXMUX_NATIVE_SERVICE_UNAVAILABLE',
+      message: `Run ${run.runId} native service cannot fully serve: owner=${nativeService.owner.type}, output=${nativeService.output.type}, input=${nativeService.input.phase.type}. These facts do not confirm child exit or input delivery. Keep this Run and restore the unavailable lane; inspect the original input result before sending more bytes and do not replay unconfirmed input.`,
+      evidence
+    })
+    if (nativeService.terminalFault) this.publish({
+      type: 'agent-error', ...scope, code: 'CTXMUX_TERMINAL_DERIVED_FAULT',
+      message: `Run ${run.runId} terminal view failed during ${nativeService.terminalFault.stage} at output byte ${nativeService.terminalFault.throughByte}. Original output and child lifecycle remain independent. Keep this Run and read original output; reattach the terminal view after its derived service is restored.`,
+      evidence: { ...evidence, source: 'terminal-output' }
     })
   }
 

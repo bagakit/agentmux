@@ -7,6 +7,7 @@ import { createConnection, createServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { focusFacts } from './desktop-focus-facts.ts'
 import {
   AgentMuxControlServer,
   agentPromptCondition,
@@ -680,11 +681,11 @@ const controlServer = new AgentMuxControlServer({
       }
     }
     if (request.operation === 'focus') {
-      return {
-        operation: request.operation,
-        tabId: agentRegion.tabId,
-        ...(request.target.kind === 'region' ? { regionId: request.target.regionId } : {})
-      }
+      const result = focusFacts(request)
+      result.navigation.selection.space = { ...result.navigation.selection.space,
+        spaceId: packedSpaceId, zoneId: packedZoneId, workspaceId: agentRegion.workspaceId,
+        groupId: 'packed-group', tabId: agentRegion.tabId }
+      return result
     }
     if (request.operation === 'agent.open') {
       const existing = request.content.kind === 'agent-session'
@@ -694,7 +695,7 @@ const controlServer = new AgentMuxControlServer({
         outcome: 'opened',
         from: null,
         to: { spaceId: packedSpaceId, zoneId: packedZoneId,
-          workspaceId: agentRegion.workspaceId,
+          workspaceId: agentRegion.workspaceId, displayWorkspaceId: agentRegion.workspaceId, groupId: 'packed-group',
           tabId: request.destination.newTab ? 'packed-agent-new-tab' : agentRegion.tabId,
           regionId: existing ? 'packed-opened-region' : 'packed-launched-region' },
         agent: { agentSessionId: existing ? request.content.agentSessionId : 'packed-launched-session',
@@ -828,7 +829,7 @@ const focusedRegion = JSON.parse((await cli([
   'focus', '--region', 'packed-terminal-region'
 ])).stdout)
 assert.equal(focusedRegion.operation, 'focus')
-assert.equal(focusedRegion.result.regionId, terminalRegion.regionId)
+assert.equal(focusedRegion.result.navigation.selection.space.regionId, terminalRegion.regionId)
 assert.deepEqual(controlRequests.map((request) => request.operation), [
   'list.agents', 'inspect.tab', 'agent.open', 'agent.open', 'open.terminal', 'open.browser', 'arrange', 'focus'
 ])

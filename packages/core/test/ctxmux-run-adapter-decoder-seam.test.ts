@@ -56,7 +56,11 @@ async function* seamEvents(): AsyncGenerator<RunEvent, void, void> {
 function seamAttachment(events: () => AsyncGenerator<RunEvent, void, void>) {
   return {
     snapshot: {
+      terminal: { type: 'not_requested' },
+      terminal_restore: new Uint8Array(0),
+      resize_revision: 0,
       run: {
+        native_service: null,
         id: 'seam-run',
         spec: null,
         lineage: null,

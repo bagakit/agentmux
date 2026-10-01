@@ -54,6 +54,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   let extraLock = false, wrongInode = false, changeBirth = false
   let insideImage: string | undefined, insideLock: string | undefined
   let version = 'ctxmuxd 0.1.0 (protocol 18, handoff opaque-public-declaration)\n'
+  let outgoingVersion = version
   let versionError: Error | undefined, versionChange: 'inode' | 'bytes' | undefined
   let versionCalls = 0
   const fields = async (fd: string, path: string) => {
@@ -62,6 +63,10 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   }
   hooks.live.mockResolvedValue('alive')
   hooks.exec.mockImplementation(async (executable: string, args: string[]) => {
+    if (executable === binaries[0] && args.length === 1 && args[0] === '--version') {
+      expect(signalled).toBe(false)
+      return { stdout: outgoingVersion }
+    }
     if (executable === binaries[1] && args.length === 1 && args[0] === '--version') {
       expect(signalled).toBe(false); versionCalls++
       if (versionError) throw versionError
@@ -100,6 +105,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
       const path = join(root, 'actual-post-image/ctxmuxd'); await mkdir(dirname(path)); await link(binaries[1]!, path)
       signal.mockImplementation(() => { signalled = true; mapped = path; return true }); return path
     }, versionResponse(value: string) { version = value }, versionFailure(error: Error) { versionError = error },
+    outgoingVersionResponse(value: string) { outgoingVersion = value },
     driftDuringVersion(kind: 'inode' | 'bytes') { versionChange = kind },
     versionCalls: () => versionCalls, wasSignalled: () => signalled }
 }
@@ -148,7 +154,7 @@ it('records only the confirmed actual post-exec image and serving state, retaini
   const f = await fixture(), plan = await f.prepare(), mappedPath = await f.alternatePostImage()
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('upgraded'); expect(outcome.originalRuns).toBe(1); expect(f.wasSignalled()).toBe(true)
-  expect(f.versionCalls()).toBe(1)
+  expect(f.versionCalls()).toBe(2)
   expect(outcome.candidateVersion).toEqual({ version: '0.1.0', protocol: 18, handoff: 'opaque-public-declaration' })
   const receipt = JSON.parse(await readFile(f.receiptPath, 'utf8'))
   expect(receipt.daemonPath).toBe(mappedPath); expect(receipt.stateDirectory).toBe(f.state)
@@ -175,7 +181,7 @@ it.each(['timed out', 'exit 1'])('keeps the positively confirmed old service and
   f.versionFailure(new Error(`Private candidate version ${reason}`))
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('old-confirmed'); expect(outcome.signalSent).toBe(false)
-  expect(outcome.error).toContain(reason); expect(f.versionCalls()).toBe(1); expect(f.signal).not.toHaveBeenCalled()
+  expect(outcome.error).toContain(reason); expect(f.versionCalls()).toBe(2); expect(f.signal).not.toHaveBeenCalled()
   expect(await readFile(f.receiptPath)).toEqual(bytes)
 })
 it.each(['ctxmuxd 0.2.0 (protocol 18, handoff opaque)', 'ctxmuxd 0.1.0 (protocol 19, handoff opaque)',
@@ -184,7 +190,7 @@ it.each(['ctxmuxd 0.2.0 (protocol 18, handoff opaque)', 'ctxmuxd 0.1.0 (protocol
   f.versionResponse(response)
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('old-confirmed'); expect(outcome.error).toContain('declare its selected')
-  expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(1); expect(f.signal).not.toHaveBeenCalled()
+  expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(2); expect(f.signal).not.toHaveBeenCalled()
   expect(await readFile(f.receiptPath)).toEqual(bytes)
 })
 it.each(['inode', 'bytes'] as const)('rejects candidate %s drift during its actual version response and preserves the old ledger', async kind => {
@@ -195,6 +201,26 @@ it.each(['inode', 'bytes'] as const)('rejects candidate %s drift during its actu
   let clock = 0; vi.spyOn(Date, 'now').mockImplementation(() => clock += 16000)
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('old-confirmed'); expect(outcome.error).toContain('changed while its version response')
-  expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(1); expect(f.signal).not.toHaveBeenCalled()
+  expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(2); expect(f.signal).not.toHaveBeenCalled()
   expect(await readFile(f.receiptPath)).toEqual(bytes)
+})
+
+it('refuses unequal public handoff declarations before owner extraction, signal or application cutover', async () => {
+  const f = await fixture(), receipt = await readFile(f.receiptPath)
+  f.outgoingVersionResponse('ctxmuxd 0.1.0 (protocol 18, handoff source-generation)\n')
+  f.versionResponse('ctxmuxd 0.1.0 (protocol 18, handoff destination-generation)\n')
+  await expect(f.prepare()).rejects.toThrow('Runtime handoff is unsupported: source-generation -> destination-generation')
+  expect(f.signal).not.toHaveBeenCalled()
+  expect(hooks.exec.mock.calls.map(([command]) => command).sort()).toEqual([...f.binaries].sort())
+  expect(await readFile(f.receiptPath)).toEqual(receipt)
+  expect(await readFile(f.binaries[0]!)).toEqual(Buffer.from('never-executed-private-image-0'))
+})
+
+it('keeps the original service when a candidate has no verifiable public handoff declaration', async () => {
+  const f = await fixture(), receipt = await readFile(f.receiptPath)
+  f.versionResponse('ctxmuxd 0.1.0 (protocol 18)\n')
+  await expect(f.prepare()).rejects.toThrow('declare its selected version, protocol and handoff')
+  expect(f.signal).not.toHaveBeenCalled()
+  expect(hooks.exec.mock.calls.map(([command]) => command).sort()).toEqual([...f.binaries].sort())
+  expect(await readFile(f.receiptPath)).toEqual(receipt)
 })

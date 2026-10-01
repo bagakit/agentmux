@@ -12,6 +12,19 @@ export type AgentMuxTerminalContinuationStep =
   | { type: 'data'; startByte: number; endByte: number; dataBytes: Uint8Array }
   | ({ type: 'resized' } & AgentMuxTerminalResize)
 
+/** Validate synthetic restore facts before an emulator changes its geometry or history policy. */
+export function assertTerminalCheckpointRestore(checkpoint: AgentMuxTerminalCheckpoint, restoreBytes: Uint8Array): void {
+  const grid = (size: { cols: number; rows: number }): boolean =>
+    Number.isSafeInteger(size.cols) && size.cols > 0 && Number.isSafeInteger(size.rows) && size.rows > 0
+  if (!grid(checkpoint.size) || !grid(checkpoint.restoreSize) ||
+      !Number.isSafeInteger(checkpoint.resizeAfterRestoreBytes) || checkpoint.resizeAfterRestoreBytes < 0 ||
+      checkpoint.resizeAfterRestoreBytes > restoreBytes.byteLength ||
+      checkpoint.restoreScrollbackRows !== null &&
+        (!Number.isSafeInteger(checkpoint.restoreScrollbackRows) || checkpoint.restoreScrollbackRows < 0)) {
+    throw new AgentMuxError('Terminal checkpoint restore has inconsistent geometry or prefix facts.', 'CTXMUX_EVENT_INVALID')
+  }
+}
+
 /**
  * The two clients of this ordering are xterm views and Provider screen observations.
  * The Runtime owns every fact; this iterator only interleaves its original bytes and resizes.
@@ -34,6 +47,7 @@ export function* terminalContinuationSteps(snapshot: {
   const checkpoint = terminal.checkpoint
   const resizes = terminal.resizes
   if (checkpoint.runId !== snapshot.run.runId) invalid()
+  assertTerminalCheckpointRestore(checkpoint, terminal.restoreBytes)
   yield { type: 'restore', checkpoint, restoreBytes: terminal.restoreBytes }
   let cursor = checkpoint.throughByte
   let revision = checkpoint.resizeRevision

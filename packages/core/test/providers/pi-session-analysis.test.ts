@@ -71,6 +71,7 @@ async function harness() {
   const writes: string[] = []
   const receipts = new Map<string, { start_byte: number; end_byte: number; data: string }>()
   const run = () => ({
+    native_service: null,
     id: runId,
     spec: { program: 'pi', args: [], cwd: workspacePath, env: {} },
     lineage: null,

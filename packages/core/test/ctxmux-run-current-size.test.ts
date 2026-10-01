@@ -32,6 +32,7 @@ async function write(screen: AgentTerminalScreen, data: string): Promise<void> {
  */
 function runInfo(currentSize: { cols: number; rows: number } | null): RunInfo {
   return {
+    native_service: null,
     id: 'resize-run',
     spec: {
       program: 'codex',
@@ -190,11 +191,11 @@ describe('Resized 是几何事件，不是进程退出', () => {
  * 删掉了那本只记录**我们自己**发起的 resize 的本地台账——daemon 的答案在每条路径上都先到。
  */
 describe('vendored ctxmux 的协议现状', () => {
-  it('是 protocol 18：current_size 与带原字节栅栏的 resized 已在场', () => {
+  it('是 protocol 21：current_size 与带原字节栅栏的 resized 已在场', () => {
     // 用 SDK 导出的常量，而不是 grep 生成物的 .d.ts：常量是 SDK 的公开契约，随 tarball 一起被
     // pnpm-lock 的 integrity 钉住；grep 要写死一条 node_modules/.pnpm 路径，路径一变就**静默**
     // 变成读不到文件或恒真断言——那正是这条用例要防的东西。
-    expect(PROTOCOL_VERSION).toBe(18)
+    expect(PROTOCOL_VERSION).toBe(21)
   })
 
   it('current_size 是必填字段——台账被删掉正是靠这一条', () => {

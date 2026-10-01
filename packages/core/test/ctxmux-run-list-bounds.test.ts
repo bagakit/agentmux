@@ -4,6 +4,7 @@ import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 
 function runInfo(id: string): RunInfo {
   return {
+    native_service: null,
     id,
     spec: {
       program: '/bin/sh',

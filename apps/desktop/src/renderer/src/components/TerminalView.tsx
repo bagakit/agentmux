@@ -889,11 +889,11 @@ export function TerminalView({
           if (disposed) return
           if (step.type === 'restore') {
             if (preserve) continue
-            viewport.acceptOwnerSize(step.checkpoint.size)
-            await restoreTerminalCheckpoint(step.restoreBytes, async (data) => {
-              if (!disposed) {
-                await writeTerminal(data)
-              }
+            await restoreTerminalCheckpoint(step.checkpoint, step.restoreBytes, {
+              write: async (data) => { if (!disposed) await writeTerminal(data) },
+              resize: size => { if (!disposed) viewport.acceptOwnerSize(size) },
+              getScrollback: () => terminal.options.scrollback!,
+              setScrollback: rows => { if (!disposed) terminal.options.scrollback = rows }
             })
             cursor = step.checkpoint.throughByte
             resizeRevision = step.checkpoint.resizeRevision

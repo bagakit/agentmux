@@ -125,6 +125,28 @@ export type AgentMuxRunRef = {
   runId: string
 }
 
+/** Native service failure facts describe a lane; they never imply child exit. */
+export type AgentMuxNativeServiceFailure =
+  | 'owner_stopped' | 'owner_unwound' | 'read_failed' | 'write_failed' | 'historical' | 'control_closed'
+  | { ownerIoFailed: { stage: 'poll' | 'wake_drain'; osError: number | null } }
+
+/** Coherent owner facts at one Run-local revision, independent of process lifecycle/readiness. */
+export type AgentMuxNativeService = {
+  revision: number
+  owner: { type: 'starting' | 'serving' | 'draining' } | { type: 'stopped'; reason: AgentMuxNativeServiceFailure }
+  output: { type: 'pending' | 'serving' | 'backpressured' | 'closed' } | { type: 'unavailable'; reason: AgentMuxNativeServiceFailure }
+  input: {
+    phase: { type: 'open' | 'closed' } | { type: 'unavailable'; reason: AgentMuxNativeServiceFailure }
+    unsettledCommands: number
+    unsettledRequestBytes: number
+    writeBlocked: boolean
+    completedInputBytes: number | null
+    currentSize: { cols: number; rows: number } | null
+    activeConfirmedBytes: number
+  }
+  terminalFault: { stage: 'process' | 'resize' | 'export' | 'recovery'; throughByte: number } | null
+}
+
 export type AgentMuxRun = AgentMuxRunRef & {
   kind: 'terminal' | 'agent'
   providerId: AgentProviderId | null
@@ -139,6 +161,8 @@ export type AgentMuxRun = AgentMuxRunRef & {
   observedAt: number
   latestOutputBytes: number
   acceptedInputBytes: number
+  /** null only for a non-native Run; a running child alone does not prove service availability. */
+  nativeService: AgentMuxNativeService | null
   exitCode?: number
   exitSignal?: string
   /**
@@ -191,6 +215,9 @@ export type AgentMuxTerminalCheckpoint = {
   throughByte: number
   resizeRevision: number
   size: { cols: number; rows: number }
+  restoreSize: { cols: number; rows: number }
+  restoreScrollbackRows: number | null
+  resizeAfterRestoreBytes: number
 }
 
 export type AgentMuxTerminalContinuation =
@@ -1045,6 +1072,13 @@ export type AgentMuxAcpEvent =
 export type AgentMuxObservationOrigin = { kind: 'attachment-refresh'; operationId: string; run: AgentMuxRunRef }
 
 export type AgentMuxClientEvent = (
+  | {
+      type: 'run-service'
+      agentSessionId?: string
+      run: AgentMuxRunRef
+      nativeService: AgentMuxNativeService
+      evidence: AgentMuxEvidence
+    }
   | ({
       /** Fresh authoritative representation, ordered before subsequent live events on this Run. */
       type: 'terminal-snapshot'

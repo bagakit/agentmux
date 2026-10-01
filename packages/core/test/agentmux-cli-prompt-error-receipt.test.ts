@@ -61,6 +61,7 @@ async function fixture() {
     const stops: string[] = []
     let cursor = 0
     const run = (): CtxmuxAdapterRun => ({
+      nativeService: null,
       runId: stored.run.runId, lifecycleOperationId: null, program: 'generic', args: [],
       workspacePath: root, pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
       latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor

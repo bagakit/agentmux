@@ -56,7 +56,7 @@ import {
 import { AgentMuxError } from './errors.js'
 import { parseMetricsObservation, type MetricsObservation, type MetricsSubscription } from './metrics.js'
 import { isToolkitOperation, parseToolkitResult } from './toolkit.js'
-import { serveToolkitControl } from './toolkit-control.js'
+import { serveToolkitControl } from './toolkit-control-server.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'

@@ -41,7 +41,7 @@ async function harness(providerId: string, provider?: AgentProvider) {
   owner.connected = true
   owner.kernel.isConnected = () => true
   let cursor = 0
-  const run = () => ({ runId, lifecycleOperationId: null, program: 'synthetic', args: [], workspacePath: '/synthetic',
+  const run = () => ({ nativeService: null, runId, lifecycleOperationId: null, program: 'synthetic', args: [], workspacePath: '/synthetic',
     pid: 1, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor })
   owner.kernel.status = async () => run()
   owner.kernel.identity = () => ({ daemonInstanceId: 'synthetic-daemon', protocolVersion: 17, buildIdentity: 'synthetic' })

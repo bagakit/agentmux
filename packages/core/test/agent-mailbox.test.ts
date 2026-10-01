@@ -35,6 +35,7 @@ function storedSession(
 
 function runProjection(acceptedInputBytes: number) {
   return {
+    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'traex',

@@ -328,7 +328,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
   'packed @agentmux/core ctxmux consumer',
   () => {
     it('runs the Shell vertical outside the checkout with the pinned SDK and binaries', async () => {
-      const root = await mkdtemp('/tmp/agentmux-packed-ctxmux-')
+      const root = await realpath(await mkdtemp('/tmp/agentmux-packed-ctxmux-'))
       roots.push(root)
       const packDirectory = join(root, 'pack')
       const packWorkspace = join(root, 'pack-workspace')
@@ -450,6 +450,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       })
       await Promise.all([
         cp(packedConsumerFixture, join(consumerDirectory, 'packed-consumer.mjs')),
+        cp(new URL('./fixtures/desktop-focus-facts.ts', import.meta.url), join(consumerDirectory, 'desktop-focus-facts.ts')),
         cp(compatibleRuntimeFixture, join(consumerDirectory, 'ctxmux-compatible-runtime.mjs')),
         cp(controlFixture, join(consumerDirectory, 'ctxmux-terminal-control.mjs')),
         cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs')),

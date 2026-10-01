@@ -56,7 +56,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     ? [chunk(100, 'P'.repeat(initiallyPublishedThroughByte - 100))] : []
   let resizes: Extract<AttachedSnapshot['terminal'], { type: 'basic_vt' }>['resizes'] = []
   const streams: Stream[] = []
-  const info = (): RunInfo => ({ id: stored.run.runId, spec: { program: 'codex', args: [], cwd: stored.workspacePath,
+  const info = (): RunInfo => ({ native_service: null, id: stored.run.runId, spec: { program: 'codex', args: [], cwd: stored.workspacePath,
     env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] }, lineage: null, backend: { type: 'native' },
     capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: false,
       fork_level_b: false, replay: 'raw_from_start' }, pid: 4321, state: { type: 'running' },
@@ -67,7 +67,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     const restore = bytes('\x1bcRESTORED')
     const start = terminal ? checkpointByte : afterByte
     const snapshot: AttachedSnapshot = { run: info(), resize_revision: revision,
-      terminal: terminal ? { type: 'basic_vt', checkpoint: { run_id: stored.run.runId,
+      terminal: terminal ? { type: 'basic_vt', checkpoint: { restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: stored.run.runId,
         through_byte: checkpointByte, resize_revision: checkpointRevision, size: checkpointSize,
         restore_bytes: restore.byteLength }, resizes } : { type: 'not_requested' },
       terminal_restore: terminal ? restore : new Uint8Array(0),

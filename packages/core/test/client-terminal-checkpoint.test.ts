@@ -13,7 +13,7 @@ const clients: AgentMuxClient[] = []
 afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.dispose())) })
 
 function runInfo(): RunInfo {
-  return { id: 'continuation-run', spec: { program: 'fixture', args: [], cwd: '/fixture', env: {},
+  return { native_service: null, id: 'continuation-run', spec: { program: 'fixture', args: [], cwd: '/fixture', env: {},
     initial_size: { cols: 12, rows: 4 }, declared_inputs: [] }, lineage: null, backend: { type: 'native' },
     capabilities: { input: true, resize: true, signal: true, stop: true,
       fork_level_a: false, fork_level_b: false, replay: 'raw_from_start' },
@@ -24,7 +24,7 @@ function runInfo(): RunInfo {
 function sdkSnapshot(terminal: boolean): AttachedSnapshot {
   const restore = bytes('\x1bcOLD\r\nKEPT\r\n\x1b[?1049h\x1b[?1003h\x1b[?1006h')
   return { run: runInfo(), resize_revision: 2,
-    terminal: terminal ? { type: 'basic_vt', checkpoint: { run_id: 'continuation-run', through_byte: 100,
+    terminal: terminal ? { type: 'basic_vt', checkpoint: { restore_size: { cols: 12, rows: 4 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: 'continuation-run', through_byte: 100,
       resize_revision: 2, size: { cols: 12, rows: 4 }, restore_bytes: restore.length }, resizes: [] }
       : { type: 'not_requested' }, terminal_restore: terminal ? restore : new Uint8Array(0),
     replay: { chunks: [{ start_byte: 100, end_byte: 103, data: bytes('new') }],
@@ -81,7 +81,7 @@ it('raw replay remains original bytes and terminal replay uses independent short
 })
 function orderedSnapshot(): Parameters<typeof terminalContinuationSteps>[0] {
   return { run: { runId: 'ordered', latestOutputBytes: 104 }, resizeRevision: 5,
-    terminal: { type: 'basic-vt', checkpoint: { runId: 'ordered', throughByte: 100,
+    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 12, rows: 4 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'ordered', throughByte: 100,
       resizeRevision: 2, size: { cols: 12, rows: 4 } }, restoreBytes: bytes('\x1bc'), resizes: [
       { throughByte: 100, resizeRevision: 3, size: { cols: 8, rows: 4 } },
       { throughByte: 102, resizeRevision: 4, size: { cols: 7, rows: 4 } },
@@ -106,7 +106,7 @@ it('missing resize or discontinuous tail cannot claim complete continuation', ()
   expect(() => [...terminalContinuationSteps(gap)]).toThrow('inconsistent byte or geometry')
 })
 it('seed establishes a screen but cannot fake a fresh original frame or increase raw cursor', async () => {
-  const checkpoint = { runId: 'screen', throughByte: 200, resizeRevision: 3, size: { cols: 20, rows: 4 } }
+  const checkpoint = { restoreSize: { cols: 20, rows: 4 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'screen', throughByte: 200, resizeRevision: 3, size: { cols: 20, rows: 4 } }
   const evidence = new AgentTerminalScreenEvidence(20, 4, { start: '\x1b[?2026h', end: '\x1b[?2026l' }, 200, false, 3)
   try {
     evidence.accept({ type: 'restore', checkpoint, restoreBytes: bytes('\x1bc\x1b[?2026h› restored\x1b[?2026l') })

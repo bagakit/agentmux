@@ -295,6 +295,7 @@ function screenStoredSession(): AgentMuxStoredAgentSession {
 
 function screenRun(cols: number | null = 80, rows: number | null = 24): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId: 'screen-run',
     lifecycleOperationId: null,
     program: 'codex',

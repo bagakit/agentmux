@@ -162,10 +162,12 @@ async function terminalGeometry(regionId, runId) {
   return waitFor('actual recovered xterm and split geometry', async () => {
     await active.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     const dom = await active.cdp.evaluate(`(() => {
-      const slot=document.querySelector('#focus-workspace-slot'), region=slot?.querySelector('[data-workbench-region-id="'+${JSON.stringify(regionId)}+'"]'), viewport=region?.querySelector('.terminal-view__xterm'), screen=region?.querySelector('.xterm-screen'), split=slot?.querySelector('.workbench-region-split');
-      if(!slot||!region||!viewport||!screen||!split)return null;
+      const regions=Array.from(document.querySelectorAll('[data-workbench-region-id="'+${JSON.stringify(regionId)}+'"]')).filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0});
+      if(regions.length!==1)return null;
+      const region=regions[0],viewport=region.querySelector('.terminal-view__xterm'),screen=region.querySelector('.xterm-screen'),split=region.closest('.workbench-region-split');
+      if(!viewport||!screen||!split)return null;
       const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
-      return { tabId:slot.dataset.focusTabId, viewport:rect(viewport),screen:rect(screen),panels:Array.from(split.children).filter(e=>e.hasAttribute('data-panel-id')).map(e=>({bounds:rect(e),grow:Number(e.style.flexGrow)})) }
+      return { regionId:region.dataset.workbenchRegionId, viewport:rect(viewport),screen:rect(screen),panels:Array.from(split.children).filter(e=>e.hasAttribute('data-panel-id')).map(e=>({bounds:rect(e),grow:Number(e.style.flexGrow)})) }
     })()`)
     if (!dom || dom.panels.length !== 2 || dom.viewport.width < 50 || dom.screen.width > dom.viewport.width + 1 || dom.screen.width < dom.viewport.width - 32) return null
     const region=(await control('inspect.region',{target:{kind:'region',regionId}})).region, run=await sdk.status(runId)
@@ -185,8 +187,14 @@ try {
   await Promise.all([mkdir(home,{recursive:true}),mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(runtimeDirectory,{recursive:true}),mkdir(join(home,'codex'),{recursive:true})])
   assert.ok(process.env.AGENTMUX_VERIFY_RECEIPT,'Explicit owning receipt path required')
   receipt.inputsBefore=await inputs()
-  daemon=spawn(join(repositoryRoot,'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),['--socket',socketPath,'--state-dir',join(runtimeDirectory,'state','ctxmux')],{detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon);daemon.stderr.on('data',()=>{});await own(daemon.pid)
-  sdk=new CtxmuxClient({socketPath});receipt.runtime=await waitFor('public private Runtime',async()=>{try{return await sdk.runtimeInfo()}catch{return null}});receipt.daemonPid=daemon.pid
+  const stateDirectory=join(runtimeDirectory,'state','ctxmux')
+  await mkdir(stateDirectory,{recursive:true,mode:0o700})
+  let daemonDiagnostic=''
+  daemon=spawn(join(repositoryRoot,'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),['--socket',socketPath,'--state-dir',stateDirectory],{detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon);daemon.stderr.on('data',bytes=>{daemonDiagnostic=(daemonDiagnostic+bytes.toString()).slice(-16384)});await own(daemon.pid)
+  sdk=new CtxmuxClient({socketPath});receipt.runtime=await waitFor('public private Runtime',async()=>{
+    if(daemon.exitCode!==null||daemon.signalCode!==null)throw new Error(`Private Runtime exited: ${daemonDiagnostic}`)
+    try{return await sdk.runtimeInfo()}catch{return null}
+  });receipt.daemonPid=daemon.pid
   const executable=join(root,'private-agent.sh');await writeFile(executable,"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.159.2'; exit 0; fi\nstty -echo -icanon\nprintf 'Private Agent ready\\r\\n'\nexec /bin/cat\n",{mode:0o700})
   creator=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
   agent=await creator.createAgent({createOperationId:randomUUID(),executorId:'private-agent',providerId:'codex',commandOverride:executable,workspacePath,env:{CODEX_HOME:fixtureEnvironment.CODEX_HOME},injectAgentMuxGuide:false,cols:90,rows:25})
@@ -198,13 +206,15 @@ try {
   terminal=(await control('open.terminal',{shellCommand:'/bin/sh',destination:{kind:'split',direction:'right',region:{kind:'region',regionId:opened.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)
   const oldSnapshot=(await active.cdp.evaluate('(async()=>await window.agentmux.sessions.snapshot())()')).sessions.find(s=>s.control.run.runId===terminal.runId);assert.equal(oldSnapshot?.kind,'terminal')
   phase='natural-terminal-exit';await active.cdp.evaluate(`window.agentmux.sessions.write(${JSON.stringify(oldSnapshot.control)},${JSON.stringify('exit 7\n')},'user')`)
-  receipt.exitedRun=await waitFor('actual target Run exits',async()=>{const run=await sdk.status(terminal.runId);return run.state.type==='exited'?run:null})
+  const exitedRun=await waitFor('actual target Run exits',async()=>{const run=await sdk.status(terminal.runId);return run.state.type==='exited'?run:null})
+  receipt.exitedRun={id:exitedRun.id,pid:exitedRun.pid,state:exitedRun.state}
   await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.regionId}})
-  await click('[aria-label^="Focus: show execution contexts"]');await click(`.focus-context[data-session-id="${oldSnapshot.id}"]`)
-  receipt.before=await observe();const tab=receipt.before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId));assert.ok(tab);assert.equal(tab.regions.length,2);assert.equal(tab.layout.activeRegionId,opened.regionId);assert.equal(receipt.before.workbench.focus.executionSessionId,oldSnapshot.id)
+  // Recover the ended Shell in the Agent's actual split workspace shown by Focus.
+  await click('[aria-label^="Focus: show execution contexts"]')
+  receipt.before=await observe();const tab=receipt.before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId));assert.ok(tab);assert.equal(tab.regions.length,2);assert.equal(tab.layout.activeRegionId,opened.regionId);assert.equal(receipt.before.workbench.focus.executionSessionId,agent.agentSessionId)
   receipt.screenshotBefore=await screenshot('recovery-before')
   phase='actual-keyboard-region-recovery'
-  const restartSelector=`#focus-workspace-slot [data-workbench-region-id="${terminal.regionId}"] .terminal-recovery__actions button`
+  const restartSelector=`[data-workbench-region-id="${terminal.regionId}"] .terminal-recovery__actions button`
   await waitFor('one real Restart terminal action',()=>active.cdp.evaluate(`(() => {const es=Array.from(document.querySelectorAll(${JSON.stringify(restartSelector)}));return es.length===1&&es[0].textContent.includes('Restart terminal')})()`))
   assert.equal(await active.cdp.evaluate(`(() => {const button=document.querySelector(${JSON.stringify(restartSelector)});button.focus();return document.activeElement===button})()`),true)
   await active.cdp.evaluate(`(() => {window.__privateRecoveryKeyTrace=[];for(const type of ['keydown','keypress','keyup','click'])document.addEventListener(type,event=>window.__privateRecoveryKeyTrace.push({type,key:event.key,trusted:event.isTrusted,tag:event.target.tagName,text:event.target.textContent?.slice(0,70),prevented:event.defaultPrevented}),{capture:true});})()`)
@@ -213,22 +223,22 @@ try {
   receipt.recovered=await waitFor('same Region accepted new terminal identity',async()=>{const value=await observe(),region=value.workbench.tabs.find(t=>t.id===tab.id)?.regions.find(r=>r.regionId===terminal.regionId);return region?.kind==='terminal'&&region.sessionId!==oldSnapshot.id&&region.processState==='running'?value:null})
   receipt.keyboardTrace=await active.cdp.evaluate('window.__privateRecoveryKeyTrace');
   const newRegion=receipt.recovered.workbench.tabs.find(t=>t.id===tab.id).regions.find(r=>r.regionId===terminal.regionId), newRunId=newRegion.control.run.runId
-  assert.notEqual(newRunId,terminal.runId);assert.equal(receipt.recovered.workbench.focus.executionSessionId,newRegion.sessionId);assert.deepEqual(receipt.recovered.workbench.layouts,receipt.before.workbench.layouts)
-  const expected=structuredClone(durableWorkbench(receipt.before));expected.focus.executionSessionId=newRegion.sessionId
+  assert.notEqual(newRunId,terminal.runId);assert.equal(receipt.recovered.workbench.focus.executionSessionId,agent.agentSessionId);assert.deepEqual(receipt.recovered.workbench.layouts,receipt.before.workbench.layouts)
+  const expected=structuredClone(durableWorkbench(receipt.before))
   const expectedRegion=expected.tabs.find(t=>t.id===tab.id).regions.find(r=>r.regionId===terminal.regionId);Object.assign(expectedRegion,newRegion)
   assert.deepEqual(durableWorkbench(receipt.recovered),expected)
   await own((await sdk.status(newRunId)).pid)
   receipt.geometryBefore=await terminalGeometry(terminal.regionId,newRunId)
-  assert.equal(await active.cdp.evaluate(`document.querySelector('.focus-context[data-session-id="'+${JSON.stringify(newRegion.sessionId)}+'"]')?.getAttribute('aria-pressed')`),'true')
+  assert.equal(await active.cdp.evaluate(`document.querySelector('.focus-context[data-session-id="'+${JSON.stringify(agent.agentSessionId)}+'"]')?.getAttribute('aria-pressed')`),'true')
   receipt.acksBefore=[];receipt.acksBefore.push(await healthyInput(opened.regionId,agent.run.runId,'PRIVATE_RECOVERY_AGENT_BEFORE'));receipt.acksBefore.push(await healthyInput(terminal.regionId,newRunId,'echo PRIVATE_RECOVERY_TERMINAL_BEFORE\r','PRIVATE_RECOVERY_TERMINAL_BEFORE'))
   const targetIds=[agent.run.runId,newRunId];assert.equal(new Set(targetIds).size,2)
-  receipt.runsBefore=(await sdk.list()).filter(run=>targetIds.includes(run.id));assert.deepEqual(receipt.runsBefore.map(run=>run.id).sort(),[...targetIds].sort())
+  receipt.runsBefore=(await sdk.list()).filter(run=>targetIds.includes(run.id)).map(run=>({id:run.id,pid:run.pid,state:run.state}));assert.deepEqual(receipt.runsBefore.map(run=>run.id).sort(),[...targetIds].sort())
   receipt.preRestart=await observe();receipt.firstQuit=await quit(active)
   phase='ordinary-process-restart';await launch('after')
   receipt.after=await observe();assert.notEqual(receipt.after.main.pid,receipt.preRestart.main.pid);assert.deepEqual(durableWorkbench(receipt.after),durableWorkbench(receipt.preRestart))
   receipt.geometryAfter=await terminalGeometry(terminal.regionId,newRunId);assert.deepEqual(receipt.geometryAfter.dom.panels,receipt.geometryBefore.dom.panels);assert.deepEqual(receipt.geometryAfter.view.viewGrid,receipt.geometryBefore.view.viewGrid)
   receipt.acksAfter=[];receipt.acksAfter.push(await healthyInput(opened.regionId,agent.run.runId,'PRIVATE_RECOVERY_AGENT_AFTER'));receipt.acksAfter.push(await healthyInput(terminal.regionId,newRunId,'echo PRIVATE_RECOVERY_TERMINAL_AFTER\r','PRIVATE_RECOVERY_TERMINAL_AFTER'))
-  receipt.runsAfter=(await sdk.list()).filter(run=>targetIds.includes(run.id));assert.deepEqual(receipt.runsAfter.map(run=>({id:run.id,pid:run.pid,state:run.state})),receipt.runsBefore.map(run=>({id:run.id,pid:run.pid,state:run.state})))
+  receipt.runsAfter=(await sdk.list()).filter(run=>targetIds.includes(run.id)).map(run=>({id:run.id,pid:run.pid,state:run.state}));assert.deepEqual(receipt.runsAfter,receipt.runsBefore)
   assert.deepEqual(await sdk.runtimeInfo(),receipt.runtime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid));assert.equal((await sdk.status(terminal.runId)).state.type,'exited')
   receipt.screenshotAfter=await screenshot('recovery-after');receipt.inputsAfter=await inputs();assert.deepEqual(receipt.inputsAfter,receipt.inputsBefore)
   receipt.secondQuit=await quit(active);receipt.passed=true
