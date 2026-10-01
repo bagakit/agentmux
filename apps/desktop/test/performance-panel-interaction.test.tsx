@@ -37,7 +37,7 @@ beforeEach(async () => {
   initial = useAppStore.getState(); observation = structuredClone(performanceSnapshot)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   release = vi.fn(); publish = () => {}
-  vi.spyOn(api.toolkit, 'observe').mockImplementation(callback => { publish = callback; callback(observation); return { dispose: release } })
+  vi.spyOn(api.toolkit, 'observe').mockImplementation((_toolId, callback) => { publish = callback; callback(observation); return { dispose: release } })
   vi.spyOn(api.toolkit, 'script').mockResolvedValue({ toolId: 'performance', path: _hygiene_fixturePath("fixture/official/performance.sh"), sha256: 'a'.repeat(64), text: 'exec agentmux metrics watch\n' })
   vi.spyOn(api.toolkit, 'run'); vi.spyOn(api.toolkit, 'stop'); vi.spyOn(api.config, 'save')
   const sessions = Array.from({ length: 128 }, (_, i) => {
@@ -121,8 +121,8 @@ it('实际 Prompt textarea 的 hover 焦点、同节点、exact draft 与组字�
 })
 
 it('同步跨桥 handle 在 observe 建立期间关闭即可释放，迟到帧不能重新打开', async () => {
-  vi.mocked(api.toolkit.observe).mockImplementation(callback => { publish = callback; return { dispose: release } })
-  await mountApp(); await click('.performance-trigger'); await click('[data-performance-close]')
+  vi.mocked(api.toolkit.observe).mockImplementation((_toolId, callback) => { publish = callback; return { dispose: release } })
+  await mountApp(); await click('.performance-trigger'); await click('[data-toolkit-close]')
   expect(document.querySelector('.performance-popover')).toBeNull()
   expect(release, 'Opening observation handle is immediately disposed after close').toHaveBeenCalledTimes(1)
   await act(async () => publish(observation))
@@ -238,7 +238,7 @@ it('128 Session/8 Host 中 unrelated Store 更新不扫描身份；真实新 Ses
   expect(node('[data-run-id="preparation-run-1"]').textContent).toContain('Actual related identity update')
   const relatedDelta = delta(related)
   expect(relatedDelta.projections).toBe(1); expect(relatedDelta.visits).toBe(128); expect(relatedDelta.panel).toBeGreaterThan(0)
-  await click('[data-performance-close]'); expect(release).toHaveBeenCalledTimes(1)
+  await click('[data-toolkit-close]'); expect(release).toHaveBeenCalledTimes(1)
   const afterClose = baselineCost(); await updateBackground(); const afterCloseDelta = delta(afterClose)
   expect(afterCloseDelta.panel).toBe(0); expect(afterCloseDelta.visits).toBe(0)
   if (process.env.AGENTMUX_PERFORMANCE_UI_EVIDENCE) appendFileSync(resolve(process.env.AGENTMUX_PERFORMANCE_UI_EVIDENCE, 'cost.jsonl'), JSON.stringify({

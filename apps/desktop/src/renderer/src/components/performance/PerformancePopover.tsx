@@ -1,16 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { Activity } from 'lucide-react'
-import { WindowOverlayPortal } from '../WindowOverlayHost'
+import { markWindowOverlayDismissal, WindowOverlayPortal } from '../WindowOverlayHost'
 
-/** 方案组件：原生焦点顺序；只负责本浮窗的进入与退出，不持有资源观察事实。 */
-export function PerformancePopover({ children, label = false, onVisibleChange, focusKey }: {
+/** 原生焦点顺序；只负责本浮窗的进入与退出，不持有资源观察事实。 */
+export type ToolkitPopoverSelection = { selectedToolId: string | symbol | null; onSelectTool(toolId: string | symbol | null, closingToolId?: string | symbol): void }
+
+export function ToolkitPopover({ children, label = false, onVisibleChange, focusKey, toolId, name, icon, selectedToolId, onSelectTool }: ToolkitPopoverSelection & {
+  toolId: string | symbol; name: string; icon: ReactNode
   children(close: () => void): ReactNode
   label?: boolean
   onVisibleChange?(visible: boolean): void
   focusKey?: string
 }) {
-  const [open, setOpen] = useState(false)
+  const open = selectedToolId === toolId
+  const setOpen = (next: boolean) => onSelectTool(next ? toolId : null, next ? undefined : toolId)
   const [visible, setVisible] = useState(() => !document.hidden)
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
@@ -26,7 +29,10 @@ export function PerformancePopover({ children, label = false, onVisibleChange, f
   }
   const enter = () => {
     clearTimeout(closeTimer.current)
-    if (!open) openTimer.current = setTimeout(() => { origin.current = 'hover'; setOpen(true) }, 120)
+    if (!open) openTimer.current = setTimeout(() => {
+      if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.performance-popover')) return
+      origin.current = 'hover'; setOpen(true)
+    }, 120)
   }
   const leave = () => {
     clearTimeout(openTimer.current)
@@ -35,16 +41,19 @@ export function PerformancePopover({ children, label = false, onVisibleChange, f
   }
   const promote = () => {
     cancel(); origin.current = 'explicit'; setOpen(true)
-    if (open) panel.current?.querySelector<HTMLButtonElement>('[data-performance-close]')?.focus({ preventScroll: true })
+    if (open) panel.current?.querySelector<HTMLButtonElement>('[data-toolkit-close]')?.focus({ preventScroll: true })
   }
+  useEffect(() => { if (selectedToolId !== toolId) cancel() }, [selectedToolId, toolId])
   useEffect(() => {
+    if (!open) { cancel(); return }
     const changed = () => { cancel(); setVisible(!document.hidden) }
+    changed()
     document.addEventListener('visibilitychange', changed)
     return () => { cancel(); document.removeEventListener('visibilitychange', changed) }
-  }, [])
+  }, [open])
   useEffect(() => { onVisibleChange?.(open && visible); return () => onVisibleChange?.(false) }, [open, visible, onVisibleChange])
   useLayoutEffect(() => {
-    if (open && visible && origin.current === 'explicit') panel.current?.querySelector<HTMLButtonElement>('[data-performance-close]')?.focus({ preventScroll: true })
+    if (open && visible && origin.current === 'explicit') panel.current?.querySelector<HTMLButtonElement>('[data-toolkit-close]')?.focus({ preventScroll: true })
   }, [focusKey])
   useLayoutEffect(() => {
     const a = trigger.current, b = panel.current
@@ -54,7 +63,7 @@ export function PerformancePopover({ children, label = false, onVisibleChange, f
       const { x, y } = await computePosition(a, b, { strategy: 'fixed', placement: 'top-start', middleware: [offset(8), flip(), shift({ padding: 12 })] })
       if (!connected) return
       Object.assign(b.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
-      if (!placed && origin.current === 'explicit') b.querySelector<HTMLButtonElement>('[data-performance-close]')?.focus({ preventScroll: true })
+      if (!placed && origin.current === 'explicit') b.querySelector<HTMLButtonElement>('[data-toolkit-close]')?.focus({ preventScroll: true })
       placed = true
     }
     const stop = autoUpdate(a, b, update)
@@ -63,10 +72,8 @@ export function PerformancePopover({ children, label = false, onVisibleChange, f
     }
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
-      const target = event.target
-      const passiveTerminal = origin.current === 'hover' && !b.contains(document.activeElement)
-        && target instanceof HTMLElement && target.closest('.xterm') !== null
-      if (passiveTerminal) { close(); return }
+      // A passive reader closes without consuming the focused input owner's cancellation.
+      if (origin.current === 'hover' && !b.contains(document.activeElement)) { markWindowOverlayDismissal(event); close(); return }
       // 可见浮窗拥有本次 Escape；capture 先于原 Settings 的关闭处理，IME 始终归原输入。
       event.preventDefault(); event.stopPropagation()
       close()
@@ -76,11 +83,11 @@ export function PerformancePopover({ children, label = false, onVisibleChange, f
     return () => { connected = false; stop(); document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape, true) }
   }, [open, visible])
   return <>
-    <button ref={trigger} type="button" className="performance-trigger" aria-label="Performance" aria-expanded={open}
+    <button ref={trigger} type="button" className="performance-trigger" aria-label={name} title={name} aria-expanded={open} data-toolkit-id={typeof toolId === 'string' ? toolId : undefined}
       aria-haspopup="dialog" onPointerEnter={enter} onPointerLeave={leave} onClick={promote}>
-      <Activity size={14} aria-hidden="true" />{label ? <span>Performance</span> : null}
+      {icon}{label ? <span>{name}</span> : null}
     </button>
-    {open && visible ? <WindowOverlayPortal><div ref={panel} className="performance-popover" role="dialog" aria-label="Performance"
+    {open && visible ? <WindowOverlayPortal><div ref={panel} className="performance-popover" role="dialog" aria-label={name}
       style={{ visibility: 'hidden' }} onPointerEnter={() => clearTimeout(closeTimer.current)} onPointerLeave={leave}
       onFocusCapture={() => { clearTimeout(closeTimer.current); origin.current = 'explicit' }}>
       {children(close)}

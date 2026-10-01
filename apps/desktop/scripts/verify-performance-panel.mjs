@@ -17,10 +17,11 @@ const execute = promisify(execFile), sha = bytes => createHash('sha256').update(
 const base = resolve(root, ".bagakit/design/toolkit-performance-fixture/ui-evidence", mode.slice(2))
 await mkdir(base, { recursive: true }); const evidence = await mkdtemp(resolve(base, 'run-'))
 const component = 'apps/desktop/src/renderer/src/components/performance/'
+const toolkitStatusBar = 'apps/desktop/src/renderer/src/components/toolkit/ToolkitStatusBar.tsx'
 const productPaths = ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/components/TopRowChrome.tsx',
   'apps/desktop/src/renderer/src/components/WindowUtilityBar.tsx', 'apps/desktop/src/renderer/src/styles/agent.css',
   ...['PerformancePanel', 'PerformancePopover', 'PerformanceOverview', 'PerformanceScript'].map(name => component + name + '.tsx'),
-  'apps/desktop/src/renderer/src/lib/use-performance-observation.ts', 'apps/desktop/src/renderer/src/styles/performance-toolkit.css', 'apps/desktop/src/renderer/src/styles/index.css']
+  'apps/desktop/src/renderer/src/lib/use-performance-observation.ts', 'apps/desktop/src/renderer/src/styles/performance-toolkit.css', 'apps/desktop/src/renderer/src/styles/index.css', toolkitStatusBar]
 const config = 'apps/desktop/scripts/fixtures/performance-panel/vitest.config.mts'
 const test = 'apps/desktop/test/performance-panel-interaction.test.tsx'
 const proofPaths = [fileURLToPath(import.meta.url), config, test, 'apps/desktop/scripts/fixtures/performance-panel/data.ts',
@@ -47,12 +48,13 @@ async function callers() {
     return found
   }
   const jsx = name => (node, ast) => (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(ast) === name
-  const app = await collect(productPaths[0], jsx('PerformancePanel')); assert.equal(app.length, 1)
+  const app = await collect(productPaths[0], jsx('ToolkitStatusBar')); assert.equal(app.length, 1)
+  const performance = await collect(toolkitStatusBar, jsx('PerformancePanel')); assert.equal(performance.length, 1)
   await collect(productPaths[2], (node, ast) => ts.isJsxExpression(node) && node.expression?.getText(ast) === 'toolkit')
   const settings = await collect(productPaths[1], (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'settings.open' && node.arguments[0]?.getText(ast) === "'overview'")
   assert.equal(settings.length, 1, '唯一普通 Settings 产品入口')
   await collect(component + 'PerformancePanel.tsx', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'usePerformanceObservation' && node.arguments[0]?.getText(ast) === 'api.toolkit')
-  for (const name of ['PerformancePopover', 'PerformanceOverview', 'PerformanceScript']) await collect(component + 'PerformancePanel.tsx', jsx(name))
+  for (const name of ['ToolkitPopover', 'PerformanceOverview', 'PerformanceScript']) await collect(component + 'PerformancePanel.tsx', jsx(name))
   await collect('apps/desktop/src/renderer/src/lib/use-performance-observation.ts', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'api.observe')
   await collect(component + 'PerformanceScript.tsx', (node, ast) => ts.isCallExpression(node) && node.expression.getText(ast) === 'api.script')
   if(mode==='--buttons') {

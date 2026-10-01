@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { AppConfig } from '../../../../shared/contracts'
+import type { SettingsNavigationRequest } from '../SettingsNavigation'
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences' },
@@ -12,6 +13,8 @@ export type SettingsPaneProps = {
   onClose: () => void
   active: boolean
   executorId?: string | undefined
+  toolId?: string | undefined
+  navigationRequest?: SettingsNavigationRequest | undefined
 }
 
 /** A source contribution; editors and save semantics stay with their feature. */

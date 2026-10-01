@@ -1,5 +1,5 @@
 import { ExecutorIdentityContext } from './components/AgentAvatar'
-import { SettingsNavigation } from './components/SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest } from './components/SettingsNavigation'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
@@ -12,7 +12,7 @@ import {
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
-import { PerformancePanel } from './components/performance/PerformancePanel'
+import { ToolkitStatusBar } from './components/toolkit/ToolkitStatusBar'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -66,10 +66,11 @@ export function App() {
 }
 
 function DesktopApp() {
-  const [settingsRoute, setSettingsRoute] = useState<{ section: SettingsPageId; executorId?: string | undefined } | null>(null)
+  const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
   const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId }), [])
   const closeSettings = useCallback((): void => setSettingsRoute(null), [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings }), [openSettings])
+  const openToolkit = useCallback((toolId: string): void => setSettingsRoute({ section: 'toolkit', toolId }), [])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit }), [openSettings, openToolkit])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const initialize = useAppStore((state) => state.initialize)
@@ -527,8 +528,10 @@ function DesktopApp() {
       <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />
       {settingsRoute ? (
         <SettingsPanel
+          navigationRequest={settingsRoute}
           initialSection={settingsRoute.section}
           executorId={settingsRoute.executorId}
+          toolId={settingsRoute.toolId}
           onClose={closeSettings}
         />
       ) : null}
@@ -536,7 +539,7 @@ function DesktopApp() {
         <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={Boolean(settingsRoute)} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
           <GlobalSystemNotices nativeOverlayWarning={nativeOverlayWarning} />
-          <WindowUtilityBar toolkit={<PerformancePanel />} />
+          <WindowUtilityBar toolkit={<ToolkitStatusBar />} />
         </div>
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />

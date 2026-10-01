@@ -10,7 +10,14 @@ const raw = { phase, frames:[], actions:[], nativeEvents:[], windowEvents:[], le
   boundary:'Actual mounted App, Settings and TerminalView / native input / isolated product preload and registered Toolkit IPC; Metrics DTO port and original preview Session transport controlled. No official CLI/nativeRun or live-user claim.' }
 let win, stop=()=>{}, current, snapshot, serial=0, delay=0, toolkit, sampler, runtime, metrics, controlServer, detachRuntime
 const leases = new Map()
-const facts = () => ({active:toolkit?.current.consumerCount??leases.size,events:raw.leaseEvents.slice()})
+const performanceCurrent = async () => {
+  assert.ok(toolkit, 'The registered Toolkit owner exists')
+  const result = await toolkit.execute({operation:'toolkit.get',toolId:'performance'},new AbortController().signal)
+  assert.equal(result.operation,'toolkit.get')
+  assert.equal(result.snapshot.kind,'metrics','The exact Performance result has the metrics shape')
+  return result.snapshot
+}
+const facts = async () => ({active:toolkit?(await performanceCurrent()).consumerCount:leases.size,events:raw.leaseEvents.slice()})
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms))
 app.whenReady().then(async()=>{
   try {
@@ -62,7 +69,7 @@ app.whenReady().then(async()=>{
         processOwners:()=>({rendererPids:[win.webContents.getOSProcessId()].filter(pid=>pid>0),browserPids:[]}),
         mainOwners:()=>({...runtime.resourceOwnerCounts(),fileWatchers:0,browserViews:0,releasedBrowserViews:0})})
       metrics=createResourceMetricsPort({sampler,currentWindow:()=>win.isDestroyed()?null:{windowId:win.id,webContentsId:win.webContents.id,generation:runtime.rendererGeneration(win.webContents)}})
-      toolkit=new ToolkitOwner({openRunPort:()=>runtime.toolkitRunPort(),enabled:()=>true,launch:()=>({
+      toolkit=new ToolkitOwner({config:owner,receiptPath:path.join(privateRoot,'toolkit-receipts.json'),openRunPort:()=>runtime.toolkitRunPort(),enabled:()=>true,launch:()=>({
         runner:process.execPath,cli,script:asset,cwd:app.getPath('userData'),env:{ELECTRON_RUN_AS_NODE:'1'}})})
       const stopIpc=registerToolkitIpc(toolkit,(channel,handler)=>ipcMain.handle(channel,handler))
       controlServer=new AgentMuxControlServer({execute:async()=>{throw Error('私有Toolkit场景不准入其他Control写操作')},metrics,toolkit})
@@ -82,7 +89,7 @@ app.whenReady().then(async()=>{
       win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...p});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...p});raw.actions.push({type:'click',...p});await settle()}
     const hover=async()=>{const p=await point(q('.performance-trigger'));win.webContents.sendInputEvent({type:'mouseMove',x:p.x,y:p.y});raw.actions.push({type:'hover',...p});await until('!!document.querySelector(".performance-popover")');await settle()}
     const key=async keyCode=>{win.webContents.sendInputEvent({type:'keyDown',keyCode});if(keyCode==='Return')win.webContents.sendInputEvent({type:'char',keyCode:'\r'});win.webContents.sendInputEvent({type:'keyUp',keyCode});await settle()}
-    const close=async()=>{await click(q('[data-performance-close]'));await until('!document.querySelector(".performance-popover")');assert.equal(leases.size,0,'Close释放真实registeredIPC此lease')}
+    const close=async()=>{await click(q('[data-toolkit-close]'));await until('!document.querySelector(".performance-popover")');assert.equal(leases.size,0,'Close释放真实registeredIPC此lease')}
     const scene=async(width,theme)=>{win.setContentSize(width,900);await read('window.performanceScene.theme('+JSON.stringify(theme)+')');await until('innerWidth==='+width+'&&document.documentElement.dataset.appearance==='+JSON.stringify(theme));await settle()}
     const buttonSelector='.surface-navigation button,.window-status-bar__utilities > button,.window-status-bar__toolkits .performance-trigger'
     const buttonStyles=async()=>read('('+function(selector){
@@ -132,40 +139,40 @@ app.whenReady().then(async()=>{
     if(phase==='joined') {
       const before=JSON.parse(fs.readFileSync(path.join(evidence,'control-render.json'))).surface
       assert.deepEqual(surface,before,'Joined真实tool执行仍保原durable工作面')
-      assert.equal(toolkit.current.consumerCount,0,'真实Toolkit关闭无观察')
+      assert.equal((await performanceCurrent()).consumerCount,0,'真实Toolkit关闭无观察')
       await click(q('.performance-trigger'))
       await until('document.querySelector(".performance-status")?.textContent.includes("Observing")')
       const deadline=Date.now()+15000
-      while(toolkit.current.sequence<2&&Date.now()<deadline)await pause(50)
-      assert.ok(toolkit.current.sequence>=2,'真实官方script/compiled CLI/Core/ctxmux至少两帧')
-      const initial=toolkit.current
+      while((await performanceCurrent()).sequence<2&&Date.now()<deadline)await pause(50)
+      assert.ok((await performanceCurrent()).sequence>=2,'真实官方script/compiled CLI/Core/ctxmux至少两帧')
+      const initial=(await performanceCurrent())
       assert.ok(initial.run?.runId&&initial.observation?.app.data&&initial.observation.scope.mainPid===process.pid,'真实registered Main与官方观察identity非空')
       const privateCore=runtime.hosts.get('local').client
       const run=(await privateCore.listRuns()).find(run=>run.runId===initial.run.runId)
       assert.equal(run.state,'running');assert.ok(run.pid>0,'真实Core RawRun进程非空')
       const controller=new AbortController(),observer=[]
       const other=await toolkit.subscribe('performance',value=>observer.push(value),()=>{},controller.signal)
-      assert.equal(toolkit.current.consumerCount,2,'另一真实消费者正控')
+      assert.equal((await performanceCurrent()).consumerCount,2,'另一真实消费者正控')
       await capture('1480-dark-joined-official.png','Actual registered Toolkit owner → official asset → compiled public CLI → private Core/ctxmux → real Renderer result')
       await click(q('[data-performance-observation-toggle]'))
-      assert.equal(toolkit.current.consumerCount,1,'UI Pause只释放自己的lease')
-      const sequence=toolkit.current.sequence
-      const continuing=Date.now()+6000;while(toolkit.current.sequence===sequence&&Date.now()<continuing)await pause(50)
-      assert.ok(toolkit.current.sequence>sequence,'另一watch保持真实官方执行与新帧')
-      assert.equal(toolkit.current.run.runId,initial.run.runId,'Pause不更换真实工具Run')
-      await click(q('[data-performance-observation-toggle]'));assert.equal(toolkit.current.consumerCount,2)
+      assert.equal((await performanceCurrent()).consumerCount,1,'UI Pause只释放自己的lease')
+      const sequence=(await performanceCurrent()).sequence
+      const continuing=Date.now()+6000;while((await performanceCurrent()).sequence===sequence&&Date.now()<continuing)await pause(50)
+      assert.ok((await performanceCurrent()).sequence>sequence,'另一watch保持真实官方执行与新帧')
+      assert.equal((await performanceCurrent()).run.runId,initial.run.runId,'Pause不更换真实工具Run')
+      await click(q('[data-performance-observation-toggle]'));assert.equal((await performanceCurrent()).consumerCount,2)
       await click(q('.performance-actions > button:first-child'))
       await until('!!document.querySelector("[aria-label=\\"Official Performance script source\\"]")')
-      assert.equal(toolkit.current.consumerCount,1,'Script释放UI消费并保另一watch')
+      assert.equal((await performanceCurrent()).consumerCount,1,'Script释放UI消费并保另一watch')
       assert.equal(await read('document.querySelector("[aria-label=\\"Official Performance script source\\"]").value'),scriptText,'真实owner发布script精确资产')
-      await click(q('[data-performance-close]'))
+      await click(q('[data-toolkit-close]'))
       other.dispose();controller.abort();await toolkit.dispose()
       const retired=Date.now()+10000
       while((await privateCore.listRuns()).some(item=>item.runId===run.runId)&&Date.now()<retired)await pause(20)
       assert.deepEqual(await privateCore.listRuns(),[],'完整公开cleanup真实owned RawRun回收')
-      assert.equal(toolkit.current.consumerCount,0)
+      assert.equal((await performanceCurrent()).consumerCount,0)
       assert.deepEqual(await read('window.performanceScene.surface()'),surface,'真实tool操作保原工作面/Session/draft')
-      raw.joined={officialExecution:true,runId:run.runId,pid:run.pid,sequence:initial.sequence,continuedSequence:toolkit.current.sequence,
+      raw.joined={officialExecution:true,runId:run.runId,pid:run.pid,sequence:initial.sequence,continuedSequence:(await performanceCurrent()).sequence,
         asset,assetSHA:scriptSHA,cli,cliSHA:createHash('sha256').update(fs.readFileSync(cli)).digest('hex'),native:privateCore.runtimeIdentity(),
         otherConsumerFrames:observer.length,allOwnedRunsRemoved:true,boundary:'真实Toolkit注册Main/原sampler/官方脚本/公开CLI/Core/私有ctxmux与actual Renderer。Main其余功能未重造；原Terminal是明确preview transport，非用户现场FPS或NativeAgent输入资格。'}
       raw.surface=surface
@@ -312,7 +319,7 @@ app.whenReady().then(async()=>{
       await scene(1480,'dark')
       // Fresh点击：不得只通过先hover再click规避hidden元素无法接焦点。
       await click(q('.performance-trigger'))
-      await until('document.activeElement===document.querySelector("[data-performance-close]")')
+      await until('document.activeElement===document.querySelector("[data-toolkit-close]")')
       assert.equal(leases.size,1,'实际App观察consumer非空')
       const tabbed=[]
       for(let i=0;i<10;i++){await key('Tab');tabbed.push(await read('({tag:document.activeElement.tagName,text:document.activeElement.textContent,within:document.querySelector(".performance-popover").contains(document.activeElement)})'));if(tabbed.at(-1).text?.trim()==='View script')break}
@@ -433,9 +440,9 @@ app.whenReady().then(async()=>{
     raw.qualified=true
   } catch(error) {raw.failure={name:error.name,message:error.message,stack:error.stack}}
   finally {
-    raw.finalLeases=toolkit?.current.consumerCount??leases.size
+    raw.finalLeases=toolkit?(await performanceCurrent()).consumerCount:leases.size
     try{await stop()}catch(error){raw.qualified=false;raw.disposalFailure=String(error)}
-    raw.afterDisposalLeases=toolkit?.current.consumerCount??leases.size
+    raw.afterDisposalLeases=toolkit?(await performanceCurrent()).consumerCount:leases.size
     fs.writeFileSync(path.join(evidence,phase+'-render.json'),JSON.stringify(raw,null,2)+'\n')
     win?.close();raw.qualified?app.quit():app.exit(1)
   }

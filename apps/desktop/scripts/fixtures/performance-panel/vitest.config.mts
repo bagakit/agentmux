@@ -38,7 +38,7 @@ export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic' }, 
     const observeOne = (anchor: string, replacement: string) => { assert.equal(code.split(anchor).length - 1, 1, '唯一实际计量承重点: ' + path); code = code.replace(anchor, replacement) }
     if (path.endsWith('/renderer/src/App.tsx')) observeOne('function DesktopApp() {', "function DesktopApp() { globalThis.__performanceUIRecord?.('app-render')")
     if (path.endsWith('/performance/PerformancePanel.tsx')) {
-      observeOne('memo(function PerformancePanel() {', "memo(function PerformancePanel() { globalThis.__performanceUIRecord?.('panel-render')")
+      observeOne('memo(function PerformancePanel(selection: ToolkitPopoverSelection) {', "memo(function PerformancePanel(selection: ToolkitPopoverSelection) { globalThis.__performanceUIRecord?.('panel-render')")
       observeOne('projection = state.sessions.flatMap(session => {', "globalThis.__performanceUIRecord?.('identity-projection', state.sessions.length)\n      projection = state.sessions.flatMap(session => { globalThis.__performanceUIRecord?.('identity-visit')")
     }
     const change = changes[mutant]
