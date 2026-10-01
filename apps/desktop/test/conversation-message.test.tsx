@@ -21,9 +21,9 @@ describe('ConversationMessage', () => {
     // 整张表而不是 activity-conversation.css 一个文件：这几条规则按表面再拆一刀就会搬走，
     // 而硬编码单文件时扫描面变空、`toContain` / `toMatch` 一条都不红。
     const styles = allStyles()
-    expect(styles).toMatch(/:where\(\[data-speaker-role='human'\], \[data-speaker-role='unknown'\]\) \.log-turn__body \{[^}]*text-align: left/)
-    expect(styles).toContain(":where([data-speaker-role='human'], [data-speaker-role='unknown']) {")
-    expect(styles).toContain('justify-self: end')
+    expect(styles).toMatch(/\.log-turn__body \{[^}]*white-space: pre-wrap/)
+    expect(styles).toContain(".log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {")
+    expect(styles).toContain('margin-inline-start: auto')
   })
   it('renders one shared message shape with identity, markdown and quiet time', () => {
     const markup = renderToStaticMarkup(createElement(ConversationMessage, {
@@ -31,7 +31,7 @@ describe('ConversationMessage', () => {
       status: 'complete',
       content: 'Answer **ready**.'
     }))
-    expect(markup).toContain('class="log-turn" data-speaker-role="agent" data-status="complete"')
+    expect(markup).toContain('class="log-turn"');expect(markup).toContain('data-speaker-role="agent"');expect(markup).toContain('data-status="complete"')
     expect(markup).toContain('Review agent')
     expect(markup).toContain('Answer <strong>ready</strong>.')
     expect(markup).toMatch(/>\d{2}:00:02<\/span>/)

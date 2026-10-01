@@ -288,10 +288,8 @@ it('delivers terminal native user inputs, Message Tool confirmed, and unverified
   const messageItems = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')]
   expect(messageItems.length).toBeGreaterThanOrEqual(4)
 
-  const headers = messageItems.map((li) => li.querySelector('.composer-mailbox__row > strong')?.textContent)
-  expect(headers).toContain('Recorded')
-  expect(headers).toContain('Sent')
-  expect(headers).toContain('Delivery not confirmed')
+  const headers = messageItems.map((li) => li.querySelector('.composer-mailbox__row strong')?.textContent)
+  expect(headers).toEqual(['Author unknown','Author unknown','Author unknown','Author unknown']);expect(outboxPanel.textContent).toContain('Delivery not confirmed')
   expect(headers).not.toContain('You')
   expect(headers).not.toContain('Human')
 
@@ -302,7 +300,7 @@ it('delivers terminal native user inputs, Message Tool confirmed, and unverified
   // Check outbox tab count
   // pending (2) + sent (2 native + 2 timelineSent = 4) = 6
   const outboxTab = dom.container.querySelector('[id$="-outbox-tab"]')!
-  expect(outboxTab.textContent).toContain('Outbox (6)')
+  expect(outboxTab.getAttribute('aria-label')).toBe('Outbox: 2 pending')
 
   spine.verifyZeroControls()
 })
@@ -417,10 +415,9 @@ it('preserves distinct records in Outbox when identical prompt text is entered r
   })
 
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__row > strong')].map((h) => h.textContent)
+  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__history .composer-mailbox__row strong')].map((h) => h.textContent)
   // 2 native recorded + 1 captured sent
-  expect(headers.filter((h) => h === 'Recorded')).toHaveLength(2)
-  expect(headers.filter((h) => h === 'Sent')).toHaveLength(1)
+  expect(headers).toEqual(['Author unknown','Author unknown','Author unknown']);expect([...outboxPanel.querySelectorAll('[data-record-key]')].map(e=>(e as HTMLElement).dataset.recordKey)).toHaveLength(3)
 })
 
 it('queue reconciliation does not eliminate queued messages by matching text, timestamps, or unverified native IDs', async () => {
@@ -553,7 +550,7 @@ it('queue actions (send queued, copy, remove, move) remain functional in Outbox 
 
   const action = async (text: string) => {
     const button = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')].find(
-      (item) => item.textContent?.trim() === text
+      (item) => (item.getAttribute('aria-label') ?? item.textContent?.trim()) === text
     )
     expect(button).toBeDefined()
     await act(async () => button!.click())
@@ -774,17 +771,16 @@ it('transport read failure preserves queued messages, drafts, and existing obser
     throw new Error('Simulated network transport error')
   })
 
-  // Trigger retry / refresh
-  const snap = useAppStore.getState().sessions.find((s) => s.id === sessionId)!
-  await act(async () => useAppStore.setState({
-    sessions: [{ ...snap, updatedAt: 3, agentSessionUpdatedAt: 3 }]
-  }))
+  // Refresh the actual source owner; unrelated Session metadata is not a source invalidation.
+  await act(async () => {
+    mailbox().querySelector<HTMLButtonElement>('[aria-label="Refresh source"]')!.click()
+  })
 
   await act(async () => {
     await vi.waitFor(() => {
       const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
-      expect(outboxPanel.textContent).toContain('Failed to read native conversation history')
-      expect(outboxPanel.textContent).toContain('Simulated network transport error')
+      expect(mailbox().textContent).toContain('Failed to read native conversation history')
+      expect(mailbox().textContent).toContain('Simulated network transport error')
     })
   })
 
@@ -798,9 +794,9 @@ it('transport read failure preserves queued messages, drafts, and existing obser
   expect(useAppStore.getState().agentComposerDrafts[sessionId]).toBe('Unsent draft text')
 
   // Visible retry button exists
-  const retryBtn = outboxPanel.querySelector('.composer-mailbox__error button')
+  const retryBtn = mailbox().querySelector('.composer-mailbox__source-notice button')
   expect(retryBtn).not.toBeNull()
-  expect(retryBtn?.textContent).toBe('Retry')
+  expect(retryBtn?.getAttribute('aria-label')).toBe('Retry')
 
   // Zero runtime control operations
   spine.verifyZeroControls()
@@ -938,14 +934,14 @@ it('public captured unverified record without a queue entry remains visible in O
 
   const panel = dom.container.querySelector('[id$="-outbox"]')!
   expect(panel.textContent).toContain('Captured accepted input without delivery confirmation')
-  expect(dom.container.querySelector('[role="tab"][id$="-outbox-tab"]')?.textContent).toContain('Outbox (3)')
+  expect(dom.container.querySelector('[role="tab"][id$="-outbox-tab"]')?.getAttribute('aria-label')).toBe('Outbox: 0 pending')
 
   // Verify honest labeling: header is 'Delivery not confirmed', NOT 'Sent', NOT 'Recorded'
   const unverifiedItem = Array.from(panel.querySelectorAll('.composer-mailbox__history .composer-mailbox__messages li')).find(
     (li) => li.textContent?.includes('Captured accepted input without delivery confirmation')
   )!
   expect(unverifiedItem).toBeDefined()
-  expect(unverifiedItem.querySelector('.composer-mailbox__row > strong')?.textContent).toBe('Delivery not confirmed')
+  expect(unverifiedItem.querySelector('.composer-mailbox__row strong')?.textContent).toBe('Author unknown');expect(unverifiedItem.textContent).toContain('Delivery not confirmed')
 
   // Unverified item is NOT failed: no retry hint, no copy button
   expect(unverifiedItem.textContent).not.toContain('Check the Agent’s response before sending again.')
@@ -1015,11 +1011,11 @@ it('knownAgent incoming unverified stream enters Inbox with remote agent identit
   await act(async () => {
     await folder('inbox')
   })
-  expect(dom.container.querySelector('[role="tab"][id$="-inbox-tab"]')?.textContent).toContain('Inbox (1)')
+  expect(dom.container.querySelector('[role="tab"][id$="-inbox-tab"]')?.getAttribute('aria-label')).toBe('Inbox: 0 unread')
   const inboxPanel = dom.container.querySelector('[id$="-inbox"]')!
   expect(inboxPanel.textContent).toContain('Incoming stream from peer agent')
   // Verify remote agent identity: labeled with agent prefix/name, never 'Human', never 'You'
-  const incomingHeader = inboxPanel.querySelector('.composer-mailbox__row > strong')?.textContent
+  const incomingHeader = inboxPanel.querySelector('.composer-mailbox__row strong')?.textContent
   expect(incomingHeader).toContain('Agent remote-a')
   expect(incomingHeader).not.toContain('Human')
   expect(incomingHeader).not.toContain('You')
@@ -1042,7 +1038,7 @@ it('knownAgent incoming unverified stream enters Inbox with remote agent identit
   // Critical queue reconciliation proof:
   // Unverified streaming status DOES NOT eliminate the queued message!
   // Total Outbox count: 1 pending queued + 1 captured unverified sent + 2 native sent = 4
-  expect(dom.container.querySelector('[role="tab"][id$="-outbox-tab"]')?.textContent).toContain('Outbox (4)')
+  expect(dom.container.querySelector('[role="tab"][id$="-outbox-tab"]')?.getAttribute('aria-label')).toBe('Outbox: 1 pending')
 
   // Pending queue item remains visible in Outbox pending section
   const pendingSection = outboxPanel.querySelector('.composer-outbox')

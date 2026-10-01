@@ -1,7 +1,7 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ChevronRight, Copy } from 'lucide-react'
-import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useClientUiPlatform } from '../platform.js'
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
@@ -15,6 +15,14 @@ import type { ConversationAnnotationSelection } from '../lib/conversation-annota
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationMessageProps = {
+  /** A compact record face, without changing ordinary conversation defaults. */
+  compact?: boolean
+  recordedIdentity?: boolean
+  messageDetails?: ReactNode
+  /** Original text for records with structured parts; never reconstructed by the host. */
+  copyText?: string
+  /** A client retains its feedback owner and returns the actual clipboard result. */
+  onCopy?: (text: string) => Promise<boolean>
   messageId?: string
   speaker?: ConversationSpeaker
   /** Current conversation identity, supplied by its host; never inferred from a name. */
@@ -39,6 +47,9 @@ export type ConversationMessageProps = {
   expandedTraces?: ReadonlySet<string>
   onToggleTrace?: (traceId: string, open: boolean) => void
 }
+
+export type ConversationReadingProps = Pick<ConversationMessageProps,
+  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'describeSpeaker'>
 
 export type ConversationAnnotation = {
   messageId: string
@@ -85,6 +96,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
+  compact = false, recordedIdentity = false, messageDetails, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, inputSource, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
@@ -95,22 +107,22 @@ export function ConversationMessage({
     ? [{ kind: 'text', text: content }]
     : content
   const hasContent = parts.some(partHasRenderableContent)
-  const hasCopyContent = parts.some((part) => partText(part).length > 0)
+  const hasCopyContent = copyText === undefined ? parts.some((part) => partText(part).length > 0) : copyText.length > 0
   const isTraceOnly = parts.length > 0 && parts.every((part) => part.kind !== 'text' || part.text.trim().length === 0)
-  const speaker = recordedSpeaker ? speakerForDisplay(recordedSpeaker) : undefined
+  const speaker = recordedSpeaker ? recordedIdentity ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
   const isSystemContext = speaker?.role === 'system'
   const isIncoming = speaker?.role === 'human' || isPeerAgent
-  const prefix = useMemo(() => isIncoming && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
-    [isIncoming, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
+  const prefix = useMemo(() => (isIncoming || recordedIdentity && speaker?.role === 'unknown') && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
+    [isIncoming, recordedIdentity, speaker?.role, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
   const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
   const described = speaker?.role === 'agent' ? describeSpeaker?.(speaker) : undefined
   const displayProvider = described?.providerId ?? providerId
   const displayName = recordedSpeaker?.role === 'unknown'
-    ? 'You'
+    ? recordedIdentity ? 'Author unknown' : 'You'
     : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -148,13 +160,17 @@ export function ConversationMessage({
       window.clearTimeout(copyTimerRef.current)
       copyTimerRef.current = null
     }
-    const text = parts.map(partText).filter((t) => t.length > 0).join('\n')
+    const text = copyText ?? parts.map(partText).filter((t) => t.length > 0).join('\n')
     if (!text) return
-    const accepted = await platform.copyText(text, () => {
-      if (activeCopyActionRef.current === actionId) {
-        setCopyState('failed')
-      }
-    })
+    let accepted = false
+    try {
+      accepted = (onCopy ? await onCopy(text) : await platform.copyText(text, () => {
+        if (activeCopyActionRef.current === actionId) setCopyState('failed')
+      })) === true
+    } catch {
+      // The client owns error feedback; an unknown clipboard result never becomes success.
+      accepted = false
+    }
     if (activeCopyActionRef.current !== actionId) return
     if (accepted) {
       setCopyState('copied')
@@ -184,6 +200,8 @@ export function ConversationMessage({
   return (
     <div
       className="log-turn"
+      data-compact={compact || undefined}
+      data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}
       data-speaker-role={speaker?.role}
       data-speaker-relation={isPeerAgent ? 'other-agent' : undefined}
@@ -191,7 +209,7 @@ export function ConversationMessage({
       data-declared-source={prefix?.sourceLabel}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
-      data-message-bubble={!isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
+      data-message-bubble={!compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
         {speaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker, name: displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
@@ -222,8 +240,8 @@ export function ConversationMessage({
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button>
         </span> : null}
-        {isIncoming || speaker?.role === 'agent' ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
-          declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} /> : null}
+        {isIncoming || speaker?.role === 'agent' || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
+          declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
         {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div>

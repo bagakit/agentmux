@@ -1,0 +1,21 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@agentmux/core/control": [
+        "../../../../../packages/core/src/control.ts"
+      ],
+      "@agentmux/core": [
+        "../../../../../packages/core/src/index.ts"
+      ],
+      "@agentmux/core/terminal-continuation": [
+        "../../../../../packages/core/src/terminal-continuation.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../src/**/*.ts",
+    "../../../src/**/*.tsx",
+    "../../../*.ts"
+  ]
+}

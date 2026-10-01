@@ -201,7 +201,7 @@
   height: 32px;
   background: transparent;
 }
-.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {
   grid-template-columns: minmax(0, 1fr) 20px;
   margin-inline-start: auto;
   background: color-mix(in srgb, var(--blue) 4%, var(--surface-1));
@@ -210,12 +210,12 @@
   grid-template-columns: minmax(0, 1fr) 32px;
   background: var(--surface-1);
 }
-.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__head,
-.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__body,
-.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__continue {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__head,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__body,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__continue {
   grid-column: 1;
 }
-.log-turn:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node {
   grid-column: 2;
   grid-row: 1;
   background: transparent;

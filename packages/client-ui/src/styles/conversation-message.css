@@ -138,3 +138,19 @@
 }
 .log-turn__continue:hover { color: var(--green); }
 .log-turn__continue:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+/* Explicit compact records share the conversation body, without the ordinary bubble lane. */
+.log-turn[data-compact='true'] { grid-template-columns: 32px minmax(0, 1fr); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; column-gap: var(--sp-3); }
+.log-turn[data-compact='true'] .log-turn__node { grid-column: 1; width: 32px; height: 32px; background: transparent; }
+.log-turn[data-compact='true'] .log-turn__head, .log-turn[data-compact='true'] .log-turn__body { grid-column: 2; }
+.log-turn[data-compact='true'] .log-turn__who { flex: 1 1 100px; min-width: 0; font-size: var(--fs-body); }
+.log-turn[data-compact='true'] .log-turn__body { font-size: var(--fs-body); }
+.log-turn[data-compact='true'] .md-paragraph { color: var(--text); }
+.log-turn[data-compact='true'] .log-turn__head { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); }
+.log-turn[data-compact='true'] .log-turn__context,
+.log-turn[data-compact='true'] .log-turn__declared-source,
+.log-turn[data-compact='true'] .log-turn__packet-declaration,
+.log-turn[data-compact='true'] .conversation-input-details__body { grid-column: 1 / -1; }
+.log-turn[data-compact='true'] .log-turn__actions { opacity: 1; }
+.log-turn[data-compact='true'] .log-turn__head .conversation-input-details { position: static; }
+.log-turn[data-compact='true'] .conversation-input-details__body { margin-block: var(--sp-2); }

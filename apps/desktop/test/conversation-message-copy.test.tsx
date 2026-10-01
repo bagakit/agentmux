@@ -13,12 +13,12 @@ describe('conversation message copy contract', () => {
   })
 
   it('uses the editorial human lane without the old left rail', () => {
-    const selector = ".log-turn[data-speaker-role='human'] {"
+    const selector = ".log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {"
     const humanStart = styles.indexOf(selector)
     expect(humanStart).toBeGreaterThan(-1)
     const humanEnd = styles.indexOf('}', humanStart)
     expect(humanEnd).toBeGreaterThan(humanStart)
-    expect(styles.slice(humanStart, humanEnd)).toContain('justify-self: end')
+    expect(styles.slice(humanStart, humanEnd)).toContain('margin-inline-start: auto')
     expect(styles.slice(humanStart, humanEnd)).not.toContain('border-left')
   })
 })

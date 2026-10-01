@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { composerDOM } from './helpers/composer-dom-fixture'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
@@ -102,7 +103,7 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
     await useAppStore.getState().sendQueuedAgentSteer('s', 'restored')
     expect(submit).toHaveBeenCalledWith(expect.any(Object), 'kept', 'restored', {
       expectedRun: { runId: 'r' }, afterSubmissionId: 'original-predecessor'
-    }, undefined, { allowUncertainTurn: true }, false)
+    }, { allowUncertainTurn: true }, false)
     expect(api.sessions.refresh).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
@@ -275,18 +276,21 @@ describe('renderer routes every send through Core, retaining nothing of Core’s
 })
 
 describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at the UI layer', () => {
-  function render(deliverable: boolean): string {
-    return renderToStaticMarkup(createElement(ComposerOutbox, {
-      selectedId: 'a', onSelect: () => {},
+  const dom = composerDOM()
+  async function render(deliverable: boolean, selectedId = 'a'): Promise<string> {
+    await dom.render(createElement(ComposerOutbox, {
+      selectedId, onSelect: () => {},
       queued: [{ id: 'a', text: 'a', status: 'queued', deliverable }, { id: 'b', text: 'b', status: 'queued', deliverable }]
     }))
+    if (dom.container.querySelector('[aria-label="Message details"][aria-expanded="false"]')) await dom.click('[aria-label="Message details"]')
+    return dom.container.innerHTML
   }
 
-  it('a live Run offers explicit delivery without claiming Provider consumption', () => {
-    const markup = render(true)
+  it('a live Run offers explicit delivery without claiming Provider consumption', async () => {
+    const markup = await render(true)
     expect(markup).toContain('Queued for delivery')
-    expect(markup).toContain('Send explicitly steers this message, including during the current turn.')
-    expect(markup).toContain('It does not send the other queued messages.')
+    expect(markup).toContain('Send explicitly steers only this message, including during the current turn.')
+    expect(markup).toContain('other queued messages are not sent automatically.')
     // "queued for delivery" is Host-accepted intent, NOT proof the Provider consumed anything.
     // MUTATION: change the deliverable-branch copy in ComposerOutbox.tsx to say "replied"/"accepted" —
     // this pair splits → red.
@@ -294,18 +298,17 @@ describe('Outbox keeps Host-accepted separate from Provider-consumed/unknown at 
     expect(markup.toLowerCase()).not.toContain('accepted')
   })
 
-  it('an ended run does not promise delivery and says where the words are kept', () => {
-    const markup = render(false)
+  it('an ended run does not promise delivery and says where the words are kept', async () => {
+    const markup = await render(false)
     expect(markup).not.toContain('Queued for delivery')
     expect(markup).toContain('Not sent')
     // MUTATION: collapse the two branches to one optimistic label (ComposerOutbox.tsx) — a
     // non-deliverable queue would read "queued for delivery" → red.
     expect(markup).toContain('the bound Run is unavailable or changed')
     expect(markup).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
-    expect(markup).toContain('composer-mailbox__full-text">a</p>')
-    const second = renderToStaticMarkup(createElement(ComposerOutbox, { selectedId: 'b', onSelect: () => {},
-      queued: [{ id: 'a', text: 'a', status: 'queued', deliverable: false }, { id: 'b', text: 'b', status: 'queued', deliverable: false }] }))
-    expect(second).toContain('composer-mailbox__full-text">b</p>')
+    expect(markup).toContain('log-turn__body')
+    const second = await render(false, 'b')
+    expect(second).toContain('data-record-key="queue:b"')
     expect(second).toContain('Its delivery result is unknown; it will not be replayed on another Run.')
   })
 })
