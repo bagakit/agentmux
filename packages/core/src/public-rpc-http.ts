@@ -75,25 +75,43 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
           onFrame(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)))
         }
       } else if (type === 'text/event-stream') {
-        const decoder = new TextDecoder('utf-8', { fatal: true }), encoder = new TextEncoder()
-        let buffer = ''
+        const decoder = new TextDecoder('utf-8', { fatal: true })
+        let pieces: Uint8Array[] = [], size = 0, tail = new Uint8Array()
         while (!closed) {
           const { value, done } = await reader.read()
-          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
-          let separator: RegExpExecArray | null
-          while (!closed && (separator = /\r?\n\r?\n/u.exec(buffer))) {
-            const event = buffer.slice(0, separator.index)
-            buffer = buffer.slice(separator.index + separator[0].length)
-            if (encoder.encode(event).byteLength > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
+          if (done) { decoder.decode(); break }
+          let start = 0, offset = 0
+          while (!closed) {
+            const newline = value.indexOf(10, offset)
+            if (newline < 0) break
+            const before = (index: number) => index >= start ? value[index]
+              : start === 0 && index < 0 ? tail[tail.byteLength + index] : undefined
+            const previous = before(newline - 1)
+            const firstNewline = previous === 10 ? newline - 1
+              : previous === 13 && before(newline - 2) === 10 ? newline - 2 : null
+            offset = newline + 1
+            if (firstNewline === null) continue
+            const separatorBytes = newline - firstNewline + 1 + (before(firstNewline - 1) === 13 ? 1 : 0)
+            const part = value.subarray(start, offset)
+            pieces.push(part); size += part.byteLength
+            if (size - separatorBytes > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
+            const bytes = new Uint8Array(size); let position = 0
+            for (const piece of pieces) { bytes.set(piece, position); position += piece.byteLength }
+            const event = decoder.decode(bytes, { stream: true }).slice(0, -separatorBytes)
+            pieces = []; size = 0; tail = new Uint8Array(); start = offset
             const data = event.split(/\r?\n/u).filter(line => line.startsWith('data:'))
               .map(line => line.slice(5).trimStart()).join('\n')
             if (!data) throw new AgentMuxError('SSE stream lacks a complete RPC frame.', 'CONTROL_PROTOCOL_ERROR')
             onFrame(JSON.parse(data))
           }
-          if (encoder.encode(buffer).byteLength > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
-          if (done) break
+          if (closed) break
+          const remaining = value.subarray(start)
+          if (remaining.byteLength) { pieces.push(remaining); size += remaining.byteLength }
+          if (size > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
+          tail = remaining.byteLength >= 3 ? remaining.subarray(-3)
+            : Uint8Array.from([...(start === 0 ? tail : []), ...remaining]).slice(-3)
         }
-        if (!closed && buffer.length) throw new AgentMuxError('SSE stream ended with an incomplete frame.', 'CONTROL_PROTOCOL_ERROR')
+        if (!closed && size) throw new AgentMuxError('SSE stream ended with an incomplete frame.', 'CONTROL_PROTOCOL_ERROR')
       } else throw new AgentMuxError('Unexpected HTTP RPC content type.', 'CONTROL_PROTOCOL_ERROR')
       finish()
     } catch (error) { finish(rpcTransportError(error)) }

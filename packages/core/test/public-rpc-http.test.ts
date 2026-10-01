@@ -88,6 +88,47 @@ it('decodes nonempty ordered SSE and UTF-8 split into single-byte transport chun
   expect(result.frames.slice(1).map(parseRpcRequest)).toEqual(notices)
 })
 
+it('preserves a 16 MiB UTF-8 SSE reply through fragmented real HTTP chunks', async () => {
+  const frame = { jsonrpc: '2.0', id: request.id, result: '字节'.repeat(2_800_000) }
+  const body = sse(frame).replaceAll('\n', '\r\n')
+  expect(Buffer.byteLength(body)).toBeGreaterThan(16 * 1024 * 1024)
+  const url = await http((_req, res) => { res.setHeader('Content-Type', 'text/event-stream'); res.end(body) })
+  let chunks = 0
+  const nativeFetch: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init)
+    const split = response.body!.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(value, controller) {
+        for (let offset = 0; offset < value.byteLength; offset += 8_191) {
+          chunks++; controller.enqueue(value.subarray(offset, offset + 8_191))
+        }
+      }
+    }))
+    return new Response(split, { status: response.status, headers: response.headers })
+  }
+  const result = await collect(url, { url, fetch: nativeFetch })
+  expect(chunks).toBeGreaterThan(1_000)
+  expect(result.error).toBeUndefined(); expect(result.frames).toEqual([frame])
+}, 15_000)
+
+it('preserves mixed SSE separators, multiline data and adjacent events across tiny HTTP chunks', async () => {
+  const frames = ['第一', '第二', '第三'].map((result, index) => ({ jsonrpc: '2.0', id: index, result }))
+  const body = 'data: ' + JSON.stringify(frames[0]) + '\r\n\n' +
+    'data: {"jsonrpc":"2.0",\r\ndata: "id":1,"result":"第二"}\n\r\n' +
+    'data: ' + JSON.stringify(frames[2]) + '\r\n\r\n'
+  const url = await http((_req, res) => { res.setHeader('Content-Type', 'text/event-stream'); res.end(body) })
+  const nativeFetch: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init)
+    const split = response.body!.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(value, controller) {
+        for (let offset = 0; offset < value.byteLength; offset += 3) controller.enqueue(value.subarray(offset, offset + 3))
+      }
+    }))
+    return new Response(split, { status: response.status, headers: response.headers })
+  }
+  const result = await collect(url, { url, fetch: nativeFetch })
+  expect(result.error).toBeUndefined(); expect(result.frames).toEqual(frames)
+})
+
 it('stops inside a notification callback without draining later frames or closing another real reader', async () => {
   const frames = [1, 2, 3].map(sequence => ({ jsonrpc: '2.0', method: 'system.subscription.event', params: { sequence } }))
   const url = await http((_req, res) => { res.setHeader('Content-Type', 'text/event-stream'); res.end(frames.map(sse).join('')) })
@@ -117,14 +158,15 @@ it('cancels before fetching and while awaiting the actual HTTP response', async 
 it.each([
   ['incomplete SSE', 'text/event-stream', 'data: {"jsonrpc":"2.0"}', 'CONTROL_PROTOCOL_ERROR'],
   ['invalid JSON', 'application/json', '{invalid}', 'CONTROL_PROTOCOL_ERROR'],
+  ['invalid UTF-8 SSE', 'text/event-stream', Uint8Array.from([100, 97, 116, 97, 58, 32, 0xc3, 0x28, 10, 10]), 'CONTROL_PROTOCOL_ERROR'],
   ['oversized JSON', 'application/json', JSON.stringify('x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES)), 'CONTROL_PROTOCOL_ERROR'],
-  ['oversized SSE', 'text/event-stream', 'data: ' + 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES) + '\n\n', 'CONTROL_PROTOCOL_ERROR'],
+  ['oversized SSE', 'text/event-stream', sse({ jsonrpc: '2.0', id: request.id, result: 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES) }), 'CONTROL_PROTOCOL_ERROR'],
   ['unexpected type', 'text/plain', '{}', 'CONTROL_PROTOCOL_ERROR']
 ] as const)('rejects actual %s without delivering a business frame', async (_name, type, body, code) => {
   const url = await http((_req, res) => { res.setHeader('Content-Type', type); res.end(body) })
   const result = await collect(url)
   expect(result.error).toMatchObject({ code }); expect(result.frames).toEqual([])
-})
+}, 15_000)
 
 it('keeps response identity and strict envelope checks in the real Node HTTP consumer', async () => {
   let response: unknown = { jsonrpc: '2.0', id: 'wrong-correlation', result: settings }
@@ -150,6 +192,18 @@ it('shares one bounded line decoder across fragmented UTF-8 and complete adjacen
   expect(() => new AgentMuxRpcLines().accept(new Uint8Array(AGENTMUX_RPC_MAX_MESSAGE_BYTES + 1), () => {})).toThrow('bounded frame budget')
 })
 
+it('preserves a legitimate 16 MiB message through encoding and fragmented shared decoding', () => {
+  const frame = { jsonrpc: '2.0', id: 'retained-large-message', result: '' }
+  const originalBytes = 16 * 1024 * 1024
+  frame.result = 'x'.repeat(originalBytes - Buffer.byteLength(JSON.stringify(frame)))
+  const bytes = new TextEncoder().encode(rpcEncode(frame))
+  expect(bytes.byteLength - 1).toBe(originalBytes)
+  const decoder = new AgentMuxRpcLines(), values: unknown[] = []
+  for (let offset = 0; offset < bytes.byteLength; offset += 65_536) decoder.accept(bytes.subarray(offset, offset + 65_536), value => values.push(value))
+  decoder.end()
+  expect(values).toEqual([frame])
+}, 15_000)
+
 it('accepts the exact shared frame budget and rejects one extra byte in both directions', () => {
   const frame = { jsonrpc: '2.0', id: 'boundary', result: '' }
   frame.result = 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES - Buffer.byteLength(JSON.stringify(frame)))
@@ -164,7 +218,7 @@ it('accepts the exact shared frame budget and rejects one extra byte in both dir
   oversized.accept(new Uint8Array(AGENTMUX_RPC_MAX_MESSAGE_BYTES), consume)
   expect(() => oversized.accept(Uint8Array.of(120), consume)).toThrow('bounded frame budget')
   expect(consume).not.toHaveBeenCalled()
-})
+}, 15_000)
 
 it('bundles the actual exported HTTP leaf for browsers with a nonempty graph and no Node imports', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
