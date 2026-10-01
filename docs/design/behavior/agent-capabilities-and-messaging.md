@@ -51,7 +51,7 @@
 | --- | --- |
 | 启动 guide、Scratch Topic/Wiki/SOUL | [Core `composeAgentLaunchPrompt`](../../../packages/core/src/agent-outbound-message.ts) 将 guide 与 `agentMuxNote` 放在同一 amux 包装；[Desktop `RuntimeController`](../../../apps/desktop/src/main/runtime-controller.ts) 提供 Topic note，[Core Client](../../../packages/core/src/client.ts) 从实际 producer 保留独立 `systemContext` 记录。 |
 | Goal/PMO 任务上下文 | [Desktop `openGoalPmo`](../../../apps/desktop/src/renderer/src/store.ts) 生成 amux 后当普通 prompt 提交；它是自产文本声明，不能由标签升级为已核 System。 |
-| Goals 探索与 Browser annotations | [Goals `startGoalExploration`](../../../apps/desktop/src/renderer/src/lib/goals-entry-actions.ts) 将项目上下文附加为纯文本；[Browser context formatter](../../../apps/desktop/src/renderer/src/lib/browser-annotations.ts) 输出纯文本，经 [Survey Browser Tools](../../../apps/desktop/src/renderer/src/components/SurveyBrowserTools.tsx) 加入可编辑草稿。当前没有专用 Goal、Task 或 Browser 信封。 |
+| Goals 探索与 Browser annotations | [Goals `startGoalExploration`](../../../apps/desktop/src/renderer/src/lib/goals-entry-actions.ts) 将项目上下文附加为纯文本；[Browser context formatter](../../../apps/desktop/src/renderer/src/lib/browser-annotations.ts) 输出纯文本，经 [Browser Tools Panel](../../../apps/desktop/src/renderer/src/components/BrowserToolsPanel.tsx) 加入可编辑草稿。当前没有专用 Goal、Task 或 Browser 信封。 |
 | 普通 submit 与 resume 输入 | [Core Client](../../../packages/core/src/client.ts) 使用普通 user 段，不额外生成平台包装。 |
 | Mailbox Progress | [Desktop `deliverContinuousProgress`](../../../apps/desktop/src/main/continuous-progress-delivery.ts) 将用户配置的 `loop.prompt` 原样自动提交，目前不自动附加平台注入或共享消息规则。用户选择的 continuation prompt 仍是用户内容，不因自动提交升级为平台自产上下文。 |
 | System Reminder | 目前为 proposal-only，尚无 AgentMux 主动持续注入；默认与单次覆盖关系已确认，正文、触发与兑现范围未定。状态与未决范围见上述 Reminder owner。 |
