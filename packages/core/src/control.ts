@@ -247,7 +247,7 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; caller?: AgentMuxControlCaller; message?: AgentMuxMessageEnvelope
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy

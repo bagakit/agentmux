@@ -1,10 +1,12 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   AgentMuxClient,
+  issueAgentCapability,
+  hashAgentCapability,
   AgentMuxFileAgentSessionStore,
   agentPromptCondition,
   normalizeAgentTimelineMutation,
@@ -15,11 +17,13 @@ import {
   type AgentTimelineSnapshot
 } from '@agentmux/core'
 
+const peerCapability = issueAgentCapability()
 const roots: string[] = []
 const clients: AgentMuxClient[] = []
 
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((c) => c.dispose()))
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })))
 })
 
@@ -77,6 +81,8 @@ async function createFixtureClient(): Promise<{
   const store = new AgentMuxFileAgentSessionStore(storePath)
   await store.compareAndSwap(null, storedSession())
 
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dirname(storePath), 'messages.ndjson'))
+  await store.compareAndSwap(null, storedSession({ agentSessionId: 'agent-peer-x', run: { runId: 'peer-run' }, capabilityHash: hashAgentCapability(peerCapability) }))
   const client = new AgentMuxClient({ store })
   clients.push(client)
 
@@ -120,24 +126,15 @@ async function createFixtureClient(): Promise<{
 }
 
 describe('Core user message author facts and projection', () => {
-  it('accepts a prompt with an empty Agent field without upgrading its conflicting Human claim', async () => {
+  it('rejects the removed raw Agent author field without upgrading its Human claim', async () => {
     const { client, store, writes } = await createFixtureClient()
-    await client.submitAgentPrompt({
-      ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)),
-      agentSessionId: AGENT_SESSION_ID,
-      operationId: 'empty-agent-conflict',
-      prompt: 'Keep this accepted input unattributed',
-      authorAgentSessionId: '',
-      authorHuman: true,
-      allowUncertainTurn: true
-    })
-    expect(writes).toEqual(['Keep this accepted input unattributed\r'])
-    const timeline = await new AgentMuxFileAgentSessionStore(store.path).loadTimeline(AGENT_SESSION_ID)
-    expect(timeline.items).toHaveLength(1)
-    expect(timeline.items[0]!.authorAgentSessionId).toBeUndefined()
-    expect(timeline.items[0]!.authorHuman).toBeUndefined()
-    expect(projectSessionUserMessages({ agentSessionId: AGENT_SESSION_ID, timeline }).map(message => message.author))
-      .toEqual([{ kind: 'unknown' }])
+    await expect(client.submitAgentPrompt({
+      ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'empty-agent-conflict', prompt: 'Keep this input unattributed',
+      ...{ authorAgentSessionId: '' }, authorHuman: true
+    })).rejects.toMatchObject({ code: 'MESSAGE_ENVELOPE_REQUIRED' })
+    expect(writes).toEqual([])
+    expect((await store.loadTimeline(AGENT_SESSION_ID)).items).toEqual([])
   })
 
   it('projects explicit human, known agent, and unknown authors with conflict precedence', () => {
@@ -256,28 +253,20 @@ describe('Core user message author facts and projection', () => {
       authorHuman: true
     })
 
-    // Immediate replay of op-human-1 with conflicting author attempt:
-    // PTY write is not repeated and author remains human.
+    // A raw author attempt cannot enter either the manual or authenticated message path.
     const writesAfterFirst = writes.length
-    await client.submitAgentPrompt({
-      ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)),
-      agentSessionId: AGENT_SESSION_ID,
-      operationId: 'op-human-1',
-      prompt: 'Human instruction',
-      authorAgentSessionId: 'agent-trying-to-change'
-    })
+    await expect(client.submitAgentPrompt({
+      ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'op-human-1', prompt: 'Human instruction', ...{ authorAgentSessionId: 'agent-trying-to-change' }
+    })).rejects.toMatchObject({ code: 'MESSAGE_ENVELOPE_REQUIRED' })
     expect(writes.length).toBe(writesAfterFirst)
 
-    // 2. Submit attributed agent prompt with conflicting authorHuman: true (positive control)
-    await client.submitAgentPrompt({
-      ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)),
-      agentSessionId: AGENT_SESSION_ID,
-      operationId: 'op-agent-1',
-      prompt: 'Agent instruction',
-      authorAgentSessionId: 'agent-peer-x',
-      authorHuman: true,
-      allowUncertainTurn: true
-    })
+    await client.submitAgentMessage({ agentSessionId: AGENT_SESSION_ID,
+      condition: agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), caller: { agentSessionId: 'agent-peer-x', capability: peerCapability },
+      envelope: { schema: 'agentmux.a2a.v1', messageId: 'op-agent-1', operationId: 'agent-message-operation', createdAt: 100,
+        sender: { kind: 'agent-session', agentSessionId: 'agent-peer-x' }, recipient: { kind: 'agent-session', agentSessionId: AGENT_SESSION_ID },
+        senderSessionId: 'agent-peer-x', senderRunId: 'peer-run', recipientSessionId: AGENT_SESSION_ID, recipientRunId: RUN_ID,
+        threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null, body: 'Agent instruction' } })
 
     // 3. Submit ordinary prompt without author attribution (unknown)
     await client.submitAgentPrompt({
@@ -303,7 +292,7 @@ describe('Core user message author facts and projection', () => {
 
     expect(writes).toEqual([
       'Human instruction\r',
-      'Agent instruction\r',
+      '[Message from Agent agent-peer-x]\nAgent instruction\r',
       'Default instruction\r'
     ])
 

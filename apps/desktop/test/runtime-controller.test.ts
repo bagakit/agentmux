@@ -45,7 +45,7 @@ const runtimeFixture = vi.hoisted(() => {
       }
     })
     readonly dispose = vi.fn(async () => {})
-    readonly authorizeAgentMessage = vi.fn(() => {})
+    readonly submitAgentMessage = vi.fn(async () => {})
     eventListener: ((event: unknown) => void) | null = null
     readonly onEvent = vi.fn((listener: (event: unknown) => void) => {
       this.eventListener = listener
@@ -382,21 +382,16 @@ function agentStatusFixture() {
 }
 
 describe('RuntimeController configuration transaction', () => {
-  it('routes complete A2A Session/Run facts through Core at the main-process boundary', async () => {
+  it('routes the complete A2A envelope and credential through the Core delivery owner', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient?.instances?.at(-1)
-    await controller.authorizeAgentMessage({
-      capability: 'capability', callerAgentSessionId: 'caller-cli', senderAgentSessionId: 'caller-cli',
-      senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli',
-      recipientSessionId: 'recipient', recipientRunId: 'run-recipient'
-    })
-    expect(client?.authorizeAgentMessage).toHaveBeenCalledWith(expect.objectContaining({ recipientRunId: 'run-recipient' }))
-    client?.authorizeAgentMessage.mockImplementationOnce(() => { throw Object.assign(new Error('recipient facts mismatch'), { code: 'MESSAGE_RECIPIENT_MISMATCH' }) })
-    await expect(controller.authorizeAgentMessage({
-      capability: 'capability', callerAgentSessionId: 'caller-cli', senderAgentSessionId: 'caller-cli',
-      senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli',
-      recipientSessionId: 'recipient', recipientRunId: null
-    })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
+    const message = { envelope: { schema: 'agentmux.a2a.v1' as const, messageId: 'message', operationId: 'operation', createdAt: 1,
+      sender: { kind: 'agent-session' as const, agentSessionId: 'caller-cli' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'recipient' },
+      senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli', recipientSessionId: 'recipient', recipientRunId: 'run-recipient',
+      threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null, body: 'original' },
+      condition: { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null }, caller: { agentSessionId: 'caller-cli', capability: 'capability' } }
+    await controller.submitMessage({ kind: 'agent', hostId: 'local', agentSessionId: 'recipient', run: message.condition.expectedRun }, message)
+    expect(client?.submitAgentMessage).toHaveBeenCalledWith({ ...message, agentSessionId: 'recipient' })
     await controller.dispose()
   })
   beforeEach(() => {
@@ -653,7 +648,7 @@ describe('RuntimeController configuration transaction', () => {
       hostId: 'local',
       workspacePath: _hygiene_fixturePath("repo"),
       prompt: 'Open Claude on the right.',
-      authorAgentSessionId: 'launch-author'
+      initialMessage: { callerAgentSessionId: 'launch-author', capability: 'launch-capability' }
     }, config)).rejects.toThrow('stopped after input capture')
 
     expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({
@@ -661,7 +656,7 @@ describe('RuntimeController configuration transaction', () => {
       executorId: 'codex-review',
       injectAgentMuxGuide,
       prompt: 'Open Claude on the right.',
-      authorAgentSessionId: 'launch-author'
+      initialMessage: { callerAgentSessionId: 'launch-author', capability: 'launch-capability' }
     }))
   })
 
@@ -1011,13 +1006,12 @@ describe('RuntimeController configuration transaction', () => {
       run: { runId: 'run-1' }
     }
 
-    await controller.submitPrompt(control, 'hello', 'message-op', { expectedRun: control.run, afterSubmissionId: null }, undefined, 'reviewer')
+    await controller.submitPrompt(control, 'hello', 'message-op', { expectedRun: control.run, afterSubmissionId: null }, undefined)
     expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1)
     expect(client.submitAgentPrompt).toHaveBeenCalledWith(expect.objectContaining({ afterSubmissionId: null,
       agentSessionId: 'agent-1',
       expectedRun: control.run,
-      prompt: 'hello',
-      authorAgentSessionId: 'reviewer'
+      prompt: 'hello'
     }))
   })
 
@@ -1110,7 +1104,7 @@ describe('RuntimeController configuration transaction', () => {
     const running = agentStatusFixture()
     client.statusAgent.mockResolvedValue({ ...running, run: { ...running.run, state: 'running' as const } })
     const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
-    await controller.submitPrompt(control, 'first', 'original', { expectedRun: control.run, afterSubmissionId: null }, undefined, undefined, { allowUncertainTurn: true })
+    await controller.submitPrompt(control, 'first', 'original', { expectedRun: control.run, afterSubmissionId: null }, undefined, { allowUncertainTurn: true })
     expect(client.submitAgentPrompt).toHaveBeenLastCalledWith({ afterSubmissionId: null, agentSessionId: 'agent-1', operationId: 'original',
       expectedRun: control.run, prompt: 'first', allowUncertainTurn: true })
     await controller.submitPrompt(control, 'second', 'other', { expectedRun: control.run, afterSubmissionId: null })
@@ -1118,7 +1112,7 @@ describe('RuntimeController configuration transaction', () => {
       operationId: 'other', prompt: 'second' })
     await controller.submitPrompt(control, 'auto', 'automatic', { expectedRun: control.run, afterSubmissionId: null }, {
       completionId: '["run-1",1]', isCurrent: () => true, signal: new AbortController().signal
-    }, undefined, { allowUncertainTurn: true })
+    }, { allowUncertainTurn: true })
     expect(client.submitAgentPrompt.mock.calls.at(-1)?.[0]).not.toHaveProperty('allowUncertainTurn')
     await controller.dispose()
   })

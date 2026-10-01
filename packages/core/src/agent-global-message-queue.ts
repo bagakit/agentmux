@@ -572,8 +572,12 @@ export class DurableAgentMuxMessageQueue {
     if (!message) {
       throw new AgentMuxError('A referenced Dispatch message is not retained in this journal.', 'DISPATCH_MESSAGE_UNAVAILABLE')
     }
-    assertDispatchMessage(message.envelope)
-    return message.envelope
+    // The original creation envelope honestly predates its Run. The same journal's
+    // immutable delivery condition supplies that Run only for this admission projection.
+    const envelope = message.envelope.recipientRunId === null && message.promptCondition
+      ? { ...message.envelope, recipientRunId: message.promptCondition.expectedRun.runId } : message.envelope
+    assertDispatchMessage(envelope)
+    return envelope
   }
 
   private dispatchProjection(sourceMessageId: string): { dispatch: Dispatch; messages: readonly AgentMuxMessageEnvelope[] } {

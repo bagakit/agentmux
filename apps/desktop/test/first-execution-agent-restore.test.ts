@@ -15,6 +15,7 @@ function agent(runId = 'old-run', processState: 'running' | 'exited' | 'interrup
   return { id, kind: 'agent', providerId: 'codex', executorId: 'probe', hostId: 'local',
     workspacePath: _hygiene_fixturePath("private/fixture"), label: 'Private Agent', createdAt: 1, updatedAt: 2, processState,
     status: { state: 'done', source: 'native-hook', observedAt: 1 }, latestOutputBytes: 0,
+    promptSubmissionPredecessor: null,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId } } }
 }
@@ -47,6 +48,7 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [agent()], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => { runtimeEvent = listener; return () => { runtimeEvent = undefined } })
   vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'resumed', session: revived })
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => agent(control.run.runId, 'running', control.kind === 'agent' ? control.agentSessionId : sessionId))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
   const tab = createWorkbenchTab('tab', { regionId: 'region', kind: 'agent', phase: 'attached', workspaceId, sessionId })
@@ -123,7 +125,7 @@ describe('one existing intent owns first execution', () => {
     expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2)
     await store.getState().sendQueuedAgentSteer(sessionId, operationId)
     expect(api.sessions.recover).toHaveBeenCalledTimes(1)
-    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(4)
+    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(6)
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => call[2])).toEqual([operationId])
   })
 
@@ -166,7 +168,7 @@ describe('one existing intent owns first execution', () => {
     store.getState().send(sessionId, 'reply lost')
     const operationId = queue()[0]!.operationId
     await store.getState().flushAgentSteerQueue(sessionId)
-    expect(refresh).toHaveBeenCalledExactlyOnceWith(agent().control)
+    expect(refresh.mock.calls).toEqual([[agent().control], [revived.control]])
     expect(api.sessions.recover).toHaveBeenCalledTimes(1)
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0].run.runId, call[2]])).toEqual([['canonical-run', operationId]])
   })
@@ -214,7 +216,7 @@ describe('one existing intent owns first execution', () => {
     store.getState().send(sessionId, 'keep failed intent')
     const operationId = queue()[0]!.operationId
     await store.getState().flushAgentSteerQueue(sessionId)
-    expect(queue()).toEqual([expect.objectContaining({ operationId, status: 'restoring', error: 'canonical facts unavailable' })])
+    expect(queue()).toEqual([expect.objectContaining({ operationId, status: 'restoring', error: 'restore unavailable' })])
     expect(queue()[0]).not.toHaveProperty('runId')
     expect(api.sessions.recover).toHaveBeenCalledTimes(1)
     expect(api.sessions.refresh).toHaveBeenCalledTimes(1)
@@ -273,7 +275,7 @@ describe('one existing intent owns first execution', () => {
     ])
     if (mode === 'same') expect(store.getState().agentSteerQueues[sessionId]).toBeUndefined()
     else expect(queue()).toEqual([expect.objectContaining({ operationId: first.operationId,
-      text: first.text, status: 'restoring', error: 'first canonical read refused' })])
+      text: first.text, status: 'restoring', error: 'first restoration refused' })])
   })
 
   it.each(['AGENT_STATE_ENTRY_PERSIST_FAILED', 'PRIVATE_UNSCOPED_DIAGNOSTIC'])('shows %s through real subscribed ingress without painting or blocking the healthy Agent', async code => {
@@ -346,8 +348,9 @@ describe('one existing intent owns first execution', () => {
 
   it('keeps historical bound and unbound queue entries read-only until one exact intent is explicitly sent', async () => {
     const historical = [
-      { operationId: 'bound-old', runId: 'old-run', text: 'old bound intent', status: 'queued' as const },
-      { operationId: 'unbound-old', text: 'old unbound intent', status: 'queued' as const }
+      { operationId: 'bound-old', runId: 'old-run', text: 'old bound intent', status: 'queued' as const,
+        promptCondition: { expectedRun: { runId: 'old-run' }, afterSubmissionId: null } },
+      { operationId: 'unbound-old', text: 'old unbound intent', status: 'queued' as const, promptCondition: null }
     ]
     vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [agent('old-run', 'running')], timelines: {}, recoveryCandidates: [] })
     store.setState({ agentSteerQueues: { [sessionId]: historical } })

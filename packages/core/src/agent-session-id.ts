@@ -14,6 +14,17 @@ export function mintAgentSessionId(): string {
   }
 }
 
+/** A stable creation identity uses the same accepted 12-byte canonical space as random minting. */
+export async function deriveAgentSessionId(operationId: string): Promise<string> {
+  for (let nonce = 0; ; nonce++) {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256',
+      new TextEncoder().encode(`agentmux.initial-session.v1:${nonce}:${operationId}`))
+    const bytes = new Uint8Array(digest).slice(0, 12)
+    const id = globalThis.btoa(String.fromCharCode(...bytes)).replace(/\+/gu, '-').replace(/\//gu, '_')
+    if (/^[A-Za-z0-9]/u.test(id)) return id
+  }
+}
+
 /** Exact canonical IDs win; a prefix is usable only while it identifies one known Session. */
 export function resolveAgentSessionId(selector: string, knownSessionIds: Iterable<string>): string {
   const ids = new Set(knownSessionIds)

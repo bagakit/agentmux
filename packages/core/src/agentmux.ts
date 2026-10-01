@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { subscribeAgentMuxToolkit } from './toolkit-control.js'
 import type { ToolkitRequest } from './toolkit.js'
 import { parseAlignmentProposal, parseGroundingProposal } from '@agentmux/demand/goals'
@@ -612,13 +613,18 @@ async function agentCommand(args: readonly string[]): Promise<number> {
   useSpaceRequestId(flags)
   const contentFlag = exactlyOne(flags, ['--executor', '--session'], 'agent open')
   if (contentFlag === '--session' && (flags.values.has('--prompt') || flags.booleans.has('--new-zone'))) throw cliError('--session cannot supply an initial prompt or create a Zone.')
+  const owner = process.env.AGENTMUX_ENV === '1' ? managedCaller() : undefined
+  const capability = owner && flags.values.has('--prompt') ? process.env.AGENTMUX_AGENT_CAPABILITY?.trim() : undefined
+  if (owner && flags.values.has('--prompt') && !capability) {
+    throw new AgentMuxError('Managed initial messages require an Agent capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
+  }
   const request = parseSpaceControlRequest({ ...requestBase(), operation: 'agent.open',
     content: contentFlag === '--executor'
       ? { kind: 'new-agent', executorId: identifier(flags.values.get('--executor'), 'Exact Executor ID'),
         ...(flags.values.has('--prompt') ? { prompt: flags.values.get('--prompt')! } : {}) }
       : { kind: 'agent-session', agentSessionId: explicitSelectorId(flags.values.get('--session'), 'Exact Agent Session ID') },
     destination: spaceDestination(flags), focus: flags.booleans.has('--focus'),
-    ...(process.env.AGENTMUX_ENV === '1' ? { caller: managedCaller() } : {})
+    ...(owner ? { caller: { ...owner, ...(capability ? { capability } : {}) } } : {})
   }, 'INVALID_CLI_ARGUMENT')
   const receipt = await requestAgentMuxControl(request)
   if (receipt.operation !== 'agent.open') throw new AgentMuxError('Agent open receipt operation is mismatched.', 'CONTROL_PROTOCOL_ERROR')
@@ -870,8 +876,8 @@ async function sendCommand(args: readonly string[]): Promise<number> {
     return candidates[0]!.agentSessionId
   })()
   const facts = owner && capability
-    ? await withClient((client) => Promise.resolve({
-      sender: client.authorizeAgentCaller(capability, owner.agentSessionId),
+    ? await withClient(async client => ({
+      sender: await client.authorizeAgentCaller(capability, owner.agentSessionId),
       recipient: client.agentSession(recipientSessionId)
     }))
     : null
@@ -1271,6 +1277,7 @@ async function whoamiCommand(args: readonly string[]): Promise<number> {
     session: status.session,
     run: status.run,
     capabilities: status.capabilities,
+    messaging: AGENTMUX_AGENT_MESSAGING_RULES,
     view,
     topic: { present: false, hint: SELF_CONTEXT_TOPIC_HINT }
   })

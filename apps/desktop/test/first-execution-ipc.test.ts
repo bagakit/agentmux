@@ -1,7 +1,9 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { EventEmitter } from 'node:events'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxMemoryAgentSessionStore, type AgentMuxClient } from '@agentmux/core'
+import { AgentMuxError, AgentMuxMemoryAgentSessionStore, type AgentMuxClient } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AgentSessionControl, AppConfig } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
@@ -10,11 +12,11 @@ import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { RuntimeController } from '../src/main/runtime-controller'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
-  invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
+  directory: '', invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => _hygiene_fixturePath("private-first-execution-ipc") },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory, getAppPath: () => bridge.directory },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -37,12 +39,16 @@ afterEach(() => { vi.restoreAllMocks(); bridge.invoke.mockReset() })
 const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'old-run' } }
 
 async function owningBridge() {
+  const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
+  bridge.directory = root
+  await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true })
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
   const durable = { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'codex', executorId: 'private',
     hostId: 'local', workspacePath: _hygiene_fixturePath("private/fixture"), run: control.run, retiredRuns: [],
      createdAt: 1, updatedAt: 2 }
   const canonical = { ...durable, run: { runId: 'canonical-run' } }
   const client = { connect: vi.fn().mockResolvedValue(undefined), onEvent: vi.fn().mockReturnValue(vi.fn()),
+    submitAgentMessage: vi.fn().mockResolvedValue(undefined),
     agentSession: vi.fn().mockReturnValue(durable),
     ensureAgentContinuity: vi.fn().mockResolvedValue({ kind: 'conflict', agentSessionId: control.agentSessionId,
       previousRun: control.run, currentRun: canonical.run, reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } }),
@@ -58,18 +64,56 @@ async function owningBridge() {
     private: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/codex"), args: [], env: {}, injectAgentMuxGuide: false }
   } }
   const flush = vi.fn(() => {})
-  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, send: vi.fn(), session: { flushStorageData: flush } })
-  const dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+  const pauseTarget = vi.fn().mockResolvedValue(undefined)
+  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, send: vi.fn(),
+    session: { flushStorageData: flush, getStoragePath: () => root } })
+  let release: () => Promise<void>
+  try { release = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
+    scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles }) }
+  catch (error) { await rm(root, { recursive: true, force: true }); throw error }
+  const dispose = async () => { try { await release() } finally { await rm(root, { recursive: true, force: true }) } }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
     return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
   })
   expect(bridge.api).not.toBeNull()
-  return { client, sender, flush, dispose }
+  return { client, sender, flush, pauseTarget, dispose }
 }
+
+const message: Parameters<AgentMuxPreloadApi['sessions']['submitMessage']>[1] = {
+  envelope: { schema: 'agentmux.a2a.v1', messageId: 'private-agent-message', operationId: 'private-message-operation', createdAt: 1,
+    sender: { kind: 'agent-session', agentSessionId: 'private-sender' }, recipient: { kind: 'agent-session', agentSessionId: control.agentSessionId },
+    senderSessionId: 'private-sender', senderRunId: 'private-sender-run', recipientSessionId: control.agentSessionId,
+    recipientRunId: control.run.runId, body: 'original body', threadId: 'private-thread', correlationId: 'private-correlation', replyTo: null, workspaceId: null },
+  condition: { expectedRun: control.run, afterSubmissionId: null }, caller: { agentSessionId: 'private-sender', capability: 'private-capability' }
+}
+
+it.each(['AGENT_CAPABILITY_INVALID', 'AGENT_CAPABILITY_STALE_RUN', 'AGENT_PROMPT_INPUT_UNCONFIRMED'])(
+  'actual message IPC does not pause a healthy recipient when Core rejects %s', async code => {
+    const { client, pauseTarget, dispose } = await owningBridge()
+    client.submitAgentMessage.mockRejectedValue(new AgentMuxError('private rejected message', code))
+    try {
+      await expect(bridge.api!.sessions.submitMessage(control, message)).rejects.toMatchObject({ code })
+      expect(client.submitAgentMessage).toHaveBeenCalledExactlyOnceWith({ ...message, agentSessionId: control.agentSessionId })
+      expect(pauseTarget).not.toHaveBeenCalled()
+    } finally { await dispose() }
+  })
+
+it('actual message IPC pauses progress only after the authorized delivery completes', async () => {
+  const { client, pauseTarget, dispose } = await owningBridge()
+  let complete!: () => void
+  client.submitAgentMessage.mockImplementationOnce(() => new Promise<void>(resolve => { complete = resolve }))
+  try {
+    const pending = bridge.api!.sessions.submitMessage(control, message)
+    await vi.waitFor(() => expect(client.submitAgentMessage).toHaveBeenCalledTimes(1))
+    expect(pauseTarget).not.toHaveBeenCalled()
+    complete(); await pending
+    expect(pauseTarget).toHaveBeenCalledExactlyOnceWith(control, 'Paused for your message.')
+  } finally { await dispose() }
+})
 
 it('actual preload/registered IPC/Main pass one stable intent to Core continuity without a prompt', async () => {
   const { client, dispose } = await owningBridge()
@@ -100,7 +144,7 @@ it('registered flush handler rejects a foreign sender before touching the owning
   try {
     const handler = bridge.handlers.get('ui:requestStorageFlush')
     expect(handler).toBeTypeOf('function')
-    expect(() => handler!({ sender: {} })).toThrow('Untrusted storage flush sender')
+    await expect(handler!({ sender: {} })).rejects.toThrow('Untrusted storage flush sender')
     expect(flush).not.toHaveBeenCalled()
   } finally { await dispose() }
 })

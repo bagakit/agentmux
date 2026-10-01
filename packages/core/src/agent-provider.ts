@@ -266,7 +266,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       }
     },
     buildLaunch(context) {
-      const prompt = context.prompt.trim()
+      const prompt = context.prompt.trim() ? context.prompt : ''
       // 「送不到」必须在此刻响亮地失败，绝不能让 buildArgs 静静把 prompt 丢掉：那会让用户的原话
       // 只落进 timeline 而永不进入进程，且界面上一切正常——正是最难发现的一类数据丢失。
       // 这条不是「以后再修」的占位：这个 CLI 的交互 UI 没有带 prompt 启动的入口（见对应 Provider

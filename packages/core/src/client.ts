@@ -37,10 +37,12 @@ import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } fr
 import { planDiscussion } from './agent-discussion.js'
 import {
   DurableAgentMuxMessageQueue,
+  validateAgentMuxMessageEnvelope,
   type AgentMuxDeliveryBatch,
   type AgentMuxDeliveryAcknowledgement,
   type AgentMuxMessageEnvelope
 } from './agent-global-message-queue.js'
+import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
 import {
   AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
@@ -79,7 +81,7 @@ import {
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
-import { mintAgentSessionId } from './agent-session-id.js'
+import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
   AgentMuxFileAgentSessionStore,
   loadAgentSessions,
@@ -161,8 +163,8 @@ export type AgentMuxAgentCreateInput = {
   workspacePath: string
   injectAgentMuxGuide: boolean
   prompt?: string
-  /** Trusted host attribution; it does not authorize the caller. */
-  authorAgentSessionId?: string
+  /** Authenticated author of this creation's original prompt; Core owns its durable message. */
+  initialMessage?: { callerAgentSessionId: string; capability: string; threadId?: string }
   /**
    * AgentMux 自己要对 Agent 说的额外上下文（如 Scratch Topic 说明），署名进出站信封而非混进用户段。
    * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
@@ -217,11 +219,16 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   signal?: AbortSignal
   agentSessionId: string
   operationId: string
-  /** Trusted host attribution; authorization stays at the control boundary. */
-  authorAgentSessionId?: string
-  /** Explicit manual origin attributed by trusted host; does not override an attributed agent. */
+  /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
   prompt: string
+}
+
+export type AgentMuxAgentMessageInput = {
+  agentSessionId: string
+  envelope: AgentMuxMessageEnvelope
+  condition: AgentPromptCondition
+  caller?: { agentSessionId: string; capability: string }
 }
 
 export type AgentMuxAgentInteractionInput = {
@@ -1910,13 +1917,14 @@ export class AgentMuxClient {
   }
 
   /** Validate the caller capability and return the authoritative live Session/Run facts. */
-  authorizeAgentCaller(capability: string, callerAgentSessionId: string): AgentMuxAgentSession {
-    this.resolveMessageAuthor(capability, callerAgentSessionId)
-    return this.agentSession(callerAgentSessionId)
+  async authorizeAgentCaller(capability: string, callerAgentSessionId: string): Promise<AgentMuxAgentSession> {
+    const caller = await this.currentMessageReader(callerAgentSessionId)
+    this.resolveMessageAuthor(capability, callerAgentSessionId, caller)
+    return cloneSession(caller)
   }
 
   /** Bind every persisted A2A identity fact to the authoritative live Session/Run before append. */
-  authorizeAgentMessage(input: {
+  async authorizeAgentMessage(input: {
     capability: string
     callerAgentSessionId: string
     senderAgentSessionId: string | null
@@ -1924,15 +1932,16 @@ export class AgentMuxClient {
     senderRunId: string | null
     recipientSessionId: string | null
     recipientRunId: string | null
-  }): void {
-    const sender = this.authorizeAgentCaller(input.capability, input.callerAgentSessionId)
+  }): Promise<void> {
+    const sender = await this.currentMessageReader(input.callerAgentSessionId)
+    this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, sender)
     if (input.senderAgentSessionId !== sender.agentSessionId || input.senderSessionId === null || input.senderRunId === null || input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
       throw new AgentMuxError('A2A sender facts do not match the authorized Agent Session/Run.', 'MESSAGE_SENDER_MISMATCH')
     }
     if (input.recipientSessionId === null || input.recipientRunId === null) {
       throw new AgentMuxError('A2A recipient Session/Run facts are required.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
-    const recipient = this.agentSession(input.recipientSessionId)
+    const recipient = await this.currentMessageReader(input.recipientSessionId)
     if (input.recipientRunId !== recipient.run.runId) {
       throw new AgentMuxError('A2A recipient facts do not match the resolved Agent Session/Run.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
@@ -2098,7 +2107,7 @@ export class AgentMuxClient {
     operationId: string
   }): Promise<{ thread: AgentThread; session: AgentMuxAgentSession }> {
     this.requireConnected()
-    const author = this.registry.get(input.callerAgentSessionId)
+    const author = await this.currentMessageReader(input.callerAgentSessionId)
     const plan = planDiscussion({
       capability: input.capability,
       binding: {
@@ -2118,7 +2127,7 @@ export class AgentMuxClient {
       providerId: input.providerId,
       workspacePath: input.workspacePath,
       prompt: plan.launchPrompt,
-      authorAgentSessionId: author.agentSessionId,
+      initialMessage: { callerAgentSessionId: author.agentSessionId, capability: input.capability, threadId: plan.threadId },
       injectAgentMuxGuide: true,
       // 同一个 operation id：重试落到同一次创建，不会重复 Spawn 或重复注入 Prompt。
       createOperationId: input.operationId
@@ -2128,7 +2137,7 @@ export class AgentMuxClient {
         ...plan.thread,
         targetAgentSessionId: session.agentSessionId,
         // ctxmux 收下了启动输入——这最多证明送达。
-        delivery: advanceDelivery(plan.thread.delivery, promptConfirmed ? 'delivered' : 'failed', Date.now())
+        delivery: promptConfirmed ? advanceDelivery(plan.thread.delivery, 'delivered', Date.now()) : plan.thread.delivery
       },
       session
     }
@@ -2143,10 +2152,43 @@ export class AgentMuxClient {
     creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
     this.requireConnected()
-    if (input.prompt !== undefined) assertAgentPromptSize(input.prompt.trim())
-    const agentSessionId = safeId(input.agentSessionId ?? mintAgentSessionId(), 'Agent Session id')
-    const executorId = safeId(input.executorId, 'Agent Executor id')
+    if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use an authenticated initial message.', 'MESSAGE_ENVELOPE_REQUIRED')
+    if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
     const createOperationId = input.createOperationId ?? randomUUID()
+    const agentSessionId = safeId(input.agentSessionId ?? (input.initialMessage
+      ? await deriveAgentSessionId(createOperationId)
+      : mintAgentSessionId()), 'Agent Session id')
+    const executorId = safeId(input.executorId, 'Agent Executor id')
+    let initialEnvelope: AgentMuxMessageEnvelope | undefined
+    if (input.initialMessage) {
+      if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
+      const author = await this.currentMessageReader(input.initialMessage.callerAgentSessionId)
+      this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, author)
+      const messageId = input.initialMessage.threadId ? `${input.initialMessage.threadId}:0`
+        : `initial-${createHash('sha256').update(createOperationId).digest('base64url').slice(0, 22)}`
+      const queued = await this.messageQueue.append({
+        messageId, operationId: createOperationId, createdAt: Date.now(),
+        sender: { kind: 'agent-session', agentSessionId: author.agentSessionId },
+        recipient: { kind: 'agent-session', agentSessionId },
+        senderSessionId: author.agentSessionId, senderRunId: author.run.runId,
+        recipientSessionId: agentSessionId, recipientRunId: null,
+        threadId: input.initialMessage.threadId ?? messageId, correlationId: messageId,
+        replyTo: null, workspaceId: null, body: input.prompt
+      })
+      initialEnvelope = queued.envelope
+      // A creation retry reads the original receipt. It never resubmits an uncertain launch prompt.
+      const existing = this.registry.list().find(session => session.agentSessionId === agentSessionId)
+      if (existing) {
+        if (existing.creation?.createOperationId !== createOperationId || existing.providerId !== input.providerId ||
+          existing.executorId !== executorId || existing.workspacePath !== input.workspacePath) {
+          throw new AgentMuxError('Initial message creation names another Session intent.', 'MESSAGE_ID_CONFLICT')
+        }
+        const promptConfirmed = existing.creation.initialPrompt === 'confirmed'
+        await this.recordInitialMessageDelivery(existing, initialEnvelope, promptConfirmed, false)
+        return { session: cloneSession(existing), promptConfirmed, creation: existing.creation }
+      }
+    }
+    const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'create',
       agentSessionId,
@@ -2169,7 +2211,7 @@ export class AgentMuxClient {
       // 拒绝，而运行时引导默认开、`composeAgentLaunchPrompt` 因此几乎总是非空，那等于这个
       // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
-      const composed = composeAgentLaunchPrompt(input.prompt, input.injectAgentMuxGuide, input.agentMuxNote)
+      const composed = composeAgentLaunchPrompt(originalPrompt, input.injectAgentMuxGuide, input.agentMuxNote)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
         provider.catalog, composed.text
       )
@@ -2309,11 +2351,11 @@ export class AgentMuxClient {
           readySession,
           `prompt:${lifecycleOperationId}`,
           'Initial prompt',
-          input.prompt.trim(),
+          originalPrompt!,
           now,
           'user',
           { status: promptConfirmed ? 'complete' : 'failed',
-            ...(input.authorAgentSessionId ? { authorAgentSessionId: input.authorAgentSessionId } : {}) }
+            ...(initialEnvelope?.senderSessionId ? { authorAgentSessionId: initialEnvelope.senderSessionId } : {}) }
         )
       }
       const creation: NonNullable<AgentMuxAgentSession['creation']> = {
@@ -2332,6 +2374,7 @@ export class AgentMuxClient {
           message: 'Agent started, but saving its initial delivery receipt is unconfirmed. Read its response before submitting again.',
           evidence: { source: 'user', observedAt: Date.now(), run: session.run } }) } catch { /* Run remains usable. */ }
       }
+      if (initialEnvelope) await this.recordInitialMessageDelivery(readySession, initialEnvelope, promptConfirmed)
       return { session: cloneSession(readySession), promptConfirmed, creation }
     } finally {
       if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
@@ -2921,6 +2964,11 @@ export class AgentMuxClient {
   }
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
+    if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
+    await this.submitPromptInternal(input)
+  }
+
+  private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string): Promise<void> {
     this.requireConnected()
     const content = input.prompt
     if (input.expectedInputByte !== undefined && (input.expectedCompletionId === undefined ||
@@ -2929,7 +2977,7 @@ export class AgentMuxClient {
     }
     if (!content.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(content)
-    // send 是纯用户话：出站文本经唯一出口产出，但不加 amux 信封——用户原文逐字节透传。
+    // Authenticated message sources were rendered by submitAgentMessage; manual text stays byte-for-byte.
     const outbound = composeOutboundMessage({ user: content })
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
@@ -2955,13 +3003,60 @@ export class AgentMuxClient {
       Date.now(),
       'user',
       {
-        ...(input.authorAgentSessionId
-          ? { authorAgentSessionId: input.authorAgentSessionId }
-          : input.authorAgentSessionId === undefined && input.authorHuman === true
+        ...(authorAgentSessionId
+          ? { authorAgentSessionId }
+          : input.authorHuman === true
             ? { authorHuman: true }
             : {})
       }
     )
+  }
+
+  /** Persist the original creation transport, without turning missing receipts into another Input. */
+  private async recordInitialMessageDelivery(session: AgentMuxAgentSession, envelope: AgentMuxMessageEnvelope, confirmed: boolean, originalCreation = true): Promise<void> {
+    try {
+      await this.messageQueue.preparePrompt(envelope.messageId, async () => {
+        if (!originalCreation) throw new AgentMuxError('The original initial message Run binding is unconfirmed; recovery cannot substitute the current Run.', 'AGENT_MESSAGE_INITIAL_RUN_UNCONFIRMED')
+        return agentPromptCondition(session)
+      })
+      if (confirmed) await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
+      else await this.messageQueue.recordDeliveryIssue(envelope.messageId,
+        'Initial message delivery is unconfirmed. Read the original Agent response; this creation will not resend it.')
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: 'AGENT_MESSAGE_RECEIPT_UNCONFIRMED',
+        message: `Agent continues, but saving the initial message delivery receipt is unconfirmed. Inspect the original message and Agent response before recovery. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'user', observedAt: Date.now(), run: session.run } })
+    }
+  }
+
+  /** The one public A2A input owner: authenticated identity, durable intent, then source plus body. */
+  async submitAgentMessage(input: AgentMuxAgentMessageInput): Promise<void> {
+    this.requireConnected()
+    const envelope = validateAgentMuxMessageEnvelope(input.envelope)
+    const condition = validateAgentPromptCondition(input.condition)
+    if (envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== input.agentSessionId ||
+      envelope.recipientSessionId !== input.agentSessionId ||
+      envelope.recipientRunId !== null && envelope.recipientRunId !== condition.expectedRun.runId) {
+      throw new AgentMuxError('Message recipient does not match its exact prompt intent.', 'MESSAGE_RECIPIENT_MISMATCH')
+    }
+    let authorAgentSessionId: string | undefined
+    if (envelope.sender.kind === 'agent-session') {
+      if (!input.caller?.capability) throw new AgentMuxError('Managed message capability is required.', 'AGENT_CAPABILITY_INVALID')
+      await this.authorizeAgentMessage({ capability: input.caller.capability, callerAgentSessionId: input.caller.agentSessionId,
+        senderAgentSessionId: envelope.sender.agentSessionId, senderSessionId: envelope.senderSessionId,
+        senderRunId: envelope.senderRunId, recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId })
+      authorAgentSessionId = envelope.senderSessionId!
+    } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
+      throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
+    }
+    const queued = await this.messageQueue.append(envelope)
+    if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state)) return
+    if (queued.delivery.state !== 'queued') throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID')
+    const originalCondition = await this.messageQueue.preparePrompt(envelope.messageId, async () => condition)
+    await this.submitPromptInternal({ ...originalCondition, agentSessionId: input.agentSessionId,
+      operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true }, authorAgentSessionId)
+    await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
   async respondAgentInteraction(input: AgentMuxAgentInteractionInput): Promise<void> {

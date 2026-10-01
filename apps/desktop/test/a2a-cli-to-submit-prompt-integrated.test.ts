@@ -15,11 +15,26 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { executorDetectionKey, useAppStore } from '../src/renderer/src/store.js'
 
 const exec = promisify(execFile)
 // packages/core/bin/agentmux — the real CLI entry the CLI attribution test also uses.
 const cli = fileURLToPath(new URL('../../../packages/core/bin/agentmux', import.meta.url))
+
+async function stopPrivateRuntime(runtime: string): Promise<void> {
+  const owned = async () => (await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout.split('\n').flatMap(line => {
+    const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+    return match && match[2]!.includes('/ctxmuxd ') &&
+      match[2]!.includes('--socket ' + join(runtime, 'ctxmux.sock') + ' ') &&
+      match[2]!.includes('--state-dir ' + join(runtime, 'state', 'ctxmux') + ' ') ? [Number(match[1])] : []
+  })
+  const owners = await owned()
+  expect(owners).toHaveLength(1)
+  for (const pid of owners) process.kill(pid, 'SIGTERM')
+  await vi.waitFor(async () => expect(await owned()).toEqual([]), { timeout: 5000, interval: 50 })
+  process.stdout.write(`${JSON.stringify({ privateRuntime: runtime, stoppedOwnerPids: owners })}\n`)
+}
 
 const initialState = useAppStore.getState()
 
@@ -88,6 +103,7 @@ async function seedCoreSessionStore(path: string): Promise<{ readonly capability
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   useAppStore.setState(initialState, true)
 })
 
@@ -102,34 +118,26 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
 
   const { recipient } = seedStore('mailbox-recipient')
   const { capability } = await seedCoreSessionStore(sessionStorePath)
-  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', queuePath)
+  vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', sessionStorePath)
+  const submit = vi.spyOn(api.sessions, 'submitMessage')
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
     const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
     if (!session) throw new Error('Private Session is missing')
     return session
   })
 
-  // Exercise the same Core capability and Session/Run binding used by main IPC before handing the
-  // request to the renderer Control executor. The CLI child reads this durable store through the
-  // injected path; no caller/session title or mock identity is accepted.
   const core = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(sessionStorePath) })
-  await (core as unknown as { registry: { load(hostId: string): Promise<void> } }).registry.load('local')
+  const inner = core as unknown as { connected: boolean; registry: { load(host: string): Promise<void> }; kernel: Record<string, unknown>; promptSubmission: { submitInputPlan: unknown } }
+  await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
+  inner.kernel.status = async (runId: string) => ({ runId, state: { type: 'running' }, workspacePath: _hygiene_fixturePath("repo"), pid: 123, acceptedInputBytes: 0, latestOutputBytes: 0 })
+  const physicalInput = vi.fn(async (..._args: unknown[]) => {})
+  inner.promptSubmission.submitInputPlan = physicalInput
+  submit.mockImplementation(async (control, input) => await core.submitAgentMessage({ ...input, agentSessionId: control.agentSessionId }))
 
   // 起真 AgentMuxControlServer。execute 转发到 store.executeControl —— 就是生产 ipc.ts:781 那条路。
   const server = new AgentMuxControlServer({
     execute: async (request: AgentMuxControlRequest): Promise<AgentMuxControlResult> => {
-      if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
-        if (!request.caller?.capability) throw new Error('managed capability missing')
-        core.authorizeAgentMessage({
-          capability: request.caller.capability,
-          callerAgentSessionId: request.caller.agentSessionId,
-          senderAgentSessionId: request.message.sender.agentSessionId,
-          senderSessionId: request.message.senderSessionId,
-          senderRunId: request.message.senderRunId,
-          recipientSessionId: request.message.recipientSessionId,
-          recipientRunId: request.message.recipientRunId
-        })
-      }
       return await useAppStore.getState().executeControl(request)
     }
   }, sock)
@@ -156,7 +164,9 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
     expect(cliMessageId, 'CLI 必须回 messageId').toEqual(expect.any(String))
 
     expect(submit).toHaveBeenCalledTimes(1)
-    const [, submittedPrompt, submittedMessageId] = submit.mock.calls[0]!
+    const [, submittedMessage] = submit.mock.calls[0]!
+    const submittedPrompt = physicalInput.mock.calls[0]![3]
+    const submittedMessageId = submittedMessage.envelope.messageId
     expect(submittedMessageId).toBe(cliMessageId)
     expect(submittedPrompt).toBe('[Message from Agent caller-cli]\nintegrated body bytes')
 
@@ -198,9 +208,9 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
         AGENTMUX_AGENT_SESSION_ID: 'caller-cli', AGENTMUX_AGENT_CAPABILITY: suppliedCapability }
     })
     await send(jsonBody, true)
-    expect(submit.mock.calls[1]![1]).toBe('[Message from Agent caller-cli]\n' + jsonBody)
+    expect(physicalInput.mock.calls[1]![3]).toBe('[Message from Agent caller-cli]\n' + jsonBody)
     await send('local author body', false)
-    expect(submit.mock.calls[2]![1]).toBe('[Message from unverified local process]\nlocal author body')
+    expect(physicalInput.mock.calls[2]![3]).toBe('[Message from unverified local process]\nlocal author body')
     expect(submit).toHaveBeenCalledTimes(3)
     await expect(send('cannot forge source', true, 'wrong-capability')).rejects.toMatchObject({ stderr: expect.stringContaining('AGENT_CAPABILITY_INVALID') })
     expect(submit).toHaveBeenCalledTimes(3)
@@ -208,6 +218,7 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
   } finally {
     await server.stop()
     await core.dispose()
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 })
@@ -235,7 +246,7 @@ it('generic Demand and mixed PMO Session routes retain a Terminal identity absen
     AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: '' }
   const run = async (args: string[]) => JSON.parse((await exec(cli, args, { env, timeout: 15000 })).stdout)
   try {
-    const created = await run(['demand', 'create', '--title', 'Terminal work', '--project', 'workspace',
+    const created = await run(['demand', 'create', '--title', 'Terminal work', '--project', workspaceProjectId(config.workspaces[0]!),
       '--risk', 'low', '--confirm', 'user', '--session', terminalId])
     const demandId = created.result.demand.id as string
     expect(created.result.demand.sessionIds).toEqual([terminalId])
@@ -262,15 +273,7 @@ it('generic Demand and mixed PMO Session routes retain a Terminal identity absen
     await server.stop()
     // PMO's existing Core observation starts an isolated daemon. Reap only that test endpoint;
     // its random socket and state directory together prove ownership of the process being stopped.
-    const processes = (await exec('ps', ['-axo', 'pid=,command='])).stdout
-    for (const line of processes.split('\n')) {
-      const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
-      if (!match || !match[2]!.includes('/ctxmuxd ') ||
-        !match[2]!.includes(`--socket ${join(runtime, 'ctxmux.sock')}`) ||
-        !match[2]!.includes(`--state-dir ${join(runtime, 'state', 'ctxmux')}`)) continue
-      try { process.kill(Number(match[1]), 'SIGTERM') }
-      catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error }
-    }
+    await stopPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 }, 45000)

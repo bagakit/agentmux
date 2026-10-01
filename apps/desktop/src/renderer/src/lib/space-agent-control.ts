@@ -530,7 +530,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         agentSessionId: sessionId, createOperationId: request.requestId,
         ...(space?.topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: space.topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
-        ...(request.caller ? { authorAgentSessionId: request.caller.agentSessionId } : {}) })
+        ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       report.agent = agentFact({ ...launched.created, ...(launched.creation ? { creation: launched.creation } : {}) })
       if (launched.created.agentSessionId !== sessionId) return fail('Core returned another Session; its healthy Run has been retained for inspection.', 'creation')
       await ports.attach(target.address.regionId, launched)

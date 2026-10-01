@@ -67,10 +67,10 @@ it('real CLI send retains managed authors for every target without inventing an 
     } }
     if (request.operation === 'inspect.tab') return { operation: 'inspect.tab', tab: { tabId: 'tab', workspaceId: 'workspace', regions: [{ kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } } }] } }
     if (request.operation === 'agent.open') return { operation: 'agent.open', requestId: request.requestId,
-      outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', tabId: 'tab', regionId: 'new-region' },
+      outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'new-region' },
       agent: { agentSessionId: 'recipient', runId: 'run-recipient', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: upstreamFixturePath("repo"), createOperationId: 'creation', initialPrompt: 'confirmed' },
       resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
-    if (request.operation === 'send') delivered.push(request.message ? renderAgentMuxMessageEnvelope(request.message) : request.text)
+    if (request.operation === 'send') delivered.push(renderAgentMuxMessageEnvelope(request.message))
     return { operation: 'send', agentSessionId: 'recipient' }
   } }, join(runtime, 'control.sock'))
   await server.start()
@@ -105,7 +105,7 @@ it('real CLI send retains managed authors for every target without inventing an 
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests.filter((request) => request.operation === 'send')).toHaveLength(4)
     const open = ['agent', 'open', '--executor', 'codex', '--region', 'region', '--split', 'right', '--prompt', 'first mail']
-    await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender' } })
+    await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: 'managed-open-capability' } })
     expect(requests.filter((request) => request.operation === 'agent.open')[0]).toMatchObject({ operation: 'agent.open', caller: { agentSessionId: 'sender' },
       content: { kind: 'new-agent', prompt: 'first mail' } })
     await exec(cli, open, { timeout: 5000, env: humanEnv })

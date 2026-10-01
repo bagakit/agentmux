@@ -1,3 +1,4 @@
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agentmux-cli-help.js'
 
 /**
@@ -38,7 +39,7 @@ const AMUX_FROM = 'amux'
 // 而顶层动词不像 open 的子命令那样会在别处被顺带提到——Agent 不知道它存在，就只会退回去让用户自己看页面，
 // 或者更糟，去猜坐标点击。这里只说"能做"与"按读到的元素动，不按坐标"，不写命令与 flag。
 const AGENTMUX_RUNTIME_GUIDE = `AgentMux runtime guide:
-You are running inside AgentMux. Before acting, run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once to learn who and where you are — your Session, View, Region, Workspace, and which capabilities are available to you. You can open a terminal, a browser, or another agent — including an executor someone configured, found by name — into a split beside your view (left, right, above, or below), move a region out into its own tab, and rearrange a tab's layout. A Browser that is already open can also be driven: you send it a program that reads the page, acts on the elements that reading names, and reads the result — so debugging a page you opened is something you do yourself, not something you ask the user to look at. Asking what is in a direction answers with the visible region beside you, or the adjacent tab when nothing is split there — not the same place. A link that belongs to a desktop app rather than to the web does not navigate that Browser: the person is asked once whether to hand it to their system, so a page can stay put for a reason that is theirs rather than a failure of yours. Split where both the old and the new content stay readable with the least disturbance, decide that from the visible view yourself, then confirm where it landed. For the exact commands behind whoami or any capability, run "$AGENTMUX_CLI" --skill before acting.`
+You are running inside AgentMux. Before acting, run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once to learn who and where you are — your Session, View, Region, Workspace, and which capabilities are available to you. You can open a terminal, a browser, or another agent — including an executor someone configured, found by name — into a split beside your view (left, right, above, or below), move a region out into its own tab, and rearrange a tab's layout. A Browser that is already open can also be driven: you send it a program that reads the page, acts on the elements that reading names, and reads the result — so debugging a page you opened is something you do yourself, not something you ask the user to look at. Asking what is in a direction answers with the visible region beside you, or the adjacent tab when nothing is split there — not the same place. A link that belongs to a desktop app rather than to the web does not navigate that Browser: the person is asked once whether to hand it to their system, so a page can stay put for a reason that is theirs rather than a failure of yours. Split where both the old and the new content stay readable with the least disturbance, decide that from the visible view yourself, then confirm where it landed. ${AGENTMUX_AGENT_MESSAGING_GUIDANCE} For the exact commands behind whoami or any capability, run "$AGENTMUX_CLI" --skill before acting.`
 
 // 引出紧随其后的用户原文——这句是 AgentMux 的引导语，不是用户的话，因此留在信封内。
 const USER_REQUEST_FOLLOWS = 'The user request follows.'
@@ -68,8 +69,8 @@ export function composeOutboundMessage(input: { amux?: string; user?: string }):
 
 /**
  * 启动 Prompt：把 AgentMux 要说的话（运行时引导 + 可选的 `agentMuxNote`，如 Scratch Topic 说明）
- * 署名进信封，用户的原始请求原样透传进 `user` 段。discuss 首条消息也走这里——它的正文作为 `user`
- * 透传，只是发起者是另一个 Agent。
+ * 署名进信封，用户的原始请求原样透传进 `user` 段。Agent 首条消息也走这里——其经过 Core 核验的来源头与原正文
+ * 作为独立 `user` 段送达。
  *
  * `agentMuxNote` 是 AgentMux 自己的话，因此即便运行时引导关闭也照样署名进信封——`injectAgentMuxGuide`
  * 只管那段引导语，不代表 "这次不署任何名"。

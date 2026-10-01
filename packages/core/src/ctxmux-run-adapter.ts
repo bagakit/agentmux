@@ -1315,6 +1315,7 @@ export class CtxmuxRunAdapter {
     decoder: TextDecoder,
     event: RunEvent
   ): CtxmuxAdapterObservationEvent {
+    const eventType = event.type
     const resized = liveResizedSize(event)
     if (resized && event.type === 'resized') {
       return { type: 'resized', runId, cols: resized.cols, rows: resized.rows,
@@ -1342,10 +1343,14 @@ export class CtxmuxRunAdapter {
         type: 'error',
         runId,
         error: new AgentMuxError(
-          `A native AgentMux Run received an unexpected ${event.type} event.`,
+          `A native AgentMux Run received an unexpected ${eventType} event.`,
           'CTXMUX_EVENT_INVALID'
         )
       }
+    }
+    if (event.type !== 'exited' && event.type !== 'interrupted') return {
+      type: 'error', runId, error: new AgentMuxError(
+        `A native AgentMux Run received an unexpected ${eventType} event.`, 'CTXMUX_EVENT_INVALID')
     }
     return {
       type: 'exit',

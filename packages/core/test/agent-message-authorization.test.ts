@@ -9,18 +9,18 @@ import { DurableAgentMuxMessageQueue, type AgentMuxMessageAppendInput } from '..
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 describe('Core A2A envelope authorization', () => {
-  it('rejects sender or recipient Run facts that do not match the authorized live sessions', () => {
+  it('rejects sender or recipient Run facts that do not match the authorized live sessions', async () => {
     const client = Object.create(AgentMuxClient.prototype) as AgentMuxClient
     const sender = { agentSessionId: 'sender', run: { runId: 'sender-run' } }
     const recipient = { agentSessionId: 'recipient', run: { runId: 'recipient-run' } }
-    const runtime = client as unknown as { authorizeAgentCaller: () => typeof sender; agentSession: () => typeof recipient }
-    runtime.authorizeAgentCaller = () => sender
-    runtime.agentSession = () => recipient
-    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'forged-identity', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).toThrow('sender facts')
-    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'wrong-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).toThrow('sender facts')
-    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'wrong-run' })).toThrow('recipient facts')
-    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: null, recipientRunId: null })).toThrow('recipient Session/Run')
-    expect(() => client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: null })).toThrow('recipient Session/Run')
+    const runtime = client as unknown as { currentMessageReader: (id: string) => Promise<typeof sender>; resolveMessageAuthor: () => string }
+    runtime.currentMessageReader = async id => id === 'sender' ? sender : recipient
+    runtime.resolveMessageAuthor = () => 'sender'
+    await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'forged-identity', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).rejects.toThrow('sender facts')
+    await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'wrong-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).rejects.toThrow('sender facts')
+    await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'wrong-run' })).rejects.toThrow('recipient facts')
+    await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: null, recipientRunId: null })).rejects.toThrow('recipient Session/Run')
+    await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: null })).rejects.toThrow('recipient Session/Run')
   })
 
   it('refuses a forged duplicate participant before real durable queue append on the Core send boundary', async () => {
@@ -49,7 +49,7 @@ describe('Core A2A envelope authorization', () => {
     // Same authorize-before-append order as the production CLI, using the actual Core capability
     // resolver and queue rather than a socket parser which has an independent duplicate-label guard.
     const send = async () => {
-      client.authorizeAgentMessage({ capability, callerAgentSessionId: 'sender', senderAgentSessionId: 'different-agent',
+      await client.authorizeAgentMessage({ capability, callerAgentSessionId: 'sender', senderAgentSessionId: 'different-agent',
         senderSessionId: body.senderSessionId, senderRunId: body.senderRunId,
         recipientSessionId: body.recipientSessionId, recipientRunId: body.recipientRunId })
       return await queue.append(body)

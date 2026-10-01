@@ -7,6 +7,8 @@ import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousP
 import type {
   AgentCatalogEntry,
   AgentPromptCondition,
+  AgentMuxAgentMessageInput,
+  AgentMuxAgentCreateInput,
   AgentMuxAgentSession,
   AgentMuxAgentContinuityResult,
   AgentMuxAgentContinuityConflictReason,
@@ -798,8 +800,8 @@ export type AgentLaunchInput = {
   agentSessionId?: string
   createOperationId?: string
   prompt?: string
-  /** Trusted control caller attribution, independent of destination. */
-  authorAgentSessionId?: string
+  /** Core-authenticated author of the original creation prompt. */
+  initialMessage?: AgentMuxAgentCreateInput['initialMessage']
   /**
    * The choice ids the launcher picked for this Provider's declared launch options (DESCRIBE half in
    * {@link AgentCatalogEntry.launchOptions}). Core resolves each choice's argv at spawn; a choice the
@@ -1564,7 +1566,8 @@ export type AgentMuxDesktopApi = {
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, authorAgentSessionId?: string, choice?: { allowUncertainTurn: true }, authorHuman?: boolean): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn: true }, authorHuman?: boolean): Promise<void>
+    submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse

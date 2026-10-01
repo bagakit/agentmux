@@ -5,6 +5,7 @@ import {
   agentPromptPredecessor,
   validateAgentPromptCondition,
   type AgentPromptCondition,
+  type AgentMuxAgentMessageInput,
   AgentMuxMemoryAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
@@ -754,7 +755,7 @@ export class RuntimeController {
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
-          ...(request.authorAgentSessionId ? { authorAgentSessionId: request.authorAgentSessionId } : {}),
+          ...(request.initialMessage ? { initialMessage: request.initialMessage } : {}),
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })
@@ -1205,7 +1206,6 @@ export class RuntimeController {
     operationId: string,
     condition: AgentPromptCondition,
     automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
-    authorAgentSessionId?: string,
     choice?: { allowUncertainTurn: true },
     authorHuman?: boolean
   ): Promise<void> {
@@ -1233,8 +1233,7 @@ export class RuntimeController {
           ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
           prompt,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
-          ...(authorAgentSessionId ? { authorAgentSessionId } : {}),
-          ...(authorHuman === true && authorAgentSessionId === undefined ? { authorHuman: true } : {})
+          ...(authorHuman === true ? { authorHuman: true } : {})
         })
       } catch (error) {
         // A process can exit in the small window after the first status check. Re-read the same
@@ -1258,6 +1257,16 @@ export class RuntimeController {
           ...(runState ? { runState } : {})
         })
       }
+    })
+  }
+
+  async submitMessage(control: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void> {
+    await this.trackHostLifecycleOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId)
+      if (control.run.runId !== message.condition.expectedRun.runId) {
+        throw new AgentMuxError('Message intent targets another Run.', 'STALE_AGENT_SESSION')
+      }
+      await client.submitAgentMessage({ ...message, agentSessionId: control.agentSessionId })
     })
   }
 
@@ -1585,27 +1594,6 @@ export class RuntimeController {
       } catch (error) { lastError = error }
     }
     throw lastError instanceof Error ? lastError : new AgentMuxError('Agent caller capability could not be verified.', 'AGENT_CAPABILITY_INVALID')
-  }
-
-  /** Validate the complete A2A envelope binding at the main-process Control boundary. */
-  async authorizeAgentMessage(input: {
-    capability: string
-    callerAgentSessionId: string
-    senderAgentSessionId: string | null
-    senderSessionId: string | null
-    senderRunId: string | null
-    recipientSessionId: string | null
-    recipientRunId: string | null
-  }): Promise<void> {
-    const hosts = [...this.hosts.values()]
-    let lastError: unknown
-    for (const host of hosts) {
-      try {
-        host.client.authorizeAgentMessage(input)
-        return
-      } catch (error) { lastError = error }
-    }
-    throw lastError instanceof Error ? lastError : new AgentMuxError('A2A message facts could not be verified.', 'MESSAGE_ENVELOPE_INVALID')
   }
 
   private async trackHostLifecycleOperation<T>(hostId: string, operation: () => Promise<T>): Promise<T> {

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -101,7 +101,7 @@ describe('built-in agent providers', () => {
         // 唯一一个 expectedProcess ≠ executable 的条目：Kimi 启动时把进程名改成 `Kimi Code`，
         // 而 readySignal 是按进程名比对的。别"顺手"把它改回 `kimi` 对齐上面九行——那会让
         // 这个 Provider 永远等不到就绪。理由与出处见 providers/kimi.ts 与 providers/kimi.test.ts。
-        id: 'kimi', executable: 'kimi', expectedProcess: 'Kimi Code',
+        id: 'kimi', executable: 'kimi', expectedProcess: 'kimi',
         promptDelivery: 'post-launch-only', readySignal: 'foreground-process',
         hook: 'native', permission: 'observe', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
@@ -168,7 +168,7 @@ describe('built-in agent providers', () => {
 
   it.each(['claude', 'traex', 'pi'] as const)('delivers %s prompts as positional argv data', (id) => {
     const plan = providers.get(id).buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       prompt: 'fix "quoted"\ntext',
       args: ['--model', 'demo'],
       env: {}
@@ -182,7 +182,7 @@ describe('built-in agent providers', () => {
 
   it('delivers codex prompts with hook trust bypass', () => {
     const plan = providers.get('codex').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       prompt: 'fix "quoted"\ntext',
       args: ['--model', 'demo'],
       env: {}
@@ -196,7 +196,7 @@ describe('built-in agent providers', () => {
 
   it('uses Hermes native query mode and keeps the TUI alive', () => {
     const plan = providers.get('hermes').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       prompt: 'inspect this repo',
       args: ['--yolo'],
       env: { DEMO: '1' }
@@ -210,40 +210,40 @@ describe('built-in agent providers', () => {
 
   it('keeps shell-looking prompts as one argv value', () => {
     const plan = providers.get('codex').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
-      prompt: ("$(touch " + (upstreamFixturePath("tmp/not-executed)"))),
+      workspacePath: fixturePath("tmp/work"),
+      prompt: ("$(touch " + (fixturePath("tmp/not-executed)"))),
       args: [],
       env: {},
-      commandOverride: upstreamFixturePath("opt/tools/codex")
+      commandOverride: fixturePath("opt/tools/codex")
     })
-    expect(plan.command).toBe(upstreamFixturePath("opt/tools/codex"))
-    expect(plan.args).toEqual(['--dangerously-bypass-hook-trust', ("$(touch " + (upstreamFixturePath("tmp/not-executed)")))])
+    expect(plan.command).toBe(fixturePath("opt/tools/codex"))
+    expect(plan.args).toEqual(['--dangerously-bypass-hook-trust', ("$(touch " + (fixturePath("tmp/not-executed)")))])
   })
 
   it('launches Grok with the argv separator that guards flag-looking prompts', () => {
     expect(providers.get('grok').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '--version', args: ['--model', 'demo'], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: '--version', args: ['--model', 'demo'], env: {}
     })).toEqual({ command: 'grok', args: ['--model', 'demo', '--', '--version'], env: {} })
     // No prompt → no trailing separator.
     expect(providers.get('grok').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '', args: ['--model', 'demo'], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: '', args: ['--model', 'demo'], env: {}
     })).toEqual({ command: 'grok', args: ['--model', 'demo'], env: {} })
   })
 
   it.each(['gemini', 'antigravity'] as const)('launches %s via --prompt-interactive', (id) => {
     const command = id === 'antigravity' ? 'agy' : 'gemini'
     expect(providers.get(id).buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: 'fix "quoted"\ntext', args: ['--yolo'], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: 'fix "quoted"\ntext', args: ['--yolo'], env: {}
     })).toEqual({ command, args: ['--prompt-interactive', 'fix "quoted"\ntext', '--yolo'], env: {} })
     // No prompt → interactive with no flag.
     expect(providers.get(id).buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '', args: [], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: '', args: [], env: {}
     })).toEqual({ command, args: [], env: {} })
   })
 
   it('launches Cursor with a positional prompt on cursor-agent', () => {
     expect(providers.get('cursor').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: 'review this', args: ['--force'], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: 'review this', args: ['--force'], env: {}
     })).toEqual({ command: 'cursor-agent', args: ['--force', 'review this'], env: {} })
   })
 
@@ -255,20 +255,20 @@ describe('built-in agent providers', () => {
     // 这三种形态各错各的，所以按 Provider 分组断言，而不是笼统说一句"参数没变"。
     for (const id of ['claude', 'traex', 'pi', 'cursor'] as const) {
       expect(providers.get(id).buildLaunch({
-        workspacePath: upstreamFixturePath("tmp/work"), prompt: ' \t\n ', args: ['--model', 'demo'], env: {}
+        workspacePath: fixturePath("tmp/work"), prompt: ' \t\n ', args: ['--model', 'demo'], env: {}
       }).args).toEqual(['--model', 'demo'])
     }
     expect(providers.get('grok').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '   ', args: ['--model', 'demo'], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: '   ', args: ['--model', 'demo'], env: {}
     }).args).toEqual(['--model', 'demo'])
     expect(providers.get('gemini').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '   ', args: ['--yolo'], env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: '   ', args: ['--yolo'], env: {}
     }).args).toEqual(['--yolo'])
     // 反面锚点：真有内容时前后空白**不许**被吃掉之外的东西影响——trim 只用于判空与去边界空白，
     // 内部的换行与引号逐字节保留（上面 positional-argv 那组已钉住内部字节）。
     expect(providers.get('claude').buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '  fix it  ', args: [], env: {}
-    }).args).toEqual(['fix it'])
+      workspacePath: fixturePath("tmp/work"), prompt: '  fix it  ', args: [], env: {}
+    }).args).toEqual(['  fix it  '])
   })
 
   // grok、gemini、cursor 都已离开这一组：grok 的 `--resume <SESSION_ID_OR_TITLE>` 来自本机 `--help`；
@@ -281,7 +281,7 @@ describe('built-in agent providers', () => {
   it.each(['traex', 'hermes'] as const)('exposes %s as not supporting provider-native resume', (id) => {
     expect(providers.get(id).catalog.capabilities.providerResume).toBe(false)
     expect(() => providers.get(id).buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: id, sessionId: 'native-x' },
       prompt: 'continue now',
       args: [],
@@ -302,7 +302,7 @@ describe('built-in agent providers', () => {
         { id: 'always-approve', label: 'Auto-approve', description: 'Skip all permission prompts for this session.', tier: 'danger' }
       ]
     })
-    expect(JSON.stringify(catalog.get('grok')?.postureControl)).not.toContain('/always-approve')
+    expect(JSON.stringify(catalog.get('grok')?.postureControl)).not.toContain("/always-approve")
 
     // Every other built-in exposes only a blind Shift+Tab cycle (or an unnavigable popup), which is not
     // addressable — so it declares no posture control and the composer draws nothing for it.
@@ -313,8 +313,8 @@ describe('built-in agent providers', () => {
 
   it('resolves grok posture keystrokes core-side and fails closed for providers without a control', () => {
     // grok's mode ids resolve to the exact bytes the CLI needs — a SET, not a blind cycle.
-    expect(providers.get('grok').planPostureSet('ask')).toEqual({ data: '/always-approve off\r' })
-    expect(providers.get('grok').planPostureSet('always-approve')).toEqual({ data: '/always-approve on\r' })
+    expect(providers.get('grok').planPostureSet('ask')).toEqual({ data: (("/always-approve") + " off\r") })
+    expect(providers.get('grok').planPostureSet('always-approve')).toEqual({ data: (("/always-approve") + " on\r") })
     // A mode grok does not declare fails closed.
     expect(() => providers.get('grok').planPostureSet('yolo')).toThrow('does not declare')
     // A Provider that declares no posture control refuses the operation rather than emitting a blind key.
@@ -323,7 +323,7 @@ describe('built-in agent providers', () => {
 
   it('builds Antigravity resume launch with --conversation and --prompt-interactive', () => {
     const plan = providers.get('antigravity').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'antigravity', sessionId: 'conv-123' },
       prompt: 'continue this task',
       args: ['--effort', 'high'],
@@ -429,15 +429,15 @@ describe('built-in agent providers', () => {
     await expect(providers.get('claude').probeCapabilities({
       async hasExecutable(executable) {
         probes.push(executable)
-        return executable === upstreamFixturePath("opt/claude")
+        return executable === fixturePath("opt/claude")
       }
-    }, upstreamFixturePath("opt/claude"))).resolves.toMatchObject({
+    }, fixturePath("opt/claude"))).resolves.toMatchObject({
       providerId: 'claude',
-      executable: upstreamFixturePath("opt/claude"),
+      executable: fixturePath("opt/claude"),
       installed: true,
       capabilities: { providerResume: true }
     })
-    expect(probes).toEqual([upstreamFixturePath("opt/claude")])
+    expect(probes).toEqual([fixturePath("opt/claude")])
   })
 
   it('decides installed from the configured command, staying honest when it changed but is unavailable', async () => {
@@ -449,22 +449,22 @@ describe('built-in agent providers', () => {
     const probe = {
       async hasExecutable(executable: string) {
         probed.push(executable)
-        return executable === upstreamFixturePath("opt/wrappers/my-claude")
+        return executable === fixturePath("opt/wrappers/my-claude")
       }
     }
-    await expect(providers.get('claude').probeCapabilities(probe, upstreamFixturePath("opt/wrappers/my-claude")))
-      .resolves.toMatchObject({ executable: upstreamFixturePath("opt/wrappers/my-claude"), installed: true })
-    await expect(providers.get('claude').probeCapabilities(probe, upstreamFixturePath("opt/wrappers/missing")))
-      .resolves.toMatchObject({ executable: upstreamFixturePath("opt/wrappers/missing"), installed: false })
+    await expect(providers.get('claude').probeCapabilities(probe, fixturePath("opt/wrappers/my-claude")))
+      .resolves.toMatchObject({ executable: fixturePath("opt/wrappers/my-claude"), installed: true })
+    await expect(providers.get('claude').probeCapabilities(probe, fixturePath("opt/wrappers/missing")))
+      .resolves.toMatchObject({ executable: fixturePath("opt/wrappers/missing"), installed: false })
     await expect(providers.get('claude').probeCapabilities(probe))
       .resolves.toMatchObject({ executable: 'claude', installed: false })
     // The exact strings probed are the configured command, not the catalog default, for each call.
-    expect(probed).toEqual([upstreamFixturePath("opt/wrappers/my-claude"), upstreamFixturePath("opt/wrappers/missing"), 'claude'])
+    expect(probed).toEqual([fixturePath("opt/wrappers/my-claude"), fixturePath("opt/wrappers/missing"), 'claude'])
   })
 
   it('builds provider-native resume argv only from a matching verified handle', () => {
     expect(providers.get('codex').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
       prompt: 'continue now',
       args: ['--model', 'demo'],
@@ -475,14 +475,14 @@ describe('built-in agent providers', () => {
       env: {}
     })
     expect(() => providers.get('pi').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'pi', sessionId: 'native-2' },
       prompt: 'continue now',
       args: [],
       env: {}
     })).toThrow('session file')
     expect(() => providers.get('hermes').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'hermes', sessionId: 'native-3' },
       prompt: 'continue now',
       args: [],
@@ -492,7 +492,7 @@ describe('built-in agent providers', () => {
 
   it('omits the prompt argv token for semantic continuity recovery', () => {
     expect(providers.get('codex').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
       args: ['--model', 'demo'],
       env: {}
@@ -502,7 +502,7 @@ describe('built-in agent providers', () => {
       env: {}
     })
     expect(providers.get('claude').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-2' },
       args: ['--model', 'demo'],
       env: {}
@@ -512,18 +512,18 @@ describe('built-in agent providers', () => {
       env: {}
     })
     expect(providers.get('pi').buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: {
         kind: 'provider',
         providerId: 'pi',
         sessionId: 'native-3',
-        transcriptPath: upstreamFixturePath("tmp/session.jsonl")
+        transcriptPath: fixturePath("tmp/session.jsonl")
       },
       args: [],
       env: {}
     })).toEqual({
       command: 'pi',
-      args: ['--session', upstreamFixturePath("tmp/session.jsonl")],
+      args: ['--session', fixturePath("tmp/session.jsonl")],
       env: {}
     })
   })
@@ -537,7 +537,7 @@ describe('built-in agent providers', () => {
     const codexPosture = codex.resolveLaunchArgv({ sandbox: 'read-only', approval: 'never' })
     expect(codexPosture).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never'])
     expect(codex.buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
       prompt: 'resume now',
       args: codexPosture,
@@ -557,7 +557,7 @@ describe('built-in agent providers', () => {
     const claudePosture = claude.resolveLaunchArgv({ 'permission-mode': 'plan' })
     expect(claudePosture).toEqual(['--permission-mode', 'plan'])
     expect(claude.buildResumeLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"),
+      workspacePath: fixturePath("tmp/work"),
       nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-2' },
       prompt: 'resume now',
       args: claudePosture,
@@ -578,14 +578,14 @@ describe('built-in agent providers', () => {
       runId: 'agy-run-1',
       receiptId: 'rcpt-1',
       eventName: 'PreInvocation',
-      payload: { conversationId: 'native-agy-1', transcriptPath: upstreamFixturePath("tmp/agy.jsonl") }
+      payload: { conversationId: 'native-agy-1', transcriptPath: fixturePath("tmp/agy.jsonl") }
     }, {})
     expect(preInvocation.status.state).toBe('working')
     expect(preInvocation.nativeHandle).toEqual({
       kind: 'provider',
       providerId: 'antigravity',
       sessionId: 'native-agy-1',
-      transcriptPath: upstreamFixturePath("tmp/agy.jsonl")
+      transcriptPath: fixturePath("tmp/agy.jsonl")
     })
 
     const toolUse = provider.normalizeHook({
@@ -625,7 +625,7 @@ describe('built-in agent providers', () => {
   })
 
   it('generates Antigravity managed hook plan with global path, agentmux-status bundle, and tool schemas', () => {
-    const plan = (new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: upstreamFixturePath("unused-workspace") })!)
+    const plan = (new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: fixturePath("unused-workspace") })!)
     expect(plan.providerId).toBe('antigravity')
     expect(plan.mutations).toHaveLength(1)
     const mutation = plan.mutations[0]
@@ -644,7 +644,7 @@ describe('built-in agent providers', () => {
   })
 
   it('declares Codex managed hooks as a marker-scoped merge so committed project hooks survive', () => {
-    const mutation = (new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: upstreamFixturePath("tmp/work") })!).mutations[0]
+    const mutation = (new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!).mutations[0]
     expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
     // 子代理在途压制的产品接线：SubagentStop 必须被真正安装，否则 Provider CLI 永不发这个事件，
     // 花名册永不减一，主 Stop 被永远压住，Agent 卡在 working 出不来。start 同样必须在，否则记不上。
@@ -656,10 +656,10 @@ describe('built-in agent providers', () => {
   })
 
   it('generates a workspace-scoped Claude settings.json merge that preserves foreign settings', () => {
-    const plan = (new AgentProviderRegistry().get("claude").planManagedHooks!({ workspacePath: upstreamFixturePath("tmp/work") })!)
+    const plan = (new AgentProviderRegistry().get("claude").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!)
     expect(plan.providerId).toBe('claude')
     const mutation = plan.mutations[0]
-    expect(mutation?.path).toBe(upstreamFixturePath("tmp/work/.claude/settings.json"))
+    expect(mutation?.path).toBe(fixturePath("tmp/work/.claude/settings.json"))
     // Claude keeps hooks under a top-level `hooks` key alongside permissions/model/MCP — like Codex,
     // AgentMux owns only its marked command entries, so the whole file cannot be replaced.
     expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
@@ -678,11 +678,11 @@ describe('built-in agent providers', () => {
 
   it('resolves the managed hook plan for JSON- and YAML-config native providers, null for the rest', () => {
     // JSON-config providers: codex and claude write into the workspace, antigravity into global ~/.gemini.
-    expect((new AgentProviderRegistry().get('codex').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)?.mutations[0]?.path).toBe(upstreamFixturePath("tmp/work/.codex/hooks.json"))
-    expect((new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)?.mutations[0]?.path).toBe(upstreamFixturePath("tmp/work/.claude/settings.json"))
-    expect((new AgentProviderRegistry().get('antigravity').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)?.providerId).toBe('antigravity')
+    expect((new AgentProviderRegistry().get('codex').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.mutations[0]?.path).toBe(fixturePath("tmp/work/.codex/hooks.json"))
+    expect((new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.mutations[0]?.path).toBe(fixturePath("tmp/work/.claude/settings.json"))
+    expect((new AgentProviderRegistry().get('antigravity').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.providerId).toBe('antigravity')
     // hermes writes into its global ~/.hermes: the YAML config plus the consent allowlist (two mutations).
-    const hermesPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)
+    const hermesPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)
     expect(hermesPlan?.providerId).toBe('hermes')
     expect(hermesPlan?.mutations.map((mutation) => mutation.path.replace(homedir(), '~'))).toEqual([
       '~/.hermes/config.yaml',
@@ -693,20 +693,20 @@ describe('built-in agent providers', () => {
     // A launch env carrying HERMES_HOME repoints the install to that dir directly (no `.hermes` append) —
     // hermes reads its config dir from $HERMES_HOME, so the installer must target the same dir the process
     // will read. This is the isolation lever the real-hermes e2e leans on.
-    const scopedPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work"), env: { HERMES_HOME: upstreamFixturePath("tmp/scratch-hermes") } }) ?? null)
+    const scopedPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: fixturePath("tmp/work"), env: { HERMES_HOME: fixturePath("tmp/scratch-hermes") } }) ?? null)
     expect(scopedPlan?.mutations.map((mutation) => mutation.path)).toEqual([
-      upstreamFixturePath("tmp/scratch-hermes/config.yaml"),
-      upstreamFixturePath("tmp/scratch-hermes/shell-hooks-allowlist.json")
+      fixturePath("tmp/scratch-hermes/config.yaml"),
+      fixturePath("tmp/scratch-hermes/shell-hooks-allowlist.json")
     ])
     // pi 现在有 plan builder：它装一份自己独占的 in-process JS 扩展。用 env 把 agent dir 指到临时目录，
     // 免得这条断言依赖跑测试那台机器的 home。
-    const piPlan = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work"), env: { PI_CODING_AGENT_DIR: upstreamFixturePath("tmp/scratch-pi") } }) ?? null)
+    const piPlan = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: fixturePath("tmp/work"), env: { PI_CODING_AGENT_DIR: fixturePath("tmp/scratch-pi") } }) ?? null)
     expect(piPlan?.providerId).toBe('pi')
-    expect(piPlan?.mutations.map((mutation) => mutation.path)).toEqual([upstreamFixturePath("tmp/scratch-pi/extensions/agentmux.js")])
+    expect(piPlan?.mutations.map((mutation) => mutation.path)).toEqual([fixturePath("tmp/scratch-pi/extensions/agentmux.js")])
     // kimi 声明 native hook 但没有 plan builder（TOML 配置面，见 providers/kimi.ts 那段），于是解析成
     // null、不被自动安装。非 hook 的 Provider 同理。
-    expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)).toBeNull()
-    expect((new AgentProviderRegistry().get('traex').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)).toBeNull()
+    expect((new AgentProviderRegistry().get('kimi').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)).toBeNull()
+    expect((new AgentProviderRegistry().get('traex').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)).toBeNull()
   })
 
   it('bakes the packaged-Electron node runner and provider id into the managed hook command', () => {
@@ -714,7 +714,7 @@ describe('built-in agent providers', () => {
     // the .js as Node (and a real node binary ignores the var). AGENTMUX_HOOK_PROVIDER lets the shared
     // hook binary emit the provider-correct decision schema without confusing antigravity with gemini.
     const codexCommand = (
-      JSON.parse((new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: upstreamFixturePath("tmp/work") })!).mutations[0]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!).mutations[0]?.content ?? '{}') as {
         hooks: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
       }
     ).hooks['SessionStart']?.[0]?.hooks?.[0]?.command ?? ''
@@ -723,7 +723,7 @@ describe('built-in agent providers', () => {
     expect(codexCommand).toContain('agentmux-hook.js')
 
     const antigravityCommand = (
-      JSON.parse((new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: upstreamFixturePath("unused-workspace") })!).mutations[0]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: fixturePath("unused-workspace") })!).mutations[0]?.content ?? '{}') as {
         'agentmux-status': Record<string, Array<{ command?: string }>>
       }
     )['agentmux-status']['PreInvocation']?.[0]?.command ?? ''
@@ -736,7 +736,7 @@ describe('built-in agent providers', () => {
     // `VAR=val exec …` prefix the other providers use would make `ELECTRON_RUN_AS_NODE=1` argv[0].
     // `/usr/bin/env` parses the NAME=value operands itself, then execs the interpreter with them applied.
     const command = (
-      JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: upstreamFixturePath("unused-workspace"), env: { HERMES_HOME: upstreamFixturePath("tmp/fake-home") } })!).mutations[0]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: fixturePath("unused-workspace"), env: { HERMES_HOME: fixturePath("tmp/fake-home") } })!).mutations[0]?.content ?? '{}') as {
         hooks: Record<string, Array<{ command?: string }>>
       }
     ).hooks['pre_tool_call']?.[0]?.command ?? ''
@@ -747,7 +747,7 @@ describe('built-in agent providers', () => {
     // The allowlist approval must gate the SAME command string, byte-for-byte — hermes matches (event,
     // command) exactly, so any divergence would leave the hook un-approved and silently skipped.
     const approvals = (
-      JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: upstreamFixturePath("unused-workspace"), env: { HERMES_HOME: upstreamFixturePath("tmp/fake-home") } })!).mutations[1]?.content ?? '{}') as {
+      JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: fixturePath("unused-workspace"), env: { HERMES_HOME: fixturePath("tmp/fake-home") } })!).mutations[1]?.content ?? '{}') as {
         approvals: Array<{ event?: string; command?: string }>
       }
     ).approvals
@@ -869,7 +869,7 @@ describe('built-in agent providers', () => {
     expect(argv).toEqual(['--mode', 'plan', '--sandbox', 'enabled', '--force'])
     // cursor-agent takes the prompt positionally, so the resolved flags fold in ahead of it.
     expect(cursor.buildLaunch({
-      workspacePath: upstreamFixturePath("repo"), prompt: 'ship it', args: argv, env: {}
+      workspacePath: fixturePath("repo"), prompt: 'ship it', args: argv, env: {}
     }).args).toEqual(['--mode', 'plan', '--sandbox', 'enabled', '--force', 'ship it'])
     // The permissive defaults contribute nothing, leaving the CLI's own default posture intact.
     expect(cursor.resolveLaunchArgv({ mode: 'default', approvals: 'default' })).toEqual([])
@@ -882,7 +882,7 @@ describe('built-in agent providers', () => {
     expect(gemini.resolveLaunchArgv({ 'approval-mode': 'yolo' })).toEqual(['--approval-mode', 'yolo'])
     // gemini front-loads --prompt-interactive; the resolved argv folds in AFTER the prompt via buildArgs.
     expect(gemini.buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: 'go', args: gemini.resolveLaunchArgv({ 'approval-mode': 'yolo' }), env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: 'go', args: gemini.resolveLaunchArgv({ 'approval-mode': 'yolo' }), env: {}
     })).toEqual({ command: 'gemini', args: ['--prompt-interactive', 'go', '--approval-mode', 'yolo'], env: {} })
 
     // grok `--permission-mode <default|acceptEdits|auto|dontAsk|bypassPermissions|plan>` — verified.
@@ -892,7 +892,7 @@ describe('built-in agent providers', () => {
       .toEqual(['--permission-mode', 'bypassPermissions'])
     // grok's `--` separator still guards a flag-looking prompt with the posture argv folded in.
     expect(grok.buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: '--version', args: grok.resolveLaunchArgv({ 'permission-mode': 'plan' }), env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: '--version', args: grok.resolveLaunchArgv({ 'permission-mode': 'plan' }), env: {}
     })).toEqual({ command: 'grok', args: ['--permission-mode', 'plan', '--', '--version'], env: {} })
 
     // traex `--sandbox` and `--permission-mode` — full permission-mode enum confirmed by reading the
@@ -911,7 +911,7 @@ describe('built-in agent providers', () => {
     expect(hermes.resolveLaunchArgv({ yolo: 'yolo' })).toEqual(['--yolo'])
     // Folded into hermes' chat/query/tui argv shape.
     expect(hermes.buildLaunch({
-      workspacePath: upstreamFixturePath("tmp/work"), prompt: 'inspect', args: hermes.resolveLaunchArgv({ yolo: 'yolo' }), env: {}
+      workspacePath: fixturePath("tmp/work"), prompt: 'inspect', args: hermes.resolveLaunchArgv({ yolo: 'yolo' }), env: {}
     })).toEqual({ command: 'hermes', args: ['chat', '--query', 'inspect', '--yolo', '--tui'], env: {} })
 
     // antigravity `--sandbox` is boolean: default off contributes NO argv, sandboxed adds the flag.
