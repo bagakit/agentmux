@@ -13,6 +13,9 @@ import { listProbeProcesses, stopProbeProcesses } from '../../probe-process.mjs'
 // triggered from its real Region button; private home is isolated before startup.
 const repositoryRoot = resolve(import.meta.dirname, '../../../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json')), exec = promisify(execFile)
+// Reuse the maintained WebSocket transport already supplied by the desktop test
+// dependency. Large compiled Renderer script bodies must survive CDP frames.
+const WebSocket = createRequire(require.resolve('happy-dom'))('ws')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), delay = ms => new Promise(done => setTimeout(done, ms))
 const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-resume-recap-")), home = join(root, 'home'), userData = join(root, 'user-data')
 const runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), workspaceId = 'private-resume-recap'
@@ -56,7 +59,7 @@ async function cdpConnect(url) {
     pending.delete(message.id); clearTimeout(request.timer)
     message.error ? request.fail(new Error(message.error.message)) : request.done(message.result)
   })
-  socket.addEventListener('close', () => { for (const request of pending.values()) { clearTimeout(request.timer); request.fail(new Error('Private CDP closed')) }; pending.clear() })
+  socket.addEventListener('close', event => { for (const request of pending.values()) { clearTimeout(request.timer); request.fail(new Error(`Private CDP closed: ${event.code} ${event.reason}`)) }; pending.clear() })
   const call = (method, params = {}) => new Promise((done, fail) => {
     const id = ++serial, timer = setTimeout(() => { pending.delete(id); fail(new Error(`CDP timed out: ${method}`)) }, 12000)
     pending.set(id, { done, fail, timer }); socket.send(JSON.stringify({ id, method, params }))
@@ -99,22 +102,32 @@ async function launch(label) {
   const mainPath = join(desktopRoot, 'out/main/index.js'), lines = (await readFile(mainPath, 'utf8')).split('\n')
   const anchors = lines.flatMap((line, index) => line.includes('const SCRATCH_BACKING_PATH = join(app.getPath("home")') ? [index] : [])
   assert.equal(anchors.length, 1)
-  const breakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: anchors[0] })
   await main.call('Runtime.runIfWaitingForDebugger')
-  let paused = await waitFor('initial Main pause', () => main.pauses.shift())
-  if (!paused.hitBreakpoints?.includes(breakpoint.breakpointId)) { await main.call('Debugger.resume'); paused = await waitFor('exact pre-home pause', () => main.pauses.shift()) }
-  assert.ok(paused.hitBreakpoints?.includes(breakpoint.breakpointId))
+  const paused = await waitFor('initial Main pause', () => main.pauses.shift())
+  const frame = paused.callFrames[0]
+  const mainUrls=[mainPath,pathToFileURL(mainPath).href]
+  assert.ok(main.scripts.size>0,'Initial debugger script observations must be nonempty')
+  assert.ok(!mainUrls.some(url=>main.scripts.has(url)),'Private home is isolated before compiled Main is loaded')
   const isolated = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
-    expression: `(() => { app.setPath('home',${JSON.stringify(home)}); return app.getPath('home') })()`, returnByValue: true })
+    expression: `(() => { const app=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app; app.setPath('home',${JSON.stringify(home)}); return app.getPath('home') })()`, returnByValue: true })
   assert.equal(isolated.exceptionDetails, undefined); assert.equal(isolated.result.value, home)
-  await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId }); await main.call('Debugger.resume')
+  await main.call('Debugger.resume')
   const probe = { child, main, label, diagnostics: () => diagnostics }; probes.push(probe); active = probe
-  const endpoint = new URL(await waitFor('Renderer debugger', () => { alive(); return rendererUrl }))
+  const endpoint = new URL(await waitFor('Renderer debugger', async () => {
+    alive()
+    // Electron pauses its bootstrap and then the application entry for inspect-brk.
+    // Home was already isolated before either entry; release each real start pause.
+    while(main.pauses.length){main.pauses.shift();await main.call('Debugger.resume')}
+    return rendererUrl
+  }))
   const page = await waitFor('real loaded Renderer', async () => { alive(); return (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(row => row.type === 'page' && row.url.startsWith('file:')) })
   probe.cdp = await cdpConnect(page.webSocketDebuggerUrl); await probe.cdp.call('Runtime.enable'); await probe.cdp.call('Debugger.enable')
   await waitFor('public IPC and loaded Store', () => probe.cdp.evaluate('Boolean(window.agentmux && document.querySelector(".window-status-bar"))'))
   await waitFor('actual client readiness', async () => { try { const value = await observe(); return !value.workbench.loading ? value : null } catch { alive(); return null } })
   assert.equal(await probe.cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()'), home)
+  const loadedMainUrl=mainUrls.find(url=>main.scripts.has(url));assert.ok(loadedMainUrl,'Actual compiled Main must have loaded')
+  const loadedMain=await main.call('Debugger.getScriptSource',{scriptId:main.scripts.get(loadedMainUrl)})
+  assert.ok(loadedMain.scriptSource.includes(await readFile(mainPath,'utf8')),'Actual loaded Main must contain exact compiled bytes')
   return probe
 }
 async function quit(probe, cleanup = false) {
