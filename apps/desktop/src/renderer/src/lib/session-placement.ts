@@ -1,15 +1,14 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
-import type { WorkspaceLayout } from '@agentmux/layout'
+import { groupIds, regionIds, type WorkspaceLayout } from '@agentmux/layout'
 import {
-  tabGroupForTab,
   workbenchSurfaces,
   type WorkbenchTab
 } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
 
 /**
- * The durable owner of a Session surface.  This is deliberately resolved from the layout tree at
- * the moment a placement is committed; a focused Region is only a UI hint and is never an owner.
+ * An exact durable display occurrence of a Session surface, resolved at placement time.
+ * workspaceId is the display Workspace; the Tab's resource Workspace is independent.
  */
 export type SessionPlacement = {
   kind: 'resolved'
@@ -51,13 +50,12 @@ export type SessionPlacementInput = {
 }
 
 /**
- * Resolve an explicit Session to its current durable Workbench owner.
+ * Resolve an explicit Session to one exact durable Workbench display occurrence.
  *
  * A supplied origin is a claim about the requested Session surface, not a hint from which another
  * surface may be guessed.  If it is stale, this returns an actionable failure instead of silently
  * falling back to the active workspace or another view of the same Session.  Without an origin,
- * exactly one visible Session surface is required; ambiguity is also a failure because ambient focus
- * cannot choose between owners.
+ * exactly one reachable occurrence is required; ambient focus cannot choose between locations.
  */
 export function resolveSessionPlacement(input: SessionPlacementInput): SessionPlacementResult {
   const { sessionId, sessions, tabs, layouts, origin } = input
@@ -67,8 +65,9 @@ export function resolveSessionPlacement(input: SessionPlacementInput): SessionPl
 
   const owners: Array<{ tab: WorkbenchTab; regionId: string }> = []
   for (const tab of Object.values(tabs)) {
+    const reachableRegions = new Set(regionIds(tab.layout.root))
     for (const surface of workbenchSurfaces(tab)) {
-      if (isSessionSurface(surface) && surface.sessionId === sessionId) {
+      if (isSessionSurface(surface) && surface.sessionId === sessionId && reachableRegions.has(surface.regionId)) {
         owners.push({ tab, regionId: surface.regionId })
       }
     }
@@ -82,53 +81,32 @@ export function resolveSessionPlacement(input: SessionPlacementInput): SessionPl
     )
   }
 
-  const selected = origin
-    ? owners.find(({ tab, regionId }) => (
-        (origin.workspaceId === undefined || tab.workspaceId === origin.workspaceId) &&
-        (origin.tabId === undefined || tab.id === origin.tabId) &&
-        (origin.regionId === undefined || regionId === origin.regionId) &&
-        (origin.tabGroupId === undefined || tabGroupForTab(layouts[tab.workspaceId], tab.id) === origin.tabGroupId)
-      ))
-    : owners.length === 1
-      ? owners[0]
-      : undefined
+  const occurrences: SessionPlacement[] = []
+  for (const [workspaceId, layout] of Object.entries(layouts)) {
+    if (origin?.workspaceId !== undefined && origin.workspaceId !== workspaceId) continue
+    const reachableGroups = new Set(groupIds(layout.root))
+    for (const group of layout.groups) {
+      if (!reachableGroups.has(group.id) || origin?.tabGroupId !== undefined && origin.tabGroupId !== group.id) continue
+      for (const { tab, regionId } of owners) {
+        if (!group.tabOrder.includes(tab.id) ||
+          origin?.tabId !== undefined && origin.tabId !== tab.id ||
+          origin?.regionId !== undefined && origin.regionId !== regionId) continue
+        occurrences.push({ kind: 'resolved', sessionId, workspaceId, tabId: tab.id, regionId, tabGroupId: group.id })
+      }
+    }
+  }
 
-  if (!selected) {
+  if (occurrences.length !== 1) {
     return unresolved(
       sessionId,
-      origin ? 'origin-mismatch' : 'surface-ambiguous',
-      origin
+      origin && occurrences.length === 0 ? 'origin-mismatch' : 'surface-ambiguous',
+      origin && occurrences.length === 0
         ? 'The target Session surface moved or was closed before placement; choose the Session again.'
         : 'The target Session has more than one surface and no explicit owner was supplied.'
     )
   }
 
-  const { tab, regionId } = selected
-  const layout = layouts[tab.workspaceId]
-  if (!layout) {
-    return unresolved(
-      sessionId,
-      'workspace-layout-missing',
-      'The target Session workspace layout is unavailable; its Workbench was kept intact.'
-    )
-  }
-  const tabGroupId = tabGroupForTab(layout, tab.id)
-  if (!tabGroupId) {
-    return unresolved(
-      sessionId,
-      'tab-group-missing',
-      'The target Session Tab is no longer attached to a Tab Group; choose the Session again.'
-    )
-  }
-
-  return {
-    kind: 'resolved',
-    sessionId,
-    workspaceId: tab.workspaceId,
-    tabId: tab.id,
-    regionId,
-    tabGroupId
-  }
+  return occurrences[0]!
 }
 
 function unresolved(

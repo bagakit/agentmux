@@ -121,4 +121,35 @@ describe('resolveSessionPlacement', () => {
       message: 'The target Session is no longer available.'
     })
   })
+
+  it('resolves the requested foreign second occurrence without borrowing the resource Workspace or first Group', () => {
+    const tab = createWorkbenchTab('resource-tab', surface('healthy', 'resource', 'original-region'))
+    const first = createWorkspaceLayout('first', [tab.id])
+    const displayed = { ...first, root: { type: 'split' as const, direction: 'horizontal' as const, ratio: .5,
+      first: first.root, second: { type: 'leaf' as const, groupId: 'second' } },
+      groups: [...first.groups, { ...first.groups[0]!, id: 'second' }] }
+    const input = { sessionId: 'healthy', sessions: [session('healthy')], tabs: { [tab.id]: tab },
+      layouts: { resource: createWorkspaceLayout('home', [tab.id]), foreign: displayed } }
+    expect(resolveSessionPlacement({ ...input, origin: { workspaceId: 'foreign', tabGroupId: 'second', tabId: tab.id, regionId: 'original-region' } })).toEqual({
+      kind: 'resolved', sessionId: 'healthy', workspaceId: 'foreign', tabGroupId: 'second', tabId: tab.id, regionId: 'original-region' })
+    expect(resolveSessionPlacement(input)).toMatchObject({ kind: 'unresolved', reason: 'surface-ambiguous' })
+  })
+
+  it('rejects a Group entry that is absent from the original layout tree', () => {
+    const tab = createWorkbenchTab('resource-tab', surface('healthy', 'resource', 'original-region'))
+    const layout = createWorkspaceLayout('live', [tab.id])
+    const result = resolveSessionPlacement({ sessionId: 'healthy', sessions: [session('healthy')], tabs: { [tab.id]: tab },
+      layouts: { foreign: { ...layout, groups: [...layout.groups, { ...layout.groups[0]!, id: 'orphan' }] } },
+      origin: { workspaceId: 'foreign', tabGroupId: 'orphan', tabId: tab.id, regionId: 'original-region' } })
+    expect(result).toMatchObject({ kind: 'unresolved', reason: 'origin-mismatch' })
+  })
+
+  it('rejects a retained Session Region entry that is absent from its original region tree', () => {
+    const tab = createWorkbenchTab('resource-tab', surface('healthy', 'resource', 'original-region'))
+    const retained = { ...tab, regions: { ...tab.regions, orphan: surface('healthy', 'resource', 'orphan') } }
+    const result = resolveSessionPlacement({ sessionId: 'healthy', sessions: [session('healthy')], tabs: { [tab.id]: retained },
+      layouts: { foreign: createWorkspaceLayout('group', [tab.id]) },
+      origin: { workspaceId: 'foreign', tabGroupId: 'group', tabId: tab.id, regionId: 'orphan' } })
+    expect(result).toMatchObject({ kind: 'unresolved', reason: 'origin-mismatch' })
+  })
 })

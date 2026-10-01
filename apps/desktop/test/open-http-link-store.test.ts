@@ -181,7 +181,7 @@ describe('HTTP link routing ownership', () => {
     pending.resolve(browserSnapshot(regionId, 'https://example.com/docs'))
     await opening
 
-    expect(create).toHaveBeenCalledWith(regionId, 'https://example.com/docs')
+    expect(create).toHaveBeenCalledWith(regionId, 'https://example.com/docs', origin.workspaceId)
     expect(useAppStore.getState().tabs[pendingTab.id]?.regions[regionId]).toMatchObject({
       kind: 'browser',
       browserId: regionId,
@@ -206,7 +206,7 @@ describe('HTTP link routing ownership', () => {
 
       const tab = useAppStore.getState().tabs[origin.tabId!]!
       const browser = workbenchSurfaces(tab).find((surface) => surface.kind === 'browser')!
-      expect(create).toHaveBeenCalledWith(browser.regionId, 'https://example.com/path')
+      expect(create).toHaveBeenCalledWith(browser.regionId, 'https://example.com/path', origin.workspaceId)
       expect(tab.layout.activeRegionId).toBe(browser.regionId)
       expect(tab.layout.root).toMatchObject({ type: 'split', direction: axis })
       if (tab.layout.root.type !== 'split') throw new Error('Expected split layout')
@@ -226,7 +226,7 @@ describe('HTTP link routing ownership', () => {
       tabId: 'terminal-tab',
       regionId: 'missing-region'
     }, 'stale Region']
-  ] as const)('rejects a directional destination with a %s origin', async (partialOrigin) => {
+  ] as const)('rejects a directional destination with a %s origin', async (partialOrigin, _reason) => {
     setupOrigin()
     const create = vi.spyOn(api.browser, 'create')
 

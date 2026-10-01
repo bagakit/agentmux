@@ -30,7 +30,7 @@ import {
 import { createPortal } from 'react-dom'
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
@@ -51,7 +51,7 @@ import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-to
 import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
-import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, workbenchHomePresentationReferences, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, workbenchHomePresentationReferences, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -504,7 +504,8 @@ function SurfaceContent({
   headerPortalTargetId,
   focus,
   browserFrame,
-  onBrowserInputSelected
+  onBrowserInputSelected,
+  primaryPresentationHostId
 }: {
   surface: WorkbenchSurface
   tabId: string
@@ -515,6 +516,7 @@ function SurfaceContent({
   headerPortalTargetId: string | null
   /** 这一格的焦点表达。只有 browser 那格真用得到（原生视图要让位），但由上游一次算好传下来。 */
   focus: RegionFocusExpression
+  primaryPresentationHostId?: string | undefined
   browserFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onBrowserInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
 }) {
@@ -532,6 +534,10 @@ function SurfaceContent({
         visible={surfaceVisible}
         parked={parked}
         headerPortalTargetId={headerPortalTargetId}
+        presentations={surface.kind === 'agent' ? browserTargets.filter(target => target.reference?.tabId === tabId &&
+          target.hostId !== primaryPresentationHostId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)) : []}
+        renderPresentationFrame={browserFrame}
+        onPresentationSelected={onBrowserInputSelected}
         linkOrigin={{
           workspaceId: surface.workspaceId,
           tabGroupId: groupId,
@@ -692,7 +698,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
       projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}
       homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
-      <WorkbenchRegionContent {...props} surfaceVisible={visible} nativeSurfacesVisible={target ? visible : props.nativeSurfacesVisible}
+      <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={target ? visible : props.nativeSurfacesVisible}
         headerPortalTargetId={target?.headerPortalTargetId ?? props.headerPortalTargetId} />
     </StableWorkbenchView>
   </>
@@ -706,7 +712,8 @@ function WorkbenchRegionContent({
   surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
-  headerPortalTargetId
+  headerPortalTargetId,
+  primaryPresentationHostId
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
   tab: WorkbenchTab
@@ -716,6 +723,7 @@ function WorkbenchRegionContent({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   headerPortalTargetId: string | null
+  primaryPresentationHostId?: string | undefined
 }) {
   const browserPresentation = useWorkbenchBrowserPresentation()
   const focusRegion = useAppStore((state) => state.focusRegion)
@@ -781,6 +789,7 @@ function WorkbenchRegionContent({
   // 也发不出 keydown，故这条接线由 AST 守（section 带 tabIndex/onKeyDown、handler 合成 contextmenu），
   // 判据本身由纯谓词层守。
   function openRegionMenuFromKeyboard(event: React.KeyboardEvent<HTMLElement>): void {
+    if (!event.currentTarget.contains(event.target as Node)) return
     if (!opensContextMenuFromKeyboard(event)) return
     event.preventDefault()
     const region = event.currentTarget
@@ -844,6 +853,8 @@ function WorkbenchRegionContent({
       tabIndex={-1}
       onKeyDown={openRegionMenuFromKeyboard}
       onPointerDown={(event) => {
+        // A portal's React ancestor is not another occurrence of this DOM interaction.
+        if (!event.currentTarget.contains(event.target as Node)) return
         // A Region portal keeps React ancestry. Survey browser input does not navigate Space;
         // the original floating pointer path still owns actual Mote/Agent/Terminal interaction.
         selectFrameRegion(target, Boolean(event.currentTarget.closest('[data-pmo-teams-topic-floating]')))
@@ -881,6 +892,7 @@ function WorkbenchRegionContent({
           headerPortalTargetId={headerPortalTargetId}
           focus={focus}
           browserFrame={renderFrame}
+          primaryPresentationHostId={primaryPresentationHostId}
           onBrowserInputSelected={target => selectFrameRegion(target)}
         />
       </SessionRegionHost>
@@ -904,6 +916,8 @@ function WorkbenchRegionContent({
 function WorkbenchBrowserPresentationSlots({ tab, target, node }: { tab: WorkbenchTab; target: WorkbenchViewTarget; node: WorkbenchRegionLayoutNode }): ReactNode {
   if (node.type === 'leaf') return tab.regions[node.regionId]?.kind === 'browser'
     ? <div id={workbenchBrowserStageHostId(target, node.regionId)} className="workbench-region-slot" data-browser-occurrence-slot={node.regionId} />
+    : tab.regions[node.regionId]?.kind === 'agent'
+      ? <div id={workbenchSessionStageHostId(target, node.regionId)} className="workbench-region-slot" data-session-occurrence-slot={node.regionId} />
     : <div role="status" className="workbench-restore-notice">This Region remains in its original work surface. Simultaneous live display is not available yet.</div>
   return <div className="workbench-browser-presentation-split" style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: node.direction === 'horizontal' ? 'row' : 'column' }}>
     <div style={{ display: 'flex', flex: node.ratio, minHeight: 0, minWidth: 0 }}><WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.first} /></div>
@@ -1470,6 +1484,10 @@ export function WorkspaceWorkbench({
   const tabs = useAppStore(useShallow((state) => projection
     ? Object.fromEntries([...projectedMemberIds ?? []].flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
+  const presentedAgentIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
+    Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [tabs])
+  const activityPresentable = useAppStore(useShallow(state => Object.fromEntries(presentedAgentIds.map(id =>
+    [id, sessionPresentationById(state.sessions).get(id)?.kind === 'agent' && effectiveSessionViewMode(state, id) !== 'terminal']))))
   const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => target.surface === 'space' && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
   const ordinaryLayouts = useAppStore(useShallow(state => Object.fromEntries(ordinaryDisplayIds.map(id => [id, state.layouts[id]]))))
@@ -1699,8 +1717,8 @@ export function WorkspaceWorkbench({
       </div>
       {viewOwnership === 'owner' && Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
         const targets = viewTargets?.[tab.id] ?? []
-        const browserOnly = Object.values(tab.regions).length > 0 && Object.values(tab.regions).every(region => region.kind === 'browser')
-        const projection = (browserOnly ? targets.find(target => target.surface === 'space') : undefined) ??
+        const repeatableContent = Object.values(tab.regions).length > 0 && Object.values(tab.regions).every(region => region.kind === 'browser' || region.kind === 'agent' && activityPresentable[region.sessionId])
+        const projection = (repeatableContent ? targets.find(target => target.surface === 'space') : undefined) ??
           [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space') ?? targets.find(target => target.visible !== false) ??
           [...targets].reverse().find(target => target.surface !== 'space') ?? targets[0]
         const reference = projection?.reference

@@ -1,5 +1,5 @@
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
@@ -43,12 +43,15 @@ import { SessionResultReviewContent } from './SessionResultReviewContent'
 import { SessionHistoryView } from './SessionHistoryView'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { AgentRegionHeader } from './AgentRegionHeader'
+import { SessionActivityPresentation } from './SessionActivityPresentation'
+import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
 
 const NO_TIMELINE_ITEMS: never[] = []
+const NO_PRESENTATIONS: readonly WorkbenchViewTarget[] = []
 
 function humanizeDetail(
   interruptionReason: string | undefined,
@@ -78,6 +81,9 @@ export function SessionPane({
   parked = false,
   readOnly = false,
   headerPortalTargetId = null,
+  presentations = NO_PRESENTATIONS,
+  renderPresentationFrame,
+  onPresentationSelected,
   linkOrigin
 }: {
   sessionId: string
@@ -90,6 +96,9 @@ export function SessionPane({
   /** Observation projection: no PTY input, Agent composer, interaction response or recovery. */
   readOnly?: boolean
   headerPortalTargetId?: string | null
+  presentations?: readonly WorkbenchViewTarget[]
+  renderPresentationFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
+  onPresentationSelected?: ((target: WorkbenchViewTarget) => void) | undefined
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
@@ -101,7 +110,8 @@ export function SessionPane({
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
-  const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId, visible)
+  const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId,
+    visible || presentations.some(target => target.visible !== false))
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const timelineSnapshot = useAppStore((state) => state.timelines[sessionId])
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
@@ -118,10 +128,11 @@ export function SessionPane({
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
   const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
-  const activityLifetime = useRef({ sessionId, opened: false })
+  const activitySourceKey = session?.kind === 'agent' ? JSON.stringify([session.control.hostId, session.id, session.control.run.runId]) : sessionId
+  const activityLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
   const activityContent = useRef<ReactNode>(null)
-  if (activityLifetime.current.sessionId !== sessionId) {
-    activityLifetime.current = { sessionId, opened: false }
+  if (activityLifetime.current.sourceKey !== activitySourceKey) {
+    activityLifetime.current = { sourceKey: activitySourceKey, opened: false }
     activityContent.current = null
   }
   if (viewMode !== 'terminal') activityLifetime.current.opened = true
@@ -180,6 +191,9 @@ export function SessionPane({
   }) : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
     startupDecision.reason === 'idle-over-day'
+  // One fact/observation owner, with demand from every actually visible reading stage.
+  const activityDemand = viewMode !== 'terminal' && !pendingAgentRestore &&
+    (visible && !historyOpen || presentations.some(target => target.visible !== false))
   const {
     messages: userMessages,
     nativeHistoryPage,
@@ -191,7 +205,7 @@ export function SessionPane({
     refresh: refreshUserMessages
   } = useSessionUserMessages(
     session?.kind === 'agent' ? session.control : undefined,
-    { enabled: visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore }
+    { enabled: activityDemand }
   )
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
@@ -208,7 +222,7 @@ export function SessionPane({
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
   const speakerIds = useMemo(() => [...new Set([sessionId, ...userMessages.flatMap(message =>
     message.author.kind === 'agent' ? [message.author.agentSessionId] : [])])], [sessionId, userMessages])
-  const speakerFacts = useAppStore(useShallow(state => visible ? speakerIds.flatMap(id => {
+  const speakerFacts = useAppStore(useShallow(state => activityDemand ? speakerIds.flatMap(id => {
     const sender = sessionPresentationById(state.sessions).get(id)
     if (!sender || sender.kind !== 'agent') return [id]
     const workspaces = state.config?.workspaces ?? []
@@ -509,41 +523,40 @@ export function SessionPane({
     ? session.status.detail
     : agentStartupRecoveryDetail(startupDecision)) : undefined
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
-  // Reuse the original element while covered/hidden, so late observations do not
-  // repaint its rows or disturb selected text. Return applies only current visible facts.
+  const activityProps: ComponentProps<typeof ActivityView> = {
+    sessionId: session.id, items: timeline, userMessages, nativeHistoryPage,
+    userMessageRead: { loading: userMessagesLoading, error: userMessagesError,
+      observationError: userMessagesObservationError, windowFrozen: userMessagesWindowFrozen,
+      hasMore: hasEarlierUserRecords, onRetry: () => { void refreshUserMessages() }, onReadEarlier: openHistory },
+    capability: session.kind === 'agent' ? session.capabilities.timeline : 'unavailable',
+    displayState: session.status.state, workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
+    fileReferenceNotice,
+    ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
+    readPastedImage, openHttpLink: onProseLinkClick,
+    ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
+    moteConversation: moteOwner !== null
+  }
+  // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore) {
-    activityContent.current = <ActivityView
-      sessionId={session.id}
-      items={timeline}
-      userMessages={userMessages}
-      nativeHistoryPage={nativeHistoryPage}
-      userMessageRead={{
-        loading: userMessagesLoading,
-        error: userMessagesError,
-        observationError: userMessagesObservationError,
-        windowFrozen: userMessagesWindowFrozen,
-        hasMore: hasEarlierUserRecords,
-        onRetry: () => { void refreshUserMessages() },
-        onReadEarlier: openHistory
-      }}
-      capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
-      displayState={session.status.state}
-      workspaceRoot={fileContext.workspaceRoot}
-      homeDir={fileContext.homeDir}
-      fileReferenceNotice={fileReferenceNotice}
-      {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
-      readPastedImage={readPastedImage}
-      openHttpLink={onProseLinkClick}
-      {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
-      describeSpeaker={describeSpeaker}
-      moteConversation={moteOwner !== null}
-              />
+    activityContent.current = <ActivityView {...activityProps} />
   }
   const resultReview = session.kind === 'agent'
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
 
   return (
+    <>
+    {session.kind === 'agent' && renderPresentationFrame ? presentations.map(target => <SessionActivityPresentation
+      key={JSON.stringify([activitySourceKey, target.hostId, target.reference!.displayWorkspaceId, target.reference!.groupId, target.reference!.tabId, linkOrigin.regionId])}
+      target={target} regionId={linkOrigin.regionId!} sourceKey={activitySourceKey}
+      sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
+      activity={activityProps} eligible={viewMode !== 'terminal' && !pendingAgentRestore}
+      readOnly={readOnly} resourceOrigin={linkOrigin}
+      {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
+      renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
+      {...(hasAgentComposer ? { composer: <AgentSessionComposer sessionId={session.id}
+        visible={target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore} {...(tabName ? { tabName } : {})} /> } : {})}
+    />) : null}
     <section
       ref={surfaceRef}
       className="agent-surface"
@@ -698,5 +711,6 @@ export function SessionPane({
         </div>
       ) : null}
     </section>
+    </>
   )
 }
