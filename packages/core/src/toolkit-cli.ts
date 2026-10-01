@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
-import { parseToolkitRunInput, parseToolkitToolFields, type ToolkitRequest, type ToolkitToolFields } from './toolkit.js'
+import { parseToolkitActionInput, parseToolkitRunInput, parseToolkitToolFields, type ToolkitRequest, type ToolkitToolFields } from './toolkit.js'
 
 type WithoutEnvelope<T> = T extends ToolkitRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
 export type ToolkitCommand = WithoutEnvelope<ToolkitRequest>
@@ -15,6 +15,9 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
   if (typeof toolId !== 'string' || !toolId.trim()) throw invalid('A tool ID is required. Run agentmux toolkit --help.')
   if ((verb === 'get' || verb === 'script' || verb === 'watch') && args.length === 2) return { operation: `toolkit.${verb}`, toolId }
   if ((verb === 'run' || verb === 'stop') && args.length === 2) return { operation: `toolkit.${verb}`, toolId }
+  if (verb === 'action' && args.length === 5 && args[2]?.trim() && args[3] === '--input' && args[4]) {
+    return { operation: 'toolkit.action', toolId, actionId: args[2], input: parseToolkitActionInput(await input(args[4]), 'INVALID_CLI_ARGUMENT') }
+  }
   const hasInput = args.length === 4 && args[2] === '--input' && Boolean(args[3])
   if (verb === 'remove' && args.length === 2) return { operation: 'toolkit.remove', toolId }
   if (!hasInput || !['add', 'update', 'remove', 'run', 'stop'].includes(verb ?? '')) throw invalid('Run agentmux toolkit --help for tool operations.')
@@ -28,7 +31,7 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
   if (verb === 'add') {
     const fields = settingsResourceRecord(value, 'INVALID_CLI_ARGUMENT')
     // These are explicit creation defaults, not persisted legacy-shape compatibility.
-    const complete = { enabled: true, statusBar: 'icon', args: [], ...fields }
+    const complete = { enabled: true, statusBar: 'icon', args: [], actions: [], ...fields }
     return { operation: 'toolkit.add', toolId, value: parseToolkitToolFields(complete, false, 'INVALID_CLI_ARGUMENT') as ToolkitToolFields }
   }
   const envelope = settingsResourceEnvelope(value, verb === 'update' ? ['changes', 'expected'] : ['expected'], 'INVALID_CLI_ARGUMENT')

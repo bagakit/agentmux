@@ -882,6 +882,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'toolkit.get': 'short',
   'toolkit.script': 'short',
   'toolkit.run': 'long',
+  'toolkit.action': 'long',
   'toolkit.stop': 'long',
   'toolkit.watch': 'short',
   'metrics.get': 'short',
