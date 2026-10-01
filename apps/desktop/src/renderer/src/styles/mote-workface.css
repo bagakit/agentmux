@@ -41,11 +41,11 @@
 .mote-rename__field { display: flex; flex-direction: column; gap: var(--sp-3); margin-block: var(--sp-5); color: var(--text-2); font-size: var(--fs-body); }
 .mote-rename__field input { width: 100%; padding: var(--sp-2) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
 
-/* The original Activity messages stay one continuous, left-aligned conversation. */
+/* Agent replies remain a continuous Mote reading surface; human text uses the shared bubble. */
 .activity-feed[data-mote-conversation="true"] { background: var(--surface-0); }
-.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"] { width: auto; margin: 0; padding: var(--sp-3) var(--sp-4); grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); border: 0; border-radius: 0; background: transparent; }
-.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"] .log-turn__node { grid-column: 1; grid-row: 1; width: 32px; height: 32px; background: transparent; }
-.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"] :is(.log-turn__head, .log-turn__body, .log-turn__continue) { grid-column: 2; }
+.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"][data-speaker-role="agent"] { width: auto; margin: 0; padding: var(--sp-3) var(--sp-4); grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); border: 0; border-radius: 0; background: transparent; }
+.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"][data-speaker-role="agent"] .log-turn__node { grid-column: 1; grid-row: 1; width: 32px; height: 32px; background: transparent; }
+.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"][data-speaker-role="agent"] :is(.log-turn__head, .log-turn__body, .log-turn__continue) { grid-column: 2; }
 .activity-feed[data-mote-conversation="true"] .log-turn__who { flex: 0 1 auto; min-width: 0; font-weight: 500; }
 .activity-feed[data-mote-conversation="true"] .log-turn__time { font-family: var(--font-sans); font-size: var(--fs-micro); }
 .conversation-message-avatar--mote > .space-object-icon { width: 32px; height: 32px; border-radius: 50%; }
