@@ -59,6 +59,8 @@ assert.equal(await fs.access(path.join(output, 'receipt.json')).then(() => true,
   'Use a new evidence directory; an existing generation must not be overwritten')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-space-appearance-'))
 try {
+  // The private Main bundle retains Core's external packages; resolve them from this candidate.
+  await fs.symlink(path.join(root, 'packages/core/node_modules'), path.join(privateRoot, 'node_modules'))
   const identity = await Promise.all(['HEAD', 'HEAD^{tree}'].map(rev => execFileAsync('git', ['rev-parse', rev], { cwd: root })))
   receipt.candidate = { commit: identity[0].stdout.trim(), tree: identity[1].stdout.trim() }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', plugins: [sourcePlugin],
