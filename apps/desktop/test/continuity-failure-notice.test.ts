@@ -250,6 +250,26 @@ describe('the store actually carries Core’s reason to the surface', () => {
     }
   }
 
+  it.each(['pending', 'unavailable', 'conflict'] as const)('preserves the native Session ID for a %s recovery projection without inventing one', (kind) => {
+    const recovery = kind === 'pending' ? { kind, detail: 'Checking the saved Session' }
+      : kind === 'unavailable' ? {
+        kind, agentSessionId: 'agent-1', previousRun: { runId: 'run-1' },
+        reason: 'provider-resume-unsupported' as const, evidence: { kind: 'run-missing' as const, observedAt: 1 }
+      } : {
+        kind, agentSessionId: 'agent-1', previousRun: { runId: 'run-1' }, currentRun: { runId: 'run-2' },
+        reason: 'lifecycle-busy' as const, evidence: { kind: 'agent-session-store' as const }
+      }
+    const known = recoveryCandidateSession({ ...candidate(), nativeSessionId: 'durable-native-session' }, recovery)
+    expect(known).toHaveProperty('nativeSessionId', 'durable-native-session')
+    expect(known.id).toBe('agent-1')
+    expect(known.control.run).toEqual({ runId: 'run-1' })
+    expect(known.processState).toBe('interrupted')
+    const unknown = recoveryCandidateSession(candidate(), recovery)
+    expect(unknown).not.toHaveProperty('nativeSessionId')
+    expect(unknown.id).toBe('agent-1')
+    expect(unknown.control).toEqual(known.control)
+  })
+
   it('projects each unavailable reason onto the Session snapshot', () => {
     for (const reason of [
       'provider-resume-unsupported',

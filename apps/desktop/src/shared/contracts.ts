@@ -935,6 +935,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       kind: 'agent'
       providerId: AgentProviderId
       executorId: AgentExecutorId
+      /** Core's native Provider/ACP Session ID for display; never a replacement for the AgentMux SID. */
+      nativeSessionId?: string
       capabilities: AgentCapabilities
       /** Core record freshness; activity updatedAt cannot order authoritative Session snapshots. */
       agentSessionUpdatedAt: number
@@ -999,6 +1001,8 @@ export type AgentSessionRecoveryCandidate = {
   workspacePath: string
   providerId: AgentProviderId
   executorId: AgentExecutorId
+  /** Durable native identity remains displayable while its Run is unavailable. */
+  nativeSessionId?: string
   capabilities: AgentCapabilities
   /** Core's last native semantic state; missing entry time remains unknown. */
   semanticStatus?: AgentStatus

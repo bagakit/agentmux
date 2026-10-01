@@ -45,7 +45,7 @@ function assertEveryCommandRunnable(text: string, where: string): number {
 describe('compact sharing cards', () => {
   it('uses a semantic SID and preserves the exact clicked Region as context', () => {
     const card = formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
-    expect(card).toContain('--- amux : IDCard ---\nID: agent-7\nExe: ? | ?\nRegion: region:pane-2')
+    expect(card).toContain('--- amux : IDCard ---\nID: agent-7\nExe: ? | ? (?)\nRegion: region:pane-2')
     expect(card).toContain("# amux agent send --to-session='agent-7' --text \"...\"")
     expect(card).not.toContain('--to-region')
     expect(formatMessagingAddress({ agentSessionId: 'agent-7' })).toBe(formatSessionAddress('agent-7'))

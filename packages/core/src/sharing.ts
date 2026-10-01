@@ -2,6 +2,7 @@
 export type AmuxSharingKind = 'IDCard' | 'Region' | 'Tab' | 'File' | 'Browser'
 
 export type AgentSharingMetadata = {
+  nativeSessionId?: string | undefined
   provider?: string | undefined
   executor?: string | undefined
 }
@@ -39,7 +40,8 @@ export function formatSessionAddress(
   metadata: AgentSharingMetadata = {}
 ): string {
   return formatMessagingAddress({
-    agentSessionId, provider: metadata.provider, executor: metadata.executor
+    agentSessionId, nativeSessionId: metadata.nativeSessionId,
+    provider: metadata.provider, executor: metadata.executor
   })
 }
 
@@ -49,7 +51,7 @@ export function formatMessagingAddress(
 ): string {
   return formatAmuxSharing('IDCard', [
     `ID: ${field(target.agentSessionId)}`,
-    `Exe: ${field(target.provider || '?')} | ${field(target.executor || '?')}`,
+    `Exe: ${field(target.nativeSessionId || '?')} | ${field(target.executor || '?')} (${field(target.provider || '?')})`,
     ...(target.regionId === undefined ? [] : [`Region: ${field(target.regionId)}`]),
     `# ${agentSessionSendCommand(target.agentSessionId)}`,
     '# amux --skill'

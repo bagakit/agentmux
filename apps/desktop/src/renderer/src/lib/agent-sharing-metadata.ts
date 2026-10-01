@@ -13,6 +13,7 @@ export function resolveAgentSharingMetadata(sessionId: string | null, facts: {
   // Missing observation leaves the SID copyable; metadata does not gate an existing identity action.
   if (session?.kind !== 'agent') return {}
   return {
+    nativeSessionId: session.nativeSessionId,
     provider: facts.providerCatalog.find(entry => entry.id === session.providerId)?.label || session.providerId,
     executor: facts.config?.executors[session.executorId]?.label || session.executorId
   }

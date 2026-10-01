@@ -1,5 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
+import type { AgentNativeSessionHandle } from '@agentmux/core'
 import type { AgentTimelineItem, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import { reduceBrowserEvent } from '../src/renderer/src/lib/browser-state.js'
 import {
@@ -420,6 +421,38 @@ describe('Renderer resource state owners', () => {
       }
     }))
     expect(cleared.sessions[0]?.turnUsage).toBeUndefined()
+  })
+
+  it.each(['provider', 'acp'] as const)('mirrors the %s native Session ID, clears authoritative absence and ignores stale snapshots', (protocol) => {
+    const state = { sessions: [session], timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
+    const incoming = {
+      kind: 'agent' as const, agentSessionId: session.id, providerId: session.providerId,
+      executorId: session.executorId, hostId: session.hostId, workspacePath: session.workspacePath,
+      run: session.control.run, retiredRuns: [], createdAt: session.createdAt
+    }
+    const handle = (sessionId: string): AgentNativeSessionHandle => protocol === 'provider'
+      ? { kind: 'provider', providerId: session.providerId, sessionId }
+      : { kind: 'acp', adapterId: 'generic-adapter', sessionId }
+    const event = (sessionId: string, updatedAt: number) => core({ type: 'agent-session',
+      session: { ...incoming, updatedAt, nativeHandle: handle(sessionId) } })
+    const first = reduceRuntimeEvent(state, event('native-first', 4))
+    expect(first.sessions[0]).toHaveProperty('nativeSessionId', 'native-first')
+    expect(first.sessions[0]?.id).toBe(session.id)
+    expect(first.sessions[0]).not.toHaveProperty('nativeHandle')
+    expect(reduceRuntimeEvent(first, event('native-first', 4))).toBe(first)
+
+    const changed = reduceRuntimeEvent(first, event('native-second', 5))
+    expect(changed.sessions[0]).toHaveProperty('nativeSessionId', 'native-second')
+    const stale = reduceRuntimeEvent(changed, event('native-stale', 4))
+    expect(stale).toBe(changed)
+    expect(stale.sessions[0]).toHaveProperty('nativeSessionId', 'native-second')
+
+    const cleared = reduceRuntimeEvent(changed, core({ type: 'agent-session', session: { ...incoming, updatedAt: 6 } }))
+    expect(cleared.sessions[0]).not.toHaveProperty('nativeSessionId')
+    expect(cleared.sessions[0]?.id).toBe(session.id)
+    expect(cleared.sessions[0]?.control).toEqual(session.control)
+    expect(cleared.tabs).toBe(state.tabs)
+    expect(cleared.layouts).toBe(state.layouts)
   })
 
   it('ignores old-Run lifecycle events but accepts committed Session Timeline revisions', () => {
