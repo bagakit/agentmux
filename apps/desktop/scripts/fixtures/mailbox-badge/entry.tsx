@@ -1,10 +1,24 @@
-import '../result-ready-input-continuity/entry'
+import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { flushSync } from 'react-dom'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import type { AgentDisplayState, ContinuousProgressLoop } from '@agentmux/core'
 
+// The existing preview resource is relative; actual Workbench Space addressing
+// requires a private absolute durable directory while preserving the real hosts.
+const previewDirectory = _hygiene_fixturePath("workspace/mailbox-badge-preview")
+const getPreviewConfig = api.config.get
+api.config.get = async () => {
+  const config = await getPreviewConfig()
+  return { ...config, workspaces: config.workspaces.map(workspace => workspace.id === 'workspace-demo' ? { ...workspace, path: previewDirectory } : workspace) }
+}
+const previewSnapshot = api.sessions.snapshot
+api.sessions.snapshot = async () => {
+  const snapshot = await previewSnapshot()
+  return { ...snapshot, sessions: snapshot.sessions.map(session => session.workspacePath === 'home//agentmux' ? { ...session, workspacePath: previewDirectory } : session) }
+}
+await import('../result-ready-input-continuity/entry')
 const base = (window as any).resultReady
 api.continuousProgress.list = async (control) => {
   const session = useAppStore.getState().sessions.find(session => session.id === control.agentSessionId)!
@@ -28,6 +42,12 @@ const probe = {
         title: 'Prompt', content: `Private received message ${i + 1}`, createdAt: i + 1, updatedAt: i + 1
       })) }
     } }))
+  },
+  notices(unread: boolean) {
+    flushSync(() => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === base.sessionId
+      ? { ...session, terminalPromptDelivery: unread ? { state: 'unverified' as const, mode: 'degraded' as const,
+          reason: 'screen-evidence-gap' as const, submissionId: 'private-notice', run: session.control.run, observedAt: 1 } : undefined }
+      : session) })))
   },
   state(display: AgentDisplayState) {
     flushSync(() => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === base.sessionId

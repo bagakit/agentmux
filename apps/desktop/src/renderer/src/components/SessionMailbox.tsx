@@ -230,7 +230,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const fingerprints = useMessageFingerprints(incoming)
   const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`, fingerprints ?? {},
     timeline !== undefined && fingerprints !== undefined)
-  const unread = receipts.unread.length + system.unread.length
+  const unread = receipts.unread.length
   const notices = useMemo(() => [...system.notices].sort((a, b) => latestFirst(a.observedAt, b.observedAt)), [system.notices])
 
   const deliveredIds = useMemo(() => {
@@ -306,7 +306,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     window.addEventListener('resize', measure)
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
   }, [open])
-  const mailboxLabel = `Mailbox: ${unread} unread, ${incoming.length} Agent messages, ${system.notices.length} notices, ${pending.length} pending${progressSession ? `. ${progressLabel}` : ''}`
+  const mailboxLabel = `Mailbox: Inbox ${unread} unread, Outbox ${pending.length} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
   return <>
     <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
       aria-label={mailboxLabel}
@@ -315,8 +315,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       onClick={(event) => { if (preview.current && open) { event.preventDefault(); pin() } }}>
       <Mail size={14} aria-hidden="true" />
       {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={9} className="composer-mailbox__progress" aria-hidden="true" /> : null}
-      {pending.length ? <span aria-hidden="true">{pending.length}</span> : null}
-      {unread ? <span className="composer-mailbox__unread" aria-hidden="true">{unread > 99 ? '99+' : unread}</span> : null}
+      {system.unread.length ? <Bell size={7} className="composer-mailbox__attention" aria-hidden="true" /> : null}
+      <span className="composer-mailbox__inbox-count" aria-hidden="true">
+        {unread ? <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span> : null}
+      </span>
     </button>
     <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
       data-state={open ? 'open' : 'closed'}
