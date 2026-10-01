@@ -44,7 +44,7 @@
   Browser **画得不一样**，且这条差别是标记去重的一部分——两个 Browser Region 一个在被驱动一个没有，
   标签上必须画两个，折成一个就是把"哪一格在被驱动"这条信息折没了。驱动是**瞬时事实**，随运行开始
   和结束，绝不进持久化：重启后复活一个"正在被驱动"的死标记，比不画更糟。
-- Browser Profile 从 Survey 的 Browser 管理入口导入，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
+- Browser Profile 从当前 Browser 的管理入口导入，不强制跳到 Survey；入口归属引用[《Survey、临时 Zone 工作面与知识入口》](spaces-and-layout.md#survey临时-zone-工作面与知识入口)，凭据与 Cookie 归 Main；导入路径落在 Workspace/Profile 约束内，逃出约束一律 typed 失败关闭，不静默降级到默认 Profile。
 - **应用链接（非 `http(s)` 的 URL scheme，例如自定义应用 scheme 与 `mailto:`）要像一般浏览器那样交给系统，不能当成非法地址挡掉。** 用户原话：「对齐一般浏览器，假定用户会自己把本应用当做浏览器」。这类链接不能被静默吞掉，也不能因为某个站点的按钮形态而增加站点专用分支。约束：
   - **两条路的症状不同，必须分别处理。** 真机探针（Electron 43.3.0，`WebContentsView`，与生产同形：不设 `setWindowOpenHandler`）实测：
     - 页面内导航（`location.href = 'custom-app://…'`）走 `will-navigate`，被 `guardNavigation` 拦下并写进 `entry.error`，URL 不变。这一条**有**错误可显示。
