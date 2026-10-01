@@ -168,6 +168,7 @@ function reportFailure(error: unknown): void {
       message: error instanceof Error ? error.message : typeof source?.message === 'string' ? source.message : String(error),
       ...(source?.detail === undefined ? {} : { detail: source.detail }),
       ...(source?.details === undefined ? {} : { details: source.details }),
+      ...(source?.controlFailure === undefined ? {} : { controlFailure: source.controlFailure }),
       ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
     }
   }, process.stderr)
