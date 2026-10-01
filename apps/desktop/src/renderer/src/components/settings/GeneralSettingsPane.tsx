@@ -38,12 +38,12 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
   return (
     <div className="settings-pane-stack">
       <section className="settings-group">
-        <header><span>Home directory in copied paths</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
+        <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <label className="browser-automation-toggle">
           <input type="checkbox" checked={absolute} onChange={(event) => setAbsolute(event.target.checked)} />
           <span>
-            <strong>Copy the full absolute path instead of <code>~</code></strong>
-            <small>By default, <code>proj/app</code> abbreviates your own home directory. Remote paths and paths belonging to another user always stay complete. Applies to every Copy Path action.</small>
+            <strong>Show and copy the full absolute path instead of <code>~</code></strong>
+            <small>By default, project paths abbreviate your own home directory as <code>~/proj/app</code>. This preference also applies to tooltips and Copy Path actions. Remote paths and paths belonging to another user stay complete.</small>
           </span>
         </label>
       </section>

@@ -18,6 +18,7 @@ export type ClientUiPlatform = {
     project?: ConversationSenderDetails['project'] | undefined
   }): ReactNode
   renderProjectIcon(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
+  renderProjectLabel(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderIcon(name: ClientUiIconName, size: number): ReactNode
 }
 

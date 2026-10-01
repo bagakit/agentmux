@@ -324,6 +324,8 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 
 ## 寻址与复制
 
+- 用户要求「包括 hover 在内，出现项目路径的地方」都遵守设置中的路径转换。所有客户端自行呈现的项目／工作区路径，包括 hover，其正文、摘要、tooltip、菜单与复制同时遵守现有路径样式设置，范围包括 Explorer／Git、相邻 Sidebar／Launcher 和其他确实呈现该路径的 typed metadata；同一准确资源在这些入口采用同一偏好，不再出现正文已缩写而 hover 又露出另一套路径风格。只改变表示，资源身份、原始路径、Host、文件事务、执行 argv 与 Runtime 字节保持；相对路径仍保其真实坐标，不为视觉拼成另一资源。不对文档、Markdown、终端或任意系统字符串猜路径。缩写继续只依据所属主机与真实 home，本机其他用户、未知 home 和远程路径不猜；原边界见本节路径缩写条目。Explorer 的去重与视觉唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。
+
 - **终端的每一档复制范围，读的必须是真能回答它的那个缓冲区。** 全屏 TUI 会把终端切到 alternate
   buffer（DECSET ?1049），那里按定义只有一屏、没有回滚；滚出去的历史留在 normal buffer 里，而
   `buffer.active` 此刻并不指向它。所以「复制可见输出」读 active——它问的就是"现在屏幕上有什么"；

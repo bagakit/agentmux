@@ -13,6 +13,7 @@ const platform = (overrides: Partial<ClientUiPlatform> = {}): ClientUiPlatform =
   bindComposerFocus: () => () => {},
   renderMessageAvatar: ({ name }) => <span role="img" aria-label={name}>{name.slice(0, 1)}</span>,
   renderProjectIcon: project => <span>{project.name}</span>,
+  renderProjectLabel: project => <small title={project.path}>{project.name}{project.branch ? ` · ${project.branch}` : ''}</small>,
   renderIcon: name => <span data-icon={name} />,
   ...overrides
 })

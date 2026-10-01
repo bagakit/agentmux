@@ -29,6 +29,7 @@ import { SidebarToggleChrome } from './TopRowChrome'
 import { activityContextsForWorkspaces } from '../lib/activity-groups'
 import { matchesSpaceQuery, navigateSpaceTree } from '../lib/space-tree-navigation'
 import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
+import { usePathDisplay } from '../hooks/usePathDisplay'
 
 function projectCollapseKey(id: string): string { return `project:${id}` }
 function isPathInside(inner: string, outer: string): boolean {
@@ -37,6 +38,7 @@ function isPathInside(inner: string, outer: string): boolean {
 }
 
 export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
+  const displayPath = usePathDisplay()
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -250,7 +252,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         onToggle={() => toggleProjectGroup(projectCollapseKey(project.id))} /> : null}
       <button
         className={`project-rail-row ${hasChildren ? 'project-rail-row--disclosure ' : ''}${active ? 'project-rail-row--active' : ''}`}
-        title={`${project.repoPath} · ${countTitle}`}
+        title={`${displayPath(project.repoPath, project.hostId)} · ${countTitle}`}
         aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
         aria-current={active ? 'page' : undefined}
         data-space-nav={project.id}
@@ -393,7 +395,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             ? `This removes ${removeRequest.name} from the Project Rail only. Its files, layouts, Sessions and running Agents stay untouched.`
             : ''
         }
-        {...(removeRequest ? { subject: removeRequest.repoPath } : {})}
+        {...(removeRequest ? { subject: displayPath(removeRequest.repoPath, removeRequest.hostId) } : {})}
         confirmLabel="Remove view"
         busy={removing}
         onCancel={() => {
@@ -419,6 +421,7 @@ function GroupHeader({
   sessions: ReturnType<typeof useAppStore.getState>['sessions']
   onToggle: () => void
 }) {
+  const displayPath = usePathDisplay()
   const attention = rowAttention(groupSessions)
   const attentionLabel = rowAttentionLabel(attention)
   const producing = producingAgentCount(groupSessions)
@@ -441,7 +444,7 @@ function GroupHeader({
         data-space-parent="space:folders"
         data-space-expanded={!filtering ? !collapsed : undefined}
         data-space-disclosure
-        title={[group.groupPath, memberLabel, ...(workingLabel ? [workingLabel] : []), ...(idleLabel ? [idleLabel] : [])]
+        title={[group.groupPath ? displayPath(group.groupPath, group.hostId) : null, memberLabel, ...(workingLabel ? [workingLabel] : []), ...(idleLabel ? [idleLabel] : [])]
           .filter(Boolean)
           .join(' · ')}
         onClick={onToggle}
@@ -450,7 +453,7 @@ function GroupHeader({
           <span className="space-disclosure__type project-rail-row__icon"><Layers size={13} aria-label="Automatic path group" /></span>
           <span className="project-rail-group__label">{group.label}</span>
           {collapsed && group.groupPath ? (
-            <span className="project-rail-group__address">{railGroupAddress(group.groupPath)}</span>
+            <span className="project-rail-group__address">{railGroupAddress(displayPath(group.groupPath, group.hostId))}</span>
           ) : null}
         </span>
       </button>

@@ -2,7 +2,7 @@
  * Source Control 面板：Branches 与 Changes 两个视图，以及它们共用的那层壳。
  *
  * 从 dock.css 拆出来（那个文件过了 400 行的上限）。拆分线选在「表面」而不是「组件」上：
- * `.branches-panel` / `.branches-header` / `.branches-repo` / `.branches-scroll` / `.branch-group`
+ * `.branches-panel` / `.branches-header` / `.changes-repository-context` / `.branches-scroll` / `.branch-group`
  * 这几条是两个视图**共用**的壳——BranchesPanel 与 ChangesPanel 都挂在上面，所以它们不能跟
  * `.change-row` 分家。`.source-control-switch` 是那对切换键，它就是这个表面的边界本身。
  *
@@ -11,12 +11,16 @@
  */
 
 .branches-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
-/* 排版走共享的 .selector-list__header；这里只固定它在这一列里的高度。 */
+/* 视图名由共用导航持有；这里仅保留分支计数与动作。 */
 .branches-header { flex: 0 0 30px; }
+.branches-header--tools { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-3); gap: var(--sp-2); }
+.source-control-count { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.source-control-actions { display: flex; align-items: center; gap: 1px; }
 .branches-header button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .branches-header button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
-.branches-repo { min-width: 0; height: 22px; flex: 0 0 22px; display: flex; align-items: center; gap:var(--sp-2); padding:0 var(--sp-4); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
-.branches-repo span { overflow: hidden; font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+/* 真实分支与 remote/PR 操作仍需要一行上下文；不重复项目路径或导航标题。 */
+.changes-repository-context { min-width: 0; height: 22px; flex: 0 0 22px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-4); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
+.changes-repository-context > span { overflow: hidden; font-family: var(--font-mono); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
 .branches-scroll { min-height: 0; flex: 1; padding:var(--sp-1) var(--sp-2) var(--sp-2); overflow: auto; }
 .branch-group { display: grid; gap:1px; margin-bottom:var(--sp-2); }
 .branch-group > span { padding:var(--sp-1) var(--sp-2) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
@@ -75,32 +79,33 @@
 .branch-create-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding:0 var(--sp-6) var(--sp-5); }
 .branch-create-dialog .primary-button { padding:var(--sp-3) var(--sp-4); }
 .branches-inline-error { padding:var(--sp-3) var(--sp-4); border-top: 1px solid var(--red-line); background: var(--red-bg); }
-.source-control-switch { flex: 0 0 auto; display: flex; gap:var(--sp-1); padding:var(--sp-2) var(--sp-3) 0; }
-.source-control-switch button { flex: 1; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-meta); font-weight: 650; letter-spacing: .02em; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+.source-control-switch { flex: 0 0 auto; display: flex; gap: 2px; margin: var(--sp-2) var(--sp-3) 0; padding: 3px; border: 1px solid var(--material-control-line); border-radius: var(--radius); background: linear-gradient(145deg, var(--material-control-glint), transparent 48%), var(--material-control-surface); backdrop-filter: blur(var(--material-control-blur)) saturate(1.12); }
+.source-control-switch button { flex: 1; min-width: 0; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-meta); font-weight: 600; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .source-control-switch button:hover { color: var(--text-2); background: var(--surface-2); }
-.source-control-switch button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.change-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap:var(--sp-2); min-height: 30px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); }
+.source-control-switch button.selected { color: var(--text); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--material-control-line), var(--hl); }
+.source-control-switch button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+@media (prefers-reduced-motion: reduce) { .source-control-switch button { transition: none; } }
+.change-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px 45px; align-items: center; gap:var(--sp-1); min-height: 30px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); }
 .change-row:hover { background: var(--surface-2); }
 .change-row__icon { display: inline-flex; align-items: center; justify-content: center; color: var(--green-2); }
 .change-row--untracked .change-row__icon { color: var(--amber); }
-.change-row__identity { min-width: 0; display: flex; flex-direction: column; gap:0; }
-.change-row__identity strong, .change-row__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.change-row__identity strong { font-size: var(--fs-meta); color: var(--text-2); }
-.change-row__identity small { color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
+.change-row__identity { min-width: 0; display: flex; align-items: baseline; gap:var(--sp-2); overflow: hidden; }
+.change-row__identity strong, .change-row__identity small { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-row__identity strong { flex: 1; font-size: var(--fs-meta); color: var(--text-2); }
+.change-row__identity small { flex: 0 1 auto; max-width: 35%; color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
 /* 同一块身份区域现在是个按钮（点开该文件的 diff）。它复用上面那几条布局，但 <button> 自带浏览器
    默认外观——边框、灰底、居中、继承不到的字体——所以必须逐项抹掉，否则这一行在列表里长得和别的
-   行完全不一样。左对齐要显式写：button 的 text-align 默认 center，而这块是两行左对齐的文本。 */
-.change-row__identity--button { padding:0; border:0; background:none; font:inherit; color:inherit; text-align:left; align-items:flex-start; cursor:pointer; }
+   行完全不一样。名字与次级目录同行，子项宽度受身份区域约束，长名字不能越过状态和动作槽。 */
+.change-row__identity--button { padding:0; border:0; background:none; font:inherit; color:inherit; text-align:left; cursor:pointer; }
 .change-row__identity--button:hover strong { color: var(--text); }
-.change-row__state { display: inline-flex; align-items: center; padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
-.change-row--untracked .change-row__state { color: var(--amber); background: var(--amber-bg); }
+.change-row__identity--button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.change-row__state { display: inline-flex; align-items: center; justify-content: center; min-width: 0; color: var(--green); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
+.change-row--untracked .change-row__state { color: var(--amber); }
 /* 一行的按钮区。两个按钮包在这里而不是各占一个网格列：列数与「一行有几个按钮」不该联动。 */
-.change-row__actions { display: inline-flex; align-items: center; gap:1px; }
+.change-row__actions { display: inline-flex; align-items: center; justify-content: flex-end; gap:1px; opacity: 0; pointer-events: none; }
+.change-row:hover .change-row__actions, .change-row:focus-within .change-row__actions, .change-row[aria-busy="true"] .change-row__actions, .change-row:has(.change-row__discard--armed) .change-row__actions { opacity: 1; pointer-events: auto; }
 .change-row__stage, .change-row__unstage, .change-row__discard { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); }
-/* 未武装时压暗到接近背景：这三个按钮常驻（藏进 hover 会让「有没有入口」取决于指针在哪），
-   但它们不该跟文件名抢注意力。整行 hover 时才亮起来。 */
-.change-row__stage, .change-row__unstage, .change-row__discard { opacity: .5; transition: opacity .12s ease, color .12s ease, background .12s ease; }
-.change-row:hover .change-row__stage, .change-row:hover .change-row__unstage, .change-row:hover .change-row__discard { opacity: 1; }
+/* 紧凑动作槽一直保留，显示时不盖字或改变行高；opacity 保键盘可达，focus-within 立即显出动作。 */
 .change-row__stage:hover:not(:disabled) { color: var(--green-text); background: var(--green-bg); }
 .change-row__unstage:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .change-row__discard:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }

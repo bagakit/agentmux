@@ -240,6 +240,39 @@ describe('Source Control 面板', () => {
     expect(group(markup, 'Changes')).toContain('Untracked')
   })
 
+  it('用紧凑非色标记保留完整状态与冲突详情，长名称不成为状态徽章', () => {
+    const markup = render([
+      change('Renamed direct editing notes with a long filename.md', { index: '?', worktree: '?', untracked: true, unstaged: true }),
+      change('modified.ts', { worktree: 'M', unstaged: true }),
+      change('conflict.ts', { index: 'A', worktree: 'A', unstaged: true })
+    ])
+    const states = [...markup.matchAll(/<span class="change-row__state" title="([^"]+)" aria-label="([^"]+)">([^<]+)<\/span>/g)]
+    expect(states.map(match => [match[3], match[1], match[2]])).toEqual([
+      ['?', 'Untracked', 'Untracked'], ['M', 'Modified', 'Modified'],
+      ['!', 'Conflict: both added', 'Conflict: both added']
+    ])
+    expect(markup).toContain('Open diff for Renamed direct editing notes with a long filename.md')
+    expect(markup).toContain('aria-label="Stage Renamed direct editing notes with a long filename.md"')
+  })
+
+  it('读取实际行样式，名字有宽度边界且状态与动作独立，键盘与确认态显出动作', () => {
+    const css = readFileSync(new URL('../src/renderer/src/styles/source-control.css', import.meta.url), 'utf8')
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    expect(rules.length).toBeGreaterThan(0)
+    const row = rules.find(rule => rule[1]!.trim() === '.change-row')
+    const identity = rules.find(rule => rule[1]!.trim() === '.change-row__identity strong, .change-row__identity small')
+    expect(row).toBeDefined(); expect(identity).toBeDefined()
+    expect(row![2]).toContain('grid-template-columns: 16px minmax(0, 1fr) 16px 45px')
+    expect(identity![2]).toContain('min-width: 0')
+    expect(identity![2]).toContain('max-width: 100%')
+    expect(identity![2]).toContain('text-overflow: ellipsis')
+    const visible = rules.find(rule => rule[1]!.includes('.change-row:focus-within .change-row__actions'))
+    expect(visible).toBeDefined()
+    expect(visible![1]).toContain('.change-row:has(.change-row__discard--armed) .change-row__actions')
+    expect(visible![2]).toContain('opacity: 1')
+    expect(visible![2]).toContain('pointer-events: auto')
+  })
+
   it('没有暂存内容时，消息框与提交按钮都关着', () => {
     // 界面不给出一条注定被拒的路：没有暂存内容时连消息都不让写。
     const markup = render([change('src/dirty.ts', { worktree: 'M', unstaged: true })])

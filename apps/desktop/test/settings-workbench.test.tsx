@@ -110,7 +110,7 @@ it('keeps one Copy Paths introduction and the actual path examples and scope', a
   expect(pane.isConnected).toBe(true)
   expect(pane.hidden).toBe(false)
   expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('General')
-  expect(dom.container.querySelector('.settings-content__header p')!.textContent).toBe('Copied paths, local data, and diagnostics.')
+  expect(dom.container.querySelector('.settings-content__header p')!.textContent).toBe('Project paths, local data, and diagnostics.')
   const copiedPaths = pane.querySelector<HTMLElement>('.settings-group')!
   expect(copiedPaths.isConnected).toBe(true)
   expect(copiedPaths.querySelector('header > span')!.textContent).toBe('Home directory in copied paths')

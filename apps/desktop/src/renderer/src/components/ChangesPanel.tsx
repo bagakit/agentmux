@@ -23,11 +23,16 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { gitBridge } from '../lib/git-bridge'
 import { describeGitRemote, discardIntent, type GitRemoteVerb } from '../lib/git-remote-outcome'
 import { workspaceRelativeGitPath } from '../lib/git-path-coordinates'
-import { gitChangeLabel } from '../lib/git-porcelain-status'
+import { gitChangeClass, gitChangeLabel, type GitChangeClass } from '../lib/git-porcelain-status'
 import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
 import { ComposerTextarea } from './ComposerTextarea'
 import { PrLaunchSurface } from './PrLaunchSurface'
+
+const CHANGE_MARK: Record<GitChangeClass, string> = {
+  conflicted: '!', untracked: '?', added: 'A', deleted: 'D', renamed: 'R',
+  copied: 'C', typeChanged: 'T', modified: 'M'
+}
 
 /**
  * Source Control: the current branch's changes, staging one file, and committing.
@@ -281,7 +286,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     // 分类现在归 gitChangeLabel（读两列），这一行只负责放到哪儿去。
     const label = gitChangeLabel(change)
     return (
-      <div className={`change-row change-row--${change.untracked ? 'untracked' : change.staged ? 'staged' : 'unstaged'}`} key={`${change.staged ? 'S' : 'W'}:${change.path}`}>
+      <div className={`change-row change-row--${change.untracked ? 'untracked' : change.staged ? 'staged' : 'unstaged'}`} key={`${change.staged ? 'S' : 'W'}:${change.path}`} aria-busy={busyPath === change.path || undefined}>
         <span className="change-row__icon" title={label}>
           {change.untracked ? <FilePlus2 size={12} /> : <FileDiff size={12} />}
         </span>
@@ -309,7 +314,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             {dir ? <small>{dir}</small> : null}
           </button>
         )}
-        <span className="change-row__state">{label}</span>
+        <span className="change-row__state" title={label} aria-label={label}>{CHANGE_MARK[gitChangeClass(change)]}</span>
         {/*
           两个按钮包在一个容器里，而不是直接做 `.change-row` 网格的第 4、5 个孩子：那个网格是四列的，
           第 5 个孩子会折到第二行去。列数与「一行有几个按钮」是两件事，容器让它们不必联动。
@@ -381,14 +386,14 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   return (
     <section className="branches-panel changes-panel">
-      <header className="branches-header">
-        <div><span>Changes</span><small>{repo ? repo.changes.length : 0}</small></div>
+      <header className="branches-header branches-header--tools" aria-label="Change actions">
+        <span className="source-control-count" aria-label="Changed file count">{repo ? repo.changes.length : 0}</span>
         <button type="button" title="Refresh changes" onClick={() => void refresh()} disabled={loading}>
           {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
       </header>
       {repo ? (
-        <div className="branches-repo">
+        <div className="changes-repository-context">
           <FolderGit2 size={11} />
           <span>{repo.branch ?? 'Detached HEAD'}</span>
           <div className="changes-remote">

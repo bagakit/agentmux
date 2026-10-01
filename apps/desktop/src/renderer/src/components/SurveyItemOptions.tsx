@@ -7,6 +7,7 @@ import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { SurveyTopicRelations } from './SurveyTopicRelations'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+import { usePathDisplay } from '../hooks/usePathDisplay'
 
 /** The selected Item's actions read the original owners; Radix owns disclosure and focus. */
 export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedTopics, activityDetails, panels, relations, tabViewControl, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace }: {
@@ -25,6 +26,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
   onManageBrowsers(): void
   onOpenWorkspace(workspaceId: string): void
 }) {
+  const displayPath = usePathDisplay()
   const [open, setOpen] = useState(false)
   useEffect(() => { if (!visible) setOpen(false) }, [visible])
   useEffect(() => setOpen(false), [zone?.zoneId])
@@ -48,14 +50,14 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
       </Menu.Sub> : null}
       <Menu.Separator className="tab-context-menu__separator" />
       <Menu.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={onManageBrowsers}><SlidersHorizontal size={14} /><span>Browser tools</span></Menu.Item>
-      {workspace ? <Menu.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${workspace.path}`}
+      {workspace ? <Menu.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${displayPath(workspace.path, workspace.hostId)}`}
         onSelect={() => onOpenWorkspace(workspace.id)}><ArrowUpRight size={14} /><span>Open resource in Space</span></Menu.Item> : null}
       <Menu.Sub><Menu.SubTrigger className="tab-context-menu__item"><span className="survey-topic-menu__indicator" aria-hidden="true" /><span>Details</span><ChevronRight size={12} /></Menu.SubTrigger>
         <Menu.Portal container={resolveOverlayContainer()}><Menu.SubContent className="tab-context-menu survey-topic-menu" collisionPadding={8} sideOffset={4}>
           <div className="survey-item-details-content">
-            <span>{workspace ? `${workspace.name}\n${workspace.hostId}\n${workspace.path}${workspace.branch ? `\nBranch: ${workspace.branch}` : ''}` : 'Resource Workspace is not confirmed. The original item is retained.'}</span>
+            <span>{workspace ? `${workspace.name}\n${workspace.hostId}\n${displayPath(workspace.path, workspace.hostId)}${workspace.branch ? `\nBranch: ${workspace.branch}` : ''}` : 'Resource Workspace is not confirmed. The original item is retained.'}</span>
             {zone ? <><span>{topics === undefined ? 'Topic links unknown' : topics.length ? `${topics.length} linked Topic${topics.length === 1 ? '' : 's'}` : 'No Topic links'}</span>
-              {topics?.map(topic => <span key={topic.spaceId}>{topic.name} · {topic.hostId} · {topic.directoryPath}</span>)}{activityDetails}</> : null}
+              {topics?.map(topic => <span key={topic.spaceId}>{topic.name} · {topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</span>)}{activityDetails}</> : null}
           </div>
         </Menu.SubContent></Menu.Portal>
       </Menu.Sub>

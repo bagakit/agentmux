@@ -1,0 +1,248 @@
+const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { WorkspaceRecord } from '../src/shared/contracts.js'
+import type { GitHistoryCommit, GitHistoryResult, GitHistorySnapshot } from '../src/shared/git-contracts.js'
+
+const fixture = vi.hoisted(() => ({
+  state: { localHome: _hygiene_fixturePath("Users/private"), config: { copyPathsAsAbsolute: false, hosts: [{ id: 'local', kind: 'local' }] } }
+}))
+vi.mock('../src/renderer/src/store.js', () => ({ useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state) }))
+import { GitHistoryPanel } from '../src/renderer/src/components/GitHistoryPanel.js'
+import { useGitHistory } from '../src/renderer/src/hooks/useGitHistory.js'
+import { speakerColorHue } from '../src/renderer/src/lib/conversation-avatar-color.js'
+
+const oid = (digit: string) => digit.repeat(40)
+const a = oid('a'), b = oid('b'), c = oid('c'), d = oid('d'), e = oid('e')
+const workspace: WorkspaceRecord = { id: 'repo', hostId: 'local', path: _hygiene_fixturePath("Users/private/project"), name: 'Project', kind: 'folder' }
+const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: workspace.path, selectedRef: null, roots: [a], checkedAt: 1,
+  refs: [{ name: 'refs/heads/main', kind: 'local', oid: a }, { name: 'refs/remotes/origin/topic', kind: 'remote', oid: b }, { name: 'HEAD', kind: 'head', oid: a }] }
+function commit(id: string, subject: string, parents: string[]): GitHistoryCommit {
+  return { oid: id, subject, parents, author: 'History author', authoredAt: _hygiene_fixtureTime(-67225600000), refs: snapshot.refs.filter(ref => ref.oid === id) }
+}
+function page(commits: GitHistoryCommit[], more = false, scope = snapshot): GitHistoryResult {
+  return { kind: 'ready', snapshot: scope, commits, nextCursor: more ? { snapshot: scope, offset: commits.length } : null }
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void, reject!: (error: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+let host: HTMLDivElement, root: Root
+let history: ReturnType<typeof vi.fn>
+const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  history = vi.fn()
+  Object.defineProperty(window, 'agentmux', { configurable: true, value: { git: { history } } })
+  fixture.state.config.copyPathsAsAbsolute = false
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+})
+afterEach(async () => {
+  await act(async () => root.unmount()); host.remove()
+  Object.defineProperty(window, 'agentmux', { configurable: true, value: undefined })
+  if (originalVisibility) Object.defineProperty(document, 'visibilityState', originalVisibility)
+  else Reflect.deleteProperty(document, 'visibilityState')
+  vi.unstubAllGlobals()
+})
+function HistoryOwner({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
+  const history = useGitHistory(workspace, visible)
+  return createElement(GitHistoryPanel, { workspace, history })
+}
+async function render(visible = true, value = workspace) { await act(async () => { root.render(createElement(HistoryOwner, { workspace: value, visible })) }) }
+async function click(label: string) {
+  const target = [...host.querySelectorAll('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label)
+  expect(target).toBeDefined(); await act(async () => target!.click())
+}
+async function select(value: string) {
+  const element = host.querySelector('select')!; expect(element).not.toBeNull()
+  await act(async () => { element.value = value; element.dispatchEvent(new Event('change', { bubbles: true })) })
+}
+function rows() { return [...host.querySelectorAll('[data-history-oid]')].map(row => row.getAttribute('data-history-oid')) }
+
+describe('mounted GitHistoryPanel with production hook and bridge', () => {
+  it('draws every actual merge parent and boundary, keeps 219 refs in their picker and formats the exact host path', async () => {
+    const refs = Array.from({ length: 219 }, (_, i) => ({ name: `refs/heads/branch-${i}`, kind: 'local' as const, oid: a }))
+    const many: GitHistorySnapshot = { ...snapshot, refs: [...refs, ...snapshot.refs] }
+    const merge = { ...commit(a, 'Merge both topics', [b, c]), refs }
+    history.mockResolvedValue(page([merge, commit(b, 'Topic B', [d]), commit(c, 'Topic C', [d]), commit(e, 'Disconnected root', [])], true, many))
+    await render()
+    expect(history).toHaveBeenCalledExactlyOnceWith('repo', { ref: null })
+    expect(rows()).toEqual([a, b, c, e])
+    expect([...host.querySelectorAll(`[data-child-oid="${a}"]`)].map(edge => edge.getAttribute('data-parent-oid'))).toEqual([b, c])
+    expect(host.querySelectorAll('[data-commit-oid]')).toHaveLength(4)
+    expect(host.querySelector('svg > g:last-of-type')?.querySelectorAll('path')).toHaveLength(1)
+    expect(host.querySelector(`[data-commit-oid="${e}"] title`)?.textContent).toContain('Root commit')
+    expect(host.querySelector(`[data-commit-oid="${e}"]`)?.hasAttribute('data-branch-ref')).toBe(false)
+    expect([...host.querySelectorAll('[data-unloaded-parent]')].map(edge => edge.getAttribute('data-unloaded-parent'))).toEqual([d])
+    expect(host.querySelectorAll('select option')).toHaveLength(223)
+    expect(host.querySelector('select')?.title).toBe('~/project')
+    expect(host.querySelector('.git-history-refs')?.textContent).toBe('branch-0branch-1+217')
+    expect(host.querySelector('.git-history-refs')?.getAttribute('title')?.split('\n')).toHaveLength(219)
+    expect(host.textContent).toContain('4 commits · 1 parent beyond view')
+    fixture.state.config.copyPathsAsAbsolute = true; await render()
+    expect(host.querySelector('select')?.title).toBe(_hygiene_fixturePath("Users/private/project"))
+  })
+
+  it('appends one explicit page, preserves it across tab hiding, and refresh creates a new snapshot', async () => {
+    const first = page([commit(a, 'Merge', [b, c])], true)
+    history.mockResolvedValueOnce(first).mockResolvedValueOnce(page([commit(b, 'Topic B', []), commit(c, 'Topic C', [])]))
+      .mockResolvedValueOnce(page([commit(e, 'New snapshot', [])], false, { ...snapshot, roots: [e], checkedAt: 2 }))
+    await render(); await click('Load more')
+    expect(rows()).toEqual([a, b, c]); expect(history.mock.calls[1]).toEqual(['repo', { ref: null, cursor: first.kind === 'ready' ? first.nextCursor : null }])
+    await render(false); await render(true)
+    expect(rows()).toEqual([a, b, c]); expect(history).toHaveBeenCalledTimes(2)
+    await click('Refresh history')
+    expect(rows()).toEqual([e]); expect(history).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps real branch guides across pages, shifting lanes and ref order, including both coloured merge routes', async () => {
+    const f = oid('f')
+    const main = { name: 'refs/heads/main', kind: 'local' as const, oid: a }
+    const topic = { name: 'refs/remotes/origin/topic', kind: 'remote' as const, oid: b }
+    const sibling = { name: 'refs/heads/z-main', kind: 'local' as const, oid: a }
+    const head = { name: 'HEAD', kind: 'head' as const, oid: a }
+    const tag = { name: 'refs/tags/release', kind: 'tag' as const, oid: f }
+    const side = { name: 'refs/heads/side', kind: 'local' as const, oid: e }
+    const scope: GitHistorySnapshot = { ...snapshot, roots: [a, b, e], refs: [sibling, head, topic, main, tag, side] }
+    const merge = { ...commit(a, 'Merge topic into main', [c, b]), refs: [main, head, sibling] }
+    const sideTip = { ...commit(e, 'Independent side', [f]), refs: [side] }
+    const sideRoot = { ...commit(f, 'Side root with a tag', []), refs: [tag] }
+    const mainWork = { ...commit(c, 'Main work', [d]), refs: [] }
+    const topicWork = { ...commit(b, 'Topic work', [d]), refs: [topic] }
+    const shared = { ...commit(d, 'Shared ancestor', []), refs: [] }
+    history.mockResolvedValueOnce(page([sideTip, merge, sideRoot], true, scope))
+      .mockResolvedValueOnce(page([mainWork, topicWork, shared], false, scope))
+      .mockResolvedValueOnce(page([merge, topicWork, mainWork, shared, sideTip, sideRoot], false,
+        { ...scope, checkedAt: 2, refs: [...scope.refs].reverse() }))
+    const hue = (element: Element | null) => {
+      expect(element).not.toBeNull()
+      return (element as HTMLElement).style.getPropertyValue('--history-branch-hue')
+    }
+    const node = (id: string) => host.querySelector(`[data-commit-oid="${id}"]`)
+    const edge = (child: string, parent: string) => host.querySelector(`[data-child-oid="${child}"][data-parent-oid="${parent}"]`)
+    await render()
+    expect(rows()).toEqual([e, a, f])
+    const mainHue = String(speakerColorHue(main.name)), topicHue = String(speakerColorHue(topic.name))
+    expect(mainHue).not.toBe(topicHue)
+    expect(node(a)?.getAttribute('data-branch-ref')).toBe(main.name)
+    expect(hue(node(a))).toBe(mainHue)
+    expect(node(a)?.getAttribute('cx')).toBe('24')
+    expect(hue(edge(a, c))).toBe(mainHue)
+    expect(hue(edge(a, b))).toBe(topicHue)
+    expect([...host.querySelectorAll('[data-unloaded-parent]')].map(path => path.getAttribute('data-unloaded-parent'))).toEqual([c, b])
+    expect(hue(host.querySelector(`[data-unloaded-parent="${c}"]`))).toBe(mainHue)
+    expect(hue(host.querySelector(`[data-unloaded-parent="${b}"]`))).toBe(topicHue)
+    // The unrelated side root closes a lane: both still-pending branch tracks move left with
+    // vertical tangents at each row boundary, rather than kinked diagonal segments.
+    const shifted = [...host.querySelectorAll('svg > g:nth-of-type(3) .git-history-track')]
+    expect(shifted).toHaveLength(3) // two passing branches and the root's incoming track
+    const routes = shifted.filter(path => path.getAttribute('d')?.includes(' C '))
+    expect(routes).toHaveLength(2)
+    expect(routes.map(path => path.getAttribute('d'))).toEqual(['M 24 80 C 24 100, 10 100, 10 120', 'M 38 80 C 38 100, 24 100, 24 120'])
+    expect(routes.map(path => hue(path))).toEqual([mainHue, topicHue])
+    await click('Load more')
+    expect(rows()).toEqual([e, a, f, c, b, d])
+    expect(hue(node(a))).toBe(mainHue)
+    expect(hue(node(c))).toBe(mainHue)
+    expect(hue(node(b))).toBe(topicHue)
+    expect(hue(edge(b, d))).toBe(topicHue)
+    expect(hue(edge(c, d))).toBe(mainHue)
+    expect(hue(node(d))).toBe(mainHue)
+    const refs = [...host.querySelectorAll('.git-history-ref')]
+    expect(refs.map(ref => ref.getAttribute('title'))).toEqual([side.name, main.name, head.name, tag.name, topic.name])
+    expect(hue(refs.find(ref => ref.getAttribute('title') === main.name) ?? null)).toBe(mainHue)
+    expect(hue(refs.find(ref => ref.getAttribute('title') === head.name) ?? null)).toBe(mainHue)
+    expect(hue(refs.find(ref => ref.getAttribute('title') === topic.name) ?? null)).toBe(topicHue)
+    expect(refs.find(ref => ref.getAttribute('title') === tag.name)?.hasAttribute('data-branch-ref')).toBe(false)
+    expect(host.querySelectorAll('.git-history-refs')).toHaveLength(4)
+    const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
+    expect(rendered.map(row => row.style.height)).toEqual(['40px', '40px', '40px', '40px', '40px', '40px'])
+    expect(rendered.map(row => row.children.length)).toEqual([2, 2, 2, 2, 2, 2])
+    expect(rendered[3]!.querySelector('.git-history-refs')).toBeNull()
+    expect(rendered[1]!.querySelector('.git-history-meta > .git-history-refs')).not.toBeNull()
+    expect([...host.querySelectorAll('.git-history-node')].map(circle => Number(circle.getAttribute('cy')))).toEqual([20, 60, 100, 140, 180, 220])
+    expect(host.querySelector('svg[aria-label="Loaded commit graph"]')?.getAttribute('height')).toBe('240')
+    await click('Refresh history')
+    expect(rows()).toEqual([a, b, c, d, e, f])
+    expect(node(a)?.getAttribute('cx')).toBe('10')
+    expect(hue(node(a))).toBe(mainHue)
+    expect(hue(node(b))).toBe(topicHue)
+    expect(hue(node(d))).toBe(mainHue)
+    expect(hue(edge(a, b))).toBe(topicHue)
+  })
+
+  it('discards old workspace and old selected-reference responses instead of crossing scopes', async () => {
+    const old = deferred<GitHistoryResult>(), remote = deferred<GitHistoryResult>()
+    history.mockReturnValueOnce(old.promise).mockResolvedValueOnce(page([commit(e, 'New workspace', [])]))
+      .mockReturnValueOnce(remote.promise).mockResolvedValueOnce(page([commit(d, 'Selected local', [])], false, { ...snapshot, selectedRef: 'refs/heads/main', roots: [a] }))
+    await render(); await render(true, { ...workspace, id: 'other' })
+    expect(rows()).toEqual([e])
+    await act(async () => old.resolve(page([commit(a, 'Late old workspace', [])])))
+    expect(rows()).toEqual([e]); expect(host.textContent).not.toContain('Late old workspace')
+    await select('refs/remotes/origin/topic'); await select('refs/heads/main')
+    expect(rows()).toEqual([d])
+    await act(async () => remote.resolve(page([commit(b, 'Late remote', [])], false, { ...snapshot, selectedRef: 'refs/remotes/origin/topic', roots: [b] })))
+    expect(rows()).toEqual([d]); expect(host.textContent).not.toContain('Late remote')
+    expect(history.mock.calls.map(call => call[0])).toEqual(['repo', 'other', 'other', 'other'])
+    await select(''); expect(history.mock.calls.at(-1)?.[1]).toEqual({ ref: null })
+  })
+
+  it('invalidates pending pages while a tab or document is hidden, retains completed pages and allows a bounded retry', async () => {
+    const late = deferred<GitHistoryResult>(), background = deferred<GitHistoryResult>()
+    history.mockResolvedValueOnce(page([commit(a, 'Loaded merge', [b, c])], true)).mockReturnValueOnce(late.promise)
+      .mockReturnValueOnce(background.promise).mockResolvedValueOnce(page([commit(b, 'Visible page', [])]))
+    await render(); await click('Load more'); await render(false)
+    await act(async () => late.resolve(page([commit(b, 'Late hidden page', [])])))
+    await render(true); expect(rows()).toEqual([a]); expect(history).toHaveBeenCalledTimes(2)
+    await click('Load more')
+    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
+    await act(async () => background.resolve(page([commit(c, 'Late background page', [])])))
+    expect(rows()).toEqual([a])
+    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
+    expect(history).toHaveBeenCalledTimes(3)
+    await click('Load more'); expect(rows()).toEqual([a, b]); expect(history).toHaveBeenCalledTimes(4)
+  })
+
+  it('invalidates a rebound path or host even when the Workspace id stays the same', async () => {
+    const old = deferred<GitHistoryResult>()
+    const rebound = { ...workspace, path: _hygiene_fixturePath("Users/private/rebound"), hostId: 'remote' }
+    history.mockReturnValueOnce(old.promise).mockResolvedValueOnce(page([commit(e, 'Rebound repository', [])], false,
+      { ...snapshot, hostId: 'remote', repoPath: rebound.path, roots: [e] }))
+    await render(); await render(true, rebound)
+    expect(rows()).toEqual([e]); expect(history.mock.calls.map(call => call[0])).toEqual(['repo', 'repo'])
+    await act(async () => old.resolve(page([commit(a, 'Late previous path', [])])))
+    expect(rows()).toEqual([e]); expect(host.textContent).not.toContain('Late previous path')
+    expect(host.querySelector('select')?.title).toBe(_hygiene_fixturePath("Users/private/rebound"))
+  })
+
+  it('shows loading, successful empty, nonrepository, unavailable and errors without creating a root or dropping completed pages', async () => {
+    const pending = deferred<GitHistoryResult>()
+    history.mockReturnValueOnce(pending.promise)
+    await render(); expect(host.textContent).toContain('Reading history…'); expect(rows()).toEqual([])
+    await act(async () => pending.resolve(page([])))
+    expect(host.textContent).toContain('No commits yet'); expect(host.querySelector('svg[role="img"]')).toBeNull()
+    history.mockResolvedValueOnce({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
+    await click('Refresh history'); expect(host.textContent).toContain('Not a Git repository')
+    history.mockRejectedValueOnce(new Error('History objects unreadable'))
+    await click('Refresh history'); expect(host.querySelector('[role="alert"]')?.textContent).toBe('History objects unreadable')
+    history.mockResolvedValueOnce(page([commit(a, 'Keep loaded commit', [b])], true)).mockRejectedValueOnce(new Error('Page failed'))
+    await click('Refresh history'); await click('Load more'); expect(rows()).toEqual([a]); expect(host.textContent).toContain('Page failed')
+    Object.defineProperty(window, 'agentmux', { configurable: true, value: undefined })
+    await click('Refresh history'); expect(rows()).toEqual([a]); expect(host.textContent).toContain('Git is unavailable in this build.')
+  })
+
+  it('does not start reads before visible, restarts a canceled initial read, and reports repeated page data without duplicating commits', async () => {
+    const canceled = deferred<GitHistoryResult>()
+    history.mockReturnValueOnce(canceled.promise).mockResolvedValueOnce(page([commit(a, 'Visible commit', [b])], true))
+      .mockResolvedValueOnce(page([commit(a, 'Invalid duplicate', [b])]))
+    await render(false); expect(history).not.toHaveBeenCalled()
+    await render(true); await render(false)
+    await act(async () => canceled.resolve(page([commit(e, 'Canceled initial', [])])))
+    await render(true); expect(rows()).toEqual([a]); expect(history).toHaveBeenCalledTimes(2)
+    await click('Load more'); expect(rows()).toEqual([a]); expect(host.textContent).toContain('repeated an already loaded commit')
+  })
+})

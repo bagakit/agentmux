@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ChevronRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -77,11 +78,11 @@ function contextLabel(group: ActivityGroup): string {
   return `${ACTIVITY_CONTEXT_KIND_LABEL[group.kind]} · ${group.label}`
 }
 
-function contextMeta(group: ActivityGroup): string | null {
+function contextMeta(group: ActivityGroup, path: string | null): string | null {
   const host = group.hostId && group.hostId !== 'local' ? group.hostId : null
   if (group.kind === 'unassigned') return host ? `Host · ${host}` : 'No Topic / Branch / Worktree binding'
-  if (host) return `${host} · ${group.path ?? 'path unavailable'}`
-  return group.path
+  if (host) return `${host} · ${path ?? 'path unavailable'}`
+  return path
 }
 
 export function ProjectActivity({
@@ -93,6 +94,7 @@ export function ProjectActivity({
   contexts?: readonly ActivityContextInput[]
   compact?: boolean
 }) {
+  const displayPath = usePathDisplay()
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const config = useAppStore((state) => state.config)
@@ -175,7 +177,8 @@ export function ProjectActivity({
         // its summary already opens the exact Session. Do not spend a column on a
         // dead disclosure affordance.
         const canExpand = group.sessions.length > 1 || Boolean((first.kind === 'agent' && first.pendingInteraction) || first.status.detail)
-        const meta = contextMeta(group)
+        const path = group.path ? displayPath(group.path, group.hostId ?? undefined) : null
+        const meta = contextMeta(group, path)
         const summary = groupSummary(group, timelines, config ?? null)
         const state = group.sessions.length === 1
           ? projectActivityRow(first, timelines[first.id]?.items ?? NO_TIMELINE, now, workspaceRootForPath(config ?? null, first)).meta
@@ -183,7 +186,7 @@ export function ProjectActivity({
         return <div key={group.key} className={`project-activity-group${expanded ? ' project-activity-group--expanded' : ''}`}>
           <div className="project-activity-group__header">
             <DropdownMenu.Item className="project-activity-group__summary"
-              title={[contextLabel(group), group.path, group.hostId].filter(Boolean).join(' · ')}
+              title={[contextLabel(group), path, group.hostId].filter(Boolean).join(' · ')}
               onSelect={() => selectSession(first.id)}>
             <span className="project-activity-group__identity">
               <strong>{contextLabel(group)}</strong>

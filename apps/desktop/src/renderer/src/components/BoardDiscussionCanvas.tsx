@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentAvatar } from './AgentAvatar'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
@@ -36,6 +37,7 @@ export function BoardDiscussionCanvas({
   onClose: () => void
   onOpenBranches: (row: BoardRow) => void
 }) {
+  const displayPath = usePathDisplay()
   const config = useAppStore((state) => state.config)
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
@@ -144,7 +146,7 @@ export function BoardDiscussionCanvas({
                 <span><ContextIcon size={14} /></span>
                 <div>
                   <strong>{row.name}</strong>
-                  <small title={row.path ?? undefined}>{row.path ?? 'No worktree'}</small>
+                  <small title={row.path ? displayPath(row.path, hostId) : undefined}>{row.path ? displayPath(row.path, hostId) : 'No worktree'}</small>
                 </div>
                 <em>{hostId === 'local' ? 'This Mac' : <><RadioTower size={11} /> {hostId}</>}</em>
               </section>

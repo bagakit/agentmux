@@ -6,6 +6,7 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
+import { usePathDisplay } from '../hooks/usePathDisplay'
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
@@ -94,6 +95,7 @@ export function ToolsToggle() {
 // title tooltip，永不平铺。host-pill 仅在非 local 时出现。
 export function TopBreadcrumb() {
   const { mainSurface, workspace } = useSurfaceIdentity()
+  const displayPath = usePathDisplay()
   const hostId = workspace?.hostId
   if (mainSurface === 'agents') {
     return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
@@ -113,7 +115,7 @@ export function TopBreadcrumb() {
   return (
     <div className="breadcrumbs">
       {branch ? (
-        <strong title={workspace?.path ?? undefined}>{branch}</strong>
+        <strong title={workspace ? displayPath(workspace.path, workspace.hostId) : undefined}>{branch}</strong>
       ) : null}
       {remoteHost ? (
         <span className="host-pill"><RadioTower size={11} /> {remoteHost}</span>

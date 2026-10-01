@@ -46,7 +46,7 @@ export function ConversationInputDetails({ messageId, source, speaker, declaredA
         {details ? <>
           <div className="conversation-input-details__identity">
             {details.project ? platform.renderProjectIcon(details.project) : null}
-            <span><strong>{details.label}</strong>{details.project ? <small title={details.project.path}>{details.project.name}{details.project.branch ? ` · ${details.project.branch}` : ''}</small> : <small>Project not recorded.</small>}</span>
+            <span><strong>{details.label}</strong>{details.project ? platform.renderProjectLabel(details.project) : <small>Project not recorded.</small>}</span>
           </div>
           <dl><dt>Session</dt><dd><code>{details.sessionId}</code></dd><dt>Provider</dt><dd>{details.providerId}</dd>
             <dt>Lifecycle start</dt><dd>{Number.isFinite(details.createdAt) ? new Date(details.createdAt).toLocaleString() : 'Unknown'}</dd>

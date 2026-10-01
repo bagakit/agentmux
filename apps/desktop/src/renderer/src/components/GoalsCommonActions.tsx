@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, ChevronUp, GripVertical, Plus, X } from 'lucide-react'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
@@ -23,8 +24,9 @@ function RequestBody({ action }: { action: GoalsCommonAction }) {
   return <span className="goals-entry__request">{emphasis && action.body.endsWith(emphasis) ? <>{action.body.slice(0, -emphasis.length)}<strong>{emphasis}</strong></> : action.body}</span>
 }
 function TargetFacts({ action }: { action: GoalsCommonAction }) {
+  const displayPath = usePathDisplay()
   return <span className="goals-common__facts">
-    {action.project ? <small title={`${action.project.id} · ${action.project.hostId} · ${action.project.path}`}>{action.project.source === 'recent' ? '最近项目' : '当前项目'} · {action.project.name}</small> : null}
+    {action.project ? <small title={`${action.project.hostId} · ${displayPath(action.project.path, action.project.hostId)}`}>{action.project.source === 'recent' ? '最近项目' : '当前项目'} · {action.project.name}</small> : null}
     <small>{action.executor ? `${action.initialExecutor ? '首次选择' : '主 Mote'} · ${action.executor.label}` : action.reason ?? '主 Mote 的 Agent 待确认'}</small>
   </span>
 }

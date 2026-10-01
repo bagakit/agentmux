@@ -265,3 +265,31 @@ export interface GitBranchComparisonApi {
   // the shared canvas must say "binary or too large for textual diff", not claim a specific cause.
   branchDiff(workspaceId: string, descriptor: GitBranchDiffDescriptor): Promise<GitFileDiff>
 }
+
+/** Existing refs observed in one repository. Tags decorate commits; they never add history roots. */
+export type GitHistoryRef = { name: string; kind: 'local' | 'remote' | 'head' | 'tag'; oid: string }
+export type GitHistorySnapshot = {
+  hostId: string
+  repoPath: string
+  selectedRef: string | null
+  roots: string[]
+  refs: GitHistoryRef[]
+  checkedAt: number
+}
+export type GitHistoryCursor = { snapshot: GitHistorySnapshot; offset: number }
+export type GitHistoryInput = { ref?: string | null; cursor?: GitHistoryCursor; limit?: number }
+export type GitHistoryCommit = {
+  oid: string
+  parents: string[]
+  subject: string
+  author: string
+  authoredAt: number | null
+  refs: GitHistoryRef[]
+}
+export type GitHistoryResult =
+  | { kind: 'ready'; snapshot: GitHistorySnapshot; commits: GitHistoryCommit[]; nextCursor: GitHistoryCursor | null }
+  | { kind: 'not-a-git-repository'; hostId: string; workspacePath: string }
+export interface GitHistoryApi {
+  /** Metadata only, fixed heads + remote-tracking + HEAD. No fetch, index writes or file blobs. */
+  history(workspaceId: string, input?: GitHistoryInput): Promise<GitHistoryResult>
+}

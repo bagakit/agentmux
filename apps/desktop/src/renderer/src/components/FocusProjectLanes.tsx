@@ -4,18 +4,20 @@ import type { FocusProjectLane } from '../lib/focus-project-lanes'
 import { ProjectIcon } from './ProjectIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
+import { usePathDisplay } from '../hooks/usePathDisplay'
 
 export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, renderLane }: {
   lanes: readonly FocusProjectLane[]; selectedWorkspaceId: string
   onSelect(workspaceId: string): void; renderLane(lane: FocusProjectLane, heading: ReactNode): ReactNode
 }) {
+  const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows">
       {lanes.map(lane => <article className={`focus-project-lanes__row${selectedWorkspaceId === lane.projectId ? ' is-selected' : ''}`} data-project-id={lane.projectId} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
-          <button type="button" className="focus-project-lanes__axis" aria-pressed={selectedWorkspaceId === lane.projectId} title={`${lane.name} · ${lane.activeAgentIds.length} live · ${lane.path}`} onClick={() => onSelect(lane.projectId)}>
+          <button type="button" className="focus-project-lanes__axis" aria-pressed={selectedWorkspaceId === lane.projectId} title={`${lane.name} · ${lane.activeAgentIds.length} live · ${displayPath(lane.path, lane.hostId)}`} onClick={() => onSelect(lane.projectId)}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}

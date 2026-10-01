@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -13,6 +14,7 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
   session: Extract<SessionSnapshot, { kind: 'agent' }>
   onStatusChange?: (status: ContinuousProgressStatus) => void
 }) {
+  const displayPath = usePathDisplay()
   const target = useMemo(() => ({ hostId: session.hostId, agentSessionId: session.id,
     providerId: session.providerId, workspacePath: session.workspacePath }),
   [session.hostId, session.id, session.providerId, session.workspacePath])
@@ -112,7 +114,7 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
         <dt>Provider</dt><dd>{agentProviderLabel(session.providerId)} ({target.providerId})</dd>
         <dt>Host</dt><dd>{target.hostId}</dd>
         <dt>Session</dt><dd>{target.agentSessionId}</dd>
-        <dt>Workspace</dt><dd>{target.workspacePath}</dd>
+        <dt>Workspace</dt><dd title={displayPath(target.workspacePath, target.hostId)}>{displayPath(target.workspacePath, target.hostId)}</dd>
       </dl>
     </details>
   </div>

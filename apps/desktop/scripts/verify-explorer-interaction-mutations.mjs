@@ -1,0 +1,53 @@
+import { randomUUID } from 'node:crypto'
+import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
+
+const base = 'apps/desktop/src/renderer/src/'
+const explorer = `${base}components/FileExplorer.tsx`
+const dock = `${base}components/SurfaceToolDock.tsx`
+const branches = `${base}components/BranchesPanel.tsx`
+await verifyRendererSourceMutations({
+  name: ("explorer-interactions-" + (globalThis.crypto.randomUUID()) + "-" + (randomUUID().slice(0, 8)) + ""),
+  tests: ['apps/desktop/test/explorer-redesign.test.tsx'],
+  sources: [explorer, dock, branches, `${base}components/ChangesPanel.tsx`,
+    `${base}styles/dock.css`, `${base}styles/file-explorer.css`, `${base}styles/source-control.css`,
+    'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx'],
+  mutations: [
+    { label: 'shared-header-actions', file: dock,
+      before: 'ref={setToolbarTarget}', after: 'ref={undefined}' },
+    { label: 'collapsed-recovery', file: dock,
+      before: 'const collapsed = resolveExplorerCollapsed(explorerCollapsedOverride, presentation.explorerCollapsedByDefault)',
+      after: 'const collapsed = false' },
+    { label: 'name-select-without-activation', file: explorer,
+      before: 'onClick={(event) => { event.stopPropagation(); onSelect(event) }}',
+      after: 'onClick={(event) => { event.stopPropagation(); onClick(event) }}' },
+    { label: 'double-click-rename', file: explorer,
+      before: 'if (canRename && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) onRename()',
+      after: 'if (false) onRename()' },
+    { label: 'rename-ime-boundary', file: explorer,
+      before: 'if (isImeCompositionKeyDown(event)) return\n              if (editPending) return',
+      after: 'if (editPending) return' },
+    { label: 'rename-single-submission', file: explorer,
+      before: 'if (!edit || editSubmissionRef.current || edit.workspaceId !== workspaceId || edit.rootPath !== rootPath) return',
+      after: 'if (!edit || edit.workspaceId !== workspaceId || edit.rootPath !== rootPath) return' },
+    { label: 'rename-failure-draft', file: explorer,
+      before: 'if (editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.rootPath === edit.rootPath) setEditError(error instanceof Error ? error.message : String(error))',
+      after: 'if (editContextRef.current.workspaceId === edit.workspaceId) setInlineEdit(null)' },
+    { label: 'rename-root-context', file: explorer,
+      before: 'editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.rootPath === edit.rootPath',
+      after: 'editContextRef.current.workspaceId === edit.workspaceId' },
+    { label: 'shared-header-project-path', file: dock,
+      before: '<span title={displayPath(workspace.path, workspace.hostId)}>',
+      after: '<span title={workspace.path}>' },
+    { label: 'file-project-path-hover', file: explorer,
+      before: 'displayPath(joinWorkspacePath(workspace.path, node.path), workspace.hostId)',
+      after: 'joinWorkspacePath(workspace.path, node.path)' },
+    { label: 'worktree-path-deduplication', file: branches,
+      before: "subtitle={worktree && worktree !== workspace.path ? displayPath(worktree, workspace.hostId) : null}",
+      after: "subtitle={worktree ? displayPath(worktree, workspace.hostId) : null}" },
+    { label: 'git-keyboard-navigation', file: dock,
+      before: 'tabs[next]!.click()', after: 'tabs[index]!.click()' },
+    { label: 'git-material-surface-connection', file: dock,
+      before: 'className="source-control-switch" role="tablist"',
+      after: 'className="source-control-disconnected" role="tablist"' }
+  ]
+})

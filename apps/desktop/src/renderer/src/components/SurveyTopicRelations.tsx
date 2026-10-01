@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import { ArrowUpRight, Check, LoaderCircle, Minus } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -16,6 +17,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
   onLinkChange(spaceId: string, linked: boolean): void
   onOpenTopic(spaceId: string): void
 }) {
+  const displayPath = usePathDisplay()
   const linked = relatedTopics?.filter(topic => topic.kind === 'topic')
   // Confirmed relations remain actionable when discovery is temporarily incomplete.
   // This is a render projection of owner facts, never a mirrored relationship store.
@@ -29,15 +31,15 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
       const checked = linked === undefined ? 'indeterminate' : linked.some(candidate => candidate.spaceId === topic.spaceId)
       return <DropdownMenu.CheckboxItem key={topic.spaceId} className="tab-context-menu__item survey-topic-menu__item"
         checked={checked} disabled={linked === undefined || pendingSpaceId !== null}
-        aria-label={`Link Topic: ${topic.name}, ${topic.hostId}, ${topic.directoryPath}`}
-        data-survey-topic-id={topic.spaceId} title={`${topic.name}\n${topic.hostId}\n${topic.directoryPath}`}
+        aria-label={`Link Topic: ${topic.name}, ${topic.hostId}, ${displayPath(topic.directoryPath, topic.hostId)}`}
+        data-survey-topic-id={topic.spaceId} title={`${topic.name}\n${topic.hostId}\n${displayPath(topic.directoryPath, topic.hostId)}`}
         onSelect={event => event.preventDefault()}
         onCheckedChange={value => onLinkChange(topic.spaceId, value === true)}>
         <span className="survey-topic-menu__indicator" aria-hidden="true">
           {pendingSpaceId === topic.spaceId ? <LoaderCircle className="spin" size={13} />
             : <DropdownMenu.ItemIndicator>{checked === 'indeterminate' ? <Minus size={13} /> : <Check size={13} />}</DropdownMenu.ItemIndicator>}
         </span>
-        <span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {topic.directoryPath}</small></span>
+        <span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
       </DropdownMenu.CheckboxItem>
     })}
     {topics === null ? <p className="survey-topic-menu__notice">Topic discovery is not confirmed.</p>
@@ -47,21 +49,21 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
       <DropdownMenu.Separator className="tab-context-menu__separator" />
       <DropdownMenu.Label className="survey-topic-menu__label">Unconfirmed linked spaces</DropdownMenu.Label>
       {unknownRelatedSpaces.map(space => <DropdownMenu.CheckboxItem key={space.spaceId} className="tab-context-menu__item survey-topic-menu__item"
-        checked disabled={pendingSpaceId !== null} aria-label={`Remove unconfirmed link: ${space.hostId}, ${space.directoryPath}`}
+        checked disabled={pendingSpaceId !== null} aria-label={`Remove unconfirmed link: ${space.hostId}, ${displayPath(space.directoryPath, space.hostId)}`}
         data-survey-topic-id={space.spaceId} onSelect={event => event.preventDefault()}
         onCheckedChange={value => { if (value === false) onLinkChange(space.spaceId, false) }}>
         <span className="survey-topic-menu__indicator" aria-hidden="true"><DropdownMenu.ItemIndicator><Check size={13} /></DropdownMenu.ItemIndicator></span>
-        <span className="survey-topic-menu__context"><strong>Unconfirmed linked space</strong><small>{space.hostId} · {space.directoryPath}</small><small>{space.issue}</small></span>
+        <span className="survey-topic-menu__context"><strong>Unconfirmed linked space</strong><small>{space.hostId} · {displayPath(space.directoryPath, space.hostId)}</small><small>{space.issue}</small></span>
       </DropdownMenu.CheckboxItem>)}
     </> : null}
     {linked && linked.length > 0 ? <>
       <DropdownMenu.Separator className="tab-context-menu__separator" />
       <DropdownMenu.Label className="survey-topic-menu__label">Open a linked Topic</DropdownMenu.Label>
       {linked.map(topic => <DropdownMenu.Item key={topic.spaceId} className="tab-context-menu__item survey-topic-menu__item"
-        aria-label={`Open linked Topic: ${topic.name}, ${topic.hostId}, ${topic.directoryPath}`}
-        data-survey-topic-id={topic.spaceId} title={`${topic.name}\n${topic.hostId}\n${topic.directoryPath}`}
+        aria-label={`Open linked Topic: ${topic.name}, ${topic.hostId}, ${displayPath(topic.directoryPath, topic.hostId)}`}
+        data-survey-topic-id={topic.spaceId} title={`${topic.name}\n${topic.hostId}\n${displayPath(topic.directoryPath, topic.hostId)}`}
         onSelect={() => onOpenTopic(topic.spaceId)}>
-        <ArrowUpRight size={13} aria-hidden="true" /><span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {topic.directoryPath}</small></span>
+        <ArrowUpRight size={13} aria-hidden="true" /><span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
       </DropdownMenu.Item>)}
     </> : null}
     {error ? <div className="survey-topic-menu__notice">{error}</div> : null}

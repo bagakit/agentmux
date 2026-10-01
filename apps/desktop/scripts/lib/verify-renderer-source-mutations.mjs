@@ -8,7 +8,6 @@ import { dirname, join, resolve } from 'node:path'
 /** Run exact Renderer tests against private copied sources; never mutate the shared worktree. */
 export async function verifyRendererSourceMutations({ name, tests, sources, mutations, evidenceRoot, owningConfig }) {
   const root = resolve(import.meta.dirname, '../../../..')
-  const copy = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-renderer-mutation-")))
   const evidence = evidenceRoot ? join(evidenceRoot, name) : join(root, '.tmp', name)
   const digest = bytes => createHash('sha256').update(bytes).digest('hex')
   const inputs = [...new Set([...tests, ...sources, ...(owningConfig ? [owningConfig] : [])])]
@@ -16,6 +15,41 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
   const hashes = values => Object.fromEntries([...values].map(([file, bytes]) => [file, digest(bytes)]))
   const receipt = { schema: 'agentmux.renderer-source-mutation.v1', passed: false, name,
     sourceBefore: hashes(original), sharedTreeMutations: 0, runtimeControl: [], cases: [] }
+  // Explicit evidence reuse verifies the same definitions, exact source/test bytes and real RED/GREEN logs.
+  // A changed input rejects reuse; it never substitutes a pass for a new mutation run.
+  if (process.env.AGENTMUX_MUTATION_RECEIPTS) {
+    const paths = JSON.parse(process.env.AGENTMUX_MUTATION_RECEIPTS)
+    assert.ok(Array.isArray(paths) && paths.length > 0)
+    const records = await Promise.all(paths.map(async path => ({ path: resolve(path), saved: JSON.parse(await readFile(resolve(path), 'utf8')) })))
+    const matching = records.filter(({ saved }) => JSON.stringify(saved.cases?.map(({ label, file, before, after }) => ({ label, file, before, after }))) === JSON.stringify(mutations))
+    assert.equal(matching.length, 1, 'Explicit receipt list must contain exactly one proof for these mutation definitions.')
+    const { path, saved } = matching[0]
+    assert.equal(saved.schema, receipt.schema); assert.equal(saved.passed, true)
+    assert.equal(saved.sharedTreeMutations, 0); assert.deepEqual(saved.runtimeControl, [])
+    assert.equal(saved.cleanup?.copyRemoved, true); assert.ok(mutations.length > 0)
+    assert.deepEqual(saved.sourceBefore, receipt.sourceBefore)
+    assert.deepEqual(saved.sourceAfter, receipt.sourceBefore); assert.deepEqual(saved.copyAfter, receipt.sourceBefore)
+    assert.deepEqual(saved.cases.map(({ label, file, before, after }) => ({ label, file, before, after })), mutations)
+    const baseline = await readFile(join(dirname(path), 'baseline-green.log'), 'utf8')
+    assert.match(baseline, /Tests\s+[1-9]\d* passed/); assert.doesNotMatch(baseline, /Tests\s+[1-9]\d* failed/)
+    for (const item of saved.cases) {
+      const source = original.get(item.file).toString()
+      assert.equal(source.split(item.before).length - 1, 1)
+      assert.ok(item.exit > 0); assert.equal(item.restore.exit, 0)
+      assert.equal(item.loaded.sha256, digest(source.replace(item.before, item.after)))
+      assert.equal(item.restore.loaded.sha256, receipt.sourceBefore[item.file])
+      const red = await readFile(join(dirname(path), item.log), 'utf8')
+      assert.match(red, /AssertionError/); assert.match(red, /Tests\s+[1-9]\d* failed/)
+      const green = await readFile(join(dirname(path), item.restore.log), 'utf8')
+      assert.match(green, /Tests\s+[1-9]\d* passed/); assert.doesNotMatch(green, /Tests\s+[1-9]\d* failed/)
+      const redLoad = JSON.parse(await readFile(join(dirname(path), `${item.label}-red-loaded.json`), 'utf8'))
+      const greenLoad = JSON.parse(await readFile(join(dirname(path), `${item.label}-restore-green-loaded.json`), 'utf8'))
+      assert.deepEqual(redLoad, item.loaded); assert.deepEqual(greenLoad, item.restore.loaded)
+    }
+    console.log(JSON.stringify({ passed: true, exactEvidenceReused: true, mutants: mutations.length, receipt: path }))
+    return
+  }
+  const copy = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-renderer-mutation-")))
   let observedSource = null
   const run = async label => {
     await writeFile(join(copy, 'current-load.json'), JSON.stringify(observedSource ? { file: join(copy, observedSource), load: join(evidence, `${label}-loaded.json`) } : null))
@@ -53,9 +87,9 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const [file, bytes] of original) { await mkdir(dirname(join(copy, file)), { recursive: true }); await writeFile(join(copy, file), bytes) }
     await writeFile(join(copy, 'vitest.mutation.config.mts'), `${owningConfig ? `import owning from './${owningConfig}';\n` : 'const owning = {};\n'}import { defineConfig } from 'vitest/config';
 import { readFileSync, writeFileSync } from 'node:fs'; import { createHash } from 'node:crypto';
-export default defineConfig({ ...owning, define: { ...owning.define, __AGENTMUX_WEB_PREVIEW__: 'true' },
+export default defineConfig({ ...owning, resolve: { ...owning.resolve, conditions: ['browser', 'import', 'default'] }, ssr: { ...owning.ssr, noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } }, define: { ...owning.define, __AGENTMUX_WEB_PREVIEW__: 'true' },
 plugins: [...(owning.plugins ?? []), { name: 'actual-private-source-load', enforce: 'pre', transform(source, id) { const target = JSON.parse(readFileSync(${JSON.stringify(join(copy, 'current-load.json'))}, 'utf8')); if (target && id === target.file) writeFileSync(target.load, JSON.stringify({ file: id, sha256: createHash('sha256').update(source).digest('hex') })); } }],
-test: { ...owning.test, include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
+test: { ...owning.test, server: { deps: { inline: ['@agentmux/client-ui'] } }, include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
     assert.ok(mutations.length > 0, 'A mutation verification must select actual cases.')
     const baseline = await run('baseline-green')
     assert.equal(baseline.code, 0, baseline.output)

@@ -1,8 +1,9 @@
-import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui'
+import { ClientUiProvider, type ClientUiPlatform, type ConversationSenderDetails } from '@agentmux/client-ui'
 import type { ReactNode } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { useAppStore } from '../store'
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { ProjectIcon } from './ProjectIcon'
 import { SemanticIcon } from './semantic-icons'
@@ -35,12 +36,20 @@ export function bindDesktopComposerFocus(target: HTMLElement, focus: () => boole
   return () => { unsubscribe(); stopObserving() }
 }
 
+function SenderProject({ project }: { project: NonNullable<ConversationSenderDetails['project']> }) {
+  const displayPath = usePathDisplay()
+  const workspaces = useAppStore(state => state.config?.workspaces)
+  const hostId = workspaces?.find(workspace => workspace.id === project.workspaceId)?.hostId
+  return <small title={displayPath(project.path, hostId)}>{project.name}{project.branch ? ` · ${project.branch}` : ''}</small>
+}
+
 const desktopPlatform: ClientUiPlatform = {
   copyText: copyTextToClipboard,
   overlayContainer: resolveOverlayContainer,
   bindComposerFocus: bindDesktopComposerFocus,
   renderMessageAvatar: input => <ConversationMessageAvatar {...input} />,
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
+  renderProjectLabel: project => <SenderProject project={project} />,
   renderIcon: (name, size) => <SemanticIcon name={name} size={size} />
 }
 

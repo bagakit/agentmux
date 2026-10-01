@@ -198,8 +198,9 @@ describe('Branches 面板', () => {
     expect(withWorktree).toContain(_hygiene_fixturePath("wt/2"))
     expect(withWorktree, '有 worktree 的行却把副标题写成 No worktree').not.toContain('No worktree')
 
-    // 没有 worktree 那一组：每一行副标题都是 No worktree，且绝不出现任何 worktree 路径。
-    expect(without).toContain('No worktree')
+    // 没有 worktree 的事实由分组与尾标说明；行内不重复同一句话，也不出现 worktree 路径。
+    expect(without).not.toContain('No worktree')
+    expect(without).toContain('branch-row__state--unbound')
     expect(without.match(/\/wt\//g), '没有 worktree 的行却露出了一条 worktree 路径').toBeNull()
     expect(without, '没有 worktree 的行却打上了 Worktree 尾标签').not.toContain('>Worktree<')
   })
