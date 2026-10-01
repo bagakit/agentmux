@@ -1,22 +1,25 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { ArrowUpRight, Inbox, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertCircle, ArrowUpRight, Check, ChevronDown, Inbox, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { FocusContext } from '../lib/focus-context'
 import type { WorkbenchTab } from '../lib/workbench-tabs'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { formatTabAddress } from '../lib/agent-address'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, usePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
+import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { primaryMoteExecutorId } from '../lib/primary-mote-executor'
 import { topicIdForSession } from '../lib/workbench-tabs'
-import { scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { scratchMoteTopics, scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { useScratchTopics } from '../hooks/useScratchTopics'
+import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { MoteIcon } from './MoteIcon'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
 
 export function FocusToolbar({ children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
   children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
@@ -33,7 +36,18 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   const sessions = useWorkbenchTabSessions(tab ?? undefined)
   const agentNames = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab ?? undefined)))
   const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab ?? undefined)))
-  const [floating] = usePmoTeamsTopicFloatingState()
+  const [floating, setFloating] = usePmoTeamsTopicFloatingState()
+  const { topics, error: directoryError } = useScratchTopics(SCRATCH_WORKSPACE_ID)
+  const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
+  const icons = useAppStore(state => state.spaceObjectIcons)
+  const motes = useMemo(() => scratchMoteTopics(topics ?? []), [topics])
+  const topicId = useAppStore(state => floating.focusChatTopicId === undefined ? pmoTeamsTopicFloatingTargetTopicId(floating, state.tabs) : floating.focusChatTopicId)
+  const recipient = motes.find(topic => topic.id === topicId)
+  const confirmed = topicId === PMO_TEAMS_TOPIC_ID || Boolean(topicId && recipient && !recipient.readError && scratchTopicKind(topicId, topics) === 'mote')
+  const recipientName = confirmed ? recipient?.title || 'Mote' : 'Unconfirmed Mote'
+  const recipientLabel = `${recipientName}${recipient?.moteArchive?.state === 'archived' ? ' · Archived' : ''}`
+  const recipientIssue = floating.preferenceIssue ?? (!confirmed ? `${topicId ? 'Chat recipient ' + topicId : 'Saved Chat recipient'} is unconfirmed. Choose an available Mote; this Chat will not be sent until its identity is confirmed.` : directoryError || recipient?.readError ? `Mote directory could not be refreshed: ${directoryError || recipient?.readError}. The known recipient is retained.` : null)
+  const recipientIcon = useMemo(() => scratch && recipient && confirmed ? topicSpaceIconTarget(scratch, recipient) : null, [scratch, recipient, confirmed])
   const [discussionPending, setDiscussionPending] = useState(false)
   const discussionFlight = useRef(false)
   const mounted = useRef(true)
@@ -84,13 +98,17 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     const target = currentReference()
     if (!target) return
     const state = useAppStore.getState()
-    const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, state.tabs)
+    const choice = readPmoTeamsTopicFloatingState() ?? floating
+    const topicId = choice.focusChatTopicId === undefined ? pmoTeamsTopicFloatingTargetTopicId(choice, state.tabs) : choice.focusChatTopicId
     const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
-    if (scratchTopicKind(topicId, scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)) !== 'mote') {
-      state.reportError(new Error('The selected Mote identity is unconfirmed. The displayed Tab and original drafts are kept; restore the same Mote before retrying.'), { kind: 'indeterminate' })
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)
+    const recipient = motes.find(topic => topic.id === topicId)
+    if (topicId === null || topicId !== PMO_TEAMS_TOPIC_ID && (!recipient || recipient.readError || scratchTopicKind(topicId, topics) !== 'mote')) {
+      state.reportError(new Error(`Mote identity is unconfirmed${topicId ? ' (' + topicId + ')' : ''}. This Chat was not sent. The displayed Tab and original drafts are kept; choose an available Mote or retry its directory.`), { kind: 'indeterminate' })
       return
     }
-    const targetTabId = createPmoTeamsTopicTargetSelector(floating)(state)
+    const moteTarget = { ...choice, targetTopicId: topicId, targetTabId: pmoTeamsTopicFloatingTargetTopicId(choice, state.tabs) === topicId ? choice.targetTabId : undefined }
+    const targetTabId = createPmoTeamsTopicTargetSelector(moteTarget)(state)
     const moteTab = targetTabId ? state.tabs[targetTabId] : undefined
     const region = moteTab?.regions[moteTab.layout.activeRegionId]
     const session = region?.kind === 'agent' ? state.sessions.find(item => item.id === region.sessionId) : undefined
@@ -121,7 +139,31 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>}
     <button type="button" className="focus-toolbar__action" aria-label="View in Space" title={`View in Space · ${name}`} onClick={viewInSpace}><ArrowUpRight size={14} aria-hidden="true" /><span>Space</span></button>
-    <button type="button" className="focus-toolbar__action" aria-label="Chat about this tab with Mote" title={`Chat about this tab with Mote · ${name}`} disabled={discussionPending} aria-busy={discussionPending} onClick={() => { void chatAboutTab() }}><MoteIcon size={14} /><span>{discussionPending ? 'Preparing…' : 'Chat'}</span></button>
+    <div className="focus-toolbar__chat">
+      <button type="button" className="focus-toolbar__action" aria-label="Chat about this tab with Mote" aria-description={`Recipient: ${recipientLabel}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`Chat about this tab with ${recipientLabel} · ${name}${recipientIssue ? '\n' + recipientIssue : ''}`} disabled={discussionPending} aria-busy={discussionPending} onClick={() => { void chatAboutTab() }}><MoteIcon size={14} /><span>{discussionPending ? 'Preparing…' : 'Chat'}</span></button>
+      <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild><button type="button" className="focus-toolbar__mote-choice" aria-label="Choose Chat Mote" aria-description={`${recipientLabel}${topicId ? ' · ' + topicId : ''}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`${recipientLabel}${topicId ? ' · ' + topicId : ''}${recipientIssue ? '\n' + recipientIssue : ''}`} data-focus-chat-topic={topicId}>
+          <SpaceObjectIcon kind="mote" name={recipientName} manualIcon={recipientIcon ? icons[recipientIcon.key] ?? null : null} avatarWorkspaceId={recipientIcon?.avatarTarget?.workspaceId} avatarTopicId={recipientIcon?.avatarTarget?.topicId} avatarObjectKey={recipientIcon?.key} />
+          <span className="focus-toolbar__mote-name">{recipientName}</span>{recipientIssue ? <AlertCircle size={12} className="focus-toolbar__mote-warning" aria-hidden="true" /> : null}<ChevronDown size={11} aria-hidden="true" />
+        </button></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu focus-chat-mote-menu" align="end" collisionPadding={8} onCloseAutoFocus={event => {
+          const focused = document.activeElement
+          if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body && !focused.closest('[hidden], [inert]') && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
+        }}>
+          <DropdownMenu.Label className="focus-chat-mote-menu__label">Chat with</DropdownMenu.Label>
+          {recipientIssue ? <p role="status" className="focus-chat-mote-menu__notice">{recipientIssue}</p> : null}
+          <DropdownMenu.RadioGroup value={topicId ?? ''} aria-label="Chat Mote">
+            {motes.map(mote => { const icon = scratch && !mote.readError ? topicSpaceIconTarget(scratch, mote) : null
+              return <DropdownMenu.RadioItem key={mote.id} value={mote.id} data-chat-mote-id={mote.id} className="tab-context-menu__item focus-chat-mote-menu__item" disabled={mote.id !== PMO_TEAMS_TOPIC_ID && Boolean(mote.readError)} onSelect={() => setFloating({ focusChatTopicId: mote.id })}>
+                <span className="focus-chat-mote-menu__check"><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></span>
+                <SpaceObjectIcon kind="mote" name={mote.title || 'Mote'} manualIcon={icon ? icons[icon.key] ?? null : null} avatarWorkspaceId={icon?.avatarTarget?.workspaceId} avatarTopicId={icon?.avatarTarget?.topicId} avatarObjectKey={icon?.key} />
+                <span>{mote.title || 'Mote'}{mote.moteArchive?.state === 'archived' ? <small>Archived</small> : null}{mote.readError ? <small>{mote.id === PMO_TEAMS_TOPIC_ID ? 'Details unavailable' : 'Identity unconfirmed'}</small> : null}</span>
+              </DropdownMenu.RadioItem> })}
+          </DropdownMenu.RadioGroup>
+          {!motes.length ? <p className="focus-chat-mote-menu__notice">No confirmed Mote directory yet.</p> : null}
+        </DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </div>
     {selected?.actionable ? <button type="button" className="focus-toolbar__review" aria-label="Review request" title="Review request" onClick={onReview}><Inbox size={12} /><span>Review</span></button> : null}
     <div id="focus-workspace-slot-header" className="focus-toolbar__region-slot" />
     <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
