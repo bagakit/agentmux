@@ -47,13 +47,13 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).not.toContain('runId')
   })
 
-  it('adds a supplement after the original activity and before details without replacing children semantics', () => {
+  it('keeps original actions before secondary reading and details without replacing children semantics', () => {
     const props = { phase: 'recovering' as const, scope: 'region' as const, title: 'Original title', detail: 'Original detail',
       supplement: createElement('p', {}, 'Observed recap'),
       details: { summary: 'Original diagnostics', content: createElement('p', {}, 'Owner facts') },
       actions: createElement('button', {}, 'Original action') }
     const markup = renderToStaticMarkup(createElement(FullPageLoadingSurface, props))
-    const positions = ['Original title', 'Original detail', 'full-page-loading__activity', 'Observed recap', 'Original diagnostics', 'Original action']
+    const positions = ['Original title', 'full-page-loading__activity', 'Original action', 'Original detail', 'Observed recap', 'Original diagnostics']
       .map(text => markup.indexOf(text))
     expect(positions).toHaveLength(6)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))

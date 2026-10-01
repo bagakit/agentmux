@@ -1,0 +1,9 @@
+# Loading and recovery quality scenes
+
+The owning result is the open loading/recovery composition defined in the recovery behavior/presentation SSOT and the existing terminal recap contract.
+
+`verify-session-loading-recovery-quality.mjs --slice scene` reuses the ordinary compiled Main/preload/Renderer + private Core/ctxmux recap scene. It captures retained ready, narrow long recap, unavailable recap, real process restart with the same durable Tab/Region/layout/focus/draft, and actual original Resume in progress. A healthy adjacent private Run receives nonempty input/output before/after restart and resume, preserving its identity. Synthetic conversations are stored through the public FileStore; no model inference or real Provider conversation is claimed. Production Runtime and user workbench remain untouched.
+
+The supplemental `presentation.mjs` compiles the production FullPageLoadingSurface, SessionConnectingSurface and real styles, renders them in an isolated actual Electron BrowserWindow, and captures app startup, full prompt at normal/narrow/short/light/reduced-motion sizes, empty connection, failed and unknown presentation. These explicit fixture facts prove composition and full Prompt/Copy callback, not additional Core/CLI lifecycle eligibility. The private copy sink does not change the system clipboard. Source, compiled module and actual loaded script bytes are bound; each complete frame has its SHA. Temporary windows, processes and roots are removed.
+
+Capture success does not approve aesthetics. An independent Agent must actually open every full frame, identify concrete composition/reading issues, and write a satisfied review bound to this exact scene. Modified source requires new capture/review. Source mutation evidence protects original facts, action ownership, title uniqueness, prompt, attribution and short-window order.

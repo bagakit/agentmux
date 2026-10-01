@@ -28,7 +28,7 @@ const cwdEnv = { ...process.env, ...fixtureEnvironment }
 for (const key of Object.keys(cwdEnv)) if (key.startsWith('AGENTMUX_') && !Object.hasOwn(fixtureEnvironment, key)) delete cwdEnv[key]
 Object.assign(process.env, fixtureEnvironment)
 const { CtxmuxClient } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')))
-const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, connectAgentMuxRpc, agentPromptCondition } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
 const receipt = { schema: 'agentmux.terminal-resume-recap-scene.v1', passed: false, temporaryRoot: root, userRuntimeTouched: false,
   captureOnly: true, aestheticReview: 'not-performed',
   startedAt: Date.now(), limitations: ['Private ordinary compiled GUI processes; no installed-package qualification.',
@@ -70,11 +70,9 @@ async function cdpConnect(url) {
     return reply.result.value
   } }); return cdp
 }
-async function control(operation, fields = {}) {
-  const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation, ...fields }, join(runtimeDirectory, 'control.sock'))
-  assert.equal(reply.ok, true, JSON.stringify(reply)); assert.equal(reply.operation, operation); return reply.result
-}
-async function observe() { return (await control('inspect.client')).observation }
+const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+async function control(method, fields = {}) { return rpc.call(method, fields) }
+async function observe() { return (await control('app.inspect')).observation }
 function durableWorkbench(observation) {
   const { activeWorkspaceId, mainSurface, focus, layouts, tabs } = observation.workbench
   return { activeWorkspaceId, mainSurface, focus, layouts, tabs: tabs.map(tab => ({
@@ -123,7 +121,7 @@ async function launch(label) {
   const page = await waitFor('real loaded Renderer', async () => { alive(); return (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(row => row.type === 'page' && row.url.startsWith('file:')) })
   probe.cdp = await cdpConnect(page.webSocketDebuggerUrl); await probe.cdp.call('Runtime.enable'); await probe.cdp.call('Debugger.enable')
   await waitFor('public IPC and loaded Store', () => probe.cdp.evaluate('Boolean(window.agentmux && document.querySelector(".window-status-bar"))'))
-  await waitFor('actual client readiness', async () => { try { const value = await observe(); return !value.workbench.loading ? value : null } catch { alive(); return null } })
+  await waitFor('actual client readiness', async () => { try { const value = await observe(); return !value.workbench.loading ? value : null } catch (error) { alive(); receipt.readinessError = { message: error.message, code: error.code }; if (error instanceof TypeError) throw error; return null } })
   assert.equal(await probe.cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()'), home)
   const loadedMainUrl=mainUrls.find(url=>main.scripts.has(url));assert.ok(loadedMainUrl,'Actual compiled Main must have loaded')
   const loadedMain=await main.call('Debugger.getScriptSource',{scriptId:main.scripts.get(loadedMainUrl)})
@@ -218,7 +216,36 @@ try {
  const body='已完成终端输入确认和恢复检查。下一步核对 Session 的上下文摘录、原工作区布局和持续读写。 Resume keeps the same conversation; this excerpt is a captured private fixture, with no model request. '
  receipt.fixtureRecap=body.repeat(6)
  await store.applyTimelineMutation({type:'append',agentSessionId:saved.agentSessionId,item:{id:'private-recap-assistant',agentSessionId:saved.agentSessionId,kind:'assistant_message',status:'complete',source:'native-hook',createdAt:Date.now(),updatedAt:Date.now(),title:'Private captured reply',content:receipt.fixtureRecap}})
- for(const target of [saved,empty]){const operation=await sdk.prepareStop(target.run.runId);await sdk.stop(operation);await waitFor('exact private target ended',async()=>(await sdk.status(target.run.runId)).state.type!=='running')}
+ // The normal recovery sample comes from the fake CLI's own clean exit, not
+ // stopAgent (which retires the Session) or a native signal (a real crash fact).
+ phase='seed-clean-retained-session'
+ const readiness=await waitFor('private fake composer readiness',()=>{
+  const value=creator.agentSession(saved.agentSessionId).terminalPromptReadiness
+  return value?.readyThroughByte!==undefined?value:null
+ })
+ const beforeExit=await sdk.status(saved.run.runId);assert.equal(beforeExit.state.type,'running')
+ const condition=agentPromptCondition(creator.agentSession(saved.agentSessionId))
+ assert.equal(condition.expectedRun.runId,saved.run.runId)
+ await creator.submitAgentPrompt({...condition,agentSessionId:saved.agentSessionId,operationId:randomUUID(),prompt:'exit'})
+ const cleanExit=await waitFor('same private fake Run naturally exited zero',async()=>{
+  const value=await sdk.status(saved.run.runId);return value.state.type==='exited'?value:null
+ })
+ assert.deepEqual(cleanExit.state,{type:'exited',code:0,signal:null})
+ const publicExit=await creator.statusAgent(saved.agentSessionId)
+ assert.equal(publicExit.run.state,'exited');assert.equal(publicExit.run.exitCode,0)
+ const retained=(await store.load()).find(value=>value.agentSessionId===saved.agentSessionId)
+ assert.ok(retained,'A clean child exit must keep its original Agent Session')
+ assert.equal(retained.run.runId,saved.run.runId);assert.ok(retained.nativeHandle?.sessionId)
+ const operation=await sdk.prepareStop(empty.run.runId);await sdk.stop(operation)
+ const forcedExit=await waitFor('separate private failure sample ended',async()=>{
+  const value=await sdk.status(empty.run.runId);return value.state.type!=='running'?value:null
+ })
+ receipt.seed={normal:{method:'public Core submitAgentPrompt to private fake CLI: exit',
+  agentSessionId:saved.agentSessionId,runId:saved.run.runId,pid:beforeExit.pid,
+  readiness,runState:cleanExit.state,publicRun:publicExit.run,retainedAgentSessionId:retained.agentSessionId,
+  retainedRunId:retained.run.runId,nativeHandleKind:retained.nativeHandle.kind},
+  failure:{method:'public SDK prepareStop/stop',agentSessionId:empty.agentSessionId,runId:empty.run.runId,state:forcedExit.state}}
+
  await creator.dispose();creator=null
  // Fixture entry state: retained conversations with no completed idle eligibility. Never user state.
  for(const target of [saved,empty]){const current=(await store.load()).find(s=>s.agentSessionId===target.agentSessionId);assert.ok(current);const now=Date.now();await store.compareAndSwap(current,{...current,updatedAt:now,semanticStatus:{state:'working',source:'native-hook',observedAt:now,stateEnteredAt:now}})}
@@ -229,13 +256,13 @@ try {
  await control('agent.view',{agentSessionId:agent.agentSessionId,mode:'terminal'})
  const restored=await control('agent.open',{content:{kind:'agent-session',agentSessionId:saved.agentSessionId},destination:{regionId:healthyRegion.regionId,split:'right'},focus:true});assert.equal(restored.outcome,'opened');savedRegion=restored.to
  await control('agent.view',{agentSessionId:saved.agentSessionId,mode:'terminal'})
- await size(1320,820);receipt.ready=await recap(savedRegion.regionId,'下一步核对');assert.equal(receipt.ready.title,'Ready to restore');assert.ok(receipt.ready.text.includes('Last assistant message'));receipt.screenshotNormal=await screenshot('normal-ready')
+ await size(1320,820);receipt.ready=await recap(savedRegion.regionId,'下一步核对');assert.equal(receipt.ready.title,'Ready to restore');assert.ok(receipt.ready.text.includes('Captured conversation'));receipt.screenshotNormal=await screenshot('normal-ready')
  await size(920,520);receipt.narrow=await recap(savedRegion.regionId,'下一步核对');receipt.screenshotNarrow=await screenshot('narrow-long-recap')
  assert.ok(savedRegion.spaceId,'The real private Space must exist')
  const newTab=await control('agent.open',{content:{kind:'agent-session',agentSessionId:empty.agentSessionId},destination:{spaceId:savedRegion.spaceId,newTab:true},focus:true});assert.equal(newTab.outcome,'opened')
  await control('agent.view',{agentSessionId:empty.agentSessionId,mode:'terminal'})
  receipt.empty=await waitFor('honest unavailable recap',()=>active.cdp.evaluate(`(()=>{const e=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(newTab.to.regionId)}+'"] .session-recap');return e&&e.dataset.recapState!=='loading'?{text:e.textContent,state:e.dataset.recapState}:null})()`));assert.notEqual(receipt.empty.state,'ready');receipt.screenshotEmpty=await screenshot('unavailable-recap')
- await control('focus',{target:{kind:'space',regionId:savedRegion.regionId},inputPolicy:'preserve'});await size(1320,820)
+ await control('app.focus',{target:{kind:'space',regionId:savedRegion.regionId},inputPolicy:'preserve'});await size(1320,820)
  // A real draft is entered through the product's controlled input and survives quit/relaunch.
  const draft='UNSENT RECAP RECOVERY DRAFT'
  const composerSelector=`[data-workbench-region-id="${savedRegion.regionId}"] .composer__editor [contenteditable="true"]`
@@ -248,8 +275,8 @@ try {
  receipt.draftAfter=await waitFor('durable ProseMirror draft',()=>active.cdp.evaluate(`document.querySelector(${JSON.stringify(composerSelector)})?.textContent===${JSON.stringify(draft)}?${JSON.stringify(draft)}:null`));assert.equal(receipt.draftAfter,draft)
  receipt.inputAfter=await healthyInput(healthyRegion.regionId,agent.run.runId,'PRIVATE_RECAP_HEALTHY_AFTER');const healthyAfter=await sdk.status(agent.run.runId);assert.equal(healthyAfter.pid,healthyBefore.pid);assert.equal(healthyAfter.state.type,'running');receipt.healthyRun={id:healthyAfter.id,pid:healthyAfter.pid,state:healthyAfter.state};receipt.screenshotRestart=await screenshot('after-process-restart')
  receipt.loadedAfter=await loadedRenderer();assert.deepEqual(receipt.loadedAfter,receipt.loadedBefore)
- phase='actual-resume';const resumeSelector=`[data-workbench-region-id="${savedRegion.regionId}"] .terminal-recovery__actions button`
- await click(resumeSelector);receipt.resuming=await waitFor('actual Resume remains alongside recap',()=>active.cdp.evaluate(`(()=>{const r=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(savedRegion.regionId)}+'"]'),b=r.querySelector('.terminal-recovery__actions button'),e=r.querySelector('.session-recap');return b?.textContent.includes('Resuming')&&e?.textContent.includes('下一步核对')?{button:b.textContent,disabled:b.disabled,recap:e.textContent}:null})()`));receipt.screenshotResuming=await screenshot('actual-resuming')
+ phase='actual-resume';const resumeSelector=`[data-workbench-region-id="${savedRegion.regionId}"] .full-page-loading__actions button`
+ await click(resumeSelector);receipt.resuming=await waitFor('actual Resume remains alongside recap',()=>active.cdp.evaluate(`(()=>{const r=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(savedRegion.regionId)}+'"]'),b=r.querySelector('.full-page-loading__actions button'),e=r.querySelector('.session-recap');return b?.textContent.includes('Resuming')&&e?.textContent.includes('下一步核对')?{button:b.textContent,disabled:b.disabled,recap:e.textContent}:null})()`));receipt.screenshotResuming=await screenshot('actual-resuming')
  receipt.resumed=await waitFor('same Session genuinely resumed',async()=>{const snapshot=await active.cdp.evaluate('(async()=>await window.agentmux.sessions.snapshot())()');const s=snapshot.sessions.find(s=>s.id===saved.agentSessionId);return s?.processState==='running'&&s.control.run.runId!==saved.run.runId?{sessionId:s.id,runId:s.control.run.runId}:null});await own((await sdk.status(receipt.resumed.runId)).pid)
  receipt.inputAfterResume=await healthyInput(healthyRegion.regionId,agent.run.runId,'PRIVATE_RECAP_HEALTHY_AFTER_RESUME')
  assert.deepEqual(await sdk.runtimeInfo(),receipt.runtime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid));receipt.inputsAfter=await inputs();assert.deepEqual(receipt.inputsAfter,receipt.inputsBefore)
@@ -260,6 +287,7 @@ try {
 }
 finally {
   const errors=[]
+  try{await rpc.dispose()}catch(error){errors.push(error.message)}
   if(creator)try{await creator.dispose()}catch(error){errors.push(error.message)}
   if(active&&active.child.exitCode===null&&active.child.signalCode===null)try{await quit(active,true)}catch(error){errors.push(error.message)}
   for(const cdp of connections)try{cdp.close()}catch(error){errors.push(error.message)}

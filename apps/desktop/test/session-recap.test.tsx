@@ -42,6 +42,14 @@ it('renders the exact captured excerpt and source before reading native history,
   await render()
   expect(container.querySelector('[aria-label="Session recap"]')).not.toBeNull()
   expect(container.textContent).toContain('Last assistant message · Captured conversation')
+  const source = container.querySelector<HTMLDetailsElement>('.session-recap__source')!
+  const summary = source.querySelector('summary')!
+  expect(summary.textContent).toBe('Last reply')
+  expect(summary.getAttribute('aria-label')).toBe('Last reply source: Last assistant message · Captured conversation')
+  expect(source.open).toBe(false)
+  await act(async () => summary.click())
+  expect(source.open).toBe(true)
+  expect(source.querySelector('p')?.textContent).toBe('Source: Last assistant message · Captured conversation')
   expect(container.textContent).toContain('Original captured reply')
   expect(container.textContent).not.toContain('FOREIGN')
   expect(api.sessions.historyPage).not.toHaveBeenCalled()
@@ -49,6 +57,7 @@ it('renders the exact captured excerpt and source before reading native history,
     ...captured, revision: 2, items: [captured.items[1]!]
   } } }))
   expect(container.textContent).toContain('Last prompt · Captured conversation')
+  expect(container.querySelector('.session-recap__source summary')?.textContent).toBe('Last request')
   expect(container.textContent).toContain('Later prompt')
   expect(api.sessions.historyPage).not.toHaveBeenCalled()
 })

@@ -147,29 +147,36 @@ it('keeps the real pending SessionPane stage and Resume independent of a hanging
   expect(container.textContent).toContain('Ready to restore')
   expect(container.textContent).toContain('Reading saved conversation…')
   const resume = button('Resume')
+  const stage = container.querySelector('.full-page-loading__stage')!
+  expect(stage.querySelector('.full-page-loading__actions')?.contains(resume)).toBe(true)
+  expect(container.querySelector('.terminal-recovery')).toBeNull()
+  expect(stage.querySelector('.full-page-loading__actions')!.compareDocumentPosition(stage.querySelector('.full-page-loading__detail')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(stage.querySelector('.full-page-loading__actions')!.compareDocumentPosition(stage.querySelector('.session-recap')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(resume.disabled).toBe(false)
   await act(async () => resume.click())
   expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
-  expect(container.textContent).toContain('Ready to restore')
+  expect(container.textContent).toContain('Restoring your session')
   expect(button('Resuming…').disabled).toBe(true)
   await act(async () => completeRecap(page('resume-recap', null)))
   expect(container.textContent).toContain('Last assistant message · Native conversation')
   expect(container.textContent).toContain('body resume-recap')
-  expect(container.textContent).toContain('Ready to restore')
+  expect(container.textContent).toContain('Restoring your session')
   await act(async () => completeRestore())
   expect(button('Resume').disabled).toBe(false)
   expect(fixture.write).not.toHaveBeenCalled()
   expect(fixture.terminalMount).not.toHaveBeenCalled()
 })
 
-it('marks only pending Agent recovery for full failure facts while keeping Resume and a healthy Run banner intact', async () => {
+it('keeps pending failure facts in the main stage and preserves the healthy Run service banner', async () => {
   const detail = 'The process ended unexpectedly. The original Session and draft are retained; Resume can restore this same Agent conversation.'
   const renderPane = () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />)
-  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { ...session.status, state: 'disconnected', detail } }]
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { ...session.status, state: 'error', detail } }]
   await act(async () => renderPane())
-  const pending = container.querySelector<HTMLElement>('.terminal-recovery[data-pending-agent-restore]')
+  const pending = container.querySelector<HTMLElement>('.full-page-loading[data-loading-phase="failed"]')
   expect(pending).not.toBeNull()
-  expect(pending!.querySelector<HTMLSpanElement>(':scope > div > span')!.textContent).toBe(detail)
+  expect(pending!.querySelector('.full-page-loading__detail')!.textContent).toBe(detail)
+  expect(container.querySelector('.terminal-recovery')).toBeNull()
+  expect(pending!.querySelector('.full-page-loading__actions')!.contains(button('Resume'))).toBe(true)
   expect(button('Resume').disabled).toBe(false)
   await act(async () => button('Resume').click())
   expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
@@ -230,6 +237,34 @@ it('does not read or show recap on a parked pending SessionPane', async () => {
   expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
   expect(fixture.historyPage).not.toHaveBeenCalled()
   expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+})
+
+it('keeps unconfirmed recovery facts and the original retry owner visible outside diagnostics', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'error', source: 'run-process', observedAt: 1,
+    continuity: 'unavailable' } }]
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  const stage = container.querySelector('.full-page-loading__stage')!
+  expect(stage.querySelector('h1')?.textContent).toBe('Agent resume unavailable')
+  expect(stage.querySelector('.full-page-loading__detail')?.textContent).toBe('Core did not report why this Agent Session could not be resumed.')
+  const retry = button('Try resuming again')
+  expect(stage.querySelector('.full-page-loading__actions')?.contains(retry)).toBe(true)
+  expect(retry.disabled).toBe(false)
+  expect(container.querySelector('.terminal-recovery')).toBeNull()
+  await act(async () => retry.click())
+  expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  expect(fixture.state.refreshSession).not.toHaveBeenCalled()
+})
+
+it('keeps a retained exited Session on one state with one original Resume action', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 1 } }]
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect([...container.querySelectorAll('h1')].map(node => node.textContent)).toEqual(['Ready to restore'])
+  expect(container.querySelector('.terminal-recovery')).toBeNull()
+  expect([...container.querySelectorAll('.full-page-loading__actions button')].map(node => node.textContent?.trim())).toEqual(['Resume'])
+  expect(container.querySelector('.full-page-loading__detail')?.textContent).toBe('Idle time is unknown. Reading and drafting keep it stopped; your next request restores it.')
+  await openAgentHistory(container)
+  expect(container.querySelector('.full-page-loading__actions')).toBeNull()
+  expect([...container.querySelectorAll('button')].filter(node => node.textContent?.trim() === 'Resume')).toHaveLength(1)
 })
 
 it('re-reads a changed canonical Run from the pending history notice without resuming again', async () => {

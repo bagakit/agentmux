@@ -69,6 +69,7 @@ export function FullPageLoadingSurface({
       onPointerMove={scope === 'app' ? moveLight : undefined}
       onPointerLeave={scope === 'app' ? resetLight : undefined}
       role={failed ? 'alert' : 'status'}
+      aria-label={eyebrow}
       aria-live="polite"
       aria-busy={busy}
     >
@@ -77,13 +78,16 @@ export function FullPageLoadingSurface({
         <div className="full-page-loading__light" />
       </div> : null}
       <div className="full-page-loading__stage">
-        <div className="full-page-loading__brand" aria-hidden="true">{scope === 'app' ? <BrandIcon size={28} /> : busy ? <RotateCcw size={16} /> : <SquareTerminal size={16} />}</div>
-        <p className="full-page-loading__eyebrow">{eyebrow}</p>
-        {children ?? <><h1>{title}</h1><p className="full-page-loading__detail">{detail}</p></>}
-        {busy ? <div className="full-page-loading__activity" aria-hidden="true"><i /><i /><i /></div> : null}
+        {children ?? <div className="full-page-loading__heading">
+            <h1>{title}</h1>
+            <span className={`full-page-loading__mark${busy ? ' full-page-loading__activity' : ''}`} aria-hidden="true">
+              {scope === 'app' ? <BrandIcon size={20} /> : busy ? <RotateCcw size={18} /> : <SquareTerminal size={18} />}
+            </span>
+        </div>}
+        {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
+        {children == null && detail ? <p className="full-page-loading__detail">{detail}</p> : null}
         {supplement}
         {details ? <details className="full-page-loading__details"><summary><ChevronRight size={12} aria-hidden="true" />{details.summary}</summary>{details.content}</details> : null}
-        {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
       </div>
     </section>
   )
