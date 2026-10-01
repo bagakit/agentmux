@@ -67,7 +67,7 @@ export function UserToolkitResult({ definition, active, close }: { definition: T
   const capturedArgs = execution?.action ? capturedAction?.args : capturedDefinition?.args
   const source = snapshot?.latestConfirmed
   return <>
-    <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={definition.icon} size={17} /><h2>{definition.name}</h2></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${definition.name}`} onClick={close}><X size={14} /></button></header>
+    <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={definition.icon} size={17} /><div className="toolkit-result__identity"><small>Custom tool</small><h2>{definition.name}</h2></div></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${definition.name}`} onClick={close}><X size={14} /></button></header>
     <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : snapshot?.state ?? 'idle'}><i />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : snapshot ? stateLabel[snapshot.state] : 'Result not loaded'}</span>
       {execution ? <time dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
     </div>

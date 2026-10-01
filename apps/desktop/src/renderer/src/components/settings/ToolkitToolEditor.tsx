@@ -64,7 +64,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   return <section className="toolkit-editor" data-tool-editor={id} aria-label={`Edit ${tool.name.trim() || 'new tool'}`}>
     <header className="toolkit-editor__heading">
       <button type="button" className="small-button toolkit-editor__back" onClick={onBack}><ArrowLeft size={13} /> Back to tools</button>
-      <span className="toolkit-editor__metadata"><span>Local JavaScript · ESM</span><span className="toolkit-editor__status" data-dirty={dirty}>{entry.saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
+      <span className="toolkit-editor__metadata"><span>Custom tool · JavaScript ESM</span><span className="toolkit-editor__status" data-dirty={dirty}>{entry.saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
       <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><Play size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button>
     </header>
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
