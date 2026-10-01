@@ -7,6 +7,7 @@ import { assertDispatchEventKind } from './agent-handoff.js'
 import { isAgentDeliveryState } from './agent-message.js'
 import { parseRpcControlResult, rpcRecord } from './rpc-business-codec.js'
 import type { AgentMuxRpcCredentials, AgentMuxRpcMethod } from './public-rpc.js'
+import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult } from './public-rpc-device.js'
 
 const fail = (): never => { throw new AgentMuxError('Core RPC result is malformed or belongs to another object.', 'CONTROL_PROTOCOL_ERROR') }
 const record = (value: unknown, fields?: readonly string[]) => rpcRecord(value, fields, 'CONTROL_PROTOCOL_ERROR')
@@ -103,6 +104,8 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
+      parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {

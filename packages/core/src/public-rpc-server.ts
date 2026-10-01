@@ -121,11 +121,11 @@ export class AgentMuxControlServer {
     await this.service.dispose()
   }
   private connection(send: (frame: AgentMuxRpcFrame) => void | Promise<void>, close: () => void,
-    principal: AgentMuxRpcPrincipal = this.localPrincipal, authority?: AgentMuxRpcHttpAuthorization) {
+    transport: 'unix' | 'http', principal: AgentMuxRpcPrincipal = this.localPrincipal, authority?: AgentMuxRpcHttpAuthorization) {
     const controller = new AbortController()
     const subscriptions = new Map<string, { method: AgentMuxRpcStreamMethod; dispose(): void | Promise<void> }>()
     const context: AgentMuxRpcConnection = {
-      principal, signal: authority?.signal ? AbortSignal.any([controller.signal, authority.signal]) : controller.signal,
+      principal, transport, signal: authority?.signal ? AbortSignal.any([controller.signal, authority.signal]) : controller.signal,
       stream: true, send, afterResponse: [],
       activate: (id, method, dispose) => { subscriptions.set(id, { method, dispose }) },
       cancel: async id => { const sub = subscriptions.get(id); if (!sub) return false
@@ -159,7 +159,7 @@ export class AgentMuxControlServer {
         const done = () => { socket.off('drain', done); socket.off('close', done); resolve() }
         socket.once('drain', done); socket.once('close', done)
       })
-    }, () => socket.destroy())
+    }, () => socket.destroy(), 'unix')
     socket.setTimeout(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, () => channel.dispose())
     socket.on('error', () => channel.dispose())
     socket.once('end', () => { try { lines.end() } catch { /* An incomplete reader cannot own a business rollback. */ } channel.dispose() })
@@ -236,7 +236,7 @@ export class AgentMuxControlServer {
           const done = () => { response.off('drain', done); response.off('close', done); resolve() }
           response.once('drain', done); response.once('close', done)
         })
-      }, () => { if (!response.writableEnded) response.destroy() }, authorization.principal, authorization)
+      }, () => { if (!response.writableEnded) response.destroy() }, 'http', authorization.principal, authorization)
       response.once('close', () => channel!.dispose()); request.once('aborted', () => channel!.dispose())
       if (web.method !== 'POST' || new URL(web.url).pathname !== '/' || new URL(web.url).search) { response.writeHead(405, { Allow: 'POST' }); response.end(); return }
       if (web.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/json') { response.writeHead(415); response.end(); return }

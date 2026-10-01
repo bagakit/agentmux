@@ -9,6 +9,15 @@ const syntax = (entry: AgentMuxCliCommand) => `agentmux ${entry.method.replaceAl
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
 
+const DEVICE_GUIDE = `Device administration accepts local Unix user requests only.
+Managed Agents, ordinary approved devices, HTTP and SSH cannot administer devices.
+A Unix connection identifies the request origin; it is not user approval.
+The original Host presents an actual local OS confirmation before any authorization change.
+No CLI confirmation flag or JSON approval field can replace that decision.
+After a missing reply, read agentmux device ls and compare the exact deviceId facts.
+Do not automatically retry device invite, approve, reject or revoke.
+A current read cannot certify an earlier lost confirmation or mutation receipt.`
+
 const COMMON = `Public methods use the same typed JSON-RPC service over Unix, HTTP or SSH.
 Select one transport with agentmux --endpoint <descriptor> <object> <action>.
 Run system endpoint to discover the default without connecting.
@@ -41,13 +50,16 @@ Usage: agentmux [--endpoint <descriptor>] <object> <action> [arguments]
 Commands:
 ${list(AGENTMUX_CLI_COMMANDS)}
 
-${COMMON}`
+${COMMON}
+
+${DEVICE_GUIDE}`
 
 export function agentMuxCommandHelp(path: string): string | null {
   const selected = entries(path)
   if (!selected.length) return null
   const exact = selected.find(entry => entry.method === path)
-  const guide = path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
+  const guide = path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
+    : path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
     : path === 'settings' || path.startsWith('settings.') ? AGENTMUX_SETTINGS_RESOURCE_GUIDE
     : path === 'goal.create' ? AGENTMUX_GOAL_CREATE_GUIDE
     : path === 'browser.task' || path.startsWith('browser.task.') ? AGENTMUX_BROWSER_TASK_GUIDE : ''
@@ -95,6 +107,8 @@ original durable identity. Topic, Mote, SOUL and Wiki come from real filesystem 
 unavailable source stays explicit unknown and cannot be replaced by guessed material.
 mote playbook pmo is a read-only working manual. It launches nothing, sends nothing,
 registers no role and changes no SOUL/Wiki/user profile.
+
+${DEVICE_GUIDE}
 
 ${AGENTMUX_SETTINGS_RESOURCE_GUIDE}
 

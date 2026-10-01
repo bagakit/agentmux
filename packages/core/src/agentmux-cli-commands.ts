@@ -4,6 +4,7 @@ import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
+import type { AgentMuxRpcParams } from './public-rpc.js'
 
 type FlagKind = 'boolean' | 'value' | 'data'
 type FlagSpec = Readonly<Record<string, FlagKind>>
@@ -132,6 +133,14 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   empty('whoami', 'Read your verified Session, Run, presentation and available capabilities.'),
+  empty('device.ls', 'Read original Host device and pending-request facts through a local Unix user request.'),
+  empty('device.invite', 'Request an invitation; the Host requires actual local OS confirmation.'),
+  command('device.approve', '--device ID --confirmation-code CODE', 'Request approval of one exact pending device; the Host confirms the original code and user decision.',
+    { '--device': 'data', '--confirmation-code': 'data' }, f => ({ deviceId: id(f, '--device'), confirmationCode: value(f, '--confirmation-code', true)! } satisfies AgentMuxRpcParams<'device.approve'>)),
+  command('device.reject', '--device ID', 'Request rejection of one exact pending device with actual local OS confirmation.',
+    { '--device': 'data' }, f => ({ deviceId: id(f, '--device') } satisfies AgentMuxRpcParams<'device.reject'>)),
+  command('device.revoke', '--device ID', 'Request revocation of one exact device with actual local OS confirmation.',
+    { '--device': 'data' }, f => ({ deviceId: id(f, '--device') } satisfies AgentMuxRpcParams<'device.revoke'>)),
   command('agent.ls', '[--session ID] [--executor ID] [--status VALUE] [--since N] [--limit N]', 'List actual Core Agent Sessions; retain unavailable item facts.', { '--session': 'data', '--executor': 'data', '--status': 'value', '--since': 'value', '--limit': 'value' }, filters),
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect Core identity and current Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) })),

@@ -82,6 +82,9 @@ export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
     whoami: [], 'agent.ls': [], 'agent.inspect': ['--session', ids.agent],
+    'device.ls': [], 'device.invite': [],
+    'device.approve': ['--device', 'DEVICE', '--confirmation-code', '012345'],
+    'device.reject': ['--device', 'DEVICE'], 'device.revoke': ['--device', 'DEVICE'],
     'agent.open': ['--executor', 'E', '--zone', ids.zone, '--new-tab', '--operation-id', 'BUSINESS'],
     'agent.rename': ['--session', ids.agent, '--name', '--help'], 'agent.view': ['--session', ids.agent],
     'agent.output': ['--session', ids.agent], 'agent.send': ['--to-session', ids.agent, '--text', '--help'],
