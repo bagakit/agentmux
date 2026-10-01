@@ -20,10 +20,10 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
   const [copyError, setCopyError] = useState('')
   const title = phase === 'launch' ? 'Starting your agent' : phase === 'restore' ? 'Restoring your session' : 'Connecting to this session'
   const detail = phase === 'launch'
-    ? 'Waiting for the Runtime to create this session.'
+    ? ''
     : phase === 'restore'
-      ? 'Reconnecting to the saved session. Your layout stays in place.'
-      : 'Waiting for this session’s Runtime state. Your layout stays in place.'
+      ? 'Reconnecting to the saved session.'
+      : 'Waiting for this session to reconnect.'
   const prompt = request?.prompt
   const executorLabel = executor?.label ?? request?.executorId ?? 'Executor not yet known'
 
@@ -42,24 +42,19 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
     eyebrow={phase === 'launch' ? 'Launch request' : 'Session connection'}
     title={title}
     detail={detail}
-  >
-    <div className="session-connecting__body">
-      <header className="session-connecting__heading" role="status" aria-live="polite">
-        <h2>{title}</h2>
-        <p>{detail}</p>
-      </header>
+    supplement={<div className="session-connecting__body">
       {surfaceKind === 'agent' ? <div className="session-connecting__executor">
         {executor
           ? <AgentAvatar providerId={executor.providerId} executorId={request?.executorId} label={executorLabel} appearance={appearance} size={18} />
           : <SquareDashed size={18} aria-label="Unknown executor" />}
-        <div><span className="session-connecting__eyebrow">Executor</span><strong>{executorLabel}</strong></div>
+        <strong>{executorLabel}</strong>
       </div> : <div className="session-connecting__executor"><TerminalSquare size={18} /><strong>Terminal</strong></div>}
       {surfaceKind === 'agent' ? <section className="session-connecting__prompt" aria-label="Initial prompt">
         <div className="session-connecting__prompt-heading">
           <span className="session-connecting__eyebrow">Initial prompt</span>
           {prompt ? <button type="button" className="session-connecting__copy" disabled={copying}
             onClick={() => { void copyPrompt() }} title="Copy the complete initial prompt" aria-label="Copy initial prompt">
-            {copied ? <Check size={13} /> : <Copy size={13} />}<span>{copying ? 'Copying…' : copied ? 'Copied' : 'Copy'}</span>
+            {copied ? <Check size={13} /> : <Copy size={13} />}<span aria-live="polite">{copying ? 'Copying…' : copied ? 'Copied' : 'Copy'}</span>
           </button> : null}
         </div>
         {prompt ? <pre>{prompt}</pre> : <p className="session-connecting__empty">{request
@@ -67,10 +62,8 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
           : phase === 'launch'
             ? 'The initial prompt is unavailable for this launch.'
             : 'The initial prompt is not available while reconnecting.'}</p>}
-        <div className="session-connecting__feedback" aria-live="polite">
-          {copyError ? <span role="alert">Copy failed: {copyError}</span> : copied ? 'Full prompt copied.' : null}
-        </div>
+        {copyError ? <div className="session-connecting__feedback" role="alert">Copy failed: {copyError}</div> : null}
       </section> : null}
-    </div>
-  </FullPageLoadingSurface>
+    </div>}
+  />
 }

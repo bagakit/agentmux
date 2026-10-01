@@ -76,6 +76,18 @@ it.each(['launcher', 'control'] as const)('captures the exact %s request before 
   }
 })
 
+it('lets the shared stage own one heading and renders only meaningful connection content', async () => {
+  pendingFixture()
+  await dom.render(pane())
+  expect([...dom.container.querySelectorAll('h1, h2')].map(node => node.textContent)).toEqual(['Starting your agent'])
+  expect(dom.container.querySelector('.full-page-loading__heading h1')?.textContent).toBe('Starting your agent')
+  expect(dom.container.querySelector('.full-page-loading__detail')).toBeNull()
+  expect(dom.container.querySelector('.session-connecting__feedback')).toBeNull()
+  expect(dom.container.querySelector('.full-page-loading__eyebrow')).toBeNull()
+  expect([...dom.container.querySelectorAll('.session-connecting__eyebrow')].map(node => node.textContent)).toEqual(['Initial prompt'])
+  expect(dom.container.querySelector('pre')?.textContent).toBe(prompt)
+})
+
 it('copies the entire submitted prompt through the shared clipboard outlet and reports local failure then retry success', async () => {
   pendingFixture()
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('clipboard denied')).mockResolvedValue(undefined)
@@ -84,13 +96,14 @@ it('copies the entire submitted prompt through the shared clipboard outlet and r
   await dom.click('[aria-label="Copy initial prompt"]')
   expect(clipboard).toHaveBeenNthCalledWith(1, prompt)
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('clipboard denied')
-  expect(dom.container.textContent).not.toContain('Full prompt copied.')
+  expect(dom.container.querySelector('[aria-label="Copy initial prompt"]')?.textContent).not.toBe('Copied')
   expect(dom.container.querySelector('[aria-label="Copy initial prompt"]')?.textContent).toBe('Copy')
   expect(report).not.toHaveBeenCalled()
   await dom.click('[aria-label="Copy initial prompt"]')
   expect(clipboard).toHaveBeenNthCalledWith(2, prompt)
   expect(dom.container.querySelector('[role="alert"]')).toBeNull()
-  expect(dom.container.textContent).toContain('Full prompt copied.')
+  expect(dom.container.querySelector('[aria-label="Copy initial prompt"]')?.textContent).toBe('Copied')
+  expect(dom.container.querySelector('.session-connecting__feedback')).toBeNull()
 })
 
 it('keeps late clipboard completion and copied feedback scoped to the original Session', async () => {
@@ -105,7 +118,7 @@ it('keeps late clipboard completion and copied feedback scoped to the original S
   await dom.render(pane('second'))
   expect(dom.container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
   await act(async () => clipboard.resolve())
-  expect(dom.container.textContent).not.toContain('Full prompt copied.')
+  expect(dom.container.querySelector('[aria-label="Copy initial prompt"]')?.textContent).not.toBe('Copied')
   expect(dom.container.querySelector('pre')?.textContent).toBe('Second request')
 })
 
@@ -116,10 +129,12 @@ it('does not invent an Executor or initial prompt for legacy pending and persist
   expect(dom.container.textContent).toContain('Starting your agent')
   expect(dom.container.textContent).toContain('Executor not yet known')
   expect(dom.container.textContent).toContain('initial prompt is unavailable for this launch')
+  expect(dom.container.querySelector('.full-page-loading__detail')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Copy initial prompt"]')).toBeNull()
   await act(async () => useAppStore.setState({ pendingAgentLaunches: {} }))
   await dom.render(pane())
   expect(dom.container.textContent).toContain('Connecting to this session')
+  expect(dom.container.querySelector('.full-page-loading__detail')?.textContent).toBe('Waiting for this session to reconnect.')
   expect(dom.container.textContent).toContain('not available while reconnecting')
   expect(useAppStore.getState().tabs.view).toEqual(tab)
   expect(useAppStore.getState().layouts.workspace).toEqual(createWorkspaceLayout('pane', ['view']))
@@ -134,6 +149,7 @@ it('uses only the matching recovery candidate identity, never a neighbor or edit
   }], agentComposerDrafts: { pending: 'not the original request' } }))
   await dom.render(pane())
   expect(dom.container.textContent).toContain('Restoring your session')
+  expect(dom.container.querySelector('.full-page-loading__detail')?.textContent).toBe('Reconnecting to the saved session.')
   expect(dom.container.textContent).toContain('Code reviewer')
   expect(dom.container.querySelector('pre')).toBeNull()
   await dom.render(pane('other-unknown'))

@@ -273,10 +273,6 @@
   gap:var(--sp-3);
 }
 .terminal-recovery__readonly { color: var(--text-3); font-size: var(--fs-micro); }
-/* Pending Agent recovery prioritizes the complete failure facts over an inline action. */
-.terminal-recovery[data-pending-agent-restore] { grid-template-columns: 32px minmax(0, 1fr); }
-.terminal-recovery[data-pending-agent-restore] > div > span { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
-.terminal-recovery[data-pending-agent-restore] .terminal-recovery__actions { grid-column: 2; justify-self: start; flex-wrap: wrap; }
 .terminal-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:var(--sp-4); padding:0; }
 .terminal-theme-choice { position: relative; min-width: 0; display: grid; grid-template-columns: 108px minmax(0, 1fr) 16px; align-items: center; gap:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-3); background: var(--surface-1); text-align: left; cursor: pointer; }
 .terminal-theme-choice:hover { border-color: var(--line); color: var(--text-2); background: var(--surface-2); }

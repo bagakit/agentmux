@@ -588,9 +588,12 @@ export function SessionPane({
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore ? (
             pendingAgentRestore ? (inlineHistory ? null :
-              <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Session retained"
-                title="Ready to restore"
-                detail="Existing history and your draft are kept. Send your next request or use Resume."
+              <FullPageLoadingSurface scope="region" phase={recovering ? 'recovering' : continuityNotice || session.status.state === 'error' ? 'failed' : 'parked'} eyebrow="Session retained"
+                title={recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title : session.status.state === 'error' ? recoveryTitle : 'Ready to restore'}
+                detail={continuityNotice?.reason ?? (session.status.state === 'error'
+                  ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
+                  : pendingRestoreDetail ?? 'The saved Session is retained. Its process state is not yet confirmed.')}
+                actions={!historyOpen ? agentRecoveryAction : null}
                 supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} /> : null}
                 details={{ summary: 'Retained session', content: <dl>
                   <dt>Session</dt><dd>{session.label}</dd>
@@ -642,8 +645,8 @@ export function SessionPane({
               serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
             } : {})}
           /> : null}
-          {(disconnected || missing || exited) && !(pendingAgentRestore && (historyOpen || inlineHistory)) ? (
-            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} data-pending-agent-restore={pendingAgentRestore ? '' : undefined} role="status" aria-live="polite">
+          {(disconnected || missing || exited) && !pendingAgentRestore ? (
+            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
                 {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
               </span>

@@ -45,7 +45,10 @@ export function SessionRecap({ session, visible }: { session: SessionHistoryRefe
   const state = recap ? 'ready' : !identified ? 'unknown' : currentRead?.state ?? 'loading'
   return <section className="session-recap" aria-label="Session recap" data-recap-state={state}>
     {recap ? <>
-      <p className="session-recap__source">{recap.source} · {recap.origin === 'timeline' ? 'Captured conversation' : 'Native conversation'}</p>
+      <details className="session-recap__source">
+        <summary aria-label={`${recap.source === 'Last assistant message' ? 'Last reply' : 'Last request'} source: ${recap.source} · ${recap.origin === 'timeline' ? 'Captured conversation' : 'Native conversation'}`}>{recap.source === 'Last assistant message' ? 'Last reply' : 'Last request'}</summary>
+        <p>Source: {recap.source} · {recap.origin === 'timeline' ? 'Captured conversation' : 'Native conversation'}</p>
+      </details>
       <p className="session-recap__excerpt">{recap.text}</p>
     </> : <p className="session-recap__notice">{state === 'unknown' ? 'Recap source is unconfirmed.'
       : state === 'unavailable' ? 'Recap could not be read.'

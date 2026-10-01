@@ -342,4 +342,9 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 应用启动允许完整品牌构图与鼠标响应；单个 Terminal / Session 正在恢复或 Ready to restore 则以当前步骤、失败或未知、原恢复动作这些功能信息为主，不能铺成第二个启动页。停泊不表示忙碌，恢复不表示新建 Agent；已有输出优先保留，不因展示更新再次请求 Runtime、改变网格或启动 Session。完整失败、未知和原动作仍可达。
 
-用户最新反馈「restoring terminal 有点过于素了，高级感是有的，但是过于素了」。保留功能信息和恢复边界，在密度 SSOT[《启动与恢复的分量分开》](../presentation/session-recovery.md#启动与恢复的分量分开)细化其视觉层次；不得用虚构进度或新的自动恢复行为填补视觉空白。
+用户要求恢复面既有功能信息与高级感，也避免「过于素了」；进一步反馈「加载页排版有点小气, 不重要的冗余信息也有点多, 可以发挥你的最高水准来设计吗」。加载与恢复面须围绕这次启动意图或原有 Session 组织信息，保留真实状态、必要动作及可读内容，去掉同一事实的重复表达；构图与视觉层次唯一见密度 SSOT[《启动与恢复的分量分开》](../presentation/session-recovery.md#启动与恢复的分量分开)。
+
+- 一个原有 Session 的恢复面只表达一份当前状态，原 Resume 或同 Session 的既有重试动作就近可达。已确认的普通退出与 Session 保留可合并为一个可恢复状态；不能由退出文案、缺快照或 UI 展示猜测权威状态，不能把真实失败或未知合并成正常。失败步骤、当前可用能力与原恢复动作直接可读，仅低层诊断、完整身份和技术元数据按需展开；删冗余不能静默藏掉未解决事实。
+- 状态与原动作先于长内容，窄／短 Region 首屏仍可找到原动作；正文与诊断可在各自有界区域阅读。Connecting 保留目标 Executor、完整可选择初始 Prompt、复制完整原文及其真实成功／失败反馈，不以缩短文案删掉启动意图。没有动作结果时不铺空反馈位。
+- 原 resume recap 的真实性、来源、精确 visible Host／Session 有界读取与恢复独立性只沿[《Terminal resume 画面中的 recap》](terminal-reading.md#terminal-resume-画面中的-recap)，不因重新排版改变读取资格、启动模型请求、扫描无关 Session 或增加自动 retry。内容不足与读取未知如实表达，不编造摘要或恢复进度。
+- 本次呈现不改变生命周期、冷启动按需恢复、原动作资格或失败处理 owner。健康输出、原 xterm／网格／输入／历史／草稿及 durable Tab／Group／Region／焦点／分割布局保留；不能用新的自动恢复、Runtime 请求或重建 Session 填补视觉空白。共享加载表面的其他消费者保留原标题、调用方内容、真实 failed 状态与原动作，不借视觉去重改变它们的行为。
