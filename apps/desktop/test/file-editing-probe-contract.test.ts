@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 //
 // 一、报告 schema `agentmux.workspace-file-editing-e2e.v2`
 //   写入方：`src/main/file-editing-probe.ts` 的两个 publishReport（成功/失败各一次）。
-//   验收方：`scripts/package-macos.mjs` 的 `fileEditing.schema === '…'`。
+//   验收方：`scripts/probe-file-editing.mjs` 的 `fileEditing.schema === '…'`。
 //   把生产侧 bump 到 `.v3`，验收侧仍在比 `.v2`——`package:mac` 在挂载盘那一步失败，而失败发生在
 //   整个签名、公证、挂载流程之后，是这条流水线上最贵的位置。
 //
@@ -38,9 +38,9 @@ function emittedSchemas(): string[] {
   )
 }
 
-/** 打包脚本断言它**应当**收到的那个 schema 串。 */
+/** 功能探针脚本断言它**应当**收到的那个 schema 串。 */
 function acceptedSchema(): string | null {
-  const match = /fileEditing\.schema === '([^']+)'/.exec(read('scripts/package-macos.mjs'))
+  const match = /report\.schema === '([^']+)'/.exec(read('scripts/probe-file-editing.mjs'))
   return match ? match[1]! : null
 }
 
@@ -63,29 +63,29 @@ function consumedWorkspaceIds(): { path: string; value: string }[] {
   )
 }
 
-describe('打包验收与探针共用的两个串', () => {
+describe('独立功能验收与探针共用的两个串', () => {
   it('四个解析点各自都取得出值——正则失配要红，不能让下面的相等断言退化成恒真', () => {
     // 自检。这四个函数都是文本解析，重构掉它们锚定的形状（换引号、抽成变量、改成模板串）会让
     // 匹配落空；不在这里响亮失败的话，`undefined === undefined` 会替坏世界背书。
     expect(emittedSchemas(), 'file-editing-probe.ts 的 schema 写入没解析出来').not.toHaveLength(0)
-    expect(acceptedSchema(), 'package-macos.mjs 的 schema 断言没解析出来').not.toBeNull()
+    expect(acceptedSchema(), 'probe-file-editing.mjs 的 schema 断言没解析出来').not.toBeNull()
     expect(fixtureWorkspaceIds(), 'file-editing-fixture.mjs 的 Workspace id 常量没解析出来').toHaveLength(2)
     expect(consumedWorkspaceIds(), '主进程侧一处 workspace id 都没解析出来').not.toHaveLength(0)
   })
 
-  it('探针写的 schema 与打包断言的 schema 逐字相等', () => {
+  it('探针写的 schema 与独立探针断言的 schema 逐字相等', () => {
     // 这一对分岔的代价是最贵的那种：`package:mac` 走完签名、公证、挂载，最后一步才拒绝。
     for (const emitted of emittedSchemas()) {
       expect(
         emitted,
-        `探针写 ${emitted}，打包脚本却在等 ${acceptedSchema()}——package:mac 会在挂载验收那一步失败`
+        `探针写 ${emitted}，功能探针脚本却在等 ${acceptedSchema()}——package:mac 会在挂载验收那一步失败`
       ).toBe(acceptedSchema())
     }
   })
 
   it('探针的成功与失败两条路写同一个 schema', () => {
     // 两个 publishReport 分别在 try 与 catch 里。只改一个的后果是失败报告带着旧版本号，
-    // 而打包脚本先比 `ok === true` 再比 schema，于是这个分岔在成功路径上永远不显形。
+    // 而功能探针脚本先比 `ok === true` 再比 schema，于是这个分岔在成功路径上永远不显形。
     expect(new Set(emittedSchemas()).size, `探针的两条路写了不同的 schema：${emittedSchemas().join(' / ')}`).toBe(1)
   })
 

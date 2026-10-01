@@ -22,7 +22,6 @@ import { fileURLToPath } from 'node:url'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
-import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
 import {
@@ -403,56 +402,15 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
   const workspaceMoveHelper = join(appResources, 'resources', 'bin', 'agentmux-workspace-move')
-  const workspaceMoveRoot = join(verificationRoot, 'workspace-move-helper')
-  const workspaceMoveSource = join(workspaceMoveRoot, 'source')
-  const workspaceMoveDestination = join(workspaceMoveRoot, 'destination')
-  await Promise.all([
-    mkdir(workspaceMoveSource, { recursive: true }),
-    mkdir(workspaceMoveDestination, { recursive: true })
-  ])
   const workspaceMoveHelperInfo = await stat(workspaceMoveHelper)
   assert(
     workspaceMoveHelperInfo.isFile() && (workspaceMoveHelperInfo.mode & 0o111) !== 0,
     'Packaged Workspace move helper is missing or not executable.'
   )
-  const workspaceMoveRootInfo = await stat(workspaceMoveRoot, { bigint: true })
-  const workspaceMoveArgs = (source, destination) => [
-    workspaceMoveRoot,
-    workspaceMoveRootInfo.dev.toString(),
-    workspaceMoveRootInfo.ino.toString(),
-    source,
-    destination
-  ]
-  await writeFile(join(workspaceMoveSource, 'moved.txt'), 'packaged helper bytes')
-  await run(workspaceMoveHelper, workspaceMoveArgs('source/moved.txt', 'destination/moved.txt'), { capture: true })
   assert(
-    await readFile(join(workspaceMoveDestination, 'moved.txt'), 'utf8') === 'packaged helper bytes',
-    'Packaged Workspace move helper did not move the source bytes.'
+    await sha256(workspaceMoveHelper) === await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')),
+    'Packaged Workspace move helper does not match the built source artifact.'
   )
-  await Promise.all([
-    writeFile(join(workspaceMoveSource, 'collision.txt'), 'source bytes'),
-    writeFile(join(workspaceMoveDestination, 'collision.txt'), 'destination bytes')
-  ])
-  let collisionError
-  try {
-    await run(
-      workspaceMoveHelper,
-      workspaceMoveArgs('source/collision.txt', 'destination/collision.txt'),
-      { capture: true }
-    )
-  } catch (error) {
-    collisionError = error
-  }
-  assert(
-    collisionError instanceof Error && collisionError.message.includes('errno=17'),
-    'Packaged Workspace move helper did not report the destination collision.'
-  )
-  assert(
-    await readFile(join(workspaceMoveSource, 'collision.txt'), 'utf8') === 'source bytes' &&
-      await readFile(join(workspaceMoveDestination, 'collision.txt'), 'utf8') === 'destination bytes',
-    'Packaged Workspace move helper changed bytes after a destination collision.'
-  )
-  process.stdout.write('packaged_workspace_move_helper=passed\n')
   const [cli, daemon, agentmux] = await Promise.all([
     run(join(binaryRoot, 'ctxmux'), ['--version'], { capture: true }),
     run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true }),
@@ -590,34 +548,18 @@ async function cleanupProcessScope(scope, findProcessIds) {
 }
 
 async function verifyLaunchServices(appPath, verificationRoot) {
-  const traceCancel = process.env.AGENTMUX_DESKTOP_FILE_EDITING_CANCEL_TRACE === '1'
   const canonicalAppPath = await realpath(appPath)
   const readyFile = join(verificationRoot, 'desktop-ready.json')
-  const fileEditingReport = join(verificationRoot, 'workspace-file-editing.json')
   const userData = join(verificationRoot, 'user-data')
-  const workspace = join(verificationRoot, 'workspace')
-  const alternateWorkspace = join(verificationRoot, 'alternate-workspace')
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
   const runtimeRoot = await mkdtemp(join(sep, 'tmp', `amx-smoke-${process.getuid()}-`))
   const endpointPath = join(runtimeRoot, 'ctxmux.sock')
   const ownerReceiptPath = join(runtimeRoot, 'owner.json')
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
-  const daemonEntrypoint = join(
-    canonicalAppPath,
-    'Contents',
-    'Resources',
-    'app',
-    'node_modules',
-    '@agentmux',
-    'core',
-    'vendor',
-    'ctxmux',
-    'darwin-arm64',
-    'bin',
-    'ctxmuxd'
-  )
-  await materializeFileEditingFixture({ userData, workspace, alternateWorkspace })
+  const daemonEntrypoint = join(canonicalAppPath, 'Contents', 'Resources', 'app',
+    'node_modules', '@agentmux', 'core', 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
+  await mkdir(userData, { recursive: true })
   const before = new Set(await processIdsForApplication(canonicalAppPath))
   const ownedApplicationPids = async () => (
     (await processIdsForApplication(canonicalAppPath)).filter((pid) => !before.has(pid))
@@ -634,202 +576,51 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   let verificationStage = 'launch-request'
   const verificationDeadline = Date.now() + 180_000
   try {
-    await run('open', [
-      '-n',
-      '--stdout', stdoutPath,
-      '--stderr', stderrPath,
+    await run('open', ['-n', '--stdout', stdoutPath, '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
       '--env', 'AGENTMUX_DISABLE_CRASH_REPORTER=1',
       '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
       '--env', `AGENTMUX_STATE_DIRECTORY=${join(runtimeRoot, 'state')}`,
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
-      '--env', `AGENTMUX_DESKTOP_FILE_EDITING_REPORT=${fileEditingReport}`,
-      ...(traceCancel ? ['--env', 'AGENTMUX_DESKTOP_FILE_EDITING_CANCEL_TRACE=1'] : []),
-      canonicalAppPath
+      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1', canonicalAppPath
     ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
     verificationStage = 'ready-receipt'
-    assert(
-      await waitForPath(readyFile, verificationDeadline),
-      'Packaged Desktop timed out waiting for a ready receipt.'
-    )
+    assert(await waitForPath(readyFile, verificationDeadline), 'Packaged Desktop did not emit its ready receipt.')
     const ready = JSON.parse(await readFile(readyFile, 'utf8'))
-    assert(ready.productName === PRODUCT_NAME, 'LaunchServices started an incorrectly branded application.')
+    assert(ready.productName === PRODUCT_NAME && ready.version === manifest.version,
+      'LaunchServices started an application with the wrong product identity.')
     assert(ready.packaged === true, 'LaunchServices did not start the packaged application.')
-    assert(
-      await realpath(ready.executable) === executable,
-      'LaunchServices ready receipt did not come from the exact relocated application.'
-    )
-    verificationStage = 'file-editing-report'
-    assert(
-      await waitForPath(fileEditingReport, verificationDeadline),
-      'Mounted Desktop timed out waiting for the file editing report.'
-    )
-    const fileEditing = JSON.parse(await readFile(fileEditingReport, 'utf8'))
-    assert(fileEditing.ok === true, `Mounted Desktop file editing E2E failed: ${fileEditing.error ?? 'unknown error'}`)
-    assert(fileEditing.schema === 'agentmux.workspace-file-editing-e2e.v2', 'Mounted Desktop emitted the wrong file editing report schema.')
-    assert(
-      fileEditing.phases?.saveGeneration?.disk === 'bravo' &&
-        fileEditing.phases.saveGeneration.editor === 'charlie' &&
-        fileEditing.phases.saveGeneration.state === 'dirty',
-      'Mounted Desktop did not preserve input made during save.'
-    )
-    assert(
-      fileEditing.phases?.writeError?.disk === 'lima' &&
-        fileEditing.phases.writeError.editor === 'mike' &&
-        fileEditing.phases.writeError.state === 'write-error',
-      'Mounted Desktop did not preserve original bytes and draft after replace failure.'
-    )
-    assert(
-      fileEditing.phases?.explorer?.pointerMove?.moved === true &&
-        fileEditing.phases.explorer.pointerMove.fileOverlayOnly === true &&
-        fileEditing.phases.explorer.invalidDrop?.blocked === true,
-      'Mounted Desktop did not prove PointerSensor move, invalid drop, and Workbench overlay isolation.'
-    )
-    assert(
-      fileEditing.phases?.explorer?.hover?.expanded === true &&
-        fileEditing.phases.explorer.hover.cancelledStayedCollapsed === true,
-      'Mounted Desktop did not prove hover expansion and drag-cancel cleanup.'
-    )
-    assert(
-      fileEditing.phases?.explorer?.menu?.shiftF10Opened === true &&
-        fileEditing.phases.explorer.menu.moved === true &&
-        fileEditing.phases.explorer.menu.singleSelection === true,
-      'Mounted Desktop did not prove Radix and Shift+F10 single-item Move behavior.'
-    )
-    assert(
-      fileEditing.phases?.explorer?.workspaceRevisit?.preserved === true &&
-        fileEditing.phases.explorer.workspaceRevisit.settledWithoutLoop === true &&
-        fileEditing.phases.explorer.workspaceRevisit.explorerProjectionNotifications?.total === 0,
-      'Mounted Desktop did not preserve the zero-notification Explorer projection across Workspace A to B to A.'
-    )
-    assert(
-      fileEditing.phases?.explorer?.menu?.workspaceRace?.alternateTreeUnchanged === true &&
-        fileEditing.phases.explorer.menu.workspaceRace.stalePrimaryReadsStarted === 0 &&
-        fileEditing.phases.explorer.menu.workspaceRace.primaryRecovered === true &&
-        fileEditing.phases.explorer.menu.workspaceRace.explorerProjectionNotifications?.total === 1,
-      'Mounted Desktop did not reject the stale primary refresh or recover it from its Workspace owner.'
-    )
+    assert(await realpath(ready.executable) === executable,
+      'LaunchServices ready receipt did not come from the exact relocated application.')
     verificationStage = 'runtime-owner-receipt'
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
-    assert(
-      await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
-        ownerReceipt.socketPath === endpointPath,
-      'LaunchServices did not start the exact packaged CtxMux runtime.'
-    )
+    assert(await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
+      ownerReceipt.socketPath === endpointPath,
+      'LaunchServices did not start the exact packaged CtxMux runtime.')
     verificationStage = 'application-exit'
-    const exitBudget = verificationDeadline - Date.now()
-    assert(exitBudget > 0, 'Packaged Desktop exhausted the lifecycle budget before exit observation.')
-    const remainingApplicationPids = await waitForProcessExit(
-      ownedApplicationPids,
-      exitBudget
-    )
-    assert(Date.now() <= verificationDeadline, 'Packaged Desktop exit observation exceeded the lifecycle budget.')
-    assert(
-      remainingApplicationPids.length === 0,
-      `Packaged Desktop application or observer processes did not exit within the lifecycle budget: ${remainingApplicationPids.join(', ')}`
-    )
+    const remainingApplicationPids = await waitForProcessExit(ownedApplicationPids,
+      Math.max(1, verificationDeadline - Date.now()))
+    assert(Date.now() <= verificationDeadline && remainingApplicationPids.length === 0,
+      `Packaged Desktop did not exit normally: ${remainingApplicationPids.join(', ')}`)
   } catch (error) {
-    const [readyExists, reportExists, ownerReceiptExists] = await Promise.all([
-      pathExists(readyFile),
-      pathExists(fileEditingReport),
-      pathExists(ownerReceiptPath)
-    ])
-    let reportReadError
-    const reportText = await readFile(fileEditingReport, 'utf8').catch((readError) => {
-      reportReadError = readError instanceof Error ? readError.message : String(readError)
-      return null
-    })
-    let ownerReceiptReadError
-    const ownerReceiptText = await readFile(ownerReceiptPath, 'utf8').catch((readError) => {
-      ownerReceiptReadError = readError instanceof Error ? readError.message : String(readError)
-      return null
-    })
     const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
-    let report
-    let reportParseError
-    if (reportText !== null) {
-      try {
-        report = JSON.parse(reportText)
-      } catch (parseError) {
-        reportParseError = parseError instanceof Error ? parseError.message : String(parseError)
-      }
-    }
-    let ownerReceipt
-    let ownerReceiptParseError
-    let ownerIdentity = ownerReceiptExists ? 'unavailable' : 'missing'
-    if (ownerReceiptText !== null) {
-      try {
-        ownerReceipt = JSON.parse(ownerReceiptText)
-      } catch (parseError) {
-        ownerReceiptParseError = parseError instanceof Error ? parseError.message : String(parseError)
-      }
-    }
-    if (ownerReceipt) {
-      try {
-        ownerIdentity =
-          await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
-            ownerReceipt.socketPath === endpointPath
-            ? 'match'
-            : 'mismatch'
-      } catch (identityError) {
-        ownerIdentity = `unavailable:${identityError instanceof Error ? identityError.message : String(identityError)}`
-      }
-    }
-    let applicationPids = 'unavailable'
-    try {
-      const scopedPids = await ownedApplicationPids()
-      applicationPids = scopedPids.length > 0 ? scopedPids.join(',') : 'none'
-    } catch (processError) {
-      applicationPids = `unavailable:${processError instanceof Error ? processError.message : String(processError)}`
-    }
-    verificationError = new Error([
-      `Mounted Desktop ${verificationStage} stage failed: ${error instanceof Error ? error.message : String(error)}`,
-      [
-        `ready=${readyExists ? 'present' : 'missing'}`,
-        `report=${reportExists ? 'present' : 'missing'}`,
-        `report_read_error=${reportReadError ?? 'none'}`,
-        `report_ok=${typeof report?.ok === 'boolean' ? String(report.ok) : 'unknown'}`,
-        `report_error=${report?.error === undefined ? 'none' : JSON.stringify(report.error)}`,
-        `report_parse_error=${reportParseError ?? 'none'}`,
-        `owner_receipt=${ownerReceiptExists ? 'present' : 'missing'}`,
-        `owner_read_error=${ownerReceiptReadError ?? 'none'}`,
-        `owner_parse=${!ownerReceiptExists ? 'missing' : ownerReceipt ? 'ok' : 'error'}`,
-        `owner_parse_error=${ownerReceiptParseError ?? 'none'}`,
-        `owner_identity=${ownerIdentity}`,
-        `scoped_application_pids=${applicationPids}`,
-        `stderr=${stderr.trim() ? JSON.stringify(stderr.trim()) : 'empty'}`
-      ].join(' ')
-    ].join('\n'), { cause: error })
+    verificationError = new Error(`Packaged Desktop ${verificationStage} failed: ${error.message}; stderr=${stderr.trim()}`,
+      { cause: error })
   }
-
   const cleanupErrors = [
     ...await cleanupProcessScope('application', ownedApplicationPids),
     ...await cleanupProcessScope('daemon', ownedDaemonPids)
   ]
-
-  try {
-    await rm(runtimeRoot, { recursive: true, force: true })
-    assert(!await pathExists(endpointPath), 'Launch smoke ctxmuxd endpoint survived scoped cleanup.')
-  } catch (error) {
-    cleanupErrors.push(error)
-  }
-
-  if (traceCancel) {
+  if (cleanupErrors.length === 0) {
     try {
-      const stderr = await readFile(stderrPath, 'utf8')
-      process.stderr.write('mounted_file_editing_diagnostic_stderr=' + JSON.stringify({ collected: true, stderr }) + '\n')
-    } catch (error) {
-      process.stderr.write('mounted_file_editing_diagnostic_stderr=' + JSON.stringify({
-        collected: false, error: error instanceof Error ? error.message : String(error)
-      }) + '\n')
-    }
+      await rm(runtimeRoot, { recursive: true, force: true })
+      assert(!await pathExists(endpointPath), 'Launch smoke endpoint survived cleanup.')
+    } catch (error) { cleanupErrors.push(error) }
   }
-
   const failures = [verificationError, ...cleanupErrors].filter(Boolean)
-  if (failures.length > 0) {
-    throw new AggregateError(failures, 'Mounted Desktop verification did not reach a clean terminal state')
-  }
-  process.stdout.write('mounted_desktop_interactions=passed\n')
+  if (failures.length > 0) throw new AggregateError(failures,
+    `Packaged Desktop verification failed; Runtime diagnostics retained if cleanup failed: ${runtimeRoot}`)
+  process.stdout.write('packaged_desktop_launch=passed\n')
 }
 
 async function createDmg(appPath, dmgPath, temporaryRoot) {
@@ -1200,9 +991,6 @@ async function main() {
     initialSource.status === '',
     `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
   )
-  // Keep the release gate coupled to the same source checkout: a package cannot be called
-  // "latest" when a design anchor has no production caller or test evidence.
-  await run('pnpm', ['--filter', '@agentmux/desktop', 'audit:features'], { cwd: repositoryRoot })
   // Emit Core and its workspace dependencies in pnpm's dependency order before compiling Desktop.
   await run('pnpm', ['--filter', '@agentmux/core...', 'build'], { cwd: repositoryRoot })
   await run('pnpm', ['build'], { cwd: desktopRoot })

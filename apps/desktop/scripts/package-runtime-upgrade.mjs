@@ -236,6 +236,14 @@ async function assertRunsKept(plan, inspection, sdk) {
   return statuses
 }
 
+/** Bind a serving socket to the installed artifact's actual mapped image and state lock. */
+export async function observeInstalledRuntimeOwner(appPath) {
+  const selected = await artifact(appPath)
+  const owner = await processOwner(selected.socketPath, selected.daemonSha256)
+  return { ...owner, socketPath: selected.socketPath, stateDirectory: selected.stateDirectory, sourceCommit: selected.manifest.source.commit,
+    sourceTree: selected.manifest.source.tree, manifestSha256: selected.manifestSha256 }
+}
+
 /** One bounded public RPC read; no Renderer injection or lifecycle action. */
 export async function observeUiClient(appPath) {
   const { stdout } = await exec(process.execPath, [script, '--inspect-ui', join(appPath, coreRelative, 'dist/index.js')], {
