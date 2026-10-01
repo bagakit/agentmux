@@ -27,8 +27,8 @@ import {
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 
 /**
- * 一个 browser 面**存到盘上的**最小可再实例化子集。只有这几位：browserId + url（+ title 供加载完成前
- * 先画个标签）。整个活体 `BrowserSnapshot` 的其余字段（navigationId/loading/canGoBack/canGoForward/
+ * 一个 browser 面**存到盘上的**最小可再实例化子集：browserId + url（+ title 供加载完成前
+ * 先画个标签），以及可选的稳定书签来源 path/binary。整个活体 `BrowserSnapshot` 的其余字段（navigationId/loading/canGoBack/canGoForward/
  * driving/appLinkPrompt/profileId/viewport/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
  * 重建 WebContentsView 那一刻的真快照补回（见 store 启动路径的 browser 复活循环 + `reduceBrowserEvent`）。
  *
@@ -45,6 +45,7 @@ export type PersistedBrowserSurface = {
   browserId: string
   url: string
   title: string
+  bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
 }
 
 /** 存盘形态的 Region：只有 browser 与活体不同（缩成 {@link PersistedBrowserSurface}），其余原样。 */
@@ -85,6 +86,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     id: surface.browserId,
     url: surface.url,
     title: surface.title,
+    ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {}),
     // 瞬时位：由 store 启动路径 create 出真 WebContentsView 后的快照经 applyBrowserEvent 覆盖。
     navigationId: '',
     profileId: '',
@@ -106,7 +108,8 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
     url: surface.url,
-    title: surface.title
+    title: surface.title,
+    ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {})
   }
 }
 

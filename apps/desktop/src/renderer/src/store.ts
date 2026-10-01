@@ -5237,7 +5237,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       } catch (error) {
         releaseNavigation()
-        throw error
+        result.data = { kind: 'failed', reason: presentError(error) }
+        get().reportError(error)
+        return false
       }
     }
     try {

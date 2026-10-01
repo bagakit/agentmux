@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import type { ExecutionHost } from '@agentmux/core'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
+import { BOOKMARK_FILE_MAX_BYTES } from '../src/shared/bookmark-file.js'
 
 /**
  * `readBookmarkBytes` 的**远端**分支：远端 host 的 `run` 只给 utf8 解码后的 string
@@ -106,6 +108,26 @@ afterEach(async () => {
 const runLocalIf = it.runIf(process.platform === 'darwin' || process.platform === 'linux')
 
 describe('readBookmarkBytes local branch preserves raw bytes (binary fidelity)', () => {
+  runLocalIf('returns all bytes at the 4 MiB boundary and rejects a larger bookmark before text fallback', async () => {
+    expect(BOOKMARK_FILE_MAX_BYTES).toBe(4 * 1024 * 1024)
+    const { root, workspace: ws, host } = await localFixture('bookmark-local-budget')
+    const files = new WorkspaceFiles(() => host)
+    const raw = Buffer.alloc(BOOKMARK_FILE_MAX_BYTES, 0x61)
+    raw.set(Buffer.from('[InternetShortcut]\nURL=https://example.invalid/\n'))
+    await writeFile(join(root, 'Boundary.url'), raw)
+    const received = await files.readBookmarkBytes(ws, 'Boundary.url')
+    expect(received?.byteLength).toBe(raw.byteLength)
+    expect(createHash('sha256').update(received!).digest('hex')).toBe(createHash('sha256').update(raw).digest('hex'))
+    await writeFile(join(root, 'Over.url'), Buffer.concat([raw, Buffer.from('x')]))
+    const rejected = await files.readBookmarkBytes(ws, 'Over.url').then(bytes => ({ readBytes: bytes?.byteLength }), error => ({ code: error.code }))
+    expect(rejected).toEqual({ code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+    // The cap belongs to bookmark preview, not the established explicit text/source reader.
+    const text = await files.read(ws, 'Over.url')
+    expect(text.status).toBe('read')
+    if (text.status !== 'read') throw new Error('The existing text reader did not return a document')
+    expect(Buffer.byteLength(text.document.content)).toBe(raw.byteLength + 1)
+    expect(createHash('sha256').update(text.document.content).digest('hex')).toBe(createHash('sha256').update(raw).update('x').digest('hex'))
+  })
   runLocalIf('a binary .webloc (real bplist00 with NUL) comes back byte-for-byte, unlike remote', async () => {
     const { root, workspace: ws, host } = await localFixture('bookmark-local-binary')
     await mkdir(join(root, 'links'))

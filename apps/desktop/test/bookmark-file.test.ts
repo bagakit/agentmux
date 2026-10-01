@@ -67,6 +67,17 @@ describe('bookmark extension SSOT', () => {
 })
 
 describe('.webloc emission is real plist that plutil accepts', () => {
+  it('decodes decimal and hexadecimal XML entities once, matching the independent plutil parser', () => {
+    const xml = emitWebloc('placeholder').replace('placeholder', 'https://example.invalid/?a=&#38;b=&#x4E2D;&#x1F642;&amp;#38;&amp;lt;')
+    const expected = 'https://example.invalid/?a=&b=中🙂&#38;&lt;'
+    const oracle = execFileSync('/usr/bin/plutil', ['-extract', 'URL', 'raw', '-o', '-', '-'], { input: xml, encoding: 'utf8' }).trimEnd()
+    expect(oracle).toBe(expected)
+    expect(parseWeblocUrl(xml)).toBe(oracle)
+  })
+
+  it.each(['&#0;', '&#xD800;', '&#x110000;', '&#999999999999999999999999999999;'])('preserves unsupported numeric entity %s without throwing', (entity) => {
+    expect(parseWeblocUrl(`<key>URL</key><string>https://example.invalid/${entity}</string>`)).toBe(`https://example.invalid/${entity}`)
+  })
   it('emits a plist that passes plutil -lint', () => {
     const lint = plutilLint(emitWebloc('https://example.com/'))
     expect(lint.ok, lint.output).toBe(true)
@@ -97,6 +108,22 @@ describe('.webloc emission is real plist that plutil accepts', () => {
   it('URL 里含字面量 &lt; 时往返仍逐字相等（钉住 &amp; 最后解）', () => {
     const url = 'https://example.com/?q=&lt;tag&gt;&amp;x'
     expect(parseWeblocUrl(emitWebloc(url))).toBe(url)
+  })
+})
+
+describe('bookmark basename UTF-8 budget', () => {
+  it.each([
+    ['中'.repeat(121), '中'.repeat(80)],
+    ['🙂'.repeat(121), '🙂'.repeat(60)],
+    ['中'.repeat(79) + '🙂tail', '中'.repeat(79)],
+    ['a'.repeat(121), 'a'.repeat(120)],
+    ['a'.repeat(119) + '🙂tail', 'a'.repeat(119) + '🙂']
+  ])('retains whole characters within both budgets for %s', (title, expected) => {
+    const name = bookmarkFileNameFromTitle(title)
+    expect(name).toBe(expected)
+    expect(Array.from(name).length).toBeLessThanOrEqual(120)
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(240)
+    expect(Buffer.byteLength(name + ' 50.webloc')).toBeLessThanOrEqual(255)
   })
 })
 

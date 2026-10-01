@@ -6,7 +6,7 @@ vi.hoisted(() => {
 
 import type { AppConfig } from '../src/shared/contracts.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { documentKey } from '../src/renderer/src/lib/workbench-tabs.js'
+import { addWorkbenchRegion, createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
@@ -54,6 +54,25 @@ afterEach(() => {
 })
 
 describe('openFile 把书签默认开进 Browser', () => {
+  it('reports a known bookmark budget failure without rereading text or changing the original workbench', async () => {
+    workspaceFixture()
+    const key = documentKey('workspace', 'draft.md')
+    const tab = addWorkbenchRegion(createWorkbenchTab('original-view', { regionId: 'dirty-file', kind: 'file', workspaceId: 'workspace', path: 'draft.md' }), 'dirty-file', 'right', {
+      regionId: 'original-agent', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'controlled-healthy-session'
+    })
+    useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('original-group', [tab.id]) },
+      documents: { [key]: { path: 'draft.md', content: 'Original unsaved draft', revision: 'original-revision' } }, dirtyDocuments: { [key]: true } })
+    const original = useAppStore.getState()
+    const before = { tabs: structuredClone(original.tabs), layouts: structuredClone(original.layouts), documents: structuredClone(original.documents), dirtyDocuments: structuredClone(original.dirtyDocuments), sessions: structuredClone(original.sessions), activeWorkspaceId: original.activeWorkspaceId }
+    vi.spyOn(api.files, 'readBookmark').mockRejectedValue(Object.assign(new Error('Bookmark exceeds the 4 MiB preview budget'), { code: 'WORKSPACE_FILE_BYTE_LIMIT' }))
+    const read = vi.spyOn(api.files, 'read'), create = vi.spyOn(api.browser, 'create')
+    expect(await useAppStore.getState().openFile('Large.webloc', undefined, undefined, 'workspace')).toBe(false)
+    const after = useAppStore.getState()
+    expect(after.error).toContain('4 MiB')
+    expect(read).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
+    expect({ tabs: after.tabs, layouts: after.layouts, documents: after.documents, dirtyDocuments: after.dirtyDocuments, sessions: after.sessions, activeWorkspaceId: after.activeWorkspaceId }).toEqual(before)
+  })
   it('URL 取得出：开 Browser 喂那个 URL，且不进 Monaco（不建 document）', async () => {
     workspaceFixture()
     const PATH = 'links/Example.webloc'

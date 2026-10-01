@@ -74,6 +74,32 @@ function splitView() {
 }
 
 describe('durable Workbench presentation', () => {
+  it.each([false, true])('round-trips bookmark source and binary=%s with the original Browser split and focus', (binary) => {
+    const browser = createWorkbenchTab('bookmark-view', {
+      regionId: 'bookmark-region', kind: 'browser', workspaceId: 'workspace', browserId: 'original-browser', id: 'original-browser',
+      url: 'https://example.invalid/original?a=1&b=2', title: 'Saved link', bookmarkOrigin: { path: 'links/Saved.webloc', binary },
+      navigationId: 'transient-navigation', profileId: 'transient-profile', loading: true, canGoBack: true, canGoForward: true,
+      viewport: 'responsive', error: 'transient', driving: true, appLinkPrompt: null
+    })
+    let tab = addWorkbenchRegion(browser, 'bookmark-region', 'right', {
+      regionId: 'healthy-neighbor', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'neighbor'
+    })
+    tab = { ...tab, layout: { ...tab.layout, activeRegionId: 'bookmark-region' } }
+    const layout = createWorkspaceLayout('original-group', [tab.id])
+    const projected = JSON.parse(JSON.stringify(projectPersistedWorkbench({ tabs: { [tab.id]: tab }, layouts: { workspace: layout } })))
+    expect(projected.tabs[tab.id].regions['bookmark-region']).toEqual({
+      regionId: 'bookmark-region', kind: 'browser', workspaceId: 'workspace', browserId: 'original-browser',
+      url: 'https://example.invalid/original?a=1&b=2', title: 'Saved link', bookmarkOrigin: { path: 'links/Saved.webloc', binary }
+    })
+    const restored = restorePersistedWorkbench({ config, sessions: [session('neighbor')], persisted: projected, createTabGroupId: () => 'unwanted-new-group' })
+    expect(Object.keys(restored.tabs)).toEqual([tab.id])
+    expect(restored.tabs[tab.id]!.regions['bookmark-region']).toMatchObject({
+      bookmarkOrigin: { path: 'links/Saved.webloc', binary }, navigationId: '', profileId: '', loading: false, error: null, driving: false
+    })
+    expect(restored.tabs[tab.id]!.regions['healthy-neighbor']).toEqual(tab.regions['healthy-neighbor'])
+    expect(restored.tabs[tab.id]!.layout).toEqual(tab.layout)
+    expect(restored.layouts.workspace).toEqual(layout)
+  })
   it('starts with empty Views instead of expanding background Sessions when no Workbench was persisted', () => {
     const restored = restorePersistedWorkbench({
       config,

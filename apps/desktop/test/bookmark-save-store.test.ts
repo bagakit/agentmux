@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { LocalExecutionHost } from '@agentmux/core'
+import { WorkspaceFiles } from '../src/main/workspace-files.js'
+import { bookmarkFileNameFromTitle, parseWeblocUrl } from '../src/shared/bookmark-file.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -27,6 +33,25 @@ afterEach(() => {
 })
 
 describe('saveBrowserBookmark 存书签', () => {
+  it.each(['中文项目'.repeat(80), '🙂🚀'.repeat(80), '中文🙂'.repeat(80)])('saves a whole-character long title at collision candidate fifty through the real filesystem owner: %s', async (title) => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-bookmark-name-'))
+    const workspace = { id: 'workspace', name: 'Project', kind: 'folder' as const, hostId: 'local', path: root }
+    const files = new WorkspaceFiles(() => new LocalExecutionHost())
+    const base = bookmarkFileNameFromTitle(title), url = 'https://example.invalid/?a=1&b=中🙂'
+    try {
+      const occupied = Array.from({ length: 49 }, (_, n) => n === 0 ? `${base}.webloc` : `${base} ${n + 1}.webloc`)
+      await Promise.all(occupied.map(name => writeFile(join(root, name), 'original bookmark bytes')))
+      const write = vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => files.write(workspace, input))
+      const saved = await useAppStore.getState().saveBrowserBookmark(workspace.id, url, title)
+      expect(saved).toBe(`${base} 50.webloc`)
+      expect(write).toHaveBeenCalledTimes(50)
+      expect(Buffer.byteLength(saved)).toBeLessThanOrEqual(255)
+      expect(parseWeblocUrl(await readFile(join(root, saved), 'utf8'))).toBe(url)
+      expect(await readFile(join(root, occupied[0]!), 'utf8')).toBe('original bookmark bytes')
+      expect(Array.from(base).length).toBeLessThanOrEqual(120)
+      expect(Buffer.byteLength(base)).toBeLessThanOrEqual(240)
+    } finally { await files.dispose(); await rm(root, { recursive: true, force: true }) }
+  })
   it('撞名退避：第一个候选被占（conflict）就换下一个，最终落到没被占的名字', async () => {
     useAppStore.setState({ workspaceFileRevisions: {} })
     const taken = new Set(['Example.webloc'])

@@ -147,6 +147,8 @@ beforeEach(() => {
 })
 
 async function openActivityMenu(container: HTMLElement): Promise<HTMLElement> {
+  // Radix restores focus on a task after the preceding menu unmounts. Reopen only after that owner releases it.
+  await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 0)) })
   const trigger = container.querySelector<HTMLButtonElement>('.browser-operation-status__trigger')!
   expect(trigger).not.toBeNull()
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
