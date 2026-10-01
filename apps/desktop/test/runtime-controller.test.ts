@@ -7,12 +7,14 @@ import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient as ActualCoreClient, type AgentMuxAgentPromptInput } from '../../../packages/core/src/client.js'
 import { AgentMuxMemoryAgentSessionStore as ActualCoreMemoryStore } from '../../../packages/core/src/agent-session-store.js'
+import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider.js'
 import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/agent-session-registry.js'
 import type { CtxmuxAdapterRun } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import type { AgentScreenEvidenceStore } from '../../../packages/core/src/screen-evidence.js'
 import type { AgentMuxStoredAgentSession } from '../../../packages/core/src/types.js'
 import {
   AgentMuxError,
+  type AgentCatalogEntry,
   type AgentCapabilities,
   type AgentMuxClientEvent,
   type AgentMuxAgentSession,
@@ -210,7 +212,7 @@ const runtimeFixture = vi.hoisted(() => {
       }
     }
     readonly providers = {
-      catalog: vi.fn(() => []),
+      catalog: vi.fn((): AgentCatalogEntry[] => []),
       get: vi.fn((providerId: string) => {
         const capabilities = FakeClient.PROVIDER_CAPABILITIES[providerId]
         // 未知 id 响亮地抛，与真 registry 的 UNKNOWN_PROVIDER 同一个姿态：取不到能力绝不能静默
@@ -400,6 +402,50 @@ describe('RuntimeController configuration transaction', () => {
     runtimeFixture.FakeClient.failNextConnect = false
     runtimeFixture.createdHosts.length = 0
     vi.clearAllMocks()
+  })
+
+  it('waits for the original Host handshake before reading the Provider catalog', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const handshake = deferred<void>()
+    const catalog = new AgentProviderRegistry().catalog()
+    let confirmed = false
+    client.connect.mockImplementationOnce(async () => { await handshake.promise; confirmed = true })
+    client.providers.catalog.mockImplementation(() => {
+      if (!confirmed) throw new AgentMuxError('The semantic Host identity is not confirmed.', 'CONTROL_UNAVAILABLE')
+      return catalog
+    })
+    const pending = controller.providerCatalog()
+    void pending.catch(() => {})
+    try {
+      await Promise.resolve()
+      expect(client.providers.catalog).not.toHaveBeenCalled()
+      expect(client.dispose).not.toHaveBeenCalled()
+      expect(client.stopAgent).not.toHaveBeenCalled()
+      expect(client.stopTerminal).not.toHaveBeenCalled()
+      handshake.resolve()
+      await expect(pending).resolves.toEqual(catalog)
+      expect(catalog.length).toBeGreaterThan(0)
+      expect(client.providers.catalog).toHaveBeenCalledOnce()
+    } finally { handshake.resolve(); await pending.catch(() => {}); await controller.dispose() }
+  })
+
+  it('retains the original Host and working input when the Provider catalog handshake fails', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const host = controller.executionHost('local'), originalSession = client.agentSession()
+    const failure = new AgentMuxError('The original Host observation is unavailable.', 'CONTROL_UNAVAILABLE')
+    client.connect.mockRejectedValueOnce(failure)
+    try {
+      await expect(controller.providerCatalog()).rejects.toBe(failure)
+      expect(client.providers.catalog).not.toHaveBeenCalled()
+      expect(controller.executionHost('local')).toBe(host)
+      expect(client.agentSession()).toEqual(originalSession)
+      expect(client.dispose).not.toHaveBeenCalled()
+      expect(client.stopAgent).not.toHaveBeenCalled()
+      expect(client.stopTerminal).not.toHaveBeenCalled()
+      client.listRuns.mockResolvedValue([{ runId: 'healthy-terminal', acceptedInputBytes: 0 }])
+      await controller.write({ kind: 'terminal', hostId: 'local', runId: 'healthy-terminal', run: { runId: 'healthy-terminal' } }, 'Still working', 'user')
+      expect(client.writeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: 'healthy-terminal' }, expect.objectContaining({ data: 'Still working' }))
+    } finally { await controller.dispose() }
   })
 
   it('connects a changed host before committing its host capabilities', async () => {

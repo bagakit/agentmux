@@ -539,9 +539,10 @@ export class RuntimeController {
     }
   }
 
-  providerCatalog(): AgentCatalogEntry[] {
+  async providerCatalog(): Promise<AgentCatalogEntry[]> {
     const runtimeHost = this.hosts.values().next().value as RuntimeHost | undefined
     if (!runtimeHost) throw new Error('Runtime has no configured hosts.')
+    await runtimeHost.client.connect()
     return runtimeHost.client.providers.catalog()
   }
 

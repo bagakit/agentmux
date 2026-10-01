@@ -357,6 +357,11 @@ function startPrimaryInstance(): void {
       await rename(temporaryReportPath, reportPath)
     }
     if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
+      if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
+        const clients = runtime.rpcClients()
+        if (!clients.some(({ hostId }) => hostId === 'local')) throw new Error('Launch smoke requires the configured local Host.')
+        await Promise.all(clients.map(({ client }) => client.connect()))
+      }
       const readyPath = process.env.AGENTMUX_DESKTOP_READY_FILE
       const temporaryReadyPath = `${readyPath}.tmp-${process.pid}`
       await writeFile(temporaryReadyPath, `${JSON.stringify({

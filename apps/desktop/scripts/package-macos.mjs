@@ -564,6 +564,27 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const ownedApplicationPids = async () => (
     (await processIdsForApplication(canonicalAppPath)).filter((pid) => !before.has(pid))
   )
+  const semanticHostCommand = `${executable} ${join(canonicalAppPath, 'Contents', 'Resources', 'app', 'out', 'main', 'agentmux-host.js')} --store ${join(userData, 'agent-sessions.json')}`
+  const semanticHostOwners = new Map()
+  const ownedSemanticHostPids = async () => {
+    const observed = await run('ps', ['-axo', 'uid=,pid=,ppid=,lstart=,command='],
+      { capture: true, env: { ...process.env, LC_ALL: 'C' } })
+    const scope = await scopedProcesses(canonicalAppPath)
+    return observed.stdout.split('\n').flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/u.exec(line)
+      if (!match || match[5] !== semanticHostCommand) return []
+      const uid = Number(match[1]), pid = Number(match[2]), ppid = Number(match[3]), birth = match[4].replace(/\s+/g, ' ')
+      const mode = scope.nodeModes.find(row => row.pid === pid)
+      assert(uid === process.getuid() && mode?.mode === 'node' && mode.executable === executable &&
+        mode.uid === uid && mode.ppid === ppid && mode.birth === birth,
+        'Private launch smoke Host process identity is unconfirmed.')
+      if (semanticHostOwners.has(pid)) assert(semanticHostOwners.get(pid) === birth,
+        'Private launch smoke Host PID was reused.')
+      else semanticHostOwners.set(pid, birth)
+      return [pid]
+    })
+  }
+  assert((await ownedSemanticHostPids()).length === 0, 'Private launch smoke Host already exists.')
   const ownedDaemonPids = async () => {
     const processes = await run('ps', ['-axo', 'pid=,command='], { capture: true })
     return processes.stdout.split('\n').flatMap((line) => {
@@ -593,6 +614,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(await realpath(ready.executable) === executable,
       'LaunchServices ready receipt did not come from the exact relocated application.')
     verificationStage = 'runtime-owner-receipt'
+    assert(await waitForPath(ownerReceiptPath, verificationDeadline), 'Packaged CtxMux did not publish its ownership receipt.')
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
     assert(await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
       ownerReceipt.socketPath === endpointPath,
@@ -609,6 +631,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   }
   const cleanupErrors = [
     ...await cleanupProcessScope('application', ownedApplicationPids),
+    ...await cleanupProcessScope('semantic-host', ownedSemanticHostPids),
     ...await cleanupProcessScope('daemon', ownedDaemonPids)
   ]
   if (cleanupErrors.length === 0) {
