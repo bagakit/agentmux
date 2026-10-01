@@ -2851,3 +2851,19 @@ Escape、显式关闭和点击外部可以收起，不丢草稿或改变运行�
 - **重启恢复保全先于界面优化。** 同一次进程重启后，原 Tab / Tab Group / Region / 焦点 / 分割布局先按 durable 状态恢复，引用 Session 自动尝试 reattach / resume；Launcher 部分偏好和未发送草稿保留。临时空快照、超时和探测未知仍保留原工作面并用服务窗说明，只有 Core 终局事实允许移除投影。宽窄视觉验收必须以实际工作面为输入，且核对健康 Run 没有因开合、尺寸和联动被停止或重复创建。
 
 视觉、密度、材质和控件层级唯一见密度 SSOT《初始 Launcher 的现代工作台密度》；本节只定义行为与约束。
+
+### 私网手机版首个闭环
+
+用户先确认「我们先完成这一步」并要求创建或整理 Feature Tracker，随后授权彻底实现同一私网首个闭环：在 worktree 推进，基于最新 main rebase 后线性集成，main 保持单亲，并发变更与未保存工作完整保全。前文“尚未批准”及仅整理计划不启动的记录只表达其当轮状态；本次执行仍沿已评审的同一目标、约束与验收边界。
+
+手机先认证直连当前 Mac Host，继续同一已有AgentSession的对话、后续Prompt和确切交互请求，并让同一Run终端、连续阅读、手机输入和断线/重启恢复可用。公网relay、Linux发行、新建Agent/工作区、diff、商店发布和系统推送不属于本批。
+
+分层与远端身份沿《联邦 Runtime 与远端恢复边界》，同公共方法沿《对象优先 CLI 与统一公共业务服务》，原工作面与健康Run沿《Session Attach 与 Runtime Projection 的边界》，终端字节、阅读与成本沿《Terminal 连续向上阅读历史》。长期无UI Host采用原Core/Hook/Store/Provider handle与ctxmux namespace，同时服务Desktop和Mobile；手机网络Client不冒充ctxmux Remote或另一Runtime。切换必须保持原Desktop可用，不先拆正常流程或新建空Store。
+
+共享既有Conversation消息/历史、结构化请求和Composer组成；设备外壳、焦点、剪贴板、overlay与键盘沿明确平台owner。手机独立导航、草稿、阅读和布局共用Session事实，观看不搬桌面Region。认证与私网可达性是两件事：设备有独立授权和撤销，HTTPS或已验证可信私网里的受保护认证通道鉴别Host并保护credential；浏览器不自行绕过证书或承诺JS pinning。撤销终止该设备已连请求/订阅，只收相关消费者，不停止健康Run。Host睡眠/离线如实说明，不伪称Agent退出或手机能唤醒关机电脑。
+
+观看与控制可辨。被动阅读不resize，不发鼠标输入或DA/DSR/颜色查询回写，checkpoint/replay不触发输入、通知或剪贴板；设备policy不伪造ctxmux排他输入/尺寸lease。发送和request响应保原业务身份，失联未知不盲重发。前台恢复先保原工作面，再核验连接、Session/Run、语义与字节cursor；只有Core终局事实移除引用。
+
+durable工作面明确保存位置和回读来源。设备进程重启与重新安装存储条件不同；不依靠普通缓存或假定秘密跨卸载必存宣称重装恢复。首闭环提供可保全的工作面来源、凭证丢失后的重新授权与明确恢复入口；未确认保原Host Session和服务说明，不创建替代对象。
+
+用户确认 iPhone 与 Android 两类真机都有，明确「优先 iphone」：优先交付 iPhone 并完成其真机验收，Android 保留后续同能力范围；已评审的两类设备 oracle 与保护约束保持，优先顺序不缩减 Android 范围或降低验收。
