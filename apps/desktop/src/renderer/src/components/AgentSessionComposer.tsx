@@ -32,6 +32,7 @@ import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
+import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 
 export type AgentComposerAvailability = {
@@ -63,6 +64,7 @@ export function AgentSessionComposer({
   tabName,
   resultReview,
   reading,
+  onRevealMessage,
   visible = true
 }: {
   sessionId: string
@@ -71,6 +73,7 @@ export function AgentSessionComposer({
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
   reading?: ConversationReadingProps | undefined
+  onRevealMessage?: RevealMailboxMessage | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
 }) {
@@ -260,7 +263,7 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
-      mailbox={<SessionMailbox reading={reading} visible={visible} system={inbox} timeline={timeline}
+      mailbox={<SessionMailbox reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({

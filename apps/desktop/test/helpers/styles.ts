@@ -32,6 +32,9 @@ function importOrder(): string[] {
 }
 
 function stylesheetPath(specifier: string): string {
+  // A Source-qualified UI suite reads the very shared style imported by the app, without
+  // requiring an unrelated package build or a stale dist copy in an isolated worktree.
+  if (specifier.startsWith('@agentmux/client-ui/styles/')) return join(STYLES_DIR, '..', '..', '..', '..', '..', '..', 'packages', 'client-ui', 'src', 'styles', specifier.slice('@agentmux/client-ui/styles/'.length))
   return specifier.startsWith('.') ? join(STYLES_DIR, specifier) : require.resolve(specifier)
 }
 
