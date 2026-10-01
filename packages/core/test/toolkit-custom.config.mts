@@ -14,7 +14,9 @@ const changes: Record<string, [string, string, string]> = {
   header: ['packages/core/src/control-host.ts', 'if (isToolkitOperation(operation?.value)) return parseToolkitRequest(source)', 'void operation'],
   target: ['packages/core/src/toolkit.ts', 'if (toolId !== request.toolId) throw', 'if (false) throw'],
   input: ['packages/core/src/toolkit.ts', "case 'toolkit.run': record(source, source.toolId === 'performance' ? base : [...base, 'input'], [], code); if (source.toolId !== 'performance') parseToolkitRunInput(source.input, code); break", "case 'toolkit.run': record(source, base, ['input'], code); break"],
-  utf8: ['packages/core/src/cli-json-input.ts', "new TextDecoder('utf-8', { fatal: true }).decode", "new TextDecoder('utf-8', { fatal: false }).decode"]
+  utf8: ['packages/core/src/cli-json-input.ts', "new TextDecoder('utf-8', { fatal: true }).decode", "new TextDecoder('utf-8', { fatal: false }).decode"],
+  'action-count': ['packages/core/src/toolkit.ts', 'value.length > TOOLKIT_MAX_ACTIONS', 'value.length > 32'],
+  'action-input': ['packages/core/src/toolkit.ts', 'identity(source.actionId, code); parseToolkitActionInput(source.input, code); break', 'identity(source.actionId, code); void source.input; break']
 }
 assert.ok(mutant === 'baseline' || changes[mutant], 'The Core mutation must name an actual owning Source change.')
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')

@@ -1176,6 +1176,11 @@ function operationPath(args: readonly string[]): string | null {
   return args[0] ?? null
 }
 function requestsHelp(args: readonly string[]): boolean {
+  if (args[0] === 'toolkit') {
+    const help = (value: string | undefined) => value === '--help' || value === '-h'
+    // Full positional commands contain literal IDs and local JSON input paths.
+    return (args.length === 2 && help(args[1])) || (args.length === 3 && help(args[2]))
+  }
   if (args[0] === 'diagnostics') {
     const tail = args.at(-1)
     return (tail === '--help' || tail === '-h') && (args.length === 2 ||

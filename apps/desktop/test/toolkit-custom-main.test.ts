@@ -10,7 +10,7 @@ import { TOOLKIT_ENDED_CHANNEL } from '../src/shared/contracts.js'
 
 async function add(m: Awaited<ReturnType<typeof nativeMain>>, id = 'quota', script = "console.log('真实工具_ACK')") {
   const fields: ToolkitToolFields = { name: 'Quota', icon: 'terminal', enabled: true, statusBar: 'icon',
-    workspacePath: join(m.directory, 'work'), script, args: [] }
+    workspacePath: join(m.directory, 'work'), script, args: [], actions: [] }
   const path = join(m.directory, id + '-fields.json'); await writeFile(path, JSON.stringify(fields))
   return { fields, definition: (await oneCli('toolkit', 'add', id, '--input', path)).result.definition }
 }
