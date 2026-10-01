@@ -136,3 +136,10 @@
 
 .toolkit-library__parent { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .toolkit-library__directory { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+.toolkit-template__identity { display: flex; align-items: flex-start; gap: var(--sp-4); padding-block: var(--sp-4); }
+.toolkit-library__item[data-tool-template][aria-pressed='true'] { background: var(--wash-3); }
+.toolkit-template__identity > svg { flex: none; margin-top: var(--sp-2); color: var(--accent); }
+.toolkit-template__identity h3 { margin: 0 0 var(--sp-2); color: var(--text); font: 600 var(--fs-display)/1.4 var(--font-sans); }
+.toolkit-template__identity p { margin: 0; color: var(--text-2); line-height: 1.6; }
+.toolkit-template__source { max-height: 300px; overflow: auto; padding: var(--sp-4); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-meta)/1.6 var(--font-mono); }
