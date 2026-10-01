@@ -101,7 +101,7 @@ describe('终端右键的身份动作：复用同一个地址出口', () => {
     for (const action of actions) await action.onSelect()
     // 带引号的 id 选得故意：shell 转义也必须来自那个出口，不是终端侧自己转一遍。
     expect(copied[1]).toBe(formatSessionAddress("agent with 'quotes'"))
-    expect(copied[1]).toContain('agentmux send')
+    expect(copied[1]).toContain('amux agent send')
   })
 })
 
@@ -146,7 +146,7 @@ describe('TerminalContextMenu / TerminalView 真把这份 actions 接上了', ()
     expect(block).toContain('sessionKind: session.kind')
     // 不许从 store 取活跃会话：用户右键的那一格往往恰恰不是聚焦的那一格。
     expect(block).not.toContain('activeSession')
-    expect(block).not.toContain('useAppStore')
+    expect(block).toContain('resolveAgentSharingMetadata(session.id, useAppStore.getState())')
   })
 
   it('写剪贴板走共用出口，不绕过它直接碰 IPC', () => {

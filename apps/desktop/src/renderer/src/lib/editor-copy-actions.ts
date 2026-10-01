@@ -12,6 +12,7 @@
  * Agent 的上下文块」。写盘则统一走 `copyTextToClipboard`，本模块不碰剪贴板。
  */
 import { formatPathsForCopy } from './clipboard-copy'
+import { formatAmuxSharing } from '@agentmux/core/sharing'
 
 /**
  * 「选区跨了多行」这个上下文键的名字。
@@ -72,7 +73,8 @@ export function hasMultilineSelection(startLine: number, endLine: number): boole
  */
 export function formatAgentContextBlock(input: CopyActionInput): string {
   const { relativePath, startLine, endLine, selectedText, fenceLang } = input
-  return `${relativePath}:${startLine}-${endLine}\n\`\`\`${fenceLang}\n${selectedText}\n\`\`\`\n`
+  return formatAmuxSharing('File',
+    `${relativePath}:${startLine}-${endLine}\n\`\`\`${fenceLang}\n${selectedText}\n\`\`\`\n`)
 }
 
 /**

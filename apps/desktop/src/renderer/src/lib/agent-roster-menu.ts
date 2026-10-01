@@ -1,4 +1,5 @@
 import { Copy, Send } from 'lucide-react'
+import type { AgentSharingMetadata } from '@agentmux/core/sharing'
 import { formatMessagingAddress, formatSessionAddress } from './agent-address'
 
 /**
@@ -24,6 +25,8 @@ export type AgentRosterMenuAction = {
 
 export function agentRosterMenuActions(input: {
   sessionId: string
+  /** Read current execution labels when copying, without subscribing a menu to runtime updates. */
+  sharingMetadata?: () => AgentSharingMetadata
   writeClipboardText(text: string): Promise<void>
 }): AgentRosterMenuAction[] {
   return [
@@ -32,13 +35,16 @@ export function agentRosterMenuActions(input: {
       label: 'Message this Agent',
       icon: Send,
       onSelect: async () =>
-        input.writeClipboardText(formatMessagingAddress({ agentSessionId: input.sessionId }))
+        input.writeClipboardText(formatMessagingAddress({
+          agentSessionId: input.sessionId,
+          ...input.sharingMetadata?.()
+        }))
     },
     {
       key: 'copy-session',
       label: 'Copy Session Address',
       icon: Copy,
-      onSelect: async () => input.writeClipboardText(formatSessionAddress(input.sessionId))
+      onSelect: async () => input.writeClipboardText(formatSessionAddress(input.sessionId, input.sharingMetadata?.()))
     }
   ]
 }

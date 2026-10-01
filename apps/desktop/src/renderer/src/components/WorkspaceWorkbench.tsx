@@ -93,6 +93,7 @@ import { assertUnreachableSurface, isSessionSurface } from '../lib/workbench-sur
 import { tabMarkAgentFactsFor, tabRegionSummary, workbenchTabMarks } from '../lib/workbench-tab-marks'
 import { canStopSessionRun, sessionTabTooltip, surfaceTabTooltip } from '../lib/session-metadata'
 import { addressableAgentSessionId, copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
+import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { api } from '../lib/api'
@@ -369,6 +370,7 @@ function SortableWorkbenchTab({
         canMoveToNewGroup={group.tabOrder.length > 1}
         tabId={tab.id}
         copyableAgentSessionId={copyableAgentSessionId}
+        sharingMetadata={() => resolveAgentSharingMetadata(copyableAgentSessionId, useAppStore.getState())}
         {...(fileActions ? { fileActions } : {})}
         writeClipboardText={async (text) => {
           await copyTextToClipboard(text, reportError)
@@ -822,6 +824,7 @@ function WorkbenchRegionContent({
       // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
       // （tab-control-handoff 的 addressableAgentSessionId），所以第六种载 Agent 的 kind 只在那里声明一次。
       agentSessionId={addressableAgentSessionId(surface)}
+      sharingMetadata={() => resolveAgentSharingMetadata(addressableAgentSessionId(surface), useAppStore.getState())}
       writeClipboardText={async (text) => {
         await copyTextToClipboard(text, reportError)
       }}

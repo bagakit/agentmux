@@ -2,6 +2,7 @@ import type {
   BrowserAnnotationMarker,
   BrowserElementSelection
 } from '../../../shared/contracts'
+import { formatAmuxSharing } from '@agentmux/core/sharing'
 
 export const BROWSER_ANNOTATION_NOTE_MAX_LENGTH = 1_000
 export const BROWSER_CONTEXT_MAX_LENGTH = 12_000
@@ -26,7 +27,7 @@ export function normalizeBrowserAnnotationNote(value: string): string {
     .slice(0, BROWSER_ANNOTATION_NOTE_MAX_LENGTH)
 }
 
-export function formatBrowserElementContext(
+function browserElementContextContent(
   selection: BrowserElementSelection,
   note = ''
 ): string {
@@ -35,7 +36,6 @@ export function formatBrowserElementContext(
     .join(' ')
   const nearby = selection.nearbyText.join(' | ')
   const content = [
-    'Browser element context',
     ...line('Page', selection.pageTitle),
     ...line('URL', selection.pageUrl),
     ...line('Element', `<${selection.tagName}>${selection.role ? ` role=${selection.role}` : ''}`),
@@ -47,16 +47,25 @@ export function formatBrowserElementContext(
     ...line('HTML', selection.html),
     ...line('Annotation', normalizeBrowserAnnotationNote(note))
   ].join('\n')
-  return content.slice(0, BROWSER_CONTEXT_MAX_LENGTH)
+  return content
+}
+
+function shareBrowserContext(content: string): string {
+  const bodyBudget = BROWSER_CONTEXT_MAX_LENGTH - formatAmuxSharing('Browser', '').length
+  return formatAmuxSharing('Browser', content.slice(0, bodyBudget))
+}
+
+export function formatBrowserElementContext(selection: BrowserElementSelection, note = ''): string {
+  return shareBrowserContext(browserElementContextContent(selection, note))
 }
 
 export function formatBrowserAnnotationsContext(annotations: readonly BrowserAnnotation[]): string {
-  return annotations
+  return shareBrowserContext(annotations
     .map((annotation, index) => (
-      `## Element ${browserAnnotationDisplayNumber(annotations, index)}\n${formatBrowserElementContext(annotation.selection, annotation.note)}`
+      `## Element ${browserAnnotationDisplayNumber(annotations, index)}\n${browserElementContextContent(annotation.selection, annotation.note)}`
     ))
     .join('\n\n')
-    .slice(0, BROWSER_CONTEXT_MAX_LENGTH)
+  )
 }
 
 export function browserAnnotationMarkers(

@@ -77,14 +77,14 @@ describe('面向 Agent 的上下文块', () => {
     const text = formatAgentContextBlock(
       input({ startLine: 3, endLine: 6, selectedText: 'const x = 1', fenceLang: 'typescript' })
     )
-    expect(text).toBe('src/app.ts:3-6\n```typescript\nconst x = 1\n```\n')
+    expect(text).toBe('--- amux : File ---\nsrc/app.ts:3-6\n```typescript\nconst x = 1\n```\n\n-----')
   })
 
   it('围栏语言跟随文件类型，不写死成某一种', () => {
     const text = formatAgentContextBlock(
       input({ relativePath: 'main.py', startLine: 1, endLine: 2, selectedText: 'pass', fenceLang: 'python' })
     )
-    expect(text).toBe('main.py:1-2\n```python\npass\n```\n')
+    expect(text).toBe('--- amux : File ---\nmain.py:1-2\n```python\npass\n```\n\n-----')
   })
 
   it('第四个动作 buildText 就是这个上下文块函数（同一出口，不重造格式）', () => {

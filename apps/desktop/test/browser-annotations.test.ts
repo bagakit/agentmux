@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BrowserElementSelection } from '../src/shared/contracts.js'
 import {
   BROWSER_ANNOTATION_NOTE_MAX_LENGTH,
+  BROWSER_CONTEXT_MAX_LENGTH,
   browserAnnotationDisplayNumber,
   browserAnnotationMarkers,
   formatBrowserAnnotationsContext,
@@ -43,7 +44,7 @@ describe('Browser annotation drafts', () => {
   it('formats only the sanitized selection contract for Composer handoff', () => {
     const context = formatBrowserElementContext(selection, 'Explain this control')
     for (const expected of [
-      'Browser element context',
+      '--- amux : Browser ---',
       'Page: Example docs',
       'URL: https://example.com/docs',
       'Selector: main > button.settings',
@@ -53,7 +54,21 @@ describe('Browser annotation drafts', () => {
       .toContain('## Element 2')
   })
 
-  it('normalizes and bounds user notes', () => {
+  it('keeps one complete frame within the total cap for individual and aggregated context', () => {
+    const large = { ...selection, text: 'x'.repeat(BROWSER_CONTEXT_MAX_LENGTH), html: 'y'.repeat(BROWSER_CONTEXT_MAX_LENGTH) }
+    const contexts = [formatBrowserElementContext(large), formatBrowserAnnotationsContext(
+      Array.from({ length: 30 }, (_, index) => ({ ...annotation(String(index)), selection: large }))
+    )]
+    for (const context of contexts) {
+      expect(context.length).toBeLessThanOrEqual(BROWSER_CONTEXT_MAX_LENGTH)
+      expect(context.startsWith('--- amux : Browser ---\n')).toBe(true)
+      expect(context.endsWith('\n-----')).toBe(true)
+      expect(context.match(/--- amux : Browser ---/gu)).toHaveLength(1)
+      expect(context).toContain('URL: https://example.com/docs')
+    }
+  })
+
+  it('normalizes and bounds user notes' , () => {
     expect(normalizeBrowserAnnotationNote('  explain\n\tthis  ')).toBe('explain this')
     expect(normalizeBrowserAnnotationNote('x'.repeat(BROWSER_ANNOTATION_NOTE_MAX_LENGTH + 10)))
       .toHaveLength(BROWSER_ANNOTATION_NOTE_MAX_LENGTH)

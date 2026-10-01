@@ -44,8 +44,8 @@ describe('Tab 地址：哪张完整工作面', () => {
   it('把带前导横线与 shell 元字符的 id 转义到可直接执行', () => {
     const address = formatTabAddress("--tab id$'quoted")
     const quoted = `'--tab id$'"'"'quoted'`
-    expect(address).toContain(`agentmux inspect --tab=${quoted}`)
-    expect(address).toContain(`agentmux send --to-tab=${quoted} --text "..."`)
+    expect(address).toContain(`amux space inspect --tab=${quoted}`)
+    expect(address).not.toContain('agent send')
   })
 
   it('复制出的是地址而非裸 id，且经唯一 formatter', async () => {
@@ -61,7 +61,7 @@ describe('Tab 地址：哪张完整工作面', () => {
     expect(copied).toBe(formatTabAddress('tab'))
     // 裸 id 不构成寻址方式：地址必须自带可执行命令。
     expect(copied).not.toBe('tab')
-    expect(copied).toContain('agentmux send --to-tab=')
+    expect(copied).toContain('amux space inspect --tab=')
   })
 
   // 唯一性判定本身没变：整张 View 承载多个不同 Agent 时，没有无歧义的 Session 地址可给，
@@ -133,8 +133,8 @@ describe('Tab 菜单与 Region 菜单同源', () => {
     const copied = writeClipboardText.mock.calls[0]![0]
 
     expect(copied).toBe(formatTabAddress('view:x'))
-    expect(copied).toContain('恰好一个不同的 Agent Session ID')
-    expect(copied).toMatch(/Region/u)
+    expect(copied).toContain('--- amux : Tab ---')
+    expect(copied).not.toContain('agent send')
     // 旧 handoff 把消歧甩给接收方，新地址不这么干。
     expect(copied).not.toContain('MESSAGE_TARGET_NOT_UNIQUE')
   })
@@ -161,7 +161,7 @@ describe('Tab 菜单与 Region 菜单同源', () => {
       writeClipboardText: fromRegion
     }).handoff?.onSelect()
     expect(fromRegion.mock.calls[0]![0]).toContain("--to-session='agent-7'")
-    expect(fromRegion.mock.calls[0]![0]).toContain("--region='region:y'")
+    expect(fromRegion.mock.calls[0]![0]).toContain('Region: region:y')
     expect(fromRegion.mock.calls[0]![0]).not.toBe(fromTab.mock.calls[0]![0])
   })
 

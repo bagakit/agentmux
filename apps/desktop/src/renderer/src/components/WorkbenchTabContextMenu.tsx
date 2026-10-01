@@ -24,6 +24,7 @@ import {
 } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '@agentmux/layout'
 import { formatMessagingAddress, formatSessionAddress, formatTabAddress } from '../lib/agent-address'
+import type { AgentSharingMetadata } from '@agentmux/core/sharing'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
@@ -121,11 +122,13 @@ export type WorkbenchTabFileActions = {
 export function createWorkbenchTabCopyModel({
   tabId,
   agentSessionId,
+  sharingMetadata,
   file,
   writeClipboardText
 }: {
   tabId: string
   agentSessionId: string | null
+  sharingMetadata?: (() => AgentSharingMetadata) | undefined
   file?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
 }): WorkbenchTabCopyModel {
@@ -152,13 +155,13 @@ export function createWorkbenchTabCopyModel({
             label: 'Message this Agent',
             icon: Send,
             onSelect: async () =>
-              copy(formatMessagingAddress({ agentSessionId }), 'Message this Agent')
+              copy(formatMessagingAddress({ agentSessionId, ...sharingMetadata?.() }), 'Message this Agent')
           },
           sessionAddress: {
             id: 'copy-session-address' as const,
             label: 'Copy Session Address',
             icon: Copy,
-            onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Session Address')
+            onSelect: async () => copy(formatSessionAddress(agentSessionId, sharingMetadata?.()), 'Copy Session Address')
           }
         }
       : {}),
@@ -225,6 +228,7 @@ export function WorkbenchTabContextMenu({
   canMoveToNewGroup,
   tabId,
   copyableAgentSessionId,
+  sharingMetadata,
   fileActions,
   writeClipboardText,
   onRenameTab,
@@ -250,6 +254,7 @@ export function WorkbenchTabContextMenu({
   canMoveToNewGroup: boolean
   tabId: string
   copyableAgentSessionId: string | null
+  sharingMetadata?: (() => AgentSharingMetadata) | undefined
   // 文件 Tab 才传；非文件 Tab 缺席，路径复制与「显示」整组不出现。
   fileActions?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
@@ -285,6 +290,7 @@ export function WorkbenchTabContextMenu({
   const copyModel = createWorkbenchTabCopyModel({
     tabId,
     agentSessionId: copyableAgentSessionId,
+    sharingMetadata,
     ...(fileActions ? { file: fileActions } : {}),
     writeClipboardText
   })

@@ -47,6 +47,7 @@ export * from './session-history.js'
 export * from './session-user-messages.js'
 export * from './workbench-layout-preset.js'
 export * from './types.js'
+export * from './sharing.js'
 export * from './terminal-continuation.js'
 export { discoverAgentSkills, type AgentSkill } from './agent-skills.js'
 
