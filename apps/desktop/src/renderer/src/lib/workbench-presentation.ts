@@ -32,4 +32,9 @@ export function workbenchBrowserStageHostId(target: WorkbenchViewTarget, regionI
   const reference = target.reference!
   return `${target.hostId}:browser:${JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId, regionId])}`
 }
+/** Agent reading stages use the same exact display occurrence as Browser stages. */
+export function workbenchSessionStageHostId(target: WorkbenchViewTarget, regionId: string): string {
+  const reference = target.reference!
+  return `${target.hostId}:session:${JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId, regionId])}`
+}
 export const WorkbenchBrowserTargetsContext = createContext<readonly WorkbenchViewTarget[]>([])

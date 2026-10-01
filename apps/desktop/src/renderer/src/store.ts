@@ -7,7 +7,7 @@ import { warmLauncherId } from './lib/warm-terminal-preview'
 import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
 import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
-import type { FileOpenPlacement, FileOpenResult } from './lib/file-workbench-state'
+import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } from './lib/file-workbench-state'
 import type { EditorRegionMode } from './lib/file-region-presentation'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
@@ -143,6 +143,7 @@ import {
   findGroupForTab,
   focusGroup,
   removeTab as removeLayoutTab,
+  regionIds,
   setSplitRatio,
   moveTabToNewGroup as moveLayoutTabToNewGroup,
   setWorkbenchRegionSplitRatio,
@@ -5171,6 +5172,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         (!placement?.onResult || !expectedSurface || exactRegionId && currentTab?.regions[exactRegionId] === expectedSurface)
     }
     if (!resourceCurrent()) return false
+    const confirmedExistingSpace = (state: AppState): ConfirmedExistingFileSpace | undefined => {
+      if (!placement || placement.reference || !canonicalTabId) return undefined
+      const tab = state.tabs[canonicalTabId]
+      if (!tab) return undefined
+      const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)
+      const catalog = spatialCatalog(state, topics ?? [])
+      const original = catalog.tabs.find(item => item.tabId === tab.id)
+      const zone = catalog.zones.find(item => item.zoneId === original?.zoneId)
+      const file = regionIds(tab.layout.root).some(id => {
+        const region = tab.regions[id]
+        return region?.kind === 'file' && region.workspaceId === workspaceId && region.path === path
+      })
+      if (tab.workspaceId !== workspaceId || !file || !workspace ||
+        workspace.hostId !== placement.resource.hostId || workspace.path !== placement.resource.path ||
+        zone?.workspaceId !== workspaceId || zone.hostId !== workspace.hostId) {
+        throw new Error('The existing File resource or Zone context is unconfirmed; its original Tab and body are retained.')
+      }
+      const space = { zoneId: zone.zoneId, spaceId: zoneContext(state, topics ?? [], zone) }
+      if (tab.space && (tab.space.zoneId !== space.zoneId || tab.space.spaceId !== space.spaceId)) {
+        throw new Error('The stored File context contradicts its original Zone; its original Tab and body are retained.')
+      }
+      return { tabId: tab.id, space }
+    }
     if (!background && !placement?.projection && get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     const intentVersion = background ? fileOpenIntentVersion : ++fileOpenIntentVersion
     if (!background) fileOpenNavigationUnsubscribe?.()
@@ -5260,7 +5285,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const targetGroupId = tabGroupId ?? layout.activeGroupId
         const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
         const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement))
+        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state)))
         rememberPlacement()
         result.data = { kind: 'text', reason: null }
         selectProjection()
@@ -5273,7 +5298,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         releaseNavigation()
         const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
         const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement))
+        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state)))
         rememberPlacement()
         result.data = { kind: get().documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'media-preview', reason: null }
         selectProjection()
@@ -5323,11 +5348,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   ? reduceDocumentAttached(state, workspaceId, path, result.document)
                   : reduceDocumentLoadFailed(state, workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength })
                 const opened = format && !format.sourceEditable
-                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement)
+                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state))
                   : result.status === 'read'
-                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement)
+                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state))
                   : reduceDocumentLoadFailed(
-                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement),
+                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state)),
                     workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength }
                   )
                 const placed = opened.layouts[displayId!]!
@@ -5380,8 +5405,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
           const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
           set((current) => current.documents[key]
-            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement)
-            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement))
+            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(current))
+            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(current)))
           rememberPlacement()
           selectProjection()
           return !background && intentVersion === fileOpenIntentVersion
@@ -6710,7 +6735,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         placementError = new Error('Workspace layout is unavailable')
         return current
       }
-      if (!findGroup(layout, placementOrigin.tabGroupId)) {
+      const originGroup = findGroup(layout, placementOrigin.tabGroupId)
+      if (!originGroup || !groupIds(layout.root).includes(originGroup.id)) {
         placementError = new Error('Link origin Tab Group is no longer available')
         return current
       }
@@ -6742,9 +6768,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const originTab = current.tabs[placementOrigin.tabId!]
       if (
         !originTab ||
-        originTab.workspaceId !== placementOrigin.workspaceId ||
         !originTab.regions[placementOrigin.regionId!] ||
-        tabGroupForTab(layout, originTab.id) !== placementOrigin.tabGroupId
+        !regionIds(originTab.layout.root).includes(placementOrigin.regionId!) ||
+        !originGroup.tabOrder.includes(originTab.id)
       ) {
         placementError = new Error('Link origin Region is no longer available')
         return current
@@ -6753,6 +6779,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         placementError = new Error('The View is closing')
         return current
       }
+      pendingLauncher.workspaceId = originTab.workspaceId
       const nextTab = addWorkbenchRegion(
         originTab,
         placementOrigin.regionId!,
@@ -6769,7 +6796,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!planned) throw placementError ?? new Error('Link destination could not be created')
 
     try {
-      await get().createBrowser(placementOrigin.tabGroupId, { tabId, regionId }, url)
+      await get().createBrowser(placementOrigin.tabGroupId, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId)
     } catch (error) {
       set((current) => {
         const liveTab = current.tabs[tabId]

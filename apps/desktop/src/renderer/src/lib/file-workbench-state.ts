@@ -92,6 +92,9 @@ export type FileOpenPlacement = {
   onResult?: (result: FileOpenResult) => void
 }
 
+/** Current original-owner fact for this commit; never written back to the retained Tab. */
+export type ConfirmedExistingFileSpace = { tabId: string; space: FileOpenPlacement['space'] }
+
 /** An existing File Region is an exact address, not an instruction to create another Tab. */
 export function fileOpenReferenceMatches(
   state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string,
@@ -121,7 +124,8 @@ export function reduceFileSurfaceOpened(
   path: string,
   preferredTabGroupId?: string,
   topicId?: string,
-  placement?: FileOpenPlacement
+  placement?: FileOpenPlacement,
+  confirmedExistingSpace?: ConfirmedExistingFileSpace
 ): FileWorkbenchState {
   const displayId = placement?.displayWorkspaceId ?? workspaceId
   const layout = state.layouts[displayId]
@@ -140,7 +144,8 @@ export function reduceFileSurfaceOpened(
   const targetTabGroupId = placement ? preferredTabGroupId : existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
   if (!targetTabGroupId) return state
   const existingTab = state.tabs[tabId]
-  if (placement && existingTab && existingTab.space?.zoneId !== placement.space.zoneId) throw new Error('The existing file Tab has another Zone context; its original placement is retained.')
+  const existingSpace = existingTab?.space ?? (confirmedExistingSpace?.tabId === existingTab?.id ? confirmedExistingSpace?.space : undefined)
+  if (placement && existingTab && (existingSpace?.zoneId !== placement.space.zoneId || existingSpace.spaceId !== placement.space.spaceId)) throw new Error('The existing file Tab has another Zone context; its original placement is retained.')
   const tab = existingTab ?? (() => {
     const surface: FileWorkbenchSurface = {
       regionId: initialWorkbenchRegionId(tabId),
@@ -170,9 +175,10 @@ export function reduceFileSurfaceOpened(
 
 export function reduceFileOpened(
   state: FileWorkbenchState, workspaceId: string, path: string, document: FileDocument,
-  preferredTabGroupId?: string, topicId?: string, placement?: FileOpenPlacement
+  preferredTabGroupId?: string, topicId?: string, placement?: FileOpenPlacement,
+  confirmedExistingSpace?: ConfirmedExistingFileSpace
 ): FileWorkbenchState {
-  const opened = reduceFileSurfaceOpened(state, workspaceId, path, preferredTabGroupId, topicId, placement)
+  const opened = reduceFileSurfaceOpened(state, workspaceId, path, preferredTabGroupId, topicId, placement, confirmedExistingSpace)
   if (opened === state && !placement?.reference) return state
   const key = documentKey(workspaceId, path)
   const alreadyOpen = Boolean(state.documents[key])

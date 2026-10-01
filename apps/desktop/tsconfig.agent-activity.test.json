@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.test.json","include":["src/**/*.ts","src/**/*.tsx","test/shared-agent-activity-presentations.test.tsx"]}
