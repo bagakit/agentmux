@@ -63,7 +63,7 @@ Mote 的事情导航使用 `Discussions`／`New discussion` 等用户可懂措�
 
 普通 Topic 的 canonical 文件目录在 `~/.agentmux/topics`，Mote 在 `~/.agentmux/motes`。用户明确要求分离并迁移已有对象，原目录保留对应软链接，以后再删；本轮不删除这些链接。这是明确授权的数据迁移与临时旧地址，不由一般“不留 migration／fallback”的实现规则否定，也不扩展为任意目录迁移。归类沿已有文件事实：主 Mote 与已确认含 SOUL 的对象是 Mote，已归档对象同样迁移；分类读取失败保持未知，不当普通 Topic 猜着搬。内容组织仍自主，不改写用户知识文件或强制分类。
 
-- **展示身份与物理地址分开。** `__scratch__` Workspace 保留原 Scratch 逻辑容器地址与 ID；既有 Topic/Mote ID、Space、Zone、Tab/Group、Region、选择、草稿、文件逻辑引用与执行绑定保持。Snapshot 明确给出实际物理目录，真实 IO 与新启动 cwd 消费该地址；原相对文件地址仍由同一受限文件 owner 解析，不按背景项目或显示位置猜对象。新对象直接写入对应 canonical 根，不先创建旧实体再搬。
+- **展示身份与物理地址分开。** `__scratch__` Workspace 保留原 Scratch 逻辑容器地址与 ID；既有 Topic/Mote ID、Space、Zone、Tab/Group、Region、选择、草稿、文件逻辑引用与执行绑定保持。Snapshot 明确给出实际物理目录，真实 IO、新启动 cwd 与公开查询的对象 path 消费该地址；公开查询只投影原协议字段，不泄漏内部路径元数据；原相对文件地址仍由同一受限文件 owner 解析，不按背景项目或显示位置猜对象。新对象直接写入对应 canonical 根，不先创建旧实体再搬。
 - **迁移保留原对象。** 已确认的旧目录在同盘以不覆盖目标的同一次原子 exchange 保留原 inode 与完整内容，同时把精确旧地址变为对应软链接，不留下旧路径不可用的间隙；`topic.md`、SOUL、Wiki、`.agents`、`.agentmux`、头像资产、归档和任意用户文件不重建、不清洗、不丢弃。旧绝对目录身份由对象内 app-owned `.agentmux/directory-identity.json` 保持，保原头像与 Space/Zone 地址，即使将来删除旧链接也不重发身份；记录的版本及旧地址须严格验证为原逻辑根下同一已校验目录名，且在 canonical 对象暴露前耐久保存。记录只承载旧目录身份，不成为 Session/Run 或第二份工作面事实，损坏或未知不得退回物理地址重铸身份。新对象使用自己的 canonical 目录身份。冲突、失败或无法确认的步骤如实可恢复，不能覆盖已有目标、将部分结果称为完成、跳过对象不说明，或删除未确认的原数据。
 - **旧执行与新启动各用真实地址。** 已有 Session/Run 的保存 cwd 与身份原样，迁移不停止、重启或改写健康执行；旧地址仍连到同一对象，活跃进程继续读写原 inode。新启动使用 canonical cwd，经 Core 原公共能力创建。真实进程重启后恢复原工作面、引用与状态，旧 Session 继续沿自己的原地址恢复，不借迁移造替代 Session 或把 unknown 当终局。
 - **旧 alias 不放宽文件边界。** ScratchTopics 与通用文件入口共用 Main 的受限目录解析，只接受已确认身份、精确旧直系目录与相应 canonical 目标的映射；读取仍遵守原已允许的 explicit 只读链接能力；任意链接不因此获得变更权限或新增可访问范围，被替换的根/目标及逃逸继续按原权限与路径规则拒绝。主 Mote 的删除／移动保护、头像资产范围及原保存冲突检查仍成立；失败只拒绝这次错误目标的动作，不拿走健康 Agent 与原工作面。

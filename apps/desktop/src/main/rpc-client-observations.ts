@@ -1,8 +1,7 @@
-import { join } from 'node:path'
 import type { AgentMuxRpcSnapshot, AgentMuxRpcSnapshotParams, AgentMuxRpcTopic } from '@agentmux/core'
 import type { AppConfig } from '../shared/contracts.js'
 import { directoryIdentity, spatialSources } from '../shared/space-addresses.js'
-import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from '../shared/scratch-topics.js'
 import type { ScratchTopics } from './scratch-topics.js'
 
 /** Read the original config and filesystem owners; observation never ensures or writes a Topic. */
@@ -38,8 +37,14 @@ export async function observeClientRpcSnapshot(config: AppConfig, scratchTopics:
       const space = matches.length === 1 ? matches[0]! : undefined
       if (snapshot.readError) for (const source of ['topics', 'motes'] as const) if (wanted(source)) result.unavailable!.push({ source, code: 'TOPIC_FILESYSTEM_UNAVAILABLE',
         message: `${snapshot.id}: ${snapshot.readError}`, recovery: 'Read this exact Topic again after its original files are available.' })
-      return { ...snapshot, topicId: snapshot.id, workspaceId: workspace.id, hostId: workspace.hostId,
-        path: join(workspace.path, snapshot.directoryPath), spaceId: space?.spaceId ?? null,
+      return { id: snapshot.id, topicId: snapshot.id, workspaceId: workspace.id, hostId: workspace.hostId,
+        directoryPath: snapshot.directoryPath, topicPath: snapshot.topicPath, title: snapshot.title,
+        summary: snapshot.summary, collaborators: snapshot.collaborators,
+        ...(snapshot.readError !== undefined ? { readError: snapshot.readError } : {}),
+        ...(snapshot.soul !== undefined ? { soul: snapshot.soul } : {}),
+        ...(snapshot.wiki !== undefined ? { wiki: snapshot.wiki } : {}),
+        ...(snapshot.moteArchive !== undefined ? { moteArchive: snapshot.moteArchive } : {}),
+        path: scratchTopicPhysicalPath(workspace, snapshot), spaceId: space?.spaceId ?? null,
         kind: snapshot.readError ? 'unknown' : space?.kind === 'mote' ? 'mote' : space?.kind === 'topic' ? 'topic' : 'unknown' }
     })
     if (wanted('topics')) result.topics = topics
