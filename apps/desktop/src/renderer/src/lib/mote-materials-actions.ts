@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef } from 'react'
 import { directoryIdentity, homeZoneId } from '../../../shared/space-addresses'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { fileTabId } from './workbench-tabs'
-import { fileExplorerContains, fileExplorerRelativeRoot } from './file-explorer-scope'
+import { fileExplorerContains } from './file-explorer-scope'
 import type { MoteWorkfaceScope } from './mote-workface'
-import { joinWorkspacePath } from './workspace-paths'
+import { scratchTopicIdentityPath, scratchTopicLogicalPath, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
+import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, subscribePmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 
 function floatingSelection(): string {
@@ -31,11 +32,12 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     const group = existingGroup ?? layout?.groups.find(group => group.tabOrder.some(id => state.tabs[id]?.topicId === owner.topic.id)) ?? layout?.groups.find(group => group.id === layout.activeGroupId)
     if (!group) { state.reportError(new Error('The original file workface is still restoring.')); return }
     const topic = state.scratchTopicSnapshots[workspaceId]?.topics?.find(item => {
-      const root = fileExplorerRelativeRoot(owner.workspace.path, item.directoryPath)
+      const root = scratchTopicLogicalPath(owner.workspace, item)
       return root !== null && fileExplorerContains(root, path)
     })
     const topicId = existing ? existing.topicId : topic?.id ?? (fileExplorerContains(owner.rootPath, path) ? owner.topic.id : undefined)
-    const spaceId = directoryIdentity(owner.workspace.hostId, topic?.directoryPath ?? (topicId === owner.topic.id ? owner.topic.directoryPath : owner.workspace.path))
+    const identityTopic = topic ?? (topicId === owner.topic.id ? owner.topic : undefined)
+    const spaceId = directoryIdentity(owner.workspace.hostId, identityTopic ? scratchTopicIdentityPath(owner.workspace, identityTopic) : owner.workspace.path)
     const space = existing?.space ?? { spaceId, zoneId: homeZoneId(spaceId) }
     const regionId = existing?.layout.activeRegionId ?? 'region:' + tabId
     pending.current?.()
@@ -89,6 +91,8 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     if (!owner) return
     const state = useAppStore.getState(), workspaceId = owner.workspace.id, layout = state.layouts[workspaceId]
     if (!layout) { state.reportError(new Error('The original directory layout is still restoring.')); return }
+    const physicalPath = scratchWorkspaceFilePath(owner.workspace, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace), path)
+    if (!physicalPath) { state.reportError(new Error('The original directory read is not confirmed. Refresh materials and retry opening its terminal.')); return }
     const inMote = fileExplorerContains(owner.rootPath, path)
     const group = inMote ? layout.groups.find(group => group.tabOrder.some(id => state.tabs[id]?.topicId === owner.topic.id)) ?? layout.groups.find(group => group.id === layout.activeGroupId) : layout.groups.find(group => group.id === layout.activeGroupId)
     if (!group) return
@@ -101,7 +105,7 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
       if (captured.options.floating) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
     }
     captured.options.onOpened?.()
-    await useAppStore.getState().launchTerminal(group.id, { tabId: tab.id, regionId: tab.layout.activeRegionId }, joinWorkspacePath(owner.workspace.path, path))
+    await useAppStore.getState().launchTerminal(group.id, { tabId: tab.id, regionId: tab.layout.activeRegionId }, physicalPath)
   }, [])
   return { open, terminal }
 }

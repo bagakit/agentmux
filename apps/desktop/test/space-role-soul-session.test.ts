@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, unlink, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rename, rm, unlink, mkdir, lstat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/ag
 import type { CtxmuxAdapterRun, CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-adapter'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { RuntimeController } from '../src/main/runtime-controller'
+import { migrateTopicDirectories } from '../scripts/migrate-topic-directories.mjs'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, MOTE_COORDINATION_ROLE, MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
@@ -55,7 +56,8 @@ async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-soul-session-'))); roots.push(root)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
-  const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'folder' }
+  const path = join(root, '.agentmux', 'scratch'); await mkdir(path, { recursive: true })
+  const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path, kind: 'folder' }
   const topics = new ScratchTopics()
   const template = new AgentProviderRegistry().get('codex')
   const providers = ['soul-fixture-a', 'soul-fixture-b'].map(id => defineAgentProvider({
@@ -107,7 +109,7 @@ async function fixture() {
   controller.commit(await controller.prepare(config))
   disposals.push(() => controller.dispose())
   const launch = (topicId: string, sessionId: string, prompt: string, executorId = providers[0]!.id) => controller.launchAgent({
-    executorId, hostId: 'local', workspacePath: root, scratchTopicId: topicId, agentSessionId: sessionId, prompt
+    executorId, hostId: 'local', workspacePath: workspace.path, scratchTopicId: topicId, agentSessionId: sessionId, prompt
   }, config)
   return { root, workspace, topics, core, inner, config, controller, starts, runs, stop, launch }
 }
@@ -121,7 +123,7 @@ it('delivers the new primary knowledge defaults once through RuntimeController a
   expect(h.starts).toHaveLength(1)
   const delivered = h.starts[0]!.args.at(-1)!
   expect(delivered.length).toBeGreaterThan(1500)
-  expect(h.starts[0]!.cwd).toBe(join(h.root, primary.directoryPath))
+  expect(h.starts[0]!.cwd).toBe(primary.physicalDirectoryPath!)
   expect(delivered).toContain(DEFAULT_MOTE_SOUL)
   expect(delivered).toContain(DEFAULT_PMO_TEAMS_TOPIC_WIKI)
   expect(delivered).toContain('Read back a saved change before saying it is remembered.')
@@ -136,7 +138,7 @@ it('delivers saved SOUL through the product controller and actual Core envelope 
   const h = await fixture()
   const moteId = 'launcher:durable-mote'
   const created = await h.topics.ensureMote(h.workspace, moteId)
-  const directory = join(h.root, created.directoryPath)
+  const directory = created.physicalDirectoryPath!
   const soulPath = join(directory, MOTE_SOUL_PATH)
   expect(h.core.agentSessions()).toEqual([])
   expect(created.id).toBe(moteId)
@@ -185,7 +187,7 @@ it('recovers the same native Session and home without pretending the edited SOUL
   const h = await fixture()
   const moteId = 'launcher:recover-mote'
   const mote = await h.topics.ensureMote(h.workspace, moteId)
-  const soulPath = join(h.root, mote.directoryPath, MOTE_SOUL_PATH)
+  const soulPath = join(mote.physicalDirectoryPath!, MOTE_SOUL_PATH)
   await writeFile(soulPath, '# SOUL\n\nOriginal personality.\n')
   const first = await h.launch(moteId, 'recover-session', 'Coordinate all authorized Projects.')
   const firstStart = structuredClone(h.starts[0]!)
@@ -210,14 +212,73 @@ it('recovers the same native Session and home without pretending the edited SOUL
     soul: { content: '# SOUL\n\nEdited personality for future Sessions.\n' } })
 })
 
+it('migrates the original Mote while actual Core recovery keeps its saved cwd and new Sessions launch in its canonical home', async () => {
+  const h = await fixture()
+  const moteId = 'launcher:migrate-original'
+  const created = await h.topics.ensureMote(h.workspace, moteId)
+  const canonical = created.physicalDirectoryPath!
+  const original = join(h.workspace.path, created.directoryPath)
+  // Prepare an actual legacy filesystem home before the first product launch.
+  await rename(canonical, original)
+  const soul = await readFile(join(original, MOTE_SOUL_PATH), 'utf8')
+  const first = await h.launch(moteId, 'pre-migration-session', 'Keep my original Mote and execution context.')
+  expect(h.starts).toHaveLength(1)
+  expect(h.starts[0]!.cwd).toBe(original)
+  const firstStart = structuredClone(h.starts[0]!)
+  const stored = h.inner.registry.get(first.session.id)
+  const nativeHandle = { kind: 'provider' as const, providerId: stored.providerId, sessionId: 'pre-migration-native-session' }
+  await h.inner.registry.put({ ...stored, nativeHandle }, stored.run)
+
+  const migrated = await migrateTopicDirectories({ home: h.root, execute: true })
+  expect(migrated).toMatchObject({ success: true, objects: [{
+    id: moteId, state: 'migrated', sourcePath: original, destinationPath: canonical, identityDirectoryPath: original
+  }] })
+  expect((await lstat(original)).isSymbolicLink()).toBe(true)
+  expect(await readFile(join(original, MOTE_SOUL_PATH), 'utf8')).toBe(soul)
+  expect(await h.topics.read(h.workspace, moteId)).toMatchObject({
+    id: moteId, physicalDirectoryPath: canonical, identityDirectoryPath: original
+  })
+  expect(h.core.agentSession(first.session.id).workspacePath).toBe(original)
+  const prepare = vi.spyOn(h.topics, 'prepareAgent')
+  const attached = await h.controller.recoverSession(first.session.control, h.config, undefined, 'attach-after-directory-migration')
+  expect(attached).toMatchObject({ kind: 'reattachable', session: {
+    id: first.session.id, workspacePath: original, control: { run: first.session.control.run }
+  } })
+  expect(h.starts).toEqual([firstStart])
+  expect(prepare).not.toHaveBeenCalled()
+  expect(h.stop).not.toHaveBeenCalled()
+
+  // Only the controlled adapter's explicit terminal fact permits this real Core resume path.
+  h.runs.set(stored.run.runId, { ...h.runs.get(stored.run.runId)!, state: { type: 'exited', code: 0, signal: null } })
+  const recovery = h.controller.recoverSession(first.session.control, h.config, undefined, 'resume-original-directory')
+  await expect(recovery).resolves.toMatchObject({ kind: 'resumed', session: { id: first.session.id, workspacePath: original } })
+  expect(h.starts).toHaveLength(2)
+  expect(h.starts[1]).toMatchObject({ cwd: original, args: ['--resume', nativeHandle.sessionId],
+    env: expect.objectContaining({ AGENTMUX_WIKI_DIR: original }) })
+  expect(h.core.agentSession(first.session.id).nativeHandle).toEqual(nativeHandle)
+  expect(prepare).not.toHaveBeenCalled()
+  expect(h.stop).not.toHaveBeenCalled()
+
+  const next = await h.launch(moteId, 'post-migration-session', 'Start a separate new discussion in the same Mote.')
+  expect(next.session.id).toBe('post-migration-session')
+  expect(h.starts).toHaveLength(3)
+  expect(h.starts[2]!.cwd).toBe(canonical)
+  expect(h.starts[2]!.env).toMatchObject({ AGENTMUX_WIKI_DIR: canonical })
+  expect(h.starts[2]!.args.at(-1)).toContain('Your persistent Mote identity is ' + moteId)
+  expect(h.core.agentSession(first.session.id).workspacePath).toBe(original)
+  expect(h.core.agentSession(next.session.id).workspacePath).toBe(canonical)
+  expect(await readFile(join(original, MOTE_SOUL_PATH), 'utf8')).toBe(soul)
+  expect(h.stop).not.toHaveBeenCalled()
+})
+
 it('isolates personalities and exposes a new-launch file failure while preserving a healthy Session and its Mote files', async () => {
   const h = await fixture()
   const moteA = await h.topics.ensureMote(h.workspace, 'launcher:mote-a')
   const moteB = await h.topics.ensureMote(h.workspace, 'launcher:mote-b')
   const soulA = '# SOUL\n\nPersonality A only.\n'
   const soulB = '# SOUL\n\nPersonality B only.\n'
-  await writeFile(join(h.root, moteA.directoryPath, MOTE_SOUL_PATH), soulA)
-  await writeFile(join(h.root, moteB.directoryPath, MOTE_SOUL_PATH), soulB)
+  await writeFile(join(moteA.physicalDirectoryPath!, MOTE_SOUL_PATH), soulA)
+  await writeFile(join(moteB.physicalDirectoryPath!, MOTE_SOUL_PATH), soulB)
   const healthy = await h.launch(moteA.id, 'healthy-a', 'Help Project A.')
   await h.launch(moteB.id, 'healthy-b', 'Help Project B.')
   expect(h.starts).toHaveLength(2)
@@ -231,7 +292,7 @@ it('isolates personalities and exposes a new-launch file failure while preservin
   expect(h.starts[2]!.args.at(-1)).not.toContain(soulA)
   expect(h.starts[2]!.args.at(-1)).not.toContain(soulB)
   // A path exists but cannot be read as a regular SOUL file. This fails before any new Run starts.
-  const damagedPath = join(h.root, moteA.directoryPath, MOTE_SOUL_PATH)
+  const damagedPath = join(moteA.physicalDirectoryPath!, MOTE_SOUL_PATH)
   await unlink(damagedPath); await mkdir(damagedPath)
   await expect(h.launch(moteA.id, 'not-created', 'New launch.')).rejects.toThrow(/SOUL\.md/)
   expect(h.starts).toHaveLength(3)
@@ -246,5 +307,5 @@ it('isolates personalities and exposes a new-launch file failure while preservin
   expect(listed.find(topic => topic.id === moteA.id)).toMatchObject({ id: moteA.id,
     directoryPath: scratchTopicDirectoryName(moteA.id), readError: expect.stringContaining('SOUL.md') })
   expect(listed.find(topic => topic.id === moteB.id)).toMatchObject({ id: moteB.id, soul: { content: soulB } })
-  expect(await readFile(join(h.root, moteA.directoryPath, 'topic.md'), 'utf8')).toContain('Untitled Mote')
+  expect(await readFile(join(moteA.physicalDirectoryPath!, 'topic.md'), 'utf8')).toContain('Untitled Mote')
 })

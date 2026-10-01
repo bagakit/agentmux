@@ -4,7 +4,7 @@ import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
 import type { SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
@@ -106,7 +106,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
     const key = `space:${label.toLowerCase()}`
     const expanded = filtering || collapsedGroups[key] !== true
     const byId = new Map(objects.map((topic) => [topic.id, topic]))
-    const filtered = objects.filter((topic) => matchesSpaceQuery(query, label, topic.title, topic.summary, topic.directoryPath, workspace.hostId))
+    const filtered = objects.filter((topic) => matchesSpaceQuery(query, label, topic.title, topic.summary, scratchTopicPhysicalPath(workspace, topic), workspace.hostId))
     const ids = partitionPinned(orderTopics(filtered.map((topic) => topic.id), order), pinned ?? [])
     const sectionSessions = objects.flatMap((topic) => byTopic.get(topic.id) ?? [])
     const contexts: ActivityContextInput[] = objects.flatMap((topic) => {
@@ -158,7 +158,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               className={`project-rail-row ${isMote ? 'space-mote-row' : 'space-topic-row'}${selected ? ' project-rail-row--active' : ''}`}
               aria-label={[`Open ${isMote && id !== PMO_TEAMS_TOPIC_ID ? `Mote · ${name}` : name}`, archived ? 'Archived' : '', attentionLabel].filter(Boolean).join(' · ')}
               aria-current={selected ? 'page' : undefined}
-              title={[name, topic.readError ?? topic.summary, topic.directoryPath].filter(Boolean).join('\n')}
+              title={[name, topic.readError ?? topic.summary, scratchTopicPhysicalPath(workspace, topic)].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
               <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>

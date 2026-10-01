@@ -98,6 +98,7 @@ import {
   MOTE_COORDINATION_ROLE,
   SCRATCH_WORKSPACE_ID,
   scratchTopicDirectoryName,
+  scratchTopicIdentityPath,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
 } from '../../shared/scratch-topics'
@@ -5525,8 +5526,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const scope = workspace ? scratchTopicsScope(workspace) : null
     const snapshot = captured.scratchTopicSnapshots[workspaceId]
     const topic = snapshot?.scope === scope ? snapshot.topics?.find(item => item.id === topicId) : undefined
+    const identityPath = workspace && topic ? scratchTopicIdentityPath(workspace, topic) : null
     if (!workspace || !topic?.moteArchive || topic.moteArchive.state === 'unknown' || topic.moteArchive.version !== expectedVersion ||
-      directoryIdentity(workspace.hostId, workspace.path.replace(/[\\/]+$/, '') + '/' + scratchTopicDirectoryName(topicId)) !== objectKey) {
+      identityPath === null || scratchTopicIdFromWorkspacePath(workspace.path, identityPath) !== topicId ||
+      // Historical snapshots identify only their configured home; sibling roots
+      // require the identity field confirmed by Main.
+      (!topic.identityDirectoryPath && identityPath !== scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) })) ||
+      directoryIdentity(workspace.hostId, identityPath) !== objectKey) {
       const error = new Error('Mote archive state is not confirmed. Refresh its directory before retrying.')
       get().reportError(error); throw error
     }

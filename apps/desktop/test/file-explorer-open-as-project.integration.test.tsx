@@ -6,10 +6,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 
-const { configGet, addWorkspace } = vi.hoisted(() => ({ configGet: vi.fn(), addWorkspace: vi.fn() }))
+const { configGet, addWorkspace, writeClipboard, listTopics, tree, defaultChildren } = vi.hoisted(() => {
+  const defaultChildren = [
+    { path: 'packages/core', name: 'core', isDirectory: true, isSymlink: false, ignored: false, depth: 0 },
+    { path: 'README.md', name: 'README.md', isDirectory: false, isSymlink: false, ignored: false, depth: 0 }
+  ]
+  return { configGet: vi.fn(), addWorkspace: vi.fn(), writeClipboard: vi.fn(), listTopics: vi.fn(), tree: { children: defaultChildren }, defaultChildren }
+})
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: {
     config: { get: configGet },
+    ui: { writeClipboardText: writeClipboard },
+    scratch: { listTopics },
     workspaces: { add: addWorkspace },
     files: { readDirectory: vi.fn(), reveal: vi.fn() }
   }
@@ -25,10 +33,7 @@ vi.mock('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js', () =
     dirCache: {},
     rootCache: {
       // 目录节点在前、文件节点在后：flattenFileTree 直通保序，(a) 依赖目录行仍是第一行。
-      children: [
-        { path: 'packages/core', name: 'core', isDirectory: true, isSymlink: false, ignored: false, depth: 0 },
-        { path: 'README.md', name: 'README.md', isDirectory: false, isSymlink: false, ignored: false, depth: 0 }
-      ]
+      children: tree.children
     },
     refreshTree: vi.fn(async () => true),
     refreshDir: vi.fn(async () => true),
@@ -42,6 +47,9 @@ import { FileExplorer } from '../src/renderer/src/components/FileExplorer.js'
 import { CONFIG_VERSION, type AppConfig, type WorkspaceRecord } from '../src/shared/contracts.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { joinWorkspacePath } from '../src/renderer/src/lib/workspace-paths.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
@@ -62,11 +70,90 @@ function config(workspaces: WorkspaceRecord[] = [workspace]): AppConfig {
 
 afterEach(() => {
   vi.clearAllMocks()
+  tree.children = defaultChildren
   useAppStore.setState(initialStore, true)
   document.body.replaceChildren()
 })
 
 describe('FileExplorer directory context menu', () => {
+  it.each(['topics', 'motes'] as const)('uses the physical %s directory for original copy/terminal/project actions while relative file keys stay unchanged', async kind => {
+    const id = 'launcher:physical-' + kind, logical = scratchTopicDirectoryName(id)
+    const owner = { ...workspace, id: SCRATCH_WORKSPACE_ID, path: _hygiene_fixturePath("data/scratch") }
+    const physical = _hygiene_fixturePath("data/") + kind + '/' + logical
+    tree.children = [{ ...defaultChildren[0]!, path: logical, name: logical }]
+    const launch = vi.fn(async () => {}), draft = { original: 'Keep this draft' }
+    let currentConfig = config([owner])
+    const project = { ...created, path: physical, name: logical }
+    configGet.mockImplementation(async () => currentConfig)
+    addWorkspace.mockImplementation(async () => {
+      currentConfig = config([owner, project]); useAppStore.getState().setConfig(currentConfig); return project
+    })
+    useAppStore.setState({ config: currentConfig, activeWorkspaceId: owner.id, loading: false, localHome: '',
+      layouts: { [owner.id]: createWorkspaceLayout('files-group') }, launchTerminal: launch,
+      agentComposerDrafts: draft, scratchTopicSnapshots: { [owner.id]: { scope: scratchTopicsScope(owner), revision: 0,
+        topics: [{ id, title: kind, summary: '', collaborators: [], directoryPath: logical, topicPath: logical + '/topic.md',
+          identityDirectoryPath: owner.path + '/' + logical, physicalDirectoryPath: physical }], error: null, reading: false } } })
+    listTopics.mockImplementation(async () => useAppStore.getState().scratchTopicSnapshots[owner.id]!.topics)
+    for (const label of ['Copy Path', 'Copy Relative Path', 'Open in Terminal', 'Open as Project']) {
+      const { root } = await openMenu(logical)
+      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(entry => entry.textContent === label)
+      expect(item, 'actual directory menu is missing ' + label).not.toBeUndefined()
+      await act(async () => item!.click())
+      await act(async () => root.unmount())
+    }
+    expect(writeClipboard.mock.calls).toEqual([[physical], [logical]])
+    expect(launch).toHaveBeenCalledExactlyOnceWith('files-group', undefined, physical)
+    expect(addWorkspace).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', path: physical, name: logical })
+    expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
+    expect(useAppStore.getState().activeWorkspaceId).toBe(project.id)
+  })
+
+  it('retains original state and reports an unconfirmed directory instead of guessing a cwd or copying a broken path', async () => {
+    const logical = scratchTopicDirectoryName('launcher:unconfirmed'), owner = { ...workspace, id: SCRATCH_WORKSPACE_ID, path: _hygiene_fixturePath("data/scratch") }
+    tree.children = [{ ...defaultChildren[0]!, path: logical, name: logical }]
+    const launch = vi.fn(async () => {}), draft = { original: 'Keep this draft' }
+    useAppStore.setState({ config: config([owner]), activeWorkspaceId: owner.id, loading: false, error: null,
+      layouts: { [owner.id]: createWorkspaceLayout('files-group') }, launchTerminal: launch,
+      scratchTopicSnapshots: {}, agentComposerDrafts: draft })
+    listTopics.mockResolvedValue([])
+    const before = useAppStore.getState()
+    let retainedRoot: ReturnType<typeof createRoot> | undefined
+    for (const label of ['Copy Path', 'Open in Terminal', 'Open as Project']) {
+      const { root } = await openMenu(logical)
+      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(entry => entry.textContent === label)
+      expect(item).not.toBeUndefined()
+      await act(async () => item!.click())
+      if (label === 'Open as Project') retainedRoot = root
+      else await act(async () => root.unmount())
+    }
+    expect(writeClipboard).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled(); expect(addWorkspace).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toContain('original directory read is not confirmed')
+    expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().activeWorkspaceId).toBe(owner.id)
+    const physical = _hygiene_fixturePath("data/motes/") + logical
+    listTopics.mockResolvedValue([{ id: 'launcher:unconfirmed', title: 'Recovered original directory', summary: '', collaborators: [],
+      directoryPath: logical, topicPath: logical + '/topic.md', physicalDirectoryPath: physical, identityDirectoryPath: physical }])
+    const refresh = document.querySelector<HTMLButtonElement>('[title="Refresh explorer"]')
+    expect(refresh).not.toBeNull()
+    const reads = listTopics.mock.calls.length
+    await act(async () => refresh!.click())
+    expect(listTopics.mock.calls.length).toBeGreaterThan(reads)
+    expect(listTopics).toHaveBeenLastCalledWith(owner.id)
+    for (const label of ['Copy Path', 'Open in Terminal']) {
+      const row = document.querySelector<HTMLElement>('[data-tree-path="' + logical + '"]')!
+      await act(async () => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
+      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(entry => entry.textContent === label)
+      expect(item).not.toBeUndefined(); await act(async () => item!.click())
+    }
+    expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(physical)
+    expect(launch).toHaveBeenCalledExactlyOnceWith('files-group', undefined, physical)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
+    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().sessions).toBe(before.sessions)
+    await act(async () => retainedRoot!.unmount())
+  })
+
   it('opens a nested directory as a Workspace and selects the returned project', async () => {
     let currentConfig = config()
     configGet.mockImplementation(async () => currentConfig)

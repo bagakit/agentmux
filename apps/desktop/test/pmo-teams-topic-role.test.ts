@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -13,8 +13,9 @@ afterEach(async () => {
 })
 
 async function workspace(): Promise<WorkspaceRecord> {
-  const path = await mkdtemp(join(tmpdir(), 'agentmux-leader-role-'))
-  roots.push(path)
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-leader-role-')))
+  roots.push(parent)
+  const path = join(parent, 'scratch'); await mkdir(path)
   return { id: SCRATCH_WORKSPACE_ID, name: 'Scratch', hostId: 'local', path, kind: 'folder' }
 }
 

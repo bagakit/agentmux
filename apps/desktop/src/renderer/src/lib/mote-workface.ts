@@ -1,11 +1,10 @@
 import { createContext, useMemo } from 'react'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { useAppStore } from '../store'
 import { activeTopicIdFromLayout } from './scratch-topic-layout'
 import { scratchTopicKind } from './scratch-topic-snapshots'
-import { fileExplorerRelativeRoot } from './file-explorer-scope'
 
 export type MoteWorkfaceScope = { topic: ScratchTopicSnapshot; workspace: WorkspaceRecord; rootPath: string }
 export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
@@ -29,7 +28,7 @@ export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTo
   return useMemo(() => {
     const topic = topics?.find(item => item.id === topicId)
     if (!workspace || !topic || scratchTopicKind(topic.id, topics) !== 'mote') return null
-    const rootPath = fileExplorerRelativeRoot(workspace.path, topic.directoryPath)
+    const rootPath = scratchTopicLogicalPath(workspace, topic)
     return rootPath === null ? null : { workspace, topic, rootPath }
   }, [workspace, topics, topicId])
 }

@@ -2,6 +2,7 @@ import { directoryIdentity } from '../shared/space-addresses.js'
 import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join, sep } from 'node:path'
+import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds } from './scratch-topic-directories.js'
 import { durableWriteFile, type AgentProviderId } from '@agentmux/core'
 import { nativeImage, type NativeImage } from 'electron'
 import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
@@ -21,7 +22,7 @@ import {
   MOTE_COORDINATION_ROLE,
   PMO_TEAMS_TOPIC_ID,
   scratchTopicDirectoryName,
-  scratchTopicIdFromDirectoryName,
+  scratchTopicStorageRoots,
   type ScratchTopicSnapshot
 } from '../shared/scratch-topics.js'
 
@@ -218,11 +219,8 @@ export class ScratchTopics {
 
   private async avatarMoteDirectory(workspace: WorkspaceRecord, topicId: string): Promise<string> {
     requireScratchWorkspace(workspace)
-    const root = await realpath(workspace.path), directory = join(root, scratchTopicDirectoryName(topicId))
-    const info = await lstat(directory)
-    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Choose an existing Mote for its avatar.')
-    const resolved = await realpath(directory)
-    if (!resolved.startsWith(root + sep)) throw new Error('The Mote avatar directory escapes its original object.')
+    const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!resolved) throw new Error('Choose an existing Mote for its avatar.')
     if (topicId !== PMO_TEAMS_TOPIC_ID) {
       const soul = await lstat(join(resolved, MOTE_SOUL_PATH))
       if (!soul.isFile() || soul.isSymbolicLink()) throw new Error('Choose an existing Mote for its avatar.')
@@ -242,8 +240,10 @@ export class ScratchTopics {
     return assets
   }
 
-  private requireAvatarObject(workspace: WorkspaceRecord, topicId: string, objectKey: string): void {
-    if (directoryIdentity(workspace.hostId, join(workspace.path, scratchTopicDirectoryName(topicId))) !== objectKey) {
+  private async requireAvatarObject(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<void> {
+    requireScratchWorkspace(workspace)
+    const directory = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!directory || directoryIdentity(workspace.hostId, await scratchDirectoryIdentity(workspace.path, topicId, directory)) !== objectKey) {
       throw new Error('This Mote directory changed while editing. Reopen its avatar editor to use the current object.')
     }
   }
@@ -271,12 +271,12 @@ export class ScratchTopics {
     expectedVersion: string): Promise<MoteArchiveState & { state: 'active' | 'archived' }> {
     if (topicId === PMO_TEAMS_TOPIC_ID) throw new Error('The primary Mote cannot be archived.')
     if (typeof archived !== 'boolean') throw new Error('Choose Archive or Restore explicitly.')
-    this.requireAvatarObject(workspace, topicId, objectKey)
+    await this.requireAvatarObject(workspace, topicId, objectKey)
     const directory = await this.avatarMoteDirectory(workspace, topicId)
     // Only concurrent mutations of this actual directory are serialized. No persistent registry.
     const previous = this.moteStateWrites.get(directory)
     const job = Promise.resolve(previous).catch(() => {}).then(async () => {
-      this.requireAvatarObject(workspace, topicId, objectKey)
+      await this.requireAvatarObject(workspace, topicId, objectKey)
       if (await this.avatarMoteDirectory(workspace, topicId) !== directory) throw new Error('The original Mote directory changed.')
       const current = await this.readMoteArchive(directory, topicId)
       if (current.state === 'unknown') throw new Error('Mote archive state is unconfirmed: ' + current.issue)
@@ -295,13 +295,13 @@ export class ScratchTopics {
   }
 
   async previewAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage> {
-    this.requireAvatarObject(workspace, topicId, objectKey)
+    await this.requireAvatarObject(workspace, topicId, objectKey)
     await this.avatarMoteDirectory(workspace, topicId)
     return previewMoteAvatar(this.decodeAvatar(input))
   }
 
   async saveAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef> {
-    this.requireAvatarObject(workspace, topicId, objectKey)
+    await this.requireAvatarObject(workspace, topicId, objectKey)
     if (input?.mimeType !== 'image/png' || input.dataUrl.length > Math.ceil(MOTE_AVATAR_OUTPUT_MAX_BYTES / 3) * 4 + 22) throw new Error('Save a bounded PNG avatar crop.')
     const png = moteAvatarPng(await this.decodeAvatar(input))
     const ref: MoteAvatarRef = { kind: 'image', fileName: createHash('sha256').update(png).digest('hex') + '.png' }
@@ -320,7 +320,7 @@ export class ScratchTopics {
   }
 
   async readAvatar(workspace: WorkspaceRecord, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage> {
-    this.requireAvatarObject(workspace, topicId, objectKey)
+    await this.requireAvatarObject(workspace, topicId, objectKey)
     if (!isMoteAvatarRef(ref)) throw new Error('The Mote avatar reference is invalid.')
     const path = join(await this.avatarDirectory(workspace, topicId), ref.fileName)
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -338,14 +338,7 @@ export class ScratchTopics {
   }
   async list(workspace: WorkspaceRecord): Promise<ScratchTopicSnapshot[]> {
     requireScratchWorkspace(workspace)
-    const root = await realpath(workspace.path)
-    const entries = await readdir(root, { withFileTypes: true })
-    const topicIds = entries.flatMap((entry) => {
-      if (!entry.isDirectory()) return []
-      const topicId = scratchTopicIdFromDirectoryName(entry.name)
-      return topicId ? [topicId] : []
-    })
-    topicIds.sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+    const topicIds = await scratchStorageTopicIds(workspace.path)
     const snapshots = await Promise.all(topicIds.map(async (topicId): Promise<ScratchTopicSnapshot | null> => {
       try {
         return await this.read(workspace, topicId)
@@ -364,20 +357,10 @@ export class ScratchTopics {
   async read(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot | null> {
     requireScratchWorkspace(workspace)
     const directoryName = scratchTopicDirectoryName(topicId)
-    const root = await realpath(workspace.path)
-    const absolutePath = join(root, directoryName)
-    let info
-    try {
-      info = await lstat(absolutePath)
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') return null
-      throw error
-    }
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw new Error(`Scratch Topic path is not a directory: ${absolutePath}`)
-    }
-    const resolved = await realpath(absolutePath)
-    if (!resolved.startsWith(`${root}${sep}`)) throw new Error('Scratch Topic escapes its workspace')
+    const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!resolved) return null
+    const physicalDirectoryPath = await scratchDirectoryAddress(workspace.path, topicId, resolved)
+    const identityDirectoryPath = await scratchDirectoryIdentity(workspace.path, topicId, physicalDirectoryPath)
     const content = await readRegularFile(join(resolved, 'topic.md'))
     const agentFiles = await readdir(join(resolved, '.agents'))
     let soul: ScratchTopicSnapshot['soul']
@@ -397,6 +380,8 @@ export class ScratchTopics {
     return {
       id: topicId,
       directoryPath: directoryName,
+      physicalDirectoryPath,
+      identityDirectoryPath,
       topicPath: `${directoryName}/topic.md`,
       ...copy,
       ...(soul ? { soul } : {}),
@@ -413,11 +398,14 @@ export class ScratchTopics {
     }
   }
 
-  async ensure(workspace: WorkspaceRecord, topicId: string, initialTitle?: string): Promise<ScratchTopicSnapshot> {
+  async ensure(workspace: WorkspaceRecord, topicId: string, initialTitle?: string, mote = topicId === PMO_TEAMS_TOPIC_ID): Promise<ScratchTopicSnapshot> {
     requireScratchWorkspace(workspace)
     const directoryName = scratchTopicDirectoryName(topicId)
-    const root = await realpath(workspace.path)
-    const absolutePath = join(root, directoryName)
+    const roots = scratchTopicStorageRoots(workspace.path)
+    const root = mote ? roots.motes : roots.topics
+    await ensureScratchStorageRoot(root)
+    const existing = await resolveScratchTopicDirectory(workspace.path, topicId)
+    const absolutePath = existing ?? join(root, directoryName)
     await ensureDirectory(absolutePath)
     await Promise.all([
       ensureDirectory(join(absolutePath, 'outcome')),
@@ -426,17 +414,14 @@ export class ScratchTopics {
       ensureDirectory(join(absolutePath, '.agentmux'))
     ])
     await ensureRegularFile(join(absolutePath, 'topic.md'), topicId === PMO_TEAMS_TOPIC_ID ? '# Mote\n\nYour global coordination partner.\n' : initialTitle ? renamedTopicContent(TOPIC_TEMPLATE, initialTitle) : TOPIC_TEMPLATE)
-    if (topicId === PMO_TEAMS_TOPIC_ID) await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
+    if (mote) await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
     return (await this.read(workspace, topicId))!
   }
 
   async ensureMote(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
-    const snapshot = await this.ensure(workspace, topicId, 'Untitled Mote')
-    const directory = join(await realpath(workspace.path), snapshot.directoryPath)
-    await ensureRegularFile(join(directory, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
-    return (await this.read(workspace, topicId))!
+    return await this.ensure(workspace, topicId, 'Untitled Mote', true)
   }
 
   async renameTitle(
@@ -446,8 +431,7 @@ export class ScratchTopics {
   ): Promise<ScratchTopicSnapshot> {
     const snapshot = await this.read(workspace, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
-    const root = await realpath(workspace.path)
-    const topicPath = join(root, snapshot.topicPath)
+    const topicPath = join(snapshot.physicalDirectoryPath!, 'topic.md')
     const content = await readRegularFile(topicPath)
     await writeRegularFile(topicPath, renamedTopicContent(content, title))
     return (await this.read(workspace, topicId))!
@@ -456,16 +440,14 @@ export class ScratchTopics {
   async setWikiEnabled(workspace: WorkspaceRecord, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot> {
     const snapshot = await this.read(workspace, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
-    const root = await realpath(workspace.path)
-    await writeWikiState(join(root, snapshot.directoryPath, SCRATCH_TOPIC_WIKI_STATE_PATH), { enabled })
+    await writeWikiState(join(snapshot.physicalDirectoryPath!, SCRATCH_TOPIC_WIKI_STATE_PATH), { enabled })
     return (await this.read(workspace, topicId))!
   }
 
   async resetWiki(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
     const snapshot = await this.read(workspace, topicId)
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
-    const root = await realpath(workspace.path)
-    const directory = join(root, snapshot.directoryPath)
+    const directory = snapshot.physicalDirectoryPath!
     await ensureDirectory(join(directory, '.agentmux'))
     await writeRegularFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await writeWikiState(join(directory, SCRATCH_TOPIC_WIKI_STATE_PATH), { enabled: true })
@@ -477,7 +459,7 @@ export class ScratchTopics {
     sessionId: string
   }): Promise<PreparedScratchAgentTopic> {
     const snapshot = await this.ensure(workspace, topicId)
-    const absolutePath = join(await realpath(workspace.path), snapshot.directoryPath)
+    const absolutePath = snapshot.physicalDirectoryPath!
     const identityPath = join(
       absolutePath,
       '.agents',

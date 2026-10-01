@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ScratchTopicSnapshot } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
@@ -180,7 +180,12 @@ it.each([false, true])('confirmed=%s with an original row still present releases
   expect(order.row().isConnected).toBe(true); expect(document.activeElement).toBe(order.row())
   expect(order.returnFocus).not.toHaveBeenCalled()
 })
-it('actual chooser keyboard menu archives only its explicit Mote while retained target, body, two drafts and healthy work stay unchanged', async () => {
+it.each([false, true])('actual chooser keyboard menu archives only its explicit Mote while retained target, body, two drafts and healthy work stay unchanged; canonical identity=%s', async canonical => {
+  if (canonical) {
+    const logical = scratchTopicDirectoryName(customMoteId), physical = _hygiene_fixturePath("motes/") + logical
+    catalog = catalog.map(topic => topic.id === customMoteId ? { ...topic, directoryPath: logical, identityDirectoryPath: physical, physicalDirectoryPath: physical } : topic)
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === customAgent.id ? { ...session, workspacePath: physical } : session) }))
+  }
   selected(); await app.mount()
   expect([PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId].map(id => choice(id)?.dataset.moteTopicId)).toEqual([PMO_TEAMS_TOPIC_ID, customMoteId, quietMoteId])
   expect(choice(ordinaryTopicId)).toBeNull()
@@ -264,7 +269,7 @@ it('the real narrow Space Mote keyboard menu edits its exact original SOUL owner
   await moteClick(button('Show archived Motes in Space')); app.ensureMote.mockClear()
   const original = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)!
   await act(async () => original.focus()); const content = await menu(original, true)
-  const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Edit SOUL.md')
+  const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Edit persona')
   expect(item).toBeDefined(); await moteClick(item!)
   expect(document.querySelector('[role="menu"]')).toBeNull()
   expect(app.ensureMote).toHaveBeenCalledOnce(); expect(app.ensureMote).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, customMoteId)

@@ -10,7 +10,7 @@ import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
 import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
 // 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
 import { resolveAgentName } from '../lib/display-name'
@@ -383,17 +383,30 @@ export function WorkspaceTopicsPanel({
             const editing = editingTopicId === topic.id
             const pinned = pinnedTopics.includes(topic.id)
             const target = topicSpaceIconTarget(workspace, topic)
+            const logicalPath = scratchTopicLogicalPath(workspace, topic)
+            const physicalPath = scratchTopicPhysicalPath(workspace, topic)
+            function withLogicalPath(action: (path: string) => void): void {
+              if (logicalPath === null || topic.readError) {
+                reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry this operation.'))
+                return
+              }
+              action(logicalPath)
+            }
             return (
               <SortableTopicItem
                 topicId={topic.id}
                 isCurrent={isCurrent}
                 pinned={pinned}
                 key={topic.id}
-                onCopyPath={() => void copyTextToClipboard(applyCopyPathStyle(topic.directoryPath, { home: localHome, copyPathsAsAbsolute }), reportError)}
+                onCopyPath={() => withLogicalPath(path => {
+                  const absolute = scratchWorkspaceFilePath(workspace, topics, path)
+                  if (absolute === null) { reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry copying its path.')); return }
+                  void copyTextToClipboard(applyCopyPathStyle(absolute, { home: localHome, copyPathsAsAbsolute }), reportError)
+                })}
                 onRename={() => beginRename(topic)}
-                onReveal={() => onRevealDirectory(topic.directoryPath)}
+                onReveal={() => withLogicalPath(onRevealDirectory)}
                 onTogglePin={() => togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id)}
-                onEditWiki={() => void openFile(`${topic.directoryPath}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)}
+                onEditWiki={() => withLogicalPath(path => void openFile(`${path}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError))}
                 onToggleWiki={topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined}
                 onResetWiki={topic.wiki ? () => void resetTopicWiki(topic) : undefined}
                 onChangeIcon={() => { iconReturnKey.current = target.key; setIconTarget(target) }}
@@ -441,7 +454,7 @@ export function WorkspaceTopicsPanel({
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
                         : <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
-                      subtitle={<><span>{topic.summary || topic.directoryPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
+                      subtitle={<><span>{topic.summary || physicalPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
                         <TopicPresence
@@ -489,7 +502,7 @@ export function WorkspaceTopicsPanel({
                     aria-label={`Reveal ${topic.title} in Files`}
                     title="Reveal in Files"
                     disabled={pending !== null}
-                    onClick={(event) => { event.stopPropagation(); onRevealDirectory(topic.directoryPath) }}
+                    onClick={(event) => { event.stopPropagation(); withLogicalPath(onRevealDirectory) }}
                   >
                     <Crosshair size={13} />
                   </button>

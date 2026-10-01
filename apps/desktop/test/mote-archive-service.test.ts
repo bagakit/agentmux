@@ -1,6 +1,6 @@
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { directoryIdentity } from '../src/shared/space-addresses'
@@ -15,12 +15,13 @@ vi.mock('electron', () => ({ nativeImage: {}, webFrame: {}, ipcRenderer: { invok
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 async function fixture() {
-  const path = await mkdtemp(join(tmpdir(), 'mote-archive-')); roots.push(path)
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'mote-archive-'))); roots.push(parent)
+  const path = join(parent, 'scratch'); await mkdir(path)
   const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path, name: 'Topics', kind: 'folder' as const }
   const service = new ScratchTopics()
   for (const id of [PMO_TEAMS_TOPIC_ID, 'view:analyst', 'view:quiet']) await service.ensureMote(workspace, id)
   await service.ensure(workspace, 'view:ordinary')
-  const id = 'view:analyst', directory = join(path, scratchTopicDirectoryName(id)), key = directoryIdentity(workspace.hostId, directory)
+  const id = 'view:analyst', directory = (await service.read(workspace, id))!.physicalDirectoryPath!, key = directoryIdentity(workspace.hostId, directory)
   return { workspace, service, id, directory, key }
 }
 it('real archive and restore retain four original directory objects, all user files and idempotent ensure across new service owners', async () => {
@@ -45,10 +46,15 @@ it('real archive and restore retain four original directory objects, all user fi
 it('final service refuses primary, ordinary Topics, missing objects, stale locator and nonlocal requests before archive writes', async () => {
   const { workspace, service, id, key, directory } = await fixture()
   await expect(service.setMoteArchived(workspace, PMO_TEAMS_TOPIC_ID, true,
-    directoryIdentity('local', join(workspace.path, scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID))), 'primary')).rejects.toThrow('primary')
-  for (const other of ['view:ordinary', 'view:missing']) await expect(service.setMoteArchived(workspace, other, true,
-    directoryIdentity('local', join(workspace.path, scratchTopicDirectoryName(other))), 'unwritten')).rejects.toThrow()
-  await expect(service.setMoteArchived({ ...workspace, path: workspace.path + '-replacement' }, id, true, key, 'unwritten')).rejects.toThrow('changed')
+    directoryIdentity('local', (await service.read(workspace, PMO_TEAMS_TOPIC_ID))!.physicalDirectoryPath!), 'primary')).rejects.toThrow('primary')
+  for (const other of ['view:ordinary', 'view:missing']) {
+    const otherDirectory = (await service.read(workspace, other))?.physicalDirectoryPath ?? join(dirname(directory), scratchTopicDirectoryName(other))
+    await expect(service.setMoteArchived(workspace, other, true, directoryIdentity('local', otherDirectory), 'unwritten')).rejects.toThrow()
+  }
+  const replacementParent = await realpath(await mkdtemp(join(tmpdir(), 'mote-archive-replacement-'))); roots.push(replacementParent)
+  const replacement = { ...workspace, path: join(replacementParent, 'scratch') }; await mkdir(replacement.path)
+  await service.ensureMote(replacement, id)
+  await expect(service.setMoteArchived(replacement, id, true, key, 'unwritten')).rejects.toThrow('changed')
   await expect(service.setMoteArchived({ ...workspace, hostId: 'remote' }, id, true, key, 'unwritten')).rejects.toThrow()
   await expect(readFile(join(directory, MOTE_STATE_PATH))).rejects.toMatchObject({ code: 'ENOENT' })
   expect((await service.read(workspace, PMO_TEAMS_TOPIC_ID))?.moteArchive).toEqual({ state: 'active', version: 'primary' })
@@ -89,7 +95,7 @@ it('regular directory and leaf guards preserve symlink targets and unconfirmed f
   expect(await readFile(outside, 'utf8')).toBe('Original bytes')
   await rm(join(directory, '.agentmux'), { recursive: true }); await mkdir(join(workspace.path, 'outside'))
   await symlink(join(workspace.path, 'outside'), join(directory, '.agentmux'))
-  await expect(service.setMoteArchived(workspace, id, true, key, 'unwritten')).rejects.toThrow('unconfirmed')
+  await expect(service.setMoteArchived(workspace, id, true, key, 'unwritten')).rejects.toThrow('Directory identity metadata is not a regular directory')
   expect(await readdir(join(workspace.path, 'outside'))).toEqual([])
 })
 it('archive commits inspect only the original Mote and metadata, independent of Wiki and collaborator reads', async () => {
@@ -127,7 +133,7 @@ it('the real preload carries explicit identity and version through its typed arc
   expect(fact.state).toBe('archived')
 })
 it('primary abnormal archive metadata is honestly unknown while the same protected primary remains discoverable and its bytes are preserved', async () => {
-  const { workspace, service } = await fixture(), directory = join(workspace.path, scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)), file = join(directory, MOTE_STATE_PATH)
+  const { workspace, service } = await fixture(), directory = (await service.read(workspace, PMO_TEAMS_TOPIC_ID))!.physicalDirectoryPath!, file = join(directory, MOTE_STATE_PATH)
   const soul = await readFile(join(directory, 'SOUL.md'))
   for (const bytes of ['{"archived":true,"version":"00000000-0000-0000-0000-000000000000"}', 'bad-primary-json']) {
     await writeFile(file, bytes)

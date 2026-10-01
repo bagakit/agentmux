@@ -7,6 +7,7 @@
 **本页章节**
 
 - [Mote 快捷入口与当前协调上下文](#mote-快捷入口与当前协调上下文)
+- [Topic 与 Mote 的物理目录](#topic-与-mote-的物理目录)
 - [Mote 头像与主 Mote](#mote-头像与主-mote)
 - [Mote 归档与恢复](#mote-归档与恢复)
 - [全局 Board 与固定 Leader Topic](#全局-board-与固定-leader-topic)
@@ -30,7 +31,7 @@
 
 用户继续要求把窗口内的 Mote 对象放到左侧，避免与 Tab 叠在一起；可以在宽卡片与仅头像两态切换，「类似 Discord」；窗口边缘更明显，与背后工作面区分。对象导航与事情导航分层，仍是原来的同一个可操作快捷面。
 
-用户追问：「Mote 的二级界面是不是不应该出现 topics」「主菜单点击是不是应该只显示那些是 mote 的」「mote 和 topics，目录是不是应该都区分开」。Mote 二级工作面围绕当前 Mote 自身的 Tab、Region 与文件，不混入其他普通 Topic 的实体目录；Mote 主选择器只列 Mote，跨对象浏览仍由 Space 中分开的 Motes 与 Topics 分区承担。同一 Mote 可以有多个自己的 Tab/Group；这些事情标签不表示多个 Topic。Mote 是持久对象，其自身工作面沿既有 Zone 展示上下文；两者不合并为同一身份，也不改变既有实体多处展示绑定。此处的「目录区分」先约束导航分类；是否物理分目录仍未确认，不据此搬迁持久目录。
+用户追问：「Mote 的二级界面是不是不应该出现 topics」「主菜单点击是不是应该只显示那些是 mote 的」「mote 和 topics，目录是不是应该都区分开」。Mote 二级工作面围绕当前 Mote 自身的 Tab、Region 与文件，不混入其他普通 Topic 的实体目录；Mote 主选择器只列 Mote，跨对象浏览仍由 Space 中分开的 Motes 与 Topics 分区承担。同一 Mote 可以有多个自己的 Tab/Group；这些事情标签不表示多个 Topic。Mote 是持久对象，其自身工作面沿既有 Zone 展示上下文；两者不合并为同一身份，也不改变既有实体多处展示绑定。导航分类与物理存储是不同事实；目录分离与已授权迁移统一遵守[《Topic 与 Mote 的物理目录》](#topic-与-mote-的物理目录)。
 
 用户随后明确批准实施：「你的建议挺好的，就这么改吧。注意设计方面，交互设计方面要发挥你的最高水平」，并希望整个弹出面板呈现类似 Discord「和很多 Agent 交流的效果」，强调「只是一个 Agent 可以启动多个会话 Session」，提出 Mote 在 Space 打开时也采用这样的聊天画面。Mote 浮窗与 Space 中打开的 Mote 工作面遵守同一对象与会话层级：多个 Mote 是持久对象选择，所选 Mote 下的多个 Session 与承载事情的 Tab/Group、实际 Region 各有准确归属，不能把会话数量画成 Mote 数量或把普通 Topic 默认变成该 Mote 的成员。Mote 工作面围绕交流与原正文输入呈现，继续复用 Topic/Zone/Tab/Region、文件与 Core 生命周期；普通 Topic 保持自己的知识工作面。进入、切换和往返保原 Tab、Region、健康 Session/Run、非空草稿、执行历史与恢复，不复制聊天或重启 Agent。资料默认明确指向当前原 Mote 的耐久目录，并有明确回到全局浏览的路径；知识组织仍由 Mote 自主，不强制分类或搬目录。身份通过对象导航与原必要上下文持续可读，不恢复已取消的独立 title 行、重复标题或第二套模式栏。具体视觉稿与真实正常/窄窗/失败场景须独立评审，不能用通用 Topic 外壳或采图成功冒称达到该交流体验。
 
@@ -57,6 +58,15 @@ Mote 的事情导航使用 `Discussions`／`New discussion` 等用户可懂措�
 - **投影只承担自己的上下文**。窗口工作面 owner 绘制全局导航 chrome；快捷面等 workbench projection 保留自己的 Tab/Region 与操作，不复制背后 Goals、Focus 或其他主工作面的全局标题。快捷面内和背后的 Browser 都保持原内容与可操作区域。没有真实显示 bounds 变化时，悬停不触发 Terminal fit/Runtime resize；所选 Mote 的原 View 真正转入快捷面时，相关显示尺寸可由原 fit/Runtime owner 适配，收起仍恢复原 Tab/Region、阅读与工作面。背景、无关 Terminal 和隐藏 slot 不因浮层开合产生尺寸写入或工作放大。原生层级与尺寸统一沿[《Browser 任务能力与可复用资产》](browser-workface.md#browser-任务能力与可复用资产)及[《Hover 提示不改变 Terminal 几何》](terminal-reading.md#hover-提示不改变-terminal-几何)，只依赖通用 overlay 与实际 Region 事实，不为 Mote 或具体站点写特例。
 
 按钮展开、左侧对象导航两态、状态、动作与窗口外缘的视觉分工唯一见 surface-density[《Mote 快捷入口与当前协调上下文》](../presentation/motes-and-coordination.md#mote-快捷入口与当前协调上下文)。跨 Mote 选择复用既有对象目录、Tab、Region、焦点、命名与状态 owner，不增加默认 Tab 或逐 Mote 记忆注册表、第二份消息投递通路或 Runtime/Session 生命周期。
+
+## Topic 与 Mote 的物理目录
+
+普通 Topic 的 canonical 文件目录在 `~/.agentmux/topics`，Mote 在 `~/.agentmux/motes`。用户明确要求分离并迁移已有对象，原目录保留对应软链接，以后再删；本轮不删除这些链接。这是明确授权的数据迁移与临时旧地址，不由一般“不留 migration／fallback”的实现规则否定，也不扩展为任意目录迁移。归类沿已有文件事实：主 Mote 与已确认含 SOUL 的对象是 Mote，已归档对象同样迁移；分类读取失败保持未知，不当普通 Topic 猜着搬。内容组织仍自主，不改写用户知识文件或强制分类。
+
+- **展示身份与物理地址分开。** `__scratch__` Workspace 保留原 Scratch 逻辑容器地址与 ID；既有 Topic/Mote ID、Space、Zone、Tab/Group、Region、选择、草稿、文件逻辑引用与执行绑定保持。Snapshot 明确给出实际物理目录，真实 IO 与新启动 cwd 消费该地址；原相对文件地址仍由同一受限文件 owner 解析，不按背景项目或显示位置猜对象。新对象直接写入对应 canonical 根，不先创建旧实体再搬。
+- **迁移保留原对象。** 已确认的旧目录在同盘以不覆盖目标的同一次原子 exchange 保留原 inode 与完整内容，同时把精确旧地址变为对应软链接，不留下旧路径不可用的间隙；`topic.md`、SOUL、Wiki、`.agents`、`.agentmux`、头像资产、归档和任意用户文件不重建、不清洗、不丢弃。旧绝对目录身份由对象内 app-owned `.agentmux/directory-identity.json` 保持，保原头像与 Space/Zone 地址，即使将来删除旧链接也不重发身份；记录的版本及旧地址须严格验证为原逻辑根下同一已校验目录名，且在 canonical 对象暴露前耐久保存。记录只承载旧目录身份，不成为 Session/Run 或第二份工作面事实，损坏或未知不得退回物理地址重铸身份。新对象使用自己的 canonical 目录身份。冲突、失败或无法确认的步骤如实可恢复，不能覆盖已有目标、将部分结果称为完成、跳过对象不说明，或删除未确认的原数据。
+- **旧执行与新启动各用真实地址。** 已有 Session/Run 的保存 cwd 与身份原样，迁移不停止、重启或改写健康执行；旧地址仍连到同一对象，活跃进程继续读写原 inode。新启动使用 canonical cwd，经 Core 原公共能力创建。真实进程重启后恢复原工作面、引用与状态，旧 Session 继续沿自己的原地址恢复，不借迁移造替代 Session 或把 unknown 当终局。
+- **旧 alias 不放宽文件边界。** ScratchTopics 与通用文件入口共用 Main 的受限目录解析，只接受已确认身份、精确旧直系目录与相应 canonical 目标的映射；读取仍遵守原已允许的 explicit 只读链接能力；任意链接不因此获得变更权限或新增可访问范围，被替换的根/目标及逃逸继续按原权限与路径规则拒绝。主 Mote 的删除／移动保护、头像资产范围及原保存冲突检查仍成立；失败只拒绝这次错误目标的动作，不拿走健康 Agent 与原工作面。
 
 ## Mote 头像与主 Mote
 
