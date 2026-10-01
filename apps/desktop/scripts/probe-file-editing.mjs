@@ -8,30 +8,10 @@ import { materializeFileEditingFixture } from './file-editing-fixture.mjs'
 
 import { runProbeProcess } from './probe-process.mjs'
 
-// Fast dev runner for the mounted file-editing E2E probe. Instead of the 15-minute package→sign→DMG→mount→
-// LaunchServices path (package-macos.mjs), this launches the raw Electron binary directly on the freshly
-// built out/main/index.js. The probe itself has NO isPackaged/branding check — the `ready.packaged === true`
-// assertion lives only in the packaging gate — so a plain dev build exercises the exact same probe code path
-// against the exact same fixture (shared file-editing-fixture.mjs). Seconds-to-a-minute debug loop.
-//
-// Isolation, so the user's real app is never touched:
-//   - a temp userData dir (never ~/Library/Application Support/dev.agentmux.desktop)
-//   - a short, unique AGENTMUX_RUNTIME_DIRECTORY under /private/tmp (unix socket path length limit) so the
-//     spawned ctxmux daemon claims its own socket/state and cannot collide with a running AgentMux.app
-//
-// Cleanup is unconditional: the Electron process is SIGTERM→SIGKILL'd and every temp dir removed on success,
-// failure, timeout, and SIGINT. No orphan process, no leftover socket.
-//
-// 【绿了不等于能发版】这个跑法只断言一件事：报告里的 `ok === true`。打包门禁除此之外还独立复查
-// 一整套本跑法**结构上够不到**的东西，别拿这里的绿当发版凭据：
-//   - 代码签名（codesign --verify --strict）与 DMG 的 create/verify/mount
-//   - `app.isPackaged === true` 这条分支、产品名与可执行文件身份（本跑法是未打包的 dev 树）
-//   - asar 打包（这里跑的是散装 out/）、以及从 .app 内部加载 vendored ctxmux daemon 的归属校验
-//   - 经 LaunchServices 启动（这里直接 spawn 二进制）
-//   - 应用在生命周期预算内自行退出（这里是我们主动杀掉它）
-//   - 门禁对约 8 个 phase 不变量的**独立复查**——本跑法只信探针内部的 assertProbe，一条都不复查。
-//     所以有人削弱了探针里的断言、而 payload 仍能序列化时，这里会绿、门禁仍会红。
-// 公证（notarization）两边都不覆盖，打包输出里明写 notarized=false。
+// Independent mounted file-editing feature probe using the current dev build.
+// Private user data and Runtime directories isolate the probe from the installed app.
+// Success requires the versioned feature report and a clean process exit.
+// Packaging separately checks signatures, artifact identity and LaunchServices startup.
 
 const require = createRequire(import.meta.url)
 const desktopRoot = resolve(import.meta.dirname, '..')
@@ -57,11 +37,7 @@ function run(command, args, options = {}) {
 
 async function main() {
   if (!skipBuild) {
-    // Rebuild BOTH halves so the probe runs against current source. `@agentmux/core` is externalized by
-    // electron-vite and loaded at runtime from the workspace symlink into packages/core/dist — so a desktop-only
-    // build leaves core's dist stale, and an edit to the adapter / runtime-paths / endpoint logic would be
-    // invisible here while the package gate (which builds both, package-macos.mjs) still goes red. That gap
-    // would break the one promise this runner makes: green here means green there.
+    // Core is loaded from its workspace dist, so rebuild both production layers.
     await run('pnpm', ['--filter', '@agentmux/core', 'build'], { cwd: workspaceRoot })
     await run('pnpm', ['build'], { cwd: desktopRoot })
   }
@@ -133,13 +109,17 @@ async function main() {
   }
   await rm(temporaryRoot, { recursive: true, force: true })
 
-  if (report?.ok === true && exitCode === 0 && !timedOut && !interruption) {
+  if (report?.ok === true && report.schema === 'agentmux.workspace-file-editing-e2e.v2' && exitCode === 0 && !timedOut && !interruption) {
     process.stdout.write('file_editing_probe=ok\n')
     return 0
   }
 
   const failingProbe = lastWaiting ?? '(no probe reported waiting — check stderr above)'
   process.stderr.write('\n=== file-editing probe FAILED ===\n')
+  if (report?.ok === true && report.schema !== 'agentmux.workspace-file-editing-e2e.v2') {
+    process.stderr.write(`Unsupported feature report schema: ${String(report.schema)}\n`)
+    return 1
+  }
   if (report?.ok === true) {
     // The assertions all passed; the failure is in shutdown. Say so plainly, or the next reader wastes their
     // time hunting a probe that never failed.
