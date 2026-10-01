@@ -1,6 +1,4 @@
 import { AgentAvatar } from './AgentAvatar'
-import { useMoteWorkfaceScope } from '../lib/mote-workface'
-import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import {
   Activity,
   ArrowUpRight,
@@ -35,13 +33,10 @@ import { formatRelativeAge } from '../lib/relative-age'
 import { contextPressure, contextUsedPercent } from '../lib/agent-usage'
 import { CONTEXT_PRESSURE_HINT } from './AgentRoster'
 import { useAppStore } from '../store'
-import { usePathDisplay } from '../hooks/usePathDisplay'
-import { useGitHistory } from '../hooks/useGitHistory'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
-import { GitHistoryPanel } from './GitHistoryPanel'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
 import { SidebarToggleChrome } from './TopRowChrome'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
@@ -60,20 +55,12 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
 
 function WorkspaceFilesTool({
   workspace,
-  isScratch,
-  visible
+  isScratch
 }: {
   workspace: WorkspaceRecord
   isScratch: boolean
-  visible: boolean
 }) {
-  const mote = useMoteWorkfaceScope(workspace.id)
-  const materials = useMoteMaterialsActions(mote)
-  const [allFiles, setAllFiles] = useState(false)
-  useEffect(() => setAllFiles(false), [mote?.topic.id])
   const presentation = contentSlotPresentation(isScratch)
-  const displayPath = usePathDisplay()
-  const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
   const explorerCollapsedOverride = useAppStore((state) => state.explorerCollapsed[workspace.id])
   const setExplorerCollapsed = useAppStore((state) => state.setExplorerCollapsed)
   // 解析一次、读写复用：折叠态既决定渲染哪一支（读），又是 toggle 写入的取反基准（写）。分开算两次
@@ -83,9 +70,7 @@ function WorkspaceFilesTool({
   const explorerRevealRequestId = useRef(0)
   // The content slot's bottom half is Branches by default (unchanged behavior); a real project can
   // switch it to Source Control changes. Scratch never shows this — it renders Topics instead.
-  const [bottomView, setBottomView] = useState<'branches' | 'changes' | 'history'>('branches')
-  // Own completed pages above the file-tree split: collapsing only moves the presentation subtree.
-  const history = useGitHistory(workspace, visible && !mote && !presentation.showTopics && bottomView === 'history')
+  const [bottomView, setBottomView] = useState<'branches' | 'changes'>('branches')
 
   function revealDirectoryInExplorer(path: string): void {
     explorerRevealRequestId.current += 1
@@ -96,28 +81,18 @@ function WorkspaceFilesTool({
     })
   }
 
-  const bottomHalf = mote ? null : presentation.showTopics ? (
+  const bottomHalf = presentation.showTopics ? (
     <WorkspaceTopicsPanel
       workspace={workspace}
       onRevealDirectory={revealDirectoryInExplorer}
     />
   ) : (
     <div className="content-slot-source-control">
-      <div className="source-control-switch" role="tablist" aria-label="Source control view" onKeyDown={(event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-        const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-        const index = tabs.indexOf(event.target as HTMLButtonElement)
-        if (index < 0 || tabs.length === 0) return
-        event.preventDefault()
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
-        tabs[next]!.focus()
-        tabs[next]!.click()
-      }}>
+      <div className="source-control-switch" role="tablist" aria-label="Source control view">
         <button
           type="button"
           role="tab"
           aria-selected={bottomView === 'branches'}
-          tabIndex={bottomView === 'branches' ? 0 : -1}
           className={bottomView === 'branches' ? 'selected' : ''}
           onClick={() => setBottomView('branches')}
         >
@@ -127,34 +102,23 @@ function WorkspaceFilesTool({
           type="button"
           role="tab"
           aria-selected={bottomView === 'changes'}
-          tabIndex={bottomView === 'changes' ? 0 : -1}
           className={bottomView === 'changes' ? 'selected' : ''}
           onClick={() => setBottomView('changes')}
         >
           Changes
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={bottomView === 'history'}
-          tabIndex={bottomView === 'history' ? 0 : -1}
-          className={bottomView === 'history' ? 'selected' : ''}
-          onClick={() => setBottomView('history')}
-        >
-          History
-        </button>
       </div>
-      {bottomView === 'branches' && <BranchesPanel workspace={workspace} />}
-      {bottomView === 'changes' && <ChangesPanel workspace={workspace} />}
-      <div className="source-control-history" hidden={bottomView !== 'history'}>
-        <GitHistoryPanel workspace={workspace} history={history} />
-      </div>
+      {bottomView === 'branches' ? (
+        <BranchesPanel workspace={workspace} />
+      ) : (
+        <ChangesPanel workspace={workspace} />
+      )}
     </div>
   )
 
   return (
     <div className="workspace-tool-explorer">
-      <div className="workspace-tool-context workspace-tool-context--collapsible workspace-tool-context--explorer">
+      <div className="workspace-tool-context workspace-tool-context--collapsible">
         <button
           type="button"
           className="workspace-tool-context__toggle"
@@ -168,19 +132,15 @@ function WorkspaceFilesTool({
         >
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
-        <span title={displayPath(workspace.path, workspace.hostId)}>
-          <strong>{mote ? allFiles ? workspace.name : mote.topic.title : workspace.name}</strong>
-          {mote ? <small>{allFiles ? 'All files' : 'Mote materials'}</small> : isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
+        <span title={workspace.path}>
+          <strong>{workspace.name}</strong>
+          {isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
         ) : null}
-        <div className="workspace-tool-context__actions" ref={setToolbarTarget} />
       </div>
-      {mote ? <><button type="button" className="mote-materials__scope" onClick={() => setAllFiles(value => !value)}>{allFiles ? 'Back to this Mote' : 'Show all files'}</button>
-        {!collapsed ? <FileExplorer key={workspace.id + mote.topic.id + allFiles} workspaceId={workspace.id}
-          rootPath={allFiles ? '' : mote.rootPath} rootLabel={allFiles ? workspace.name : mote.topic.title}
-          onOpenPath={materials.open} onOpenTerminal={materials.terminal} toolbarTarget={toolbarTarget} /> : null}</> : collapsed ? (
+      {collapsed ? (
         // 折叠＝没有可切分的第二块，所以整块直接由 bottomHalf 占满，不渲染 PanelGroup / 把手（见评审
         // §2.3.1：折叠态不进 react-resizable-panels，否则折叠状态会有 store 与库两个源）。「可拖但无意义
         // 的死把手」因此不可能存在——把手根本没被渲染。
@@ -192,7 +152,7 @@ function WorkspaceFilesTool({
           key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
         >
           <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
-            <FileExplorer key={workspace.id} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget} />
+            <FileExplorer key={workspace.id} revealRequest={explorerRevealRequest} />
           </Panel>
           <PanelResizeHandle className="workspace-tools-resize-handle" />
           <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
@@ -306,11 +266,9 @@ export function WorkspaceAgentsTool({
 }
 
 export function SurfaceToolDock({
-  workspace,
-  visible = true
+  workspace
 }: {
   workspace: WorkspaceRecord | undefined
-  visible?: boolean
 }) {
   const workspaceTool = useAppStore((state) => state.workspaceTool)
   const projectRailOpen = useAppStore((state) => state.projectRailOpen)
@@ -378,7 +336,7 @@ export function SurfaceToolDock({
       </header>
       <div className="surface-tool-content">
         {selectedTool === 'files-branches' && workspace ? (
-          <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} visible={visible} />
+          <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} />
         ) : null}
         {effectiveWorkspaceTool === 'agents' && workspace ? (
           <WorkspaceAgentsTool

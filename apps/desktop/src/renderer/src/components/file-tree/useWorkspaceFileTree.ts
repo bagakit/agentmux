@@ -13,7 +13,6 @@ import {
   decideExpandedDirLoad
 } from './file-explorer-stale-dir-cache'
 import type { DirCache, TreeNode } from './file-explorer-types'
-import { fileExplorerContains } from '../../lib/file-explorer-scope'
 
 function pathDepth(path: string): number {
   return path ? path.split('/').length - 1 : -1
@@ -37,17 +36,16 @@ export function flattenFileTree(
   return rows
 }
 
-export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '') {
+export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>) {
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
   const staleDirsRef = useRef(new Set<string>())
-  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId, rootPath])
+  const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId])
   cacheRef.current = dirCache
 
   const loadDir = useCallback(
     async (path: string, options?: { force?: boolean; failOnError?: boolean }) => {
-      if (!fileExplorerContains(rootPath, path)) return false
       const cached = cacheRef.current[path]
       const decision = decideExpandedDirLoad(cached, staleDirsRef.current.has(path))
       if (!options?.force && decision === 'skip') return true
@@ -67,10 +65,10 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
       try {
         const entries = await api.files.readDirectory(workspaceId, path)
         if (!loadTrackerRef.current.isCurrent(token)) return false
-        const children = entries.filter(entry => fileExplorerContains(rootPath, entry.path)).map((entry) => ({
+        const children = entries.map((entry) => ({
           ...entry,
           relativePath: entry.path,
-          depth: pathDepth(path) - pathDepth(rootPath)
+          depth: pathDepth(path) + 1
         }))
         staleDirsRef.current.delete(path)
         setDirCache((previous) => ({
@@ -91,7 +89,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         return !options?.failOnError
       }
     },
-    [loadScope, workspaceId, rootPath]
+    [loadScope, workspaceId]
   )
 
   useLayoutEffect(() => {
@@ -108,7 +106,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
     // previous Workspace's loaded/loading entries.
     cacheRef.current = {}
     setDirCache({})
-    void loadDir(rootPath, { force: true })
+    void loadDir('', { force: true })
   }, [loadDir, loadScope])
 
   useEffect(() => {
@@ -125,12 +123,12 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
 
   const refreshTree = useCallback(async () => {
     const admitted = loadTrackerRef.current.runIfActive(loadScope, () => {
-      for (const path of collectStaleDirCachePaths(cacheRef.current, rootPath, expanded)) {
+      for (const path of collectStaleDirCachePaths(cacheRef.current, '', expanded)) {
         staleDirsRef.current.add(path)
       }
     })
     if (!admitted) return false
-    const rootLoaded = await loadDir(rootPath, { force: true, failOnError: true })
+    const rootLoaded = await loadDir('', { force: true, failOnError: true })
     if (!rootLoaded) return false
     const paths = [...expanded]
     for (let index = 0; index < paths.length; index += 4) {
@@ -139,7 +137,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
       )
     }
     return true
-  }, [expanded, loadDir, loadScope, rootPath])
+  }, [expanded, loadDir, loadScope])
 
   const refreshDir = useCallback(
     async (path: string) => await loadDir(path, { force: true }),
@@ -148,9 +146,9 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
 
   return {
     dirCache,
-    rootCache: dirCache[rootPath],
+    rootCache: dirCache[''],
     // 根目录的错误从 cache 派生，而不是另存一份 state：它与子目录的错误是同一件事，两个写者必漂移。
-    rootError: dirCache[rootPath]?.error ?? null,
+    rootError: dirCache['']?.error ?? null,
     loadDir,
     refreshDir,
     refreshTree,

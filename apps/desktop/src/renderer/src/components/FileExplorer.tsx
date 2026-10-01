@@ -1,5 +1,4 @@
 import { Link2 } from 'lucide-react'
-import { fileExplorerContains } from '../lib/file-explorer-scope'
 import {
   DndContext,
   DragOverlay,
@@ -25,15 +24,16 @@ import {
   FolderPlus,
   GripVertical,
   LoaderCircle,
+  Pencil,
   RefreshCw,
   Search,
+  Trash2,
   TriangleAlert,
   X
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
-import { createPortal } from 'react-dom'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
-import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
+import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'
@@ -44,9 +44,12 @@ import {
   isNavigationKey,
   resolveFileExplorerNavigationTarget
 } from './file-tree/file-explorer-keyboard-navigation'
-import { getRevealAncestorPaths } from '../lib/workspace-paths'
-import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import {
+  getRevealAncestorPaths,
+  joinWorkspacePath
+} from '../lib/workspace-paths'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
+import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import {
   FILE_TREE_GIT_STATUS_CLASS,
@@ -56,7 +59,6 @@ import {
   type FileTreeGitStatus
 } from '../lib/file-tree-git-status'
 import { useGitStatus } from '../hooks/useGitStatus'
-import { usePathDisplay } from '../hooks/usePathDisplay'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
 import { refreshFileExplorer } from './file-tree/file-explorer-refresh'
 import { presentExpandedDir } from './file-tree/file-explorer-stale-dir-cache'
@@ -88,10 +90,9 @@ import {
   type FileExplorerMoveTarget
 } from '../lib/file-explorer-move'
 
-type InlineEdit = { workspaceId: string; rootPath: string } & (
+type InlineEdit =
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
   | { kind: 'rename'; node: TreeNode }
-)
 
 const EMPTY_EXPLORER_STATE = createEmptyFileExplorerViewState()
 
@@ -153,15 +154,11 @@ function FileTreeRow({
   dirty,
   gitStatus,
   editing,
-  editPending,
-  editError,
-  pathTitle,
   editValue,
   onEditValue,
   onCommitEdit,
   onCancelEdit,
   onClick,
-  onSelect,
   onCollapse,
   onContextMenuOpen,
   onCopyPaths,
@@ -192,15 +189,11 @@ function FileTreeRow({
   /** 该节点的源码状态，来自 git:status 的纯投影；干净或未知时为 null。 */
   gitStatus: FileTreeGitStatus | null
   editing: boolean
-  editPending: boolean
-  editError: string | null
-  pathTitle: string
   editValue: string
   onEditValue: (value: string) => void
   onCommitEdit: () => void
   onCancelEdit: () => void
   onClick: (event: React.MouseEvent) => void
-  onSelect: (event: React.MouseEvent) => void
   onCollapse: () => void
   onContextMenuOpen: () => void
   onCopyPaths: (kind: 'absolute' | 'relative') => void
@@ -222,14 +215,6 @@ function FileTreeRow({
   selectionSize: number
 }) {
   const FileIcon = getFileTypeIcon(node.path)
-  const renameInputRef = useRef<HTMLInputElement>(null)
-  useLayoutEffect(() => {
-    const input = renameInputRef.current
-    if (!editing || !input) return
-    const extension = node.isDirectory ? -1 : node.name.lastIndexOf('.')
-    input.setSelectionRange(0, extension > 0 ? extension : node.name.length)
-    input.scrollLeft = 0
-  }, [editing, node.isDirectory, node.name])
   const {
     attributes,
     listeners,
@@ -284,7 +269,7 @@ function FileTreeRow({
         {...listeners}
         className={`tree-row ${node.ignored ? 'tree-row--ignored' : ''} ${selected ? 'tree-row--selected' : ''} ${isDragging ? 'tree-row--dragging' : ''} ${isOver ? 'tree-row--drop-over' : ''} ${loadFailure ? 'tree-row--load-failed' : ''} ${gitStatus ? FILE_TREE_GIT_STATUS_CLASS[gitStatus] : ''}`}
         style={{ '--tree-depth': node.depth } as React.CSSProperties}
-        title={[pathTitle, node.ignored ? 'Ignored by Git' : '', node.isSymlink ? `${node.linkIssue ? 'Unavailable' : node.isDirectory ? 'Directory' : 'File'} link` : ''].filter(Boolean).join(' · ')}
+        title={[node.ignored ? 'Ignored by Git' : '', node.isSymlink ? `${node.linkIssue ? 'Unavailable' : node.isDirectory ? 'Directory' : 'File'} link${node.linkTarget ? ` → ${node.linkTarget}` : ''}` : ''].filter(Boolean).join(' · ') || undefined}
         data-tree-path={node.path}
         data-tree-index={rowIndex}
         data-load-failed={loadFailure ? 'true' : 'false'}
@@ -324,20 +309,14 @@ function FileTreeRow({
           <input
             autoFocus
             className="tree-inline-input"
-            aria-label={`Rename ${node.name}`}
-            ref={renameInputRef}
-            aria-invalid={Boolean(editError)}
-            title={editError ?? undefined}
-            readOnly={editPending}
             value={editValue}
             onChange={(event) => onEditValue(event.target.value)}
             onBlur={onCommitEdit}
             onKeyDown={(event) => {
               // 组字确认用的 Enter（CJK 输入法）不能触发提交，否则会以半转换的取值重命名。
               if (isImeCompositionKeyDown(event)) return
-              if (editPending) return
-              if (event.key === 'Enter') { event.preventDefault(); onCommitEdit() }
-              if (event.key === 'Escape') { event.preventDefault(); onCancelEdit() }
+              if (event.key === 'Enter') onCommitEdit()
+              if (event.key === 'Escape') onCancelEdit()
             }}
             onClick={(event) => event.stopPropagation()}
           />
@@ -346,12 +325,6 @@ function FileTreeRow({
             type="button"
             className="tree-row__label"
             tabIndex={-1}
-            title={canRename ? `${pathTitle}\nDouble-click to rename (F2)` : pathTitle}
-            onClick={(event) => { event.stopPropagation(); onSelect(event) }}
-            onDoubleClick={(event) => {
-              event.stopPropagation()
-              if (canRename && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) onRename()
-            }}
           >
             {node.name}
           </button>
@@ -372,15 +345,21 @@ function FileTreeRow({
           </span>
         ) : null}
         {node.isSymlink ? <Link2 size={11} className="tree-row__link" aria-label={node.linkIssue ? 'Unavailable symbolic link' : node.isDirectory ? 'Directory symbolic link' : 'File symbolic link'} /> : null}
+        {!editing ? (
+          <span className="tree-row__actions">
+            {canRename ? <button type="button" title={`Rename ${node.name}`} onClick={(event) => { event.stopPropagation(); onRename() }}><Pencil size={11} /></button> : null}
+            <button type="button" title={`Delete ${node.name}`} onClick={(event) => { event.stopPropagation(); onDelete() }}><Trash2 size={11} /></button>
+          </span>
+        ) : null}
       </div>
     </FileTreeContextMenu>
   )
 }
 
-function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disabled: boolean; rootPath: string; rootLabel: string }) {
+function FileExplorerRootDropTarget({ disabled }: { disabled: boolean }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: 'file-explorer-target:root:' + rootPath,
-    data: { kind: 'file-explorer-directory', directoryPath: rootPath } satisfies FileExplorerDropData,
+    id: 'file-explorer-target:workspace-root',
+    data: { kind: 'file-explorer-directory', directoryPath: '' } satisfies FileExplorerDropData,
     disabled
   })
   return (
@@ -389,42 +368,34 @@ function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disable
       className={`file-tree-root-target ${isOver ? 'file-tree-root-target--over' : ''}`}
       data-move-drop-disabled={disabled ? 'true' : 'false'}
     >
-      <FolderOpen size={12} /><span>{rootLabel}</span>
+      <FolderOpen size={12} /><span>Workspace Root</span>
     </div>
   )
 }
 
 export function FileExplorer({
-  revealRequest, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal, toolbarTarget
+  revealRequest
 }: {
   revealRequest?: FileExplorerRevealRequest | undefined
-  workspaceId?: string | undefined
-  rootPath?: string | undefined
-  rootLabel?: string | undefined
-  onOpenPath?: ((path: string) => Promise<unknown>) | undefined
-  onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
-  /** undefined: own toolbar; null: shared header slot is not attached yet. */
-  toolbarTarget?: HTMLElement | null | undefined
 }) {
-  const workspaceId = useAppStore((state) => requestedWorkspaceId ?? state.activeWorkspaceId)
+  const workspaceId = useAppStore((state) => state.activeWorkspaceId)
   const workspace = useAppStore((state) =>
-    state.config?.workspaces.find((item) => item.id === workspaceId)
+    state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
   )
   const activePath = useAppStore((state) =>
-    workspaceId && fileExplorerContains(rootPath, state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
+    workspaceId ? state.lastActiveFileByWorkspace[workspaceId] : undefined
   )
-  const originalOpenFile = useAppStore((state) => state.openFile)
-  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) => onOpenPath ? onOpenPath(path) : originalOpenFile(path, groupId, undefined, resourceId ?? undefined)
+  const openFile = useAppStore((state) => state.openFile)
   const createPath = useAppStore((state) => state.createPath)
   const renamePath = useAppStore((state) => state.renamePath)
   const deletePath = useAppStore((state) => state.deletePath)
   const launchTerminal = useAppStore((state) => state.launchTerminal)
   const reportError = useAppStore((state) => state.reportError)
-  const displayPath = usePathDisplay()
-  const scratchTopics = useAppStore(state => scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace))
+  const localHome = useAppStore((state) => state.localHome)
+  const copyPathsAsAbsolute = useAppStore((state) => state.config?.copyPathsAsAbsolute)
   const setConfig = useAppStore((state) => state.setConfig)
   const activePaneId = useAppStore((state) => (
-    workspaceId ? state.layouts[workspaceId]?.activeGroupId : undefined
+    state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
   ))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   // Source-control status projected straight onto the tree — no second copy of "what changed" in the
@@ -450,11 +421,6 @@ export function FileExplorer({
   const [query, setQuery] = useState('')
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [editError, setEditError] = useState<string | null>(null)
-  const [editPending, setEditPending] = useState(false)
-  const editSubmissionRef = useRef<InlineEdit | null>(null)
-  const editContextRef = useRef({ workspaceId, rootPath })
-  editContextRef.current = { workspaceId, rootPath }
   const [deleteRequest, setDeleteRequest] = useState<TreeNode | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [relinking, setRelinking] = useState(false)
@@ -469,10 +435,10 @@ export function FileExplorer({
   const lastRevealRequestIdRef = useRef<number | null>(null)
   const autoRevealRequestIdRef = useRef(0)
   const observedFileRevisionRef = useRef(workspaceFileRevision)
-  const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => fileExplorerContains(rootPath, path))), [explorerState.expandedPaths, rootPath])
+  const expanded = explorerState.expandedPaths
   const selection = explorerState.selection
   const selectedPath = selection.activePath
-  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath)
+  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded)
   const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
@@ -480,15 +446,11 @@ export function FileExplorer({
   // 见 file-tree/file-explorer-refresh.ts：把结构与 git 状态收成一个动作，是因为它们分开时
   // 漏掉的那一半完全静默——#750 就是 git 那半边从来没人调。
   const refreshExplorer = useCallback(
-    async () => {
-      await Promise.all([
-        refreshFileExplorer({ refreshTree: tree.refreshTree, refreshGitStatus }),
-        workspaceId && isScratchWorkspaceId(workspaceId)
-          ? useAppStore.getState().refreshScratchTopics(workspaceId, true)
-          : Promise.resolve()
-      ])
-    },
-    [refreshGitStatus, tree.refreshTree, workspaceId]
+    async () => await refreshFileExplorer({
+      refreshTree: tree.refreshTree,
+      refreshGitStatus
+    }),
+    [refreshGitStatus, tree.refreshTree]
   )
 
   function setExpanded(update: SetStateAction<Set<string>>): void {
@@ -514,10 +476,8 @@ export function FileExplorer({
     lastRevealRequestIdRef.current = null
     setScrollTarget(null)
     setInlineEdit(null)
-    setEditError(null)
     return () => clearHoverExpand()
-    setQuery('')
-  }, [workspaceId, rootPath])
+  }, [workspaceId])
 
   useEffect(() => {
     if (observedFileRevisionRef.current === workspaceFileRevision) return
@@ -546,7 +506,6 @@ export function FileExplorer({
     if (
       !revealRequest ||
       revealRequest.workspaceId !== workspaceId ||
-      !fileExplorerContains(rootPath, revealRequest.path) ||
       revealRequest.requestId === lastRevealRequestIdRef.current
     ) return
     lastRevealRequestIdRef.current = revealRequest.requestId
@@ -563,7 +522,7 @@ export function FileExplorer({
       requestId: revealRequest.requestId,
       focus: true
     })
-  }, [revealRequest, workspaceId, rootPath])
+  }, [revealRequest, workspaceId])
 
   useEffect(() => {
     if (!scrollTarget) return
@@ -601,7 +560,7 @@ export function FileExplorer({
   const selectedNode = selectedPath ? rowProjection.getRowByPath(selectedPath) : null
   const createParent = selectedNode?.isDirectory
     ? selectedNode.path
-    : selectedNode ? workspacePathParent(selectedNode.path) : rootPath
+    : selectedNode ? workspacePathParent(selectedNode.path) : ''
   const loadedTreeNodes = useMemo(
     () => Object.values(tree.dirCache).flatMap((entry) => entry.children),
     [tree.dirCache]
@@ -622,7 +581,7 @@ export function FileExplorer({
     await runFileExplorerMove({
       sourcePath,
       destinationPath,
-      move: (source, destination) => renamePath(source, destination, workspaceId ?? undefined),
+      move: renamePath,
       refreshDirectory: tree.refreshDir
     })
   }
@@ -690,11 +649,9 @@ export function FileExplorer({
   }
 
   function beginCreate(kind: 'create-file' | 'create-directory', targetParent = createParent): void {
-    if (!workspaceId || editSubmissionRef.current) return
     setExpanded((current) => new Set(current).add(targetParent))
-    setInlineEdit({ kind, parentPath: targetParent, workspaceId, rootPath })
+    setInlineEdit({ kind, parentPath: targetParent })
     setEditValue('')
-    setEditError(null)
   }
 
   function pathsForContext(node: TreeNode): string[] {
@@ -703,40 +660,20 @@ export function FileExplorer({
       : [node.path]
   }
 
-  function filePathTitle(node: TreeNode): string {
-    if (!workspace) return ''
-    const physical = scratchWorkspaceFilePath(workspace, scratchTopics, node.path)
-    return [physical === null ? '' : displayPath(physical, workspace.hostId),
-      node.isSymlink && node.linkTarget ? `→ ${displayPath(node.linkTarget, workspace.hostId)}` : ''
-    ].filter(Boolean).join(' ')
-  }
-
-  function physicalFilePath(path: string): string | null {
-    if (!workspace) return null
-    const absolute = scratchWorkspaceFilePath(workspace,
-      scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace), path)
-    if (absolute === null) reportError(new Error('The original directory read is not confirmed. Refresh Files and retry this operation.'))
-    return absolute
-  }
-
   async function copyContextPaths(node: TreeNode, kind: 'absolute' | 'relative'): Promise<void> {
     if (!workspace) return
-    const paths = pathsForContext(node)
-    const absolutePaths = kind === 'absolute' ? paths.map(physicalFilePath) : null
-    if (absolutePaths?.some(path => path === null)) return
     // 缩写只对本机绝对路径做：相对路径不含 home，远程主机的路径套本机 home 会指向对面不存在的地方。
-    const text = absolutePaths
-      ? absolutePaths.map(path => displayPath(path!, workspace.hostId)).join('\n')
-      : formatPathsForCopy(paths, kind, workspace.path)
+    const formatted = formatPathsForCopy(pathsForContext(node), kind, workspace.path)
+    const text =
+      kind === 'absolute' && workspace.hostId === 'local'
+        ? applyCopyPathStyle(formatted, { home: localHome, copyPathsAsAbsolute })
+        : formatted
     await copyTextToClipboard(text, reportError)
   }
 
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
     if (!workspace || !activePaneId || !node.isDirectory) return
-    if (onOpenTerminal) { await onOpenTerminal(node.path); return }
-    const path = physicalFilePath(node.path)
-    if (path === null) return
-    await launchTerminal(activePaneId, undefined, path)
+    await launchTerminal(activePaneId, undefined, joinWorkspacePath(workspace.path, node.path))
   }
 
   async function openDirectoryAsProject(node: TreeNode): Promise<void> {
@@ -749,10 +686,8 @@ export function FileExplorer({
         isDirectory: node.isDirectory
       })
       if (!projectInput) return
-      const path = physicalFilePath(node.path)
-      if (path === null) return
       // Main resolves duplicates atomically and publishes before replying; do not replay a get snapshot.
-      const created = await api.workspaces.add({ ...projectInput, path })
+      const created = await api.workspaces.add(projectInput)
       await useAppStore.getState().selectWorkspace(created.id)
     } catch (error) {
       reportError(error)
@@ -792,21 +727,19 @@ export function FileExplorer({
   }
 
   function beginRename(node: TreeNode): void {
-    if (!workspaceId || editSubmissionRef.current || !canRenameFileExplorerNode(workspaceId, node)) return
+    if (!workspaceId || !canRenameFileExplorerNode(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
-    setInlineEdit({ kind: 'rename', node, workspaceId, rootPath })
+    setInlineEdit({ kind: 'rename', node })
     setEditValue(node.name)
-    setEditError(null)
   }
 
   async function commitEdit(): Promise<void> {
     const edit = inlineEdit
     const name = editValue.trim()
-    if (!edit || editSubmissionRef.current || edit.workspaceId !== workspaceId || edit.rootPath !== rootPath) return
-    if (!validName(name)) { setEditError('Enter a name without / or \\; . and .. are not file names.'); return }
-    editSubmissionRef.current = edit
-    setEditPending(true)
-    setEditError(null)
+    if (!edit || !validName(name) || !workspaceId) {
+      setInlineEdit(null)
+      return
+    }
     try {
       if (edit.kind === 'rename') {
         const nextPath = joinPath(workspacePathParent(edit.node.path), name)
@@ -819,18 +752,13 @@ export function FileExplorer({
         const createdIn = await createPath({
           path,
           kind: edit.kind === 'create-file' ? 'file' : 'directory'
-        }, workspaceId)
+        })
         await tree.refreshDir(edit.parentPath)
         setSelection(createSingleFileExplorerSelection(path))
         if (edit.kind === 'create-file') await openFile(path, undefined, undefined, createdIn)
       }
-      setInlineEdit(current => current === edit ? null : current)
-    } catch (error) {
-      // The file owner reports the transaction failure. Keep the local draft retryable.
-      if (editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.rootPath === edit.rootPath) setEditError(error instanceof Error ? error.message : String(error))
     } finally {
-      editSubmissionRef.current = null
-      setEditPending(false)
+      setInlineEdit(null)
     }
   }
 
@@ -839,7 +767,7 @@ export function FileExplorer({
     if (!node || deleting) return
     setDeleting(true)
     try {
-      await deletePath(node.path, workspaceId ?? undefined)
+      await deletePath(node.path)
       await tree.refreshDir(workspacePathParent(node.path))
       setDeleteRequest(null)
     } finally {
@@ -933,37 +861,36 @@ export function FileExplorer({
     ? inlineEdit
     : null
   const createRow = createEdit ? (
-    <div className="tree-create-row" style={{ '--tree-depth': createEdit.parentPath ? Math.max(0, createEdit.parentPath.split('/').length - (rootPath ? rootPath.split('/').length : 0)) : 0 } as React.CSSProperties}>
+    <div className="tree-create-row" style={{ '--tree-depth': createEdit.parentPath ? createEdit.parentPath.split('/').length : 0 } as React.CSSProperties}>
       {createEdit.kind === 'create-directory' ? <Folder size={14} /> : <FilePlus2 size={13} />}
       <input
         autoFocus
         className="tree-inline-input"
-        readOnly={editPending}
-        aria-invalid={Boolean(editError)}
         value={editValue}
         placeholder={createEdit.kind === 'create-directory' ? 'folder name' : 'file name'}
-        onChange={(event) => { setEditValue(event.target.value); setEditError(null) }}
+        onChange={(event) => setEditValue(event.target.value)}
         onBlur={() => void commitEdit()}
         onKeyDown={(event) => {
           // 组字确认用的 Enter（CJK 输入法）不能触发提交，否则会以半转换的取值创建文件/目录。
           if (isImeCompositionKeyDown(event)) return
-          if (editPending) return
-          if (event.key === 'Enter') { event.preventDefault(); void commitEdit() }
-          if (event.key === 'Escape') { setInlineEdit(null); setEditError(null) }
+          if (event.key === 'Enter') void commitEdit()
+          if (event.key === 'Escape') setInlineEdit(null)
         }}
       />
     </div>
   ) : null
-  const toolbar = <div className="explorer-header__actions" role="group" aria-label="File actions">
+  return (
+    <section className="file-explorer">
+      <div className="explorer-header">
+        <span>Explorer</span>
+        <div className="explorer-header__actions">
           <button onClick={() => beginCreate('create-file')} title="New file"><FilePlus2 size={13} /></button>
           <button onClick={() => beginCreate('create-directory')} title="New folder"><FolderPlus size={13} /></button>
           <button onClick={() => void refreshExplorer()} title="Refresh explorer">
             {tree.rootCache?.loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
           </button>
         </div>
-  return (
-    <section className={`file-explorer${toolbarTarget !== undefined ? ' file-explorer--shared-header' : ''}`} data-file-workspace={workspaceId} data-file-root={rootPath}>
-      {toolbarTarget !== undefined ? toolbarTarget ? createPortal(toolbar, toolbarTarget) : null : <div className="explorer-header">{toolbar}</div>}
+      </div>
       <label className="file-search">
         <Search size={13} />
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find loaded files" />
@@ -988,9 +915,8 @@ export function FileExplorer({
           tabIndex={0}
           onKeyDown={handleTreeKeyDown}
         >
-          <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
-          {editError ? <p className="tree-edit-error" role="alert">{editError}</p> : null}
-          {createEdit?.parentPath === rootPath ? createRow : null}
+          <FileExplorerRootDropTarget disabled={isMoveDropDisabled('')} />
+          {createEdit && !createEdit.parentPath ? createRow : null}
           {visibleRows.map((node, rowIndex) => (
             <Fragment key={node.path}>
               <FileTreeRow
@@ -1010,21 +936,14 @@ export function FileExplorer({
             dirty={Boolean(workspaceId && dirtyDocuments[documentKey(workspaceId, node.path)])}
             gitStatus={gitStatusIndex.get(node.path, node.isDirectory)}
             editing={inlineEdit?.kind === 'rename' && inlineEdit.node.path === node.path}
-            editPending={editPending}
-            editError={editError}
-            pathTitle={filePathTitle(node)}
             editValue={editValue}
-            onEditValue={(value) => { setEditValue(value); setEditError(null) }}
+            onEditValue={setEditValue}
             onCommitEdit={() => void commitEdit()}
-            onCancelEdit={() => { setInlineEdit(null); setEditError(null) }}
+            onCancelEdit={() => setInlineEdit(null)}
             onContextMenuOpen={() => {
               if (!selection.selectedPaths.has(node.path)) {
                 setSelection(createSingleFileExplorerSelection(node.path))
               }
-            }}
-            onSelect={(event) => {
-              const mode = getFileExplorerSelectionMode(event, isMac)
-              setSelection(current => updateFileExplorerSelection(current, rowProjection.getOrderedPaths(), node.path, mode))
             }}
             onCreate={(kind) => beginCreate(
               kind === 'file' ? 'create-file' : 'create-directory',
@@ -1092,7 +1011,7 @@ export function FileExplorer({
               </div>
             </div>
           ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
-            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
+            <div className="tree-empty"><strong>{query ? 'No loaded files match' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
           ) : null}
         </div>
         <DragOverlay dropAnimation={null}>
@@ -1109,7 +1028,7 @@ export function FileExplorer({
             ? 'AgentMux will permanently remove this path. This cannot be undone.'
             : 'AgentMux will permanently remove this path from the remote host. This cannot be undone.'
         }
-        {...(deleteRequest ? { subject: displayPath(deleteRequest.path, workspace?.hostId) } : {})}
+        {...(deleteRequest ? { subject: deleteRequest.path } : {})}
         confirmLabel="Delete"
         busy={deleting}
         onCancel={() => {
