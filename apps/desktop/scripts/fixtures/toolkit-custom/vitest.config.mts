@@ -29,6 +29,10 @@ const changes: Record<string, [string,string,string][]> = {
   execution: [[owner, "args: ['--input-type=module', '--eval', program.script, '--', ...program.args]", "args: ['--input-type=module', '--eval', 'void 0', '--', ...program.args]"]],
   completion: [[owner, "if (execution.cursor !== final.run.latestOutputBytes) throw", 'if (false) throw']],
   cleanup: [[owner, 'await execution.port.remove(ref(execution))', 'void execution.port']],
+  'stop-acceptance': [[owner, 'await execution.port!.stop(ref(execution))\n        execution.stopRequested = true',
+    'execution.stopRequested = true\n        await execution.port!.stop(ref(execution))']],
+  'stop-decision': [[owner, 'try { await execution.stopSubmission } catch {', 'try { await Promise.resolve() } catch {']],
+  'stop-cleanup': [[owner, 'if (execution?.ended) {', 'if (false) {']],
   'action-binding': [
     [owner, 'if (definition.revision !== input.expectedRevision) throw', 'if (false) throw'],
     [owner, 'if (action && (!tool.latest || tool.latest.definition.revision !== definition.revision ||\n          tool.latest.target.workspacePath !== definition.workspacePath || tool.latest.executionId !== action.sourceExecutionId ||\n          (tool.admission?.executionId ?? null) !== action.expectedAdmissionExecutionId))', 'if (false)']

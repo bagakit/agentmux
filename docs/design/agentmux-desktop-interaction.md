@@ -1416,6 +1416,8 @@ Performance 原启用与 icon / label 默认、关闭入口不持续观察、手
 
 用户工具每次准入捕获不可变配置 revision、固定目标和明确 invocation；相同已保留 invocation 不重复执行，旧请求无保留事实时不猜重放，unknown 只限制该工具新准入，不停健康 Agent。修改只影响下一次，disable 影响显示与新准入；pending/running/unknown 工具删除沿 UI/CLI 同一持久提交与执行准入完整性拒绝，不以删除配置假装停止。动作仅来自已保存配置，绑定原结果 execution/config 和目标；配置、动作、目标或最新确认结果变化时旧按钮明确冲突，输出文本不能创造命令或权限。
 
+用户点停止只针对原捕获的执行。Core 拒绝停止后不能留下“正在停止”或未被接受的 stopped 标记；脚本已自然结束时，只根据同一 Run 的公开终态、exitCode 与完整输出确认原结果并回收，不把后来一次停止请求改写成终止原因。停止回执与终态观察并发时也守同一事实边界；确认不足则保留原准入、旧确认结果与真实 unknown 原因，不猜测错误文案、不自动重放，不影响健康 Agent 的输入。
+
 用户脚本结果是有界 PTY 合流文本，空结果可辨，不伪称独立 stdout，不执行 HTML/脚本。自然完成以 exact Core 终态/exitCode、authoritative 最终输出字节与完整连续接收事实为准，不以静默、观察退出或动画猜成功；Gap、损坏或终局不完整明确失败/unknown。工具 owner 保有限最新确认结果与必要在途准入，仅在关键点持久，不按输出片段写盘；准入先于执行持久确认，结果先于回收持久确认，保存失败保旧确认事实及必要准入，只限对应工具 unknown。普通退出只回收自己创建的 exact 工具 Run；异常重开保结果与准入，经 exact 公开 Core 状态/replay查证，事实不足不清工作面、不猜删或自动重放副作用，不增加 DB/WAL/daemon。
 
 数据权威、Run 与 Agent 生命周期仍由原 owner 持有；指标、unknown、采样及释放只定义在《Status Bar CPU/Memory 资源面板》，通用工作量与原工作面保护沿《Terminal 连续向上阅读历史》。公开查询、脚本和 Toolkit 自身成本也计入，不能按指标或采样周期反复 spawn 多个 CLI、建立第二 sampler 或每工具常驻 loop。执行脚本与 Agent 任务复用现有 Runtime / Core 能力，不把长寿命 Agent 进程管理放进 Renderer。

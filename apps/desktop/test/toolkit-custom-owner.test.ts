@@ -18,19 +18,19 @@ const deferred = () => { let resolve!: () => void; return { promise: new Promise
 function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'exited', definition = tool) {
   let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [structuredClone(definition)] } }
   let custom!: CustomToolkitOwner, accept: (event: AgentMuxClientEvent) => void = () => {}
-  let state = initialState, bytes = Buffer.from(output), finalBytes = bytes.byteLength
+  let state = initialState, exitCode = 0, bytes = Buffer.from(output), finalBytes = bytes.byteLength
   const receipts = new Map<string, unknown>()
   const storage = { read: vi.fn(async (id: string) => receipts.get(id) ?? null), save: vi.fn(async (id: string, value: unknown) => { receipts.set(id, structuredClone(value)) }) }
   const owner = new ConfigOwner({ read: () => config,
     prepare: (current, next) => prepareToolkitConfig(current, next, id => custom.guardDelete(id)),
     save: vi.fn(async next => structuredClone(next)), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
-  const run = () => ({ runId: 'exact-tool-run', kind: 'terminal', state, exitCode: state === 'exited' ? 0 : undefined, latestOutputBytes: finalBytes })
+  const run = () => ({ runId: 'exact-tool-run', kind: 'terminal', state, exitCode: state === 'exited' ? exitCode : undefined, latestOutputBytes: finalBytes })
   const snapshot = () => ({ run: run(), replay: bytes.length ? [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }] : [], gap: null }) as AgentMuxRunAttachment
   const port: ToolkitRunPort = { create: vi.fn(async (_input, listener) => { accept = listener; return run() as any }),
     attach: vi.fn(async (_ref, _after, listener) => {
       if (listener) accept = listener
       // Production attach publishes state before returning replay. This cannot recurse into another attach.
-      accept({ type: 'process-state', state, exitCode: state === 'exited' ? 0 : undefined, run: { runId: 'exact-tool-run' } } as any)
+      accept({ type: 'process-state', state, exitCode: state === 'exited' ? exitCode : undefined, run: { runId: 'exact-tool-run' } } as any)
       return snapshot()
     }), replay: vi.fn(async () => snapshot()),
     release: vi.fn(async () => {}), remove: vi.fn(async () => {}),
@@ -38,7 +38,7 @@ function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'ex
   custom = new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort: async () => port, runner: process.execPath, env: {} })
   const input = (latest: string | null = null): ToolkitRunInput => ({ invocationId: randomUUID(), expectedRevision: config.toolkit.tools[0]!.revision, expectedLatestExecutionId: latest })
   return { custom, owner, storage, receipts, port, input, get config() { return config },
-    exit: () => { state = 'exited'; accept({ type: 'process-state', state: 'exited', exitCode: 0, run: { runId: 'exact-tool-run' } } as any) },
+    exit: (code = 0) => { state = 'exited'; exitCode = code; accept({ type: 'process-state', state: 'exited', exitCode: code, run: { runId: 'exact-tool-run' } } as any) },
     begin: () => { state = 'running'; bytes = Buffer.alloc(0); finalBytes = 0 },
     final: (text: string, barrier = Buffer.byteLength(text)) => { bytes = Buffer.from(text); finalBytes = barrier },
     liveBytes: (data: Uint8Array, startByte: number) => accept({ type: 'terminal-output', run: { runId: 'exact-tool-run' }, dataBytes: data,
@@ -228,6 +228,122 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     f.final('last_ACK'); f.exit(); await flush()
     expect(await f.custom.get('quota')).toMatchObject({ state: 'stopped', admission: null, latestConfirmed: { text: 'last_ACK' } })
     expect(f.port.remove).toHaveBeenCalledOnce()
+  })
+  it('confirms natural completion after a rejected Stop repairs a previously failed result save', async () => {
+    const f = fixture('natural_ACK')
+    let saves = 0
+    f.storage.save.mockImplementation(async (id, receipt) => {
+      if (++saves === 3) throw new Error('result-save-failed')
+      f.receipts.set(id, structuredClone(receipt))
+    })
+    const failedSave = await f.custom.run('quota', f.input(), new AbortController().signal)
+    expect(failedSave).toMatchObject({ state: 'unknown', latestConfirmed: null, admission: { text: 'natural_ACK' } })
+    const captured = failedSave.admission!
+    f.port.stop = vi.fn(async () => { throw new Error('stop-not-accepted') })
+    const value = await f.custom.stop('quota', captured.executionId)
+    expect(value).toMatchObject({ state: 'succeeded', admission: null, latestConfirmed: {
+      executionId: captured.executionId, invocationId: captured.invocationId, definition: captured.definition,
+      target: captured.target, run: captured.run, text: 'natural_ACK', exitCode: 0, state: 'succeeded'
+    } })
+    expect(f.port.create).toHaveBeenCalledOnce()
+    expect(f.port.stop).toHaveBeenCalledExactlyOnceWith({ runId: 'exact-tool-run' })
+    expect(f.port.remove).toHaveBeenCalledExactlyOnceWith({ runId: 'exact-tool-run' })
+  })
+  it.each([0, 7])('waits for a rejected Stop submission before confirming natural exit %i', async code => {
+    const f = fixture('', 'running'), decision = deferred()
+    const started = await f.custom.run('quota', f.input(), new AbortController().signal)
+    f.final('terminal_ACK')
+    f.port.stop = vi.fn(async () => { f.exit(code); await decision.promise; throw new Error('stop-not-accepted') })
+    const writesBeforeStop = f.storage.save.mock.calls.length
+    const stopping = f.custom.stop('quota', started.admission!.executionId)
+    await flush()
+    expect(f.storage.save.mock.calls.length).toBe(writesBeforeStop)
+    expect((await f.custom.get('quota')).latestConfirmed).toBeNull()
+    expect(f.port.remove).not.toHaveBeenCalled()
+    decision.release()
+    const value = await stopping, state = code === 0 ? 'succeeded' : 'failed'
+    expect(value).toMatchObject({ state, admission: null, latestConfirmed: {
+      executionId: started.admission!.executionId, text: 'terminal_ACK', state, exitCode: code
+    } })
+    expect(f.port.create).toHaveBeenCalledOnce(); expect(f.port.stop).toHaveBeenCalledOnce()
+  })
+  it('shares one accepted Stop submission and confirms stopped only after its decision', async () => {
+    const f = fixture('', 'running'), decision = deferred()
+    const started = await f.custom.run('quota', f.input(), new AbortController().signal)
+    f.final('stopped_ACK')
+    f.port.stop = vi.fn(async () => { f.exit(); await decision.promise })
+    const stopping = f.custom.stop('quota', started.admission!.executionId)
+    const repeated = f.custom.stop('quota', started.admission!.executionId)
+    await flush()
+    expect((await f.custom.get('quota')).latestConfirmed).toBeNull()
+    expect(f.port.stop).toHaveBeenCalledOnce(); expect(f.port.remove).not.toHaveBeenCalled()
+    decision.release()
+    const [first, second] = await Promise.all([stopping, repeated])
+    expect(first).toMatchObject({ state: 'stopped', admission: null, latestConfirmed: { text: 'stopped_ACK', state: 'stopped' } })
+    expect(second).toEqual(first); expect(f.port.remove).toHaveBeenCalledOnce()
+  })
+  it('keeps rejected live Stop unknown with the original error and prior result, then confirms natural exit', async () => {
+    const f = fixture('prior_ACK')
+    const first = await f.custom.run('quota', f.input(), new AbortController().signal)
+    f.begin()
+    const started = await f.custom.run('quota', f.input(first.latestConfirmed!.executionId), new AbortController().signal)
+    const rejection = new Error('stop-submission-failed')
+    f.port.stop = vi.fn(async () => { throw rejection })
+    await expect(f.custom.stop('quota', started.admission!.executionId)).rejects.toBe(rejection)
+    expect(await f.custom.get('quota')).toMatchObject({ state: 'unknown', reason: expect.stringContaining(rejection.message),
+      admission: { executionId: started.admission!.executionId }, latestConfirmed: first.latestConfirmed })
+    expect(f.port.remove).toHaveBeenCalledOnce(); expect(f.port.stop).toHaveBeenCalledOnce()
+    f.final('natural_tail_ACK'); f.exit(); await flush()
+    expect(await f.custom.get('quota')).toMatchObject({ state: 'succeeded', admission: null,
+      latestConfirmed: { executionId: started.admission!.executionId, state: 'succeeded', text: 'natural_tail_ACK' } })
+    expect(f.port.create).toHaveBeenCalledTimes(2); expect(f.port.stop).toHaveBeenCalledOnce()
+  })
+  it('preserves rejected Stop and failed replay reasons without removing an unconfirmed execution', async () => {
+    const f = fixture('', 'running')
+    const started = await f.custom.run('quota', f.input(), new AbortController().signal)
+    const rejection = new Error('stop-submission-failed')
+    f.port.stop = vi.fn(async () => { throw rejection })
+    f.port.replay = vi.fn(async () => { throw new Error('final-replay-failed') })
+    await expect(f.custom.stop('quota', started.admission!.executionId)).rejects.toBe(rejection)
+    const value = await f.custom.get('quota')
+    expect(value).toMatchObject({ state: 'unknown', admission: { executionId: started.admission!.executionId }, latestConfirmed: null })
+    expect(value.reason).toContain('stop-submission-failed'); expect(value.reason).toContain('final-replay-failed')
+    expect(f.port.remove).not.toHaveBeenCalled(); expect(f.port.stop).toHaveBeenCalledOnce()
+  })
+  it('does not label naturally completed output stopped when disposing after failed confirmation', async () => {
+    const f = fixture('natural_ACK')
+    let saves = 0
+    f.storage.save.mockImplementation(async (id, receipt) => {
+      if (++saves === 3) throw new Error('result-save-failed')
+      f.receipts.set(id, structuredClone(receipt))
+    })
+    const value = await f.custom.run('quota', f.input(), new AbortController().signal)
+    expect(value.state).toBe('unknown')
+    f.port.stop = vi.fn(async () => { throw new Error('stop-not-accepted') })
+    await f.custom.dispose()
+    expect(await f.custom.get('quota')).toMatchObject({ state: 'succeeded', admission: null,
+      latestConfirmed: { executionId: value.admission!.executionId, state: 'succeeded', text: 'natural_ACK' } })
+    expect(f.port.create).toHaveBeenCalledOnce(); expect(f.port.remove).toHaveBeenCalledOnce()
+  })
+  it.each(['release', 'remove'] as const)('waits for already confirmed %s cleanup without submitting Stop', async method => {
+    const f = fixture('natural_ACK'), cleanup = deferred()
+    f.port[method] = vi.fn(async () => { await cleanup.promise })
+    const running = f.custom.run('quota', f.input(), new AbortController().signal)
+    await flush()
+    const before = await f.custom.get('quota')
+    expect(before).toMatchObject({ state: 'stopping', reason: 'Result confirmed; exact Run cleanup pending.',
+      latestConfirmed: { state: 'succeeded', text: 'natural_ACK' } })
+    expect(before.admission!.executionId).toBe(before.latestConfirmed!.executionId)
+    let stopReturned = false
+    const stopping = f.custom.stop('quota', before.admission!.executionId).then(value => { stopReturned = true; return value })
+    await flush()
+    expect(stopReturned).toBe(false); expect(f.port.stop).not.toHaveBeenCalled()
+    expect(await f.custom.get('quota')).toEqual(before)
+    cleanup.release()
+    const [original, stopped] = await Promise.all([running, stopping])
+    expect(stopped).toEqual(original)
+    expect(stopped).toMatchObject({ state: 'succeeded', admission: null, latestConfirmed: before.latestConfirmed })
+    expect(f.port.release).toHaveBeenCalledOnce(); expect(f.port.remove).toHaveBeenCalledOnce()
   })
   it('waits for held admission save during disposal and never creates a late Run after the owner closes', async () => {
     const f = fixture(), held = deferred()
