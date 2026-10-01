@@ -92,11 +92,12 @@ function MessageHistory({ items, incoming, selectedKey, onOpen, onCopy }: {
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued }: {
   system: ReturnType<typeof useServiceNotices>
   queued: readonly ComposerQueuedMessage[]
   timeline?: AgentTimelineSnapshot | undefined
   progressSession?: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
+  visible?: boolean
   control?: AgentSessionControl | undefined
   userMessages?: readonly AgentSessionUserMessage[] | undefined
   onRemoveQueued?: (id: string) => void
@@ -188,7 +189,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, cont
     error: historyError,
     observationError,
     windowFrozen
-  } = useSessionUserMessages(effectiveControl, { enabled: open })
+  } = useSessionUserMessages(effectiveControl, { enabled: open && visible })
 
   const effectiveUserMessages = propUserMessages ?? hookUserMessages
 

@@ -119,7 +119,7 @@ export function ObservationSurfaceGallery() {
           disabled={false}
           placeholder="Ask, steer, or paste a command…"
           onChange={setDraft}
-          mailbox={<SessionMailbox system={inbox} queued={queued}
+          mailbox={<SessionMailbox visible system={inbox} queued={queued}
           onRemoveQueued={(id) => setQueued((items) => items.filter((item) => item.id !== id))}
           onSendQueued={(id) => { setComposerAction(`Example send: ${queued.find((item) => item.id === id)?.text}`); setQueued((items) => items.filter((item) => item.id !== id)) }} />}
           onSubmit={() => { setComposerAction(`Example payload: ${expandSemanticReferences(draft)}`); setDraft('') }}

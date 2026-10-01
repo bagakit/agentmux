@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": [
+    "../../../src/renderer/src/global.d.ts",
+    "../../../src/renderer/src/components/SessionMailbox.tsx",
+    "../../../src/renderer/src/components/AgentSessionComposer.tsx",
+    "../../../src/renderer/src/components/ObservationSurfaceGallery.tsx"
+  ]
+}

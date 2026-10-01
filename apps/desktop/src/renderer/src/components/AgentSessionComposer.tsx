@@ -256,7 +256,7 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
-      mailbox={<SessionMailbox system={inbox} timeline={timeline}
+      mailbox={<SessionMailbox visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
