@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExternalBrowserBridge, ExternalBrowserRequestFailure } from '../src/main/browser-external-bridge.js'
 import { attachExternalBrowserTarget, type ExternalBrowserTargetSession } from '../src/main/browser-external-target.js'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
-import { isShareUrl, isTabScopedCommand } from '../browser-extension/protocol.js'
+import { isShareUrl, isTabScopedCommand, BROWSER_OPERATION_FEEDBACK_WORLD_NAME, buildOwnedFeedbackClearScript } from '../browser-extension/protocol.js'
 
 // A real production extension worker talks to the real loopback bridge. Chrome APIs are
 // deliberately Source doubles here; this suite does not certify a Native browser.
@@ -24,6 +24,7 @@ function deferred<T = void>() {
 const extensionId = 'a'.repeat(32)
 const origin = `chrome-extension://${extensionId}`
 const owner = { operationId: 'fixture-operation', callerId: 'fixture-caller' }
+let Worker: typeof import('../browser-extension/service-worker.js')['SharedTabWorker'] | undefined
 const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => {
   // Disconnect before transport cleanup, so a deliberately malformed reply cannot
@@ -35,7 +36,8 @@ afterEach(async () => {
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'agentmux-shared-tab-source-'))
   const path = join(directory, 'bindings.json')
-  const bridge = new ExternalBrowserBridge(path)
+  const documentEnded = vi.fn()
+  const bridge = new ExternalBrowserBridge(path, () => {}, documentEnded)
   const tabs = new Map([
     [1, { id: 1, url: 'https://fixture.invalid/form', title: 'Fixture HTTPS' }],
     [2, { id: 2, url: 'http://127.0.0.1:8123/form', title: 'Fixture loopback' }],
@@ -63,15 +65,18 @@ async function fixture() {
         if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
         if (method === 'Runtime.evaluate') return { result: { value: params.expression === 'counter' ? counter : '[]' } }
         if (method === 'DOM.resolveNode') return { object: { objectId: 'fixture-object' } }
-        if (method === 'Runtime.callFunctionOn') { counter++; return { result: { value: null } } }
+        if (method === 'Runtime.callFunctionOn') { if (params?.functionDeclaration?.includes('this.click()')) counter++; return { result: { value: null } } }
         return {}
       }) }
   }
   class ExtensionSocket extends WebSocket { constructor(url: string) { super(url, { origin }) } }
   vi.stubGlobal('chrome', api)
   vi.stubGlobal('WebSocket', ExtensionSocket)
-  vi.resetModules()
-  const { worker } = await import('../browser-extension/service-worker.js')
+  let worker: import('../browser-extension/service-worker.js').SharedTabWorker
+  if (!Worker) {
+    const module = await import('../browser-extension/service-worker.js')
+    Worker = module.SharedTabWorker; worker = module.worker
+  } else { worker = new Worker(api, ExtensionSocket); worker.start() }
   await worker.ready
   cleanups.push(async () => { worker.disconnect('Fixture complete'); await bridge.dispose(); await rm(directory, { recursive: true }) })
   function popup(message: Record<string, unknown>, sender = { url: `${origin}/popup.html` }): Promise<any> {
@@ -96,11 +101,69 @@ async function fixture() {
     cleanups.push(() => session.detach())
     return { binding, session }
   }
-  return { api, bridge, worker, pairing, popup, share, attach, tabs, path, attached,
+  return { api, bridge, worker, documentEnded, pairing, popup, share, attach, tabs, path, attached,
     select: (id: number) => { selected = id }, get counter() { return counter } }
 }
 
 describe('person-shared external Browser transport', () => {
+  it.each(['withdrawal', 'disconnect'])('clears only original recorded root/child feedback contexts before detach on %s', async reason => {
+    const f = await fixture(); const { session } = await f.attach()
+    const original = f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => method === 'Page.createIsolatedWorld'
+      ? { executionContextId: params?.worldName === BROWSER_OPERATION_FEEDBACK_WORLD_NAME ? target.sessionId ? 17 : 11 : 29 }
+      : await original(target, method, params))
+    await session.sendCommand('Page.createIsolatedWorld', { frameId: 'main-document', worldName: BROWSER_OPERATION_FEEDBACK_WORLD_NAME })
+    await session.sendCommand('Page.createIsolatedWorld', { frameId: 'main-document', worldName: 'ordinary-page-world' })
+    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Target.attachedToTarget', { sessionId: 'original-child', targetInfo: { type: 'iframe' } })
+    await vi.waitFor(() => expect(session.frames.has('original-child')).toBe(true))
+    await session.frames.get('original-child')!('Page.createIsolatedWorld', { frameId: 'original-child-frame', worldName: BROWSER_OPERATION_FEEDBACK_WORLD_NAME })
+    f.api.debugger.sendCommand.mockClear(); f.api.debugger.attach.mockClear()
+    if (reason === 'withdrawal') expect((await f.popup({ type: 'unshare', tabId: 1 })).ok).toBe(true)
+    else f.worker.disconnect('Actual fixture disconnect')
+    await vi.waitFor(() => expect(f.api.debugger.detach).toHaveBeenCalledTimes(1))
+    expect(f.api.debugger.sendCommand.mock.calls).toEqual([
+      [{ tabId: 1 }, 'Runtime.evaluate', { contextId: 11, expression: buildOwnedFeedbackClearScript(owner.operationId), returnByValue: true }],
+      [{ tabId: 1, sessionId: 'original-child' }, 'Runtime.evaluate', { contextId: 17, expression: buildOwnedFeedbackClearScript(owner.operationId), returnByValue: true }]
+    ])
+    expect(f.api.debugger.attach).not.toHaveBeenCalled(); expect(f.api.tabs.update).not.toHaveBeenCalled(); expect(f.api.windows.update).not.toHaveBeenCalled()
+    expect(f.api.debugger.sendCommand.mock.invocationCallOrder.at(-1)).toBeLessThan(f.api.debugger.detach.mock.invocationCallOrder[0]!)
+  })
+  it('keeps ordinary completed feedback on normal detach and creates no cleanup reads for an unrecorded world', async () => {
+    const f = await fixture(); const { session } = await f.attach()
+    await session.sendCommand('Page.createIsolatedWorld', { frameId: 'main-document', worldName: BROWSER_OPERATION_FEEDBACK_WORLD_NAME })
+    f.api.debugger.sendCommand.mockClear()
+    await session.detach()
+    expect(f.api.debugger.sendCommand.mock.calls).toEqual([])
+    expect(f.api.debugger.detach).toHaveBeenCalledTimes(1)
+    const second = await f.attach(2)
+    f.api.debugger.sendCommand.mockClear()
+    await f.popup({ type: 'unshare', tabId: 2 })
+    expect(f.api.debugger.sendCommand.mock.calls).toEqual([])
+    await vi.waitFor(() => expect(second.binding.status).toBe('revoked'))
+  })
+  it('ends only the original replaced or closed document, keeping same-document navigation, withdrawal and disconnection unknown', async () => {
+    const f = await fixture(); const { binding } = await f.attach()
+    const document = binding.navigationId
+    f.documentEnded.mockClear()
+    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.navigatedWithinDocument', { frameId: 'main-document', url: 'https://fixture.invalid/form#section' })
+    await vi.waitFor(() => expect(binding.url).toContain('#section'))
+    expect(binding.navigationId).toBe(document)
+    expect(f.documentEnded).not.toHaveBeenCalled()
+    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.frameNavigated', { frame: { id: 'main-document', loaderId: 'confirmed-next-document', url: 'https://fixture.invalid/next' } })
+    await vi.waitFor(() => expect(f.documentEnded).toHaveBeenCalledWith(binding.id, document))
+    expect(f.documentEnded.mock.calls).toEqual([[binding.id, document]])
+    f.api.tabs.onRemoved.emit(1)
+    await vi.waitFor(() => expect(binding.status).toBe('closed'))
+    expect(f.documentEnded.mock.calls).toEqual([[binding.id, document], [binding.id, 'confirmed-next-document']])
+    const second = await f.share(2)
+    f.documentEnded.mockClear()
+    expect((await f.popup({ type: 'unshare', tabId: 2 })).ok).toBe(true)
+    await vi.waitFor(() => expect(second.status).toBe('revoked'))
+    const third = await f.share(3)
+    f.worker.disconnect('Uncertain transport loss')
+    await vi.waitFor(() => expect(third.status).toBe('disconnected'))
+    expect(f.documentEnded).not.toHaveBeenCalled()
+  })
   it('pairs transport without granting a tab and refuses a page sender or a stale selection', async () => {
     const f = await fixture()
     expect(f.bridge.list()).toEqual([])
@@ -209,7 +272,7 @@ describe('person-shared external Browser transport', () => {
       if (method === 'Runtime.callFunctionOn') { entered.resolve(); return held.promise }
       return result
     })
-    const action = session.sendCommand('Runtime.callFunctionOn', { objectId: 'fixture-object' })
+    const action = session.sendCommand('Runtime.callFunctionOn', { objectId: 'fixture-object', functionDeclaration: 'function(){ this.click() }' })
     const rejected = expect(action).rejects.toBeInstanceOf(ExternalBrowserRequestFailure)
     await entered.promise
     f.worker.disconnect('Fixture link lost')
@@ -235,7 +298,7 @@ describe('person-shared external Browser transport', () => {
     const prior = session.sendCommand('Runtime.evaluate', { expression: 'hold' })
     const priorRejected = expect(prior).rejects.toThrow(/document changed/)
     await entered.promise
-    const action = session.sendCommand('Runtime.callFunctionOn', { objectId: 'fixture-object' })
+    const action = session.sendCommand('Runtime.callFunctionOn', { objectId: 'fixture-object', functionDeclaration: 'function(){ this.click() }' })
     const actionRejected = expect(action).rejects.toMatchObject({ sent: false })
     f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.frameNavigated', { frame: { id: 'main-document', loaderId: 'new-loader', url: f.tabs.get(1)!.url } })
     await vi.waitFor(() => expect(binding.navigationId).toBe('new-loader'))
@@ -394,5 +457,187 @@ describe('person-shared external Browser transport', () => {
     expect(['https://fixture.invalid/', 'http://localhost:8080/', 'http://[::1]:8080/'].map(isShareUrl)).toEqual([true, true, true])
     expect([("file://localhost" + _hygiene_fixturePath("tmp")), 'ftp://localhost/', 'http://localhost.example.invalid/', 'http://remote.invalid/', 'https://user:password@fixture.invalid/'].map(isShareUrl)).toEqual([false, false, false, false, false])
     expect(isTabScopedCommand('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true, filter: [{ type: 'page', exclude: false }] })).toBe(false)
+  })
+})
+
+// The actual page program child process, dispatch, operation journal and retained evidence
+// consume this transport. Native Chrome is certified by the separate private-profile probe.
+async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: import('../src/main/browser-uploads.js').BrowserUploads = { upload: vi.fn() } as any) {
+  const { dirname } = await import('node:path')
+  const { ExternalBrowserOwner } = await import('../src/main/browser-external-owner.js')
+  const { BrowserOperationJournal, BrowserOperationFileStore } = await import('../src/main/browser-operation-journal.js')
+  const { BrowserStepEvidenceStore } = await import('../src/main/browser-step-evidence.js')
+  const { BrowserResultArtifactStore } = await import('../src/main/browser-result-artifact.js')
+  const directory = dirname(f.path)
+  const journalFile = new BrowserOperationFileStore(join(directory, 'operations.json'))
+  const journalSaves = vi.spyOn(journalFile, 'save')
+  const journal = new BrowserOperationJournal(journalFile)
+  const evidence = new BrowserStepEvidenceStore(join(directory, 'evidence'))
+  const ledger = new Map<string, any>()
+  const refs = { read: vi.fn(async id => ledger.get(id) ?? null), write: vi.fn(async (id, value) => { ledger.set(id, value) }) }
+  const page = new ExternalBrowserOwner(f.bridge, { journal, refs, evidence, uploads,
+    results: new BrowserResultArtifactStore(join(directory, 'results')),
+    decodeScreenshot: () => { throw new Error('This Source fixture does not certify PNG decoding.') } })
+  return { page, journal, evidence, refs, journalFile, journalSaves }
+}
+
+describe('external page owner uses the existing program and journal', () => {
+  it('passes the independent-document fact through the real SDK dispatcher into the original Workspace upload store', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    const { dirname } = await import('node:path')
+    const { LocalExecutionHost } = await import('../../../packages/core/src/execution-host.js')
+    const { WorkspaceFiles } = await import('../src/main/workspace-files.js')
+    const { BrowserUploads } = await import('../src/main/browser-uploads.js')
+    const f = await fixture(); const binding = await f.share()
+    const directory = dirname(f.path); const root = join(directory, 'workspace'); await mkdir(root)
+    await writeFile(join(root, 'selected.txt'), 'original Workspace snapshot')
+    const uploads = new BrowserUploads(join(directory, 'uploads'), new WorkspaceFiles(() => new LocalExecutionHost()),
+      id => ({ id, name: 'Owned Source workspace', path: root, kind: 'folder', hostId: 'local' }))
+    const original = f.api.debugger.sendCommand.getMockImplementation()!
+    let selected: string[] = []
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'DOM.setFileInputFiles') { selected = params!.files; return {} }
+      if (method === 'Runtime.callFunctionOn' && params?.functionDeclaration?.includes('Current target is not an enabled file input')) return { result: { value: { multiple: false } } }
+      if (method === 'Runtime.callFunctionOn' && params?.functionDeclaration?.includes('Array.from(this.files')) return { result: { value: [{ name: 'selected.txt', byteLength: 27 }] } }
+      return await original(target, method, params)
+    })
+    const o = await programOwner(f, uploads)
+    const report = await o.page.runScript(binding.id, 'const page=await snapshot();return await uploadFiles(page.nodes[0].ref,["selected.txt"])')
+    expect(report.outcome.kind).toBe('completed')
+    expect(report.result).toMatchObject({ kind: 'browser-upload-files', browserId: binding.id, workspaceId: 'fixture-workspace', navigationId: binding.navigationId })
+    expect(selected).toHaveLength(1)
+    await uploads.dispose()
+    await expect(readFile(selected[0]!, 'utf8')).resolves.toBe('original Workspace snapshot')
+    expect(await uploads.retained()).toMatchObject({ selections: [expect.objectContaining({ browserId: binding.id, navigationId: binding.navigationId, byteLength: 27 })] })
+  })
+  it('runs the original SDK and joins the selected target, caller, steps, refs and evidence to its actual journal', async () => {
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const report = await o.page.runScript(binding.id, 'const page = await snapshot(); await click(page.nodes[0].ref); return await js("counter")', { id: owner.callerId, name: 'Fixture Agent' }, 'public-operation')
+    expect(report.outcome).toEqual({ kind: 'completed' })
+    expect(report.result).toBe(1)
+    expect(f.counter).toBe(1)
+    const record = await o.journal.get('public-operation')
+    expect(record?.browserId).toBe(binding.id)
+    expect(record?.operator.id).toBe(owner.callerId)
+    expect(record?.steps.map(step => [step.sequence, step.method, step.status])).toEqual([[1, 'snapshot', 'completed'], [2, 'click', 'completed'], [3, 'js', 'completed']])
+    expect(o.refs.write).toHaveBeenCalledWith(binding.id, expect.anything())
+    expect(binding.ledgerNavigationId).toBe(binding.navigationId)
+    expect(record?.steps[1]?.target).toEqual(expect.objectContaining({ role: 'button', name: 'Fixture button' }))
+    expect(record?.steps[0]?.evidence).toHaveLength(1)
+    const retained = await o.evidence.read(record!.steps[0]!.evidence![0]!)
+    expect(retained.content).toEqual(expect.objectContaining({ kind: 'page', text: expect.stringContaining('Fixture button') }))
+    expect(f.attached.size).toBe(0)
+    expect(f.api.tabs.update).not.toHaveBeenCalled(); expect(f.api.windows.update).not.toHaveBeenCalled()
+  })
+  it('continues the original isolated-world revision for a later operation without adding preparation to a read-only snapshot', async () => {
+    const { buildBrowserOperationFeedbackRevisionScript } = await import('../src/main/browser-operation-feedback.js')
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const probe = buildBrowserOperationFeedbackRevisionScript()
+    const original = f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'Runtime.evaluate' && params?.expression?.includes(probe)) return { result: { value: { value: true, revision: 37 } } }
+      return await original(target, method, params)
+    })
+    expect((await o.page.runScript(binding.id, 'return await snapshot()')).outcome.kind).toBe('completed')
+    expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression?.includes(probe))).toHaveLength(1)
+    const report = await o.page.runScript(binding.id, 'const page=await snapshot();await click(page.nodes[0].ref);return 1')
+    expect(report.outcome.kind).toBe('completed')
+    expect(f.counter).toBe(1)
+    expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression?.includes(probe))).toHaveLength(5)
+    const scripts = f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression?.includes('data-agentmux-browser-operation-feedback') && call[2]?.expression?.includes('"phase":"running"')).map(call => call[2]!.expression)
+    expect(scripts.length).toBeGreaterThan(0)
+    expect(scripts[0]).toContain('"revision":39')
+  })
+  it('reports a failed feedback acknowledgement beside the result without blocking the original action', async () => {
+    const { buildBrowserOperationFeedbackRevisionScript } = await import('../src/main/browser-operation-feedback.js')
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const probe = buildBrowserOperationFeedbackRevisionScript(); const original = f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'Runtime.evaluate' && params?.expression?.includes(probe)) throw new Error('Owned feedback world unavailable')
+      return await original(target, method, params)
+    })
+    const report = await o.page.runScript(binding.id, 'const page=await snapshot();await click(page.nodes[0].ref);return 1')
+    expect(report.outcome.kind).toBe('completed')
+    expect(f.counter).toBe(1)
+    expect(report.runOperation?.warning).toContain('Action feedback is unavailable')
+  })
+  it('keeps a lost side effect indeterminate even if the program catches its error', async () => {
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const entered = deferred(); const held = deferred(); const original = f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'Runtime.evaluate' && params?.expression === 'mutate') { entered.resolve(); await held.promise; return { result: { value: 1 } } }
+      return await original(target, method, params)
+    })
+    const run = o.page.runScript(binding.id, 'try { await js("mutate") } catch {} return "caught"', { id: owner.callerId, name: 'Fixture Agent' })
+    await entered.promise
+    f.worker.disconnect('Fixture lost action acknowledgement')
+    held.resolve()
+    const report = await run
+    expect(report.outcome.kind).toBe('indeterminate')
+    expect(report.runOperation?.phase).toBe('indeterminate')
+    expect((await o.journal.get(report.runOperation!.id))?.phase).toBe('indeterminate')
+  })
+  it('keeps a sent action across a document change indeterminate when the program catches its result error', async () => {
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const entered = deferred(); const held = deferred(); const original = f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'Runtime.evaluate' && params?.expression === 'mutate') { entered.resolve(); await held.promise; return { result: { value: 1 } } }
+      return await original(target, method, params)
+    })
+    const run = o.page.runScript(binding.id, 'try { await js("mutate") } catch {} return "caught"', { id: owner.callerId, name: 'Fixture Agent' })
+    await entered.promise
+    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.frameNavigated', { frame: { id: 'main-document', loaderId: 'replacement-document', url: 'https://fixture.invalid/replacement' } })
+    held.resolve()
+    const report = await run
+    expect(binding.status).toBe('ready')
+    expect(binding.navigationId).toBe('replacement-document')
+    expect(report.result).toBe('caught')
+    expect(report.outcome.kind).toBe('indeterminate')
+    expect((await o.journal.get(report.runOperation!.id))?.phase).toBe('indeterminate')
+  })
+  it('stops the original operation and removes its sharing authority without enabling a replacement', async () => {
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const started = deferred(); const stopped = deferred()
+    const release = await o.journal.subscribe('stop-original', 0, event => {
+      if (event.event.type === 'step-started') started.resolve()
+      if (event.event.type === 'step-finished' && event.event.step.status === 'stopped') stopped.resolve()
+    })
+    const run = o.page.runScript(binding.id, 'await waitForLoad(5000); return 1', { id: owner.callerId, name: 'Fixture Agent' }, 'stop-original')
+    await started.promise
+    await o.page.stopOperationById('stop-original')
+    expect(binding.status).toBe('revoked')
+    const report = await run
+    expect(report.outcome.kind).toBe('stopped')
+    // The runner aborts promptly; the original page callback can persist its final
+    // step later. Wait for that actual terminal step and its real file saves before
+    // removing this fixture, rather than racing durableWriteFile or retrying rm.
+    await stopped.promise
+    await Promise.all(o.journalSaves.mock.results.map(result => result.value))
+    const durable = await o.journalFile.load()
+    expect(durable?.operations.find(item => item.id === 'stop-original')?.steps.map(step => [step.method, step.status])).toEqual([['waitForLoad', 'stopped']])
+    await vi.waitFor(() => expect(f.worker.grants.has(1)).toBe(false))
+    expect(f.bridge.list()).toHaveLength(1)
+    expect(f.api.tabs.create).not.toHaveBeenCalled(); release.dispose()
+  })
+  it('observes the original navigation load before allowing the next SDK read', async () => {
+    const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
+    const navigated = deferred(); const original = f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'Page.navigate') {
+        f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.frameNavigated', { frame: { id: 'main-document', loaderId: 'next-document', url: params!.url } })
+        navigated.resolve(); return { loaderId: 'next-document' }
+      }
+      return await original(target, method, params)
+    })
+    const run = o.page.runScript(binding.id, 'await gotoUrl("https://fixture.invalid/next"); return await js("counter")', { id: owner.callerId, name: 'Fixture Agent' })
+    await navigated.promise
+    // Give the real child program and WebSocket response chain a bounded opportunity
+    // to make an illegal next read; one microtask would sample before either path can continue.
+    await new Promise<void>(resolve => setTimeout(resolve, 100))
+    expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression === 'counter')).toEqual([])
+    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.loadEventFired', { timestamp: 1 })
+    expect((await run).outcome.kind).toBe('completed')
+    expect(binding.navigationId).toBe('next-document')
+    expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression === 'counter')).toHaveLength(1)
   })
 })

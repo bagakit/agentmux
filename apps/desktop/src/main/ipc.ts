@@ -93,10 +93,12 @@ import type {
 } from '../shared/git-contracts.js'
 import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
 import type { SessionHistoryPageOptions } from '../shared/contracts.js'
-import { AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
+import { BROWSER_PNG_MAX_BASE64_CHARS, AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
 import { PASTED_IMAGE_EXTENSIONS, PASTED_IMAGE_MAX_BYTES } from '@agentmux/client-ui/pasted-images'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
+import { ExternalBrowserBridge } from './browser-external-bridge.js'
+import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { NativeOverlaySurfaces } from './native-overlay-surfaces.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
@@ -114,7 +116,7 @@ import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { BrowserInputHistoryStore } from './browser-input-history.js'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
-import { nativeImageFromBrowserPng } from './browser-image.js'
+import { browserPngFromBytes, nativeImageFromBrowserPng } from './browser-image.js'
 import { pastedDirectory } from './pasted-directory.js'
 import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
@@ -232,7 +234,26 @@ export async function registerIpc(args: {
   const browserDemonstrations = new BrowserDemonstrationRecorder(
     new BrowserDemonstrationFileStore(join(app.getPath('userData'), BROWSER_DEMONSTRATION_FILE))
   )
-  const browsers = new BrowserViewManager(args.window, browserProfiles, new BrowserRefLedgerStore(), {
+  // One payload/ledger owner is consumed by both actual page transports.
+  const browserRefs = new BrowserRefLedgerStore()
+  const browserEvidence = new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence'))
+  const browserResults = new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results'))
+  const browserUploads = new BrowserUploads(join(app.getPath('userData'), 'browser-uploads'), files, id => workspace(config, id))
+  const externalBridge = new ExternalBrowserBridge(join(app.getPath('userData'), 'browser-external-targets.json'), () => {
+    if (!args.window.webContents.isDestroyed()) args.window.webContents.send('browser:targetsChanged')
+  }, (browserId, navigationId) => {
+    void browserUploads.releaseDocument(browserId, navigationId).catch(error => console.warn('Selected-file snapshots could not be released after the original document ended:', error))
+  })
+  await externalBridge.ready()
+  const externalBrowsers = new ExternalBrowserOwner(externalBridge, { journal: browserOperationJournal,
+    refs: browserRefs, evidence: browserEvidence, results: browserResults, uploads: browserUploads,
+    decodeScreenshot: data => {
+      if (typeof data !== 'string' || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Shared-tab screenshot exceeds its image budget.')
+      const png = browserPngFromBytes(Buffer.from(data, 'base64'))
+      nativeImageFromBrowserPng(png, bytes => nativeImage.createFromBuffer(bytes))
+      return png
+    } })
+  const browsers = new BrowserViewManager(args.window, browserProfiles, browserRefs, {
     // Read the current owner fact so a remembered answer or explicit Forget takes effect immediately.
     rememberedSchemes: async () => config.browser.appLinkSchemes ?? {},
     rememberScheme: async (scheme, choice) => {
@@ -244,11 +265,10 @@ export async function registerIpc(args: {
     },
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
-  }, browserOperationJournal, new BrowserStepEvidenceStore(join(app.getPath('userData'), 'browser-step-evidence')),
-  new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results')), browserDemonstrations,
+  }, browserOperationJournal, browserEvidence, browserResults, browserDemonstrations,
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE))),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
-  new BrowserUploads(join(app.getPath('userData'), 'browser-uploads'), files, id => workspace(config, id)))
+  browserUploads)
   const warnNativeChrome = (warning: string): void => {
     if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, warning)
   }
@@ -870,6 +890,42 @@ export async function registerIpc(args: {
     }
     await forgetBrowserAppLink(configOwner, scheme, expected)
   })
+  handleWithEvent('browser:listRetainedUploads', async event => {
+    requireTrustedSender('browser:listRetainedUploads', event)
+    return await browserUploads.retained()
+  })
+  handleWithEvent('browser:discardRetainedUpload', async (event, selectionId: string) => {
+    requireTrustedSender('browser:discardRetainedUpload', event)
+    return await browserUploads.confirmDiscardSelection(selectionId, async selection => {
+      if (args.window.isDestroyed()) return false
+      const answer = await dialog.showMessageBox(args.window, { type: 'warning', title: 'Discard selected files?',
+        message: '原页面后续上传将不可读，先完成或取消上传',
+        detail: `${selection.files.join(', ') || 'Unknown document selection'}\n${selection.byteLength} bytes will be removed. Other pages and selections are kept.`,
+        buttons: ['Keep files', 'Discard files'], defaultId: 0, cancelId: 0, noLink: true })
+      return !args.window.isDestroyed() && answer.response === 1
+    })
+  })
+  handleWithEvent('browser:listTargets', async (event, workspaceId?: string) => {
+    requireTrustedSender('browser:listTargets', event)
+    if (workspaceId !== undefined) workspace(config, workspaceId)
+    const targets = [...browsers.targets(), ...externalBridge.list()].filter(row => workspaceId === undefined || row.workspaceId === workspaceId)
+    return { targets: targets.slice(0, 256), ...(targets.length > 256 ? { warning: 'More Browser targets exist than this bounded discovery response can show.' } : {}) }
+  })
+  handleWithEvent('browser:createExternalPairing', async (event, workspaceId: string) => {
+    requireTrustedSender('browser:createExternalPairing', event)
+    workspace(config, workspaceId)
+    return await externalBridge.createPairing(workspaceId)
+  })
+  handleWithEvent('browser:revealExternalExtension', async event => {
+    requireTrustedSender('browser:revealExternalExtension', event)
+    const directory = join(app.getAppPath(), 'browser-extension')
+    const error = await shell.openPath(directory)
+    if (error) throw new Error(`The Browser extension folder could not be opened: ${error}`)
+  })
+  handleWithEvent('browser:stopSharingExternal', (event, id: string) => {
+    requireTrustedSender('browser:stopSharingExternal', event)
+    externalBridge.stopSharing(id)
+  })
   handle('browser:create', async (id: string, url: string, workspaceId: unknown) =>
     await browsers.create(id, url, verifiedBrowserWorkspace(config.workspaces, workspaceId)))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
@@ -952,6 +1008,10 @@ export async function registerIpc(args: {
     // 第四个位置是 `replayOf`，这条路上永远没有（回放走 `browser:runReplay`）。这个 undefined 洞
     // 必须显式留着：少写一个位置就是把 operationId 喂进 replayOf，于是这次操作被记成"某个操作的
     // 回放"，而调用方拿着的 id 谁也不认识——两边各自看起来都正常。
+    if (externalBrowsers.has(id)) {
+      workspace(config, externalBridge.require(id).workspaceId)
+      return await externalBrowsers.runScript(id, code, operator, operationId)
+    }
     return await browsers.runScript(id, code, operator, undefined, operationId)
   })
   handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
@@ -977,6 +1037,8 @@ export async function registerIpc(args: {
   })
   handleWithEvent('browser:readStepResult', async (event, operationId: string, sequence: number, options?: BrowserResultReadOptions) => {
     requireTrustedSender('browser:readStepResult', event)
+    const operation = await browserOperationJournal.get(operationId)
+    if (operation && externalBrowsers.has(operation.browserId)) return await externalBrowsers.readStepResult(operationId, sequence, options)
     return await browsers.readStepResult(operationId, sequence, options)
   })
   // 取消不过 `agentAutomation` 闸，而 runScript 过。这不是漏了：那个闸挡的是「让 Agent 去驱动页面」，
@@ -984,7 +1046,7 @@ export async function registerIpc(args: {
   // 停不了手上这一个——把一道拒绝新动作的闸变成了一次能力损失。
   handleWithEvent('browser:stopOperationById', async (event, operationId: string) => {
     requireTrustedSender('browser:stopOperationById', event)
-    return await browsers.stopOperationById(operationId)
+    return await externalBrowsers.stopOperationById(operationId) ?? await browsers.stopOperationById(operationId)
   })
   handleWithEvent('browser:replayPlan', async (event, operationId: string) => {
     requireTrustedSender('browser:replayPlan', event)
@@ -1177,6 +1239,7 @@ export async function registerIpc(args: {
       },
       () => notifier.dispose(),
       () => { browsers.onNativeInput = undefined; nativeChrome.dispose() },
+      async () => await externalBrowsers.dispose(),
       () => browsers.dispose(),
       async () => await browserInputHistory.flush(),
       async () => await browserProfiles.dispose(),

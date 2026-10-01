@@ -5,6 +5,7 @@ import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
+import type { AgentMuxBrowserTarget } from './browser-targets.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
@@ -434,6 +435,7 @@ export type AgentMuxControlDemandDecisionLogRequest = RequestBase & { operation:
  * 没有 `destination`：它作用在一个已存在的 Browser 上（`browserId`），不是往某个空间落一个新东西。
  * 这也是它不叫 `open.*` 的原因。
  */
+export type AgentMuxControlBrowserTargetsRequest = RequestBase & { operation: 'browser.targets'; workspaceId?: string }
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'
   browserId: string
@@ -591,6 +593,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandLinkProjectRequest
   | AgentMuxControlDemandDecisionLogRequest
   | AgentMuxControlBrowserRunRequest
+  | AgentMuxControlBrowserTargetsRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
   | AgentMuxControlBrowserStopRequest
@@ -702,6 +705,7 @@ export type AgentMuxControlResult =
       // 收窄全部失效。receipt 侧改名，wire 侧的字段名不动（那是协议，见 control-host 的读取点）。
       runOperation: AgentMuxControlBrowserOperation
     }
+  | { operation: 'browser.targets'; targets: AgentMuxBrowserTarget[]; warning?: string }
   | { operation: 'browser.history'; operations: AgentMuxControlBrowserOperation[] }
   | {
       operation: 'browser.replay'
@@ -941,6 +945,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 而掐死的表现是 CONTROL_TIMEOUT，看起来像页面出了事。子进程自己还有一道更紧的超时兜底（脚本执行器
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
   'browser.run': 'long',
+  'browser.targets': 'short',
   'browser.history': 'short',
   'browser.task.assets': 'short',
   'browser.task.reliability': 'short',

@@ -1,0 +1,30 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "types": [
+      "node"
+    ],
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/core": [
+        "apps/desktop/scripts/fixtures/browser-upload-document-lifetime/core-exports.ts"
+      ],
+      "@agentmux/core/control": [
+        "packages/core/src/control.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../src/main/browser-uploads.ts",
+    "../../../src/main/browser-external-bridge.ts",
+    "../../../src/main/browser-external-owner.ts",
+    "../../../src/main/browser-page-dispatch.ts",
+    "../../../test/browser-upload-document-lifetime.test.ts",
+    "../../../test/browser-uploads.test.ts",
+    "../../../test/browser-external-target.test.ts",
+    "../../../src/renderer/src/components/settings/RetainedBrowserUploads.tsx",
+    "../../../src/renderer/src/global.d.ts",
+    "../../../test/browser-external-main-glue.test.ts"
+  ]
+}

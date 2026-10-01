@@ -15,7 +15,11 @@ export default defineConfig({
       'apps/desktop/test/browser-cdp-session.test.ts',
       'apps/desktop/test/browser-page-dispatch.test.ts',
       'apps/desktop/test/browser-script-runner.test.ts',
-      'apps/desktop/test/browser-external-target.test.ts'
+      'apps/desktop/test/browser-external-target.test.ts',
+      'apps/desktop/test/browser-external-public-cli.test.ts',
+      'apps/desktop/test/browser-external-main-glue.test.ts',
+      'apps/desktop/test/browser-image.test.ts',
+      'apps/desktop/test/browser-operation-feedback.test.ts'
     ],
     maxWorkers: 1,
     fileParallelism: false

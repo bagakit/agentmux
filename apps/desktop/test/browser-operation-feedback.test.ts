@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildBrowserOperationFeedbackScript, buildBrowserOperationTargetFeedbackDeclaration, showBrowserOperationFeedback } from '../src/main/browser-operation-feedback.js'
+import { buildBrowserOperationFeedbackScript, buildBrowserOperationTargetFeedbackDeclaration, buildBrowserOperationFeedbackRevisionScript, showBrowserOperationFeedback } from '../src/main/browser-operation-feedback.js'
+import { buildOwnedFeedbackClearScript } from '../browser-extension/protocol.js'
 const key = '__agentMuxBrowserOperationFeedback'
 const globals = globalThis as any
 const base = { revision: 1, operationId: 'one', navigationId: 'document-one', token: 'private-one', phase: 'running' as const,
@@ -37,6 +38,25 @@ afterEach(() => {
   document.body.replaceChildren(); moves.length = 0; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 describe('actual isolated feedback document script', () => {
+  it('clears only the recorded operation overlay on withdrawal, preserving the page and ordering fact', () => {
+    const input = document.createElement('input'); input.value = 'Original human draft'; document.body.append(input); input.focus()
+    apply({ ...base, revision: 37, kind: 'page', method: 'js' })
+    const owned = state(); expect(owned.host).not.toBeNull()
+    const clear = (id: string) => new Function(`return (${buildOwnedFeedbackClearScript(id)})`)()
+    expect(clear('another-operation')).toBe(false); expect(owned.host).not.toBeNull()
+    expect(clear('one')).toBe(true)
+    expect(owned.host).toBeNull(); expect(owned.phase).toBe('clear'); expect(owned.history).toBeNull()
+    expect(owned.revision).toBe(37); expect(input.value).toBe('Original human draft'); expect(document.activeElement).toBe(input)
+    apply({ ...base, revision: 38, operationId: 'next-operation', token: 'next-token', kind: 'page' })
+    expect(clear('one')).toBe(false); expect(state().host).not.toBeNull()
+  })
+  it('reads the actual owned document revision and returns zero when no original state exists', () => {
+    const probe = () => new Function(`return (${buildBrowserOperationFeedbackRevisionScript()})`)()
+    expect(probe()).toBe(0)
+    apply({ ...base, revision: 37 }, target())
+    expect(state().revision).toBe(37)
+    expect(probe()).toBe(37)
+  })
   it('uses the actual visible target rect and closed shadow without a hit/focus/AX target', () => {
     const element = target(); element.focus(); apply(base, element)
     const value = state(); expect(value.point).toEqual({ x: 60, y: 40 })

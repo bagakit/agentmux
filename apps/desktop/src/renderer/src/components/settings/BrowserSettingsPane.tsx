@@ -2,6 +2,8 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useState } from 'react'
 import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/contracts'
 import { useSettingDraft } from './use-setting-draft'
+import { RetainedBrowserUploads } from './RetainedBrowserUploads'
+import { ExternalBrowserConnections } from './ExternalBrowserConnections'
 
 /**
  * Agent 驱动浏览器的总开关。
@@ -45,6 +47,8 @@ export function BrowserSettingsPane({ browser, onSave, onForget }: {
         </label>
       </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
+      <ExternalBrowserConnections />
+      <RetainedBrowserUploads />
       <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save browser" onSave={() => void save()} />
     </div>
   )

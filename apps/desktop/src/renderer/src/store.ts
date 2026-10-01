@@ -3814,6 +3814,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     //
     // 这一处是 T-008 验收点名的「两处没有编译器保护」之一。今天不是了：browser.run 进联合之后，
     // 下面的 `request.destination` 与 `request.url` 各报一处 TS2339——漏掉这个分支编译不过。
+    if (request.operation === 'browser.targets') {
+      const facts = await api.browser.listTargets(request.workspaceId)
+      requireActive()
+      return { operation: request.operation, ...facts }
+    }
     if (request.operation === 'browser.run') {
       // 授权闸不在这层，在 Main 的 browser:runScript handler 里：那是所有调用方的必经之路，
       // 而这里只是今天唯一的一个调用方。放在这层的话，每多一个入口就要记得再写一遍同样的检查。

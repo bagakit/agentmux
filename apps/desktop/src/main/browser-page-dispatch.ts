@@ -178,7 +178,7 @@ export function renderBrowserSnapshotText(snapshot: BrowserPageSnapshot, observa
  * 返回的闭包就是 `runBrowserScript` 的 `onPageCall`——**这是那两个模块唯一的生产调用点**，
  * 也是 T-010 验收里那条零调用者 grep 要看到的答案。
  */
-type BrowserPageActionScope = { feedback?: BrowserPageContext['actionFeedback']; beforeAction?: BrowserPageContext['beforeAction'] }
+type BrowserPageActionScope = { feedback?: BrowserPageContext['actionFeedback']; beforeAction?: BrowserPageContext['beforeAction']; recordTarget?: BrowserPageContext['recordTarget'] }
 
 export function createBrowserPageDispatch(
   context: BrowserPageContext
@@ -328,7 +328,8 @@ export function createBrowserPageDispatch(
     }
     if (node) {
       const same = current?.nodes.filter((candidate) => candidate.role === node.role && candidate.name === node.name) ?? []
-      context.recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === node.ref) + 1, count: same.length })
+      const recordTarget = scope?.recordTarget ?? context.recordTarget
+      recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === node.ref) + 1, count: same.length })
     }
     guard()
     if (actionFeedback && feedback !== 'observe') {
@@ -467,7 +468,8 @@ export function createBrowserPageDispatch(
           throw new Error('The upload snapshot changed. Take a fresh snapshot and choose the actual file input again.')
         }
         const same = snapshot.nodes.filter(node => node.role === target.node.role && node.name === target.node.name)
-        context.recordTarget?.({ role: target.node.role, name: target.node.name,
+        const recordTarget = scope?.recordTarget ?? context.recordTarget
+      recordTarget?.({ role: target.node.role, name: target.node.name,
           ordinal: same.findIndex(node => node.ref === ref) + 1, count: same.length })
         try {
           return await uploadBrowserFiles(context.uploads.store, { ...context.uploads.context(),

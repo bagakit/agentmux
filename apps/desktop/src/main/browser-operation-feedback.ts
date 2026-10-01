@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import type { BrowserPageNode } from '../shared/contracts.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
+import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../browser-extension/protocol.js'
+export { BROWSER_OPERATION_FEEDBACK_WORLD_NAME }
 
 export const BROWSER_OPERATION_FEEDBACK_WORLD_ID = 1209
-export const BROWSER_OPERATION_FEEDBACK_WORLD_NAME = 'agentmux-browser-operation-feedback'
 const DISPLAY_BUDGET_MS = 120
 const COMPLETED_CUE_MS = 900
 const ACTION_LABELS: Record<string, string> = {
@@ -222,6 +223,11 @@ export function buildBrowserOperationFeedbackScript(payload: FeedbackPayload): s
 }
 export function buildBrowserOperationTargetFeedbackDeclaration(): string {
   return `function(payload){return (${applyFeedback.toString()})(payload,this)}`
+}
+
+/** Read only our isolated-world ordering fact when its document outlives the client. */
+export function buildBrowserOperationFeedbackRevisionScript(): string {
+  return '(()=>{const value=globalThis.__agentMuxBrowserOperationFeedback?.revision;return Number.isSafeInteger(value)&&value>=0?value:0})()'
 }
 
 type TargetContext = { send: BrowserCdpSender; id: number }

@@ -42,25 +42,27 @@ function pngDimensions(png: Buffer): { width: number; height: number } {
   return { width, height }
 }
 
-export function browserPngFromNativeImage(image: NativeImage): BrowserPng {
-  if (image.isEmpty()) throw new Error('Browser screenshot is empty')
-  const { width, height } = image.getSize()
-  assertImageSize(width, height)
-  const png = image.toPNG()
+export function browserPngFromBytes(png: Buffer): BrowserPng {
   if (png.byteLength < 1 || png.byteLength > BROWSER_PNG_MAX_BYTES) {
     throw new Error('Browser screenshot exceeds the image byte limit')
   }
   const encodedSize = pngDimensions(png)
-  if (encodedSize.width !== width || encodedSize.height !== height) {
-    throw new Error('Browser screenshot dimensions do not match the PNG')
-  }
   return {
     mimeType: 'image/png',
     dataUrl: `${PNG_DATA_URL_PREFIX}${png.toString('base64')}`,
-    width,
-    height,
+    width: encodedSize.width,
+    height: encodedSize.height,
     byteLength: png.byteLength
   }
+}
+
+export function browserPngFromNativeImage(image: NativeImage): BrowserPng {
+  if (image.isEmpty()) throw new Error('Browser screenshot is empty')
+  const { width, height } = image.getSize()
+  assertImageSize(width, height)
+  const result = browserPngFromBytes(image.toPNG())
+  if (result.width !== width || result.height !== height) throw new Error('Browser screenshot dimensions do not match the PNG')
+  return result
 }
 
 export function nativeImageFromBrowserPng(

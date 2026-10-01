@@ -95,7 +95,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'space.focus': ['--region', ids.region], 'space.promote': ['--region', ids.region], 'space.arrange': ['--tab', 'TAB', '--balance'],
     'file.open': ['--path', '--help', '--zone', ids.zone], 'file.view': ['--region', ids.region],
     'terminal.open': ['--in-region', ids.region], 'browser.open': ['--url', 'https://example.org', '--in-region', ids.region],
-    'browser.run': ['--browser', 'B', '--operation-id', 'BOP'], 'browser.history': [],
+    'browser.targets': [], 'browser.run': ['--browser', 'B', '--operation-id', 'BOP'], 'browser.history': [],
     'browser.task.assets': ['--browser', 'B'], 'browser.task.reliability': ['--browser', 'B', '--asset', 'A', '--version', '1'],
     'browser.task.run': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.stop': ['--browser', 'B', '--run', 'RUN'],
     'browser.task.batch': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.batch-stop': ['--browser', 'B', '--batch', 'BATCH'],

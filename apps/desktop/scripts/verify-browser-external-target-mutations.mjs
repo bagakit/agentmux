@@ -13,7 +13,29 @@ const target = 'apps/desktop/src/main/browser-external-target.ts'
 const protocol = 'apps/desktop/browser-extension/protocol.js'
 // Mutate the actual authority/result blocks, including every redundant gate in a
 // block where applicable. An Assertion failure, not startup or timeout, is required.
+const owner = 'apps/desktop/src/main/browser-external-owner.ts'
+const ownerTests = ['apps/desktop/test/browser-external-target.test.ts']
+const mainTests = ['apps/desktop/test/browser-external-main-glue.test.ts']
+const cliTests = ['apps/desktop/test/browser-external-public-cli.test.ts']
 const blocks = [
+  { name: 'withdrawal-owned-feedback-worlds', path: worker, tests: ownerTests, pattern: 'clears only original recorded root/child', edits: [["if (clearFeedback && lease.feedbackWorlds.size)", "if (false && lease.feedbackWorlds.size)"]] },
+  { name: 'withdrawal-feedback-world-record', path: worker, tests: ownerTests, pattern: 'clears only original recorded root/child', edits: [["message.params?.worldName === BROWSER_OPERATION_FEEDBACK_WORLD_NAME", "false"]] },
+  { name: 'withdrawal-feedback-owner', path: protocol, tests: ['apps/desktop/test/browser-operation-feedback.test.ts'], pattern: 'clears only the recorded operation overlay', edits: [["if (!state || state.operationId !== operationId) return false", "if (!state) return false"]] },
+  { name: 'owned-feedback-revision-source', path: 'apps/desktop/src/main/browser-operation-feedback.ts', tests: ['apps/desktop/test/browser-operation-feedback.test.ts'], pattern: 'reads the actual owned document revision', edits: [['globalThis.__agentMuxBrowserOperationFeedback?.revision', 'globalThis.__missingFeedbackRevision?.revision']] },
+  { name: 'document-feedback-revision', path: owner, tests: ownerTests, pattern: 'continues the original isolated-world revision', edits: [['revision = Math.max(revision, observed)', 'void observed']] },
+  { name: "program-original-ref-ledger", path: owner, tests: ownerTests, pattern: "runs the original SDK and joins", edits: [["await this.stores.refs.write(id, ledger);", "void ledger;"]] },
+  { name: "program-step-evidence", path: owner, tests: ownerTests, pattern: "runs the original SDK and joins", edits: [["if (content) {", "if (false && content) {"]] },
+  { name: "program-step-target", path: owner, tests: ownerTests, pattern: "runs the original SDK and joins", edits: [["recordTarget: target => { currentStep.target = target }", "recordTarget: target => { void target }"]] },
+  { name: "program-unknown-side-effect", path: owner, tests: ownerTests, pattern: "keeps a sent action across a document change", edits: [["uncertain || notes.length ?", "false ?"]] },
+  { name: "program-load-before-read", path: owner, tests: ownerTests, pattern: "observes the original navigation load", edits: [["await this.navigate(binding, attached, url, active.controller.signal)", "await attached.sendCommand('Page.navigate', { url })"]] },
+  { name: "program-stop-original-grant", path: owner, tests: ownerTests, pattern: "stops the original operation", edits: [["this.bridge.stopSharing(active.binding.id)", "void active.binding.id"]] },
+  { name: "main-original-external-route", path: 'apps/desktop/src/main/ipc.ts', tests: mainTests, pattern: "routes the chosen original external", edits: [["if (externalBrowsers.has(id)) {", "if (false) {"]] },
+  { name: "main-original-sender", path: 'apps/desktop/src/main/ipc.ts', tests: mainTests, pattern: "sends no owner action", edits: [["requireTrustedSender('browser:runScript', event)", "void event"]] },
+  { name: "public-targets-verb", path: 'packages/core/src/agentmux-cli-commands.ts', tests: cliTests, pattern: "discovers an explicitly shared target", edits: [["command('browser.targets',", "command('browser.missing-targets',"]] },
+  { name: 'public-rpc-targets-owner', path: 'packages/core/src/public-rpc.ts', tests: cliTests, pattern: 'discovers an explicitly shared target', edits: [["'browser.targets': 'browser.targets'", "'browser.targets': 'browser.history'"]] },
+  { name: 'public-rpc-targets-result', path: 'packages/core/src/control-codec.ts', tests: cliTests, pattern: 'routes typed SDK discovery', edits: [['result: parseBrowserTargetsResult(result)', 'result: result as any']] },
+  { name: 'public-rpc-targets-workspace', path: 'packages/core/src/rpc-business-codec.ts', tests: cliTests, pattern: 'routes typed SDK discovery', edits: [["target.workspaceId !== request.workspaceId", "false"]] },
+  { name: "public-target-source-schema", path: 'packages/core/src/control-browser-targets.ts', tests: cliTests, pattern: "retains honest source/status/navigation", edits: [["!sources.has(String(row.source)) || ", ""]] },
   { name: 'attach-preparation-authority', path: worker, edits: [["current(true)\n        if (this.attachOwners.get(grant.tabId) !== lease || lease.cancelled || !grant.attached) throw new Error('The original operation stopped during debugger preparation.')\n        const tree", 'const tree']] },
   { name: 'popup-authority', path: worker, edits: [["if (sender.tab || sender.url !== this.api.runtime.getURL('popup.html')) return false", 'if (false) return false']] },
   { name: 'selected-tab', path: worker, edits: [["if (selected?.id !== message.tabId) throw new Error", 'if (false) throw new Error']] },
@@ -50,10 +72,12 @@ const receipt = { schema: 'agentmux.browser-external-source-mutations.v1', sourc
   command: ['pnpm', 'exec', 'vitest', 'run', '--config', 'apps/desktop/scripts/fixtures/browser-external-target/vitest.owning.config.mts',
     'apps/desktop/test/browser-external-target.test.ts', '--maxWorkers=1'],
   environment: { PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false' }, attempts: [], passed: false }
-const run = name => {
-  const result = spawnSync(receipt.command[0], receipt.command.slice(1), { cwd: root, encoding: 'utf8', timeout: 40_000,
+const run = (name, block) => {
+  const command = block?.tests ? receipt.command.flatMap(item => item === 'apps/desktop/test/browser-external-target.test.ts' ? block.tests : [item]) : [...receipt.command]
+  if (block?.pattern) command.push('-t', block.pattern)
+  const result = spawnSync(command[0], command.slice(1), { cwd: root, encoding: 'utf8', timeout: 40_000,
     env: { ...process.env, ...receipt.environment }, maxBuffer: 2 * 1024 * 1024 })
-  return { result, text: `${result.stdout ?? ''}${result.stderr ?? ''}`, name }
+  return { result, text: `${result.stdout ?? ''}${result.stderr ?? ''}`, name, command }
 }
 const baseline = run('baseline')
 await writeFile(join(output, 'baseline.log'), baseline.text)
@@ -70,15 +94,15 @@ for (const block of chosenBlocks) {
   let attempt
   await writeFile(path, mutant)
   try {
-    const red = run(block.name)
+    const red = run(block.name, block)
     await writeFile(join(output, `${block.name}.red.log`), red.text)
-    attempt = { name: block.name, path: block.path, mutantSha256: sha(mutant), exit: red.result.status,
+    attempt = { name: block.name, path: block.path, mutantSha256: sha(mutant), command: red.command, exit: red.result.status,
       assertionRed: red.result.status !== null && red.result.status !== 0 && /AssertionError/.test(red.text), restoredGreen: false }
   } finally {
     if (await readFile(path, 'utf8') !== mutant) throw new Error(`Concurrent Source change retained; refused overwrite: ${block.path}`)
     await writeFile(path, original)
   }
-  const restored = run(`${block.name}.restore`)
+  const restored = run(`${block.name}.restore`, block)
   await writeFile(join(output, `${block.name}.restore.log`), restored.text)
   attempt.restoredGreen = restored.result.status === 0
   receipt.attempts.push(attempt)

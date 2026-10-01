@@ -364,6 +364,17 @@ const api: AgentMuxPreloadApi = {
     }
   },
   browser: {
+    listRetainedUploads: () => ipcRenderer.invoke('browser:listRetainedUploads'),
+    discardRetainedUpload: selectionId => ipcRenderer.invoke('browser:discardRetainedUpload', selectionId),
+    listTargets: workspaceId => ipcRenderer.invoke('browser:listTargets', workspaceId),
+    createExternalPairing: workspaceId => ipcRenderer.invoke('browser:createExternalPairing', workspaceId),
+    revealExternalExtension: () => ipcRenderer.invoke('browser:revealExternalExtension'),
+    stopSharingExternal: id => ipcRenderer.invoke('browser:stopSharingExternal', id),
+    onTargetsChanged(listener) {
+      const wrapped = (): void => listener()
+      ipcRenderer.on('browser:targetsChanged', wrapped)
+      return () => ipcRenderer.off('browser:targetsChanged', wrapped)
+    },
     forgetAppLinkScheme: (scheme, expected) => ipcRenderer.invoke('browser:forgetAppLinkScheme', scheme, expected),
     create: (id: string, url: string, workspaceId: string | null) => ipcRenderer.invoke('browser:create', id, url, workspaceId),
     navigate: (id: string, url: string) => ipcRenderer.invoke('browser:navigate', id, url),
