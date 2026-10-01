@@ -1271,7 +1271,10 @@ export class BrowserViewManager {
         workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
         navigationId: resultNavigationId
       }
+      const remainingMillis = taskPage?.cursor.deadlineMillis === undefined ? undefined : Math.floor(taskPage.cursor.deadlineMillis - performance.now())
+      if (remainingMillis !== undefined && (!Number.isFinite(remainingMillis) || remainingMillis <= 0)) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
+        ...(remainingMillis === undefined ? {} : { timeoutMs: Math.min(30_000, remainingMillis) }),
         onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters, stopController.signal, taskPage),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
           await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
@@ -1783,7 +1786,7 @@ export class BrowserViewManager {
     const entry = this.require(id)
     if (entry.runInFlight || entry.activeRun) throw new Error('Wait for the active Browser operation before locating a task target.')
     const step = asset.draft.steps.find(step => step.id === stepId)
-    if (!step || step.kind === 'checkpoint') throw new Error('This task step has no page target.')
+    if (!step || step.kind === 'checkpoint' || (step.kind === 'branch' && step.branch?.condition.kind !== 'element-present')) throw new Error('This task step has no page target.')
     const view = entry.view
     const contents = view.webContents
     const navigationId = entry.navigationId
@@ -1832,7 +1835,7 @@ export class BrowserViewManager {
     }
     if (!live()) throw new Error('The Browser page changed before the task target could be saved.')
     return await this.taskAssets!.edit(assetId, expectedRevision, { ...asset.draft,
-      steps: asset.draft.steps.map(item => item.id === stepId ? { ...item, url, ...(target ? { target } : {}), reviewed: false,
+      steps: asset.draft.steps.map(item => item.id === stepId ? { ...item, url, ...(target ? item.kind === 'branch' && item.branch ? { branch: { ...item.branch, condition: { kind: 'element-present' as const, target: { role: target.role, name: target.name } } } } : { target } : {}), reviewed: false,
         warning: 'Actual page target located. Review this draft step before saving a runnable version.' } : item) })
   }
 
@@ -1885,6 +1888,7 @@ export class BrowserViewManager {
         onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
         yieldControl: id => this.yieldControl(id),
+        navigationId: id => id === entry.id && this.owns(entry, view) && !view.webContents.isDestroyed() ? entry.navigationId : null,
         runScript: async (id, code, cursor) => {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
           if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
@@ -1898,7 +1902,7 @@ export class BrowserViewManager {
               const bound = await this.taskAssets!.bindOperation(cursor, operation.id)
               const declaration = version?.completion
               const download = declaration?.criteria.find(item => item.kind === 'download-readable')
-              const producer = download?.stepId ?? version?.steps.find(step => step.kind !== 'checkpoint')?.id
+              const producer = download?.stepId ?? version?.steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch')?.id
               if (declaration && producer === cursor.stepId && this.operationJournal) {
                 const registration: BrowserOutcomeRegistration = {
                   context: { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId },
@@ -2000,6 +2004,8 @@ export class BrowserViewManager {
       if (signal?.aborted) throw new Error('This Browser operation stopped before dispatch.')
       if (takeover.at !== null || entry.humanControl) throw new Error(takeoverMessage(takeover))
       if (activeRecoveryMayDispatch && !activeRecoveryMayDispatch()) throw new Error('This recovery attempt no longer has dispatch authority.')
+      if (taskPage?.cursor.expectedNavigationId && entry.navigationId !== taskPage.cursor.expectedNavigationId) throw new Error('The selected condition document changed before dispatch.')
+      if (taskPage?.cursor.deadlineMillis !== undefined && performance.now() >= taskPage.cursor.deadlineMillis) throw new Error('Task execution budget reached before page dispatch.')
       if (taskPage && !this.taskAssets?.isExecutionCurrent(taskPage.cursor, operation.id)) throw new Error('The original task cursor changed before dispatch.')
     }
     const dispatch = createBrowserPageDispatch({
@@ -2141,7 +2147,8 @@ export class BrowserViewManager {
             step: taskPage.step, method: name, args, failure: error }, {
             signal,
             isCurrent: () => this.entries.get(entry.id) === entry && entry.view === observingView && !observingView.webContents.isDestroyed() &&
-              entry.activeRun?.operationId === operation.id && this.taskAssets?.isExecutionCurrent(taskPage.cursor, operation.id) === true,
+              entry.activeRun?.operationId === operation.id && (!taskPage.cursor.expectedNavigationId || entry.navigationId === taskPage.cursor.expectedNavigationId) &&
+              this.taskAssets?.isExecutionCurrent(taskPage.cursor, operation.id) === true,
             control: () => takeover.at !== null || entry.humanControl ? 'human' : 'agent',
             observe: async () => {
               if (entry.error) throw new Error('The original page reports a navigation or renderer error.')

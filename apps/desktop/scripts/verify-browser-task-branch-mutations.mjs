@@ -8,6 +8,20 @@ const index = process.argv.indexOf('--out')
 const out = resolve(index < 0 ? (".tmp/browser-task-branch-mutations-" + (globalThis.crypto.randomUUID()) + "") : process.argv[index + 1])
 mkdirSync(out, { recursive: true })
 const only = process.argv.indexOf('--only')
+const branchTests = [
+  ['branch-empty-observation', 'empty returned nodes cannot manufacture'],
+  ['branch-selected-save-navigation', 'rechecks navigation after the chosen action'],
+  ['branch-unknown-chooses-false', 'unknown/incomplete/empty observation'],
+  ['branch-unbound-result', 'rejects a condition result from another'],
+  ['branch-late-navigation', 'late navigation/owner loss'],
+  ['branch-back-edge', 'rejects back edges'],
+  ['branch-unreachable', 'rejects back edges'],
+  ['branch-budget', 'rejects back edges'],
+  ['branch-run-budget', 'enforces the existing run'],
+  ['branch-native-stale-document', 'actual Main dispatcher refuses'],
+  ['branch-public-path-unbound', 'public task result requires']
+]
+const scope = process.argv.indexOf('--scope')
 const tests = [
   ['cli-drops-fresh-parameters', 'positive public CLI run'],
   ['control-approves-human-wait', 'Agent cannot approve'],
@@ -15,7 +29,8 @@ const tests = [
   ['unbound-version-history', 'deduplicates only exact-version'],
   ['empty-terminal-samples', 'rejects mismatched identities'],
   ['nonfinite-rate', 'rejects mismatched identities'],
-  ['wrong-public-target', 'real public client refuses reliability']
+  ['wrong-public-target', 'real public client refuses reliability'],
+  ...branchTests
 ]
 const sha = value => createHash('sha256').update(value).digest('hex')
 const rows = []
@@ -42,8 +57,9 @@ function run(name, pattern, mutation) {
   writeFileSync(resolve(out, 'progress.json'), JSON.stringify({ scope: 'source-control-guards', rows }, null, 2) + '\n')
   process.stdout.write(`${name}: ${mutation ? 'Assertion RED' : 'restored GREEN'}\n`)
 }
-const selected = only < 0 ? tests : tests.filter(([key]) => key === process.argv[only + 1])
+const candidates = scope >= 0 && process.argv[scope + 1] === 'branch' ? branchTests : tests
+const selected = only < 0 ? candidates : tests.filter(([key]) => process.argv[only + 1].split(',').includes(key))
 assert.ok(selected.length > 0, 'Selected Source mutations must be nonempty')
 for (const [key, pattern] of selected) { run(key, pattern, key); run(`${key}-restored`, pattern) }
-writeFileSync(resolve(out, 'receipt.json'), JSON.stringify({ schema: 'agentmux.browser-task-source-mutations.v1', scope: 'public-task-control',
+writeFileSync(resolve(out, 'receipt.json'), JSON.stringify({ schema: 'agentmux.browser-task-source-mutations.v1', scope: scope >= 0 ? 'bounded-task-branch-guards' : 'public-task-control-and-branch',
   passed: true, native: 'not-tested', rows }, null, 2) + '\n')

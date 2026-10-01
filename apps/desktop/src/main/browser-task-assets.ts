@@ -12,6 +12,8 @@ import type {
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
 import { parseBrowserOutcomeCriteriaRequest } from '../shared/browser-outcome-criteria.js'
+import { browserTaskNextIndex, browserTaskSegment, browserTaskReachedCheckpoints, validateBrowserTaskPath, BROWSER_TASK_MAX_EXECUTED_MILLIS, BROWSER_TASK_MAX_OPERATIONS } from '../shared/browser-task-path.js'
+import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from './browser-task-branch.js'
 
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 const MAX_ASSETS = 32
@@ -54,6 +56,8 @@ export interface BrowserTaskAssetHost {
   runScript(browserId: string, script: string, execution: BrowserTaskStepExecution): Promise<BrowserScriptRunReport>
   yieldControl(browserId: string): void
   control(browserId: string): 'human' | 'agent'
+  /** Same original owner and current document; null means the observation cannot select a path. */
+  navigationId?(browserId: string): string | null
 }
 
 export class BrowserTaskAssets {
@@ -102,7 +106,7 @@ export class BrowserTaskAssets {
     return this.change(async () => {
       const bound = this.exactRun(execution)
       if (!bound || bound.run.status !== 'running' || bound.version.steps[bound.run.nextStep]?.id !== execution.stepId) return false
-      if (!bound.run.operationIds.includes(operationId)) bound.run.operationIds.push(identity(operationId))
+      recordStepOperation(bound.run, execution.stepId, operationId)
       try { await this.updateRun(bound.run); return true }
       catch { return false } // Optional completion recording cannot block the healthy page action.
     })
@@ -180,7 +184,7 @@ export class BrowserTaskAssets {
     const fact = bound.run.humanCheckpoints.find(item => item.checkpointId === checkpointId)
     if (fact) return { status: 'available', fact: copy(fact) }
     // A passed cursor without its event may be an old/unrecorded Continue or failed optional save.
-    if (cursor <= bound.run.nextStep && bound.run.pendingCheckpointId !== checkpointId) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }
+    if (cursor <= bound.run.nextStep && browserTaskReachedCheckpoints(bound.version.steps, bound.run).has(checkpointId) && bound.run.pendingCheckpointId !== checkpointId) return { status: 'unavailable', warning: HUMAN_FACT_UNAVAILABLE }
     return { status: 'not-recorded' }
   }
 
@@ -224,6 +228,7 @@ export class BrowserTaskAssets {
       if (asset.revision !== expectedRevision) throw new Error('Task draft changed; reload before saving its version.')
       if (asset.versions.length >= MAX_VERSIONS) throw new Error('Task version budget reached; old versions were retained.')
       if (!asset.draft.steps.length) throw new Error('The draft has no steps. Add a reviewed step before saving a runnable version.')
+      validateBrowserTaskPath(asset.draft.steps)
       asset.versions.push({ ...copy(asset.draft), version: (asset.versions.at(-1)?.version ?? 0) + 1, savedAt: this.now() })
       asset.revision += 1; asset.updatedAt = this.now()
       await this.persist(asset.browserId)
@@ -267,10 +272,11 @@ export class BrowserTaskAssets {
           throw new Error('This task cannot be continued automatically. Review completed and uncertain steps before creating another run.')
         }
         if (host.control(browserId) !== 'agent') throw new Error('The person has Browser control. Return control explicitly before running the task.')
+        validateBrowserTaskPath(version.steps)
         validateTaskSegment(version, parameters, existing?.nextStep ?? 0, input.mode)
         const next = existing ?? {
           id: identity(this.id()), assetId: asset.id, version: version.version, browserId,
-          nextStep: 0, status: 'ready' as const, operationIds: [], humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now()
+          nextStep: 0, status: 'ready' as const, operationIds: [], stepExecutions: [], branchDecisions: [], executedMillis: 0, humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now()
         }
         if (!existing) {
           if (this.document.runs.length >= MAX_RUNS) throw new Error('Task run budget reached; previous run facts were retained.')
@@ -286,8 +292,24 @@ export class BrowserTaskAssets {
       run = prepared.run
       const version = prepared.version
       let actions = 0
+      const previousDecision = run.branchDecisions?.find(fact => fact.result !== 'unknown' && fact.nextStepId === version.steps[run!.nextStep]?.id && run!.stepExecutions?.at(-1)?.operationId === fact.operationId)
+      let selectedByBranch: { stepId: string; index: number; navigationId: string } | undefined = previousDecision ? { stepId: previousDecision.stepId, index: version.steps.findIndex(step => step.id === previousDecision.stepId), navigationId: previousDecision.navigationId } : undefined
+      const invalidateSelection = async () => {
+        const selected = selectedByBranch!
+        await this.change(async () => {
+          if (run!.status === 'stopped') return
+          run!.nextStep = selected.index; run!.status = 'ready'
+          const fact = run!.branchDecisions?.find(item => item.stepId === selected.stepId)
+          if (fact) { fact.result = 'unknown'; delete fact.nextStepId }
+          run!.warning = 'The condition page changed before the selected action. No action was sent; inspect the original page and observe the condition again.'
+          await this.updateRun(run!)
+        })
+        host.yieldControl(browserId)
+        return copy(this.projectRun(run!))
+      }
       while (run.nextStep < version.steps.length) {
         if (run.status === 'stopped') break
+        if (selectedByBranch && host.navigationId?.(browserId) !== selectedByBranch.navigationId) return await invalidateSelection()
         const step = version.steps[run.nextStep]!
         if (step.kind === 'checkpoint') {
           host.yieldControl(browserId)
@@ -299,8 +321,23 @@ export class BrowserTaskAssets {
           })
           return copy(this.projectRun(run))
         }
+        if (run.operationIds.length >= BROWSER_TASK_MAX_OPERATIONS || (run.executedMillis ?? 0) >= BROWSER_TASK_MAX_EXECUTED_MILLIS) {
+          await this.change(async () => { run!.status = 'interrupted'; run!.warning = 'Task execution budget reached. Existing actions and progress remain; no further step was sent.'; await this.updateRun(run!) })
+          host.yieldControl(browserId)
+          return copy(this.projectRun(run))
+        }
+        // A selected path may need fresh parameters not known before its condition ran.
+        // Retain that selected cursor and let the person supply them; never execute an earlier arm again.
+        try { validateTaskSegment(version, parameters, run.nextStep, input.mode) }
+        catch (error) {
+          await this.change(async () => { run!.status = 'ready'; run!.warning = error instanceof Error ? error.message : 'The selected path needs review before execution.'; await this.updateRun(run!) })
+          return copy(this.projectRun(run))
+        }
+        const execution: BrowserTaskStepExecution = { browserId, runId: run.id, assetId: run.assetId, version: run.version, stepId: step.id, ...(selectedByBranch ? { expectedNavigationId: selectedByBranch.navigationId } : {}) }
+        const navigationId = step.kind === 'branch' ? host.navigationId?.(browserId) ?? null : null
         const download = version.completion?.criteria.find(item => item.kind === 'download-readable' && item.stepId === step.id)
-        const script = compileAssetStep(step, parameters, download?.kind === 'download-readable' ? download.path : undefined)
+        const script = step.kind === 'branch' ? compileBrowserTaskBranchObservation(step, execution)
+          : compileAssetStep(step, parameters, download?.kind === 'download-readable' ? download.path : undefined)
         // Write-ahead cursor: restart during a call is uncertain, so no automatic replay is offered.
         const started = await this.change(async () => {
           if (run!.status === 'stopped') return false
@@ -309,8 +346,12 @@ export class BrowserTaskAssets {
         })
         // A listener can stop the cursor across the await; discard the earlier loop narrowing.
         if (!started || (run as BrowserTaskAssetRun).status === 'stopped') break
+        if (selectedByBranch && host.navigationId?.(browserId) !== selectedByBranch.navigationId) return await invalidateSelection()
+        const branchIndex = run.nextStep
         let report: BrowserScriptRunReport
-        try { report = await host.runScript(browserId, script, { browserId, runId: run.id, assetId: run.assetId, version: run.version, stepId: step.id }) }
+        const callStartedAt = performance.now()
+        execution.deadlineMillis = callStartedAt + BROWSER_TASK_MAX_EXECUTED_MILLIS - (run.executedMillis ?? 0)
+        try { report = await host.runScript(browserId, script, execution) }
         catch {
           await this.change(async () => {
             if (run!.status !== 'stopped') {
@@ -322,12 +363,27 @@ export class BrowserTaskAssets {
         }
         await this.change(async () => {
           const stopped = run!.status === 'stopped'
+          run!.executedMillis = (run!.executedMillis ?? 0) + Math.max(0, performance.now() - callStartedAt)
           // A real journal id is required; asset/run ids are never passed as operation ids.
           if (!report.runOperation.id || report.runOperation.browserId !== browserId) {
             run!.status = 'interrupted'; run!.warning = 'The Browser operation identity could not be confirmed. Inspect the page before continuing.'
           } else {
-            if (!run!.operationIds.includes(report.runOperation.id)) run!.operationIds.push(identity(report.runOperation.id))
-            if (report.outcome.kind === 'completed') run!.nextStep += 1
+            recordStepOperation(run!, step.id, report.runOperation.id)
+            if (step.kind === 'branch') {
+              const decision = evaluateBrowserTaskBranch({ execution, report, navigationId,
+                currentNavigationId: host.navigationId?.(browserId) ?? null,
+                current: !stopped && run!.status === 'running' && version.steps[run!.nextStep]?.id === step.id && host.control(browserId) === 'agent' })
+              const destination = decision.result === 'true' ? step.branch!.onTrue : decision.result === 'false' ? step.branch!.onFalse : undefined
+              run!.branchDecisions = [...(run!.branchDecisions ?? []).filter(item => item.stepId !== step.id),
+                { stepId: step.id, operationId: report.runOperation.id, navigationId: decision.navigationId, result: decision.result,
+                  ...(destination === undefined ? {} : { nextStepId: destination }) }]
+              if (decision.result === 'unknown') {
+                run!.status = 'ready'; run!.warning = 'Condition is unknown or its page changed. No path was chosen; inspect the original page and explicitly return control to observe again.'
+              } else {
+                run!.nextStep = browserTaskNextIndex(version.steps, run!.nextStep, destination)
+                selectedByBranch = { stepId: step.id, index: branchIndex, navigationId: decision.navigationId }
+              }
+            } else if (report.outcome.kind === 'completed') run!.nextStep = browserTaskNextIndex(version.steps, run!.nextStep, step.nextStepId)
             else {
               run!.status = report.outcome.kind === 'stopped' ? 'stopped' : report.outcome.kind === 'script-failed' ? 'failed' : 'interrupted'
               run!.warning = 'The Browser step did not complete. Earlier steps remain; inspect the operation details before another action.'
@@ -336,7 +392,11 @@ export class BrowserTaskAssets {
           if (stopped) run!.status = 'stopped'
           await this.updateRun(run!)
         })
-        if (run.status !== 'running') return copy(this.projectRun(run))
+        if (run.status !== 'running') {
+          if (step.kind === 'branch' && run.status === 'ready') host.yieldControl(browserId)
+          return copy(this.projectRun(run))
+        }
+        if (step.kind !== 'branch') selectedByBranch = undefined
         actions += 1
         if (input.mode === 'step' && actions === 1 && run.nextStep < version.steps.length) {
           await this.change(async () => { run!.status = 'ready'; await this.updateRun(run!) })
@@ -370,7 +430,8 @@ export class BrowserTaskAssets {
   private projectRun(run: BrowserTaskAssetRun): BrowserTaskAssetRun {
     const version = this.document.assets.find(asset => asset.id === run.assetId)?.versions.find(item => item.version === run.version)
     const confirmed = new Set(run.humanCheckpoints?.map(fact => fact.checkpointId))
-    const unavailable = version?.steps.some((step, index) => step.kind === 'checkpoint' && index < run.nextStep &&
+    const reached = version ? browserTaskReachedCheckpoints(version.steps, run) : new Set<string>()
+    const unavailable = version?.steps.some((step, index) => step.kind === 'checkpoint' && index < run.nextStep && reached.has(step.id) &&
       step.id !== run.pendingCheckpointId && !confirmed.has(step.id))
     if (!unavailable) return run
     return { ...run, warning: run.warning ? `${run.warning} ${HUMAN_FACT_UNAVAILABLE}` : HUMAN_FACT_UNAVAILABLE }
@@ -432,8 +493,12 @@ function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, stri
 
 function validateTaskSegment(version: BrowserTaskVersion, values: Record<string, string>, nextStep: number, mode?: 'run' | 'step'): void {
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Provide the task parameters for this invocation.')
-  for (const step of version.steps.slice(nextStep)) {
-    if (step.kind === 'checkpoint') break
+  const first = version.steps[nextStep]
+  if (first?.kind === 'branch') {
+    if (!first.reviewed || !first.branch) throw new Error('Review the condition and both paths before executing it.')
+    return
+  }
+  for (const step of browserTaskSegment(version.steps, nextStep)) {
     if (step.kind === 'fill') {
     const definition = version.parameters.find(item => item.key === step.parameterKey)
     if (!definition || typeof values[definition.key] !== 'string' || !values[definition.key] || values[definition.key]!.length > 16_384) {
@@ -476,13 +541,16 @@ function content(raw: BrowserTaskContent): BrowserTaskContent {
   const parameters: BrowserTaskParameter[] = raw.parameters.map(parameter => ({ key: parameterKey(parameter.key), label: text(parameter.label), secret: parameter.secret === true }))
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
-    if (!step || !['click', 'fill', 'navigate', 'checkpoint'].includes(step.kind)) throw new Error('Invalid task step')
+    if (!step || !['click', 'fill', 'navigate', 'checkpoint', 'branch'].includes(step.kind)) throw new Error('Invalid task step')
     const url = safeUrl(step.url)
     return { id: identity(step.id), kind: step.kind, url, ...(step.target ? { target: target(step.target) } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
+      ...(step.branch !== undefined ? { branch: branch(step.branch) } : {}),
+      ...(step.nextStepId !== undefined ? { nextStepId: step.nextStepId === null ? null : identity(step.nextStepId) } : {}),
       reviewed: step.reviewed === true, ...(step.warning ? { warning: text(step.warning) } : {}) }
   })
   if (new Set(steps.map(step => step.id)).size !== steps.length) throw new Error('Duplicate task step identity')
+  for (const step of steps) if (step.kind === 'branch' ? !step.branch : step.branch !== undefined) throw new Error('Condition declaration belongs only to a condition step.')
   for (const step of steps) if (step.kind === 'fill' && !parameters.some(parameter => parameter.key === step.parameterKey)) throw new Error('Task fill parameter is not defined')
   let completion = raw.completion
   if (completion !== undefined) {
@@ -495,9 +563,9 @@ function content(raw: BrowserTaskContent): BrowserTaskContent {
       ? { kind: item.kind, path: item.path } : item) })
     const downloads = criteria.filter(item => item.kind === 'download-readable')
     if (downloads.length > 1) throw new Error('Declare one download producer per version; checkpoints may accompany it.')
-    const producer = downloads[0]?.stepId ?? steps.find(step => step.kind !== 'checkpoint')?.id
+    const producer = downloads[0]?.stepId ?? steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch')?.id
     const producerIndex = steps.findIndex(step => step.id === producer)
-    if (producerIndex < 0 || steps[producerIndex]?.kind === 'checkpoint') throw new Error('Completion needs a real page producer before its checkpoint.')
+    if (producerIndex < 0 || (steps[producerIndex]?.kind === 'checkpoint' || steps[producerIndex]?.kind === 'branch')) throw new Error('Completion needs a real page producer before its checkpoint.')
     for (const item of criteria) {
       if (item.kind === 'download-readable' && (steps[producerIndex]?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
       if (item.kind === 'human-checkpoint' && !steps.some((step, index) => step.kind === 'checkpoint' && step.id === item.checkpointId && index > producerIndex)) throw new Error('Declare the checkpoint after its real producer.')
@@ -531,7 +599,7 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
         !Array.isArray(run.operationIds) || run.operationIds.length > MAX_STEPS || !Number.isFinite(run.startedAt) || !Number.isFinite(run.updatedAt)) throw new Error('Invalid task run')
     const humanCheckpoints = normalizeHumanCheckpoints(run, version)
     return { id: identity(run.id), assetId: asset.id, version: version.version, browserId: asset.browserId, nextStep: run.nextStep, status: run.status,
-      operationIds: run.operationIds.map(identity), ...(run.pendingCheckpointId ? { pendingCheckpointId: identity(run.pendingCheckpointId) } : {}),
+      operationIds: run.operationIds.map(identity), ...normalizePathFacts(run, version), ...(run.pendingCheckpointId ? { pendingCheckpointId: identity(run.pendingCheckpointId) } : {}),
       ...(humanCheckpoints !== undefined ? { humanCheckpoints } : {}),
       ...(run.completionWarning ? { completionWarning: text(run.completionWarning) } : {}),
       ...(run.warning ? { warning: text(run.warning) } : {}), startedAt: run.startedAt, updatedAt: run.updatedAt }
@@ -556,6 +624,46 @@ function normalizeHumanCheckpoints(run: BrowserTaskAssetRun, version: BrowserTas
         fact.confirmedAt < run.startedAt || fact.confirmedAt > run.updatedAt || facts.some(item => item.checkpointId === fact.checkpointId)) return undefined
     facts.push({ runId: run.id, browserId: run.browserId, assetId: run.assetId, version: run.version, checkpointId: fact.checkpointId,
       pendingCursor: fact.pendingCursor, origin: 'trusted-ui', controlBefore: 'human', confirmedAt: fact.confirmedAt })
+  }
+  return facts
+}
+
+function branch(value: NonNullable<BrowserTaskStep['branch']>): NonNullable<BrowserTaskStep['branch']> {
+  if (!value || !value.condition || !['page-url-is', 'element-present'].includes(value.condition.kind) ||
+      (value.onTrue !== null && typeof value.onTrue !== 'string') || (value.onFalse !== null && typeof value.onFalse !== 'string')) throw new Error('Invalid task condition declaration')
+  const condition = value.condition.kind === 'page-url-is'
+    ? { kind: value.condition.kind, url: safeUrl(value.condition.url) }
+    : { kind: value.condition.kind, target: { role: text(value.condition.target.role), name: text(value.condition.target.name) } }
+  if (condition.kind === 'page-url-is' ? !condition.url : !condition.target.role) throw new Error('Condition needs a reviewed page URL or a semantic element role.')
+  return { condition, onTrue: value.onTrue === null ? null : identity(value.onTrue), onFalse: value.onFalse === null ? null : identity(value.onFalse) }
+}
+function recordStepOperation(run: BrowserTaskAssetRun, stepId: string, operationId: string): void {
+  const id = identity(operationId)
+  if (!run.operationIds.includes(id)) run.operationIds.push(id)
+  if (!run.stepExecutions?.some(item => item.operationId === id)) run.stepExecutions = [...(run.stepExecutions ?? []), { stepId, operationId: id }]
+}
+function normalizePathFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersion): Pick<BrowserTaskAssetRun, 'stepExecutions' | 'branchDecisions' | 'executedMillis'> {
+  const facts: Pick<BrowserTaskAssetRun, 'stepExecutions' | 'branchDecisions' | 'executedMillis'> = {}
+  if (run.stepExecutions !== undefined) {
+    if (!Array.isArray(run.stepExecutions) || run.stepExecutions.length > MAX_STEPS ||
+        new Set(run.stepExecutions.map(item => item.operationId)).size !== run.stepExecutions.length ||
+        run.stepExecutions.some(item => !version.steps.some(step => step.id === item.stepId) || !run.operationIds.includes(item.operationId))) throw new Error('Invalid task executed path')
+    facts.stepExecutions = run.stepExecutions.map(item => ({ stepId: identity(item.stepId), operationId: identity(item.operationId) }))
+  }
+  if (run.branchDecisions !== undefined) {
+    if (!Array.isArray(run.branchDecisions) || run.branchDecisions.length > 16 || new Set(run.branchDecisions.map(item => item.stepId)).size !== run.branchDecisions.length) throw new Error('Invalid task condition facts')
+    facts.branchDecisions = run.branchDecisions.map(item => {
+      const step = version.steps.find(step => step.id === item.stepId && step.kind === 'branch')
+      const expected = item.result === 'true' ? step?.branch?.onTrue : item.result === 'false' ? step?.branch?.onFalse : undefined
+      if (!step || !['true', 'false', 'unknown'].includes(item.result) || !run.operationIds.includes(item.operationId) ||
+          item.nextStepId !== expected || !run.stepExecutions?.some(fact => fact.stepId === step.id && fact.operationId === item.operationId)) throw new Error('Invalid task condition path binding')
+      return { stepId: identity(item.stepId), operationId: identity(item.operationId), navigationId: typeof item.navigationId === 'string' ? item.navigationId.slice(0, 128) : '',
+        result: item.result, ...(expected === undefined ? {} : { nextStepId: expected }) }
+    })
+  }
+  if (run.executedMillis !== undefined) {
+    if (!Number.isFinite(run.executedMillis) || run.executedMillis < 0) throw new Error('Invalid task execution time budget')
+    facts.executedMillis = run.executedMillis
   }
   return facts
 }

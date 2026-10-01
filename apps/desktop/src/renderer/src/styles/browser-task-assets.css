@@ -32,3 +32,12 @@
 .browser-demonstration-suggestion { display: grid; min-width: 0; gap: var(--sp-1); margin-block-start: var(--sp-1); overflow-wrap: anywhere; }
 .browser-demonstration-suggestion > :is(strong, small) { overflow: visible; text-overflow: clip; white-space: normal; }
 .browser-demonstration-suggestion > small { color: var(--text-3); }
+
+/* A condition owns its two forward choices, including a narrow Browser details pane. */
+.browser-task-asset .browser-rsi-replay__steps li[data-task-has-path] { grid-template-columns: 20px minmax(0, 1fr); }
+.browser-task-asset .browser-rsi-replay__steps li[data-task-has-path] > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
+.browser-task-branch { min-width: 0; display: grid; gap: var(--sp-1); }
+.browser-task-branch .browser-task-asset__field { grid-template-columns: 32px minmax(0, 1fr); padding-inline: 0; }
+.browser-task-asset .browser-task-branch > small { white-space: normal; line-height: 1.4; }
+
+.browser-task-asset li[data-task-has-path] .browser-task-asset__field { grid-template-columns: 32px minmax(0, 1fr); padding-inline: 0; }

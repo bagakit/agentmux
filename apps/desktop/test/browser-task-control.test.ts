@@ -219,3 +219,60 @@ it('positive public CLI run passes fresh values into the actual compiled fill wi
     expect(document.activeElement).toBe(field); expect([field.value, field.selectionStart, field.selectionEnd]).toEqual(['person draft', 2, 6])
   } finally { await server.stop(); field.remove() }
 })
+
+it('actual public CLI chooses one forward condition arm and binds its fresh fill to the original run', async () => {
+  const f = await fixture(false, true), secret = 'branch-cli-one-time-value', writes: unknown[][] = []
+  ;(f.entry as any).navigationId = 'actual-branch-cli-navigation'
+  const edited = await f.assets.edit(f.asset.id, f.asset.revision, { ...f.asset.draft, steps: [
+    { id: 'condition', kind: 'branch', url, reviewed: true, branch: { condition: { kind: 'page-url-is', url }, onTrue: 'fill', onFalse: 'alternative' } },
+    { ...f.asset.draft.steps[0]!, nextStepId: null }, { id: 'alternative', kind: 'navigate', url: 'https://generic.invalid/alternative', reviewed: true }
+  ] })
+  await f.assets.saveVersion(f.asset.id, edited.revision)
+  let operation = 0
+  f.actions.mockImplementation(async (id, code) => {
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+    const result = await new AsyncFunction('pageInfo', 'snapshot', 'fillInput', 'gotoUrl', code)(
+      async () => ({ url, navigationId: 'actual-branch-cli-navigation' }),
+      async () => ({ observation: { scope: { kind: 'page', document: null }, fullObserved: 1, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'text input', name: 'Field' }] }),
+      async (...args: unknown[]) => { writes.push(args) }, async () => { throw new Error('The unselected path must not run') })
+    return { result, logs: [], outcome: { kind: 'completed' }, runOperation: { id: `branch-cli-operation-${++operation}`, browserId: id } } as any
+  })
+  vi.spyOn(api.browser, 'controlTask').mockImplementation(request => executeBrowserTaskControl(request, f.owner, true))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'control.sock'), coreClients: () => [], execute: request => useAppStore.getState().executeControl(request) })
+  await server.start()
+  try {
+    const result = await cliRun(['run', '--browser', browserId, '--asset', f.asset.id, '--version', '2'], JSON.stringify({ fresh: secret }))
+    expect(result.code, result.stderr).toBe(0)
+    expect(objectCliReceipt(JSON.parse(result.stdout))).toMatchObject({ result: { run: { status: 'completed', version: 2,
+      branchDecisions: [{ stepId: 'condition', result: 'true', navigationId: 'actual-branch-cli-navigation', nextStepId: 'fill' }],
+      stepExecutions: [{ stepId: 'condition', operationId: 'branch-cli-operation-1' }, { stepId: 'fill', operationId: 'branch-cli-operation-2' }] } } })
+    expect(writes).toEqual([['@e1', secret]]); expect(f.actions).toHaveBeenCalledTimes(2); expect(f.returnControl).not.toHaveBeenCalled()
+    expect(JSON.stringify(f.store.document) + result.stdout + result.stderr).not.toContain(secret)
+  } finally { await server.stop() }
+})
+
+it('actual Main dispatcher refuses a selected condition action after its document changes across preparation', async () => {
+  const f = await fixture(), operation = { id: 'selected-arm-operation', browserId, phase: 'running', operator: { id: 'source-person', name: 'Source person' }, startedAt: 1, url, summary: 'Actual selected arm', steps: [] }
+  Object.assign(f.entry, { navigationId: 'old-condition-navigation', activeRun: { operationId: operation.id }, feedback: {
+    begin: vi.fn(async () => { (f.entry as any).navigationId = 'new-same-url-navigation'; return 1 }), completeAction: vi.fn(), clear: vi.fn()
+  } })
+  vi.spyOn(f.manager as any, 'emit').mockImplementation(() => {})
+  const nativeNavigation = vi.spyOn(f.manager as any, 'startNavigation').mockResolvedValue(undefined)
+  const taskAuthority = vi.spyOn(f.assets, 'isExecutionCurrent').mockReturnValue(true)
+  Object.assign(f.manager, { refLedgers: { read: vi.fn(async () => null), write: vi.fn() } })
+  const sender = { sendCommand: vi.fn(), frames: new Map() }
+  const actual = (f.manager as any).pageCallHandler(f.entry, sender, [], { at: null }, operation, false, new AbortController().signal,
+    { cursor: { runId: 'original-selected-run', assetId: f.asset.id, version: 1, browserId, stepId: 'navigation', expectedNavigationId: 'old-condition-navigation' } })
+  await expect(actual('gotoUrl', ['https://generic.invalid/next'])).rejects.toThrow('condition document changed')
+  expect((f.entry as any).feedback.begin).toHaveBeenCalledOnce(); expect(nativeNavigation).not.toHaveBeenCalled(); expect(sender.sendCommand).not.toHaveBeenCalled()
+  expect(taskAuthority).toHaveBeenCalled(); expect(operation.steps).toMatchObject([{ status: 'failed', method: 'gotoUrl' }])
+})
+
+
+it('public task result requires the actual branch operation to be bound to the same executed step', async () => {
+  const f = await fixture(), run = await f.manager.runControlledTaskAsset({ browserId, assetId: f.asset.id, version: 1, parameters: {} })
+  expect(run.stepExecutions).toEqual([{ stepId: 'navigation', operationId: run.operationIds[0] }])
+  const source = { operation: 'browser.task.run' as const, run: { ...run, branchDecisions: [{ stepId: 'another-step', operationId: run.operationIds[0], navigationId: 'real-navigation', result: 'true', nextStepId: null }] } }
+  expect(() => parseBrowserTaskControlResult(source.operation, source)).toThrow('not bound to its step')
+  expect(() => parseBrowserTaskControlResult(source.operation, { ...source, run: { ...source.run, stepExecutions: [] } })).toThrow('not bound to its step')
+})
