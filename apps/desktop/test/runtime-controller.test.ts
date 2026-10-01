@@ -2007,6 +2007,40 @@ describe('RuntimeController configuration transaction', () => {
     expect(carried?.semanticStatus?.stateEnteredAt).toBe(7)
   })
 
+  it.each([
+    ['running', 'provider'], ['running', 'acp'], ['running', 'unknown'],
+    ['missing', 'provider'], ['missing', 'acp'], ['missing', 'unknown']
+  ] as const)('projects the native Session ID for a %s Run with a %s handle', async (runState, protocol) => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const status = agentStatusFixture()
+    const nativeHandle: AgentMuxAgentSession['nativeHandle'] = protocol === 'provider'
+      ? { kind: 'provider', providerId: status.session.providerId, sessionId: 'provider-native-session', transcriptPath: _hygiene_fixturePath("private/transcript.jsonl") }
+      : protocol === 'acp' ? { kind: 'acp', adapterId: 'generic-adapter', sessionId: 'acp-native-session' } : undefined
+    const stored: AgentMuxAgentSession = { ...status.session, ...(nativeHandle ? { nativeHandle } : {}) }
+    const { exitCode: _exitCode, ...runningRun } = status.run
+    client.agentSessions.mockReturnValue([stored])
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: runState === 'missing' ? [] : [{
+      subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
+      providerId: stored.providerId, executorId: stored.executorId, agentSession: stored,
+      run: { ...runningRun, state: 'running' }
+    }] })
+
+    const snapshot = await controller.snapshot(localConfig)
+    expect(snapshot.sessions).toHaveLength(runState === 'missing' ? 0 : 1)
+    expect(snapshot.recoveryCandidates).toHaveLength(runState === 'missing' ? 1 : 0)
+    const projected = runState === 'missing' ? snapshot.recoveryCandidates[0] : snapshot.sessions[0]
+    expect(projected).toBeDefined()
+    if (nativeHandle) {
+      expect(projected).toHaveProperty('nativeSessionId', nativeHandle.sessionId)
+      expect(projected).not.toHaveProperty('nativeSessionId', stored.agentSessionId)
+    } else expect(projected).not.toHaveProperty('nativeSessionId')
+    // Only the display scalar crosses Desktop's projection, not the native locator or transcript path.
+    expect(projected).not.toHaveProperty('nativeHandle')
+    expect(projected).not.toHaveProperty('transcriptPath')
+    if (runState === 'missing') expect(client.sessionTimeline).not.toHaveBeenCalled()
+  })
+
   it('projects a stored Agent with a missing Run only as an exact recovery candidate', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!

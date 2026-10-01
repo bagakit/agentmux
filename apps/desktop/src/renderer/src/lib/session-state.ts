@@ -702,12 +702,14 @@ export function projectRuntimeEvent(
       terminalPromptDelivery: _terminalPromptDelivery,
       terminalOutputChannel: _terminalOutputChannel,
       turnUsage: _turnUsage,
+      nativeSessionId: _nativeSessionId,
       ...current
     } = item
     const reason = core.session.pendingInteraction ? agentInteractionResponseUnavailableReason(core.session.pendingInteraction) : undefined
     const next = {
       ...current,
       providerId: core.session.providerId,
+      ...(core.session.nativeHandle ? { nativeSessionId: core.session.nativeHandle.sessionId } : {}),
       hostId: core.session.hostId,
       workspacePath: core.session.workspacePath,
       updatedAt: Math.max(item.updatedAt, core.session.updatedAt),

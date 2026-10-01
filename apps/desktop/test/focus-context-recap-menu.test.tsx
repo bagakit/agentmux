@@ -139,7 +139,7 @@ it('copies the clicked same-name context with its own Provider and current Execu
       reviewer: { ...original.executors[agent.executorId]!, label: 'Review Executor' }
     } },
     sessions: state.sessions.map(session => session.kind === 'agent'
-      ? { ...session, executorId: session.id === secondId ? 'reviewer' : 'author' } : session)
+      ? { ...session, executorId: session.id === secondId ? 'reviewer' : 'author', nativeSessionId: session.id === secondId ? 'native-review' : 'native-author' } : session)
   })))
   await mount(); await open(secondId)
   await act(async () => useAppStore.setState(state => ({ config: {
@@ -151,7 +151,7 @@ it('copies the clicked same-name context with its own Provider and current Execu
   expect(copy).toHaveBeenCalledTimes(1)
   const text = copy.mock.calls[0]![0]
   expect(text).toContain(`ID: ${secondId}\n`)
-  expect(text).toContain('Exe: Shared Provider | Renamed Review Executor\n')
+  expect(text).toContain('Exe: native-review | Renamed Review Executor (Shared Provider)\n')
   expect(text).not.toContain('Author Executor')
   expect(text).not.toContain('region:')
 })

@@ -26,7 +26,7 @@ describe('public amux sharing consumption', () => {
   it('runs each nonempty printed hint through the real short-name bin and object parser', async () => {
     const probe = new ObjectCliProbe(); probes.push(probe); await probe.start()
     const identity = "--original id$'quoted"
-    for (const card of [formatSessionAddress(identity), formatRegionAddress(identity), formatTabAddress(identity)]) {
+    for (const card of [formatSessionAddress(identity, { nativeSessionId: 'different-native-id' }), formatRegionAddress(identity), formatTabAddress(identity)]) {
       const hints = card.split('\n').filter(line => line.startsWith('# amux ')).map(line => line.slice(2))
       expect(hints).toHaveLength(2)
       const result = await command(probe, hints[0]!)
@@ -64,7 +64,7 @@ describe('public amux sharing consumption', () => {
     const result = await exec(process.execPath, ['--input-type=module', '-e',
       "import {formatSessionAddress} from '@agentmux/core/sharing'; console.log(formatSessionAddress('S'))"
     ], { cwd: fileURLToPath(new URL('../../../apps/desktop', import.meta.url)) })
-    expect(result.stdout).toContain('--- amux : IDCard ---\nID: S\nExe: ? | ?')
+    expect(result.stdout).toContain('--- amux : IDCard ---\nID: S\nExe: ? | ? (?)')
   })
 
   it('includes the executable short name and sharing module in the real package archive', async () => {

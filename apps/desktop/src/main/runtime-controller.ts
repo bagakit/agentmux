@@ -233,6 +233,9 @@ function projectSession(
       kind: 'agent',
       providerId: subject.providerId,
       executorId: subject.executorId,
+      ...(subject.agentSession.nativeHandle
+        ? { nativeSessionId: subject.agentSession.nativeHandle.sessionId }
+        : {}),
       capabilities: capabilitiesFor(subject.providerId),
       ...(semantic ? { semanticStatus: structuredClone(semantic) } : {}),
       hostId: subject.hostId,
@@ -638,6 +641,7 @@ export class RuntimeController {
           workspacePath: session.workspacePath,
           providerId: session.providerId,
           executorId: session.executorId,
+          ...(session.nativeHandle ? { nativeSessionId: session.nativeHandle.sessionId } : {}),
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
           ...(session.terminalCapability

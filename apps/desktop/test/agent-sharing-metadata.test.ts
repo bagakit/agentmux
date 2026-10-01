@@ -25,8 +25,8 @@ beforeAll(async () => {
 function facts(): SharingFacts {
   return {
     sessions: [
-      { ...base, id: 'same-name-first', providerId: 'shared-provider', executorId: 'author', label: 'Same name' },
-      { ...base, id: 'target', providerId: 'shared-provider', executorId: 'reviewer', label: 'Same name' }
+      { ...base, id: 'same-name-first', providerId: 'shared-provider', executorId: 'author', nativeSessionId: 'native-author', label: 'Same name' },
+      { ...base, id: 'target', providerId: 'shared-provider', executorId: 'reviewer', nativeSessionId: 'native-review', label: 'Same name' }
     ],
     providerCatalog: [{ ...catalog, id: 'shared-provider', label: 'Shared Provider' }],
     config: { executors: {
@@ -40,21 +40,32 @@ function facts(): SharingFacts {
 describe('Sharing metadata follows the exact Session execution identity', () => {
   it('distinguishes two Executors of one Provider even with identical Session display names', () => {
     const input = facts()
-    expect(resolveAgentSharingMetadata('target', input)).toEqual({ provider: 'Shared Provider', executor: 'Review Executor' })
-    expect(resolveAgentSharingMetadata('same-name-first', input)).toEqual({ provider: 'Shared Provider', executor: 'Author Executor' })
+    expect(resolveAgentSharingMetadata('target', input)).toEqual({ nativeSessionId: 'native-review', provider: 'Shared Provider', executor: 'Review Executor' })
+    expect(resolveAgentSharingMetadata('same-name-first', input)).toEqual({ nativeSessionId: 'native-author', provider: 'Shared Provider', executor: 'Author Executor' })
   })
   it('keeps persisted Provider and Executor IDs when current configuration is absent', () => {
     const input = facts()
     expect(resolveAgentSharingMetadata('target', { ...input, providerCatalog: [], config: null }))
-      .toEqual({ provider: 'shared-provider', executor: 'reviewer' })
+      .toEqual({ nativeSessionId: 'native-review', provider: 'shared-provider', executor: 'reviewer' })
     expect(resolveAgentSharingMetadata('target', { ...input, config: { executors: {} } }))
-      .toEqual({ provider: 'Shared Provider', executor: 'reviewer' })
+      .toEqual({ nativeSessionId: 'native-review', provider: 'Shared Provider', executor: 'reviewer' })
   })
   it('does not claim identity from empty configuration labels', () => {
     const input = facts()
     input.providerCatalog = [{ ...catalog, id: 'shared-provider', label: '' }]
     input.config = { executors: { reviewer: { ...executor, label: '' } } }
-    expect(resolveAgentSharingMetadata('target', input)).toEqual({ provider: 'shared-provider', executor: 'reviewer' })
+    expect(resolveAgentSharingMetadata('target', input)).toEqual({ nativeSessionId: 'native-review', provider: 'shared-provider', executor: 'reviewer' })
+  })
+  it('does not substitute the Core SID when a known Agent lacks native identity', () => {
+    const input = facts()
+    input.sessions = input.sessions.map(session => {
+      if (session.kind !== 'agent') return session
+      const { nativeSessionId: _native, ...unknown } = session
+      return unknown
+    })
+    const metadata = resolveAgentSharingMetadata('target', input)
+    expect(metadata.nativeSessionId).toBeUndefined()
+    expect(metadata).toMatchObject({ provider: 'Shared Provider', executor: 'Review Executor' })
   })
   it('leaves unknown observation and plain terminals without invented Agent metadata', () => {
     const terminal: SessionSnapshot = {
@@ -89,7 +100,7 @@ describe('Production identity menu models copy one current card', () => {
     expect(copied).toHaveLength(4)
     expect(new Set(copied).size).toBe(1)
     expect(copied[0]).toContain('ID: target\n')
-    expect(copied[0]).toContain('Exe: Shared Provider | Review Executor\n')
+    expect(copied[0]).toContain('Exe: native-review | Review Executor (Shared Provider)\n')
     expect(copied[0]).not.toContain('Author Executor')
     expect(copied[0]).not.toContain('region:')
     copied.length = 0
@@ -101,7 +112,7 @@ describe('Production identity menu models copy one current card', () => {
     expect(copied).toHaveLength(4)
     expect(copied[0]).toContain('region:clicked')
     expect(copied[0]).toContain('ID: target\n')
-    expect(copied[0]).toContain('Exe: Shared Provider | Review Executor\n')
+    expect(copied[0]).toContain('Exe: native-review | Review Executor (Shared Provider)\n')
     expect(new Set(copied.slice(1)).size).toBe(1)
     expect(copied[1]).not.toContain('region:')
     expect(sharingMetadata).toHaveBeenCalledTimes(8)
@@ -113,11 +124,16 @@ describe('Production identity menu models copy one current card', () => {
       sharingMetadata: () => resolveAgentSharingMetadata('target', current) })
     current = { ...current, config: { executors: { reviewer: { ...executor, label: 'Renamed Executor' } } } }
     await actions[1]!.onSelect()
-    expect(writeClipboardText.mock.calls[0]![0]).toContain('Exe: Shared Provider | Renamed Executor\n')
+    expect(writeClipboardText.mock.calls[0]![0]).toContain('Exe: native-review | Renamed Executor (Shared Provider)\n')
+    current = { ...current, sessions: current.sessions.map(session => session.kind === 'agent'
+      ? { ...session, nativeSessionId: 'updated-native' } : session) }
+    await actions[1]!.onSelect()
+    expect(writeClipboardText.mock.calls[1]![0]).toContain('Exe: updated-native | Renamed Executor (Shared Provider)\n')
+    expect(writeClipboardText.mock.calls[1]![0]).toContain("--to-session='target'")
     current = { ...current, sessions: [] }
     await actions[0]!.onSelect()
-    expect(writeClipboardText.mock.calls).toHaveLength(2)
-    expect(writeClipboardText.mock.calls[1]![0]).toContain('ID: target\n')
-    expect(writeClipboardText.mock.calls[1]![0]).not.toContain('Renamed Executor')
+    expect(writeClipboardText.mock.calls).toHaveLength(3)
+    expect(writeClipboardText.mock.calls[2]![0]).toContain('ID: target\n')
+    expect(writeClipboardText.mock.calls[2]![0]).toContain('Exe: ? | ? (?)')
   })
 })

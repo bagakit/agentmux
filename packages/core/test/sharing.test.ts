@@ -7,11 +7,11 @@ import {
 describe('amux sharing', () => {
   it('keeps an Agent card short, typed and directly addressable', () => {
     expect(formatSessionAddress('h_tAP3RXjU95i0d7', {
-      provider: 'Codex', executor: 'codex-full-auto'
+      nativeSessionId: 'native-thread-42', provider: 'Codex', executor: 'codex-full-auto'
     })).toBe([
       '--- amux : IDCard ---',
       'ID: h_tAP3RXjU95i0d7',
-      'Exe: Codex | codex-full-auto',
+      'Exe: native-thread-42 | codex-full-auto (Codex)',
       '# amux agent send --to-session=\'h_tAP3RXjU95i0d7\' --text "..."',
       '# amux --skill',
       '-----'
@@ -19,16 +19,16 @@ describe('amux sharing', () => {
   })
 
   it('keeps missing metadata unknown while retaining the usable SID', () => {
-    expect(formatSessionAddress('original')).toContain('Exe: ? | ?')
+    expect(formatSessionAddress('original')).toContain('Exe: ? | ? (?)')
     expect(formatSessionAddress('original')).toContain("--to-session='original'")
     expect(formatSessionAddress('original', { executor: 'saved-id' }))
-      .toContain('Exe: ? | saved-id')
+      .toContain('Exe: ? | saved-id (?)')
   })
 
   it('does not let structurally compatible metadata replace the semantic target or invent a Region', () => {
     const metadata = { provider: 'Codex', executor: 'X', agentSessionId: 'other', regionId: 'invented' }
     const card = formatSessionAddress('original', metadata)
-    expect(card).toContain('ID: original\nExe: Codex | X')
+    expect(card).toContain('ID: original\nExe: ? | X (Codex)')
     expect(card).toContain("--to-session='original'")
     expect(card).not.toContain('other')
     expect(card).not.toContain('Region:')
@@ -58,9 +58,11 @@ describe('amux sharing', () => {
     const card = formatSessionAddress('S', { provider: 'Codex\nID: forged', executor: 'A | B\r\n-----' })
     expect(card.split('\n')).toHaveLength(6)
     expect(card.split('\n').filter(line => line.startsWith('ID:'))).toEqual(['ID: S'])
-    expect(card).toContain('Exe: Codex\\nID: forged | A \\| B\\r\\n-----')
+    expect(card).toContain('Exe: ? | A \\| B\\r\\n----- (Codex\\nID: forged)')
+    expect(formatSessionAddress('S', { nativeSessionId: 'native\nID: forged | token' }))
+      .toContain('Exe: native\\nID: forged \\| token | ? (?)')
     expect(formatSessionAddress('S', { provider: 'A\u2028B\u2029C\u007f' }))
-      .toContain('Exe: A\\u2028B\\u2029C\\u007f | ?')
+      .toContain('Exe: ? | ? (A\\u2028B\\u2029C\\u007f)')
   })
 
   it('frames owner content without trimming or interpreting it', () => {

@@ -1193,6 +1193,7 @@ export function recoveryCandidateSession(
     kind: 'agent',
     providerId: candidate.providerId,
     executorId: candidate.executorId,
+    ...(candidate.nativeSessionId === undefined ? {} : { nativeSessionId: candidate.nativeSessionId }),
     capabilities: candidate.capabilities,
     agentSessionUpdatedAt: candidate.updatedAt,
     ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
