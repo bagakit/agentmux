@@ -49,7 +49,7 @@ const mutations = [
   { label: 'actual-public-result-tuple-guard-removed', file: view, target: 'another requested version',
     before: block(view, '      if (result.browserId !== browserId', '      setState({ key, result })'), after: '' },
   { label: 'actual-declared-producer-identity-removed', file: helper, target: 'original declared producing step and navigation',
-    before: '      !registration.context.workspaceId || !registration.context.navigationId || producerIndex < 0 || operationIds[producerIndex] !== operation.id ||\n', after: '' },
+    before: '      !registration.context.workspaceId || !registration.context.navigationId || producerIndex < 0 || producerOperationId !== operation.id ||\n', after: '' },
   { label: 'actual-selected-version-scope-removed', file: helper, target: 'separates versions',
     before: ' && run.assetId === assetId && run.version === version) : undefined', after: ') : undefined' },
   { label: 'actual-invalid-date-display-guard-removed', file: view, target: 'timestamps exceed the Date range',
