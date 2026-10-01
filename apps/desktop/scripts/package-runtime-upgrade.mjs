@@ -236,7 +236,7 @@ async function assertRunsKept(plan, inspection, sdk) {
   return statuses
 }
 
-/** One bounded public Control read; no Renderer injection or lifecycle action. */
+/** One bounded public RPC read; no Renderer injection or lifecycle action. */
 export async function observeUiClient(appPath) {
   const { stdout } = await exec(process.execPath, [script, '--inspect-ui', join(appPath, coreRelative, 'dist/index.js')], {
     timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -426,9 +426,12 @@ export async function closeRuntimeUpgrade(plan) {
 
 if (process.argv[1] && resolve(process.argv[1]) === script) {
   if (process.argv[2] === '--inspect-ui') {
-  const { requestAgentMuxControl } = await import(pathToFileURL(process.argv[3]).href)
-  const receipt = await requestAgentMuxControl({ schemaVersion: 5, requestId: randomUUID(), operation: 'inspect.client' })
-  process.stdout.write(JSON.stringify(parseDesktopClientObservation(receipt.result.observation)))
+  const { connectAgentMuxRpc } = await import(pathToFileURL(process.argv[3]).href)
+  const client = await connectAgentMuxRpc()
+  try {
+    const result = await client.call('app.inspect', {})
+    process.stdout.write(JSON.stringify(parseDesktopClientObservation(result.observation)))
+  } finally { await client.dispose() }
 } else if (process.argv[2] === '--identity') {
   const sdk = await import(pathToFileURL(process.argv[3]).href)
   const runtime = await new sdk.CtxmuxClient({ socketPath: process.argv[4] }).runtimeInfo()

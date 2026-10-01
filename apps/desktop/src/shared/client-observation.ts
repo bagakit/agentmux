@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
-import { desktopObservationSchema } from './desktop-focus-observation'
+import { desktopObservationSchema } from './desktop-focus-observation.ts'
 
 const id = z.string().min(1)
 const nullableId = id.nullable()
