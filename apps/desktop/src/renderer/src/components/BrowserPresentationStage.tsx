@@ -97,7 +97,9 @@ export function useBrowserPresentationCapture(browserId: string) {
   }, [ensureCapture])
   useEffect(() => {
     const stop = api.browser.onPresentationEvent(event => {
-      if (event.browserId !== browserId || event.type !== 'capture-revoked') return
+      if (event.browserId !== browserId) return
+      if (event.type === 'input-owner-changed') { inputChosen.current = event.leaseId !== null; return }
+      if (event.type !== 'capture-revoked') return
       const held = media.current
       if (!held || held.capture.captureId !== event.captureId) return
       generation.current += 1
@@ -204,7 +206,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       if (current) void api.browser.removePresentation(current.leaseId).catch(() => {}) }
   }, [browserId, presentation.occurrence.presentationId, geometry, observe, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
-  useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
+  useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, inputSelected, blocked, observe])
   useLayoutEffect(() => {
     const node = video.current
     if (node && node.srcObject !== media.stream) { node.srcObject = media.stream; if (media.stream) void node.play().catch(() => {}) }
@@ -250,29 +252,35 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       else if (committed.outcome === 'input-dispatched') { setNotice(null); onInputSelected?.() }
     } catch (error) { setNotice({ source: 'input', message: String(error) }) }
   }
+  const [retrying, setRetrying] = useState(false)
+  const retry = async () => {
+    if (retrying) return
+    const current = lease.current
+    if (!current) { registrationRetry.current?.(true); return }
+    setRetrying(true)
+    try {
+      const next = geometry()
+      await api.browser.updatePresentation(current.leaseId, next)
+      await media.registered(current, latest.current.inputSelected, next.visible)
+      if (next.visible) await media.retryCapture(current)
+      setNotice(null)
+    } catch (error) { setNotice({ source: 'presentation', message: error instanceof Error ? error.message : String(error) }) }
+    finally { setRetrying(false) }
+  }
+  const presentationNotice = notice?.message ?? media.notice
   return <div className="browser-presentation">
-    <ServiceWindowNotice notice={notice ? { kind: 'indeterminate', notice: {
-      step: notice.source === 'registration' ? 'Browser presentation has not connected' : 'Browser presentation is unconfirmed',
-      mode: `The original page is kept. ${notice.message}`,
-      restore: notice.source === 'registration'
-        ? 'This presentation reconnects when the Browser becomes available. You can retry without reopening the page.'
-        : notice.source === 'input'
-          ? 'Keep this window in the foreground and try this page again. The original page stays in place.'
-          : 'The presentation could not confirm its native geometry or input owner. The original page stays in place.'
-    } } : null} {...(notice ? { summary: {
-      step: notice.source === 'registration' ? 'Page connection pending' : 'Page interaction is unconfirmed',
-      mode: 'The original page and address draft stay in place.',
-      restore: notice.source === 'registration' ? 'Retry this connection.' : 'Open Details for the failed step.'
-    } } : {})} actions={notice?.source === 'registration'
-      ? <button type="button" className="small-button" onClick={() => registrationRetry.current?.(true)}>Retry connection</button> : null} />
-    <ServiceWindowNotice notice={media.notice ? { kind: 'indeterminate', notice: {
-      step: 'Live Browser preview is unconfirmed', mode: media.notice,
-      restore: 'Retry this live preview when ready. The original Browser page remains available.'
-    } } : null} {...(media.notice ? { summary: {
-      step: 'Live preview unavailable', mode: 'The page can still load and accept input.',
-      restore: 'Retry the preview if you need another view of this page.'
-    } } : {})} actions={media.notice ? <button type="button" className="small-button" disabled={!presentation.visible || blocked}
-      onClick={() => { const current = lease.current; if (current && geometry().visible) void media.retryCapture(current) }}>Retry live preview</button> : null} />
+    <div className="browser-presentation-notice">
+      <ServiceWindowNotice notice={presentationNotice ? { kind: 'indeterminate', notice: {
+        step: notice?.source === 'registration' ? 'Page connection pending' : 'Page preview needs attention',
+        mode: `The original page is kept. ${presentationNotice}`,
+        restore: 'Retry here. The address, page and other open presentations are preserved.'
+      } } : null}
+        disclosure={{ scope: `browser-presentation:${presentation.occurrence.presentationId}`, id: 'live-preview',
+          occurrence: navigationId, cause: presentationNotice ?? '', visible: presentation.visible }} />
+      {presentationNotice ? <button className="small-button" type="button" disabled={retrying || !presentation.visible || blocked} title={!presentation.visible || blocked ? 'Return to this preview to retry' : undefined} onClick={() => void retry()}>
+        {retrying ? 'Retrying preview…' : notice?.source === 'registration' ? 'Retry connection' : 'Retry preview'}
+      </button> : null}
+    </div>
     <div className="browser-stage" data-native-browser-stage={browserId} data-browser-presentation-id={presentation.occurrence.presentationId}
       ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}
       onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, copyFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import path, { join, resolve, relative } from 'node:path'
+import path, { join, resolve, relative, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses } from '../../probe-process.mjs'
@@ -19,20 +19,45 @@ const receipt = { schema: 'agentmux.browser-presentation-product-native.v1', evi
   T004Qualified: false, userAppRunRuntimeControls: 0, inputs: {},
   boundary: 'Actual App/Store/Workbench and original BrowserPane own all product stages. Original Main/preload/BVM and authorized same-stream capture are real; maintained typed non-Browser data is isolated. Explicit media-only evidence does not qualify first press, IME, clipboard, Run, restart or installation.' }
 const mediaOnly=process.argv.includes('--media-only')
+const surveyInitial=process.argv.includes('--survey-initial')
+const previewFailure=process.argv.includes('--survey-preview-failure')
+const sourceAliases = []
+if (surveyInitial) for (const pkg of ['core','demand']) {
+ const manifest = JSON.parse(await readFile(join(root,'packages',pkg,'package.json'),'utf8'))
+ for (const [key,value] of Object.entries(manifest.exports)) sourceAliases.push({find:key==='.'?`@agentmux/${pkg}`:`@agentmux/${pkg}/${key.slice(2)}`,replacement:resolve(root,'packages',pkg,value.import.replace('./dist/',pkg==='core'?'./src/':'./').replace(/\.js$/,'.ts'))})
+}
+sourceAliases.sort((a,b)=>b.find.length-a.find.length)
+if(surveyInitial)sourceAliases.push({find:'@agentmux/layout',replacement:join(root,'packages/layout/src/index.ts')})
 receipt.firstPressRequested=!mediaOnly
 const inputs = new Map(), logs = []
 let privateRoot
 try {
+  if (surveyInitial) receipt.freshness = { sourceBound: true, rebuilt: false, boundary: 'Actual Core/Demand/Layout Source aliases replace private package dist, with nonempty compiled input manifest.' }
+  else {
   const freshness = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e',
     `const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`], { cwd: root, encoding: 'utf8' })
   await writeFile(join(evidence, 'freshness.log'), freshness.stdout + freshness.stderr)
   receipt.freshness = { exitCode: freshness.status, rebuilt: false }
   assert.equal(freshness.status, 0, 'Unmodified production Core/Demand freshness guard')
+  }
   receipt.main = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
-  privateRoot = await mkdtemp(join(tmpdir(), 'amux-native-resource-'))
+  privateRoot = await mkdtemp(join(tmpdir(), surveyInitial ? 'amp-' : 'amux-native-resource-'))
   const out = join(privateRoot, 'out'); await mkdir(out)
   await symlink(join(desktop, 'node_modules'), join(privateRoot, 'node_modules'))
   const plugin = { name: 'literal-production-source-binding', setup(builder) {
+    if (surveyInitial && builder.initialOptions.format === 'esm') builder.onResolve({ filter: /^[^./]/ }, async args => {
+      if (args.pluginData?.externalResolution || args.path === 'electron' || isBuiltin(args.path)) return
+      const source = sourceAliases.find(value => value.find === args.path)
+      if (source) return { path: source.replacement }
+      if (args.path.startsWith('@agentmux/client-ui/')) {
+        const key = args.path.slice('@agentmux/client-ui/'.length)
+        const manifest = JSON.parse(await readFile(join(root,'packages/client-ui/package.json'),'utf8'))
+        const target = manifest.exports['./'+key] ?? manifest.exports['./*']
+        return { path: resolve(root,'packages/client-ui',target.browser.replace('*',key)) }
+      }
+      const resolved = await builder.resolve(args.path, {resolveDir:dirname(args.importer),kind:'import-statement',pluginData:{externalResolution:true}})
+      return resolved.errors.length ? {errors:resolved.errors} : {path:resolved.path,external:true}
+    })
     builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
       const bytes = await readFile(path); inputs.set(path, digest(bytes))
@@ -47,15 +72,15 @@ try {
     })
   } }
   const main = join(out, 'main.mjs'), preload = join(out, 'preload.cjs'), entry = join(out, 'entry.js')
-  const settings = { bundle: true, packages: 'external', platform: 'node', target: 'node22', format: 'cjs', external: ['electron'], plugins: [plugin], metafile: true, logLevel: 'silent' }
-  const mainBuild = await build({ ...settings, format: 'esm', entryPoints: [join(fixture, 'product-main.ts')], outfile: main,
+  const settings = { bundle: true, packages: 'external', platform: 'node', target: 'node22', format: 'cjs', external: ['electron'], ...(surveyInitial?{alias:Object.fromEntries(sourceAliases.map(({find,replacement})=>[find,replacement]))}:{}), plugins: [plugin], metafile: true, logLevel: 'silent' }
+  const mainBuild = await build({ ...settings, ...(surveyInitial?{packages:'bundle'}:{}), format: 'esm', entryPoints: [join(fixture, 'product-main.ts')], outfile: main,
     banner: { js: "import {createRequire as createNativeRequire} from 'node:module';const require=createNativeRequire(import.meta.url);" } })
   // Sandboxed preload bundles local pure dependencies; only Electron is a native external.
   const preloadBuild = await build({ ...settings, packages: 'bundle', entryPoints: [join(desktop, 'src/preload/index.ts')], outfile: preload })
-  const rendererPlugin = { name: 'literal-product-App-renderer', enforce: 'pre', transform(code,id) {
+  const rendererPlugin = { name: 'literal-product-App-renderer', enforce: 'pre', async transform(code,id) {
     const file=id.split('?')[0]
     if (!file.startsWith(root+'/') || file.includes('/node_modules/') || !/\.[cm]?[jt]sx?$/.test(file)) return
-    inputs.set(file,digest(code))
+    inputs.set(file,digest(await readFile(file)))
     if (file===join(desktop,'src/renderer/src/lib/api.ts')) {
       const needle='export const api = __AGENTMUX_WEB_PREVIEW__ ? mockApi : requireDesktopApi()'
       assert.equal(code.split(needle).length,2);const changed=code.replace(needle,'export const api = mockApi')
@@ -77,7 +102,7 @@ try {
     await copy(join(resolve(root,reuse),'compiled'),out)
     receipt.rendererReuse={evidence:reuse,sourceCount:reusedSources.length,actualSourceExact:true}
   } else {
-  await viteBuild({configFile:false,root:fixture,base:'./',logLevel:'error',plugins:[rendererPlugin],css:{postcss:{plugins:[cssPlugin]}},
+  await viteBuild({configFile:false,root:fixture,base:'./',logLevel:'error',...(surveyInitial?{resolve:{alias:sourceAliases}}:{}),plugins:[rendererPlugin],css:{postcss:{plugins:[cssPlugin]}},
     define:{__AGENTMUX_WEB_PREVIEW__:'false','process.env.NODE_ENV':'"production"'},build:{outDir:out,emptyOutDir:false,target:'esnext',rollupOptions:{input:join(fixture,'product-index.html')}}})
   }
   const entryBuild = {metafile: 'Actual Vite product Renderer; original Source and CSS captured by pre transform/PostCSS AST.'}
@@ -107,7 +132,7 @@ for(const type of ['mousedown','mouseup'])document.addEventListener(type,e=>sour
     const directory = join(root, 'packages', name)
     const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
     assert.equal(typeof manifest.exports['.'].import, 'string', 'Actual public ESM export')
-    packageEntries.push(resolve(directory, manifest.exports['.'].import))
+    packageEntries.push(surveyInitial ? sourceAliases.find(value=>value.find===`@agentmux/${name}`).replacement : resolve(directory, manifest.exports['.'].import))
   }
   for (const file of ['pnpm-lock.yaml','packages/core/package.json','packages/demand/package.json',...packageEntries]) {
     const path = resolve(root, file); inputs.set(path, digest(await readFile(path)))
@@ -118,14 +143,14 @@ for(const type of ['mousedown','mouseup'])document.addEventListener(type,e=>sour
     AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(privateRoot, 'messages.ndjson'),
     AGENTMUX_AGENT_SESSION_STORE: join(privateRoot, 'sessions.json') }
   delete env.ELECTRON_RUN_AS_NODE
-  receipt.process = await runProbeProcess(require('electron'), [main, html, privateRoot, preload, evidence, sourcePage, ...(mediaOnly?['--media-only']:[])],
+  receipt.process = await runProbeProcess(require('electron'), [main, html, privateRoot, preload, evidence, sourcePage, ...(mediaOnly?['--media-only']:[]),...(surveyInitial?['--survey-initial']:[]),...(previewFailure?['--survey-preview-failure']:[])],
     { cwd: root, temporaryRoot: privateRoot, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.native = JSON.parse(await readFile(join(evidence, 'native-receipt.json'), 'utf8'))
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs].map(async ([path]) => [relative(root, path), digest(await readFile(path))])))
   assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Actual Source/compiled dependency inputs before/after')
   assert.equal(receipt.process.exitCode, 0, 'Original private product fixture exit')
   assert.equal(receipt.native.passed, true, 'Actual product facts')
-  assert.equal(receipt.native.openProduct.stages.length, 2, 'Actual App product stages are nonempty')
+  assert.ok(receipt.native.openProduct.stages.length >= (surveyInitial ? 1 : 2), 'Actual App product stages are nonempty')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs].map(async ([path]) => [relative(root, path), digest(await readFile(path))])))
   assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Actual Source/compiled dependency inputs before/after')
   receipt.frames = await Promise.all(receipt.native.frames.map(async frame => {

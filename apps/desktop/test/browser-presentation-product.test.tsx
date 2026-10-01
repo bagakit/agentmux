@@ -94,3 +94,90 @@ it('actual App keeps both exact Browser workfaces on one capture; Settings hides
     vi.unstubAllGlobals()
   }
 })
+
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { surveyInitialZoneSelection } from '../src/renderer/src/lib/survey-workface'
+import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from '../src/renderer/src/components/BrowserPresentationStage'
+
+it('a fresh Survey Browser selects its exact visible occurrence before capture, keeps failures inside the page and retries the same lease', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const initial = useAppStore.getState(), restorePopover = installNativePopover()
+  const workspace = { id: 'survey-capture-workspace', hostId: 'local', path: _hygiene_fixturePath("survey-capture"), name: 'Research', kind: 'folder' as const }
+  const config = await api.config.get(), page = await api.browser.create('survey-capture-page', 'https://example.invalid/fresh', workspace.id)
+  const surface = { ...page, kind: 'browser' as const, regionId: 'survey-capture-region', workspaceId: workspace.id, browserId: page.id }
+  const tab = createWorkbenchTab('survey-capture-tab', surface)
+  useAppStore.setState({ ...initial, loading: false, initialize: async () => () => {}, config: { ...config, workspaces: [workspace] }, sessions: [],
+    activeWorkspaceId: workspace.id, mainSurface: 'survey', tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('survey-capture-group', [tab.id]) },
+    toolsOpen: false, projectRailOpen: false, surveyToolsOpen: false, surveyZoneSelection: null, surveyCollectedZones: {}, surveySidebarCollapsed: false }, true)
+  const catalog = spatialCatalog(useAppStore.getState(), []), zoneId = catalog.tabs.find(value => value.tabId === tab.id)!.zoneId!
+  useAppStore.setState({ surveyCollectedZones: { [zoneId]: true }, surveyZoneSelection: surveyInitialZoneSelection(catalog, zoneId, useAppStore.getState().layouts, useAppStore.getState().tabs, workspace.id) })
+  const held = new Map<string, { occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry }>(), sequence: string[] = []
+  let nextLease = 0
+  const register = vi.spyOn(api.browser, 'registerPresentation').mockImplementation(async request => { const leaseId = `survey-lease-${++nextLease}`; held.set(leaseId, request); return { leaseId } })
+  const update = vi.spyOn(api.browser, 'updatePresentation').mockImplementation(async (id, geometry) => { held.set(id, { ...held.get(id)!, geometry }) })
+  const remove = vi.spyOn(api.browser, 'removePresentation').mockImplementation(async id => { held.delete(id) })
+  const activate = vi.spyOn(api.browser, 'activatePresentation').mockImplementation(async id => { expect(held.get(id)!.geometry.visible).toBe(true); sequence.push('select'); return { outcome: 'selected' } })
+  const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockImplementation(async () => { sequence.push('capture'); return { captureId: 'survey-original-capture', browserId: page.id } })
+  const ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined), events = vi.spyOn(api.browser, 'onPresentationEvent').mockImplementation(() => () => {})
+  const stream = new MediaStream(), stop = vi.fn()
+  Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'survey-track', stop }] })
+  const capture = vi.fn().mockRejectedValueOnce(new Error('Timeout starting video source')).mockResolvedValue(stream)
+  const priorMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: capture } })
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(220, 60, 620, 320))
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
+  try {
+    await act(async () => root.render(createElement(App)))
+    await vi.waitFor(async () => { await act(async () => {}); expect(container.querySelector('.global-survey-surface .browser-presentation-notice .service-disclosure')).not.toBeNull() })
+    expect(sequence[0]).toBe('select'); expect(activate).toHaveBeenCalledTimes(1)
+    const chosen = held.get(activate.mock.calls[0]![0])!
+    expect(chosen.occurrence.presentationId).toContain('survey-workbench')
+    expect(chosen.occurrence.location).toEqual({ displayWorkspaceId: workspace.id, groupId: 'survey-capture-group', tabId: tab.id, regionId: surface.regionId })
+    const stage = container.querySelector('.global-survey-surface [data-native-browser-stage]')!
+    const pane = stage.closest('.browser-surface')!
+    const retry = pane.querySelector<HTMLButtonElement>('.browser-presentation-notice > button')!
+    expect(retry).not.toBeNull(); expect(stage.closest('.browser-surface')).not.toBeNull()
+    await act(async () => retry.click())
+    await vi.waitFor(async () => { await act(async () => {}); expect((stage.querySelector('video') as HTMLVideoElement)?.srcObject).toBe(stream) })
+    expect(container.querySelector('.global-survey-surface [data-native-browser-stage]')).toBe(stage)
+    expect(activate).toHaveBeenCalledTimes(1); expect(capture).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
+    expect(pane.querySelector('.service-disclosure')).toBeNull()
+  } finally {
+    await act(async () => root.unmount()); container.remove(); restorePopover(); useAppStore.setState(initial, true)
+    if (priorMedia) Object.defineProperty(navigator, 'mediaDevices', priorMedia); else delete (navigator as unknown as Record<string, unknown>).mediaDevices
+    for (const spy of [register, update, remove, activate, arm, ack, events, rect, play]) spy.mockRestore()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('hidden registration and unconfirmed selection preserve the next visible activation opportunity', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const initial = useAppStore.getState(), restorePopover = installNativePopover()
+  const location = { displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' }
+  const presentation: WorkbenchBrowserPresentation = { occurrence: { presentationId: 'precise-occurrence', location }, stageHostId: 'stage', visible: false, active: true, yieldToFocusRing: false, target: { hostId: 'host', reference: location, surface: 'survey', active: true } }
+  const activate = vi.spyOn(api.browser, 'activatePresentation').mockResolvedValueOnce({ outcome: 'input-unconfirmed', reason: 'hidden', message: 'Visibility changed before selection' }).mockResolvedValue({ outcome: 'selected' })
+  const register = vi.spyOn(api.browser, 'registerPresentation').mockResolvedValue({ leaseId: 'same-lease' }), update = vi.spyOn(api.browser, 'updatePresentation').mockResolvedValue(undefined), remove = vi.spyOn(api.browser, 'removePresentation').mockResolvedValue(undefined)
+  const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockResolvedValue({ captureId: 'capture', browserId: 'browser' }), ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined), events = vi.spyOn(api.browser, 'onPresentationEvent').mockImplementation(() => () => {})
+  const stream = new MediaStream(); Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'track', stop: vi.fn() }] })
+  const priorMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: vi.fn(async () => stream) } })
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 320)), play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  function Workface({ visible }: { visible: boolean }) { const media = useBrowserPresentationCapture('browser'); return createElement(BrowserPresentationStage, { browserId: 'browser', navigationId: 'navigation', presentation: { ...presentation, visible }, inputSelected: true, blocked: false, media }) }
+  const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
+  try {
+    await act(async () => root.render(createElement(Workface, { visible: false })))
+    expect(register).toHaveBeenCalledTimes(1); expect(activate).not.toHaveBeenCalled(); expect(arm).not.toHaveBeenCalled()
+    await act(async () => root.render(createElement(Workface, { visible: true })))
+    await vi.waitFor(async () => { await act(async () => {}); expect(activate).toHaveBeenCalled() })
+    const retry = container.querySelector<HTMLButtonElement>('.browser-presentation-notice > button')!
+    expect(retry).not.toBeNull(); await act(async () => retry.click())
+    expect(activate).toHaveBeenCalledTimes(2); expect(register).toHaveBeenCalledTimes(1)
+  } finally {
+    await act(async () => root.unmount()); container.remove(); restorePopover(); useAppStore.setState(initial, true)
+    if (priorMedia) Object.defineProperty(navigator, 'mediaDevices', priorMedia); else delete (navigator as unknown as Record<string, unknown>).mediaDevices
+    for (const spy of [activate, register, update, remove, arm, ack, events, rect, play]) spy.mockRestore(); vi.unstubAllGlobals()
+  }
+})

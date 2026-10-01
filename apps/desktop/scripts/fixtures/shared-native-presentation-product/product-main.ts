@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -14,6 +15,8 @@ import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces
 
 const [html, privateRoot, preload, evidence, sourcePage] = process.argv.slice(2) as [string,string,string,string,string]
 const mediaOnly=process.argv.includes('--media-only')
+const surveyInitial=process.argv.includes('--survey-initial')
+const previewFailure=process.argv.includes('--survey-preview-failure')
 app.setPath('userData', join(privateRoot, 'user-data'))
 app.setPath('sessionData', join(privateRoot, 'session-data'))
 const receipt: any = { passed: false, pid: process.pid, phases: [], ipc: [], captures: [], mediaEvents: [], frames: [], chromeRefresh: [],
@@ -22,7 +25,7 @@ const receipt: any = { passed: false, pid: process.pid, phases: [], ipc: [], cap
 let window: BrowserWindow, controller: RuntimeController, dispose: (() => Promise<void>) | undefined
 app.whenReady().then(async () => {
   try {
-    if (process.platform === 'darwin') app.setActivationPolicy('regular')
+    if (process.platform === 'darwin') app.setActivationPolicy(surveyInitial ? 'accessory' : 'regular')
     window = new BrowserWindow({ width: 1060, height: 460, useContentSize: true, show: false,
       webPreferences: { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     const guard = topFrameNavigationGuard(topFrameOrigin({ rendererDevServerUrl: undefined, packagedRendererFilePath: html }))
@@ -59,11 +62,13 @@ app.whenReady().then(async () => {
     }
     controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     controller.prepare = async () => ({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-    const config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: [] }
+    const privateWorkspace = { id: '__scratch__', hostId: 'local', path: join(privateRoot,'topics'), name: 'Topics', kind: 'folder' as const }
+    if (surveyInitial) await fs.mkdir(privateWorkspace.path,{recursive:true})
+    const config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: surveyInitial ? [privateWorkspace] : [] }
     dispose = await registerIpc({ window, runtime: controller, configStore: { get: async () => config } as never,
       progressLoops: { subscribe: () => () => {} } as never, scratchTopics: {} as never,
       workspaceFiles: { dispose: async () => {} } as never })
-    await window.loadFile(html); window.show(); if(!mediaOnly){app.focus({ steal: true }); window.focus()}
+    await window.loadFile(html, surveyInitial ? { query: { survey: '1', workspace:privateWorkspace.path, ...(previewFailure ? {'preview-failure':'1'} : {}) } } : {}); if(surveyInitial)window.showInactive();else window.show(); if(!mediaOnly){app.focus({ steal: true }); window.focus()}
     const read = (expression: string) => requester.executeJavaScript(expression)
     const until = async (name: string, condition: () => Promise<boolean>) => {
       const deadline = Date.now() + 12000
@@ -84,8 +89,60 @@ app.whenReady().then(async () => {
     const click = async (selector: string) => {
       const point = await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw new Error('Missing actual product control');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(${JSON.stringify(selector)})===e}})()`)
       assert.equal(point.hit, true, 'Actual requester product control is visible and hit')
+      if (surveyInitial) {
+        await read(`document.querySelector(${JSON.stringify(selector)}).click()`)
+        return { ...point, activation: 'original-product-DOM-click', physicalInputQualified: false }
+      }
       for (const type of ['mousePressed','mouseReleased']) await requester.debugger.sendCommand('Input.dispatchMouseEvent', { type,x:point.x,y:point.y,button:'left',clickCount:1 })
       return point
+    }
+    if (surveyInitial) {
+      const live = () => read('nativeProductProof.facts().stages.some(stage=>stage.presentationId.startsWith("survey-")&&stage.stream&&stage.videoWidth>0&&nativeProductProof.paintIsPageFrame(stage.paint))')
+      if (previewFailure) {
+        await until('local preview recovery control', () => read('!!document.querySelector(".global-survey-surface .browser-presentation-notice > button")'))
+        for (const width of [1060,640]) {
+          window.setContentSize(width,460)
+          await read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+          const geometry = await read('(()=>{const pane=document.querySelector(".global-survey-surface .browser-surface"),notice=pane.querySelector(".browser-presentation-notice"),stage=pane.querySelector(".browser-stage");return {pane:pane.getBoundingClientRect().toJSON(),notice:notice.getBoundingClientRect().toJSON(),stage:stage.getBoundingClientRect().toJSON()}})()')
+          assert.ok(geometry.notice.bottom <= geometry.stage.top + 1, 'Notice is above the actual Native viewport')
+          assert.ok(geometry.notice.width <= geometry.pane.width, 'Notice does not create a sibling Region')
+          const file = `actual-Survey-preview-recovery-${width}.png`
+          await fs.writeFile(join(evidence,file),(await requester.capturePage()).toPNG())
+          receipt.frames.push({file,source:'actual-compiled-App-injected-media-failure',width,geometry})
+        }
+        receipt.previewFailure = {injected:true,boundary:'Only first media acquisition rejects; original Native page, IPC, lease and second real stream are unmodified'}
+        receipt.retryControl = await click('.global-survey-surface .browser-presentation-notice > button')
+      }
+      await until('fresh Survey gets actual original page paint', live)
+      receipt.openProduct = await read('nativeProductProof.facts()')
+      const selects = receipt.ipc.filter((fact: any) => fact.channel === 'browser:activatePresentation' && fact.result?.outcome === 'selected')
+      assert.equal(selects.length, 1, 'Fresh Survey selects once before capture')
+      const selected = receipt.ipc.find((fact: any) => fact.channel === 'browser:registerPresentation' && fact.args[0]?.occurrence.presentationId.startsWith('survey-'))
+      assert.ok(selected, 'Exact Survey registration exists')
+      assert.equal(original[0]!.getVisible(), true, 'Fresh original page is physically visible')
+      receipt.sourceDocument = await original[0]!.webContents.executeJavaScript('({readyState:document.readyState,visibilityState:document.visibilityState,sourceFacts})')
+      assert.equal(receipt.sourceDocument.visibilityState, 'visible')
+      const frame = async (width: number) => {
+        window.setContentSize(width, 460); await until('Survey paint survives width change', live)
+        await read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+        const file = `actual-Survey-native-${width}.png`
+        await fs.writeFile(join(evidence,file),(await requester.capturePage()).toPNG())
+        receipt.frames.push({file,source:'actual-compiled-App-original-Native-page',width})
+      }
+      await frame(1060); await frame(640)
+      receipt.settingsControl = await click('button[aria-label="Settings"]')
+      await until('Settings clears only current visible presentation', async () => (await read('nativeProductProof.facts().settings')) && !original[0]!.getVisible())
+      receipt.hiddenSourceId = original[0]!.webContents.id
+      receipt.returnControl = await click('button[aria-label="Settings"]')
+      await until('Survey restores actual live frames after hiding', live)
+      assert.equal(original[0]!.webContents.id, receipt.originalProductSource.sourceId, 'Same original Native page returns')
+      receipt.restoredSource = await original[0]!.webContents.executeJavaScript('sourceFacts')
+      assert.equal(receipt.restoredSource.loads, receipt.sourceDocument.sourceFacts.loads, 'No original page reload')
+      await frame(1060)
+      receipt.phases.push({name:'fresh-Survey-initial-selection-native-paint-and-local-Settings-restore',passed:true})
+      receipt.firstPress = {qualified:false,reason:'Private source-paint scope; no OS foreground or physical input claim'}
+      receipt.passed = true
+      return
     }
     receipt.moteControl = await click('[data-pmo-teams-topic-launcher] button')
     await until('actual Mote popover is open', () => read('nativeProductProof.facts().mote'))
