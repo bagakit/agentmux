@@ -71,6 +71,7 @@
 
 /* Only automatic Space Folders carry this fact and their durable identity hue. */
 .project-rail-row__icon[data-monogram][data-folder-icon-recency] {
+  --folder-icon-hue: 288;
   color: hsl(var(--folder-icon-hue) 28% 66%); background-color: hsl(var(--folder-icon-hue) 20% 50% / .09); filter: saturate(.2);
 }
 .project-rail-row__icon[data-monogram][data-folder-icon-recency="full"] {
