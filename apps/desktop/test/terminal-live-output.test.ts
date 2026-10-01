@@ -5,7 +5,7 @@ import {
   composeTerminalLiveOutputWrite,
   TERMINAL_LIVE_OUTPUT_BACKLOG_BYTES,
   type TerminalLiveOutputChunk
-} from '../src/renderer/src/lib/terminal-live-output'
+} from '@agentmux/client-ui/terminal/live-output'
 
 // ---------------------------------------------------------------------------
 // live 输出队列的上界。
@@ -218,7 +218,7 @@ describe('TerminalView 真的经过了这道闸', () => {
 
   it('从 lib 导入，不是就地又抄了一份判据', () => {
     // 判据要是 import 关系。本仓栽过「not.toContain('name(') 被裸标识符绕过」，所以这里查导入路径。
-    expect(source).toContain("from '../lib/terminal-live-output'")
+    expect(source).toContain("from '@agentmux/client-ui/terminal/live-output'")
   })
 
   it('重叠判定也走 lib，组件里不许再有自己的告示与 cursor 推进', () => {

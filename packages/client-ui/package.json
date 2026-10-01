@@ -16,6 +16,11 @@
       "browser": "./src/components/*.tsx",
       "import": "./dist/components/*.js"
     },
+    "./terminal/*": {
+      "types": "./src/terminal/*.ts",
+      "browser": "./src/terminal/*.ts",
+      "import": "./dist/terminal/*.js"
+    },
     "./*": {
       "types": "./src/lib/*.ts",
       "browser": "./src/lib/*.ts",

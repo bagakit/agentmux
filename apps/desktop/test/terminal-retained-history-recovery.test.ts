@@ -8,7 +8,7 @@ import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { AgentMuxClient } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller'
-import { recoverTerminalRetainedOutput, terminalHistoryBoundary } from '../src/renderer/src/lib/terminal-replay'
+import { recoverTerminalRetainedOutput, terminalHistoryBoundary } from '@agentmux/client-ui/terminal/replay'
 import type { SessionReplayResult } from '../src/shared/contracts'
 import { TerminalViewportSynchronizer } from '../src/renderer/src/lib/terminal-viewport-sync'
 
@@ -36,7 +36,8 @@ const fixture = vi.hoisted(() => ({
   blockFirstWrite: false,
   releaseWrite: null as (() => void) | null,
   reveal: null as (() => void) | null,
-  proposedGrid: { cols: 80, rows: 24 }
+  proposedGrid: { cols: 80, rows: 24 },
+  historyBoundary: null as string | null
 }))
 
 vi.mock('@xterm/xterm', async () => {
@@ -127,7 +128,10 @@ vi.mock('../src/renderer/src/store', () => {
   }) }
 })
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
-  TerminalContextMenu: ({ children }: { children: ReactNode }) => children
+  TerminalContextMenu: ({ children, historyBoundary }: { children: ReactNode; historyBoundary: string | null }) => {
+    fixture.historyBoundary = historyBoundary
+    return children
+  }
 }))
 
 const session: SessionSnapshot = {
@@ -149,6 +153,7 @@ beforeEach(() => {
   fixture.reveal = null
   fixture.blockFirstWrite = false
   fixture.proposedGrid = { cols: 80, rows: 24 }
+  fixture.historyBoundary = null
   vi.clearAllMocks()
   const original = globalThis.setTimeout
   vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
@@ -170,8 +175,8 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-vi.mock('../src/renderer/src/lib/terminal-live-output', async (original) => {
-  const actual = await original<typeof import('../src/renderer/src/lib/terminal-live-output')>()
+vi.mock('@agentmux/client-ui/terminal/live-output', async (original) => {
+  const actual = await original<typeof import('@agentmux/client-ui/terminal/live-output')>()
   return { ...actual, TerminalLiveOutputQueue: class extends actual.TerminalLiveOutputQueue { constructor() { super(80) } } }
 })
 
@@ -439,9 +444,8 @@ it('shows alternate semantics from the actual parser without transferring altern
   expect(terminal.buffer.active.type).toBe('alternate')
   expect(terminal.buffer.active.baseY).toBe(0)
   expect(terminal.buffer.normal.length).toBe(normalLength)
-  const fact=document.querySelector('[aria-label*="full-screen buffer"]')
-  expect(fact).not.toBeNull()
-  expect(fact?.getAttribute('aria-label')).toContain('no terminal scrollback')
+  expect(fixture.historyBoundary).toContain('full-screen buffer')
+  expect(fixture.historyBoundary).toContain('no terminal scrollback')
 })
 
 it('keeps a pending exact-Run read owned after the original pane lease is detached and replaced', async () => {
