@@ -266,7 +266,8 @@ describe('one public JSON-RPC service over bounded transports', () => {
     for (const gap of gaps) {
       const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-rpc-gap-")), path = join(root, 'gap.sock')
       const server = createServer(socket => socket.once('data', chunk => { const request = JSON.parse(chunk.toString())
-        socket.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { subscriptionId: 'reader', method: 'agent.output', initial: { session, run, gap } } }) + '\n')
+        socket.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { subscriptionId: 'reader', method: 'agent.output',
+          initial: { session, run, gap, terminal: { type: 'not-requested' }, resizeRevision: 7 } } }) + '\n')
       }))
       await new Promise<void>(yes => server.listen(path, yes)); const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
       try { await expect(client.subscribe('agent.output', { agentSessionId: 'caller', afterByte: 0, follow: false },

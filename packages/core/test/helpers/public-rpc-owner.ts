@@ -30,7 +30,7 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient']) {
   const observers = new Set<(event: CtxmuxAdapterObservationEvent) => void>(), closes = vi.fn()
   inner.kernel.observeOutput = vi.fn(async (id: string, _after: number, listener: (event: CtxmuxAdapterObservationEvent) => void) => {
     observers.add(listener)
-    return { run: run(id), gap: null, replay: [
+    return { run: run(id), gap: null, terminal: { type: 'not-requested' as const }, resizeRevision: 7, replay: [
       { type: 'data', runId: id, startByte: 0, endByte: 1, data: '', dataBytes: Uint8Array.from([0xe4]) },
       { type: 'data', runId: id, startByte: 0, endByte: 2, data: '', dataBytes: Uint8Array.from([0xe4, 0xb8]) }
     ], close: async () => { observers.delete(listener); closes() } }

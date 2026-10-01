@@ -5,6 +5,7 @@ import { rpcTransportError } from './rpc-transport-error.js'
 
 export * from './public-rpc-frame.js'
 export { AgentMuxError } from './errors.js'
+export { encodeHostedValue, decodeHostedValue } from './hosted-value.js'
 
 export type AgentMuxRpcHttpClientOptions = {
   url: string

@@ -133,9 +133,8 @@ export type AgentMuxRpcGoal = GoalKeys<import('./control.js').AgentMuxDemand>
 export type AgentMuxRpcOutputBytes = Omit<FollowOutput, 'dataBytes'> & { dataBase64: string }
 export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
-  run: Awaited<ReturnType<AgentMuxClient['reattachAgent']>>['attachment']['run']
-  gap: Awaited<ReturnType<AgentMuxClient['reattachAgent']>>['attachment']['gap']
-}
+} & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
+  'run' | 'gap' | 'terminal' | 'resizeRevision'>
 type NativeParams = {
   'runtime.bootstrap': { consumerId: string }
   'runtime.invoke': { consumerId: string; invocation: import('./hosted-client-contract.js').AgentMuxHostedInvocation }

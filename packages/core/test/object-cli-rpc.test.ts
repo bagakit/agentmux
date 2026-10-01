@@ -17,7 +17,11 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const fixture = await probe()
     const methods = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local).map(entry => entry.method)
     const publicMethods = [...Object.keys(AGENTMUX_RPC_CONTROL_METHODS), ...Object.keys(AGENTMUX_RPC_NATIVE_METHODS)]
-      .filter(method => method !== 'system.subscription.cancel' && method !== 'system.endpoint')
+      .filter(method => method !== 'system.subscription.cancel' && method !== 'system.endpoint' && !method.startsWith('runtime.'))
+    // runtime.* is the Host SDK facade; application commands retain complete CLI coverage.
+    const sdkMethods = Object.keys(AGENTMUX_RPC_NATIVE_METHODS).filter(method => method.startsWith('runtime.'))
+    expect(sdkMethods.length).toBeGreaterThan(0)
+    expect(methods.some(method => sdkMethods.includes(method))).toBe(false)
     expect(methods.length).toBeGreaterThan(0)
     expect(new Set(methods).size).toBe(methods.length)
     expect([...methods].sort()).toEqual(publicMethods.sort())
@@ -157,7 +161,8 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     for (const entry of streamEntries) for (const followed of entry.method === 'agent.output' ? [false, true] : [false]) {
       const initial = entry.method === 'agent.output'
         ? { session: { kind: 'agent', agentSessionId: 'SID', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: upstreamFixturePath("fixture"),
-          run: { runId: 'RUN' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }, run: { runId: 'RUN', state: 'running' }, gap: { requestedAfterByte: 0, firstAvailableByte: 5 } }
+          run: { runId: 'RUN' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }, run: { runId: 'RUN', state: 'running', latestOutputBytes: 10 },
+          terminal: { type: 'not-requested' }, resizeRevision: 0, gap: { requestedAfterByte: 0, firstAvailableByte: 5 } }
         : entry.method === 'browser.follow' ? { runOperation: null, gap: { droppedThrough: 3 } }
         : entry.method === 'toolkit.watch' ? { toolId: 'TOOL' } : { observation }
       const data = entry.method === 'agent.output'
