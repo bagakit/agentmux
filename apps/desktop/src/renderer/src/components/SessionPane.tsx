@@ -44,6 +44,7 @@ import { SessionResultReview } from './SessionResultReview'
 import { SessionResultReviewContent } from './SessionResultReviewContent'
 import { SessionHistoryView } from './SessionHistoryView'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { SessionRecap } from './SessionRecap'
 import { AgentRegionHeader } from './AgentRegionHeader'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
 import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
@@ -584,6 +585,7 @@ export function SessionPane({
               <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Session retained"
                 title="Ready to restore"
                 detail="Existing history and your draft are kept. Send your next request or use Resume."
+                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked} /> : null}
                 details={{ summary: 'Retained session', content: <dl>
                   <dt>Session</dt><dd>{session.label}</dd>
                   <dt>Session ID</dt><dd>{session.id}</dd>

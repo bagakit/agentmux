@@ -94,6 +94,7 @@ import { TerminalReplayGapNotice, TERMINAL_GAP_NOTICE } from './TerminalReplayGa
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { terminalIdentityMenuActions } from '../lib/terminal-identity-menu'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { SessionRecap } from './SessionRecap'
 import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { isMacPlatform } from '../lib/host-platform'
@@ -1670,11 +1671,13 @@ export function TerminalView({
           ) : null}
           {startupPhase === 'restoring' ? (
             <FullPageLoadingSurface
+              key="terminal-recovery"
               scope="region"
               phase="recovering"
               eyebrow="Terminal recovery"
               title="Restoring terminal"
               detail="Replaying retained output and confirming the viewport before live bytes return."
+              supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible} /> : null}
               details={{ summary: 'Recovery details', content: <dl>
                 <dt>Session</dt><dd>{session.label}</dd>
                 <dt>Run</dt><dd>{session.control.run.runId}</dd>
@@ -1684,11 +1687,13 @@ export function TerminalView({
           ) : null}
           {startupPhase === 'starting-agent' && session.kind === 'agent' ? (
             <FullPageLoadingSurface
+              key="terminal-recovery"
               scope="region"
               phase="loading"
               eyebrow="Terminal attach"
               title={`Starting ${agentProviderLabel(session.providerId)}`}
               detail="Waiting for the first terminal output before handing the Region to the Agent."
+              supplement={<SessionRecap session={session.control} visible={visible} />}
             />
           ) : null}
           {/* 服务窗（原则 11）：揭示是被 deadline 逼出来的时，绝不静默——画布已交还，同时说清

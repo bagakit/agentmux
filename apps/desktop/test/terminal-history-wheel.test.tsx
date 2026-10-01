@@ -65,7 +65,7 @@ vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionRe
 const originalState = useAppStore.getState()
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
   id: 'wheel-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Wheel Agent', createdAt: 1, updatedAt: 1,
-  kind: 'agent', providerId: 'codex', executorId: 'codex', processState: 'running',
+  kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: 1, processState: 'running',
   status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'wheel-agent', run: { runId: 'wheel-run' } }
@@ -84,7 +84,12 @@ let configuration: AppConfig
 function state(current: SessionSnapshot = session) {
   const tab = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, kind: current.kind, phase: 'attached', workspaceId: origin.workspaceId, sessionId: current.id })
   useAppStore.setState({ sessions: [current], tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout(origin.tabGroupId, [tab.id]) },
-    activeWorkspaceId: origin.workspaceId, config: configuration, closingWorkbenchViews: {}, regionCaretFocus: null, timelines: {},
+    activeWorkspaceId: origin.workspaceId, config: configuration, closingWorkbenchViews: {}, regionCaretFocus: null,
+    // These wheel/reader scenarios already have a captured reply. A recovery recap consumes
+    // that exact record instead of adding a native read to this unrelated reader's budget.
+    timelines: current.kind === 'agent' ? { [current.id]: { agentSessionId: current.id, revision: 1,
+      items: [{ id: 'captured-reply', agentSessionId: current.id, kind: 'assistant_message', status: 'complete',
+        source: 'native-hook', title: 'Reply', createdAt: 1, updatedAt: 1, content: 'Retained reply for this Session' }] } } : {},
     pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [], viewModes: {}, agentNames: {} })
 }
 function replay(data: string, current: SessionSnapshot = session): SessionAttachResult {
@@ -136,6 +141,49 @@ beforeEach(async () => {
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   configuration = await api.config.get()
   state(); container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+})
+
+it('mounts the real restoring TerminalView recap without replacing its phase or rebuilding xterm', async () => {
+  let finishAttach!: (value: SessionAttachResult) => void
+  attach.mockImplementationOnce(() => new Promise(done => { finishAttach = done }))
+  state(); await render()
+  expect(container.textContent).toContain('Restoring terminal')
+  expect(container.textContent).toContain('Replaying retained output and confirming the viewport')
+  expect(container.textContent).toContain('Last assistant message · Captured conversation')
+  expect(container.textContent).toContain('Retained reply for this Session')
+  expect(fixture.terminals).toHaveLength(1)
+  const retained = fixture.terminals[0]
+  expect(attach).toHaveBeenCalledTimes(1)
+  expect(history).not.toHaveBeenCalled()
+  await act(async () => finishAttach(replay(repaint)))
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId})).toMatchObject({liveReady:true})))
+  expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
+  expect(fixture.terminals).toEqual([retained])
+  expect(attach).toHaveBeenCalledTimes(1)
+  noExecution()
+})
+
+it('keeps the actual starting-agent stage independent of a pending native recap without rebuilding xterm', async () => {
+  let finishRecap!: (value: AgentSessionHistoryPage) => void
+  const pendingRecap = new Promise<AgentSessionHistoryPage>(done => { finishRecap = done })
+  history.mockReturnValue(pendingRecap)
+  state(); useAppStore.setState({ timelines: {} }); attach.mockResolvedValue(replay(''))
+  await render()
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId})).toMatchObject({liveReady:true})))
+  expect(container.textContent).toContain('Starting Codex')
+  expect(container.textContent).toContain('Waiting for the first terminal output')
+  expect(container.textContent).toContain('Reading saved conversation…')
+  expect(history).toHaveBeenCalledExactlyOnceWith(
+    { hostId: session.hostId, agentSessionId: session.id }, { limit: 6 })
+  expect(attach).toHaveBeenCalledTimes(1)
+  expect(fixture.terminals).toHaveLength(1)
+  await act(async () => finishRecap(page('starting-recap', null)))
+  expect(container.textContent).toContain('Last assistant message · Native conversation')
+  expect(container.textContent).toContain('Private record starting-recap')
+  expect(container.textContent).toContain('Starting Codex')
+  expect(fixture.terminals).toHaveLength(1)
+  expect(attach).toHaveBeenCalledTimes(1)
+  noExecution()
 })
 afterEach(async () => {
   await act(async () => root.unmount()); useAppStore.setState(originalState, true)
@@ -295,6 +343,19 @@ it('keeps explicit records reachable for active Agents and returns to the origin
   await act(async () => button('Terminal').click())
   expect(container.querySelector('[aria-label="Conversation history"]')).toBeNull()
   expect(fixture.terminals).toEqual([terminal]); expect(attach).toHaveBeenCalledTimes(1); noExecution()
+})
+
+it('keeps an ordinary Terminal restoring stage free of Agent recap reads', async () => {
+  const terminal: Extract<SessionSnapshot, { kind: 'terminal' }> = { ...session, kind: 'terminal', providerId: null,
+    control: { kind: 'terminal', hostId: 'local', runId: session.control.run.runId, run: session.control.run } }
+  attach.mockReturnValue(new Promise(() => {}))
+  state(terminal); await render(terminal)
+  expect(container.textContent).toContain('Restoring terminal')
+  expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
+  expect(history).not.toHaveBeenCalled()
+  expect(attach).toHaveBeenCalledTimes(1)
+  expect(fixture.terminals).toHaveLength(1)
+  noExecution()
 })
 
 it('does not offer Agent records for an ordinary Terminal', async () => {

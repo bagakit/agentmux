@@ -17,6 +17,7 @@ export function FullPageLoadingSurface({
   detail,
   actions,
   details,
+  supplement,
   children,
   className
 }: {
@@ -27,6 +28,7 @@ export function FullPageLoadingSurface({
   detail: string
   actions?: ReactNode
   details?: { summary: string; content: ReactNode }
+  supplement?: ReactNode
   children?: ReactNode
   className?: string
 }) {
@@ -79,6 +81,7 @@ export function FullPageLoadingSurface({
         <p className="full-page-loading__eyebrow">{eyebrow}</p>
         {children ?? <><h1>{title}</h1><p className="full-page-loading__detail">{detail}</p></>}
         {busy ? <div className="full-page-loading__activity" aria-hidden="true"><i /><i /><i /></div> : null}
+        {supplement}
         {details ? <details className="full-page-loading__details"><summary><ChevronRight size={12} aria-hidden="true" />{details.summary}</summary>{details.content}</details> : null}
         {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
       </div>
