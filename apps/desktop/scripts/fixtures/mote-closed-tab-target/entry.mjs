@@ -127,7 +127,7 @@ const facts = () => {
     runs: current.sessions.map(session => session.control), floating: JSON.parse(localStorage.getItem(floatingKey) ?? 'null'),
     ui: { target: panel?.dataset.moteTargetTab ?? null, topic: panel?.dataset.moteTargetTopic,
       visible: panel?.matches(':popover-open'), text: panel?.textContent,
-      newTab: !!panel?.querySelector('[aria-label="New Tab"], [aria-label="New discussion"]') },
+      newTab: !!panel?.querySelector('[aria-label="New discussion"]') },
     initialization: { initializeCalls, seedApplied: phase === 'seed', initialDurable, initialFloating, afterOrdinaryInitialize } }
 }
 let retainedLayout

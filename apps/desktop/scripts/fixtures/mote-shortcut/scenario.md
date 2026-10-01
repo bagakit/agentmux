@@ -12,7 +12,7 @@
 
 在同一原 Browser float 关闭后再 hover 打开，真实 native move 进入页面并跨过收起延时，原面保持 preview；原页面点击固定同一个工作面。随后点击原 page editor，普通 Escape 必须由实际 WebContents before-input-event 经公共原 owner 关闭原面。输入法保护由 owning Source 用例与有效变异校验。另存的真实 `Input.imeSetComposition` 诊断确实开始可信 DOM 组字，但之后 CDP raw Escape 的 native isComposing 仍为 false；该输入不能签 native 组字按键。第 12 轮原失败 receipt 保留，不伪填 composing 参数，不宣称物理键盘或 OS 输入法验证。
 
-所有入口、控件、渲染、View owner 和持久化来自生产代码。只有 api.ts 唯一出口在私有编译中精确改为其类型化 mock；原 source bytes 和这一转换单独记录，desktop Browser 分支保持。Session snapshot/attachment/recovery、Goal 和 Topic 文件内容是受控公开 API 边界。第二个进程收到自定义 Mote 原 Session 的已结束投影与完整、近期 idle-entry 事实，普通 initialize 请求其原身份 recovery；受控 API 返回同一身份 reattachable。没有真实 Core/ctxmux Run，不宣称 Provider/真实 CLI 验收。命令不安装、不更新、不访问用户配置/Run；Main owners 使用独占私有 Profile/Ledger，清理只针对确认退出的本次私有目录。
+所有入口、控件、渲染、View owner 和持久化来自生产代码。只有 api.ts 唯一出口在私有编译中精确改为其类型化 mock；原 source bytes 和这一转换单独记录，desktop Browser 分支保持。Session snapshot/attachment/recovery、Goal 和 Topic 文件内容是受控公开 API 边界。第二个进程收到自定义 Mote 原 Session 的已结束投影与完整、近期 turn-ended 事实，普通 initialize 请求其原身份 recovery；受控 API 返回同一身份 reattachable。没有真实 Core/ctxmux Run，不宣称 Provider/真实 CLI 验收。命令不安装、不更新、不访问用户配置/Run；Main owners 使用独占私有 Profile/Ledger，清理只针对确认退出的本次私有目录。
 
 明确固定空 launcher 后，原 owner 可以预热 shell；本受控 Session API 保留该调用及准确 pinned/preview 来源，返回由既有 mock 公共工厂生成的 typed Terminal 事实，结果标记为 `typed-mock-terminal-no-core-run-created`，不创建 Core/ctxmux 进程。hover 的同类调用仍明确失败，不把它放行；原 Agent 启停、发送与排队始终没有隐式调用。私有图中的启动面和 Terminal 内容不代签真实 shell，实际初始空 launcher 的零预热/不抢焦点还须由 owning consumer 反例与源码变异验证。前一轮拒绝 warm 请求造成原 owner 重试，保留该失败，不以它代表正常 Terminal 返回路径。
 

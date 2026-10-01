@@ -5,14 +5,27 @@ import { defineConfig } from 'vitest/config'
 const repository = resolve(import.meta.dirname, '../../../../..')
 // This bounded UI gate consumes current Source directly. It does not build or
 // claim freshness of Core's published dist, nor exercise a live Runtime/Run.
-const aliases = ['core', 'demand', 'layout'].flatMap(name => {
+const aliases = ['core', 'demand', 'layout', 'client-ui'].flatMap(name => {
   const directory = resolve(repository, 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')) as {
-    exports: Record<string, { import: string }>
+    exports: Record<string, string | { import: string; browser?: string }>
   }
-  const entries = Object.entries(manifest.exports)
+  // Exact exports precede wildcard exports, and narrower wildcard prefixes
+  // precede the package-wide wildcard, matching package resolution semantics.
+  const entries = Object.entries(manifest.exports).sort(([a], [b]) =>
+    Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)
   if (!entries.length) throw new Error(`No public ${name} exports were found`)
   return entries.map(([subpath, target]) => {
+    if (name === 'client-ui') {
+      const source = typeof target === 'string' ? target : target.browser
+      if (!source?.startsWith('./src/')) throw new Error(`Unmapped ${name} Source export: ${subpath}`)
+      const parts = subpath === '.' ? ['@agentmux/client-ui'] : ('@agentmux/client-ui' + subpath.slice(1)).split('*')
+      const expression = parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
+      const replacement = resolve(directory, source.replace('*', '$1'))
+      if (!subpath.includes('*') && !existsSync(replacement)) throw new Error(`Missing current Source for ${subpath}: ${replacement}`)
+      return { find: new RegExp('^' + expression + '$'), replacement }
+    }
+    if (typeof target === 'string') throw new Error(`Unmapped ${name} Source export: ${subpath}`)
     if (name !== 'layout' && (!target.import.startsWith('./dist/') || !target.import.endsWith('.js')))
       throw new Error(`Unmapped ${name} Source export: ${subpath}`)
     const specifier = '@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))

@@ -39,7 +39,7 @@ let directoryFailure = false, directoryReads = 0
 const sessions = [
   ['project-worker', null, 'working'], ['project-reader', null, 'working'],
   ['mote-primary', PMO_TEAMS_TOPIC_ID, 'working'], ['mote-neighbor', PMO_TEAMS_TOPIC_ID, 'waiting'],
-  ['custom-mote', customId, 'idle'], ['ordinary-agent', ordinaryId, 'idle']
+  ['custom-mote', customId, 'done'], ['ordinary-agent', ordinaryId, 'done']
 ].map(([id, topicId, state]) => ({
   ...prototype, id, hostId: 'local', label: topicId ? 'Agent · Topic' : 'Agent · Recovery',
   workspacePath: topicId ? scratch.path + '/' + scratchTopicDirectoryName(topicId) : project.path,
@@ -185,7 +185,7 @@ function facts() {
       panelTarget: panel?.getAttribute('data-mote-target-tab'), panelTopic: panel?.getAttribute('data-mote-target-topic'), panelSession: panel?.getAttribute('data-mote-target-session'), panelStatus: panel?.getAttribute('data-mote-status'),
       panelVisible: !!panel && panel.matches(':popover-open'), panelRect: rect(panel), panelText: panel?.textContent, titleRows: panel?.querySelectorAll('.pmo-teams-topic-floating__titlebar').length,
       globalChrome: panel?.querySelectorAll('.top-row-leading-chrome').length, footerHeight: document.querySelector('.window-status-bar')?.getBoundingClientRect().height,
-      footerRect: rect(document.querySelector('.window-status-bar')), entryAvatarRect: rect(entry?.querySelector('img')),
+      footerRect: rect(document.querySelector('.window-status-bar')), entryAvatarRect: rect(entry?.querySelector('.space-object-icon')),
       entryStatusRect: rect(entry?.querySelector('.pmo-teams-topic-compact-launcher__status')),
       activeElement: { tag: active?.tagName, id: active?.id, label: active?.getAttribute('aria-label'), editable: active?.isContentEditable, text: active?.isContentEditable ? active?.textContent : undefined, value: active?.value, start: active?.selectionStart, end: active?.selectionEnd,
         selection: { anchorOffset: window.getSelection()?.anchorOffset, focusOffset: window.getSelection()?.focusOffset, anchorText: window.getSelection()?.anchorNode?.textContent, focusText: window.getSelection()?.focusNode?.textContent } },

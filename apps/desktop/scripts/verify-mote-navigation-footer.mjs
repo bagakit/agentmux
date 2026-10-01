@@ -200,14 +200,18 @@ try {
       scope: 'Unchanged original actual Renderer compilation; current separately bound Node capture/assertion driver. No Renderer recompile.' }
   } else {
     const aliases = []
-    if (moteIdentity || moteArchive || motePaperdoll) for (const name of ['core', 'demand', 'layout']) {
-      const manifest = JSON.parse(await readFile(join(repository, 'packages', name, 'package.json'), 'utf8'))
+    if (floatingResize || moteIdentity || moteArchive || motePaperdoll) for (const name of ['core', 'demand', 'layout']) {
+      const manifestPath = join(repository, 'packages', name, 'package.json'), manifestBytes = await readFile(manifestPath)
+      inputs.set(manifestPath, hash(manifestBytes)); originalBytes.set(manifestPath, manifestBytes)
+      const manifest = JSON.parse(manifestBytes)
       const exports = Object.entries(manifest.exports)
       assert.ok(exports.length > 0)
       for (const [subpath, target] of exports) {
         const specifier = '@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))
         const source = target.import.replace('./dist/', name === 'core' ? './src/' : './').replace(/\.js$/, '.ts')
-        aliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: join(repository, 'packages', name, source) })
+        const replacement = join(repository, 'packages', name, source)
+        await readFile(replacement)
+        aliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement })
       }
     }
     if (sharedRenderer) aliases.push({ find: /^react-dom\/client$/, replacement: require.resolve('react-dom/profiling') })

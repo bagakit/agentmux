@@ -12,6 +12,7 @@ import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopic
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { workbenchProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 import { useAppStore } from '../src/renderer/src/store'
 import { installNativePopover } from './fixtures/mote-workface'
 
@@ -53,7 +54,9 @@ it('retains only the missing projection target slot while other Tabs are availab
   await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID,
     topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projectionTabId: 'restoring-tab', viewHostPrefix: 'projection-slot' })))
   expect(container.querySelector('[role="status"]')?.textContent).toContain('Original Tab retained')
-  expect(container.querySelector('#projection-slot\\:restoring-tab')).not.toBeNull()
+  expect(container.querySelector('[data-mote-retained-reference="restoring-tab"]')).not.toBeNull()
+  // An absent entity retains its exact reference, without minting a content slot.
+  expect(container.querySelector('[data-workbench-tab-id="restoring-tab"]')).toBeNull()
   expect(container.querySelectorAll('.workbench-tab')).toHaveLength(0)
   expect(container.textContent).not.toContain('First context')
   expect(useAppStore.getState().tabs).toEqual({ [first.id]: first, [second.id]: second })
@@ -71,7 +74,8 @@ it('reports actual Tab clicks and native focus in retained content through the v
   selected.mockClear()
   // The retained portal's DOM enters this host even though its React owner is
   // elsewhere. Native focus must therefore identify the visible slot's exact Tab.
-  const slot = container.querySelector<HTMLElement>(`[id="projection-slot:${first.id}"]`)!
+  const slotId = workbenchProjectionSlotId('projection-slot', { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'group', tabId: first.id })
+  const slot = Array.from(container.querySelectorAll<HTMLElement>('[id]')).find(element => element.id === slotId)!
   expect(slot).not.toBeNull()
   const input = document.createElement('input'); slot.append(input)
   await act(async () => input.focus())
@@ -123,7 +127,9 @@ it.each([
     const other = container.querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${second.id}"]`)!
     expect(other).not.toBeNull()
     await act(async () => other.click())
-    expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(second.id)
+    // Floating selection owns the exact visible target, while the original
+    // durable workface behind it keeps its navigation selection.
+    expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(missing ? second.id : first.id)
     expect(JSON.parse(window.localStorage.getItem(key)!).targetTabId).toBe(second.id)
   } else if (choice === 'close-reopen') {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button')!.click())
@@ -134,7 +140,7 @@ it.each([
   const error = new Error('Metadata completion failed')
   await act(async () => { if (outcome === 'success') finish(topic); else fail(error) })
   const completed = choice === 'keep' && outcome === 'success'
-  const selectedTab = choice === 'select' || (missing && !completed) ? second.id : first.id
+  const selectedTab = missing && !completed ? second.id : first.id
   expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(selectedTab)
   const floating = JSON.parse(window.localStorage.getItem(key)!)
   expect(floating.open).toBe(!completed)

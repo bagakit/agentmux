@@ -182,7 +182,7 @@ app.whenReady().then(async () => {
       await hover(); await click(selectors.prompt); await paint()
       const original = await facts(), anchor = { x: original.ui.panelRect.x, offset: original.ui.entryRect.y - original.ui.panelRect.bottom }
       const record = async label => {
-        const one = await facts()
+        let one = await facts()
         assert.equal(one.errors.length, 0); assert.equal(forbidden(one).length, 0)
         assert.deepEqual(one.protected, original.protected, 'Resize preserves original Tabs, layout, draft, execution and view facts')
         assert.equal(one.ui.tabId, original.ui.tabId); assert.equal(one.ui.input.token, original.ui.input.token)
@@ -193,12 +193,41 @@ app.whenReady().then(async () => {
         assert.ok(Math.abs(p.x - anchor.x) <= .2 && Math.abs(p.bottom + anchor.offset - one.ui.entryRect.y) <= .2, 'Resize preserves original left/bottom anchor and offset')
         await allMotes(one)
         const controls = one.ui.actions
-        assert.ok(one.ui.actions.length === 3 && one.ui.workfaceControls.length > 0, 'Original navigation, Tab actions and Composer consumers are nonempty')
+        assert.deepEqual(one.ui.actions.map(action => action.label).sort(),
+          ['Show archived Motes', 'Show Mote avatars only', 'Open Mote Space', 'Close Mote'].sort())
+        assert.ok(one.ui.workfaceControls.length > 0, 'Original Tab actions and Composer consumers are nonempty')
         for (const control of controls) {
           const r = control.rect
           assert.ok(r.width > 0 && r.height > 0 && r.x >= p.x - .1 && r.right <= p.right + .1 && r.y >= p.y - .1 && r.bottom <= p.bottom + .1, 'Original visible action/input is contained in actual panel: ' + control.label)
           assert.ok(h.right <= r.x + .1 || r.right <= h.x + .1 || h.bottom <= r.y + .1 || r.bottom <= h.y + .1, 'Corner handle does not overlap original action/input: ' + control.label)
         }
+        const navigationToggle = selectors.panel + ' button[aria-label="Show Mote discussions"]'
+        const navigationWasClosed = await read(`document.querySelector(${JSON.stringify(navigationToggle)})?.getAttribute('aria-expanded') === 'false'`)
+        if (navigationWasClosed) { await click(navigationToggle); await paint() }
+        const navigationExpanded = await facts()
+        assert.deepEqual(navigationExpanded.protected, original.protected, 'Opening discussions preserves original workspace facts')
+        assert.equal(navigationExpanded.ui.input.token, original.ui.input.token)
+        assert.equal(navigationExpanded.ui.input.text, original.ui.input.text)
+        const navigation = await read(`(() => {
+          const body=document.querySelector(${JSON.stringify(selectors.panel + ' .pmo-teams-topic-floating__content')})
+          const required=[body.querySelector('button[aria-label="New discussion"]'),body.querySelector('.workbench-tab--active')]
+          return required.map(node=>{
+            if(!node)return {present:false,positive:false,hit:false}
+            const r=node.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)
+            return {present:true,label:node.getAttribute('aria-label')??node.textContent,positive:r.width>0&&r.height>0,hit:!!hit&&(hit===node||node.contains(hit))}
+          })
+        })()`)
+        assert.equal(navigation.length, 2)
+        for (const control of navigation) {
+          assert.equal(control.present, true, 'Exact original discussion control exists')
+          assert.equal(control.positive, true, 'Original discussion control is reachable through its visible navigation toggle')
+          assert.equal(control.hit, true, 'Original discussion control is hit-testable: ' + control.label)
+        }
+        if (navigationWasClosed) { await click(navigationToggle); await paint() }
+        one = await facts()
+        assert.deepEqual(one.protected, original.protected, 'Returning discussions navigation preserves original workspace facts')
+        assert.equal(one.ui.input.token, original.ui.input.token)
+        assert.equal(one.ui.input.text, original.ui.input.text)
         const hits = await read(`(() => {
           const handle = document.querySelector(${JSON.stringify(selectors.resize)})
           const r = handle.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
@@ -207,11 +236,13 @@ app.whenReady().then(async () => {
           const visible = n => { const b=n.getBoundingClientRect(), s=getComputedStyle(n);return b.width>0&&b.height>0&&s.visibility==='visible'&&Number(s.opacity)>0 }
           const required = [...body.querySelectorAll('.pane-tabbar__actions button, .workbench-tab-strip__nav, [data-agent-composer] button, [aria-label="Message Agent"]')].filter(visible)
           const essentialInput = body.querySelector('[aria-label="Message Agent"]')
-          const essentialNewTab = body.querySelector('button[title="New tab"]')
+          const essentialNewTab = body.querySelector('button[aria-label="New discussion"]')
           const active = body.querySelector('.workbench-tab--active')
+          const navigationToggle=body.querySelector('button[aria-label="Show Mote discussions"]')
+          const navigationControl=essentialNewTab && visible(essentialNewTab)?essentialNewTab:navigationToggle
           // Required input/New tab bypass visibility filtering: missing, hidden,
           // clipped or zero-area consumers must fail rather than disappear.
-          const bodyControls = [...new Set([essentialInput, essentialNewTab, ...required, active])]
+          const bodyControls = [...new Set([essentialInput, navigationControl, ...required, ...(active&&visible(active)?[active]:[])])]
           const p = document.querySelector(${JSON.stringify(selectors.panel)}).getBoundingClientRect()
           return { essentialInputFound:!!essentialInput, essentialNewTabFound:!!essentialNewTab, handle: hit === handle || handle.contains(hit), actions: controls.map(n => { const b=n.getBoundingClientRect(); return n.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)) }),
             body:bodyControls.map(n=>{
@@ -219,15 +250,17 @@ app.whenReady().then(async () => {
               const b=n.getBoundingClientRect();let left=b.left,right=b.right,top=b.top,bottom=b.bottom
               // A scrollable Tab owns a clipped viewport. Test its actual visible
               // intersection, while preserving all raw rectangles in facts.
-              if(n===active){const clip=n.closest('.pane-tabbar__tabs').getBoundingClientRect();left=Math.max(left,clip.left);right=Math.min(right,clip.right);top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom)}
+              if(n===active){const clip=n.closest('.mote-conversations__list, .pane-tabbar__tabs').getBoundingClientRect();left=Math.max(left,clip.left);right=Math.min(right,clip.right);top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom)}
               const h=document.elementFromPoint((left+right)/2,(top+bottom)/2)
               return {label:n.getAttribute('aria-label')??n.textContent,rect:{left,right,top,bottom},positive:right>left&&bottom>top,
                 contained:left>=p.left-.1&&right<=p.right+.1&&top>=p.top-.1&&bottom<=p.bottom+.1,
                 hit:!!h&&(h===n||n.contains(h)),hitNode:h?.outerHTML.slice(0,220)}
             }) }
         })()`)
-        assert.equal(hits.handle, true, 'Real corner is hit-testable'); assert.equal(hits.actions.length, 3); assert.deepEqual(hits.actions, [true, true, true]); assert.equal(hits.essentialInputFound, true, 'Required original Message Agent exists'); assert.equal(hits.essentialNewTabFound, true, 'Required original New tab exists'); assert.ok(hits.body.length >= 2, 'Input and original Tab controls are nonempty'); for (const hit of hits.body) { assert.equal(hit.positive, true, 'Required body control has visible area: ' + hit.label); assert.equal(hit.contained, true, 'Required body control is contained: ' + hit.label); assert.equal(hit.hit, true, 'Original body control center is operable: ' + hit.label + ' / ' + hit.hitNode) }
-        result.checks.push({ label, viewport: win.getContentSize(), saved: one.saved, floating: one.floating, ui: one.ui, hits })
+        assert.equal(hits.handle, true, 'Real corner is hit-testable'); assert.equal(hits.actions.length, 4); assert.deepEqual(hits.actions, [true, true, true, true]); assert.equal(hits.essentialInputFound, true, 'Required original Message Agent exists'); assert.equal(hits.essentialNewTabFound, true, 'Required original New discussion exists'); assert.ok(hits.body.length >= 2, 'Input and original Tab controls are nonempty'); for (const hit of hits.body) { assert.equal(hit.positive, true, 'Required body control has visible area: ' + hit.label); assert.equal(hit.contained, true, 'Required body control is contained: ' + hit.label); assert.equal(hit.hit, true, 'Original body control center is operable: ' + hit.label + ' / ' + hit.hitNode) }
+        result.checks.push({ label, viewport: win.getContentSize(), saved: one.saved, floating: one.floating, ui: one.ui,
+          navigation, navigationStages: { expanded: { protected: navigationExpanded.protected, input: navigationExpanded.ui.input },
+            restored: { protected: one.protected, input: one.ui.input } }, hits })
         return one
       }
       let pressed, oldSaved, oldStyles

@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('moteNative', {
     setBounds: invoke('browser:setBounds'), release: invoke('browser:release'), restore: invoke('browser:restore'),
     close: invoke('browser:close'), cancelElementSelection: invoke('browser:cancelElementSelection'),
     setAnnotationMarkers: invoke('browser:setAnnotationMarkers'),
+    registerPresentation: invoke('browser:registerPresentation'), updatePresentation: invoke('browser:updatePresentation'),
+    removePresentation: invoke('browser:removePresentation'), activatePresentation: invoke('browser:activatePresentation'),
+    armPresentationCapture: invoke('browser:armPresentationCapture'), ackPresentationCapture: invoke('browser:ackPresentationCapture'),
+    onPresentationEvent: listen('agentmux:browser-presentation-event'),
     onEvent: listen('agentmux:browser-event')
   },
   ui: {
