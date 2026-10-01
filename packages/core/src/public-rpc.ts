@@ -81,6 +81,8 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   : BusinessParams<M>
 
 export type AgentMuxRpcCredentials = { agentSessionId: string; capability: string }
+/** Transport-approved local user/device identity; never supplied by business params. */
+export type AgentMuxRpcPrincipal = Readonly<{ kind: 'user' | 'device'; id: string }>
 export type AgentMuxRpcEndpoint =
   | { transport: 'unix'; path: string }
   | { transport: 'http'; url: string; token?: string }
@@ -135,6 +137,12 @@ export type AgentMuxRpcOutputInitial = {
   gap: Awaited<ReturnType<AgentMuxClient['reattachAgent']>>['attachment']['gap']
 }
 type NativeParams = {
+  'runtime.bootstrap': { consumerId: string }
+  'runtime.invoke': { consumerId: string; invocation: import('./hosted-client-contract.js').AgentMuxHostedInvocation }
+  'runtime.release-consumer': { consumerId: string }
+  'runtime.events': { consumerId: string }
+  'runtime.history-watch': { consumerId: string; agentSessionId: string;
+    options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
   whoami: Record<string, never>
   'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
@@ -158,6 +166,11 @@ type NativeParams = {
   'system.subscription.cancel': { subscriptionId: string }
 }
 type NativeResult = {
+  'runtime.bootstrap': import('./hosted-client-contract.js').AgentMuxHostedBootstrap
+  'runtime.invoke': { value: unknown }
+  'runtime.release-consumer': { released: boolean }
+  'runtime.events': never
+  'runtime.history-watch': never
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
     view: import('./agent-self-context.js').SelfViewOutcome; topic: string;
     messaging: typeof import('./agent-messaging-guidance.js').AGENTMUX_AGENT_MESSAGING_RULES; unavailable: AgentMuxRpcUnavailable[] }
@@ -195,6 +208,8 @@ export type AgentMuxRpcSpacePresentation = {
 }
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
+  'runtime.bootstrap': 'short', 'runtime.invoke': 'long', 'runtime.release-consumer': 'long',
+  'runtime.events': 'long', 'runtime.history-watch': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
@@ -204,19 +219,23 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
-export type AgentMuxRpcStreamMethod = 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch'
+export type AgentMuxRpcStreamMethod = 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' |
+  'runtime.events' | 'runtime.history-watch'
 export type AgentMuxRpcStreamParams<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcParams<M> &
   (M extends 'agent.output' ? { follow?: boolean } : Record<never, never>)
 export type AgentMuxRpcStreamInitial<M extends AgentMuxRpcStreamMethod> =
-  M extends 'agent.output' ? AgentMuxRpcOutputInitial
+  M extends 'runtime.events' ? { bootstrap: import('./hosted-client-contract.js').AgentMuxHostedBootstrap }
+  : M extends 'runtime.history-watch' ? { source: import('./types.js').AgentSessionHistoryObservationHandle['source'] }
+  : M extends 'agent.output' ? AgentMuxRpcOutputInitial
   : M extends 'browser.follow' ? { runOperation: import('./control.js').AgentMuxControlBrowserOperation | null;
     gap: { droppedThrough: number } | null }
   : M extends 'toolkit.watch' ? { toolId: string }
   : { observation: import('./metrics.js').MetricsObservation }
 export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'end'; data: unknown }
-  | { type: 'error'; error: { code: string; message: string; details?: unknown } }
-  | (M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
+  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown } }
+  | (M extends 'runtime.events' | 'runtime.history-watch' ? Extract<import('./hosted-client-contract.js').AgentMuxHostedStreamEvent, { type: 'snapshot' }>
+    : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }
     : { type: 'snapshot'; data: M extends 'toolkit.watch' ? import('./toolkit.js').ToolkitSnapshot : import('./metrics.js').MetricsObservation })
 
@@ -226,5 +245,5 @@ export function isAgentMuxRpcMethod(value: unknown): value is AgentMuxRpcMethod 
 }
 export function isAgentMuxRpcStream(method: AgentMuxRpcMethod, params: Record<string, unknown>): method is AgentMuxRpcStreamMethod {
   return method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' ||
-    method === 'agent.output'
+    method === 'agent.output' || method === 'runtime.events' || method === 'runtime.history-watch'
 }

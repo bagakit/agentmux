@@ -36,6 +36,21 @@ export function rpcSessionTargetMatches(selector: unknown, actual: string, crede
   if (typeof expected !== 'string' || !expected) return false
   try { return resolveAgentSessionId(expected, [actual]) === actual } catch { return false }
 }
+/** Host bootstrap is a read projection of the original SDK, never a new registry. */
+export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown> {
+  const p = record(value, ['identity', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
+  const identity = record(p.identity, ['ownership', 'hostId', 'buildIdentity', 'protocolVersion', 'processId', 'instanceId'])
+  for (const key of ['hostId', 'buildIdentity', 'instanceId']) string(identity[key])
+  count(identity.protocolVersion); count(identity.processId, true)
+  if (identity.ownership !== undefined) member(identity.ownership, ['owned', 'unverified'])
+  string(p.storePath, true); count(p.hostProcessId); string(p.messageQueuePath)
+  array(p.sessions, session => parseRpcAgentSession(session))
+  array(p.catalog, item => { const entry = record(item)
+    for (const key of ['id', 'label', 'executable', 'expectedProcess']) string(entry[key])
+    record(entry.capabilities); array(entry.launchOptions, option => record(option))
+  })
+  return p
+}
 function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSession>): void {
   const p = record(value, ['session', 'run', 'capabilities', 'observation']), session = parseRpcAgentSession(p.session)
   const run = record(p.run)
@@ -91,6 +106,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {
+      case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
+      case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
+      case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['session', 'status', 'displayName', 'unavailable'])
         const session = parseRpcAgentSession(p.session), target = method === 'whoami' ? { kind: 'self' } : record(input.target)

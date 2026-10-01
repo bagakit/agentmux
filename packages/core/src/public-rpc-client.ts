@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection } from 'node:net'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
@@ -8,7 +9,7 @@ import { agentMuxControlTimeoutMs } from './control.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
 import { parseRpcControlResult } from './rpc-business-codec.js'
-import { parseRpcNativeResult, parseRpcAgentSession, rpcSessionTargetMatches } from './rpc-native-codec.js'
+import { parseRpcNativeResult, parseRpcAgentSession, rpcSessionTargetMatches, parseRpcHostedBootstrap } from './rpc-native-codec.js'
 import { parseMetricsObservation } from './metrics.js'
 import { parseToolkitSnapshot } from './toolkit.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
@@ -17,7 +18,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, isAgentMuxRp
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent } from './public-rpc.js'
 import { AgentMuxRpcLines, AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode, parseRpcResponse,
-  parseRpcRequest, rpcResponseError, rpcFailure, type AgentMuxRpcFrame } from './public-rpc-wire.js'
+  parseRpcRequest, rpcResponseError, rpcFailure, AgentMuxRpcError, type AgentMuxRpcFrame } from './public-rpc-wire.js'
 
 export type AgentMuxRpcSubscriptionOptions<M extends AgentMuxRpcStreamMethod> = {
   onInitial(initial: AgentMuxRpcStreamInitial<M>): void
@@ -90,43 +91,7 @@ async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCReques
   const encoded = rpcEncode(request)
   if (endpoint.transport === 'http') {
     if (!endpoint.token) throw new AgentMuxError('HTTP RPC requires explicit authorization.', 'AGENT_CAPABILITY_INVALID')
-    const response = await fetch(endpoint.url, { method: 'POST', redirect: 'error', signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${endpoint.token}` }, body: encoded.trimEnd() })
-    if (response.status === 401 || response.status === 403) throw new AgentMuxError('HTTP RPC authorization was rejected.', 'AGENT_CAPABILITY_INVALID')
-    if (!response.ok || !response.body) throw new AgentMuxError('HTTP RPC service is unavailable.', 'CONTROL_UNAVAILABLE')
-    const reader = response.body.getReader()
-    let closed = false
-    const dispose = async () => { if (closed) return; closed = true; await reader.cancel().catch(() => {}) }
-    void (async () => {
-      try {
-        const type = response.headers.get('content-type')?.split(';')[0]
-        if (type === 'application/json') {
-          const chunks: Uint8Array[] = []; let size = 0
-          while (!closed) { const { value, done } = await reader.read(); if (done) break
-            size += value.byteLength; if (size > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('HTTP RPC response exceeds its budget.', 'CONTROL_PROTOCOL_ERROR'); chunks.push(value) }
-          if (!closed) onFrame(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))))
-        } else if (type === 'text/event-stream') {
-          const decoder = new TextDecoder('utf-8', { fatal: true }); let buffer = ''
-          while (!closed) {
-            const { value, done } = await reader.read()
-            if (done) { buffer += decoder.decode(); break }
-            buffer += decoder.decode(value, { stream: true })
-            let separator: number
-            while ((separator = buffer.indexOf('\n\n')) >= 0) {
-              const event = buffer.slice(0, separator); buffer = buffer.slice(separator + 2)
-              if (Buffer.byteLength(event) > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
-              const data = event.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
-              if (!data) throw new AgentMuxError('SSE stream lacks a complete RPC frame.', 'CONTROL_PROTOCOL_ERROR')
-              onFrame(JSON.parse(data))
-            }
-            if (Buffer.byteLength(buffer) > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
-          }
-          if (!closed && buffer.length) throw new AgentMuxError('SSE stream ended with an incomplete frame.', 'CONTROL_PROTOCOL_ERROR')
-        } else throw new AgentMuxError('Unexpected HTTP RPC content type.', 'CONTROL_PROTOCOL_ERROR')
-        if (!closed) onEnd()
-      } catch (error) { if (!closed) onEnd(transportError(error)) }
-    })()
-    return { dispose }
+    return await openAgentMuxRpcHttpRequest(endpoint, request, onFrame, onEnd, signal)
   }
   const lines = new AgentMuxRpcLines()
   let closed = false, child: ChildProcessWithoutNullStreams | undefined
@@ -160,6 +125,17 @@ function resultBody(method: AgentMuxRpcMethod, value: unknown, params: unknown, 
 }
 function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: Record<string, unknown>, credentials?: AgentMuxRpcCredentials): unknown {
   const p = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
+  if (method === 'runtime.events') {
+    rpcRecord(p, ['bootstrap'], 'CONTROL_PROTOCOL_ERROR'); parseRpcHostedBootstrap(p.bootstrap); return p
+  }
+  if (method === 'runtime.history-watch') {
+    rpcRecord(p, ['source'], 'CONTROL_PROTOCOL_ERROR')
+    const source = rpcRecord(p.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
+    if (typeof source.providerId !== 'string' || !source.providerId || typeof source.nativeSessionId !== 'string' || !source.nativeSessionId) {
+      throw new AgentMuxError('History opening lacks its original native source.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    return p
+  }
   if (method === 'system.metrics.watch') return { observation: parseMetricsObservation(p.observation) }
   if (method === 'toolkit.watch') {
     rpcRecord(p, ['toolId'], 'CONTROL_PROTOCOL_ERROR')
@@ -187,16 +163,40 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
   }
   return p
 }
-function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: unknown, afterByte: number): Record<string, unknown> {
+function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: unknown, afterByte: number,
+  params: Record<string, unknown>): Record<string, unknown> {
   const event = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const error = rpcRecord(event.error, ['code', 'message', 'details'], 'CONTROL_PROTOCOL_ERROR')
-    if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
+    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates'], 'CONTROL_PROTOCOL_ERROR')
+    if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' ||
+      error.detail !== undefined && typeof error.detail !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
     return event
   }
   rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR')
+  if ((method === 'runtime.events' || method === 'runtime.history-watch') && event.type === 'snapshot') {
+    const data = rpcRecord(event.data, [method === 'runtime.events' ? 'event' : 'observation'], 'CONTROL_PROTOCOL_ERROR')
+    const observed = rpcRecord(data[method === 'runtime.events' ? 'event' : 'observation'], undefined, 'CONTROL_PROTOCOL_ERROR')
+    if (method === 'runtime.events' ? typeof observed.type !== 'string' || !observed.type
+      : observed.agentSessionId !== params.agentSessionId || !['invalidated', 'unavailable'].includes(String(observed.kind))) {
+      throw new AgentMuxError('Invalid original Runtime event.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    if (method === 'runtime.history-watch') {
+      rpcRecord(observed, ['kind', 'source', 'agentSessionId', 'code', 'message'], 'CONTROL_PROTOCOL_ERROR')
+      if (observed.source !== undefined) {
+        const source = rpcRecord(observed.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
+        const expected = (initial as AgentMuxRpcStreamInitial<'runtime.history-watch'>).source
+        if (source.providerId !== expected.providerId || source.nativeSessionId !== expected.nativeSessionId) {
+          throw new AgentMuxError('History event belongs to another original source.', 'CONTROL_PROTOCOL_ERROR')
+        }
+      } else if (observed.kind === 'invalidated') throw new AgentMuxError('History invalidation lacks its original source.', 'CONTROL_PROTOCOL_ERROR')
+      if (observed.kind === 'unavailable' && (typeof observed.code !== 'string' || !observed.code || typeof observed.message !== 'string')) {
+        throw new AgentMuxError('History unavailability lacks its original reason.', 'CONTROL_PROTOCOL_ERROR')
+      }
+    }
+    return event
+  }
   if (method === 'system.metrics.watch' && event.type === 'snapshot') return { ...event, data: parseMetricsObservation(event.data) }
   if (method === 'toolkit.watch' && event.type === 'snapshot') {
     const data = parseToolkitSnapshot(event.data)
@@ -273,13 +273,14 @@ class RpcClient implements AgentMuxRpcClient {
           const p = rpcRecord(notification.params, ['subscriptionId', 'method', 'sequence', 'event'], 'CONTROL_PROTOCOL_ERROR')
           if (p.subscriptionId !== subscriptionId || p.method !== method || p.sequence !== sequence + 1) throw new AgentMuxError('Subscription notification identity or sequence is invalid.', 'CONTROL_PROTOCOL_ERROR')
           sequence++
-          const event = streamEvent(method as AgentMuxRpcStreamMethod, p.event, initial, outputCursor)
+          const event = streamEvent(method as AgentMuxRpcStreamMethod, p.event, initial, outputCursor, rpcRecord(params))
           if (event.type === 'output') outputCursor = (event.data as { endByte: number }).endByte
           handlers!.onFrame?.(notification)
           if (finished) return
           handlers!.onEvent(event as AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>)
           if (event.type === 'end') end()
-          if (event.type === 'error') { const failure = event.error as { code: string; message: string }; end(new AgentMuxError(failure.message, failure.code)) }
+          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown };
+            end(new AgentMuxRpcError(failure.message, failure.code, -32000, failure.details, failure.candidates, failure.detail)) }
         }
       } catch (error) { end(transportError(error)) }
     }

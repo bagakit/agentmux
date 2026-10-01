@@ -5,25 +5,12 @@ import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './cont
 import { AgentMuxError } from './errors.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from './browser-task-control.js'
+import { isToolkitRequest, assertToolkitResultTarget } from './toolkit.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-rpc.js'
 
-export function rpcRecord(value: unknown, fields?: readonly string[], code = 'INVALID_CONTROL_REQUEST'): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value) ||
-    (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
-    throw new AgentMuxError('RPC parameters must be a named object.', code)
-  }
-  for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (typeof key !== 'string' || !descriptor?.enumerable || !('value' in descriptor)) {
-      throw new AgentMuxError('RPC parameters must contain only JSON data.', code)
-    }
-  }
-  const record = value as Record<string, unknown>
-  if (fields && Object.keys(record).some(key => !fields.includes(key))) {
-    throw new AgentMuxError('RPC parameters contain an unsupported field.', code)
-  }
-  return record
-}
+import { rpcRecord } from './rpc-data.js'
+export { rpcRecord } from './rpc-data.js'
+
 export function rpcString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value) || Buffer.byteLength(value) > 4096) {
     throw new AgentMuxError(`${label} is invalid.`, 'INVALID_CONTROL_REQUEST')
@@ -93,7 +80,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if (operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'browser.run', 'browser.replay',
-    'browser.stop', 'browser.operation', 'browser.subscribe', 'agent.open'].includes(operation)
+    'browser.stop', 'agent.open'].includes(operation)
   const input = { ...body, schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation,
     ...(caller && usesCaller ? { caller } : {}) }
   const parsed = parseAgentMuxControlRequest(input)
@@ -139,6 +126,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
   if (isBrowserTaskControlOperation(request.operation)) {
     assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, result))
   }
+  if (isToolkitRequest(request) && isToolkitRequest(result)) assertToolkitResultTarget(request, result)
   const actual = result as unknown as Record<string, unknown>
   switch (request.operation) {
     case 'agent.view': case 'agent.rename': case 'agent.inspect':

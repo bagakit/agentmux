@@ -1,103 +1,19 @@
-import { JSONRPCServer, JSONRPCErrorCode, createJSONRPCErrorResponse,
+import { JSONRPCServer, createJSONRPCErrorResponse,
   type JSONRPCRequest, type JSONRPCResponse, type JSONRPCID } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, agentMuxControlTimeoutMs } from './control.js'
+import { agentMuxControlTimeoutMs } from './control.js'
 import { rpcRecord } from './rpc-business-codec.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS,
   isAgentMuxRpcStream, isAgentMuxRpcMethod, type AgentMuxRpcMethod, type AgentMuxRpcParams,
-  type AgentMuxRpcStreamMethod, type AgentMuxRpcStreamEvent } from './public-rpc.js'
+  type AgentMuxRpcStreamMethod, type AgentMuxRpcStreamEvent, type AgentMuxRpcPrincipal } from './public-rpc.js'
 import { AgentMuxRpcService, type AgentMuxRpcCallContext } from './public-rpc-service.js'
 
-export type AgentMuxRpcFrame = JSONRPCResponse | JSONRPCRequest
-export const AGENTMUX_RPC_MAX_MESSAGE_BYTES = AGENTMUX_CONTROL_MAX_MESSAGE_BYTES
-export class AgentMuxRpcError extends AgentMuxError {
-  constructor(message: string, code: string, readonly rpcCode: number,
-    readonly details?: unknown, readonly candidates?: unknown) { super(message, code) }
-}
-export function rpcFailure(id: JSONRPCID, error: unknown): JSONRPCResponse {
-  const source = error instanceof Error ? error as Error & { code?: string; details?: unknown; candidates?: unknown } : null
-  const code = source?.code ?? 'CONTROL_FAILED'
-  const numeric = code === 'INVALID_CONTROL_REQUEST' ? JSONRPCErrorCode.InvalidParams
-    : code === 'RPC_METHOD_NOT_FOUND' ? JSONRPCErrorCode.MethodNotFound : -32000
-  return createJSONRPCErrorResponse(id, numeric, source?.message ?? 'Public service failed.', {
-    code, ...(source?.details === undefined ? {} : { details: source.details }),
-    ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
-  })
-}
-function validId(value: unknown): value is JSONRPCID {
-  return value === null || typeof value === 'string' || typeof value === 'number' && Number.isFinite(value)
-}
-export function parseRpcRequest(value: unknown): JSONRPCRequest {
-  const source = rpcRecord(value, ['jsonrpc', 'id', 'method', 'params'], 'CONTROL_PROTOCOL_ERROR')
-  if (source.jsonrpc !== '2.0' || typeof source.method !== 'string' || !source.method ||
-    Object.hasOwn(source, 'id') && !validId(source.id)) {
-    throw new AgentMuxError('Expected a JSON-RPC 2.0 request.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  if (source.params !== undefined && (!source.params || typeof source.params !== 'object')) {
-    throw new AgentMuxError('RPC parameters must be structured.', 'INVALID_CONTROL_REQUEST')
-  }
-  return source as unknown as JSONRPCRequest
-}
-export function parseRpcResponse(value: unknown): JSONRPCResponse {
-  const source = rpcRecord(value, ['jsonrpc', 'id', 'result', 'error'], 'CONTROL_PROTOCOL_ERROR')
-  if (source.jsonrpc !== '2.0' || !Object.hasOwn(source, 'id') || !validId(source.id) ||
-    Object.hasOwn(source, 'result') === Object.hasOwn(source, 'error')) {
-    throw new AgentMuxError('Invalid JSON-RPC response.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  if (Object.hasOwn(source, 'error')) {
-    const error = rpcRecord(source.error, ['code', 'message', 'data'], 'CONTROL_PROTOCOL_ERROR')
-    if (!Number.isInteger(error.code) || typeof error.message !== 'string') {
-      throw new AgentMuxError('Invalid JSON-RPC error.', 'CONTROL_PROTOCOL_ERROR')
-    }
-    if (error.data !== undefined) {
-      const data = rpcRecord(error.data, ['code', 'details', 'candidates'], 'CONTROL_PROTOCOL_ERROR')
-      if (typeof data.code !== 'string') throw new AgentMuxError('Invalid typed RPC error.', 'CONTROL_PROTOCOL_ERROR')
-      if (data.code === 'MESSAGE_TARGET_NOT_UNIQUE') {
-        if (!Array.isArray(data.candidates) || !data.candidates.length) throw new AgentMuxError('Ambiguous target lacks candidates.', 'CONTROL_PROTOCOL_ERROR')
-        const ids = new Set<string>()
-        for (const item of data.candidates) {
-          const candidate = rpcRecord(item, ['agentSessionId', 'regionIds'], 'CONTROL_PROTOCOL_ERROR')
-          if (typeof candidate.agentSessionId !== 'string' || !candidate.agentSessionId || ids.has(candidate.agentSessionId) ||
-            !Array.isArray(candidate.regionIds) || !candidate.regionIds.length || candidate.regionIds.some(id => typeof id !== 'string' || !id) ||
-            new Set(candidate.regionIds).size !== candidate.regionIds.length) throw new AgentMuxError('Invalid message target candidates.', 'CONTROL_PROTOCOL_ERROR')
-          ids.add(candidate.agentSessionId)
-        }
-      }
-    }
-  }
-  return source as unknown as JSONRPCResponse
-}
-export function rpcResponseError(response: JSONRPCResponse): AgentMuxRpcError | null {
-  if (!response.error) return null
-  const data = response.error.data as { code?: string; details?: unknown; candidates?: unknown } | undefined
-  return new AgentMuxRpcError(response.error.message, data?.code ??
-    (response.error.code === -32601 ? 'RPC_METHOD_NOT_FOUND' : 'CONTROL_PROTOCOL_ERROR'),
-    response.error.code, data?.details, data?.candidates)
-}
-export function rpcEncode(frame: unknown): string {
-  const json = JSON.stringify(frame)
-  if (Buffer.byteLength(json) > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('RPC message exceeds its bounded frame budget.', 'CONTROL_PROTOCOL_ERROR')
-  return json + '\n'
-}
-/** A single strict decoder preserves UTF-8 across arbitrary transport chunks. */
-export class AgentMuxRpcLines {
-  private pending = Buffer.alloc(0)
-  accept(chunk: Uint8Array, onValue: (value: unknown) => void): void {
-    this.pending = Buffer.concat([this.pending, chunk])
-    let newline: number
-    while ((newline = this.pending.indexOf(10)) >= 0) {
-      if (newline > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('RPC message exceeds its bounded frame budget.', 'CONTROL_PROTOCOL_ERROR')
-      const line = this.pending.subarray(0, newline); this.pending = this.pending.subarray(newline + 1)
-      if (!line.length) throw new AgentMuxError('Empty RPC frame.', 'CONTROL_PROTOCOL_ERROR')
-      onValue(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(line)))
-    }
-    if (this.pending.length > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('RPC message exceeds its bounded frame budget.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  end(): void {
-    if (this.pending.length) throw new AgentMuxError('RPC stream ended with an incomplete frame.', 'CONTROL_PROTOCOL_ERROR')
-  }
-}
+export * from './public-rpc-frame.js'
+import { AgentMuxRpcLines, AgentMuxRpcError, AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode, rpcFailure, parseRpcRequest, isRpcId as validId, type AgentMuxRpcFrame } from './public-rpc-frame.js'
+
 export type AgentMuxRpcConnection = {
+  /** Trusted transport identity; JSON params cannot mint or replace it. */
+  principal?: AgentMuxRpcPrincipal
   signal: AbortSignal
   stream: boolean
   send(frame: AgentMuxRpcFrame): void | Promise<void>
@@ -116,6 +32,7 @@ export class AgentMuxRpcDispatcher {
         try {
           const { caller, ...params } = rpcRecord(request.params ?? {})
           const context: AgentMuxRpcCallContext = { signal: channel.signal,
+            ...(channel.principal === undefined ? {} : { principal: channel.principal }),
             ...(caller === undefined ? {} : { caller: rpcRecord(caller, ['agentSessionId', 'capability']) as NonNullable<AgentMuxRpcCallContext['caller']> }) }
           let result: unknown
           if (method === 'system.subscription.cancel') result = { disposed: await channel.cancel(String(params.subscriptionId ?? '')) }
@@ -158,7 +75,8 @@ export class AgentMuxRpcDispatcher {
               if (channel.signal.aborted || pendingFailure) return
               // All replay and live events share one bounded reader queue. A
               // synchronous journal may publish while an earlier write awaits drain.
-              if (event.type === 'snapshot' && pending.at(-1)?.event.type === 'snapshot') {
+              if ((method === 'system.metrics.watch' || method === 'toolkit.watch') &&
+                event.type === 'snapshot' && pending.at(-1)?.event.type === 'snapshot') {
                 const previous = pending.pop()!; pendingBytes -= previous.bytes; previous.resolve?.()
               }
               const bytes = Buffer.byteLength(JSON.stringify(event)); pendingBytes += bytes
@@ -222,7 +140,8 @@ export class AgentMuxRpcDispatcher {
     const deadline = setTimeout(() => { controller.abort(); reject(new AgentMuxError('RPC response timed out; the business outcome is unconfirmed.', 'CONTROL_TIMEOUT')) }, duration)
     try {
       if (channel.signal.aborted) abort()
-      return await Promise.race([this.server.receive(request, { ...channel, signal: controller.signal }), ended])
+      return await Promise.race([this.server.receive(request, { ...channel,
+        signal: AbortSignal.any([channel.signal, controller.signal]) }), ended])
     } catch (error) { return Object.hasOwn(request, 'id') ? rpcFailure(request.id!, error) : null }
     finally { clearTimeout(deadline); channel.signal.removeEventListener('abort', abort) }
   }

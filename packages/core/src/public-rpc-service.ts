@@ -16,20 +16,26 @@ import { diagnoseAgentMux } from './doctor.js'
 import { agentSessionMatches } from './rpc-agent-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
+import type { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
+import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
+import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
   type AgentMuxRpcSnapshotParams, type AgentMuxRpcSnapshot, type AgentMuxRpcStreamMethod,
-  type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent, type AgentMuxRpcUnavailable } from './public-rpc.js'
+  type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent, type AgentMuxRpcUnavailable, type AgentMuxRpcPrincipal } from './public-rpc.js'
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'readAgentSessions' | 'sessionHistorySources' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
-  'observeAgentOutput' | 'startDiscussion' | 'handOff' | 'checkDeliveries' |
+  'observeAgentOutput' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
-  'runtimeDiagnostics' | 'runtimeIdentity'>
+  'runtimeDiagnostics' | 'runtimeIdentity'> & {
+    handOff(...args: Parameters<AgentMuxClient['handOff']>):
+      Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>
+  }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
@@ -37,12 +43,23 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Client-owned real filesystem/config observations, not a second registry. */
   snapshot?(params: AgentMuxRpcSnapshotParams): Promise<Partial<AgentMuxRpcSnapshot>>
+  /** Borrow the Host's original SDK business owner; never connect a second Runtime. */
+  hostedRuntime?(): Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'> |
+    Promise<Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'>>
+  /** Forward canonical GUI work before its original business orchestration begins. */
+  forwardControl?<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
+    context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
+  forwardSubscription?<M extends AgentMuxRpcStreamMethod>(method: M, params: import('./public-rpc.js').AgentMuxRpcStreamParams<M>,
+    handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
-export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal }
+export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal }
 export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = AgentMuxRpcStreamMethod> = {
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 const NATIVE_FIELDS = {
+  'runtime.bootstrap': ['consumerId'], 'runtime.invoke': ['consumerId', 'invocation'],
+  'runtime.release-consumer': ['consumerId'], 'runtime.events': ['consumerId'],
+  'runtime.history-watch': ['consumerId', 'agentSessionId', 'options'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -62,6 +79,10 @@ function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
     message: error instanceof Error ? error.message : String(error) }
 }
+function readerError(error: unknown): Extract<AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>, { type: 'error' }>['error'] {
+  const failure = rpcFailure(null, error).error!
+  return { ...rpcRecord(failure.data), message: failure.message } as Extract<AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>, { type: 'error' }>['error']
+}
 function unavailable(error: unknown): AgentMuxRpcUnavailable {
   return { ...cause(error), recovery: 'Read this exact object again after its original owner is available.' }
 }
@@ -80,6 +101,26 @@ function validateFilters(p: Record<string, unknown>): void {
 export class AgentMuxRpcService {
   private local: Promise<AgentMuxClient> | undefined
   constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) {}
+
+  private async hosted(method: AgentMuxRpcMethod, params: unknown, context: AgentMuxRpcCallContext) {
+    // Native SDK writes are authorized as a user/device by the transport. An
+    // Agent capability remains confined to agent.* and cannot mint source:user.
+    if (context.caller !== undefined || !context.principal ||
+      !['user', 'device'].includes(context.principal.kind)) {
+      throw new AgentMuxError('The runtime domain requires a transport-approved user or device, without a managed Agent caller.', 'AGENT_CAPABILITY_INVALID')
+    }
+    const principalId = rpcString(context.principal.id, 'Transport principal')
+    const p = rpcRecord(params, NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS])
+    const consumer = rpcString(p.consumerId, 'Host consumer ID')
+    const consumerId = createHash('sha256').update(context.principal.kind + '\0' + principalId + '\0' + consumer).digest('hex')
+    if (method === 'runtime.history-watch') {
+      rpcString(p.agentSessionId, 'History Session ID')
+      if (p.options !== undefined) rpcRecord(p.options, ['commandOverride', 'args', 'env'])
+    }
+    if (method === 'runtime.invoke' && p.invocation === undefined) throw new AgentMuxError('An SDK invocation is required.', 'INVALID_CONTROL_REQUEST')
+    if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
+    return { owner: await this.ports.hostedRuntime(), params: { ...p, consumerId } }
+  }
 
   private async clients(): Promise<readonly AgentMuxRpcCoreClient[]> {
     if (this.ports.coreClients) return await this.ports.coreClients()
@@ -148,10 +189,16 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (method === 'runtime.bootstrap' || method === 'runtime.invoke' || method === 'runtime.release-consumer') {
+      const hosted = await this.hosted(method, params, context)
+      return await hosted.owner.call(method, hosted.params, { ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+    }
+    if (method === 'runtime.events' || method === 'runtime.history-watch') throw new AgentMuxError('Runtime observations require a subscription.', 'INVALID_CONTROL_REQUEST')
     const caller = await this.authenticated(context)
     const p = rpcRecord(params)
     let result: unknown
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
       let body = p
       if (method === 'space.inspect') {
         const target = rpcRecord(p.target)
@@ -265,6 +312,10 @@ export class AgentMuxRpcService {
         result = { session, status, displayName, unavailable: issues }; break
       }
       case 'whoami': {
+        if (this.ports.forwardControl) {
+          try { return await this.ports.forwardControl(method, params, context) }
+          catch (error) { if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error }
+        }
         const owner = this.requireCaller(caller), issues: AgentMuxRpcUnavailable[] = []
         let status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null = null
         try {
@@ -315,7 +366,7 @@ export class AgentMuxRpcService {
       }
       case 'agent.handoff': {
         const owner = this.requireCaller(caller)
-        result = owner.client.handOff({ capability: owner.capability, callerAgentSessionId: owner.agentSessionId,
+        result = await owner.client.handOff({ capability: owner.capability, callerAgentSessionId: owner.agentSessionId,
           toAgentSessionId: (await this.owner(rpcString(p.toAgentSessionId, 'Recipient Session ID'))).agentSessionId,
           taskId: rpcString(p.taskId, 'Task ID') }); break
       }
@@ -334,16 +385,27 @@ export class AgentMuxRpcService {
               kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
         } break
       }
-      case 'agent.send': result = await this.send(p, caller); break
+      case 'agent.send': result = this.ports.forwardControl
+        ? await this.ports.forwardControl(method, params, context) : await this.send(p, caller); break
       case 'agent.output': throw new AgentMuxError('Agent output is a bounded byte subscription.', 'INVALID_CONTROL_REQUEST')
       case 'goal.activity': {
+        if (this.ports.forwardControl) {
+          try { return await this.ports.forwardControl(method, params, context) }
+          catch (error) { if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error }
+        }
         const goals = await this.goals(p)
         const limit = rpcCount(p.limit, 100, 1000)
         result = { activity: goals.flatMap(goal => (goal.activityLog ?? []).map(message => ({
           goalId: goal.id, message, updatedAt: goal.updatedAt
         }))).slice(-limit) }; break
       }
-      case 'app.snapshot': result = await this.snapshot(p); break
+      case 'app.snapshot': {
+        if (this.ports.forwardControl) {
+          try { return await this.ports.forwardControl(method, params, context) }
+          catch (error) { if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error }
+        }
+        result = await this.snapshot(p); break
+      }
       case 'system.subscription.cancel': throw new AgentMuxError('A subscription belongs to its transport connection.', 'INVALID_CONTROL_REQUEST')
       default: throw new AgentMuxError('RPC method is not implemented.', 'RPC_METHOD_NOT_FOUND')
     }
@@ -354,7 +416,10 @@ export class AgentMuxRpcService {
     if (!this.ports.toolkit) throw new AgentMuxError('Toolkit owner is unavailable.', 'TOOLKIT_UNSUPPORTED')
     const { isToolkitRequest, parseToolkitResult, assertToolkitResultTarget } = await import('./toolkit.js')
     if (!isToolkitRequest(request)) throw new AgentMuxError('Toolkit request is invalid.', 'INVALID_CONTROL_REQUEST')
-    const result = parseToolkitResult(request.operation, await this.ports.toolkit.execute(request, signal ?? new AbortController().signal))
+    const raw = rpcRecord(await this.ports.toolkit.execute(request, signal ?? new AbortController().signal), undefined, 'CONTROL_PROTOCOL_ERROR')
+    const { operation, ...body } = raw
+    if (operation !== request.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
+    const result = parseToolkitResult(request.operation, body)
     assertToolkitResultTarget(request, result); return result
   }
   private async metrics(signal?: AbortSignal): Promise<import('./metrics.js').MetricsObservation> {
@@ -537,7 +602,22 @@ export class AgentMuxRpcService {
 
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
     onEvent: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcServiceSubscription<M>> {
+    if (method === 'runtime.events' || method === 'runtime.history-watch') {
+      const hosted = await this.hosted(method, params, context)
+      return await hosted.owner.subscribe(method, hosted.params, onEvent as (event: import('./hosted-client-contract.js').AgentMuxHostedStreamEvent) => void | Promise<void>,
+        { ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcServiceSubscription<M>
+    }
     const caller = await this.authenticated(context)
+    if (this.ports.forwardSubscription && (method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch')) {
+      let initial: AgentMuxRpcStreamInitial<M> | undefined
+      const subscription = await this.ports.forwardSubscription(method, params as import('./public-rpc.js').AgentMuxRpcStreamParams<M>, {
+        onInitial: value => { initial = value }, onEvent: event => { void onEvent(event) },
+        onEnd: error => { void onEvent(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }) },
+        ...(context.signal ? { signal: context.signal } : {})
+      }, context)
+      if (initial === undefined) { await subscription.dispose(); throw new AgentMuxError('Forwarded observation returned without its opening response.', 'CONTROL_PROTOCOL_ERROR') }
+      return { initial, dispose: () => subscription.dispose() }
+    }
     const controller = new AbortController()
     const aborted = () => { controller.abort(); void dispose().catch(() => {}) }
     context.signal?.addEventListener('abort', aborted, { once: true })
@@ -561,7 +641,7 @@ export class AgentMuxRpcService {
             const dataBytes = event.dataBytes.subarray(offset, offset + 128 * 1024), startByte = event.startByte + offset
             await emit({ type: 'output', data: bytes({ ...event, dataBytes, startByte, endByte: startByte + dataBytes.length }) })
           } }, event => { void emit({ type: 'end', data: { runId, ...event } }) },
-          error => { void Promise.resolve(emit({ type: 'error', error: cause(error) })).finally(dispose).catch(() => {}) })
+          error => { void Promise.resolve(emit({ type: 'error', error: readerError(error) })).finally(dispose).catch(() => {}) })
         let attached: Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>> | undefined
         cleanup = async () => { if (attached) await attached.close() }
         attached = await owner.client.observeAgentOutput(owner.agentSessionId, cursor, event => {
@@ -574,7 +654,7 @@ export class AgentMuxRpcService {
         initial = { session: attached.session, run: attached.attachment.run, gap: attached.attachment.gap }
         start = async () => {
           try { await ordered.finishReplayAsync(attached!.attachment.replay) }
-          catch (error) { await emit({ type: 'error', error: cause(error) }); await dispose(); return }
+          catch (error) { await emit({ type: 'error', error: readerError(error) }); await dispose(); return }
           if (params.follow !== true || attached!.attachment.run.state !== 'running') await emit({ type: 'end',
             data: { runId, state: attached!.attachment.run.state, reason: params.follow === true ? 'owner-ended' : 'replay-complete' } })
         }
@@ -587,7 +667,7 @@ export class AgentMuxRpcService {
         const request = rpcControlRequest(method, params)
         if (request.operation !== 'toolkit.watch' || !this.ports.toolkit) throw new AgentMuxError('Toolkit subscriptions are unavailable.', 'TOOLKIT_UNSUPPORTED')
         const sub = await this.ports.toolkit.subscribe(request.toolId, data => emit({ type: 'snapshot', data }),
-          error => emit(error ? { type: 'error', error: cause(error) } : { type: 'end', data: {} }), controller.signal)
+          error => emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }), controller.signal)
         initial = { toolId: request.toolId }; cleanup = () => sub.dispose()
       } else {
         rpcRecord(params, [])
@@ -600,7 +680,7 @@ export class AgentMuxRpcService {
         let observed = false
         const sub = await this.ports.metrics.subscribe(data => { if (!observed) { observed = true; resolve(data) }
           else emit({ type: 'snapshot', data }) }, error => { if (!observed) reject(error ?? new AgentMuxError('Metrics ended without a snapshot.', 'CONTROL_UNAVAILABLE'))
-          else emit(error ? { type: 'error', error: cause(error) } : { type: 'end', data: {} }) }, controller.signal)
+          else emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }) }, controller.signal)
         cleanup = () => sub.dispose(); initial = { observation: await first }
       }
       if (controller.signal.aborted) { await dispose(); throw new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED') }

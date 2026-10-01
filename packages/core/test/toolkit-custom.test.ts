@@ -1,18 +1,17 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseToolkitCommand } from '../src/toolkit-cli.js'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest, requestAgentMuxControl } from '../src/control-host.js'
-import { subscribeAgentMuxToolkit } from '../src/toolkit-control.js'
+import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest, connectAgentMuxRpc, AgentMuxRpcLines } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
 import { parseToolkitResult, parseToolkitSnapshot, parseToolkitToolFields,
   type AgentMuxToolkitPort, type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '../src/toolkit.js'
 
 const definition: ToolkitToolDefinition = { id: 'summary', revision: 'revision-one', name: 'Summary', icon: 'terminal',
-  enabled: true, statusBar: 'icon', workspacePath: upstreamFixturePath("project"), script: "console.log('ready')", args: [], actions: [] }
+  enabled: true, statusBar: 'icon', workspacePath: fixturePath("project"), script: "console.log('ready')", args: [], actions: [] }
 const { id: _id, revision: _revision, ...fields } = definition
 const input = { invocationId: 'explicit-invocation', expectedRevision: definition.revision, expectedLatestExecutionId: null }
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'custom-owning' } as const
@@ -23,6 +22,12 @@ afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn()
 async function directory() {
   const dir = await mkdtemp(join(tmpdir(), 'toolkit-custom-core-'))
   cleanup.push(() => rm(dir, { recursive: true, force: true })); return dir
+}
+
+async function publicClient(path: string) {
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
+  cleanup.push(() => client.dispose())
+  return client
 }
 
 describe('custom Toolkit public data and authored CLI', () => {
@@ -76,10 +81,11 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(Buffer.byteLength(JSON.stringify(frame) + '\n')).toBeLessThan(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES)
     const path = join(await directory(), 'list.sock')
     const port: AgentMuxToolkitPort = { execute: async () => ({ operation: 'toolkit.list', tools }), subscribe: vi.fn() }
-    const server = new AgentMuxControlServer({ execute: vi.fn(), toolkit: port }, path)
+    const server = new AgentMuxControlServer({ coreClients: () => [], execute: vi.fn(), toolkit: port }, path)
     await server.start(); cleanup.push(() => server.stop())
-    const receipt = await requestAgentMuxControl({ ...base, operation: 'toolkit.list' }, path)
-    expect(receipt).toEqual(frame)
+    const client = await publicClient(path)
+    const result = await client.call('toolkit.ls', {})
+    expect(result).toEqual({ tools })
     expect(tools).toHaveLength(129)
   })
   it('keeps metric and script identities distinct, forbids empty or duplicate tool lists', () => {
@@ -104,7 +110,7 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(parsed.latestConfirmed).toEqual(result)
     expect(() => parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: { ...result, run: null } })).toThrow()
     expect(() => parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: { ...result, exitCode: 1 } })).toThrow()
-    expect(() => parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: { ...result, target: { workspacePath: upstreamFixturePath("changed") } } })).toThrow()
+    expect(() => parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: { ...result, target: { workspacePath: fixturePath("changed") } } })).toThrow()
     expect(() => parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: { ...result, text: 'a'.repeat(32769) } })).toThrow()
     expect(() => parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: { ...result, text: '\0'.repeat(12000) } })).toThrow()
   })
@@ -140,7 +146,7 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(() => parseToolkitToolFields({ ...fields, actions: Array.from({ length: 17 }, (_, i) => ({ ...action, id: String(i) })) })).toThrow()
     expect(() => parseToolkitToolFields({ ...fields, actions: [{ ...action, label: '' }] })).toThrow()
     expect(() => parseToolkitToolFields({ ...fields, script: 'a'.repeat(28000), actions: [{ ...action, script: 'b'.repeat(16000) }] })).toThrow()
-    expect(() => parseToolkitToolFields({ ...fields, actions: [{ ...action, target: upstreamFixturePath("other") }] })).toThrow()
+    expect(() => parseToolkitToolFields({ ...fields, actions: [{ ...action, target: fixturePath("other") }] })).toThrow()
     const original = { executionId: 'original', invocationId: 'original-request', definition: { ...unconfigured, id: definition.id, revision: definition.revision },
       expectedLatestExecutionId: null, target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'original-run' },
       startedAt: 10, endedAt: 12, state: 'succeeded', reason: null, exitCode: 0, text: 'original' }
@@ -158,59 +164,73 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(parseAgentMuxControlRequest(request)).toEqual(request)
     expect(() => parseAgentMuxControlRequest({ ...request, toolId: 'performance' })).toThrow()
     expect(() => parseAgentMuxControlRequest({ ...request, input: { ...actionInput, sourceExecutionId: undefined } })).toThrow()
-    expect(() => parseAgentMuxControlRequest({ ...request, input: { ...actionInput, target: upstreamFixturePath("other") } })).toThrow()
+    expect(() => parseAgentMuxControlRequest({ ...request, input: { ...actionInput, target: fixturePath("other") } })).toThrow()
     await expect(parseToolkitCommand(['action', definition.id, 'refresh'])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     const execute = vi.fn(async () => ({ operation: 'toolkit.action' as const, snapshot: snapshot() }))
-    const server = new AgentMuxControlServer({ execute: vi.fn(), toolkit: { execute, subscribe: vi.fn() } }, join(dir, 'action.sock'))
+    const server = new AgentMuxControlServer({ coreClients: () => [], execute: vi.fn(), toolkit: { execute, subscribe: vi.fn() } }, join(dir, 'action.sock'))
     await server.start(); cleanup.push(() => server.stop())
-    await expect(requestAgentMuxControl(request, join(dir, 'action.sock'))).resolves.toMatchObject({ operation: 'toolkit.action' })
+    const client = await publicClient(join(dir, 'action.sock'))
+    await expect(client.call('toolkit.action', { operationId: base.requestId, toolId: definition.id, actionId: 'refresh', input: command.params.input })).resolves.toEqual({ snapshot: snapshot() })
     expect(execute).toHaveBeenCalledExactlyOnceWith(request, expect.any(AbortSignal))
   })
   it('reads and watches a custom tool through real Control sockets without executing it', async () => {
     const path = join(await directory(), 'control.sock'), execute = vi.fn(async () => ({ operation: 'toolkit.get' as const, snapshot: snapshot() }))
     const release = vi.fn()
     const port: AgentMuxToolkitPort = { execute, subscribe: async (toolId, publish) => { expect(toolId).toBe(definition.id); publish(snapshot()); return { dispose: release } } }
-    const server = new AgentMuxControlServer({ execute: vi.fn(), toolkit: port }, path)
+    const server = new AgentMuxControlServer({ coreClients: () => [], execute: vi.fn(), toolkit: port }, path)
     await server.start(); cleanup.push(() => server.stop())
-    const receipt = await requestAgentMuxControl({ ...base, operation: 'toolkit.get', toolId: definition.id }, path)
-    expect(receipt).toMatchObject({ operation: 'toolkit.get', result: { snapshot: snapshot() } })
+    const client = await publicClient(path)
+    await expect(client.call('toolkit.inspect', { toolId: definition.id })).resolves.toEqual({ snapshot: snapshot() })
     execute.mockClear()
-    const frames: string[] = [], snapshots: unknown[] = []
-    const lease = await subscribeAgentMuxToolkit({ ...base, operation: 'toolkit.watch', toolId: definition.id }, {
-      onFrame: frame => { frames.push(frame.event); if (frame.event === 'snapshot') snapshots.push(frame.result.snapshot) }, onEnd: vi.fn()
-    }, { path })
+    const frames: string[] = [], snapshots: unknown[] = [], initial = vi.fn(), ended = vi.fn()
+    const lease = await client.subscribe('toolkit.watch', { toolId: definition.id }, {
+      onInitial: value => initial(value), onEvent: event => { if (event.type === 'snapshot') snapshots.push(event.data) },
+      onFrame: frame => { frames.push('result' in frame ? 'response' : 'method' in frame ? frame.method : 'error') }, onEnd: ended
+    })
+    expect(initial).toHaveBeenCalledExactlyOnceWith({ toolId: definition.id })
     await vi.waitFor(() => expect(snapshots).toEqual([snapshot()]))
-    expect(frames).toEqual(['attached', 'snapshot']); expect(execute).not.toHaveBeenCalled()
-    lease.dispose(); await vi.waitFor(() => expect(release).toHaveBeenCalledOnce())
+    expect(frames).toEqual(['response', 'system.subscription.event']); expect(execute).not.toHaveBeenCalled()
+    expect(ended).not.toHaveBeenCalled()
+    await lease.dispose(); await vi.waitFor(() => expect(release).toHaveBeenCalledOnce())
   })
-  it('rejects an actual stream snapshot from another tool before attachment', async () => {
+  it('rejects an actual stream snapshot from another tool before publishing it to the consumer', async () => {
     const path = join(await directory(), 'control.sock'), release = vi.fn()
     const port: AgentMuxToolkitPort = { execute: vi.fn(), subscribe: async (_toolId, publish) => {
       publish({ ...snapshot(), toolId: 'another', definition: { ...definition, id: 'another' } }); return { dispose: release }
     } }
-    const server = new AgentMuxControlServer({ execute: vi.fn(), toolkit: port }, path)
+    const server = new AgentMuxControlServer({ coreClients: () => [], execute: vi.fn(), toolkit: port }, path)
     await server.start(); cleanup.push(() => server.stop())
-    await expect(subscribeAgentMuxToolkit({ ...base, operation: 'toolkit.watch', toolId: definition.id }, { onFrame: vi.fn(), onEnd: vi.fn() }, { path })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    const client = await publicClient(path), publish = vi.fn(), ended = vi.fn(), initial = vi.fn()
+    const lease = await client.subscribe('toolkit.watch', { toolId: definition.id }, { onInitial: initial, onEvent: publish, onEnd: ended })
+    expect(initial).toHaveBeenCalledExactlyOnceWith({ toolId: definition.id })
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' })))
+    expect(publish).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(release).toHaveBeenCalledOnce())
+    await lease.dispose()
   })
   it('rejects valid but differently targeted owner replies on the actual get socket', async () => {
     const path = join(await directory(), 'control.sock')
     const other = { ...snapshot(), toolId: 'another', definition: { ...definition, id: 'another' } }
     const port: AgentMuxToolkitPort = { execute: async () => ({ operation: 'toolkit.get', snapshot: other }), subscribe: vi.fn() }
-    const server = new AgentMuxControlServer({ execute: vi.fn(), toolkit: port }, path)
+    const server = new AgentMuxControlServer({ coreClients: () => [], execute: vi.fn(), toolkit: port }, path)
     await server.start(); cleanup.push(() => server.stop())
-    const reply = await requestAgentMuxControl({ ...base, operation: 'toolkit.get', toolId: definition.id }, path).then(
+    const client = await publicClient(path)
+    const reply = await client.call('toolkit.inspect', { toolId: definition.id }).then(
       value => ({ ok: true, value }), error => ({ ok: false, code: error.code }))
     expect(reply).toEqual({ ok: false, code: 'CONTROL_PROTOCOL_ERROR' })
   })
   it('rejects differently targeted complete success frames from an actual remote socket', async () => {
     const path = join(await directory(), 'remote.sock')
     const other = { ...snapshot(), toolId: 'another', definition: { ...definition, id: 'another' } }
-    const server = createServer(socket => socket.once('data', () => socket.end(JSON.stringify({ ...base,
-      operation: 'toolkit.get', ok: true, result: { snapshot: other } }) + '\n')))
+    const server = createServer(socket => {
+      const lines = new AgentMuxRpcLines()
+      socket.on('data', chunk => lines.accept(chunk, request => socket.end(JSON.stringify({ jsonrpc: '2.0',
+        id: (request as { id: string }).id, result: { snapshot: other } }) + '\n')))
+    })
     await new Promise<void>(resolve => server.listen(path, resolve))
     cleanup.push(() => new Promise<void>(resolve => server.close(() => resolve())))
-    const reply = await requestAgentMuxControl({ ...base, operation: 'toolkit.get', toolId: definition.id }, path).then(
+    const client = await publicClient(path)
+    const reply = await client.call('toolkit.inspect', { toolId: definition.id }).then(
       value => ({ ok: true, value }), error => ({ ok: false, code: error.code }))
     expect(reply).toEqual({ ok: false, code: 'CONTROL_PROTOCOL_ERROR' })
   })
