@@ -2,10 +2,32 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   finishTerminalReplayRecovery,
   hydrateTerminalReplay,
+  restoreTerminalCheckpoint,
   TERMINAL_REPLAY_BATCH_BYTES
 } from '../src/renderer/src/lib/terminal-replay'
 
 describe('hydrateTerminalReplay', () => {
+  it('restores seed prefix at its declared geometry and temporary history policy before the final grid and suffix', async () => {
+    const calls: unknown[] = [], write = vi.fn(async (data: Uint8Array) => { calls.push(['write', Buffer.from(data).toString()]) })
+    await restoreTerminalCheckpoint({ runId: 'exact-run', throughByte: 100, resizeRevision: 3,
+      size: { cols: 90, rows: 30 }, restoreSize: { cols: 40, rows: 2 }, restoreScrollbackRows: 1, resizeAfterRestoreBytes: 6 },
+    Buffer.from('prefixsuffix'), { write,
+      resize: size => { calls.push(['resize', size]) }, getScrollback: () => 5000,
+      setScrollback: rows => { calls.push(['scrollback', rows]) } }, async () => {})
+    expect(calls).toEqual([['resize', { cols: 40, rows: 2 }], ['scrollback', 1], ['write', 'prefix'],
+      ['scrollback', 5000], ['resize', { cols: 90, rows: 30 }], ['write', 'suffix']])
+  })
+
+  it('restores the user history policy on a failed prefix without writing a later seed section', async () => {
+    const calls: unknown[] = []
+    await expect(restoreTerminalCheckpoint({ runId: 'exact-run', throughByte: 100, resizeRevision: 3,
+      size: { cols: 90, rows: 30 }, restoreSize: { cols: 40, rows: 2 }, restoreScrollbackRows: 1, resizeAfterRestoreBytes: 6 },
+    Buffer.from('prefixsuffix'), { write: async () => { throw new Error('parser unavailable') },
+      resize: size => { calls.push(['resize', size]) }, getScrollback: () => 5000,
+      setScrollback: rows => { calls.push(['scrollback', rows]) } }, async () => {})).rejects.toThrow('parser unavailable')
+    expect(calls).toEqual([['resize', { cols: 40, rows: 2 }], ['scrollback', 1], ['scrollback', 5000]])
+  })
+
   it('restores ordered replay bytes through one xterm write', async () => {
     const write = vi.fn(async (_data: Uint8Array) => {})
 

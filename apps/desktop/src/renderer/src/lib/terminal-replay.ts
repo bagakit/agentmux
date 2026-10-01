@@ -1,4 +1,4 @@
-import type { AgentMuxRunState, AgentMuxTerminalContinuation } from '@agentmux/core'
+import type { AgentMuxRunState, AgentMuxTerminalCheckpoint, AgentMuxTerminalContinuation } from '@agentmux/core'
 import type { SessionReplayResult } from '../../../shared/contracts'
 import { TERMINAL_REVEAL_DEADLINE_MS } from './terminal-reveal'
 import { composeTerminalLiveOutputWrite } from './terminal-live-output'
@@ -108,11 +108,26 @@ async function writeTerminalBytes(
 
 /** A synthetic seed has no raw byte range and must not pass through output inspectors. */
 export async function restoreTerminalCheckpoint(
+  checkpoint: AgentMuxTerminalCheckpoint,
   restoreBytes: Uint8Array,
-  write: (data: Uint8Array) => Promise<void>,
+  consumer: {
+    write(data: Uint8Array): Promise<void>
+    resize(size: { cols: number; rows: number }): void
+    getScrollback(): number
+    setScrollback(rows: number): void
+  },
   yieldWork: () => Promise<void> = yieldTerminalWork
 ): Promise<void> {
-  await writeTerminalBytes([{ dataBytes: restoreBytes }], write, yieldWork)
+  consumer.resize(checkpoint.restoreSize)
+  const scrollback = consumer.getScrollback()
+  if (checkpoint.restoreScrollbackRows !== null) consumer.setScrollback(checkpoint.restoreScrollbackRows)
+  try {
+    await writeTerminalBytes([{ dataBytes: restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes) }], consumer.write, yieldWork)
+  } finally {
+    if (checkpoint.restoreScrollbackRows !== null) consumer.setScrollback(scrollback)
+  }
+  consumer.resize(checkpoint.size)
+  await writeTerminalBytes([{ dataBytes: restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes) }], consumer.write, yieldWork)
 }
 
 /** Restores original output, returning its raw byte cursor rather than the parser write size. */

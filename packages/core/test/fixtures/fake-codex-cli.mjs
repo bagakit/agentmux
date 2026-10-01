@@ -118,7 +118,9 @@ const decodeTerminalInput = (data) => {
   return decoded
 }
 const writeDiagnostic = (value) => {
-  process.stdout.write(`\u001b[s\u001b[24;1H${value}\u001b[K\u001b[u`)
+  // DECSC/DECRC belong to ctxmux's basic VT checkpoint model as well as xterm.
+  // CSI s/u would leave the native model's cursor on the diagnostic row.
+  process.stdout.write(`\u001b7\u001b[24;1H${value}\u001b[K\u001b8`)
 }
 const writeComposerFrame = (value) => {
   process.stdout.write('\u001b[?2026h\u001b[22;3H')

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -32,7 +32,7 @@ import { ackDeliveryBatch, checkDeliveries, type DeliveryQueue } from '../src/ag
 
 const RUN_ID = 'ingress-run'
 const AGENT_SESSION_ID = 'ingress-agent'
-const WORKSPACE = upstreamFixturePath("tmp/ingress-agent")
+const WORKSPACE = fixturePath("tmp/ingress-agent")
 const clients: AgentMuxClient[] = []
 afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.dispose())); vi.restoreAllMocks() })
 
@@ -59,6 +59,7 @@ function storedSession(
 
 function runProjection(acceptedInputBytes: number) {
   return {
+    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'traex',

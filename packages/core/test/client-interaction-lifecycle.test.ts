@@ -55,6 +55,7 @@ function permission(id: string): AgentMuxInteractionRequest {
 
 function runProjection(acceptedInputBytes: number) {
   return {
+    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',

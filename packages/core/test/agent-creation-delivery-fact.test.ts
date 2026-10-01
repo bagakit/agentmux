@@ -27,7 +27,7 @@ let providerId: 'claude' | 'kimi'
 const sessionId = 'private-creation-session', requestId = 'pmo-original-creation'
 const runId = 'private-adapter-run', task = 'execute the exact original task'
 function run(): CtxmuxAdapterRun {
-  return { runId, lifecycleOperationId: null, program: providerId, args: [], workspacePath: root,
+  return { nativeService: null, runId, lifecycleOperationId: null, program: providerId, args: [], workspacePath: root,
     pid: 424242, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0,
     firstAvailableByte: 0, acceptedInputBytes: 0 }
 }
