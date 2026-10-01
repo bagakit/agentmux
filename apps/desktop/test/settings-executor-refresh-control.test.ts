@@ -1,5 +1,6 @@
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -24,7 +25,7 @@ vi.mock('node:fs/promises', async original => {
   } }
 })
 vi.mock('electron', () => ({
-  app: { getPath: () => ipc.root || tmpdir() },
+  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -84,7 +85,7 @@ async function registered() {
   })
   vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
   vi.spyOn(store, 'get').mockResolvedValue(config)
-  const sender = { id: 919, isDestroyed: vi.fn(() => false), send: vi.fn(), mainFrame: { framesInSubtree: [] } }
+  const sender = Object.assign(new EventEmitter(), { id: 919, isDestroyed: vi.fn(() => false), send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const progressLoops = new ContinuousProgressLoopManager(ContinuousProgressLoopStore.forUserData(root),
     async () => { throw new Error('Refresh cannot deliver progress input') }, undefined,
     async () => { throw new Error('Refresh cannot observe progress input') })
@@ -104,10 +105,11 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
     const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
     const server = new core.AgentMuxControlServer({ execute: f.execute }, join(f.root, 'control.sock'))
     await server.start()
+    const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     try {
       f.sender.isDestroyed.mockReturnValue(true)
-      const result = await exec(process.execPath, [resolve('packages/core/bin/agentmux'), 'settings', 'executors', 'refresh', 'first', '--host', 'local'],
-        { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: f.root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined } })
+      const result = await exec(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'settings', 'executors', 'refresh', 'first', '--host', 'local'],
+        { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: f.root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })
       expect(JSON.parse(result.stdout).result).toEqual({ input: { executorId: 'first', providerId: 'codex', command: f.executable, host: f.config.hosts[0] },
         executable: f.executable, availability: 'available' })
       expect(f.clients[0]!.probeExecutorAvailability).toHaveBeenCalledExactlyOnceWith('codex', f.executable)
@@ -115,14 +117,14 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       expect(directory).toEqual({ input: { executorId: 'second', providerId: 'claude', command: f.directory, host: f.config.hosts[0] },
         executable: f.directory, availability: 'missing', cause: { code: 'EXECUTABLE_NOT_FILE', message: `${f.directory} is a directory; expected a regular executable file.` } })
       vi.mocked(f.clients[1]!.connect).mockRejectedValueOnce(Object.assign(new Error('Remote Runtime is not supported.'), { code: 'REMOTE_UNSUPPORTED' }))
-      const remote = await core.requestAgentMuxControl({ ...envelope, executorId: 'second', hostId: '--help' }, join(f.root, 'control.sock'))
-      expect(remote).toMatchObject({ result: { input: { executorId: 'second', providerId: 'claude', command: f.directory, host: f.config.hosts[1] },
-        availability: 'check-failed', cause: { code: 'REMOTE_UNSUPPORTED', message: 'Remote Runtime is not supported.' } } })
-      expect(remote.result).not.toHaveProperty('executable'); expect(f.clients[1]!.probeExecutorAvailability).not.toHaveBeenCalled()
+      const remote = await rpc.call('settings.executors.refresh', { executorId: 'second', hostId: '--help' })
+      expect(remote).toMatchObject({ input: { executorId: 'second', providerId: 'claude', command: f.directory, host: f.config.hosts[1] },
+        availability: 'check-failed', cause: { code: 'REMOTE_UNSUPPORTED', message: 'Remote Runtime is not supported.' } })
+      expect(remote).not.toHaveProperty('executable'); expect(f.clients[1]!.probeExecutorAvailability).not.toHaveBeenCalled()
       expect(JSON.stringify([directory, remote])).not.toContain('do-not-expose')
       expect(await f.bytes()).toBe(before); expect(f.prepare).toHaveBeenCalledTimes(preparations)
       expect(f.sender.send).toHaveBeenCalledTimes(publications)
-    } finally { await server.stop(); await f.dispose() }
+    } finally { await rpc.dispose(); await server.stop(); await f.dispose() }
   })
 
   it('preserves actual Core unknown I/O cause and missing facts without configuration publication', async () => {
@@ -167,7 +169,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       }
       for (const pair of [[null, 'local'], ['first', 1], ['', 'local']]) await expect(f.native(...pair as [unknown, unknown])).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
       expect(f.clients).toHaveLength(2)
-      expect(f.clients.map(client => client.probeExecutorAvailability.mock.calls)).toEqual([[], []])
+      expect(f.clients.map(client => vi.mocked(client.probeExecutorAvailability).mock.calls)).toEqual([[], []])
       expect(await f.bytes()).toBe(before)
     } finally { await f.dispose() }
   })

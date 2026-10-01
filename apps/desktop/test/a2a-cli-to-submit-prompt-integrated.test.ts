@@ -10,7 +10,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxControlServer, AgentMuxFileAgentSessionStore, DurableAgentMuxMessageQueue, hashAgentCapability, issueAgentCapability, requestAgentMuxControl, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxControlServer, AgentMuxFileAgentSessionStore, DurableAgentMuxMessageQueue, connectAgentMuxRpc, hashAgentCapability, issueAgentCapability, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -22,18 +22,16 @@ const exec = promisify(execFile)
 // packages/core/bin/agentmux — the real CLI entry the CLI attribution test also uses.
 const cli = fileURLToPath(new URL('../../../packages/core/bin/agentmux', import.meta.url))
 
-async function stopPrivateRuntime(runtime: string): Promise<void> {
+async function assertNoPrivateRuntime(runtime: string): Promise<void> {
   const owned = async () => (await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout.split('\n').flatMap(line => {
     const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
     return match && match[2]!.includes('/ctxmuxd ') &&
       match[2]!.includes('--socket ' + join(runtime, 'ctxmux.sock') + ' ') &&
       match[2]!.includes('--state-dir ' + join(runtime, 'state', 'ctxmux') + ' ') ? [Number(match[1])] : []
   })
-  const owners = await owned()
-  expect(owners).toHaveLength(1)
-  for (const pid of owners) process.kill(pid, 'SIGTERM')
-  await vi.waitFor(async () => expect(await owned()).toEqual([]), { timeout: 5000, interval: 50 })
-  process.stdout.write(`${JSON.stringify({ privateRuntime: runtime, stoppedOwnerPids: owners })}\n`)
+  // The public service borrows the controlled original Core below. Merely exercising
+  // the transport must not launch a default Runtime or any Agent process.
+  expect(await owned()).toEqual([])
 }
 
 const initialState = useAppStore.getState()
@@ -79,7 +77,7 @@ function seedStore(recipientId: string) {
     executorDetections: {
       [executorDetectionKey('local', 'codex')]: {
         state: 'ready',
-        result: { executorId: 'codex', providerId: 'codex', hostId: 'local', availability: 'available' }
+        result: { input: { executorId: 'codex', providerId: 'codex', command: 'codex', host: config.hosts[0]! }, executable: 'codex', availability: 'available' }
       }
     },
     error: null
@@ -107,7 +105,7 @@ afterEach(() => {
   useAppStore.setState(initialState, true)
 })
 
-// Real CLI → Control socket → production store executor → submitPrompt.
+// Real object CLI → public JSON-RPC → production store executor → submitPrompt.
 // Machine identities remain in the submit/receipt channel; the prompt is a readable source
 // followed by the original body. Replacing the store projection with request.text is red.
 it('CLI send reaches production submitPrompt with readable source, unchanged body and separate durable receipt', async () => {
@@ -122,6 +120,7 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', sessionStorePath)
   const submit = vi.spyOn(api.sessions, 'submitMessage')
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    if (control.kind !== 'agent') throw new Error('Private fixture refresh requires an Agent Session')
     const session = useAppStore.getState().sessions.find(item => item.id === control.agentSessionId)
     if (!session) throw new Error('Private Session is missing')
     return session
@@ -135,26 +134,29 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
   inner.promptSubmission.submitInputPlan = physicalInput
   submit.mockImplementation(async (control, input) => await core.submitAgentMessage({ ...input, agentSessionId: control.agentSessionId }))
 
-  // 起真 AgentMuxControlServer。execute 转发到 store.executeControl —— 就是生产 ipc.ts:781 那条路。
+  // The real service borrows the same original Core that owns admission and input.
+  // It must not silently open another default Runtime while authenticating this fixture.
   const server = new AgentMuxControlServer({
+    coreClients: () => [{ hostId: 'local', client: core }],
     execute: async (request: AgentMuxControlRequest): Promise<AgentMuxControlResult> => {
       return await useAppStore.getState().executeControl(request)
     }
   }, sock)
   await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: sock },
+    credentials: { agentSessionId: 'caller-cli', capability } })
 
   try {
-    // 1) 真 CLI 走 send 到 sock。AGENTMUX_ENV=1 + AGENTMUX_AGENT_SESSION_ID 让 CLI 认作 managed sender。
+    // 真 CLI 走 agent send 到这个私有 endpoint；身份由同一 Core 核验 SID + capability。
     //    timeout=15000 而非 5000：CLI 子进程 + fs + sock 握手 + queue append + store executeControl 一整套，
     //    在忙碌 CI 机上 5s 会 flake。见 MINOR-4 (review prior observation)。
-    const stdout = await exec(cli, ['send', '--to-session', recipient.id, '--text', 'integrated body bytes'], {
+    const stdout = await exec(cli, ['--endpoint', `unix:${sock}`, 'agent', 'send', '--to-session', recipient.id, '--text', 'integrated body bytes'], {
       timeout: 15000,
       env: {
         ...process.env,
         AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'),
         AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
         AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
-        AGENTMUX_ENV: '1',
         AGENTMUX_AGENT_SESSION_ID: 'caller-cli',
         AGENTMUX_AGENT_CAPABILITY: capability
       }
@@ -179,15 +181,17 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
 
     // Recipient identity remains bound to the current Run outside the readable prompt.
     const cliMessage = messages[0]!.envelope
-    // The duplicate sender label must agree with the capability-authorized sender before
-    // crossing the same Control socket to the production prompt caller.
-    await expect(requestAgentMuxControl({
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'forged-source-label', operation: 'send',
-      target: { kind: 'agent-session', agentSessionId: recipient.id }, text: cliMessage.body,
-      promptCondition: { expectedRun: recipient.control.run, afterSubmissionId: null },
-      caller: { agentSessionId: 'caller-cli', capability },
-      message: { ...cliMessage, messageId: 'forged-source-label-message', sender: { kind: 'agent-session', agentSessionId: 'different-agent' } }
-    }, sock)).rejects.toMatchObject({ code: 'MESSAGE_SENDER_MISMATCH' })
+    // Public RPC rejects caller-supplied envelopes. The original Core also rejects
+    // a sender label that differs from the authorized sender before physical input.
+    const forged = {
+      target: { kind: 'agent-session' as const, agentSessionId: recipient.id }, text: cliMessage.body,
+      operationId: 'forged-public-source-label',
+      message: { ...cliMessage, messageId: 'forged-public-source-label-message', sender: { kind: 'agent-session', agentSessionId: 'different-agent' } }
+    }
+    await expect(rpc.call('agent.send', forged)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    await expect(core.submitAgentMessage({ ...submittedMessage, agentSessionId: recipient.id,
+      envelope: { ...cliMessage, messageId: 'forged-source-label-message', sender: { kind: 'agent-session', agentSessionId: 'different-agent' } }
+    })).rejects.toMatchObject({ code: 'MESSAGE_SENDER_MISMATCH' })
     expect(submit).toHaveBeenCalledTimes(1)
     const badRunId = 'run-not-the-recipient'
     await expect(useAppStore.getState().executeControl({
@@ -201,11 +205,11 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
       message: { ...cliMessage, messageId: 'test-run-mismatch', recipientRunId: badRunId }
     })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
     const jsonBody = '{"messageId":"explicit-author-body","nested":{"text":"keep exactly"}}'
-    const send = async (body: string, managed: boolean, suppliedCapability = capability) => await exec(cli, ['send', '--to-session', 'mailbox-rec', '--text', body], {
+    const send = async (body: string, managed: boolean, suppliedCapability = capability) => await exec(cli, ['--endpoint', `unix:${sock}`, 'agent', 'send', '--to-session', recipient.id, '--text', body], {
       timeout: 15000,
       env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
-        AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_ENV: managed ? '1' : '',
-        AGENTMUX_AGENT_SESSION_ID: 'caller-cli', AGENTMUX_AGENT_CAPABILITY: suppliedCapability }
+        AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+        AGENTMUX_AGENT_SESSION_ID: managed ? 'caller-cli' : undefined, AGENTMUX_AGENT_CAPABILITY: managed ? suppliedCapability : undefined }
     })
     await send(jsonBody, true)
     expect(physicalInput.mock.calls[1]![3]).toBe('[Message from Agent caller-cli]\n' + jsonBody)
@@ -216,20 +220,21 @@ it('CLI send reaches production submitPrompt with readable source, unchanged bod
     expect(submit).toHaveBeenCalledTimes(3)
     expect(await queue.listAfter(0)).toHaveLength(3)
   } finally {
+    await rpc.dispose()
     await server.stop()
     await core.dispose()
-    await stopPrivateRuntime(runtime)
+    await assertNoPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 })
 
-it('generic Demand and mixed PMO Session routes retain a Terminal identity absent from the Agent store', async () => {
+it('generic Goal and application observations retain a Terminal identity absent from the Agent store', async () => {
   const runtime = await mkdtemp(_hygiene_fixturePath("tmp/amux-generic-session-"))
   const sessionStorePath = join(runtime, 'agent-sessions.json')
   const terminalId = 'terminal-session-only'
   const terminal: Extract<SessionSnapshot, { kind: 'terminal' }> = {
     id: terminalId, kind: 'terminal', providerId: null, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
-    label: 'Terminal', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, promptSubmissionPredecessor: null, processState: 'running', latestOutputBytes: 0,
+    label: 'Terminal', createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
     status: { state: 'running', source: 'run-process', observedAt: 1 },
     control: { kind: 'terminal', hostId: 'local', runId: 'terminal-run', run: { runId: 'terminal-run' } }
   }
@@ -237,43 +242,58 @@ it('generic Demand and mixed PMO Session routes retain a Terminal identity absen
   const store = new AgentMuxFileAgentSessionStore(sessionStorePath)
   expect(await store.load()).toEqual([])
   const requests: AgentMuxControlRequest[] = []
-  const server = new AgentMuxControlServer({ execute: async (request) => {
+  const server = new AgentMuxControlServer({ coreClients: () => [], execute: async (request) => {
     requests.push(request)
     return await useAppStore.getState().executeControl(request)
   } }, join(runtime, 'control.sock'))
   await server.start()
   const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
-    AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: '' }
-  const run = async (args: string[]) => JSON.parse((await exec(cli, args, { env, timeout: 15000 })).stdout)
+    AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+  const run = async (args: string[]) => JSON.parse((await exec(cli, ['--endpoint', `unix:${server.path}`, ...args], { env, timeout: 15000 })).stdout)
   try {
-    const created = await run(['demand', 'create', '--title', 'Terminal work', '--project', workspaceProjectId(config.workspaces[0]!),
+    const created = await run(['goal', 'create', '--title', 'Terminal work', '--project', workspaceProjectId(config.workspaces[0]!),
       '--risk', 'low', '--confirm', 'user', '--session', terminalId])
-    const demandId = created.result.demand.id as string
-    expect(created.result.demand.sessionIds).toEqual([terminalId])
-    await run(['demand', 'update', '--demand', demandId, '--session', terminalId])
-    await run(['demand', 'handoff', '--demand', demandId, '--session', terminalId])
-    await run(['demand', 'link-session', '--demand', demandId, '--session', terminalId])
-    const listed = await run(['demand', 'list', '--session', terminalId])
-    expect(listed.result.demands.map((demand: { id: string }) => demand.id)).toEqual([demandId])
-    const pmo = await run(['pmo', 'demands', '--session', terminalId])
-    expect(pmo.result.demands.map((demand: { id: string }) => demand.id)).toEqual([demandId])
-    const snapshot = await run(['pmo', 'snapshot', '--session', terminalId])
-    expect(snapshot.result.demands.map((demand: { id: string }) => demand.id)).toEqual([demandId])
+    const demandId = created.result.goal.id as string
+    expect(created.result.goal.sessionIds).toEqual([terminalId])
+    await run(['goal', 'update', '--goal', demandId, '--session', terminalId])
+    for (const action of ['handoff', 'link-session']) {
+      const observed = await run(['goal', action, '--goal', demandId, '--session', terminalId])
+        .then(result => ({ result }), error => ({ error }))
+      expect(observed).toMatchObject({ result: {
+        ok: true, operation: `goal.${action}`, result: { goal: { id: demandId, sessionIds: [terminalId] }, receipt: { sessionId: terminalId } }
+      } })
+    }
+    const listed = await run(['goal', 'ls', '--session', terminalId])
+    expect(listed.result.goals.map((goal: { id: string }) => goal.id)).toEqual([demandId])
+    const inspected = await run(['goal', 'inspect', '--goal', demandId])
+    expect(inspected.result.goal.sessionIds).toEqual([terminalId])
+    const snapshot = await run(['app', 'snapshot', '--include', 'goals', '--session', terminalId])
+    expect(snapshot.result.goals.map((goal: { id: string }) => goal.id)).toEqual([demandId])
     expect(useAppStore.getState().demands[demandId]?.sessionIds).toEqual([terminalId])
+    expect(requests.filter(request => request.operation === 'demand.handoff')).toEqual([
+      expect.objectContaining({ sessionId: terminalId })
+    ])
     expect(requests.filter((request) => request.operation === 'demand.link-session')).toEqual([
       expect.objectContaining({ sessionId: terminalId })
     ])
+    // The original mixed Session owner still rejects an unknown link without changing the Goal.
+    const beforeUnknownLink = requests.length
+    await expect(run(['goal', 'link-session', '--goal', demandId, '--session', 'unknown-terminal']))
+      .rejects.toMatchObject({ stderr: expect.stringContaining('UNKNOWN_AGENT_SESSION') })
+    expect(requests).toHaveLength(beforeUnknownLink + 1)
+    expect(requests.at(-1)).toMatchObject({ operation: 'demand.link-session', sessionId: 'unknown-terminal' })
+    expect(useAppStore.getState().demands[demandId]?.sessionIds).toEqual([terminalId])
     // Execution remains an Agent-only domain, unlike linking or observing a Terminal.
     const before = requests.length
-    await expect(run(['demand', 'start', '--demand', demandId, '--session', terminalId]))
+    await expect(run(['goal', 'start', '--goal', demandId, '--session', terminalId]))
       .rejects.toMatchObject({ stderr: expect.stringContaining('UNKNOWN_AGENT_SESSION') })
     expect(requests).toHaveLength(before)
     expect(await store.load()).toEqual([])
   } finally {
     await server.stop()
-    // PMO's existing Core observation starts an isolated daemon. Reap only that test endpoint;
-    // its random socket and state directory together prove ownership of the process being stopped.
-    await stopPrivateRuntime(runtime)
+    // The mixed Session owner remains the actual Store; no Terminal is invented
+    // in Core and no default Runtime is needed for a Goal observation.
+    await assertNoPrivateRuntime(runtime)
     await rm(runtime, { recursive: true, force: true })
   }
 }, 45000)
