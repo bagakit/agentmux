@@ -159,8 +159,16 @@ it('bundles the actual exported HTTP leaf for browsers with a nonempty graph and
   expect(inputs.length).toBeGreaterThan(2)
   expect(inputs.some(input => input.endsWith('public-rpc-http.js'))).toBe(true)
   expect(inputs.some(input => input.endsWith('public-rpc-frame.js'))).toBe(true)
+  expect(inputs.some(input => input.endsWith('hosted-value.js'))).toBe(true)
   const imports = Object.values(result.metafile!.inputs).flatMap(input => input.imports.map(item => item.path))
   expect(imports.length).toBeGreaterThan(0)
   expect(imports.filter(path => path.startsWith('node:'))).toEqual([])
   expect(result.outputFiles[0]!.contents.byteLength).toBeGreaterThan(100)
+  const browserModule = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0]!.contents).toString('base64')}`)
+  expect(typeof browserModule.encodeHostedValue).toBe('function')
+  expect(typeof browserModule.decodeHostedValue).toBe('function')
+  const original = { env: { signal: 'keep-me', $agentmuxValue: 'bytes', data: 'ordinary' },
+    bytes: Uint8Array.from([0, 232, 156, 173, 255]), tuple: ['scope', undefined] }
+  const wireValue = JSON.parse(JSON.stringify(browserModule.encodeHostedValue(original)))
+  expect(browserModule.decodeHostedValue(wireValue)).toEqual(original)
 })

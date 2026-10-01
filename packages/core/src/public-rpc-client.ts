@@ -13,6 +13,8 @@ import { parseRpcNativeResult, parseRpcAgentSession, rpcSessionTargetMatches, pa
 import { parseMetricsObservation } from './metrics.js'
 import { parseToolkitSnapshot } from './toolkit.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
+import { decodeHostedValue } from './hosted-value.js'
+import { parseTerminalContinuation } from './terminal-continuation.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, isAgentMuxRpcStream,
   type AgentMuxRpcEndpoint, type AgentMuxRpcCredentials, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
@@ -145,7 +147,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
     if (parsed.runOperation && (parsed.runOperation as Record<string, unknown>).id !== params.operationId) throw new AgentMuxError('Browser opening belongs to another operation.', 'CONTROL_PROTOCOL_ERROR')
     return parsed
   } else {
-    rpcRecord(p, ['session', 'run', 'gap'], 'CONTROL_PROTOCOL_ERROR')
+    rpcRecord(p, ['session', 'run', 'gap', 'terminal', 'resizeRevision'], 'CONTROL_PROTOCOL_ERROR')
     const session = parseRpcAgentSession(p.session), run = rpcRecord(p.run, undefined, 'CONTROL_PROTOCOL_ERROR')
     if (!rpcSessionTargetMatches(params.agentSessionId, session.agentSessionId, credentials) || session.run.runId !== run.runId ||
       typeof run.runId !== 'string' || !run.runId || !['running', 'exited', 'interrupted'].includes(String(run.state))) {
@@ -160,6 +162,13 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
         throw new AgentMuxError('Output Gap does not match the original requested byte cursor.', 'CONTROL_PROTOCOL_ERROR')
       }
     }
+    try {
+      const terminal = parseTerminalContinuation(decodeHostedValue(p.terminal), {
+        run: { runId: run.runId as string, latestOutputBytes: run.latestOutputBytes as number },
+        resizeRevision: p.resizeRevision as number
+      })
+      return { ...p, terminal }
+    } catch { throw new AgentMuxError('Output opening lacks a valid original terminal continuation or resize revision.', 'CONTROL_PROTOCOL_ERROR') }
   }
   return p
 }

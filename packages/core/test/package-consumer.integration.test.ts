@@ -454,6 +454,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       })
       await Promise.all([
         cp(packedConsumerFixture, join(consumerDirectory, 'packed-consumer.mjs')),
+        cp(new URL('./fixtures/desktop-focus-facts.ts', import.meta.url), join(consumerDirectory, 'desktop-focus-facts.ts')),
+        cp(new URL('./fixtures/packed-public-rpc.mjs', import.meta.url), join(consumerDirectory, 'packed-public-rpc.mjs')),
         cp(compatibleRuntimeFixture, join(consumerDirectory, 'ctxmux-compatible-runtime.mjs')),
         cp(controlFixture, join(consumerDirectory, 'ctxmux-terminal-control.mjs')),
         cp(stubbornFixture, join(consumerDirectory, 'stubborn-process-tree.mjs')),

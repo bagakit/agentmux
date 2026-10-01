@@ -37,17 +37,15 @@ import { createConnection, createServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { focusFacts } from './desktop-focus-facts.ts'
+import { startPackedPublicControl, exercisePackedPublicControl, rawControlReceipt } from './packed-public-rpc.mjs'
 import {
-  AgentMuxControlServer,
   agentPromptCondition,
   AgentMuxFileAgentSessionStore,
   connectLocalAgentMux,
   connectSshAgentMux,
-  requestAgentMuxControl
+  connectAgentMuxRpc
 } from '@agentmux/core'
 import {
-  AGENTMUX_CONTROL_SCHEMA_VERSION,
   resolveAgentMuxRegion
 } from '@agentmux/core/control'
 import { normalizeAgentTimelineMutation } from '@agentmux/core/timeline'
@@ -374,23 +372,6 @@ async function firstJsonLine(child, description) {
   }
 }
 
-async function rawControlReceipt(path, message, splitAt) {
-  return await new Promise((resolve, reject) => {
-    const socket = createConnection(path)
-    const chunks = []
-    socket.once('connect', () => {
-      const bytes = Buffer.from(`${JSON.stringify(message)}\n`, 'utf8')
-      socket.write(bytes.subarray(0, splitAt))
-      setTimeout(() => socket.write(bytes.subarray(splitAt)), 10)
-    })
-    socket.on('data', (chunk) => chunks.push(chunk))
-    socket.once('end', () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) } catch (error) { reject(error) }
-    })
-    socket.once('error', reject)
-  })
-}
-
 process.env.AGENTMUX_TEST_CURRENT_ENV = 'before-daemon'
 process.env.AGENTMUX_TEST_EXPLICIT_ENV = 'inherited'
 let first = await connectLocalAgentMux()
@@ -520,10 +501,19 @@ unsubscribe()
  * `Command failed: <argv>`，靠 `killed: true` / `signal: 'SIGTERM'` / `code: null` 才认得出。
  * 于是它长得就像"CLI 自己失败了"，而 stdout/stderr 都是空的。
  */
-const cli = async (args, env = {}) => await execFileAsync(agentmuxCli, args, {
-  maxBuffer: 4 * 1024 * 1024,
-  env: { ...process.env, ...env }
-})
+let controlEndpoint
+const cliEnvironment = (env = {}) => {
+  const inherited = { ...process.env }
+  delete inherited.AGENTMUX_AGENT_SESSION_ID
+  delete inherited.AGENTMUX_AGENT_CAPABILITY
+  return { ...inherited, ...env }
+}
+const cli = async (args, env = {}) => await execFileAsync(agentmuxCli, [
+  '--endpoint', 'unix:' + controlEndpoint, ...args
+], { maxBuffer: 4 * 1024 * 1024, env: cliEnvironment(env) })
+assert.ok(process.env.AGENTMUX_RUNTIME_DIRECTORY)
+const capabilityRoot = await mkdtemp(join(process.env.AGENTMUX_RUNTIME_DIRECTORY, 'cap-'))
+const capabilityReceiptPath = join(capabilityRoot, 'managed.json')
 let codexFirst = await connectLocalAgentMux()
 const codexFirstEvents = []
 const codexTimelinePublicationSnapshots = []
@@ -545,6 +535,7 @@ const codex = await codexFirst.createAgent({
   commandOverride: fakeCodex,
   env: {
     AGENTMUX_FAKE_PROMPT_RENDER_MODE: 'historical-match',
+    AGENTMUX_FAKE_CAPABILITY_RECEIPT: capabilityReceiptPath,
     AGENTMUX_FAKE_PERMISSION_REQUEST: '1'
   }
 })
@@ -654,15 +645,21 @@ assert.ok(codexPid)
 await codexFirst.dispose()
 codexFirst = null
 
-const cliStatus = JSON.parse((await cli(['inspect', '--session', codex.agentSessionId])).stdout)
-assert.equal(cliStatus.schemaVersion, AGENTMUX_CONTROL_SCHEMA_VERSION)
+const packedControlClient = await connectLocalAgentMux()
+const packedHost = await startPackedPublicControl({ codex, fakeCodex,
+  coreClients: () => [{ hostId: 'local', client: packedControlClient }] })
+const { controlServer, agentRegion } = packedHost
+controlEndpoint = controlServer.path
+const managedEnv = { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: codex.agentSessionId,
+  AGENTMUX_AGENT_CAPABILITY: JSON.parse(readFileSync(capabilityReceiptPath, 'utf8')).capability }
+await exercisePackedPublicControl(cli, managedEnv, packedHost)
+const cliStatus = JSON.parse((await cli(['agent', 'inspect', '--session', codex.agentSessionId])).stdout)
 assert.equal(cliStatus.ok, true)
-assert.equal(typeof cliStatus.requestId, 'string')
-assert.equal(cliStatus.operation, 'inspect.session')
+assert.equal(cliStatus.operation, 'agent.inspect')
 assert.equal(cliStatus.result.session.agentSessionId, codex.agentSessionId)
 assert.equal(cliStatus.result.session.run.runId, codex.run.runId)
-const cliList = JSON.parse((await cli(['list', 'sessions'])).stdout)
-assert.equal(cliList.operation, 'list.sessions')
+const cliList = JSON.parse((await cli(['agent', 'ls'])).stdout)
+assert.equal(cliList.operation, 'agent.ls')
 assert.equal(cliList.result.sessions.length, 1)
 assert.equal(cliList.result.sessions[0].session.agentSessionId, codex.agentSessionId)
 for (const args of [
@@ -670,261 +667,36 @@ for (const args of [
   ['--provider-native', 'native-codex-semantic-1', '--provider', 'codex'],
   ['--run', codex.run.runId]
 ]) {
-  const resolved = JSON.parse((await cli(['inspect', ...args])).stdout)
-  assert.equal(resolved.operation, 'inspect.session')
+  const resolved = JSON.parse((await cli(['agent', 'inspect', ...args])).stdout)
+  assert.equal(resolved.operation, 'agent.inspect')
   assert.equal(resolved.result.session.agentSessionId, codex.agentSessionId)
 }
-const controlRequests = []
-const agentRegion = {
-  tabId: 'packed-agent-tab',
-  regionId: 'packed-agent-region',
-  kind: 'agent',
-  agentSessionId: codex.agentSessionId,
-  providerId: 'codex',
-  executorId: 'codex',
-  workspaceId: 'packed-workspace'
-}
-const packedSpaceId = JSON.stringify(['local', codex.workspacePath])
-const packedZoneId = JSON.stringify([packedSpaceId, 'workspace', agentRegion.workspaceId])
-const terminalRegion = {
-  tabId: 'packed-agent-tab',
-  regionId: 'packed-terminal-region',
-  kind: 'terminal',
-  runId: 'packed-terminal-run',
-  workspaceId: 'packed-workspace'
-}
-// 只有一格、也只有一张 Tab 时的邻居：四个方向都到边。
-const soleRegionNeighbors = {
-  left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' }
-}
-const controlServer = new AgentMuxControlServer({
-  async execute(request) {
-    controlRequests.push(request)
-    if (request.operation === 'inspect.tab') {
-      return {
-        operation: request.operation,
-        tab: {
-          tabId: agentRegion.tabId,
-          workspaceId: agentRegion.workspaceId,
-          regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
-        }
-      }
-    }
-    if (request.operation === 'focus') {
-      const result = focusFacts(request)
-      result.navigation.selection.space = { ...result.navigation.selection.space,
-        spaceId: packedSpaceId, zoneId: packedZoneId, workspaceId: agentRegion.workspaceId,
-        groupId: 'packed-group', tabId: agentRegion.tabId }
-      return result
-    }
-    if (request.operation === 'agent.open') {
-      const existing = request.content.kind === 'agent-session'
-      return {
-        operation: request.operation,
-        requestId: request.requestId,
-        outcome: 'opened',
-        from: null,
-        to: { spaceId: packedSpaceId, zoneId: packedZoneId,
-          workspaceId: agentRegion.workspaceId, displayWorkspaceId: agentRegion.workspaceId, groupId: 'packed-group',
-          tabId: request.destination.newTab ? 'packed-agent-new-tab' : agentRegion.tabId,
-          regionId: existing ? 'packed-opened-region' : 'packed-launched-region' },
-        agent: { agentSessionId: existing ? request.content.agentSessionId : 'packed-launched-session',
-          runId: existing ? codex.run.runId : 'packed-launched-run', providerId: 'codex', executorId: 'codex',
-          hostId: 'local', cwd: codex.workspacePath, createOperationId: existing ? null : request.requestId,
-          initialPrompt: existing ? 'not-requested' : 'confirmed' },
-        resource: null,
-        save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true,
-          diskDurability: 'unconfirmed', reason: null },
-        issues: []
-      }
-    }
-    if (request.operation === 'open.terminal') {
-      return {
-        operation: request.operation,
-        region: { ...terminalRegion, runId: 'packed-created-terminal' }
-      }
-    }
-    if (request.operation === 'open.browser') {
-      return {
-        operation: request.operation,
-        region: {
-          tabId: agentRegion.tabId,
-          regionId: 'packed-browser-region',
-          workspaceId: agentRegion.workspaceId,
-          kind: 'browser',
-          browserId: 'packed-browser'
-        }
-      }
-    }
-    if (request.operation === 'arrange') {
-      return {
-        operation: request.operation,
-        tab: {
-          tabId: agentRegion.tabId,
-          workspaceId: agentRegion.workspaceId,
-          regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
-        }
-      }
-    }
-    if (request.operation === 'list.agents') {
-      return { operation: request.operation, agents: [{ executorId: 'codex', label: 'Codex', providerId: 'codex', availability: 'available' }] }
-    }
-    const targetId = request.target?.kind === 'self'
-      ? request.caller.agentSessionId
-      : request.target?.agentSessionId
-    const controlClient = await connectLocalAgentMux()
-    try {
-      if (request.operation === 'list.active-agents') {
-        return { operation: request.operation, agents: controlClient.agentSessions()
-          .filter(session => !request.agentSessionId || session.agentSessionId === request.agentSessionId)
-          .map(session => ({ agentSessionId: session.agentSessionId, promptCondition: agentPromptCondition(session),
-            projectId: null, projectName: null, workspacePath: session.workspacePath,
-            providerId: session.providerId, executorId: session.executorId,
-            processState: session.run.state === 'running' ? 'running' : 'exited', status: 'unknown', updatedAt: session.updatedAt })) }
-      }
-      if (request.operation === 'send') {
-        if (request.target.kind === 'tab') {
-          throw Object.assign(new Error('Tab contains multiple Agent Sessions.'), {
-            code: 'MESSAGE_TARGET_NOT_UNIQUE',
-            candidates: [
-              { agentSessionId: 'packed-writer', regionIds: ['packed-writer-region'] },
-              { agentSessionId: 'packed-reviewer', regionIds: ['packed-reviewer-region'] }
-            ]
-          })
-        }
-        await controlClient.submitAgentPrompt({
-    ...request.promptCondition, agentSessionId: targetId, operationId: request.requestId, prompt: request.text })
-        return { operation: request.operation, agentSessionId: targetId }
-      }
-      if (request.operation === 'interrupt') {
-        await controlClient.signalAgent(targetId, 'SIGINT')
-        return { operation: request.operation, agentSessionId: targetId }
-      }
-      if (request.operation === 'resume') {
-        const session = await controlClient.resumeAgent({ agentSessionId: targetId, operationId: request.requestId, prompt: request.text, commandOverride: fakeCodex })
-        return { operation: request.operation, agentSessionId: targetId, runId: session.run.runId }
-      }
-      if (request.operation === 'stop') {
-        const session = controlClient.agentSession(targetId)
-        await controlClient.stopAgent(targetId, session.run)
-        return { operation: request.operation, agentSessionId: targetId }
-      }
-    } finally {
-      await controlClient.dispose()
-    }
-    throw Object.assign(new Error('Unsupported packed Control request.'), { code: 'CONTROL_OPERATION_UNAVAILABLE' })
-  }
-})
-await controlServer.start()
-const managedEnv = { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: codex.agentSessionId }
-const cliAgents = JSON.parse((await cli(['list', 'agents'])).stdout)
-assert.equal(cliAgents.operation, 'list.agents')
-assert.equal(cliAgents.result.agents[0].executorId, 'codex')
-const cliContext = JSON.parse((await cli(['inspect', '--tab', 'self'], managedEnv)).stdout)
-assert.equal(cliContext.operation, 'inspect.tab')
-assert.equal(cliContext.result.tab.regions[0].regionId, agentRegion.regionId)
-const launchedRegion = JSON.parse((await cli([
-  'agent', 'open', '--executor', 'codex', '--prompt', '--help', '--region', agentRegion.regionId, '--split', 'right'
-], managedEnv)).stdout)
-assert.equal(launchedRegion.operation, 'agent.open')
-assert.equal(launchedRegion.result.to.regionId, 'packed-launched-region')
-assert.equal(launchedRegion.result.agent.agentSessionId, 'packed-launched-session')
-assert.equal(launchedRegion.result.agent.initialPrompt, 'confirmed')
-assert.equal(launchedRegion.result.agent.createOperationId, launchedRegion.requestId)
-assert.equal(launchedRegion.result.save.diskDurability, 'unconfirmed')
-const openedRegion = JSON.parse((await cli([
-  'agent', 'open', '--session', codex.agentSessionId, '--zone', packedZoneId, '--new-tab'
-], managedEnv)).stdout)
-assert.equal(openedRegion.operation, 'agent.open')
-assert.equal(openedRegion.result.to.regionId, 'packed-opened-region')
-assert.equal(openedRegion.result.to.tabId, 'packed-agent-new-tab')
-assert.equal(openedRegion.result.agent.agentSessionId, codex.agentSessionId)
-assert.equal(openedRegion.result.agent.runId, codex.run.runId)
-const openedTerminal = JSON.parse((await cli([
-  'open', 'terminal', '--command', 'printf packed', '--below', agentRegion.regionId
-])).stdout)
-assert.equal(openedTerminal.operation, 'open.terminal')
-assert.equal(openedTerminal.result.region.runId, 'packed-created-terminal')
-const openedBrowser = JSON.parse((await cli([
-  'open', 'browser', '--url', 'http://localhost:5173', '--tab', agentRegion.tabId, '--new-tab'
-])).stdout)
-assert.equal(openedBrowser.operation, 'open.browser')
-assert.equal(openedBrowser.result.region.browserId, 'packed-browser')
-const arranged = JSON.parse((await cli([
-  'arrange', `--tab=${agentRegion.tabId}`, '--preset', 'columns-3'
-])).stdout)
-assert.equal(arranged.operation, 'arrange')
-assert.equal(arranged.result.tab.tabId, agentRegion.tabId)
-const focusedRegion = JSON.parse((await cli([
-  'focus', '--region', 'packed-terminal-region'
-])).stdout)
-assert.equal(focusedRegion.operation, 'focus')
-assert.equal(focusedRegion.result.navigation.selection.space.regionId, terminalRegion.regionId)
-assert.deepEqual(controlRequests.map((request) => request.operation), [
-  'list.agents', 'inspect.tab', 'agent.open', 'agent.open', 'open.terminal', 'open.browser', 'arrange', 'focus'
-])
-assert.equal(controlRequests[2].content.executorId, 'codex')
-assert.equal(controlRequests[2].content.prompt, '--help')
-assert.deepEqual(controlRequests[2].destination, { regionId: agentRegion.regionId, split: 'right' })
-assert.equal(controlRequests[2].focus, false)
-assert.deepEqual(controlRequests[3].destination, { zoneId: packedZoneId, newTab: true })
-assert.equal(controlRequests[3].focus, false)
-await assert.rejects(
-  cli(['send', `--to-tab=${agentRegion.tabId}`, '--text', 'review']),
-  (error) => {
-    const receiptLines = error.stderr.split('\n').filter(line => line.startsWith('{'))
-    assert.equal(receiptLines.length, 1, 'one structured error receipt alongside native warnings')
-    const receipt = JSON.parse(receiptLines[0])
-    assert.equal(receipt.schemaVersion, AGENTMUX_CONTROL_SCHEMA_VERSION)
-    assert.equal(receipt.ok, false)
-    assert.equal(typeof receipt.requestId, 'string')
-    assert.equal(receipt.operation, 'send', JSON.stringify(receipt))
-    assert.equal(receipt.error.code, 'MESSAGE_TARGET_NOT_UNIQUE')
-    assert.deepEqual(receipt.error.candidates, [
-      { agentSessionId: 'packed-writer', regionIds: ['packed-writer-region'] },
-      { agentSessionId: 'packed-reviewer', regionIds: ['packed-reviewer-region'] }
-    ])
-    return true
-  }
-)
-const utf8Request = {
-  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-  requestId: 'packed-继续',
-  operation: 'inspect.tab',
-  target: { kind: 'tab', tabId: agentRegion.tabId }
-}
+const utf8Request = { jsonrpc: '2.0', id: 'packed-继续', method: 'space.inspect',
+  params: { target: { tabId: agentRegion.tabId } } }
 const utf8Bytes = Buffer.from(`${JSON.stringify(utf8Request)}\n`, 'utf8')
 const utf8Start = utf8Bytes.indexOf(Buffer.from('继续', 'utf8'))
 assert.ok(utf8Start >= 0)
 const utf8Receipt = await rawControlReceipt(controlServer.path, utf8Request, utf8Start + 1)
-assert.equal(utf8Receipt.requestId, utf8Request.requestId)
-assert.equal(utf8Receipt.result.tab.tabId, agentRegion.tabId)
-const cliAttachment = JSON.parse((await cli([
-  'output', '--session', codex.agentSessionId, '--after-byte', '0'
-])).stdout)
-assert.equal(cliAttachment.result.session.agentSessionId, codex.agentSessionId)
+assert.equal(utf8Receipt.id, utf8Request.id)
+assert.equal(utf8Receipt.result.presentation.tab.tabId, agentRegion.tabId)
+const cliAttachment = (await cli([
+  'agent', 'output', '--session', codex.agentSessionId, '--after-byte', '0'
+])).stdout.trim().split('\n').map(line => JSON.parse(line))
+assert.equal(cliAttachment[0].result.initial.session.agentSessionId, codex.agentSessionId)
+assert.equal(cliAttachment[0].result.method, 'agent.output')
+assert.equal(cliAttachment.at(-1).params.event.type, 'end')
 const followReader = spawnOwned(agentmuxCli, [
-  'output', '--session', codex.agentSessionId, '--after-byte', '0', '--follow'
-], { stdio: ['ignore', 'pipe', 'pipe'] })
+  '--endpoint', 'unix:' + controlEndpoint,
+  'agent', 'output', '--session', codex.agentSessionId, '--after-byte', '0', '--follow'
+], { env: cliEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] })
 const followAttached = await firstJsonLine(followReader, 'session output follower')
-assert.deepEqual(
-  {
-    schemaVersion: followAttached.schemaVersion,
-    operation: followAttached.operation,
-    event: followAttached.event,
-    agentSessionId: followAttached.result.session.agentSessionId
-  },
-  {
-    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-    operation: 'output',
-    event: 'attached',
-    agentSessionId: codex.agentSessionId
-  }
-)
+assert.equal(followAttached.jsonrpc, '2.0')
+assert.equal(followAttached.result.method, 'agent.output')
+assert.equal(followAttached.result.initial.session.agentSessionId, codex.agentSessionId)
 followReader.kill('SIGINT')
 await once(followReader, 'exit')
 assert.equal(
-  JSON.parse((await cli(['inspect', '--session', codex.agentSessionId])).stdout)
+  JSON.parse((await cli(['agent', 'inspect', '--session', codex.agentSessionId])).stdout)
     .result.session.run.runId,
   codex.run.runId
 )
@@ -933,8 +705,8 @@ assert.equal(
 const codexSecond = await connectLocalAgentMux()
 const codexSecondEvents = []
 codexSecond.onEvent((event) => codexSecondEvents.push(event))
-await cli(['send', '--to-session', codex.agentSessionId, '--text', 'continue\nwith details'])
-await cli(['interrupt', '--session', codex.agentSessionId])
+await cli(['agent', 'send', '--to-session', codex.agentSessionId, '--text', 'continue\nwith details'])
+await cli(['agent', 'interrupt', '--session', codex.agentSessionId])
 
 const codexReconnected = await codexSecond.statusAgent(codex.agentSessionId)
 assert.equal(codexReconnected.run.runId, codex.run.runId)
@@ -1007,14 +779,15 @@ try {
 } catch (error) {
   const session = codexSecond.agentSession(codex.agentSessionId)
   const agentErrors = codexSecondEvents.filter((event) => event.type === 'agent-error')
-  const debugAttachment = JSON.parse((await cli([
-    'output', '--session', codex.agentSessionId, '--after-byte', '0'
-  ])).stdout)
+  const debugAttachment = (await cli([
+    'agent', 'output', '--session', codex.agentSessionId, '--after-byte', '0'
+  ])).stdout.trim().split('\n').map(line => JSON.parse(line))
   throw new Error(`${error.message}\n${JSON.stringify({
     terminalPromptReadiness: session.terminalPromptReadiness,
     terminalPromptSubmission: session.terminalPromptSubmission,
     agentErrors,
-    outputTail: debugAttachment.result.replay.map((event) => event.data).join('').slice(-1_500)
+    outputTail: Buffer.concat(debugAttachment.slice(1).filter(frame => frame.params.event.type === 'output')
+      .map(frame => Buffer.from(frame.params.event.data.dataBase64, 'base64'))).toString('utf8').slice(-1_500)
   }, null, 2)}`)
 }
 const oversizedPrompt = 'x'.repeat(64 * 1024 + 1)
@@ -1191,7 +964,7 @@ await resumeRollbackClient.dispose()
 
 const resumePrompt = 'packed native resume prompt'
 const resumeResult = JSON.parse((await cli([
-  'resume', '--session', codex.agentSessionId, '--text', resumePrompt
+  'agent', 'resume', '--session', codex.agentSessionId, '--text', resumePrompt
 ])).stdout)
 const codexThird = await connectLocalAgentMux()
 const resumed = codexThird.agentSession(codex.agentSessionId)
@@ -1261,7 +1034,7 @@ assert.deepEqual(
   { runId: resumed.run.runId, state: 'running' }
 )
 await assert.rejects(
-  cli(['inspect', '--run', codex.run.runId]),
+  cli(['agent', 'inspect', '--run', codex.run.runId]),
   (error) => error?.stderr?.includes('STALE_AGENT_SESSION_BINDING')
 )
 const packedPromptCondition5 = agentPromptCondition(codexThird.agentSession(resumed.agentSessionId))
@@ -1275,7 +1048,7 @@ await waitFor('resumed Codex Run natural exit', async () => (
   (await codexThird.statusAgent(resumed.agentSessionId)).run.state === 'exited'
 ))
 await codexThird.dispose()
-await cli(['stop', '--session', resumed.agentSessionId])
+await cli(['agent', 'stop', '--session', resumed.agentSessionId])
 const codexStopped = await connectLocalAgentMux()
 assert.deepEqual(codexStopped.agentSessions(), [])
 const retiredContinuity = await codexStopped.ensureAgentContinuity({
@@ -1313,7 +1086,7 @@ await waitFor('literal prompt Agent ready epoch', () => (
   literalPromptClient.agentSession(literalPromptAgent.agentSessionId)
     .terminalPromptReadiness?.readyThroughByte !== undefined
 ))
-await cli(['send', '--to-session', literalPromptAgent.agentSessionId, '--text', '--help'])
+await cli(['agent', 'send', '--to-session', literalPromptAgent.agentSessionId, '--text', '--help'])
 await waitFor('literal option-like prompt submitted', () => (
   output(literalPromptEvents, literalPromptAgent.run.runId).includes('codex-submit:--help:accepted')
 ))
@@ -2050,30 +1823,28 @@ const acpSession = {
 }
 await acpStore.compareAndSwap(null, acpSession)
 const resolvedAcp = JSON.parse((await cli([
-  'inspect', '--acp-native', 'packed-native', '--adapter', 'packed-acp'
+  'agent', 'inspect', '--acp-native', 'packed-native', '--adapter', 'packed-acp'
 ])).stdout)
 assert.equal(resolvedAcp.result.session.agentSessionId, acpSession.agentSessionId)
 await controlServer.stop()
+await packedControlClient.dispose()
+await rm(capabilityRoot, { recursive: true, force: true })
 const earlyCloseRoot = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-packed-control-close-"))
 const earlyClosePath = join(earlyCloseRoot, 'control.sock')
 const earlyCloseSockets = new Set()
 const earlyCloseServer = createServer((socket) => {
   earlyCloseSockets.add(socket)
   socket.once('close', () => earlyCloseSockets.delete(socket))
-  socket.end('{"schemaVersion":')
+  socket.end('{"jsonrpc":')
 })
 await new Promise((resolve, reject) => {
   earlyCloseServer.once('error', reject)
   earlyCloseServer.listen(earlyClosePath, resolve)
 })
-await assert.rejects(
-  requestAgentMuxControl({
-    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-    requestId: 'packed-peer-close',
-    operation: 'list.agents'
-  }, earlyClosePath),
-  (error) => error?.code === 'CONTROL_PROTOCOL_ERROR'
-)
+const earlyCloseClient = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: earlyClosePath } })
+try {
+  await assert.rejects(earlyCloseClient.call('app.inspect', {}), error => error?.code === 'CONTROL_PROTOCOL_ERROR')
+} finally { await earlyCloseClient.dispose() }
 await new Promise((resolve) => {
   earlyCloseServer.close(resolve)
   for (const socket of earlyCloseSockets) socket.destroy()

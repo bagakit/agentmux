@@ -651,7 +651,8 @@ export class AgentMuxRpcService {
         if (attached.session.run.runId !== runId || attached.attachment.run.runId !== runId) {
           throw new AgentMuxError('Session changed before output observation completed. Its Run is kept.', 'STALE_AGENT_SESSION')
         }
-        initial = { session: attached.session, run: attached.attachment.run, gap: attached.attachment.gap }
+        initial = { session: attached.session, run: attached.attachment.run, gap: attached.attachment.gap,
+          terminal: attached.attachment.terminal, resizeRevision: attached.attachment.resizeRevision }
         start = async () => {
           try { await ordered.finishReplayAsync(attached!.attachment.replay) }
           catch (error) { await emit({ type: 'error', error: readerError(error) }); await dispose(); return }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeFileSync } from 'node:fs'
 const args = process.argv.slice(2)
 const nonFlags = args.filter((arg) => !arg.startsWith('-'))
 const resumeIndex = nonFlags.indexOf('resume')
@@ -8,6 +9,13 @@ const hookUrl = process.env.AGENTMUX_HOOK_URL
 const hookToken = process.env.AGENTMUX_HOOK_TOKEN
 const agentSessionId = process.env.AGENTMUX_AGENT_SESSION_ID
 const providerId = process.env.AGENTMUX_PROVIDER_ID
+// A private test parent can read the actual Core-issued credential; never print it.
+const capabilityReceipt = process.env.AGENTMUX_FAKE_CAPABILITY_RECEIPT
+if (capabilityReceipt) {
+  const capability = process.env.AGENTMUX_AGENT_CAPABILITY
+  if (!agentSessionId || !capability) throw new Error('missing Core-issued fixture credentials')
+  writeFileSync(capabilityReceipt, JSON.stringify({ agentSessionId, capability }), { mode: 0o600 })
+}
 const readyMode = process.env.AGENTMUX_FAKE_READY_MODE ?? 'before-delayed'
 const promptRenderMode = process.env.AGENTMUX_FAKE_PROMPT_RENDER_MODE ?? 'normal'
 const publishPermissionRequest = process.env.AGENTMUX_FAKE_PERMISSION_REQUEST === '1'

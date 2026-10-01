@@ -7,6 +7,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS,
   isAgentMuxRpcStream, isAgentMuxRpcMethod, type AgentMuxRpcMethod, type AgentMuxRpcParams,
   type AgentMuxRpcStreamMethod, type AgentMuxRpcStreamEvent, type AgentMuxRpcPrincipal } from './public-rpc.js'
 import { AgentMuxRpcService, type AgentMuxRpcCallContext } from './public-rpc-service.js'
+import { encodeHostedValue } from './hosted-value.js'
 
 export * from './public-rpc-frame.js'
 import { AgentMuxRpcLines, AgentMuxRpcError, AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode, rpcFailure, parseRpcRequest, isRpcId as validId, type AgentMuxRpcFrame } from './public-rpc-frame.js'
@@ -92,10 +93,14 @@ export class AgentMuxRpcDispatcher {
             }
             const sub = await this.service.subscribe(method, params, progress, context)
             if (channel.signal.aborted || pendingFailure) { await sub.dispose(); if (pendingFailure) throw pendingFailure; return null }
-            try { rpcEncode({ jsonrpc: '2.0', id: request.id!, result: { subscriptionId, method, initial: sub.initial } }) }
+            // Only the original continuation carries synthetic Uint8Array restore
+            // bytes. Reuse the SDK value carrier without changing raw output frames.
+            const initial = method === 'agent.output' ? { ...sub.initial,
+              terminal: encodeHostedValue((sub.initial as import('./public-rpc.js').AgentMuxRpcOutputInitial).terminal) } : sub.initial
+            try { rpcEncode({ jsonrpc: '2.0', id: request.id!, result: { subscriptionId, method, initial } }) }
             catch (error) { await sub.dispose(); throw error }
             channel.activate(subscriptionId, method, () => sub.dispose())
-            result = { subscriptionId, method, initial: sub.initial }
+            result = { subscriptionId, method, initial }
             channel.afterResponse.push(async () => { opened = true
               await drain()
               if (!pendingFailure && !channel.signal.aborted) await sub.start?.()
