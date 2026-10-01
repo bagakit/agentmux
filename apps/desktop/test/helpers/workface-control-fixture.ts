@@ -6,8 +6,9 @@ import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { expect, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt } from '../../../../packages/core/src/control-host'
-import type { AgentMuxControlRequest, AgentMuxControlSuccessReceipt } from '../../../../packages/core/src/control'
+import { AgentMuxControlServer, type AgentMuxRpcMethod, type AgentMuxRpcResult } from '@agentmux/core'
+import { objectCliReceipt } from '../../../../packages/core/test/helpers/object-cli-receipt'
+import type { AgentMuxControlRequest } from '@agentmux/core/control'
 import type { AppConfig, SessionSnapshot } from '../../src/shared/contracts'
 import { api } from '../../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../src/renderer/src/lib/workbench-tabs'
@@ -76,10 +77,11 @@ export async function startWorkfaceFixture() {
   const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson') })
   const seen: AgentMuxControlRequest[] = []
-  const server = new AgentMuxControlServer({ execute(request) { seen.push(request); return useAppStore.getState().executeControl(request) } }, join(directory, 'control.sock'))
+  const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'),
+    execute(request) { seen.push(request); return useAppStore.getState().executeControl(request) } })
   await server.start()
   const exec = promisify(execFile)
-  async function run(args: string[], code = 0): Promise<AgentMuxControlSuccessReceipt> {
+  async function run<M extends AgentMuxRpcMethod>(method: M, args: string[], code = 0): Promise<AgentMuxRpcResult<M>> {
     let output: { stdout: string; stderr: string }, actualCode = 0
     try { output = await exec(process.execPath, [join(process.cwd(), 'packages/core/bin/agentmux'), ...args], { env, timeout: 8_000 }) }
     catch (error) {
@@ -89,10 +91,13 @@ export async function startWorkfaceFixture() {
     }
     expect(actualCode, output.stderr).toBe(code)
     const lines = output.stdout.trim().split('\n'); expect(lines).toHaveLength(1)
-    const receipt = parseAgentMuxControlReceipt(JSON.parse(lines[0]!))
+    // The real RPC client validates the original business body; reuse the canonical
+    // CLI envelope oracle rather than parsing it as an internal GUI receipt.
+    const receipt = objectCliReceipt(JSON.parse(lines[0]!))
     expect(receipt.ok).toBe(true)
+    expect(receipt.operation).toBe(method)
     if (!receipt.ok) throw new Error('Expected a typed Workface success report.')
-    return receipt
+    return receipt.result as AgentMuxRpcResult<M>
   }
   function noLifecycle() { expect(snapshot).not.toHaveBeenCalled(); for (const call of lifecycle) expect(call).not.toHaveBeenCalled() }
   return { run, flush, snapshot, lifecycle, seen, directory, env, noLifecycle, stop: () => server.stop() }

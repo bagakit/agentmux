@@ -40,10 +40,7 @@ afterEach(async () => {
   vi.restoreAllMocks(); useAppStore.setState(original, true); vi.unstubAllGlobals()
 })
 async function swap(a = regionIdA, b = regionIdB, code = 0) {
-  const receipt = await fixture!.run(['space', 'swap', '--region', a, '--with', b], code)
-  expect(receipt.operation).toBe('space.swap')
-  if (receipt.operation !== 'space.swap') throw new Error('Wrong Region swap receipt.')
-  return receipt.result
+  return await fixture!.run('space.swap', ['space', 'swap', '--region', a, '--with', b], code)
 }
 async function mount() { await act(async () => root.render(<WorkspaceWorkbench workspaceId="resource" interactiveResize={false} />)) }
 function originalRegions() {
