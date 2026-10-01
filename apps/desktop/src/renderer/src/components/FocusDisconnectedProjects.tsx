@@ -1,57 +1,73 @@
-import { ChevronRight, RotateCcw } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { ChevronRight, Unplug } from 'lucide-react'
+import { useLayoutEffect, useRef, type RefObject } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusProjectLane } from '../lib/focus-project-lanes'
 import { FocusProjectLanes } from './FocusProjectLanes'
 import { FocusContextRow } from './FocusContextRow'
 
-/** A compact projection of all confirmed offline Contexts, never a Session owner. */
-export function FocusDisconnectedProjects({ lanes, contexts, selectedId, projectId, reveal, onProject, onSelect }: {
+/** The same confirmed-offline directory in both the full and mixed Focus surfaces. */
+export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selectedId, projectId, expanded, canReturn, reveal, fallbackFocus, onExpand, onClose, onClearFilters, onProject, onSelect }: {
   lanes: readonly FocusProjectLane[]; contexts: ReadonlyMap<string, FocusContext>; selectedId: string | null
+  visibleIds: ReadonlySet<string>; expanded: boolean; canReturn: boolean
   projectId: string; reveal: { laneId: string; trigger: HTMLElement } | null
+  fallbackFocus: RefObject<HTMLInputElement | null>
+  onExpand(): void; onClose(): void; onClearFilters(): void
   onProject(id: string): void; onSelect(id: string): void
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const [activeReveal, setActiveReveal] = useState<typeof reveal>(null)
   const surface = useRef<HTMLElement>(null), header = useRef<HTMLButtonElement>(null)
-  const ids = lanes.flatMap(lane => lane.contextIds.filter(id => contexts.has(id)))
+  const pendingReturn = useRef<{ target: HTMLElement | null; from: Element | null } | null>(null)
+  const ids = new Set(lanes.flatMap(lane => lane.contextIds.filter(id => contexts.has(id))))
+  const visibleLanes = lanes.filter(lane => lane.contextIds.some(id => contexts.has(id) && visibleIds.has(id)))
+  const matchingCount = [...ids].filter(id => visibleIds.has(id)).length
   const projectCount = new Set(lanes.map(lane => lane.projectId)).size
   useLayoutEffect(() => {
-    if (reveal && lanes.some(lane => lane.id === reveal.laneId)) { setExpanded(true); setActiveReveal(reveal) }
-  }, [reveal])
-  useLayoutEffect(() => {
-    if (!expanded || !activeReveal || !surface.current) return
-    const target = [...surface.current.querySelectorAll<HTMLElement>('[data-lane-id]')].find(node => node.dataset.laneId === activeReveal.laneId)
+    if (!expanded || !reveal || !surface.current) return
+    const target = [...surface.current.querySelectorAll<HTMLElement>('[data-lane-id]')].find(node => node.dataset.laneId === reveal.laneId)
     if (!target) return
     target.scrollIntoView({ block: 'nearest' })
-    if (document.activeElement === activeReveal.trigger || document.activeElement === document.body) {
+    if (document.activeElement === reveal.trigger || document.activeElement === document.body) {
       target.querySelector<HTMLButtonElement>('.focus-context')?.focus({ preventScroll: true })
     }
-  }, [expanded, activeReveal])
-  const close = () => {
+  }, [expanded, reveal])
+  useLayoutEffect(() => {
+    const pending = pendingReturn.current
+    if (expanded || !pending) return
+    pendingReturn.current = null
     const focused = document.activeElement
+    if (focused !== pending.from && focused !== document.body && focused?.isConnected) return
     const usable = (node: HTMLElement | null | undefined) => node?.isConnected && !node.closest('[hidden], [inert], [aria-hidden="true"]')
       && (!(node instanceof HTMLButtonElement) || !node.disabled) && getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility !== 'hidden'
-    const returnTo = usable(activeReveal?.trigger) ? activeReveal!.trigger : usable(header.current) ? header.current : null
-    const mayReturn = focused instanceof Node && surface.current?.contains(focused)
-    setExpanded(false); setActiveReveal(null)
-    if (mayReturn && returnTo) returnTo.focus({ preventScroll: true })
+    const target = usable(pending.target) ? pending.target : usable(fallbackFocus.current) ? fallbackFocus.current : null
+    target?.focus({ preventScroll: true })
+  }, [expanded, fallbackFocus])
+  const close = () => {
+    if (!canReturn) return
+    const focused = document.activeElement
+    if (focused instanceof Node && surface.current?.contains(focused)) {
+      pendingReturn.current = { target: reveal?.trigger ?? header.current, from: focused }
+    }
+    onClose()
   }
-  if (!ids.length) return null
-  return <section ref={surface} className="focus-disconnected-projects" aria-label="Disconnected projects"
-    onKeyDown={event => { if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); close() } }}>
+  if (!ids.size) return null
+  const title = <><Unplug size={14} aria-hidden="true" /><strong>Disconnected</strong>
+    <span className="focus-disconnected-projects__count">{projectCount} {projectCount === 1 ? 'project' : 'projects'} · {ids.size} {ids.size === 1 ? 'context' : 'contexts'}</span></>
+  return <section ref={surface} className="focus-disconnected-projects" aria-label="Disconnected projects" data-expanded={expanded ? 'true' : 'false'}
+    onKeyDown={event => { if (event.key === 'Escape' && expanded && canReturn) { event.preventDefault(); event.stopPropagation(); close() } }}>
     <div className="focus-disconnected-projects__heading">
-      <button ref={header} type="button" className="focus-recovery-toggle" aria-expanded={expanded} onClick={() => { if (expanded) close(); else setExpanded(true) }}>
-        <ChevronRight size={11} /><RotateCcw size={12} /><span>Disconnected</span>
-        <span className="focus-recovery-toggle__count">{projectCount} {projectCount === 1 ? 'project' : 'projects'} · {ids.length} {ids.length === 1 ? 'context' : 'contexts'}</span>
-      </button>
-      {expanded ? <button type="button" className="focus-disconnected-projects__return" onClick={close}>Return</button> : null}
+      {canReturn ? <button ref={header} type="button" className="focus-disconnected-projects__toggle" aria-expanded={expanded} onClick={() => { if (expanded) close(); else onExpand() }}>
+        <ChevronRight size={12} aria-hidden="true" />{title}
+      </button> : <div className="focus-disconnected-projects__title">{title}</div>}
+      {expanded && canReturn ? <button type="button" className="focus-disconnected-projects__return" onClick={close}>Return to board</button> : null}
     </div>
-    {expanded ? <FocusProjectLanes lanes={lanes} selectedWorkspaceId={projectId} onSelect={onProject} renderLane={(lane, heading) => <>
+    {expanded && matchingCount !== ids.size ? <p className="focus-disconnected-projects__matches">{matchingCount} of {ids.size} contexts match the current filters</p> : null}
+    {expanded && visibleLanes.length ? <FocusProjectLanes lanes={visibleLanes} selectedWorkspaceId={projectId} onSelect={onProject} renderLane={(lane, heading) => <>
       {heading}<div className="focus-disconnected-projects__cards">{lane.contextIds.flatMap(id => {
-        const context = contexts.get(id)
-        return context ? [<FocusContextRow key={id} context={context} compact selected={id === selectedId} onSelect={onSelect} />] : []
+        const context = visibleIds.has(id) ? contexts.get(id) : null
+        return context ? [<FocusContextRow key={id} context={context} variant="directory" selected={id === selectedId} onSelect={onSelect} />] : []
       })}</div>
-    </>} /> : null}
+    </>} /> : expanded ? <div className="focus-disconnected-projects__empty" role="status">
+      <strong>No matching disconnected contexts</strong><span>Try another search or clear the filters.</span>
+      <button type="button" onClick={onClearFilters}>Clear filters</button>
+    </div> : null}
   </section>
 }
