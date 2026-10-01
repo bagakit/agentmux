@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/history-fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -31,7 +31,11 @@ function itemOf(mutation: AgentTimelineMutation | undefined) {
   return mutation.item
 }
 
-const isolation = await vi.hoisted(async () => { const { fixturePath: upstreamFixturePath } = await import("./helpers/history-fixture-values.js"); return ({ homedir: upstreamFixturePath("synthetic/unset-home") }) })
+const isolation = await vi.hoisted(async () => {
+  const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os')
+  const { join } = await import('node:path')
+  return { homedir: join(tmpdir(), 'agentmux-fixtures', "synthetic/unset-home") }
+})
 vi.mock('node:os', async importOriginal => ({
   ...(await importOriginal<typeof import('node:os')>()),
   homedir: () => isolation.homedir
@@ -121,7 +125,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
 
       const rawPayload = {
         session_id: 'foreign-session-id',
-        transcript_path: upstreamFixturePath("synthetic/foreign.jsonl"),
+        transcript_path: fixturePath("synthetic/foreign.jsonl"),
         [HOOK_PAYLOAD_USAGE_KEY]: validUsage
       }
 
@@ -408,6 +412,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
       })
 
       const run = {
+        native_service: null,
         id: runId,
         spec: { program: 'scoped-agent', args: [], cwd: workspacePath, env: {} },
         lineage: null,
@@ -472,7 +477,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         // Send foreign turn_start: claimed working + foreign session_id + foreign transcript
         const status = await h.feed('turn_start', {
           session_id: 'foreign-session',
-          transcript_path: upstreamFixturePath("synthetic/foreign.jsonl")
+          transcript_path: fixturePath("synthetic/foreign.jsonl")
         })
         expect(status).toBe(204)
 

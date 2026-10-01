@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -33,7 +33,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'binding-hook-after-end'.padEnd(43, 'A'),
@@ -47,11 +47,12 @@ function storedSession(): AgentMuxStoredAgentSession {
 
 function run(state: CtxmuxAdapterRun['state']): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId: 'run-1',
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     pid: state.type === 'running' ? 999 : null,
     state,
     cols: 80,

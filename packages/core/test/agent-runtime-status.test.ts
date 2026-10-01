@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -8,12 +8,13 @@ import type { AgentMuxStoredAgentSession } from '../src/types.js'
 it('Core status observes the ended Run instead of reusing a stale working hook', async () => {
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'status-agent', providerId: 'claude', executorId: 'claude',
-    hostId: 'local', workspacePath: upstreamFixturePath("fixture"), run: { runId: 'status-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("fixture"), run: { runId: 'status-run' }, retiredRuns: [],
     hookBindingId: 'binding', hookToken: 'token',  createdAt: 1, updatedAt: 1,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
   }
   const run: CtxmuxAdapterRun = {
-    runId: 'status-run', lifecycleOperationId: null, program: 'claude', args: [], workspacePath: upstreamFixturePath("fixture"), pid: null,
+    nativeService: null,
+    runId: 'status-run', lifecycleOperationId: null, program: 'claude', args: [], workspacePath: fixturePath("fixture"), pid: null,
     state: { type: 'interrupted', reason: 'daemon_restart' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0
   }

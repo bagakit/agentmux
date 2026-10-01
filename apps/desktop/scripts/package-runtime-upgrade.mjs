@@ -35,6 +35,26 @@ async function artifact(app) {
     archivePath, corePath: join(core, 'dist/index.js'), socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
 }
 
+async function daemonDeclaration(selected) {
+  const image = await lstat(selected.daemonPath, { bigint: true })
+  fail(image.isFile(), 'The selected Runtime candidate is not a regular executable file.')
+  const response = await exec(selected.daemonPath, ['--version'], { timeout: 10_000, maxBuffer: 4096 })
+  const declared = /^ctxmuxd (\S+) \(protocol (\d+), handoff ([^\s(),]+)\)\s*$/.exec(response.stdout)
+  fail(declared && declared[1] === selected.daemonVersion && Number(declared[2]) === selected.manifest.product.protocol,
+    'The selected Runtime candidate did not declare its selected version, protocol and handoff.')
+  const opened = await open(selected.daemonPath, 'r')
+  try {
+    const metadata = await opened.stat({ bigint: true })
+    fail(metadata.isFile() && metadata.dev === image.dev && metadata.ino === image.ino &&
+      hash(await opened.readFile()) === selected.daemonSha256,
+    'The selected Runtime candidate changed while its version response was being checked.')
+    const final = await lstat(selected.daemonPath, { bigint: true })
+    fail(final.isFile() && final.dev === image.dev && final.ino === image.ino,
+      'The selected Runtime candidate changed while its version response was being checked.')
+  } finally { await opened.close() }
+  return { declaration: { version: declared[1], protocol: Number(declared[2]), handoff: declared[3] }, image }
+}
+
 async function extractSdk(artifact, directory) {
   await mkdir(directory)
   await exec('/usr/bin/tar', ['-xzf', artifact.archivePath, '-C', directory], { timeout: 10_000, maxBuffer: 1024 * 1024 })
@@ -301,6 +321,14 @@ export async function prepareRuntimeUpgrade(currentApp, candidateApp) {
   fail(liveness === 'alive', 'Runtime listener liveness is unknown; no application was changed.')
   fail(old.stateDirectory === candidate.stateDirectory,
     'Runtime upgrade changes the durable host address. No application was changed.')
+  const declarations = await Promise.allSettled([daemonDeclaration(old), daemonDeclaration(candidate)])
+  const [outgoing, incoming] = declarations.map(result => {
+    if (result.status === 'rejected') throw result.reason
+    return result.value
+  })
+  fail(outgoing.declaration.handoff === incoming.declaration.handoff,
+    `Runtime handoff is unsupported: ${outgoing.declaration.handoff} -> ${incoming.declaration.handoff}. ` +
+    'The existing application, healthy Runs and durable state were kept. Review a cold restart before switching formats.')
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-install-sdk-'))
   try {
     const oldSdk = await extractSdk(old, join(temporary, 'old'))
@@ -344,23 +372,9 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
     const current = await artifact(currentApp)
     fail(current.daemonSha256 === plan.candidate.daemonSha256 && current.manifestSha256 === plan.candidate.manifestSha256,
       'The canonical application is not the preflighted Runtime candidate.')
-    const candidateImage = await lstat(current.daemonPath, { bigint: true })
-    fail(candidateImage.isFile(), 'The canonical Runtime candidate is not a regular executable file.')
-    const response = await exec(current.daemonPath, ['--version'], { timeout: 10_000, maxBuffer: 4096 })
-    const declared = /^ctxmuxd (\S+) \(protocol (\d+), handoff ([^\s(),]+)\)\s*$/.exec(response.stdout)
-    fail(declared && declared[1] === current.daemonVersion && Number(declared[2]) === current.manifest.product.protocol,
-      'The canonical Runtime candidate did not declare its selected version, protocol and handoff.')
-    const respondingImage = await open(current.daemonPath, 'r')
-    try {
-      const metadata = await respondingImage.stat({ bigint: true })
-      fail(metadata.isFile() && metadata.dev === candidateImage.dev && metadata.ino === candidateImage.ino &&
-        hash(await respondingImage.readFile()) === current.daemonSha256,
-      'The canonical Runtime candidate changed while its version response was being checked.')
-      const finalImage = await lstat(current.daemonPath, { bigint: true })
-      fail(finalImage.isFile() && finalImage.dev === candidateImage.dev && finalImage.ino === candidateImage.ino,
-        'The canonical Runtime candidate changed while its version response was being checked.')
-    } finally { await respondingImage.close() }
-    candidateVersion = { version: declared[1], protocol: Number(declared[2]), handoff: declared[3] }
+    const declared = await daemonDeclaration(current)
+    const candidateImage = declared.image
+    candidateVersion = declared.declaration
     const signalOwner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
     assertServingOwner(plan.owner, signalOwner)
     process.kill(signalOwner.pid, 'SIGHUP')

@@ -84,6 +84,7 @@ describe('Trusted Hook normalization context (T-039)', () => {
       }
 
       const run = {
+        native_service: null,
         id: 'run-frozen-1',
         spec: { program: 'opencode', args: [], cwd: workspacePath, env: {} },
         lineage: null,
@@ -364,6 +365,7 @@ describe('Trusted Hook normalization context (T-039)', () => {
       await store.compareAndSwap(null, seedSession)
 
       const run = {
+        native_service: null,
         id: 'run-live-1',
         spec: { program: 'opencode', args: [], cwd: workspacePath, env: {} },
         lineage: null,
