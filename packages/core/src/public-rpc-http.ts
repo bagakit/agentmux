@@ -39,7 +39,9 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
   }
   if (!response.ok || !response.body) {
     await response.body?.cancel().catch(() => {})
-    throw new AgentMuxError('HTTP RPC service is unavailable.', 'CONTROL_UNAVAILABLE')
+    throw response.status === 429
+      ? new AgentMuxError('HTTP RPC connection capacity is busy.', 'CONTROL_OWNER_BUSY')
+      : new AgentMuxError('HTTP RPC service is unavailable.', 'CONTROL_UNAVAILABLE')
   }
   const reader = response.body.getReader()
   let closed = false
