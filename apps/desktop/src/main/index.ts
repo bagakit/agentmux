@@ -15,6 +15,7 @@ import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from './login-shell-environment.js'
 import { RuntimeController } from './runtime-controller.js'
+import { connectDesktopAgentMuxHost } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
@@ -82,6 +83,7 @@ function startPrimaryInstance(): void {
   const scratchTopics = new ScratchTopics()
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
+    connectDesktopAgentMuxHost,
     scratchTopics
   )
   const progressLoops = new ContinuousProgressLoopManager(

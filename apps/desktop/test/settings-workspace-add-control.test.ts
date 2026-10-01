@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -42,7 +43,7 @@ async function fixture() {
   const initial = await store.save({ ...structuredClone(DEFAULT_CONFIG), workspaces: [
     { id: '__scratch__', name: 'Owned Topics', hostId: 'local', path: join(root, 'topics'), kind: 'folder' }] })
   vi.spyOn(store, 'get').mockResolvedValue(initial)
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   const preparation: RuntimePreparation = { hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] }
   const prepare=vi.spyOn(runtime, 'prepare').mockResolvedValue(preparation)
   const executionHost=vi.spyOn(runtime, 'executionHost').mockReturnValue({} as ExecutionHost)

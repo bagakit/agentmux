@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
@@ -40,7 +41,7 @@ app.whenReady().then(async () => {
     client=new AgentMuxClient({store})
     const kernel=(client as any).kernel
     for(const name of ['connect','start','input','resize','stop','attach','status'])kernel[name]=async(...args:any[])=>{output.controls.push({name,args});throw new Error(`Forbidden Runtime ${name}`)}
-    controller=new RuntimeController(store)
+    controller=new RuntimeController(store, localRuntimeConnector)
     controller.commit({hosts:[{id:'private-host',client,executionHost:{kind:'local',dispose:async()=>{}} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
     // Only host setup is isolated. All read operations use the real Controller/IPC.
     controller.prepare=async()=>({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})

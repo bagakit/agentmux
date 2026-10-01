@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -114,7 +115,7 @@ beforeEach(async () => {
     return receipt
   }
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(120)
-  runtime = new RuntimeController(store)
+  runtime = new RuntimeController(store, localRuntimeConnector)
   runtime.commit({ hosts: [{ id: 'local', client,
     executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })

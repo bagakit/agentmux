@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import ts from 'typescript'
+import { deviceManagementIpcSource } from './helpers/device-management-ipc-source.js'
 import {
   assertSenderTrusted,
   senderTrust,
@@ -632,8 +633,37 @@ const HONEST_ADAPTER: AdapterShape = {
 }
 
 describe('ipc.ts wiring: the shell forwards each privileged sender check to the pure decision (AST, not text)', () => {
-  const module = parse(readFileSync(ipcPath, 'utf8'), ipcPath)
+  const ipcSource = readFileSync(ipcPath, 'utf8')
+  const deviceSource = readFileSync(new URL('../src/main/device-management-ipc.ts', import.meta.url), 'utf8')
+  const module = parse(ipcSource, ipcPath)
   const adapter = adapterDeclaration(module)
+  const delegated = deviceManagementIpcSource(ipcSource, deviceSource)
+
+  it('实际跨模块注册把原 adapter 交给 leaf，leaf 第一句校验同一个频道和 event', () => {
+    expect(delegated.rootCalls).toBe(1)
+    expect(delegated.rootWrapperBinding).toBe(true)
+    expect(delegated.rootGuardBinding).toBe(true)
+    expect(delegated.leafRegistrationShape).toBe(true)
+    expect(delegated.leafFirstGuard).toBe(true)
+    expect(delegated.guardedChannels).toHaveLength(5)
+  })
+
+  it('跨模块自检：Root 换 no-op/影子 guard 或 leaf 移除/延后 guard 均不能冒可信路径', () => {
+    for (const replacement of ['() => {}', 'untrustedAlias']) {
+      const mutated = ipcSource.replace('assertTrusted: requireTrustedSender', `assertTrusted: ${replacement}`)
+      expect(mutated).not.toBe(ipcSource)
+      expect(deviceManagementIpcSource(mutated, deviceSource).guardedChannels).toEqual([])
+    }
+    const shadow = ipcSource.replace('  registerDeviceManagementIpc({', '  { const requireTrustedSender = () => {};\n  registerDeviceManagementIpc({')
+      .replace('assertTrusted: requireTrustedSender })', 'assertTrusted: requireTrustedSender }); }')
+    expect(shadow).not.toBe(ipcSource)
+    expect(deviceManagementIpcSource(shadow, deviceSource).guardedChannels).toEqual([])
+    for (const replacement of ['void event', 'void event; options.assertTrusted(channel, event)', 'options.assertTrusted(channel, params)']) {
+      const mutated = deviceSource.replace('options.assertTrusted(channel, event)', replacement)
+      expect(mutated).not.toBe(deviceSource)
+      expect(deviceManagementIpcSource(ipcSource, mutated).guardedChannels).toEqual([])
+    }
+  })
 
   it('imports the pure decision and its throw-half from ipc-sender-trust', () => {
     const names = namedImportsFrom(module, SENDER_TRUST_MODULE)
@@ -652,7 +682,12 @@ describe('ipc.ts wiring: the shell forwards each privileged sender check to the 
     // handler 丢了第一句转发、或转发了错的 event、或 callee 绑定到影子，这里逐条报红。
     expect(THROWING_CHANNELS.length).toBeGreaterThan(0)
     for (const channel of THROWING_CHANNELS) {
-      expect(handlerGuard(module, channel, adapter), channel).toEqual({
+      const direct = handlerGuard(module, channel, adapter)
+      const guard = direct.kind === 'no-handler' && delegated.registrations.some(item => item.channel === channel)
+        ? { kind: 'forwards', bindsToAdapter: delegated.rootGuardBinding, channel,
+          event: delegated.leafFirstGuard ? 'own-parameter' : 'absent' }
+        : direct
+      expect(guard, channel).toEqual({
         kind: 'forwards',
         bindsToAdapter: true,
         channel,
@@ -666,7 +701,7 @@ describe('ipc.ts wiring: the shell forwards each privileged sender check to the 
     // 扫描面没脱节，否则这条恒真（scan-surface 打错字会让守卫空转变绿）。地板取**全集大小**而不是 > 1：
     // 12 个站点而地板写 > 1 时，提取器截断到 2 个照旧通过，那道地板从来没独立抓住过任何东西（真正抓住
     // 截断的是下面那条逐频道覆盖断言）。地板与覆盖断言各自都该能独立报红，所以这里钉全等。
-    const sites = requireTrustedSenderCallChannels(module)
+    const sites = [...requireTrustedSenderCallChannels(module), ...delegated.guardedChannels]
     expect(sites.length, '扫到的 requireTrustedSender 调用数与 allow-list 不等——提取器与 ipc.ts 脱节了').toBe(
       THROWING_CHANNELS.length
     )

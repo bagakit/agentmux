@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
+import { deviceManagementIpcSource, toolkitIpcSource } from './helpers/device-management-ipc-source.js'
 
 /**
  * main 的 IPC 注册面与 preload 的 invoke 面必须逐条对齐。
@@ -24,6 +25,8 @@ const IPC_TS = new URL('../src/main/ipc.ts', import.meta.url)
 const PRELOAD_TS = new URL('../src/preload/index.ts', import.meta.url)
 const IPC_SOURCE = readFileSync(IPC_TS, 'utf8')
 const PRELOAD_SOURCE = readFileSync(PRELOAD_TS, 'utf8')
+const DEVICE_SOURCE = readFileSync(new URL('../src/main/device-management-ipc.ts', import.meta.url), 'utf8')
+const TOOLKIT_SOURCE = readFileSync(new URL('../src/main/toolkit-ipc.ts', import.meta.url), 'utf8')
 
 function parse(source: string, name: string): ts.SourceFile {
   return ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
@@ -61,7 +64,8 @@ function registrations(source = IPC_SOURCE, fileName = 'ipc.ts'): Registration[]
     ts.forEachChild(node, walk)
   }
   ts.forEachChild(ast, walk)
-  return out
+  return [...out, ...deviceManagementIpcSource(source, DEVICE_SOURCE).registrations,
+    ...toolkitIpcSource(source, TOOLKIT_SOURCE).registrations]
 }
 
 /**
@@ -149,6 +153,51 @@ function overruns(ipcSource: string): Array<{ channel: string; detail: string }>
 }
 
 describe('IPC 两侧的对齐（跨进程那条缝没有类型检查）', () => {
+  it('既有 Toolkit 注册由实际原 wrapper 接入；含源码 for-of 常量的全部十一频道', () => {
+    const delegated = toolkitIpcSource(IPC_SOURCE, TOOLKIT_SOURCE)
+    expect(delegated.rootCalls).toBe(1)
+    expect(delegated.rootWrapperBinding).toBe(true)
+    expect(delegated.leafRegistrationShape).toBe(true)
+    expect(delegated.registrations).toHaveLength(11)
+    expect(new Set(delegated.registrations.map(item => item.channel)).size).toBe(11)
+  })
+
+  it('Toolkit 自检：移除真实 caller 或传 helper wrapper 不可冒原 event 路径', () => {
+    const call = 'registerToolkitIpc(toolkit, handleWithEvent)'
+    expect(IPC_SOURCE.split(call)).toHaveLength(2)
+    expect(toolkitIpcSource(IPC_SOURCE.replace(call, '(() => () => {})()'), TOOLKIT_SOURCE).registrations).toEqual([])
+    expect(toolkitIpcSource(IPC_SOURCE.replace(call, 'registerToolkitIpc(toolkit, handle)'), TOOLKIT_SOURCE).registrations).toEqual([])
+  })
+
+  it('跨模块注册沿实际 imported leaf 和原 handleWithEvent，扫描五条真实注册', () => {
+    const delegated = deviceManagementIpcSource(IPC_SOURCE, DEVICE_SOURCE)
+    expect(delegated.rootCalls).toBe(1)
+    expect(delegated.rootWrapperBinding).toBe(true)
+    expect(delegated.leafRegistrationShape).toBe(true)
+    expect(delegated.channelsUnique).toBe(true)
+    expect(delegated.registrations).toHaveLength(5)
+    expect(delegated.registrations.every(item => item.params === 2 && item.via === 'event')).toBe(true)
+  })
+
+  it('自检：移除实际跨模块调用会留下五个 preload 调用缺席，不能直接拼入 leaf 清单', () => {
+    const call = 'registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })'
+    expect(IPC_SOURCE.split(call)).toHaveLength(2)
+    const mutated = IPC_SOURCE.replace(call, '')
+    const before = new Set(registrations().map(item => item.channel))
+    const registered = new Set(registrations(mutated).map(item => item.channel))
+    expect(invocations().filter(item => before.has(item.channel) && !registered.has(item.channel)).map(item => item.channel))
+      .toEqual(deviceManagementIpcSource(IPC_SOURCE, DEVICE_SOURCE).registrations.map(item => item.channel))
+  })
+
+  it('自检：传 helper 路径不能冒 event 路径；同名本地注册不能冒实际 import', () => {
+    const wrongWrapper = IPC_SOURCE.replace('registerDeviceManagementIpc({ handleWithEvent,', 'registerDeviceManagementIpc({ handleWithEvent: handle,')
+    expect(wrongWrapper).not.toBe(IPC_SOURCE)
+    expect(deviceManagementIpcSource(wrongWrapper, DEVICE_SOURCE).registrations).toEqual([])
+    const shadow = IPC_SOURCE.replace('  registerDeviceManagementIpc({', '  const registerDeviceManagementIpc = () => {};\n  registerDeviceManagementIpc({')
+    expect(shadow).not.toBe(IPC_SOURCE)
+    expect(deviceManagementIpcSource(shadow, DEVICE_SOURCE).registrations).toEqual([])
+  })
+
   it('两个提取器都真的取到了东西——判据不能落空', () => {
     // 提取器返回空数组会让下面每一条断言变成恒真。这一条把「提取器还认得这两个文件的写法」
     // 做成显式前提：注册面重构成第三种写法时，是这一条先红，而不是别的断言静默变成空转。
@@ -199,9 +248,10 @@ describe('IPC 两侧的对齐（跨进程那条缝没有类型检查）', () => 
   it('自检：删掉一条注册，频道集合那条会从「注册缺席」方向报', () => {
     const mutated = IPC_SOURCE.replace("handle('config:get', () => config)", '')
     expect(mutated).not.toBe(IPC_SOURCE)
+    const before = new Set(registrations().map((r) => r.channel))
     const registered = new Set(registrations(mutated).map((r) => r.channel))
     const invoked = new Set(invocations().map((i) => i.channel))
-    expect([...invoked].filter((c) => !registered.has(c))).toEqual(['config:get'])
+    expect([...invoked].filter((c) => before.has(c) && !registered.has(c))).toEqual(['config:get'])
   })
 
   it('`handle` 包装确实剥掉了 event——形参预算的前提', () => {

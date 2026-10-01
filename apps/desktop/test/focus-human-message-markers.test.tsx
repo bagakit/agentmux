@@ -1,5 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act, createElement } from 'react';
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -169,7 +170,7 @@ it('actual continuous-progress caller through Runtime/Core/Store presents an aut
     const h = await fixture();
     // Install only this private, already-connected Core client in the host transport slot.
     // Observation, completion admission, input delivery and captured recording remain real.
-    const runtime = new RuntimeController(h.store);
+    const runtime = new RuntimeController(h.store, localRuntimeConnector);
     (runtime as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client: h.client });
     runtime.setContinuousProgressInputObserver(async () => false);
     const completionId = JSON.stringify([h.session.run.runId, 1]);

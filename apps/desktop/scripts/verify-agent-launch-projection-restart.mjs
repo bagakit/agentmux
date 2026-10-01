@@ -42,6 +42,7 @@ import { EventEmitter } from 'node:events'
 import { Window } from ${JSON.stringify(happyDomPath)}
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, AgentProviderRegistry, defineAgentProvider } from '@agentmux/core'
 import { RuntimeController } from ${JSON.stringify(join(base, 'apps/desktop/src/main/runtime-controller.ts'))}
+import { localRuntimeConnector } from ${JSON.stringify(join(base, 'apps/desktop/test/helpers/local-runtime-connector.ts'))}
 const [mode, root] = process.argv.slice(2)
 const window = new Window({ url: 'http://private.test' })
 const storagePath = join(root, 'workbench.json')
@@ -61,7 +62,7 @@ const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'proj
  buildArgs: (_prompt, args) => args, buildResumeArgs: (_id, _path, _prompt, args) => args })
 const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
 const core = await connectLocalAgentMux({ store, providers: [provider] })
-const runtime = new RuntimeController(store)
+const runtime = new RuntimeController(store, localRuntimeConnector)
 runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: async () => {} } }],
  removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }],

@@ -1,5 +1,6 @@
 const { fixtureIso: _hygiene_fixtureIso } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
@@ -207,7 +208,7 @@ describe('Focus consumes accepted public message authors without inventing ident
     adapter.kernel.status = async () => runProjection(cursor, directory)
     adapter.kernel.input = async (_run: string, operation: { expectedByte: number; data: string }) => { expect(operation.expectedByte).toBe(cursor); const start = cursor; writes.push(operation.data); cursor += Buffer.byteLength(operation.data); return { run: runProjection(cursor, directory), appliedByteRange: { startByte: start, endByte: cursor } } }
     vi.spyOn((client as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence, 'wait').mockResolvedValue(120)
-    const runtime = new RuntimeController(store as never)
+    const runtime = new RuntimeController(store as never, localRuntimeConnector)
     runtime.commit({ hosts: [{ id: 'local', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     disposeIpc = await registerIpc({ window: fakeWindow as unknown as Parameters<typeof registerIpc>[0]['window'], runtime,

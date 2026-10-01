@@ -21,7 +21,7 @@ const facts = async () => ({active:toolkit?(await performanceCurrent()).consumer
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms))
 app.whenReady().then(async()=>{
   try {
-    const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer}=await import(pathToFileURL(ownerBundle).href)
+    const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,localRuntimeConnector,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer}=await import(pathToFileURL(ownerBundle).href)
     const configStore = new ConfigStore(path.join(privateRoot,'userData','config.json'))
     const initialConfigExists = fs.existsSync(configStore.filePath)
     current = await configStore.get()
@@ -62,7 +62,7 @@ app.whenReady().then(async()=>{
     if(phase==='joined'){
       fs.mkdirSync(process.env.AGENTMUX_RUNTIME_DIRECTORY,{recursive:true})
       sampler=new ProcessResourceSampler()
-      runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(),undefined,sampler)
+      runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(),localRuntimeConnector,undefined,sampler)
       runtime.commit(await runtime.prepare({...current,hosts:current.hosts.filter(host=>host.kind==='local')}))
       detachRuntime=runtime.attach(win.webContents)
       sampler.setObservationSources({observeRuntime:()=>runtime.resourceUsageObservation(),

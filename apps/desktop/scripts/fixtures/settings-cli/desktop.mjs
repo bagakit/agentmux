@@ -43,7 +43,13 @@ export async function connectCdp(url, connections) {
 
 export function desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor, packagedApplication, beforeRuntimePrepare }) {
   const require = createRequire(join(desktopRoot, 'package.json'))
-  return async function launch(label, seed) {
+  return async function launch(label, seed, { expectRuntimeUnavailable } = {}) {
+    if (expectRuntimeUnavailable) {
+      assert.ok(['CONTROL_UNAVAILABLE', 'RPC_METHOD_NOT_FOUND'].includes(expectRuntimeUnavailable.code))
+      assert.ok(typeof expectRuntimeUnavailable.message === 'string' && expectRuntimeUnavailable.message.length > 0,
+        'An unavailable launch needs the exact failure already observed from its public owner')
+      assert.equal(seed, undefined, 'Unavailable runtime proof uses an existing durable workface')
+    }
     for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) {
       assert.equal(process.env[name], undefined, `Private launch inherited ${name}`)
     }
@@ -121,8 +127,20 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
       return { report: JSON.parse(await readFile(report, 'utf8')) }
     }
     await waitFor(`${label} actual App`, () => cdp.evaluate('Boolean(window.agentmux && document.querySelector(".app-shell"))'))
-    assert.equal(await cdp.evaluate('(async()=> (await window.agentmux.sessions.snapshot()).localHome)()'), privateHome)
-    return { child, main, cdp, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
+    let runtimeFailure
+    if (expectRuntimeUnavailable) {
+      runtimeFailure = await cdp.evaluate(`(async()=> { try { await window.agentmux.sessions.snapshot(); return {unexpectedSuccess:true} }
+        catch(error) { return {message:error.message,code:error.code??null} } })()`)
+      assert.equal(runtimeFailure.unexpectedSuccess, undefined, 'An unconfirmed owner cannot masquerade as a live Session snapshot')
+      // Electron may serialize only an Error's message across invoke. Its exact public RPC
+      // cause was checked by this proof's caller; a timeout or unrelated error cannot pass here.
+      if (runtimeFailure.code !== null) assert.equal(runtimeFailure.code, expectRuntimeUnavailable.code)
+      assert.ok(runtimeFailure.message === expectRuntimeUnavailable.message || runtimeFailure.message.endsWith(`: ${expectRuntimeUnavailable.message}`),
+        `Desktop failure must preserve the exact public owner cause: ${runtimeFailure.message}`)
+    } else {
+      assert.equal(await cdp.evaluate('(async()=> (await window.agentmux.sessions.snapshot()).localHome)()'), privateHome)
+    }
+    return { child, main, cdp, ready, runtimeFailure, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
   }
 }
 

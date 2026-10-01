@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act } from 'react'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -248,7 +249,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
   const protectedHost = { id: 'ssh-protected', kind: 'ssh' as const, label: 'Protected', hostname: 'private.invalid' }
   const config = await disk.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [DEFAULT_CONFIG.hosts[0]!, protectedHost], workspaces: [] })
   vi.spyOn(disk, 'get').mockResolvedValue(config)
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   const facts = [{ runId: 'healthy-run', state: 'running', pid: 123, workspacePath: _hygiene_fixturePath("private-fixture") }]
   const client = { connect: vi.fn(async () => {}), listRuns: vi.fn(async () => facts),
     stopAgent: vi.fn(), stopRun: vi.fn(), dispose: vi.fn() }

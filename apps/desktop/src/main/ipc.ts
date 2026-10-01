@@ -9,6 +9,7 @@ import { createResourceMetricsPort, observeRendererResources } from './resource-
 import { ToolkitOwner } from './toolkit-owner.js'
 import { performanceLaunch } from './toolkit-asset.js'
 import { registerToolkitIpc } from './toolkit-ipc.js'
+import { registerDeviceManagementIpc } from './device-management-ipc.js'
 import { resolvePerformancePreferences } from '../shared/toolkit-preferences.js'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
 import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
@@ -134,6 +135,7 @@ import { executeCrashLogControl, requestCrashLogReveal } from './crash-log-acces
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { RuntimeController } from './runtime-controller.js'
+import { desktopBusinessSocketPath } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { saveRuntimeConfig } from './runtime-config-transaction.js'
@@ -393,6 +395,8 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
+
+  registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })
 
   const resolveInputHistoryScope = (target: BrowserInputHistoryTarget): BrowserInputHistoryScope => {
     let scope: BrowserInputHistoryScope
@@ -1217,7 +1221,7 @@ export async function registerIpc(args: {
         dispose: () => subscription.dispose()
       }
     }
-  })
+  }, desktopBusinessSocketPath())
   await control.start()
   return async () => {
     await runOwnerDisposals([

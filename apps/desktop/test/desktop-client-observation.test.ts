@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -99,7 +100,7 @@ it('retains the package metadata captured at startup after the canonical metadat
 
 it('does not pair a pre-navigation Store response with a new Renderer owner', async () => {
   workbench()
-  const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   const contents = Object.assign(new EventEmitter(), { id: 10, isDestroyed: () => false }) as unknown as WebContents
   const detach = controller.attach(contents)
   const held = await useAppStore.getState().executeControl(request)

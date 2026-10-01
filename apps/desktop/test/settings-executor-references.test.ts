@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -156,7 +157,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       return { daemonInstance: 'private-reference', operationKey, runId }
     })
     vi.spyOn(kernel, 'stop').mockImplementation(async operation => { runs.delete(operation.runId) })
-    runtime = new RuntimeController(store)
+    runtime = new RuntimeController(store, localRuntimeConnector)
     runtime.commit({ hosts: [{ id: 'local', client: core,
       executionHost: new LocalExecutionHost({ runner: async () => { throw new Error('This proof must not execute native commands.') } }) }],
       removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })

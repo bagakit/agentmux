@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector.ts'
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -47,7 +48,7 @@ try {
     record.runs.push({ agentSessionId: receipt.session.agentSessionId, run: receipt.session.run, workspacePath: receipt.session.workspacePath })
     await save(); return receipt
   }
-  runtime = new RuntimeController(sessions, topics)
+  runtime = new RuntimeController(sessions, localRuntimeConnector, topics)
   runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: async () => {} } }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const listeners = new Set()
   const sender = Object.assign(new EventEmitter(), { id: 192241, isDestroyed: () => false, send: (_channel, event) => { for (const fn of listeners) fn(event) } })

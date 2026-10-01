@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -95,7 +96,7 @@ async function registered() {
   const other = new ProcessResourceSampler(readTable, () => clock, appMetrics)
   ;(globalThis as any).__metricsMutantSampler = other
   cleanup.push(() => { sampler.dispose(); other.dispose() })
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), undefined, sampler)
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, undefined, sampler)
   const events = new Map<string, (event: any) => void>()
   const resourceReads = vi.fn(async () => ({ observedAt: 900, runCount: 1, runningRuns: 1, terminatedRuns: 0,
     terminatedUnattachedRuns: 0, attachments: 1, retainedOutputBytes: 64 }))

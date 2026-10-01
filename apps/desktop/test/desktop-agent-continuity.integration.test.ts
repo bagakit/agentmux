@@ -1,3 +1,4 @@
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -228,7 +229,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
       appearance: { terminalTheme: 'graphite' },
       browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
     }
-    const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(storePath))
+    const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(storePath), localRuntimeConnector)
     runtime.commit(await runtime.prepare(config))
     activeRuntime = runtime
     const renderer = createFakeWebContents(3)
@@ -331,7 +332,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     }
 
     const store1 = new AgentMuxFileAgentSessionStore(sessionStorePath)
-    const runtime1 = new RuntimeController(store1)
+    const runtime1 = new RuntimeController(store1, localRuntimeConnector)
     runtime1.commit(await runtime1.prepare(config))
     activeRuntime = runtime1
 
@@ -537,7 +538,7 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
     activeRuntime = undefined
 
     const store2 = new AgentMuxFileAgentSessionStore(sessionStorePath)
-    const runtime2 = new RuntimeController(store2)
+    const runtime2 = new RuntimeController(store2, localRuntimeConnector)
     runtime2.commit(await runtime2.prepare(config))
     activeRuntime = runtime2
 

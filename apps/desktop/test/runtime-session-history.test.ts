@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
 import {expect,it,vi} from 'vitest'
 import {AgentMuxMemoryAgentSessionStore,type AgentMuxClient,type AgentSessionHistoryPage,type AgentSessionHistoryObservationHandle} from '@agentmux/core'
@@ -36,7 +37,7 @@ async function owner(){
  await store.compareAndSwap(null,{kind:'agent',agentSessionId:control.agentSessionId,providerId:'codex',executorId:'specific-codex',hostId:control.hostId,
  workspacePath:_hygiene_fixturePath("synthetic"),run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
  nativeHandle:{kind:'provider',providerId:'codex',sessionId:'native-main'}})
- const controller=new RuntimeController(store)
+ const controller=new RuntimeController(store, localRuntimeConnector)
  const client={observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
  controller.commit({hosts:[{id:control.hostId,client:client as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const config:AppConfig={...structuredClone(DEFAULT_CONFIG),executors:{

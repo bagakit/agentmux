@@ -45,6 +45,7 @@ import { Window } from ${JSON.stringify(happyDomPath)}
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { RuntimeController } from ${JSON.stringify(join(base, 'apps/desktop/src/main/runtime-controller.ts'))}
+import { localRuntimeConnector } from ${JSON.stringify(join(base, 'apps/desktop/test/helpers/local-runtime-connector.ts'))}
 import { createWorkbenchTab } from ${JSON.stringify(join(base, 'apps/desktop/src/renderer/src/lib/workbench-tabs.ts'))}
 const [mode, root] = process.argv.slice(2)
 const window = new Window({ url: 'http://private.test' })
@@ -59,7 +60,7 @@ const { api } = await import(${JSON.stringify(join(base, 'apps/desktop/src/rende
 const { useAppStore } = await import(${JSON.stringify(join(base, 'apps/desktop/src/renderer/src/store.ts'))})
 const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
 const core = await connectLocalAgentMux({ store })
-const runtime = new RuntimeController(store)
+const runtime = new RuntimeController(store, localRuntimeConnector)
 runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: async () => {} } }],
  removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: {},

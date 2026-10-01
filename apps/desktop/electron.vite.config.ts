@@ -11,7 +11,7 @@ export default defineConfig({
         '@agentmux/client-ui/pasted-images': resolve(import.meta.dirname, '../../packages/client-ui/src/lib/pasted-images.ts')
       }
     },
-    build: { rollupOptions: { input: resolve(import.meta.dirname, 'src/main/index.ts') } }
+    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/main/index.ts'), 'agentmux-host': resolve(import.meta.dirname, '../host/src/index.ts') } } }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

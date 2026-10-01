@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act } from 'react'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -58,7 +59,7 @@ beforeEach(async () => {
   config = await disk.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [DEFAULT_CONFIG.hosts[0]!, remote], workspaces: [] })
   // The fixture is initialized explicitly; no unrelated default Topics bootstrap is exercised.
   vi.spyOn(disk, 'get').mockResolvedValue(config)
-  runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(ipc.directory, 'loops.json')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     undefined, (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal))

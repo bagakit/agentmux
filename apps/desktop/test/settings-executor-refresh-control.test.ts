@@ -1,3 +1,4 @@
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -73,7 +74,7 @@ async function registered() {
     vi.spyOn(client, 'probeExecutorAvailability')
     return client
   })
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   let initialized = false
   const prepare = vi.spyOn(runtime, 'prepare').mockImplementation(async (current): Promise<RuntimePreparation> => {
     const hosts = initialized ? [] : current.hosts.map((host, index) => ({ id: host.id,

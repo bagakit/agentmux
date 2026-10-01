@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxMemoryAgentSessionStore, type AgentMuxRuntimeResourceSnapshot } from '@agentmux/core'
 import type { RuntimeUsage, UsageSnapshot } from '../src/shared/process-usage.js'
@@ -231,7 +232,7 @@ describe('existing RuntimeController resource observation owner', () => {
       connect: vi.fn(() => { throw new Error('resource observation must not activate Runtime') }),
       stopTerminal: vi.fn(), remove: vi.fn()
     }
-    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     Object.assign(controller, { hosts: new Map([
       ['local', { executionHost: { kind: 'local' }, client }],
       ['other-local', { executionHost: { kind: 'local' }, client }]
@@ -251,7 +252,7 @@ describe('existing RuntimeController resource observation owner', () => {
     const runtimeDiagnostics = async () => ({ ctxmux: { state: { configuredDirectory: _hygiene_fixturePath("fixture/future"), servingDirectory: _hygiene_fixturePath("fixture/current") } } })
     const good = { runtimeResourceSnapshot: async () => resources, runtimeDiagnostics }
     const bad = { runtimeResourceSnapshot: async () => { throw new Error('disconnected') }, runtimeDiagnostics }
-    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     Object.assign(controller, { hosts: new Map([
       ['working', { executionHost: { kind: 'local' }, client: good }],
       ['failed', { executionHost: { kind: 'local' }, client: bad }]
@@ -272,7 +273,7 @@ describe('existing RuntimeController resource observation owner', () => {
       runtimeDiagnostics: vi.fn(async () => ({ ctxmux: { state: { configuredDirectory: _hygiene_fixturePath("fixture/future"), servingDirectory: null } } })),
       connect: vi.fn(), stopTerminal: vi.fn(), remove: vi.fn()
     }
-    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     Object.assign(controller, { hosts: new Map([['local', { executionHost: { kind: 'local' }, client }]]) })
     expect(await controller.resourceUsageObservation()).toEqual([{
       ...runtimeRow, runtimeStorage: null, runtimeStorageUnavailable: 'Current Runtime state directory is unverified', runtimeStorageObservedAt: null
