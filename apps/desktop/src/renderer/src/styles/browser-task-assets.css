@@ -22,3 +22,7 @@
 .browser-outcome-criteria__types > div { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .browser-outcome-criteria__types label { display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
 .browser-outcome-criteria__types input { margin: 0; accent-color: var(--green-2); }
+
+.browser-demonstration-suggestion { display: grid; min-width: 0; gap: var(--sp-1); margin-block-start: var(--sp-1); overflow-wrap: anywhere; }
+.browser-demonstration-suggestion > :is(strong, small) { overflow: visible; text-overflow: clip; white-space: normal; }
+.browser-demonstration-suggestion > small { color: var(--text-3); }

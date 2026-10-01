@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client", "vitest/globals"],
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/core": ["packages/core/src/index.ts"],
+      "@agentmux/core/control": ["packages/core/src/control.ts"],
+      "@agentmux/layout": ["packages/layout/src/index.ts"]
+    }
+  },
+  "include": ["../../../src/main/browser-demonstration-interpretation.ts", "../../../src/shared/browser-demonstration-semantics.ts",
+    "../../../src/renderer/src/components/BrowserDemonstrationSuggestion.tsx", "../../../src/renderer/src/components/BrowserDemonstrationSurface.tsx",
+    "../../../src/renderer/src/components/BrowserTaskAssetEditor.tsx", "../../../src/renderer/src/global.d.ts", "../../../test/browser-demonstration-semantics.test.tsx"]
+}

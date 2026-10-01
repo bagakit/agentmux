@@ -1,9 +1,12 @@
 import type { MouseEvent } from 'react'
 import { Circle, CircleAlert, Square } from 'lucide-react'
 import type { BrowserDemonstrationDraft } from '../../../shared/browser-demonstration'
+import type { BrowserDemonstrationSuggestion as Suggestion } from '../../../shared/browser-demonstration-semantics'
+import { BrowserDemonstrationSuggestion } from './BrowserDemonstrationSuggestion'
 
 type Props = {
   draft: BrowserDemonstrationDraft | null
+  suggestions?: Suggestion[] | undefined
   warning?: string
   busy?: boolean
   collapseSteps?: boolean
@@ -12,7 +15,7 @@ type Props = {
 }
 
 /** Draft review lives in the Browser's existing details surface; it never runs recorded actions. */
-export function BrowserDemonstrationSurface({ draft, warning, busy = false, collapseSteps = false, onStart, onStop }: Props) {
+export function BrowserDemonstrationSurface({ draft, suggestions, warning, busy = false, collapseSteps = false, onStart, onStop }: Props) {
   const recording = draft?.status === 'recording'
   if (!draft) return <section className="browser-demonstration-entry" aria-label="Human demonstration draft">
     <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
@@ -41,6 +44,7 @@ export function BrowserDemonstrationSurface({ draft, warning, busy = false, coll
         <span className="browser-rsi-replay__step-copy"><strong>{step.method === 'fillInput' ? 'Fill' : step.method === 'gotoUrl' ? 'Navigate' : 'Click'}</strong>
           <span>{step.target?.name ?? (step.method === 'gotoUrl' ? step.url : 'Target needs location')}</span>
           {step.inputKey ? <small>Parameter: {step.inputKey} · value not recorded</small> : null}
+          <BrowserDemonstrationSuggestion suggestion={suggestions?.find(item => item.stepId === step.id)} />
           {step.blockedReason ? <small className="browser-rsi-replay__blocked">{step.blockedReason}</small> : null}
         </span>
       </li>)}
