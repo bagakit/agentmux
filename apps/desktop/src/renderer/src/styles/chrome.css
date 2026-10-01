@@ -5,8 +5,6 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-:root { --window-controls-inset: 80px; }
-
 .window-drag-region {
   position: fixed;
   z-index: 80;
