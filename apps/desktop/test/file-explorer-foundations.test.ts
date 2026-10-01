@@ -528,7 +528,7 @@ describe('读失败在树上真的被画出来', () => {
       hook,
       'rootError 又变回独立 state 了——它与子目录的 error 是同一件事，两个写者会漂移'
     ).not.toMatch(/setRootError/)
-    expect(hook).toMatch(/rootError:\s*dirCache\[''\]\?\.error/)
+    expect(hook).toMatch(/rootError:\s*dirCache\[rootPath\]\?\.error/)
     // catch 里必须真的把原因写进 cache，否则上面那条派生恒为 null。
     expect(
       hook,

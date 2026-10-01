@@ -3,7 +3,7 @@ import { Copy, ExternalLink, GitBranch, PanelLeftClose, Shapes, SquareTerminal }
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { applyCopyPathStyle } from '../lib/copy-path-display'
+import { formatPathForDisplay } from '../lib/copy-path-display'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
@@ -137,7 +137,7 @@ export function WorkspaceRowContextMenu({
   const model = createWorkspaceRowMenuModel({
     // 路径复制走「路径怎么表示」这一层：本机行缩写 home 成 `~`（除非用户选了绝对路径），远端行原样。
     // 分支名不是路径，不缩写——它经 copyText 直达剪贴板出口。
-    path: isLocal ? applyCopyPathStyle(path, { home: localHome, copyPathsAsAbsolute }) : path,
+    path: isLocal ? formatPathForDisplay(path, { home: localHome, copyPathsAsAbsolute }) : path,
     branch,
     isLocal,
     revealLabel: revealInFileManagerLabel(),

@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ArchiveRestore, NotebookText, Pin, NotebookPen } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
@@ -24,6 +25,7 @@ import { MoteRenameDialog } from './MoteRenameDialog'
 export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: {
   workspace: WorkspaceRecord; query?: string; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
 }) {
+  const displayPath = usePathDisplay()
   const { topics, error } = useScratchTopics(workspace.id)
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
@@ -158,7 +160,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               className={`project-rail-row ${isMote ? 'space-mote-row' : 'space-topic-row'}${selected ? ' project-rail-row--active' : ''}`}
               aria-label={[`Open ${isMote && id !== PMO_TEAMS_TOPIC_ID ? `Mote · ${name}` : name}`, archived ? 'Archived' : '', attentionLabel].filter(Boolean).join(' · ')}
               aria-current={selected ? 'page' : undefined}
-              title={[name, topic.readError ?? topic.summary, scratchTopicPhysicalPath(workspace, topic)].filter(Boolean).join('\n')}
+              title={[name, topic.readError ?? topic.summary, displayPath(scratchTopicPhysicalPath(workspace, topic), workspace.hostId)].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
               <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>

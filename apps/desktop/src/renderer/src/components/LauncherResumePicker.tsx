@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, Clock3, FolderOpen, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
 import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -20,6 +21,7 @@ const EMPTY_FACTS = { timelines: {} as Record<string, AgentTimelineSnapshot>, se
 
 export function LauncherResumePicker({ workspace, disabled = false }: { workspace?: WorkspaceRecord | undefined; disabled?: boolean }) {
   const [open, setOpen] = useState(false)
+  const displayPath = usePathDisplay()
   const config = useAppStore(state => open ? state.config : null)
   const candidates = useAppStore(state => open ? state.recoveryCandidates : EMPTY_CANDIDATES)
   const [facts, setFacts] = useState(EMPTY_FACTS)
@@ -229,7 +231,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             </div>
             <dl className="launcher-resume__facts">
               <div><dt>Project</dt><dd>{selected.projectName}{!selected.workspace ? <small>Project is not registered</small> : null}</dd></div>
-              <div><dt>Directory</dt><dd className="launcher-resume__path">{selected.candidate.workspacePath}</dd></div>
+              <div><dt>Directory</dt><dd className="launcher-resume__path" title={displayPath(selected.candidate.workspacePath, selected.candidate.hostId)}>{displayPath(selected.candidate.workspacePath, selected.candidate.hostId)}</dd></div>
               <div><dt>Host</dt><dd>{selected.hostName}{selected.hostName !== selected.candidate.hostId ? <small>{selected.candidate.hostId}</small> : null}</dd></div>
               <div><dt>Session ID</dt><dd><code>{selected.candidate.agentSessionId}</code></dd></div>
               <div><dt>Last active</dt><dd><Clock3 size={11} aria-hidden="true" /><time dateTime={new Date(selected.candidate.updatedAt).toISOString()}>{new Date(selected.candidate.updatedAt).toLocaleString()}</time></dd></div>

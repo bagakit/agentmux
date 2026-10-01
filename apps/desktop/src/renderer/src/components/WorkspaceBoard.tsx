@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentAvatar } from './AgentAvatar'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import {
@@ -123,6 +124,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
 }
 
 export function WorkspaceBoard() {
+  const displayPath = usePathDisplay()
   const sessions = useAppStore((state) => state.sessions)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const selectSession = useAppStore((state) => state.selectSession)
@@ -303,7 +305,7 @@ export function WorkspaceBoard() {
                           void openRow(row)
                         }
                       }}
-                    ><strong>{row.name}</strong><small title={row.path ?? undefined}>{row.path ?? meta.emptyPathLabel}</small>{boardRowRecap(row) ? <small className="board-branch-head__recap">{boardRowRecap(row)}</small> : null}</span>
+                    ><strong>{row.name}</strong><small title={row.path ? displayPath(row.path, hostId) : undefined}>{row.path ? displayPath(row.path, hostId) : meta.emptyPathLabel}</small>{boardRowRecap(row) ? <small className="board-branch-head__recap">{boardRowRecap(row)}</small> : null}</span>
                     <span className="board-branch-head__meta">
                       {row.kind === 'branch' && row.branch.isCurrent ? <em>Current</em> : null}
                       <small>{row.sessions.length} run{row.sessions.length === 1 ? '' : 's'}</small>

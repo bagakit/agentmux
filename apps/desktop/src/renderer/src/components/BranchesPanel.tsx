@@ -1,7 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import {
   Check,
-  FolderGit2,
   GitBranch,
   GitCompareArrows,
   LoaderCircle,
@@ -19,6 +18,7 @@ import type {
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { useGitAheadBehind } from '../hooks/useGitAheadBehind'
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { gitSyncBadge } from '../lib/git-sync-badge'
 import { MAX_FANOUT_LANES } from '../../../shared/fanout-limits'
 import { buildFanOutRequest } from '../lib/fanout-request'
@@ -39,7 +39,7 @@ import {
 } from '../lib/worktree-removal-request'
 import { useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
-import { SelectorListHeader, SelectorPresence, SelectorRow } from './SelectorList'
+import { SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
 import { BranchComparisonPanel } from './BranchComparisonPanel'
 import { ConfirmationDialog } from './ConfirmationDialog'
@@ -50,6 +50,7 @@ function message(error: unknown): string {
 }
 
 export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
+  const displayPath = usePathDisplay()
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const runFanOut = useAppStore((state) => state.runFanOut)
   const config = useAppStore((state) => state.config)
@@ -258,7 +259,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         hasWorktree={worktree !== null}
         onOpen={() => void openBranch(branch)}
         onCopyBranchName={() => void copyText(branch.name)}
-        onCopyWorktreePath={() => worktree !== null && void copyText(worktree)}
+        onCopyWorktreePath={() => worktree !== null && void copyText(displayPath(worktree, workspace.hostId))}
         onRefresh={() => void refresh()}
         onRemoveWorktree={() => {
           // 要删的是**这一行**那个 worktree，所以 workspaceId 取 branch.workspaceId，不取
@@ -310,9 +311,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             <SelectorRow
               leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : pinned ? <Pin size={12} aria-label="Pinned branch" /> : <GitBranch size={12} />}
               title={branch.name}
-              titleTooltip={branch.name}
-              subtitle={worktree ?? 'No worktree'}
-              subtitleTooltip={worktree ?? undefined}
+              titleTooltip={worktree ? `${branch.name} · ${displayPath(worktree, workspace.hostId)}` : branch.name}
+              subtitle={worktree && worktree !== workspace.path ? displayPath(worktree, workspace.hostId) : null}
+              subtitleTooltip={worktree ? displayPath(worktree, workspace.hostId) : undefined}
               presence={
                 <SelectorPresence
                   agents={runningAgents.map((agent) => ({
@@ -363,12 +364,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
 
   return (
     <section className="branches-panel">
-      <SelectorListHeader
-        className="branches-header"
-        title="Branches"
-        count={snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}
-        actions={
-          <>
+      <header className="branches-header branches-header--tools" aria-label="Branch actions">
+        <span className="source-control-count" aria-label="Local branch count">{snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}</span>
+        <div className="source-control-actions">
             {snapshot?.kind === 'git-repository' ? (
               <button type="button" title="Compare two local branches" aria-label="Compare two local branches" aria-pressed={comparisonOpen} onClick={() => setComparisonOpen((open) => !open)}>
                 <GitCompareArrows size={13} />
@@ -389,10 +387,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
               {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
             </button>
-          </>
-        }
-      />
-      {snapshot?.kind === 'git-repository' ? <div className="branches-repo"><FolderGit2 size={11} /><span>{snapshot.repoPath}</span></div> : null}
+        </div>
+      </header>
       {comparisonOpen && snapshot?.kind === 'git-repository' ? (
         <BranchComparisonPanel key={JSON.stringify([workspace.id, snapshot.hostId, snapshot.repoPath])} workspaceId={workspace.id} branches={snapshot.branches} />
       ) : null}
@@ -539,7 +535,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         open={removalPrompt !== null}
         title={removalPrompt?.title ?? ''}
         description={removalPrompt?.description ?? ''}
-        {...(removalPrompt ? { subject: removalPrompt.subject } : {})}
+        {...(removalPrompt ? { subject: displayPath(removalPrompt.subject, workspace.hostId) } : {})}
         confirmLabel={removalPrompt?.confirmLabel ?? ''}
         busy={removing}
         onCancel={() => {

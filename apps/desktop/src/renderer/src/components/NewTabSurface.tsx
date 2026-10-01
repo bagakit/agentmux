@@ -8,7 +8,7 @@ import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { currentHostCheck } from '../lib/host-check'
-import { applyCopyPathStyle } from '../lib/copy-path-display'
+import { formatPathForDisplay } from '../lib/copy-path-display'
 import { configuredExecutors } from '../lib/executors'
 import { currentExecutorDetection, executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -165,7 +165,7 @@ export function NewTabSurface({
   }, [launcherTopicId, launcherTopics])
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
   const localHome = useAppStore(state => state.localHome)
-  const displayPath = workspace ? applyCopyPathStyle(workspace.path, {
+  const displayPath = workspace ? formatPathForDisplay(workspace.path, {
     home: host?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
   }) : ''
   const storedHostCheck = useAppStore((state) => workspace ? state.hostChecks[workspace.hostId] : undefined)

@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import {
   Crosshair,
   LoaderCircle,
@@ -20,7 +21,6 @@ import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { bumpWorkspaceFileRevision } from '../lib/file-workbench-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
   DndContext,
   KeyboardSensor,
@@ -67,6 +67,7 @@ export function WorkspaceTopicsPanel({
   workspace: WorkspaceRecord
   onRevealDirectory(path: string): void
 }) {
+  const displayPath = usePathDisplay()
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
   const topicId = layout ? activeTopicIdFromLayout(layout, tabs) : null
@@ -85,8 +86,6 @@ export function WorkspaceTopicsPanel({
   const selectSession = useAppStore((state) => state.selectSession)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
-  const localHome = useAppStore((state) => state.localHome)
-  const copyPathsAsAbsolute = useAppStore((state) => state.config?.copyPathsAsAbsolute)
   const { topics, error: readError } = useScratchTopics(workspace.id)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
@@ -401,7 +400,7 @@ export function WorkspaceTopicsPanel({
                 onCopyPath={() => withLogicalPath(path => {
                   const absolute = scratchWorkspaceFilePath(workspace, topics, path)
                   if (absolute === null) { reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry copying its path.')); return }
-                  void copyTextToClipboard(applyCopyPathStyle(absolute, { home: localHome, copyPathsAsAbsolute }), reportError)
+                  void copyTextToClipboard(displayPath(absolute, workspace.hostId), reportError)
                 })}
                 onRename={() => beginRename(topic)}
                 onReveal={() => withLogicalPath(onRevealDirectory)}
@@ -454,7 +453,7 @@ export function WorkspaceTopicsPanel({
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
                         : <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
-                      subtitle={<><span>{topic.summary || physicalPath}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
+                      subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
                         <TopicPresence

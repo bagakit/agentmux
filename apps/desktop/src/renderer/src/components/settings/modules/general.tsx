@@ -14,7 +14,7 @@ export const generalSettingsModule = {
   id: 'general',
   group: 'preferences',
   title: 'General',
-  description: 'Copied paths, local data, and diagnostics.',
+  description: 'Project paths, local data, and diagnostics.',
   icon: Settings2,
   keywords: 'copy path clipboard home directory ~ tilde abbreviate absolute full shorten core runtime terminal tmux ssh show crash log session recovery',
   savedSummary: (config) => config.copyPathsAsAbsolute === true ? 'Absolute paths' : 'Home paths (~)',

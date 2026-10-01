@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, History, LocateFixed, MessageSquare, Minus, Plus, SquareTerminal, X } from 'lucide-react'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
@@ -207,6 +208,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   onSelect(id: string): void; onPreview(message: AgentSessionUserMessage, target: HTMLElement, interactive: boolean, immediate?: boolean): void; onDismiss(messageId: string): void
   onInspect(segment: FocusTimeSegment, anchor: HTMLElement): void; onPresence(key: string, present: boolean): void
 }) {
+  const displayPath = usePathDisplay()
   const { clock, dateClock } = time
   const { current: context, segments, identity, sessionId } = track
   const gutter = useRef<HTMLSpanElement>(null)
@@ -245,7 +247,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
     </>
   }
   return <div className="recent-focus__track" data-focus-timeline-id={sessionId} data-focus-current={selected || undefined} data-history-only={!context ? 'true' : undefined}>
-    <span ref={gutter} className="recent-focus__gutter" title={`${name} · ${identity?.workspacePath ?? context?.workspacePath ?? 'Historical identity not recorded'}${path ? ` · ${path}` : ''}`}>
+    <span ref={gutter} className="recent-focus__gutter" title={`${name} · ${identity?.workspacePath ? displayPath(identity.workspacePath, identity.hostId) : context?.workspacePath ? displayPath(context.workspacePath, context.hostId) : 'Historical identity not recorded'}${path ? ` · ${path}` : ''}`}>
       <AgentAvatar sessionId={context?.kind === 'agent' ? sessionId : undefined} label={name} providerId={context?.providerId ?? identity?.providerId ?? undefined} state={context?.state} size={14} disclosure={disclosure}
         onOpen={context ? () => onSelect(context.id) : segments.length ? () => {
           const anchor = gutter.current?.querySelector<HTMLElement>('.agent-avatar')
@@ -346,6 +348,7 @@ function FocusTimelineLegend({ reading, sources, serviceNotice, onRead }: { read
 }
 
 function FocusHistoryObservation({ segment, anchor, time, onClose }: { segment: FocusTimeSegment; anchor: HTMLElement; time: FocusTimeFormatters; onClose(): void }) {
+  const displayPath = usePathDisplay()
   const identity = segment.identity
   const dateClock = time.detailed
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
@@ -355,7 +358,7 @@ function FocusHistoryObservation({ segment, anchor, time, onClose }: { segment: 
       <Dialog.Description className="confirmation-dialog__description">Retained focus observation. Reading it does not restore a Session.</Dialog.Description>
       <dl><dt>Focused</dt><dd>{dateClock(segment.focusedAt)}</dd><dt>Next focus</dt><dd>{segment.end === undefined ? 'Not recorded' : dateClock(segment.end)}</dd>
         <dt>Project</dt><dd>{identity?.project?.name ?? 'Not recorded'}</dd><dt>Branch / Topic</dt><dd>{[identity?.branch, identity?.topicId].filter(Boolean).join(' / ') || 'Not recorded'}</dd>
-        <dt>Workspace</dt><dd>{identity?.workspacePath ?? 'Not recorded'}</dd><dt>Session</dt><dd>{segment.sessionId}</dd></dl>
+        <dt>Workspace</dt><dd>{identity?.workspacePath ? displayPath(identity.workspacePath, identity.hostId) : 'Not recorded'}</dd><dt>Session</dt><dd>{segment.sessionId}</dd></dl>
       <p>Focus visits are retained here. Message and execution history coverage may be incomplete.</p>
       <footer><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></footer>
     </Dialog.Content>
@@ -405,6 +408,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     observe(); document.addEventListener('visibilitychange', observe)
     return () => { if (timer) clearInterval(timer); document.removeEventListener('visibilitychange', observe) }
   }, [mode])
+  const displayPath = usePathDisplay()
   const config = useAppStore(state => state.config)
   const registeredProjects = useMemo(() => new Set(config?.workspaces.map(workspace => JSON.stringify([workspace.hostId, workspace.id]))), [config])
   const lanesByContext = useMemo(() => {
@@ -514,16 +518,16 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     const available = new Map(contexts.filter(context => context.kind === 'agent').map(context => [context.id, {
       id: context.id, name: context.name, workspaceName: context.workspaceName,
       reference: { hostId: context.hostId, agentSessionId: context.id } satisfies SessionHistoryReference,
-      workspacePath: context.workspacePath, details: `Session: ${context.id}\nCurrent workspace: ${context.workspacePath}`
+      workspacePath: context.workspacePath, details: `Session: ${context.id}\nCurrent workspace: ${displayPath(context.workspacePath, context.hostId)}`
     }]))
     for (const source of catalogue.sources) if (!available.has(source.agentSessionId)) {
       const observation = resolveFocusInputTrack(observations, source).identity
       available.set(source.agentSessionId, { id: source.agentSessionId, name: observation?.name ?? `${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'} · ${source.agentSessionId.length <= 12 ? source.agentSessionId : `${source.agentSessionId.slice(0, 8)}…${source.agentSessionId.slice(-4)}`}`,
         workspaceName: `${observation?.project ? `${observation.project.name} (observed Context)` : 'Project not recorded'} · ${source.state === 'retired' ? 'Archived' : 'Stored source'}`,
-        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nObserved Context project: ${observation?.project?.name ?? 'Not recorded or conflicting'}\nMessage-time project: Not recorded\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ?? 'Not recorded'}` })
+        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nObserved Context project: ${observation?.project?.name ?? 'Not recorded or conflicting'}\nMessage-time project: Not recorded\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ? displayPath(source.history.workspacePath, source.hostId) : 'Not recorded'}` })
     }
     return [...available.values()]
-  }, [contexts, observations, catalogue.sources])
+  }, [contexts, observations, catalogue.sources, displayPath])
   const inputContextId = readingContextId ?? currentSessionId
   const inputContext = contexts.find(context => context.id === inputContextId && context.kind === 'agent')
   const inputSource = inputSources.find(source => source.id === inputContextId)

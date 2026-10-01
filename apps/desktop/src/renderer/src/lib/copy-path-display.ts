@@ -26,6 +26,14 @@ export function abbreviateHomePath(path: string, home: string): string {
   return path
 }
 
+/** A single path is opaque, including any literal newline in its name. */
+export function formatPathForDisplay(
+  path: string,
+  options: { home: string; copyPathsAsAbsolute: boolean | undefined }
+): string {
+  return options.copyPathsAsAbsolute === true ? path : abbreviateHomePath(path, options.home)
+}
+
 /**
  * 复制多行路径文本时逐行套用缩写。`copyPathsAsAbsolute` 为 `true`（用户主动选了绝对路径）时原样返回；
  * 否则（默认档）把每一行里的本机家目录缩写掉。`home` 为空时同样不动——由 `abbreviateHomePath` 兜住。
@@ -37,9 +45,8 @@ export function applyCopyPathStyle(
   text: string,
   options: { home: string; copyPathsAsAbsolute: boolean | undefined }
 ): string {
-  if (options.copyPathsAsAbsolute === true) return text
   return text
     .split('\n')
-    .map((line) => abbreviateHomePath(line, options.home))
+    .map((line) => formatPathForDisplay(line, options))
     .join('\n')
 }

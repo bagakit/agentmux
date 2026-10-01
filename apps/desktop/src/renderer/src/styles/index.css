@@ -14,6 +14,7 @@
 @import './topic-topology.css';
 @import './file-explorer.css';
 @import './source-control.css';
+@import './git-history.css';
 @import './workbench.css';
 @import './file-preview.css';
 @import './note.css';

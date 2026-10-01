@@ -25,7 +25,7 @@ export function focusProjectRoots(config: AppConfig | null) {
   return roots
 }
 export type FocusProjectLane = {
-  id: string; workspaceId: string; projectId: string; name: string; path: string
+  id: string; workspaceId: string; projectId: string; name: string; path: string; hostId: string
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
   projectWorkspaceId: string | null; summary: string | null
   objectKind?: 'topic' | 'mote' | 'unknown'; objectIconKey?: string
@@ -63,7 +63,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     const id = JSON.stringify([workspaceId, row.workspacePath, topicId])
     const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
       name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
-      path: row.workspacePath, topicId,
+      path: row.workspacePath, hostId: row.hostId, topicId,
       ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
         ...(workspace && topic && !topic.readError ? { objectIconKey: topicSpaceIconTarget(workspace, topic).key } : {}) } : {}),
       recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }

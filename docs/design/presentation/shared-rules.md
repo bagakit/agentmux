@@ -365,7 +365,8 @@ styles/
   dock.css  Tool Dock 这个容器本身及其 Topics / Agents 面板
   topic-topology.css  Topic 行尾的工作台拓扑：Region 缩略图、在场簇、悬停展开的 Tab/Region 检视面
   file-explorer.css  被塞进工具槽的文件浏览器：Explorer 头、搜索、文件树、文件列表
-  source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
+  source-control.css  Source Control 面板：Branches、Changes、History 共用导航与工作列表
+  git-history.css  Git History 的固定引用选择、已读提交与拓扑图
   workbench.css  Pane、Region、分屏、拖放
   file-preview.css  共用文件预览与就地编辑
   note.css  Note 阅读、编辑与恢复

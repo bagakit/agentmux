@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { FolderGit2, LoaderCircle, Play, Plus, RadioTower, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
@@ -14,6 +15,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   onClose: () => void
 }) {
   const [filter, setFilter] = useState('')
+  const displayPath = usePathDisplay()
   const [hostId, setHostId] = useState(config.workspaces[0]?.hostId ?? 'local')
   const [projectPath, setProjectPath] = useState('')
   const [name, setName] = useState('')
@@ -106,7 +108,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
       </div>
       {config.workspaces.length > 0 ? <section className="settings-group">
         <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Filter workspaces" placeholder="Find a workspace…" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
-        <div className="workspace-settings-list">{matchingWorkspaces.map((workspace) => <div key={workspace.id}><FolderGit2 size={14} /><span><strong>{workspace.name}</strong><small>{workspace.path}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
+        <div className="workspace-settings-list">{matchingWorkspaces.map((workspace) => <div key={workspace.id}><FolderGit2 size={14} /><span><strong>{workspace.name}</strong><small title={displayPath(workspace.path, workspace.hostId)}>{displayPath(workspace.path, workspace.hostId)}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
       {matchingWorkspaces.length === 0 ? <p className="settings-resource-empty" role="status">No workspaces match “{filter}”.</p> : null}
       </section> : <div className="settings-workspaces-empty"><p>Your projects will appear here.</p>{!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add your first project</button> : null}</div>}
     </div>

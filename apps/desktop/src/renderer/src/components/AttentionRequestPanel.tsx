@@ -1,3 +1,4 @@
+import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ArrowRight, ArrowUpRight, CheckCircle2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AgentMuxInteractionResponse } from '@agentmux/core'
@@ -53,6 +54,7 @@ export function AttentionRequestPanel({
   const [actionError, setActionError] = useState<string | null>(null)
   const [caughtUp, setCaughtUp] = useState(false)
 
+  const displayPath = usePathDisplay()
   const sessions = useAppStore((state) => state.sessions)
   const session = sessions.find((item) => item.id === activeSessionId)
   const selectSession = useAppStore((state) => state.selectSession)
@@ -216,7 +218,7 @@ export function AttentionRequestPanel({
   return (
     <aside ref={panelRef} className="attention-request-panel" aria-label={`Request from ${session.label}`} tabIndex={-1} onKeyDown={handleKeyDown}>
       <header className="attention-request-panel__header">
-        <div><span>{request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small>{session.workspacePath}</small></div>
+        <div><span>{request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small title={displayPath(session.workspacePath, session.hostId)}>{displayPath(session.workspacePath, session.hostId)}</small></div>
         <div className="attention-request-panel__actions">
           <button type="button" className="small-button" onClick={() => selectSession(session.id)}><ArrowUpRight size={12} /> Open Session</button>
           <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><X size={14} /></button>

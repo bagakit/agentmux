@@ -21,6 +21,7 @@ import type {
   GitRemoteResult,
   GitStatusResult
 } from '../shared/git-contracts.js'
+import type { GitHistoryCommit, GitHistoryInput, GitHistoryRef, GitHistoryResult, GitHistorySnapshot } from '../shared/git-contracts.js'
 
 /**
  * The one place git's own error text is trusted enough to show a person. Git can echo a remote URL
@@ -428,6 +429,30 @@ const MAX_DIFF_BYTES = 2 * 1024 * 1024
 const MAX_COMPARISON_FILES = 1_000
 const FULL_COMMIT_OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u
 
+const MAX_HISTORY_REFS = 2_000
+const MAX_HISTORY_PAGE = 100
+
+/** Raw pretty format preserves original parents, including a shallow boundary; %P can rewrite them. */
+export function parseGitHistory(output: string): Omit<GitHistoryCommit, 'refs'>[] {
+  if (output === '') return []
+  const blocks = output.split(/(?=^commit [0-9a-f]+\n)/mu).filter(Boolean)
+  return blocks.map(block => {
+    const end = block.indexOf('\n\n')
+    const header = block.slice(0, end).split('\n')
+    const oid = header[0]?.slice('commit '.length) ?? ''
+    if (end < 0 || !header[0]?.startsWith('commit ') || !FULL_COMMIT_OID.test(oid) ||
+      !header.some(line => /^tree [0-9a-f]+$/u.test(line))) throw new Error('Git returned invalid history metadata')
+    const parents = header.filter(line => line.startsWith('parent ')).map(line => line.slice(7))
+    if (parents.some(parent => !FULL_COMMIT_OID.test(parent))) throw new Error('Git returned invalid history parents')
+    const author = /^author (.*) <[^>]*> (-?\d+) [+-]\d{4}$/u.exec(header.find(line => line.startsWith('author ')) ?? '')
+    if (!author) throw new Error('Git returned invalid history author metadata')
+    const seconds = Number(author[2])
+    const authoredAt = Number.isSafeInteger(seconds) && Math.abs(seconds * 1000) <= 8.64e15 ? seconds * 1000 : null
+    const message = block.slice(end + 2).split('\n').map(line => line.startsWith('    ') ? line.slice(4) : line).join('\n').trim()
+    return { oid, parents, author: author[1]!, authoredAt, subject: message.split(/\n\s*\n/u)[0]!.replace(/\n/gu, ' ').trim() }
+  })
+}
+
 function assertComparisonPath(path: string): void {
   if (typeof path !== 'string' || path === '' || path.includes('\0') ||
     path.split('/').some((part) => part === '' || part === '.' || part === '..')) {
@@ -593,6 +618,85 @@ export class GitService {
     private readonly readWorktreeFile: WorktreeReader = defaultWorktreeReader
   ) {}
 
+  async history(workspaceId: string, input: GitHistoryInput = {}, config: AppConfig): Promise<GitHistoryResult> {
+    const limit = input.limit ?? 50
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_HISTORY_PAGE) throw new Error('History page size must be between 1 and 100')
+    const workspace = this.workspace(config, workspaceId)
+    const host = this.hostFor(workspace.hostId)
+    const repoPath = await this.resolveRepoPath(host, workspace.path)
+    if (repoPath === null) return { kind: 'not-a-git-repository', hostId: workspace.hostId, workspacePath: workspace.path }
+    let snapshot: GitHistorySnapshot
+    const offset = input.cursor?.offset ?? 0
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid history cursor offset')
+    if (input.cursor) {
+      snapshot = input.cursor.snapshot
+      if (!snapshot || snapshot.hostId !== workspace.hostId || snapshot.repoPath !== repoPath ||
+        !Array.isArray(snapshot.refs) || snapshot.refs.length > MAX_HISTORY_REFS + 1 ||
+        !Array.isArray(snapshot.roots) || snapshot.roots.length > MAX_HISTORY_REFS + 1 ||
+        !Number.isFinite(snapshot.checkedAt) || (input.ref !== undefined && input.ref !== snapshot.selectedRef)) {
+        throw new Error('History cursor does not belong to this repository and reference')
+      }
+      for (const ref of snapshot.refs) {
+        this.commitOid(ref.oid)
+        if (!(ref.kind === 'head' && ref.name === 'HEAD') &&
+          !(ref.kind === 'local' && ref.name.startsWith('refs/heads/')) &&
+          !(ref.kind === 'remote' && ref.name.startsWith('refs/remotes/')) &&
+          !(ref.kind === 'tag' && ref.name.startsWith('refs/tags/'))) throw new Error('Invalid history reference')
+      }
+      for (const root of snapshot.roots) this.commitOid(root)
+      const expected = this.historyRoots(snapshot.refs, snapshot.selectedRef)
+      if (JSON.stringify(expected) !== JSON.stringify(snapshot.roots)) throw new Error('History cursor roots changed')
+    } else {
+      const enumerated = await this.comparisonGit(host, repoPath,
+        ['for-each-ref', `--count=${MAX_HISTORY_REFS + 1}`, '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)',
+          'refs/heads', 'refs/remotes', 'refs/tags'], 'Could not read history references')
+      const records = enumerated.stdout.split('\n').filter(Boolean)
+      if (records.length > MAX_HISTORY_REFS) throw new Error('History has too many references; the complete reference snapshot exceeds the 2000-ref limit')
+      const refs: GitHistoryRef[] = records.flatMap(record => {
+        const [name, type, object, peeledType, peeled] = record.split('\0')
+        if (!name || !type || !object || record.split('\0').length !== 5) throw new Error('Git returned invalid history references')
+        const kind: GitHistoryRef['kind'] = name.startsWith('refs/heads/') ? 'local' : name.startsWith('refs/remotes/') ? 'remote' : 'tag'
+        const oid = type === 'commit' ? object : peeledType === 'commit' ? peeled : null
+        if (!oid) {
+          if (kind !== 'tag') throw new Error('History branch does not point to a readable commit')
+          return []
+        }
+        return [{ name, kind, oid: this.commitOid(oid) }]
+      })
+      const head = await host.run('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], GIT_RUN_OPTIONS)
+      if (head.exitCode === 0) refs.push({ name: 'HEAD', kind: 'head', oid: this.commitOid(head.stdout) })
+      else {
+        const symbolic = await this.comparisonGit(host, repoPath, ['symbolic-ref', '--quiet', 'HEAD'], 'Could not read history HEAD')
+        const name = symbolic.stdout.trim()
+        if (!name.startsWith('refs/heads/')) throw new Error('History HEAD does not identify a local branch')
+        const exists = await host.run('git', ['-C', repoPath, 'show-ref', '--verify', '--quiet', name], GIT_RUN_OPTIONS)
+        if (exists.exitCode !== 1 || exists.stderr.trim()) throw gitFailureError(head, 'History HEAD is unreadable')
+      }
+      const selectedRef = input.ref ?? null
+      snapshot = { hostId: workspace.hostId, repoPath, selectedRef, refs,
+        roots: this.historyRoots(refs, selectedRef), checkedAt: Date.now() }
+    }
+    if (snapshot.roots.length === 0) return { kind: 'ready', snapshot, commits: [], nextCursor: null }
+    const result = await this.comparisonGit(host, repoPath,
+      ['log', '--no-color', '--no-decorate', '--no-show-signature', '--topo-order', '--format=raw', '--no-abbrev',
+        `--max-count=${limit + 1}`, `--skip=${offset}`, '--stdin', '--'], 'Could not read the fixed history commits',
+      snapshot.roots.join('\n') + '\n')
+    // Roots are immutable complete OIDs, never revision expressions supplied through stdin.
+    const parsed = parseGitHistory(result.stdout)
+    if (parsed.length > limit + 1 || new Set(parsed.map(commit => commit.oid)).size !== parsed.length) throw new Error('Git returned an invalid history page')
+    const commits = parsed.slice(0, limit).map(commit => ({ ...commit, refs: snapshot.refs.filter(ref => ref.oid === commit.oid) }))
+    return { kind: 'ready', snapshot, commits, nextCursor: parsed.length > limit ? { snapshot, offset: offset + commits.length } : null }
+  }
+
+  private historyRoots(refs: GitHistoryRef[], selectedRef: string | null): string[] {
+    if (selectedRef !== null) {
+      const ref = refs.find(ref => ref.name === selectedRef && ref.kind !== 'tag')
+      if (!ref) throw new Error('Selected history reference has no observed commit')
+      return [ref.oid]
+    }
+    return [...new Set(refs.filter(ref => ref.kind !== 'tag').map(ref => ref.oid))].sort()
+  }
+
   async compareBranches(
     workspaceId: string,
     input: GitBranchCompareInput,
@@ -679,10 +783,10 @@ export class GitService {
     return this.commitOid(result.stdout)
   }
 
-  private async comparisonGit(host: ExecutionHost, repoPath: string, args: string[], failure: string) {
+  private async comparisonGit(host: ExecutionHost, repoPath: string, args: string[], failure: string, input?: string) {
     let result
     try {
-      result = await host.run('git', ['-C', repoPath, ...args], GIT_RUN_OPTIONS)
+      result = await host.run('git', ['-C', repoPath, ...args], input === undefined ? GIT_RUN_OPTIONS : { ...GIT_RUN_OPTIONS, input })
     } catch (error) {
       if (isOutputLimitError(error)) throw error
       throw gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, failure)
