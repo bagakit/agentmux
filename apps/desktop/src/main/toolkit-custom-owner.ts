@@ -14,7 +14,7 @@ type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirme
 type Execution = { tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
-  finishing: Promise<void> | null; starting: Promise<void> | null }
+  finishing: Promise<void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null }
 type Receipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null }
 // A code unit may cost six JSON bytes; leave room for the fixed owner explanation.
 const message = (error: unknown) => String(error instanceof Error ? error.message : error).slice(0, 512)
@@ -101,7 +101,7 @@ export class CustomToolkitOwner {
     const done = new Promise<void>(resolve => { complete = resolve })
     return { tool, admission, port: null, cursor: 0, rawBytes: 0, decoder: new TextDecoder('utf-8', { fatal: true }), replayText: null,
       failure: null, creating: false, attaching: false, ended: false, stopRequested: false, terminalHint: false, uncertain: false,
-      done, complete, finishing: null, starting: null }
+      done, complete, finishing: null, starting: null, stopSubmission: null }
   }
   private receipt(tool: Tool): Receipt { return structuredClone({ latestConfirmed: tool.latest, admission: tool.admission }) }
   private async save(tool: Tool): Promise<void> { await this.args.receipts.save(tool.id, this.receipt(tool)) }
@@ -194,7 +194,7 @@ export class CustomToolkitOwner {
       const attached = await this.attach(execution)
       if (execution.ended || execution.tool.live !== execution || execution.uncertain) return
       if (attached.run.state !== 'running') await this.finish(execution, attached)
-      else if (execution.stopRequested || execution.failure) await this.stop(execution.tool.id, execution.admission.executionId)
+      else if (this.closed || execution.stopRequested || execution.failure) await this.stop(execution.tool.id, execution.admission.executionId)
       else { execution.admission.state = 'running'; this.publish(execution.tool) }
     } catch (error) {
       if (execution.creating || execution.admission.run) this.unknown(execution, error)
@@ -211,7 +211,7 @@ export class CustomToolkitOwner {
         const attached = await this.attach(execution)
         if (execution.ended || tool.live !== execution || execution.uncertain) return
         if (attached.run.state !== 'running') await this.finish(execution, attached)
-        else if (execution.failure || execution.stopRequested) await this.stop(tool.id, execution.admission.executionId)
+        else if (this.closed || execution.failure || execution.stopRequested) await this.stop(tool.id, execution.admission.executionId)
         else { execution.admission.state = 'running'; execution.admission.reason = null; this.publish(tool) }
       } catch (error) {
         this.unknown(execution, error)
@@ -323,6 +323,9 @@ export class CustomToolkitOwner {
           catch (error) { execution.failure = message(error) }
         }
         this.restoreText(execution, final)
+        // An exit event can arrive inside Core Stop, before its acceptance is known.
+        // Wait only for that submission, never for Stop's later call back into finish.
+        try { await execution.stopSubmission } catch { /* Rejected Stop leaves the natural terminal fact authoritative. */ }
         const state = execution.failure ? 'failed' : execution.stopRequested ? 'stopped' : final.run.exitCode === 0 ? 'succeeded' : 'failed'
         const reason = execution.failure ?? (state === 'succeeded' ? null : state === 'stopped' ? 'Stopped explicitly.' : 'Script exited unsuccessfully.')
         await this.confirm(execution, state, reason, final.run.exitCode ?? null)
@@ -360,9 +363,29 @@ export class CustomToolkitOwner {
       if (tool.admission?.executionId !== executionId) throw new AgentMuxError('Tool execution changed during recovery.', 'CONFIG_CONFLICT')
     }
     const execution = tool.live
+    if (execution?.ended) {
+      if (execution.finishing) await execution.finishing
+      return this.current(tool)
+    }
     if (!execution?.port || !tool.admission.run) throw new AgentMuxError('Tool Run identity is unconfirmed.', 'CONTROL_UNAVAILABLE')
-    execution.stopRequested = true; execution.admission.state = 'stopping'; this.publish(tool)
-    await execution.port.stop(ref(execution))
+    if (!execution.stopRequested) {
+      // Register before invoking the port: it may synchronously publish an exit.
+      execution.stopSubmission ??= Promise.resolve().then(async () => {
+        await execution.port!.stop(ref(execution))
+        execution.stopRequested = true
+      })
+      const submission = execution.stopSubmission
+      execution.admission.state = 'stopping'; execution.admission.reason = 'Stop confirmation pending.'; this.publish(tool)
+      try { await submission }
+      catch (error) {
+        await this.finish(execution)
+        if (tool.live !== execution || execution.ended) return this.current(tool)
+        const observed = this.current(tool)
+        const outcome = observed.state === 'unknown' ? observed.reason : null
+        this.unknown(execution, 'Stop unconfirmed: ' + message(error) + (outcome ? '; ' + outcome : ''))
+        throw error
+      } finally { if (execution.stopSubmission === submission) execution.stopSubmission = null }
+    }
     await this.finish(execution)
     // Core Stop releases the old attachment. Its receipt may precede terminal metadata;
     // retain observation of this same Run rather than losing the later authoritative exit.
@@ -395,7 +418,6 @@ export class CustomToolkitOwner {
       for (const lease of [...tool.leases]) { lease.release(); try { lease.end() } catch {} }
       const execution = tool.live
       if (!execution) continue
-      execution.stopRequested = true
       if (execution.starting) {
         try { await execution.starting } catch (error) { this.unknown(execution, error) }
       }
