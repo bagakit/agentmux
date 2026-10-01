@@ -1,11 +1,13 @@
 import type { AgentSessionUserMessageSource } from '@agentmux/core'
 import { Flag, Info } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { useClientUiPlatform } from '../platform.js'
 
 /** Opening this disclosure never changes the message's author. */
-export function ConversationInputDetails({ messageId, source, speaker, declaredAgentSessionId, describeSpeaker }: {
+export function ConversationInputDetails({ messageId, source, speaker, declaredAgentSessionId, describeSpeaker, recordedIdentity = false, children }: {
+  recordedIdentity?: boolean
+  children?: ReactNode
   messageId: string
   source?: AgentSessionUserMessageSource | undefined
   speaker?: ConversationSpeaker | undefined
@@ -19,7 +21,7 @@ export function ConversationInputDetails({ messageId, source, speaker, declaredA
   const [opened, setOpened] = useState<{ identity: string; details?: ConversationSenderDetails } | null>(null)
   const contentId = useId()
   const open = opened?.identity === identity
-  if (!source && !senderId) return null
+  if (!source && !senderId && !children && !recordedIdentity) return null
 
   function toggle(): void {
     if (open) { setOpened(null); return }
@@ -36,8 +38,9 @@ export function ConversationInputDetails({ messageId, source, speaker, declaredA
         <dt>{source.kind === 'native' ? 'Record' : 'Submission'}</dt><dd><code>{source.kind === 'native' ? source.recordId : source.submissionId}</code></dd>
         {source.kind === 'native' ? <><dt>Native session</dt><dd><code>{source.nativeSessionId}</code></dd></> : null}
         <dt>Delivery channel</dt><dd>Not recorded</dd>
-        <dt>Recorded author</dt><dd>{speaker?.role === 'unknown' ? 'Not recorded · shown as You' : speaker?.role ?? 'Not recorded'}</dd>
+        <dt>Recorded author</dt><dd>{speaker?.role === 'unknown' ? recordedIdentity ? 'Not recorded' : 'Not recorded · shown as You' : speaker?.role ?? 'Not recorded'}</dd>
       </dl> : null}
+      {children}
       {senderId ? <div className="conversation-input-details__sender">
         <h4>{declared ? 'Current details from message header' : 'Current sender'}</h4>
         {details ? <>

@@ -274,6 +274,22 @@ Inbox 来信和 Outbox 已发送／已记录的历史以各条原始展示时间
 邮箱的打开优先、hover／pin／关闭／键盘和按所见分类记录已读继续按本节既有规则；不新增单条已读账本或在已被该规则确认的记录上保留假的 Unread 标签。来源变化不把另一个对象顶替当前详情；System 详情复用既有 serviceNoticeFingerprint 的 occurrence／cause／kind 身份，不把 observedAt 放进身份；单 id 复发或原因／kind 变化须返回本页，不能静默换成另一次问题。换 Session／Run 不带入旧详情或派发旧意图。固定导航、摘要层次与详情密度只定义在 surface-density 的同名小节。
 
 
+### 统一对话阅读与简明操作
+
+用户反馈「最新的包里没有看到有复用组件」「整个 mailbox 看起来，它的选项非常不清晰，到处都是字，不够现代化」，要求完整重新设计。邮箱须成为当前 Session 的清楚阅读与处理面：Inbox 来信、Outbox 待发与输入记录、Notices 当前服务告示的导航含义可直接辨认；Progress 是可发现的独立工具入口，仍沿《[持续推进与邮箱共享入口](#持续推进与邮箱共享入口)》的常驻表单和循环 owner，不增加二层模式导航或全局循环管理。
+
+导航计数只表达要处理的事实：Inbox 与 Notices 为各自既有未读数，Outbox 为实际 pending 数；零时不显示 badge，可访问名称和标题说明对象与准确数量。已加载 History 的有界窗口不是全源总数，不能与 Pending 相加伪装成 Outbox 总数。邮箱入口仍沿[《Message Tools 邮箱》](#message-tools-邮箱)原总未读／pending／Progress 分离合同，打开优先、所见页已读、hover 不夺焦点、新事实不强切页均不变。
+
+列表以真实作者／身份、原始时间和有界原文开头为主要信息，不逐条重复 Read full message、Captured input、Delivered 等说明。摘要的读取边界是原始字符串前240字符；预算内可按共享对话语法完整解释的来源声明，不得挤占正文摘要。有正文时摘要以同条正文开头为主；无法完整解释时保留有界原文，不伪装成已解析正文。完整详情、身份事实及原文 Copy 不受摘要投影影响。不得扩大预算、解析全文或扫描尾部来寻找正文，也不得维护另一份声明语法。来源及投递成功细节可渐进披露；影响当前处理的未知投递、Run 不可用或失败在对应记录附近保持简短可见，不能只为减字隐藏风险。缺失作者明确未知；缺失时间和完整来源在详情可读，不补造事实。Pending 与 History 仍分别按真实投递顺序及最近顺序呈现，分页／刷新／观察问题留在 History，不盖过队列。
+
+Inbox 以及 Outbox 的 Pending／History 完整详情实际复用各 client 共用的 ConversationMessage 正文、头像／身份、Markdown 与原文 Copy；共享阅读层是这些呈现的唯一实现，Mailbox 不保留宿主专用副本或第二套正文、声明语法与复制反馈。共享阅读层只持呈现与单对象局部交互，不持 Session、Run、Queue、Read、Progress 或来源发现。Clipboard 结果与错误报告、浮层目标、焦点策略及身份／图标呈现由宿主明确提供；文件、HTTP、图片与当前来源上下文仍由宿主传入，共享层不借 Electron、宿主 Store 或隐含平台默认取得这些能力。仅邮箱记录阅读显式选择紧凑呈现与记录身份语义：未知作者仍为 Author unknown，不改变普通对话已确认的 unknown→You 展示默认，也不把 queued／restoring／deferred 或 native Recorded 映射成对话 complete／streaming／failed。尚未投递的队列不伪造 captured receipt；正文中的声明不升级成已认证作者。Copy 复制完整原记录字符串，包含原头部及末尾，不复制两行预览或解析后的正文；共享单条 Copy 只有原 Clipboard／feedback 明确返回 true 才显示 Copied；false／throw／void／undefined 不冒成功，失败保完整正文、原反馈与 Retry，Copy all 的原路径不换。
+
+文件、HTTP 链接、图片和来源披露沿来源 Session 的既有 origin、workspaceRoot、homeDir 与实际打开／读取 owner；不能借当前 active Workspace 或收件 Agent 的资料补造发件人上下文，不新增逐行 Store 观察、正文缓存或持久 owner。列表只挂当前页轻量有界摘要，显式单对象详情才挂完整对话内容；不能把含 Copy／来源等互动的 ConversationMessage 嵌进整行按钮。返回保原分类、滚动位置与焦点优先级；旧 Session／Run、失效记录与 Notice occurrence／cause／kind 的详情隔离继续沿[《Message Tools 邮箱》](#message-tools-邮箱)合同。
+
+Pending 只把当前原 first deliverable 的 Send 作为清楚主动作；任一条 sending 时全部 Send 仍禁用。移动／复制／移除可用低层级图标动作，但每个都有 tooltip、准确可访问名称和原次序／sending 禁用规则；Copy all 的原全文与顺序保持。风险说明归实际对象，不用每条重复长流程段来代替状态。查看、返回、切页、展开来源或重开邮箱均不派发、重投、重排、清草稿或改变 Run 绑定。
+
+Notices 列表先给问题及轻量类型／时间，完整详情仍读原 problem／impact／restore 与原恢复动作；已读不冒充恢复，详情不替换另一 occurrence。空页有可辨的对象标题，最多一条必要提示。原 Mailbox 原生浮层、可见性租约、观察／刷新／分页、Read、Queue、Progress、Terminal 与输入 owner 均保留；本次只重设计呈现与真正共享阅读，不新增依赖、存储、调度或状态机。具体视觉及紧凑层次只定义在[呈现合同同名小节](../presentation/conversation-input.md#统一对话阅读与简明操作)。
+
 ## 输入框截图缩略图
 
 用户反馈“现在截图在输入框里头还是没有变成缩略图展示”。截图与粘贴图片进入草稿后，必须在输入框内显示可辨认的缩略图并可放大检查；发送前即可确认是哪张图。缩略图只是同一图片引用的展示，不改变实际发送路径、草稿持久化、复制、撤销或删除语义。加载中和不可读取时原始引用仍可见，不能把图片引用悄悄丢掉。重挂载后仍能从同一持久引用恢复缩略图；Session 输入框和新建 Agent 的输入框共用这项能力。尺寸语言见密度 SSOT。

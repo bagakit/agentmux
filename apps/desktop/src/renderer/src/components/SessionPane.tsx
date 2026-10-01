@@ -427,6 +427,12 @@ export function SessionPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.kind, missing, interruptionReason])
 
+  const mailboxReading = {
+    workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
+    ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
+    readPastedImage, openHttpLink: onProseLinkClick, describeSpeaker
+  }
+
   const acceptedLaunch = pendingLaunch?.created && (!session || session.control.run.runId === pendingLaunch.created.run.runId)
     ? pendingLaunch.created : undefined
   const launchFailures = pendingLaunch?.projectionFailures ?? []
@@ -456,7 +462,7 @@ export function SessionPane({
   if (!session && acceptedLaunch) {
     return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
       <div className="agent-body">{launchNotice}<p>Agent created · {acceptedLaunch.agentSessionId}</p></div>
-      {!readOnly ? <AgentSessionComposer key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
+      {!readOnly ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>
   }
 
@@ -472,7 +478,7 @@ export function SessionPane({
           executor={connectingExecutor}
           appearance={connectingAppearance}
         />
-        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
+        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -557,7 +563,7 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { composer: <AgentSessionComposer sessionId={session.id}
+      {...(hasAgentComposer ? { composer: <AgentSessionComposer reading={mailboxReading} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <section
@@ -711,7 +717,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>

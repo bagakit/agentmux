@@ -62,3 +62,27 @@ describe('conversation message reading surface', () => {
     }
   })
 })
+
+describe('recorded identity and host copy result',()=>{
+  it('keeps ordinary unknown shown as You while explicitly selected records retain unknown identity',()=>{
+    const base={speaker:{role:'unknown' as const,id:'unknown'},content:'Original words'}
+    const ordinary=renderToStaticMarkup(<ConversationMessage {...base}/>),record=renderToStaticMarkup(<ConversationMessage {...base} compact recordedIdentity />)
+    expect(ordinary).toContain('data-speaker-role="human"');expect(ordinary).toContain('>You</span>')
+    expect(record).toContain('data-speaker-role="unknown"');expect(record).toContain('>Author unknown</span>');expect(record).not.toContain('>You</span>')
+  })
+  it.each(['false','throw','void'] as const)('never labels a %s host Copy result as copied and retains the complete original',async mode=>{
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
+    const text='Header **original**\n'+Array.from({length:90},(_,i)=>`Retained line ${i+1}`).join('\n')+'\nOriginal last line\n'
+    const host=document.createElement('div');document.body.append(host);const root=createRoot(host)
+    const copy=vi.fn(async()=>{if(mode==='throw')throw Error('Original clipboard unavailable');return mode==='false'?false:undefined})
+    try{
+      await act(async()=>root.render(<ConversationMessage compact recordedIdentity speaker={{role:'unknown',id:'unknown'}} content={text} onCopy={copy as ()=>Promise<boolean>} />))
+      await act(async()=>host.querySelector<HTMLButtonElement>('.log-turn__action')!.click())
+      expect(copy).toHaveBeenCalledExactlyOnceWith(text)
+      expect(host.querySelector('.log-turn__actions')!.getAttribute('data-copy-state')).toBe('failed')
+      expect(host.querySelector('[role="alert"]')!.textContent).toBe('Copy failed')
+      expect(host.textContent).toContain('Original last line');expect(host.textContent).not.toContain('Copied')
+      expect(host.querySelector('.log-turn__action')!.textContent).toContain('Retry')
+    }finally{await act(async()=>root.unmount());host.remove()}
+  })
+})

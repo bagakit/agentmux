@@ -31,6 +31,7 @@ import { useComposerFeedback } from './ComposerFeedback'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
+import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 
 export type AgentComposerAvailability = {
@@ -61,6 +62,7 @@ export function AgentSessionComposer({
   readOnly = false,
   tabName,
   resultReview,
+  reading,
   visible = true
 }: {
   sessionId: string
@@ -68,6 +70,7 @@ export function AgentSessionComposer({
   readOnly?: boolean
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
+  reading?: ConversationReadingProps | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
 }) {
@@ -257,7 +260,7 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
-      mailbox={<SessionMailbox visible={visible} system={inbox} timeline={timeline}
+      mailbox={<SessionMailbox reading={reading} visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
@@ -273,7 +276,7 @@ export function AgentSessionComposer({
         onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         onSendQueued={(operationId) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) }}
-        onCopyQueued={(text) => { void feedback.run(async () => { await copyTextToClipboard(text, feedback.report) }) }}
+        onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
       />}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}

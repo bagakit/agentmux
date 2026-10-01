@@ -27,15 +27,15 @@ it('the existing Send grants its exact head message without an additional contin
   await dom.render(<ComposerOutbox selectedId={firstId} onSelect={() => {}} queued={pending.map((entry) => ({ id: entry.operationId,
     text: entry.text, status: entry.status, deliverable: true
   }))} onSend={(id) => { void useAppStore.getState().sendQueuedAgentSteer('agent-1', id) }} />)
-  expect(dom.container.textContent).toContain('Send explicitly steers this message')
+  expect(dom.container.textContent).toContain('Send explicitly steers only this message')
   expect(dom.container.textContent).not.toContain('Send now — turn may still be running')
   const button = Array.from(dom.container.querySelectorAll('button')).find((item) =>
-    item.textContent === 'Send queued message')
+    item.getAttribute('aria-label') === 'Send queued message')
   expect(button).toBeDefined()
   await act(async () => { button!.click() })
   expect(submit.mock.calls).toEqual([
-    [composerSession().control, 'first', firstId, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, undefined, false],
-    [composerSession().control, 'first', firstId, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, { allowUncertainTurn: true }, false]
+    [composerSession().control, 'first', firstId, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, false],
+    [composerSession().control, 'first', firstId, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, { allowUncertainTurn: true }, false]
   ])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([pending[1]])
 })
@@ -61,6 +61,6 @@ it('waits for a fresh accepted native completion, without output or working retr
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toHaveLength(1)
   status('done', 5)
   await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2))
-  expect(submit.mock.calls[1]).toEqual([session.control, 'kept message', id, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, undefined, false])
+  expect(submit.mock.calls[1]).toEqual([session.control, 'kept message', id, { expectedRun: { runId: 'run-agent-1' }, afterSubmissionId: null }, undefined, false])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toBeUndefined()
 })

@@ -1,10 +1,24 @@
-import '../result-ready-input-continuity/entry'
+import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { flushSync } from 'react-dom'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 
+// The existing local preview uses a relative resource path. This private Workbench
+// fixture supplies an absolute durable directory while preserving the real host IDs.
+const previewDirectory = _hygiene_fixturePath("workspace/mailbox-preview")
+const getPreviewConfig = api.config.get
+api.config.get = async () => {
+  const config = await getPreviewConfig()
+  return { ...config, workspaces: config.workspaces.map(workspace => workspace.id === 'workspace-demo' ? { ...workspace, path: previewDirectory } : workspace) }
+}
+const previewSnapshot = api.sessions.snapshot
+api.sessions.snapshot = async () => {
+  const snapshot = await previewSnapshot()
+  return { ...snapshot, sessions: snapshot.sessions.map(session => session.workspacePath === 'home//agentmux' ? { ...session, workspacePath: previewDirectory } : session) }
+}
+await import('../result-ready-input-continuity/entry')
 const original = (window as any).resultReady
 const longBody = Array.from({ length: 90 }, (_, index) => `Original message line ${index + 1}: review the recorded facts and retain these exact words.`).join('\n')
 let loops: ContinuousProgressLoop[] = []
@@ -30,7 +44,7 @@ const probe = {
     flushSync(() => useAppStore.setState({ noticeReadReceipts: {}, agentSteerInFlight: {}, timelines: {
       [session.id]: { agentSessionId: session.id, revision: 1, items: [
         { id: 'in-long', agentSessionId: session.id, kind: 'user_message', status: 'complete', source: 'user', authorAgentSessionId: 'private-peer', title: 'Prompt', content: longBody, createdAt: 50, updatedAt: 50 },
-        { id: 'in-short', agentSessionId: session.id, kind: 'user_message', status: 'complete', source: 'user', authorAgentSessionId: 'private-peer', title: 'Prompt', content: 'Check the handoff before editing the delivery target.', createdAt: 60, updatedAt: 60 },
+        { id: 'in-short', agentSessionId: session.id, kind: 'user_message', status: 'complete', source: 'user', authorAgentSessionId: 'private-peer', title: 'Prompt', content: ("[Message from Agent reviewer]\n<bagakit-msg type=\"agent-v1\" name=\"Review team\" time=\"" + _hygiene_fixtureIso(23817600000, "zone-second", 480) + "\">Check **the handoff** before editing [the original file](result.txt).</bagakit-msg>"), createdAt: 60, updatedAt: 60 },
         { id: 'sent', agentSessionId: session.id, kind: 'user_message', status: 'complete', source: 'user', authorHuman: true, title: 'Prompt', content: 'A confirmed Message Tool instruction.', createdAt: 20, updatedAt: 20 }
       ] } }, agentSteerQueues: { [session.id]: [
         { operationId: 'reading-old', text: 'Old Run message retained here.', status: 'deferred', runId: 'old-private-run', enqueuedAt: 999 },
