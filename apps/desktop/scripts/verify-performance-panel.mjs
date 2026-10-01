@@ -181,6 +181,11 @@ try {
       native = captureOnly ? await capturePerformancePanel({ root, evidence: resolve(evidence, 'native') })
         : await json(resolve(base, 'product/receipt.json'))
       assert.equal(native.completed, true, 'actual mounted Renderer 交互必须通过')
+      assert.equal(native.captureScope, 'full', 'T004 requires its complete native scope')
+      assert.deepEqual(native.processes.map(process => process.phase), ['control', 'restart', 'joined'], 'Actual control, ordinary restart and joined execution are nonempty and exact')
+      for (const process of native.processes) { assert.equal(process.exitCode, 0); assert.equal(process.timedOut, false) }
+      assert.equal(native.officialOwnerQualification, true, 'The original registered owner and public Core execution remain required')
+      assert.deepEqual(native.remainingPrivateProcesses, []); assert.equal(native.privateRootRemoved, true)
       if (!captureOnly) {
         for (const [path, input] of Object.entries(native.inputs)) assert.equal(sha(await readFile(resolve(root, path))), input.sha256, 'sealed control 必须与当前实际 Source 相同: ' + path)
         for (const item of [...native.compiled, ...native.frames]) assert.equal(sha(await readFile(resolve(native.evidence, item.file))), item.sha256, 'sealed compiled/PNG readback exact')

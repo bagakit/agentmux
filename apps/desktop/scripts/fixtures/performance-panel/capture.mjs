@@ -11,10 +11,11 @@ import { pathToFileURL } from 'node:url'
 
 export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel' }) {
   assert.ok(['full','placement','buttons','toolkit'].includes(captureScope),'已知明确 capture scope')
-  assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || fixtureName === 'toolkit-custom-ui' && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
+  const toolkitFixture = ['toolkit-custom-ui', 'toolkit-template'].includes(fixtureName)
+  assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
   assert.ok(['baseline','state','focus'].includes(cssMutant)&& (captureScope==='buttons'||cssMutant==='baseline'),'明确有界私有CSS变异')
   const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures',fixtureName)
-  const toolkitQualification=fixtureName==='toolkit-custom-ui'&&process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE==='qualification'
+  const toolkitQualification=toolkitFixture&&process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE==='qualification'
   const require=createRequire(path.join(desktop,'package.json')),sha=bytes=>createHash('sha256').update(bytes).digest('hex')
   const {build,loadConfigFromFile}=await import(pathToFileURL(require.resolve('vite')).href)
   const viteRequire=createRequire(require.resolve('vite')),esbuild=viteRequire('esbuild').build
@@ -32,6 +33,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     for(const file of [configFile,path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
     if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
+    if(fixtureName==='toolkit-template')for(const name of ['main.cjs','preload.cjs','coordinator.cjs'])await bind(path.join(desktop,'scripts/fixtures/toolkit-custom-ui',name))
     const aliases=new Map()
     for(const name of ['core','demand','layout']){
       const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
@@ -54,7 +56,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     for(const descriptor of [manifest.sdk.archive,...manifest.binaries])await bind(path.join(artifactRoot,descriptor.path))
     await fs.mkdir(compiled,{recursive:true})
     let fixedSdkEntry
-    if (toolkitQualification) {
+    {
       const sdkDirectory=path.join(compiled,'fixture-sdk'),archive=path.join(artifactRoot,manifest.sdk.archive.path)
       await fs.mkdir(sdkDirectory);await promisify(execFile)('/usr/bin/tar',['-xzf',archive,'-C',sdkDirectory])
       fixedSdkEntry=path.join(sdkDirectory,'package/dist/index.js')
@@ -74,7 +76,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
         builder.onResolve({filter:/^@agentmux\//},args=>aliases.has(args.path)?{path:aliases.get(args.path)}:undefined)
         builder.onResolve({filter:/^[^./]/},args=>{
           if(args.path==='electron'||isBuiltin(args.path)||aliases.has(args.path))return
-          if(args.path==='@ctxmux/sdk')return {path:fixedSdkEntry??path.join(root,'packages/core/node_modules/@ctxmux/sdk/dist/index.js'),external:true}
+          if(args.path==='@ctxmux/sdk')return {path:fixedSdkEntry,external:true}
           return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:true}
         })
         builder.onLoad({filter:/\.[cm]?tsx?$/},async args=>{
@@ -115,7 +117,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
     for(const phase of captureScope==='full'?['control','restart','joined']:[captureScope]){
-      const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs')]
+      const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs'),...(toolkitQualification?[path.join(fixture,'qualification.cjs')]:[])]
       const executable=toolkitQualification?globalThis.process.execPath:require('electron')
       const args=toolkitQualification?[path.join(fixture,'coordinator.cjs'),require('electron'),path.join(compiled,'health.mjs'),...guiArgs]:guiArgs
       const process=await runProbeProcess(executable,args,
