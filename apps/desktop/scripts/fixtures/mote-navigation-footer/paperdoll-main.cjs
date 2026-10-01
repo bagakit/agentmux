@@ -7,6 +7,7 @@ const [html, privateRoot, evidence, phase, refinementMode, chooserMode] = proces
 const refinement = refinementMode === 'refinement'
 const fromChooser = chooserMode === 'from-chooser'
 const avatarColor = process.env.AGENTMUX_MOTE_AVATAR_COLOR === '1'
+const moteAmbient = process.env.AGENTMUX_MOTE_AMBIENT === '1'
 assert.ok(['seed', 'restore'].includes(phase), 'Exactly two private paperdoll phases')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -156,6 +157,60 @@ app.whenReady().then(async () => {
       await extraFrame('avatar-color-'+stage)
       return observation
     }
+    // Observe ordinary native time. No seeking, holding, pausing or changing animation speed.
+    const ambientMeasure = () => read(`(() => {
+      const rect=n=>{const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}},identity='matrix(1, 0, 0, 1, 0, 0)';
+      const rows=Array.from(document.querySelectorAll('[data-space-icon-kind="mote"][data-space-icon-source]')).map((n,index)=>{
+        const paint=n.querySelector('img')||n.querySelector('svg');if(!paint)return null;const r=paint.getBoundingClientRect();if(!(r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.x<innerWidth&&r.y<innerHeight))return null;
+        const motion=n.closest('[data-mote-expression]'),entry=n.closest('[data-pmo-teams-topic-launcher]'),choice=n.closest('[data-mote-topic-id]'),space=n.closest('[data-space-icon-target]'),author=n.closest('[data-mote-author]'),details=n.closest('.conversation-input-details__identity');
+        const expression=motion?.dataset.moteExpression,face=paint.classList.contains('mote-face'),part=face?n.querySelector(expression==='sleep'?'.mote-face__head':expression==='waiting'||expression==='unknown'?'.mote-face__eyes':'.mote-face__gaze'):paint;
+        const transforms=Object.fromEntries(['eyes','head','gaze','brows','mouth'].map(p=>{const bone=n.querySelector('.mote-face__'+p);return[p,bone?getComputedStyle(bone).transform:null]}));const transform=getComputedStyle(part).transform;
+        return {key:(entry?'footer':choice?'roster':space?'space':author?'author':details?'details':'other')+':'+(entry?.querySelector('button')?.dataset.moteTargetTopic||choice?.dataset.moteTopicId||space?.dataset.spaceIconTarget||author?.dataset.moteAuthor||'')+':instance-'+index,owner:entry?'footer':choice?'roster':space?'space':author?'author':details?'details':'other',source:n.dataset.spaceIconSource,asset:face?'face':paint.tagName==='IMG'?'image':'glyph',expression,motion:motion?.dataset.moteMotion,gaze:motion?.dataset.moteGaze,phase:motion?parseFloat(motion.style.getPropertyValue('--mote-ambient-delay')):null,railIcon:parseFloat(getComputedStyle(n).getPropertyValue('--rail-icon')),slot:rect(motion||n),paint:rect(paint),transform,rest:transform==='none'||transform===identity,transforms,filter:getComputedStyle(paint).filter,opacity:getComputedStyle(paint).opacity,awake:face?getComputedStyle(n.querySelector('.mote-face__awake-eyes')).display:null,animations:(motion?.getAnimations({subtree:true})||[]).map(a=>({name:a.animationName,state:a.playState,time:a.currentTime,progress:a.effect.getComputedTiming().progress,duration:a.effect.getComputedTiming().duration})),surface:author?{border:getComputedStyle(n).borderTopWidth,background:getComputedStyle(n).backgroundColor,overflow:getComputedStyle(n).overflow}:null};
+      }).filter(Boolean);return{at:performance.now(),rows};
+    })()`)
+    const ambientProof = async stage => {
+      if(!moteAmbient)return
+      await input('Input.dispatchMouseEvent',{type:'mouseMoved',x:900,y:5});await pause(300)
+      const before=await facts(),samples=[];let start=await ambientMeasure();assert.ok(start.rows.length>0,'Nonempty actual ambient identities')
+      assert.equal(new Set(start.rows.map(r=>r.key)).size,start.rows.length,'Each actual DOM consumer has a distinct local observation key')
+      const target=start.rows.find(r=>r.owner==='space'&&r.motion==='on')||start.rows.find(r=>r.owner==='footer'&&r.motion==='on');assert.ok(target,'Visible actual identity admitted')
+      const deadline=Date.now()+15000
+      while(!start.rows.find(r=>r.key===target.key).rest){assert.ok(Date.now()<deadline,'Natural identity returns to rest');await pause(80);start=await ambientMeasure()}
+      let moving=false,settled=false;await extraFrame('ambient-'+stage+'-before')
+      do {
+        const sample=await ambientMeasure();samples.push(sample);const row=sample.rows.find(r=>r.key===target.key)
+        assert.ok(row,'Same original consumer remains visible')
+        if(!moving&&!row.rest){moving=true;await extraFrame('ambient-'+stage+'-gesture')}
+        else if(moving&&!settled&&row.rest){settled=true;await extraFrame('ambient-'+stage+'-settled')}
+        await pause(80)
+      } while(samples.at(-1).at-start.at<14600)
+      const summaries=[]
+      for(const first of start.rows.filter(r=>r.motion==='on')) {
+        const observations=samples.flatMap(s=>s.rows.filter(r=>r.key===first.key));assert.ok(observations.length>80,'Nonempty full natural cycle')
+        const rest=observations.filter(r=>r.rest).length,active=observations.length-rest
+        assert.ok(active>0,'Actual gesture observed in normal time: '+first.key);assert.ok(rest/observations.length>.65,'Much more rest than activity: '+first.key)
+        for(const row of observations){assert.equal(row.expression,first.expression);assert.equal(row.filter,'none');assert.equal(row.opacity,'1');assert.deepEqual(row.slot,first.slot,'Animation keeps its original layout slot');if(row.expression==='sleep'&&row.asset==='face')assert.equal(row.awake,'none')}
+        if(first.owner==='space'){assert.ok(Number.isFinite(first.railIcon)&&first.railIcon>0,'Original Space density token is resolved');assert.equal(first.slot.width,first.asset==='face'?20:first.railIcon);assert.equal(first.slot.height,first.asset==='face'?20:first.railIcon)}
+        if(first.owner==='footer'){assert.equal(first.slot.width,26);assert.equal(first.slot.height,26)}
+        summaries.push({key:first.key,asset:first.asset,source:first.source,phase:first.phase,expression:first.expression,slot:first.slot,active,rest,total:observations.length})
+      }
+      assert.ok(moving&&settled,'Natural gesture and return both captured')
+      const authors=start.rows.filter(r=>r.owner==='author')
+      for(const author of authors){assert.equal(author.slot.width,32);assert.equal(author.slot.height,32);assert.equal(author.animations.length,0);assert.equal(author.surface.border,'1px');assert.equal(author.surface.overflow,'hidden')}
+      const phases=start.rows.filter(r=>r.owner==='space'||r.owner==='roster').map(r=>r.phase).filter(Number.isFinite);assert.ok(phases.length>=2);assert.ok(Math.max(...phases)-Math.min(...phases)>500,'Visible original object phases are perceptibly distinct')
+      const after=await facts();protectedSame(before,after);assert.deepEqual(after.icons,before.icons,'Ambient does not change saved identity')
+      ;(result.ambient??={naturalTime:true,animationWrites:false,cycles:[],states:[]}).cycles.push({stage,start,end:samples.at(-1).at,target:target.key,summaries,authors,samples})
+      check('natural-ambient-'+stage,{start:start.at,end:samples.at(-1).at,summaries})
+    }
+    const ambientState = async (stage,expected) => {
+      if(!moteAmbient)return
+      await input('Input.dispatchMouseEvent',{type:'mouseMoved',x:900,y:5});await pause(300)
+      const observations=[await ambientMeasure()];await pause(500);observations.push(await ambientMeasure())
+      const entry=observations[0].rows.find(r=>r.owner==='footer');assert.equal(entry.expression,expected)
+      if(expected==='waiting'||expected==='unknown')for(const observation of observations){const row=observation.rows.find(r=>r.owner==='footer');assert.equal(row.motion,'on');assert.deepEqual(row.animations.map(a=>a.name),['mote-blink']);assert.equal(row.transforms.brows,entry.transforms.brows);assert.equal(row.transforms.mouth,entry.transforms.mouth)}
+      if(expected==='error'||expected==='stopped')for(const observation of observations){const row=observation.rows.find(r=>r.owner==='footer');assert.equal(row.motion,'off');assert.equal(row.animations.length,0)}
+      ;(result.ambient??={naturalTime:true,animationWrites:false,cycles:[],states:[]}).states.push({stage,expected,observations});await extraFrame('ambient-state-'+stage)
+    }
     const gazeFace = async (selector, label, expected = 'identity') => {
       const measure = () => read(`(() => { const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw new Error('Actual face consumer missing');const r=n.getBoundingClientRect();return { sampledAt:performance.now(),x:r.x,y:r.y,width:r.width,height:r.height,face:n.querySelector('.mote-face').outerHTML,follow:getComputedStyle(n.querySelector('.mote-face__gaze-follow')).transform,neck:getComputedStyle(n.querySelector('.mote-face__neck')).transform,brows:getComputedStyle(n.querySelector('.mote-face__brow-follow')).transform,awake:getComputedStyle(n.querySelector('.mote-face__awake-eyes')).display,expression:n.dataset.moteExpression } })()`)
       const original = await measure(), baseline = await facts()
@@ -286,6 +341,7 @@ app.whenReady().then(async () => {
       await open(); const baseline = await facts()
       assert.equal(baseline.ui.entry.source, 'automatic'); assert.match(baseline.ui.entry.image, /pmo-teams-topic-avatar/)
       await capture('paperdoll-primary-default')
+      if(moteAmbient){await click(button('Open Mote Space'));await until('!window.motePaperdollProof.facts().ui.visible','original Space entry');await call('showSpaceNavigation');await pause(180);await ambientProof('space-original-assets');await open()}
       const originalColors=await colorProof('opened-original')
       if(avatarColor){assert.ok(originalColors.rows.filter(row=>row.paint==='image').length>=2);assert.ok(originalColors.rows.some(row=>row.paint==='glyph'&&row.topicId===quiet),'Original sleeping seed is a visible product consumer')}
       await edit(); await click(dialogButton('Make a face')); await click(dialogButton('Eyes · spark')); await click(dialogButton('Color · peach')); await click(dialogButton('Brows · curious'))
@@ -311,6 +367,7 @@ app.whenReady().then(async () => {
       await locate(dialogButton('Save avatar')); await read(`(${dialogButton('Save avatar')}).focus()`); await key('Enter')
       await until('!document.querySelector(".space-icon-picker")', 'confirmed face Save')
       const saved = await facts(); assert.equal(saved.icons[keyFor(primary)].eyes, 'spark'); assert.equal(saved.icons[keyFor(primary)].palette, 'peach'); protectedSame(baseline, saved)
+      if(moteAmbient){await select(quiet);await edit();await click(dialogButton('Icon or image'));await click(dialogButton('Book icon'));await click(dialogButton('Save avatar'));await until('!document.querySelector(".space-icon-picker")','confirmed original manual avatar');await select(primary);await call('status','done');await animate('idle');await ambientProof('idle-face-image-manual');await call('status','waiting');await activeExpression('waiting');await ambientState('waiting','waiting');await call('status','unknown');await activeExpression('unknown');await ambientState('unknown','unknown');await call('status','error');await activeExpression('error');await ambientState('error','error');await call('status','working')}
       await open(); await animate('thinking')
       const mixedColors=await colorProof('face-image-seed')
       if(avatarColor){assert.ok(mixedColors.rows.some(row=>row.paint==='face'));assert.ok(mixedColors.rows.some(row=>row.paint==='image'));assert.ok(mixedColors.rows.some(row=>row.paint==='glyph'))
@@ -389,10 +446,16 @@ app.whenReady().then(async () => {
       await colorProof('restored-sleep')
       const sleep = await facts(); assert.equal(sleep.ui.topicId, quiet); assert.ok(sleep.ui.entry.motion.animations.length > 0)
       await click(button('Close Mote')); await until('!window.motePaperdollProof.facts().ui.visible', 'hidden panel');
-      const hidden = await facts(); assert.equal(hidden.ui.faces.filter(face => face.rect?.width > 0 && face.rect?.height > 0).length, 1, 'Only the always-visible entry consumes motion; hidden chooser is unmounted')
+      const hidden = await facts()
+      if(moteAmbient){
+        const scope=await read(`(() => {const visible=n=>{const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.x<innerWidth&&r.y<innerHeight},rows=selector=>Array.from(document.querySelectorAll(selector)).filter(visible).map(n=>({rect:{width:n.getBoundingClientRect().width,height:n.getBoundingClientRect().height},motion:n.dataset.moteMotion,expression:n.dataset.moteExpression}));return{chooser:document.querySelectorAll('[data-pmo-teams-topic-floating] [data-mote-topic-id] [data-mote-expression]').length,footer:rows('[data-pmo-teams-topic-launcher] [data-mote-expression]'),space:rows('.project-rail [data-mote-expression]'),all:rows('[data-mote-expression]')}})()`)
+        assert.equal(scope.chooser,0,'Closed floating chooser consumes no identity motion');assert.equal(scope.footer.length,1,'Original always-visible entry is retained');assert.equal(scope.footer[0].motion,'on')
+        assert.ok(scope.space.length>0,'Actual visible Space identities remain mounted after panel close');for(const row of scope.space)assert.equal(row.motion,'on')
+        assert.equal(scope.all.length,scope.footer.length+scope.space.length,'Visible motion belongs to the original footer and Space, not the closed panel');check('closed-chooser-retains-original-visible-space',scope)
+      }else assert.equal(hidden.ui.faces.filter(face => face.rect?.width > 0 && face.rect?.height > 0).length, 1, 'Only the always-visible entry consumes motion; hidden chooser is unmounted')
       check('fresh-process-and-hidden-face', { initial: initial.initialization, hidden: hidden.ui.faces })
       await select(primary); await call('status', 'unknown'); await activeExpression('unknown')
-      const unknown = await facts(); assert.equal(unknown.ui.entry.motion.animations.filter(animation => animation.name !== null).length, 0)
+      const unknown = await facts(); assert.deepEqual(unknown.ui.entry.motion.animations.filter(animation => animation.name !== null).map(animation=>animation.name), ['mote-blink'])
       await colorProof('unknown')
       await edit(); await click(dialogButton('Mouth · grin')); saveFailure = true; await click(dialogButton('Save avatar'))
       await until('!!document.querySelector(".space-icon-picker [role=alert]")', 'explicit unconfirmed notice')
@@ -402,13 +465,14 @@ app.whenReady().then(async () => {
       const confirmed = await facts(); assert.equal(confirmed.icons[keyFor(primary)].mouth, 'grin'); protectedSame(failed, confirmed)
       await select(custom); assert.equal((await facts()).ui.entry.source, 'image', 'Original custom user image retains precedence')
       assert.ok((await facts()).ui.entry.image.startsWith('data:image/png;base64,')); await select(primary)
-      if(avatarColor){
+      if(avatarColor||moteAmbient){
         win.setContentSize(980,820);await pause(120);const beforeSpace=await facts();await click(button('Open Mote Space'));await until('!window.motePaperdollProof.facts().ui.visible','actual Space entry');await call('showSpaceNavigation');await pause(180)
-        const spaceColors=await colorProof('space-current-identity');assert.ok(spaceColors.rows.some(row=>row.owner==='space'),'Actual Space tree identity receives the same color rule')
+        const spaceColors=await colorProof('space-current-identity');if(avatarColor)assert.ok(spaceColors.rows.some(row=>row.owner==='space'),'Actual Space tree identity receives the same color rule')
+        if(moteAmbient)await ambientProof('space-saved-face-image')
         const afterSpace=await facts();assert.deepEqual(afterSpace.icons,beforeSpace.icons);assert.deepEqual(afterSpace.protected.drafts,beforeSpace.protected.drafts);assert.deepEqual(afterSpace.protected.controls,beforeSpace.protected.controls);assert.deepEqual(afterSpace.protected.tabs,beforeSpace.protected.tabs)
         check('color-through-original-space-entry',{before:beforeSpace.protected,after:afterSpace.protected});await open()
       }
-      await call('exactRestoring'); await activeExpression('unknown'); assert.equal((await facts()).ui.entry.motion.animations.filter(animation => animation.name !== null).length, 0)
+      await call('exactRestoring'); await activeExpression('unknown'); assert.deepEqual((await facts()).ui.entry.motion.animations.filter(animation => animation.name !== null).map(animation=>animation.name), ['mote-blink'])
       check('save-failure-retry-image-and-restoring', { failed: failed.ui, confirmed: confirmed.icons, final: (await facts()).ui })
     }
     result.final = await facts(); assert.deepEqual(result.final.errors, [])

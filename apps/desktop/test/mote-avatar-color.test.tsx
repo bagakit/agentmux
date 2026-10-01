@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
@@ -16,6 +17,11 @@ import { customMoteId, defaultAgent, defaultTab, moteConfig, moteTopics, quietMo
 
 const primary = topicSpaceIconTarget(scratchWorkspace, moteTopics[0]!), custom = topicSpaceIconTarget(scratchWorkspace, moteTopics[1]!)
 const image = { kind: 'image' as const, fileName: 'b'.repeat(64) + '.png' }
+const require = createRequire(import.meta.url)
+const cssSources = [
+  ...['tokens', 'chrome', 'space-object-appearance'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css')),
+  require.resolve('@agentmux/client-ui/styles/conversation-avatar.css')
+]
 let app: MoteAppFixture, sheet: HTMLStyleElement, dispose: (() => void) | undefined
 beforeEach(async () => {
   vi.spyOn(api.config, 'get').mockResolvedValue(moteConfig)
@@ -26,7 +32,7 @@ beforeEach(async () => {
   app = createMoteApp()
   vi.spyOn(api.scratch, 'readMoteAvatar').mockResolvedValue({ width: 256, height: 256, dataUrl: 'data:image/png;base64,ORIGINAL' })
   sheet = document.createElement('style')
-  sheet.textContent = ['tokens', 'chrome', 'space-object-appearance', 'conversation-avatar'].map(name => readFileSync(resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css'), 'utf8')).join('\n')
+  sheet.textContent = cssSources.map(path => readFileSync(path, 'utf8')).join('\n')
   document.head.append(sheet)
   expect(sheet.sheet!.cssRules.length).toBeGreaterThan(100)
 })

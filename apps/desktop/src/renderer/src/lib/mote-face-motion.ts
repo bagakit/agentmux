@@ -1,7 +1,7 @@
 import type { MoteExpression } from '../components/MoteFace'
 
 type Identity = { node: HTMLElement; expression: MoteExpression; visible: boolean; inView: boolean; near: boolean }
-const ambient = new Set<MoteExpression>(['identity', 'sleep', 'idle', 'thinking', 'tool', 'starting'])
+const ambient = new Set<MoteExpression>(['identity', 'sleep', 'idle', 'thinking', 'tool', 'starting', 'waiting', 'unknown'])
 let owner: ReturnType<typeof createMotionOwner> | undefined
 
 /** One event-driven native rig owner for the currently visible identities. No React frame clock. */
