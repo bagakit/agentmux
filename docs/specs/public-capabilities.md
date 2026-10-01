@@ -7,12 +7,12 @@
 | 读者要做什么 | 从这里开始 | 继续核对 |
 | --- | --- | --- |
 | 在 Node 宿主接入本地 Agent／Terminal | [Core 接入说明](../../packages/core/README.md)，从 `@agentmux/core` 导入 `connectLocalAgentMux` 或 `AgentMuxClient` | [runtime-client.ts](../../packages/core/src/runtime-client.ts)、[client.ts](../../packages/core/src/client.ts) |
-| 在现有宿主提供 Control 能力，或连接已运行的 Control owner | [`AgentMuxControlHost` 与请求／回执类型](../../packages/core/src/control.ts) | [`AgentMuxControlServer` / `requestAgentMuxControl`](../../packages/core/src/control-host.ts) |
+| 提供共享业务服务，或连接已运行的服务 owner | [公共 RPC 类型](../../packages/core/src/public-rpc.ts) 与 [`AgentMuxRpcServiceOptions`](../../packages/core/src/public-rpc-service.ts) | [`AgentMuxControlServer`](../../packages/core/src/public-rpc-server.ts)、[`connectAgentMuxRpc`](../../packages/core/src/public-rpc-client.ts)；经 [control-host.ts](../../packages/core/src/control-host.ts) 从包根导出 |
 | 在浏览器投影执行事实或 Session Timeline | Core [package exports](../../packages/core/package.json) 中的 `runtime`、`timeline` 等专项入口 | [runtime.ts](../../packages/core/src/runtime.ts)、[session-timeline.ts](../../packages/core/src/session-timeline.ts)；不导入加载 Node Runtime 的包根 |
 | 在 React 客户端复用 Conversation／Composer 呈现 | [共享 UI 包说明](../../packages/client-ui/README.md)，从 `@agentmux/client-ui` 或已导出的 component 子路径导入 | [package exports](../../packages/client-ui/package.json)、[index.ts](../../packages/client-ui/src/index.ts)、[`ClientUiProvider` / `ClientUiPlatform`](../../packages/client-ui/src/platform.tsx)；宿主显式注入平台与业务 props |
 | 复用分屏树计算 | [Layout 包说明](../../packages/layout/README.md)，只从 `@agentmux/layout` 入口导入 | [package exports](../../packages/layout/package.json)、[index.ts](../../packages/layout/src/index.ts)；当前源 TS 入口需要可转译 TS 的宿主 |
 | 使用独立 Goal／Demand Store，或浏览器侧 Goal 规则 | [Demand 包说明](../../packages/demand/README.md)，`openDemandStore` / `@agentmux/demand/goals` | [package exports](../../packages/demand/package.json)、[demand-store.ts](../../packages/demand/src/demand-store.ts)、[goals.ts](../../packages/demand/src/goals.ts) |
-| 用 AgentMux CLI 操作原工作面 | 当前执行版本的 `--help` / `--skill`；[对象操作指南](../guides/agentmux-cli-object-control.md) 给任务入口和失败处理 | [CLI parser](../../packages/core/src/agentmux.ts)、[help / skill 来源](../../packages/core/src/agentmux-cli-help.ts) |
+| 用 AgentMux CLI 操作原工作面 | 当前执行版本的 `--help` / `--skill`；[对象操作指南](../guides/agentmux-cli-object-control.md) 给任务入口和失败处理 | [命令注册与 parser](../../packages/core/src/agentmux-cli-commands.ts)、[help / skill 来源](../../packages/core/src/agentmux-cli-help.ts)、[CLI 接线](../../packages/core/src/agentmux.ts) |
 
 [Core package exports](../../packages/core/package.json) 决定可导入子路径；[index.ts](../../packages/core/src/index.ts) 决定包根重导出。出现在 exports 中只证明当前包入口，不单独证明接口成熟度、稳定性或运行验收。包内实现文件链接用于阅读源码，不授权消费者绕开公共入口深入导入。
 
@@ -31,16 +31,16 @@
 | Session 身份、历史与事件 | [Session Registry](../../packages/core/src/agent-session-registry.ts)、[Session Store](../../packages/core/src/agent-session-store.ts)；`onEvent`、`sessionTimeline`、`sessionHistoryPage`、`observeSessionHistory` | [历史观察接线](../../apps/desktop/src/main/session-history-observation.ts)、[Session snapshot](../../apps/desktop/src/main/session-snapshot-payload.ts) |
 | 共享 Conversation、结构化请求与 Composer 呈现 | [client-ui index](../../packages/client-ui/src/index.ts) 与 [platform.tsx](../../packages/client-ui/src/platform.tsx)；组件 typed props 注入文件、导航、消息和回答操作 | [DesktopClientUiProvider](../../apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx) → [Renderer main](../../apps/desktop/src/renderer/src/main.tsx)；宿主保有平台 IO、身份和工作面焦点 |
 | 空间地址、展示导航与工作面回执 | [space-control.ts](../../packages/core/src/space-control.ts)、[desktop-focus-control.ts](../../packages/core/src/desktop-focus-control.ts)，由 [control.ts](../../packages/core/src/control.ts) 公开 | Main 的 [Control bridge](../../apps/desktop/src/main/control-ipc-bridge.ts) → Renderer [control-api.ts](../../apps/desktop/src/renderer/src/lib/control-api.ts) → [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)；布局记录仍归 client |
-| 宿主配置、Browser、Toolkit 与诊断 | Control 的对应 typed request / result；[Toolkit](../../packages/core/src/toolkit-control.ts) 的订阅入口 | [Main IPC handlers](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 及各宿主 owner |
+| 宿主配置、Browser、Toolkit 与诊断 | [公共 RPC](../../packages/core/src/public-rpc.ts) 的 typed params / result / stream；[业务服务](../../packages/core/src/public-rpc-service.ts) 委托原 owner | [Main IPC handlers](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 及各宿主 owner |
 | Goal／Demand 内容、确认与接受 | [`openDemandStore`](../../packages/demand/src/demand-store.ts)、[Goal 类型与 readiness helpers](../../packages/demand/src/goals.ts) | Main IPC 的 Demand handlers 与 Renderer Goal 操作；Agent proposal 不代替人类确认／接受 |
 
 输入应用、Prompt 投递、任务接受、Agent 状态和工作完成是不同事实，准确边界见 Core 接入说明与 owning 设计。初始 Prompt 的投递事实消费 `createAgentWithDelivery` 的同次返回；缺失回执不自行重启、重发或换目标。
 
-## CLI 的当前来源和设计方向
+## CLI 与服务的当前来源
 
-当前 CLI 的参数解析与路由在 [agentmux.ts](../../packages/core/src/agentmux.ts)，help 与运行时技能在 [agentmux-cli-help.ts](../../packages/core/src/agentmux-cli-help.ts)。Control 的请求、回执、错误与宿主接口由 [control.ts](../../packages/core/src/control.ts) 定义，解析和 Unix socket 输送由 [control-host.ts](../../packages/core/src/control-host.ts) 承担；Main 在 [ipc.ts](../../apps/desktop/src/main/ipc.ts) 提供真实 handlers。
+[`AGENTMUX_CLI_COMMANDS`](../../packages/core/src/agentmux-cli-commands.ts) 是对象命令的共同注册来源，`parseAgentMuxCliInvocation` 从它解析参数，[help 与运行时技能](../../packages/core/src/agentmux-cli-help.ts) 从它生成说明。[agentmux.ts](../../packages/core/src/agentmux.ts) 处理 endpoint、调用与流输出，业务查询、角色绑定和消息编排进入 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)，不在 CLI 直接读写本地业务事实。公共方法、参数、结果与订阅类型归 [public-rpc.ts](../../packages/core/src/public-rpc.ts)；Main 在 [ipc.ts](../../apps/desktop/src/main/ipc.ts) 注入原 owner 的真实能力。
 
-现有 Control 是自定义 NDJSON 协议；现有 CLI 仍有顶层跨域命令、本地 Session Store 解析和角色文件读写。已确认的 [对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 规定下一套公共方法、对象树和传输边界。完整目标树只在该设计处定义，本页不复制，也不把目标命令列为当前可执行入口。
+当前 [Server](../../packages/core/src/public-rpc-server.ts) 与 [Client](../../packages/core/src/public-rpc-client.ts) 使用同一 JSON-RPC 2.0 合同，支持默认 Unix socket、显式启用的 HTTP／SSE，以及 SSH stdio 转发到既有 Unix 服务。连接条件与远端 Run 的未支持边界见 [系统接入边界](../architecture/system-ownership.md#当前接入边界)。[对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 持有行为约束；本页不复制对象树，也不以服务入口存在代签所有宿主能力或安装后的可用性。
 
 核对能力按同一对象寻找业务类型、实际 owner、服务接线、CLI／Client 消费及验证证据；查看事实、修改状态与执行 Agent 的副作用须各自明确。CLI 与 GUI 是同一业务 owner 的消费面，不成为事实镜像。运行中的 help 只说明该执行版本公开什么；源码、构建、安装与当前实例的身份需分别核对。
 

@@ -1,188 +1,135 @@
 # AgentMux
 
-AgentMux 把本地 Coding Agent 的 Provider、Agent Session、Hook、Permission、ACP 与 Client 投影收口成一个可嵌入的 TypeScript Core；Desktop 是它的第一方 Client。
+AgentMux 提供可嵌入的本地 Agent Core，以及基于它构建的 Agent 原生桌面工作区。你可以只接入 Core，在自己的 client 中运行 Coding Agent；也可以使用 Desktop，把多个 Agent、终端、对话、文件和浏览器组织到同一工作面。
 
-产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。Agent-first 空间 CLI 的命令、失败保留与查询合同见[空间 CLI 使用合同](docs/guides/agentmux-cli-object-control.md)。
+Core 统一 Provider、AgentSession、Prompt、权限、状态和语义恢复，不依赖 Electron 或 React。Desktop 是 Core 的第一方 client；通用 Run、PTY、进程和字节回放由独立的 **ctxmux** Runtime 持有。
 
-Run 层只有一个 Owner：`ctxmux`。AgentMux 不持有 PTY、子进程、Replay、Socket wire 或进程树，也没有 Backend Selector、兼容层和 fallback。
+## 从哪里开始
 
-```text
-Desktop / CLI / external Node client
-                  │
-                  ▼
-             @agentmux/core
- Provider / AgentSession / Hook / ACP / Runtime Projection
- Host-neutral Control contracts
-                  │
-                  ▼
-       private CtxmuxRunAdapter
-                  │
-                  ▼
-       bundled @ctxmux/sdk + ctxmuxd
- Run / PTY / byte replay / resize / interrupt / stop
-```
-
-项目全貌见[系统职责地图](docs/architecture/system-ownership.md)，接入时从[公共能力源码入口](docs/specs/public-capabilities.md)定位当前合同。约束、操作和验证按[文档导航](docs/README.md)选择入口。
-
-## AgentMux 与 ctxmux 的分层
-
-ctxmux 是可独立安装、发布和使用的通用 Run Runtime。它的 daemon、CLI、协议与 SDK
-不依赖 AgentMux；即使没有任何 Agent Provider 或编辑器，ctxmux 也必须能够运行任意命令，
-完成 detach/attach、输入、resize、replay、wait、interrupt 和 stop。
-
-AgentMux 是 ctxmux 的高级 Client。`packages/core` 把 Provider、Agent Session、Hook、
-Permission、ACP 和语义事件建立在 ctxmux 的 Run 事实之上，但不重新实现或重新判定这些
-Runtime 事实。当前随包携带固定 ctxmux artifact 是 AgentMux 的发布与供应链策略，不改变
-两个项目的产品边界，也不使 AgentMux 成为 ctxmux 的宿主。
-
-| ctxmux 权威 | AgentMux 权威 |
+| 你想做什么 | 入口 |
 | --- | --- |
-| daemon endpoint、Run identity、PTY/process lifecycle | Provider catalog、AgentSession 与 provider-native identity |
-| ordered bytes、replay、gap、input、resize、interrupt、stop | Prompt readiness、Agent message、Hook、Permission 与 ACP |
-| Runtime capability、持久化、attach/reconnect、权威 revision 与时间 | Agent working/waiting/done、Evidence 解释与 semantic settlement |
-| 执行调用方明确物化的通用 `RunSpec`、fork/resume plan 与 lineage | Provider-specific launch/resume plan、provenance、workspace/context 与产品策略 |
+| 从源码运行或安装 Desktop | [启动与开发](#启动与开发) |
+| 在自己的 Node 宿主接入 Agent | [Core 接入说明](packages/core/README.md) |
+| 用 CLI 操作 Agent 和工作面 | [CLI 使用](#cli-使用)、[对象操作指南](docs/guides/agentmux-cli-object-control.md) |
+| 在 React client 复用对话、Composer 与终端辅助模块 | [Client UI](packages/client-ui/README.md) |
+| 理解项目分层与公共合同 | [系统职责地图](docs/architecture/system-ownership.md)、[公共能力入口](docs/specs/public-capabilities.md) |
+| 修改项目或查找设计、验证规则 | [文档导航](docs/README.md)、[AGENTS.md](AGENTS.md) |
 
-PTY 写入成功只能证明字节进入了 Runtime 边界，不能证明 Agent 接受了 Prompt；进程退出只能
-证明 Run 终止，不能证明任务成功。AgentMux 可以引用 ctxmux 的 Run revision、byte range 和
-lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
+## Desktop 的工作面
 
-## 当前实现与验证范围
+Desktop 保持 Agent-first、terminal-first：Agent 的状态、输入、输出和恢复动作靠近原工作面，多个 Session 可以并行运行和协作。
 
-以下介绍源码中的接入边界。构建、安装和运行实例可能处于不同版本；验证结果须绑定候选身份，具体 oracle 与历史证据边界见[测试策略](docs/testing/strategy.md)。
+| 能力 | 用途 |
+| --- | --- |
+| 空间与分屏 | 用 Space、Zone、Tab、Region 组织项目与多个工作面；Zone 可以关联目录或 Git worktree，移动展示保留原 Session 和执行目录 |
+| Agent 与对话 | 发现和配置 Executor，启动 Agent，在终端与对话视图之间切换，查看原生历史、Trace、权限和问题请求 |
+| 文件与 Git | 在工作目录中浏览、编辑和预览文件，查看差异，管理工作区与 worktree |
+| Browser | 在内嵌浏览器中阅读页面、执行 Agent 程序，保留操作记录、任务版本与结果；页面操作能力从实际 Browser 发现 |
+| Goals 与 Mote | 组织目标、需求及其关联 Session，通过 Topic、Wiki 与 Mote 上下文协作 |
+| Focus、Survey 与 Toolkit | 阅读多 Session 活动，查看工作面和资源状态，配置、运行工具并检查其结果 |
 
-- 随包 CtxMux 的 source commit/tree、product/SDK protocol 和支持平台唯一取自 [vendor manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json)，不在本文另存版本号；
-- `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
-- Core typecheck 与构建直接消费固定 tarball 的官方 SDK 类型和实现，不保留手写 wire 声明；公开包仍不暴露 CtxMux 类型，也不读取相邻 checkout、全局安装或下载；
-- Local endpoint 使用稳定宿主 namespace；已有服务按公开身份、协议与能力核验，产物更新不另建 Runtime；
-- `AgentMuxRunRef` 只包含 CtxMux `runId`，没有第二个 incarnation identity；
-- Local Terminal 的 packed consumer oracle 覆盖同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；当前候选是否通过以本轮 receipt 为准；
-- Remote/SSH 明确返回 `REMOTE_UNSUPPORTED`；
-- 旧自建 daemon、wire、journal、`node-pty` Owner 和 Remote artifact 已删除；包仍按 `packages/core/package.json` 的 `bin` 字段暴露 `agentmux`、`ctxmux`、`ctxmuxd` 三个可执行入口。
-- 平台边界是 **darwin-arm64 only**，且是 fail-closed 的硬边界而非软约定：`ctxmux-run-adapter.ts` 逐字段校验 vendor manifest，`support.platform` / `support.architecture` 与当前 `process.platform` / `process.arch` 对不上就抛 `CTXMUX_ARTIFACT_INVALID`，不降级、不回退到别的产物。
-- Codex 继续使用 AgentMux Provider 的 Launch/Resume/Hook/Permission 语义，只把物化后的通用 `RunSpec` 和物理 Run 操作交给同一个 `CtxmuxRunAdapter`；ctxmux 不提供第二份 Agent-specific Provider；
-- Core File Store/Resolver 是 `agentSessionId ↔ exact runId ↔ Provider native session id/ACP handle` 的唯一身份 Owner，Desktop 与 CLI 不再各存一份；
-- checkout-external packed consumer 的 Codex 纵切检查 create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 拒绝控制和 Stop；
-- `agentmux inspect --session|--run|--*-native`、`list sessions` 与 `output` 由短命 CLI 直接读取 Core；Session 操作使用 `agentSessionId`，Run 操作使用 ctxmux `runId`，`output --follow` 输出 JSON Lines；
-- Core 的 `RuntimeProjection` 只投影 Run 与 Agent Session，不表示界面。Desktop 只用 Tab、Region 与 Surface 表达展示；
-- `agent open`、`space ls/inspect/mv` 与既有 Control 命令通过版本化 Control Host 进入各自 Owner。Renderer 的既有 Workbench 持有 Space/Zone 绑定与 Tab/Region 布局，Desktop Main 持有配置、Git worktree、长期 RuntimeController 与 Browser owner；
-- `agent open` 按 Space/Zone/Tab/Region 精确寻址，可以在另一个 Space 新建 worktree Zone、第一张 Tab 与指定 Executor 的 Agent，并投递第一句任务；`space mv` 只移动指定 Region 的展示位置。Terminal 与 Browser 继续使用精确 Region 方位或 `--tab <id> --new-tab`。
+Space/Zone/Tab/Region 是展示位置，Project/Workspace 是资源与工作目录，AgentSession/Run 是执行身份。完整定义归[概念词典](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)；打开、移动和恢复工作面不会据此重建另一份执行事实。
 
-Remote/SSH 仍明确 unsupported；Claude、TraeX、Hermes、Pi 与 Codex 共享同一
-Provider/Agent Session 合同，当前真实端到端覆盖以 Codex 为代表。
+## 启动与开发
 
-## 使用 Codex 与统一 CLI
+当前随包的原生 Runtime 与 Desktop 打包面向 **macOS Apple Silicon**。Node 版本要求见 [Core package](packages/core/package.json)，pnpm 使用[根 package](package.json)的 `packageManager` 版本；平台和 ctxmux 产物身份以 [vendor manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) 为准。
+
+开发还需要 Xcode Command Line Tools（`xcrun` / `clang`），用于构建 Desktop 的原生工作区辅助程序。
+
+在仓库根目录安装依赖、构建共享包并启动开发桌面：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @agentmux/client-ui... build
+pnpm dev
+```
+
+Agent CLI 需要在本机单独安装并完成登录。仓库提供 Codex、Claude、TraeX、Hermes、Pi、Gemini 等内置 Provider；完整组合见 [Provider 入口](packages/core/src/providers/index.ts)。Provider 已注册不代表该 Agent 在本机可用，各 Provider 的真实运行覆盖也分别核对。
+
+从已提交的干净源码构建安装包：
+
+```sh
+pnpm package:mac
+pnpm package:mac:install
+```
+
+已有安装的更新入口为 `pnpm update:local`；仅 Renderer 的兼容更新可用 `pnpm update:renderer`，回退用 `pnpm update:renderer:rollback`。安装前提、Runtime 变更与原工作面保全见 [Desktop 更新架构](docs/architecture/desktop-updates.md)。
+
+## 在自己的 client 中接入 Core
+
+在已接入 `@agentmux/core`、已安装并登录 Codex 的 Node 宿主中：
 
 ```ts
-import { agentPromptCondition, connectLocalAgentMux } from '@agentmux/core'
-
-const client = await connectLocalAgentMux()
-const session = await client.createAgent({
-  providerId: 'codex',
-  executorId: 'codex-full-auto',
-  workspacePath: process.cwd(),
-  injectAgentMuxGuide: true,
-  prompt: 'Inspect this repository'
-})
-
-await client.reattachAgent(session.agentSessionId, 0)
-// Agent 可接收后续 Prompt 时，先保存这条消息的精确投递条件。
-const followup = {
-  ...agentPromptCondition(await client.refreshAgentSession(session.agentSessionId, session.run)),
-  agentSessionId: session.agentSessionId,
-  operationId: crypto.randomUUID(),
-  prompt: 'Run the focused tests'
-}
-await client.submitAgentPrompt(followup)
-await client.signalAgent(session.agentSessionId, 'SIGINT')
-await client.dispose()
-```
-
-丢回执或重试时保留同一个 `followup`，不按最新状态重建条件或 operationId。
-Provider 与 Executor 的职责、投递 admission 和 typed 交互见 [Core 接入说明](packages/core/README.md)。
-
-```bash
-agentmux list agents
-agentmux list sessions
-agentmux inspect --session <agent-session-id>
-agentmux space ls
-agentmux space ls --space <space-id>
-agentmux agent open --executor <executor-id> --zone <zone-id> \
-  --prompt "Inspect the failing tests" --request-id <request-id>
-agentmux space inspect --request <request-id>
-agentmux space mv --from-region <region-id> --expect-session <agent-session-id> \
-  --zone <target-zone-id> --new-tab
-agentmux send --to-session <agent-session-id> --text "Run the focused tests"
-agentmux output --session <agent-session-id> --follow
-agentmux interrupt --session <agent-session-id>
-agentmux resume --session <agent-session-id> --text "Continue from the provider context"
-agentmux stop --session <agent-session-id>
-
-agentmux inspect --tab <tab-id>
-agentmux focus --region <region-id>
-agentmux arrange --tab <tab-id> --preset columns-3
-```
-
-PMO 可以从任何 Space 一次创建 Git worktree Zone、第一张 Tab 和 Agent：
-
-```bash
-agentmux agent open --executor <executor-id> --space <space-id> \
-  --new-zone --worktree --new-branch feat/task --path "$WORKTREE_PATH" \
-  --prompt "Implement this task and verify it" --request-id <request-id>
-```
-
-`--executor` 使用 `list agents` 返回的确切 Executor ID；Space/Zone ID 从 `space ls` 读取，包含 JSON 目录键时按原字符串引用。已有目录用 `--new-zone --directory "$EXISTING_DIRECTORY"`，已有 Git 分支用 `--branch`。一个 Space 含多个 Zone 时返回候选，调用方必须选定目标。
-
-打开与移动默认在后台，`--focus` 才导航到结果。已有 Session 可用 `agent open --session <id>` 增加投影；`space mv` 则保留原 Region/Session/Run、执行 Host 与 cwd，其他投影继续存在。
-
-最终 JSON 的 `result.agent.agentSessionId` 可交给后续 `send --to-session`；`result.to` 是实际空间地址。`initialPrompt=confirmed` 只证明本次创建的投递协议完成。失败可能留下已创建 worktree、健康 Agent 或待确认的布局；`partial/unknown` 仍返回报告并以非零退出。丢回执时用预先指定的 `--request-id` 查询 `space inspect --request`，查询不会重做 Git、启动或发任务。保存报告区分 localStorage 写入、flush 请求和 `diskDurability=unconfirmed`。
-
-`self` 只接受受管 Agent 注入的 `AGENTMUX_ENV=1` 与 `AGENTMUX_AGENT_SESSION_ID`。
-`inspect --tab self` 或方位 destination 不能唯一解析时会失败关闭，调用方必须改用 receipt
-返回的精确 Tab/Region ID。Desktop 不可用时，Control 命令不会退化为 UI automation、直接
-访问 ctxmux socket 或另一套命令。
-
-## 使用 Local Terminal
-
-```ts
+import { randomUUID } from 'node:crypto'
 import { connectLocalAgentMux } from '@agentmux/core'
 
 const client = await connectLocalAgentMux()
-const run = await client.createTerminal({
-  workspacePath: process.cwd()
-})
-
-const attachment = await client.attachTerminal(run.runId, 0)
-for (const event of attachment.replay) process.stdout.write(event.data)
-
-await client.writeTerminal(run, {
-  ownerInstanceId: client.runtimeIdentity().instanceId,
-  operationId: crypto.randomUUID(),
-  expectedByte: run.acceptedInputBytes,
-  data: "printf 'hello from AgentMux\\n'\n"
-})
-await client.resizeTerminal(run, 120, 40)
-await client.signalTerminal(run, 'SIGINT')
-await client.stopTerminal(run)
-await client.dispose()
+try {
+  const { session, creation } = await client.createAgentWithDelivery({
+    providerId: 'codex',
+    executorId: 'codex-full-auto',
+    workspacePath: process.cwd(),
+    createOperationId: randomUUID(),
+    prompt: '检查仓库，说明当前结构和需要验证的内容'
+  })
+  console.log(session.agentSessionId, creation.initialPrompt)
+} finally {
+  await client.dispose()
+}
 ```
 
-`dispose()` 只释放当前 Client/Attachment；Run 由 `ctxmuxd` 持有，另一个 Client 可用相同 `runId` 和 byte cursor 重连。
+创建回执说明初始 Prompt 的投递情况，不等于任务完成。`dispose()` 释放当前 client 与 attachment，不自动停止 Run；会话接回、后续 Prompt、结构化回答、停止和自定义 Provider 见 [Core 接入说明](packages/core/README.md)。本地纯 Terminal 也由同一 Core 接入 ctxmux。
 
-`client.onEvent` 是同步观察接口。需要异步处理时，callback 必须先把事件复制到 Consumer 自己的有界队列再返回；返回 Promise 的 callback 会在首个事件后自动退订。需要完整终端字节流时使用独立 Attachment/Replay，不把通用事件观察器当作无界消息队列。
+## CLI 使用
 
-## 验证
+CLI 按对象组织命令，与 client 消费同一 typed JSON-RPC 业务服务。先运行桌面或自己的服务宿主，确保 `agentmux` 可执行文件已进入当前环境，再发现实际资源：
 
-```bash
+```sh
+agentmux --help
+agentmux --skill
+agentmux settings executors ls
+agentmux space ls
+agentmux agent ls
+agentmux app snapshot
+```
+
+下例中的 ID 用发现结果替换；`operation-id` 由调用者为这次操作生成并保留：
+
+```sh
+agentmux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab \
+  --prompt '检查当前项目并给出修改建议' --operation-id '<operation-id>'
+agentmux agent inspect --session '<session-id>'
+agentmux agent send --to-session '<session-id>' --text '继续验证这项修改'
+```
+
+使用创建回执返回的 Session 与空间地址，避免从名称或焦点猜目标。回执丢失时先查询原业务操作，不自动重建 Agent 或重发首任务。完整对象命令、错误与保存边界见[对象操作指南](docs/guides/agentmux-cli-object-control.md)，准确参数以执行版本的 `--help` / `--skill` 为准。
+
+服务支持 Unix socket、HTTP/SSE 和 SSH stdio 转发。HTTP 默认关闭，需要宿主显式配置 token；SSH 需要远端已有服务和 CLI。**远程访问服务与远程启动 Agent 是不同能力**：直接 SSH execution host / remote Run 启动仍未支持。连接与授权细节见 [Core 公共服务](packages/core/README.md#公共-json-rpc-服务)。
+
+## 仓库分工
+
+| 位置 | 职责 |
+| --- | --- |
+| [`packages/core`](packages/core/README.md) | 通用 Agent API、Provider、Session、Timeline、权限、恢复和公共业务服务 |
+| [`packages/client-ui`](packages/client-ui/README.md) | 共享 Conversation、Composer、Trace、请求卡片及终端回放、输出队列等辅助模块；宿主显式提供平台和业务操作 |
+| [`packages/layout`](packages/layout/README.md) | 分屏树、比例与布局计算 |
+| [`packages/demand`](packages/demand/README.md) | 独立的文件 Demand Store、Goal 规则与 CLI |
+| `apps/desktop` | Electron Main 和 Renderer，组合 Core 与共享包，持有宿主能力及工作面投影 |
+
+ctxmux 可独立发布和使用；AgentMux 是它的高级 client。Core 通过唯一适配器消费 Run 事实，Provider 解释各 Agent 的原生协议，client 持有展示与宿主 IO。源码机制和身份边界见[系统职责地图](docs/architecture/system-ownership.md)。
+
+## 文档与验证
+
+[文档导航](docs/README.md)按读者任务连接设计约束、当前机制、接口、操作与验证来源。交互和视觉分别从[行为专题](docs/design/agentmux-desktop-interaction.md)、[呈现专题](docs/design/agentmux-surface-density.md)进入；README 保留项目概览与上手入口，准确合同由所属文档和源码持有。
+
+有价值的需求或思路先记录整合为 idea，确认内容再更新 owning 需求／设计文档，决定执行后再创建 Tracker。[文档维护规范](docs/guides/document-truth-and-maintenance.md)定义维护方式；[过程资料规则](docs/process-directories.md)明确 idea、调研、计划、评审和原始证据留本机、不提交。
+
+按改动选择验证，常用入口为：
+
+```sh
 pnpm typecheck
 pnpm test:fast
 pnpm test:native
-pnpm check
 ```
 
-按改动选择验证命令；列出命令不代表本轮已执行。阅读入口与边界见：
-
-- [项目文档导航](docs/README.md)
-- [协作约束](AGENTS.md)与[文档事实与维护规范](docs/guides/document-truth-and-maintenance.md)
-- [测试策略](docs/testing/strategy.md)
-- [Core 接入与 Run / AgentSession 边界](packages/core/README.md)
-- [Terminal Runtime 所有权](docs/architecture/terminal-runtime.md)
+这些命令定义在[根 package](package.json)，验证范围与实际行为验收见[测试策略](docs/testing/strategy.md)。本页描述当前源码入口；源码、构建、安装副本与运行实例分别核对，列出验证命令不代表本轮已执行。
