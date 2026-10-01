@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Folder, GitBranch } from 'lucide-react'
 import { api } from '../lib/api'
 import { projectMonogram } from '../lib/project-monogram'
 import { folderIconRecency } from '../lib/space-folder-icon-recency'
+import { speakerColorHue } from '../lib/conversation-avatar-color'
 
 type Appearance = { kind: 'repository' | 'directory'; icon: string | null }
 
-export function ProjectIcon({ workspaceId, name, lastActivityAt, visible = true }: {
-  workspaceId: string; name: string; lastActivityAt?: number | null | undefined; visible?: boolean | undefined
+export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivityAt, visible = true }: {
+  workspaceId: string; name: string; folderIdentityKey?: string | undefined; lastActivityAt?: number | null | undefined; visible?: boolean | undefined
 }) {
   // `null` means "not probed yet" — kept distinct from a probed `{icon: null}` (confirmed-absent).
   // The distinction has a visible consequence: on first paint we render the slot but NO glyph, so a
@@ -15,6 +16,9 @@ export function ProjectIcon({ workspaceId, name, lastActivityAt, visible = true 
   // unknown is not the same as known-absent, and must not be rendered as the absent state).
   const [appearance, setAppearance] = useState<Appearance | null>(null)
   const [, setNow] = useState(Date.now)
+  const monogram = appearance && !appearance.icon ? projectMonogram(name) : ''
+  // Only the Space Folder caller provides its durable Host + Project root identity.
+  const coloredMonogram = Boolean(monogram && folderIdentityKey && lastActivityAt !== undefined)
   useEffect(() => {
     let active = true
     setAppearance(null)
@@ -22,7 +26,7 @@ export function ProjectIcon({ workspaceId, name, lastActivityAt, visible = true 
     return () => { active = false }
   }, [workspaceId])
   useEffect(() => {
-    if (!appearance?.icon || lastActivityAt === undefined || lastActivityAt === null || !visible) return
+    if (!(appearance?.icon || coloredMonogram) || lastActivityAt === undefined || lastActivityAt === null || !visible) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const schedule = () => {
       if (timer !== undefined) clearTimeout(timer)
@@ -42,7 +46,7 @@ export function ProjectIcon({ workspaceId, name, lastActivityAt, visible = true 
       if (timer !== undefined) clearTimeout(timer)
       document.removeEventListener('visibilitychange', updateVisibility)
     }
-  }, [appearance?.icon, lastActivityAt, visible])
+  }, [appearance?.icon, coloredMonogram, lastActivityAt, visible])
   const recency = lastActivityAt === undefined ? undefined : folderIconRecency(lastActivityAt, Date.now())
   const activityLabel = recency?.tone === 'full' ? 'Agent activity within 1 hour'
     : recency?.tone === 'subdued' ? 'Agent activity 1–12 hours ago'
@@ -54,11 +58,12 @@ export function ProjectIcon({ workspaceId, name, lastActivityAt, visible = true 
   // 只在**探测完成且确认无图标**时才画（`appearance` 非 null 且 `icon` 为 null）：未探测态继续什么都
   // 不画，否则有图标的项目会先闪一枚字母牌再换成真图标——那正是上面那条 class-3 约束要避免的事。
   // 名字给不出可显示的字素时（空名、纯空白）monogram 为空串，如实退回图形字形，不编一个假首字母。
-  const monogram = appearance && !appearance.icon ? projectMonogram(name) : ''
   return <span
     className="project-rail-row__icon"
     data-space-icon-source="automatic"
-    title={appearance ? `${appearance.kind === 'repository' ? 'Git project' : 'Project folder'}${appearance.icon && recency ? ` · ${activityLabel}` : ''}` : undefined}
+    title={appearance ? `${appearance.kind === 'repository' ? 'Git project' : 'Project folder'}${(appearance.icon || coloredMonogram) && recency ? ` · ${activityLabel}` : ''}` : undefined}
+    data-folder-icon-recency={coloredMonogram ? recency?.tone : undefined}
+    style={coloredMonogram ? { '--folder-icon-hue': speakerColorHue(folderIdentityKey!) } as CSSProperties : undefined}
     {...(monogram ? { 'data-monogram': '' } : {})}
   >
     {appearance === null ? null

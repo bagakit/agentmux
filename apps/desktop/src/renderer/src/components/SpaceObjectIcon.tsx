@@ -38,6 +38,7 @@ function MoteAvatar({ workspaceId, topicId, choice, objectKey }: { workspaceId: 
 /** One selected asset; Mote expressions use only their caller's exact target, never a directory scan. */
 type SpaceObjectIconProps = {
   kind: SpaceIconTarget['kind']; name: string; manualIcon: SpaceIconChoice | null; workspaceId?: string
+  folderIdentityKey?: string | undefined
   avatarWorkspaceId?: string | undefined; avatarTopicId?: string | undefined; avatarObjectKey?: string | undefined
   lastActivityAt?: number | null | undefined; visible?: boolean | undefined; topicGlyph?: boolean
 } & MoteIdentityMotionProps
@@ -46,7 +47,7 @@ export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectI
     {expression => <SpaceObjectIconContents {...props} expression={expression} />}
   </MoteIdentityMotion> : <SpaceObjectIconContents {...props} />
 })
-function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
+function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderIdentityKey, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
   if (isMoteFace(manualIcon)) return <span className="project-rail-row__icon space-object-icon" data-space-icon-source="face" aria-hidden="true">
     {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <NotebookText size={14} />}
   </span>
@@ -61,7 +62,7 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, lastActi
   }
   if (kind === 'folder') {
     if (!workspaceId) throw new Error('Automatic Folder icons require their registered Workspace.')
-    return <ProjectIcon workspaceId={workspaceId} name={name} lastActivityAt={lastActivityAt} visible={visible} />
+    return <ProjectIcon workspaceId={workspaceId} name={name} folderIdentityKey={folderIdentityKey} lastActivityAt={lastActivityAt} visible={visible} />
   }
   const monogram = kind === 'topic' && !topicGlyph ? projectMonogram(name) : ''
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-source="automatic"

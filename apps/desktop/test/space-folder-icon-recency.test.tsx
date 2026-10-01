@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import '../src/renderer/src/styles/chrome.css'
+import '../src/renderer/src/styles/conversation-avatar.css'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 // The actual App route and ProjectRail stay mounted. Native workbench surfaces are outside this color projection.
@@ -16,6 +17,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import * as recency from '../src/renderer/src/lib/space-folder-icon-recency'
 import { folderSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
+import { clearsSemanticHues, speakerColorHue } from '../src/renderer/src/lib/conversation-avatar-color'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
@@ -26,6 +28,7 @@ import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLa
 const HOUR = 60 * 60_000, NOW = 1_800_000_000_000
 const ASSET = 'data:image/svg+xml;base64,PHN2Zy8+'
 const CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/chrome.css'), 'utf8')
+const AVATAR_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/conversation-avatar.css'), 'utf8')
 const project: WorkspaceRecord = { id: 'project', name: 'Project', hostId: 'local', path: '/repo', kind: 'folder' }
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'private.invalid' }],
   executors: {}, workspaces: [project], appearance: { terminalTheme: 'graphite' },
@@ -57,12 +60,14 @@ beforeEach(() => {
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   expect(CSS.length).toBeGreaterThan(0)
-  style = document.createElement('style'); style.textContent = CSS; document.head.append(style)
+  expect(AVATAR_CSS.length).toBeGreaterThan(0)
+  style = document.createElement('style'); style.textContent = `${CSS}\n${AVATAR_CSS}`; document.head.append(style)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined; container.remove(); style.remove()
+  document.documentElement.removeAttribute('data-appearance')
   useAppStore.setState(initial, true)
   if (originalVisibility) Object.defineProperty(document, 'visibilityState', originalVisibility)
   else Reflect.deleteProperty(document, 'visibilityState')
@@ -94,6 +99,29 @@ function expectTone(tone: recency.FolderIconTone, id = project.id) {
   expect(Number(actual.opacity)).toBe(tone === 'full' ? 1 : tone === 'subdued' ? .95 : .85)
   expect(img.parentElement?.title).toContain('Git project')
   expect(img.parentElement?.title).toContain(tone === 'unknown' ? 'activity time unknown' : tone === 'quiet' ? 'over 12 hours ago' : tone === 'full' ? 'within 1 hour' : '1–12 hours ago')
+}
+function monogram(id = project.id) {
+  const shell = row(id).closest('.project-rail-row-shell')
+  expect(shell).not.toBeNull()
+  const cards = [...shell!.querySelectorAll<HTMLElement>('[data-monogram]')]
+  expect(cards).toHaveLength(1)
+  expect(cards[0]!.textContent?.length).toBeGreaterThan(0)
+  expect(shell!.querySelectorAll('img')).toHaveLength(0)
+  return cards[0]!
+}
+function expectMonogramTone(tone: recency.FolderIconTone, id = project.id, light = false) {
+  const card = monogram(id), actual = getComputedStyle(card), hue = card.style.getPropertyValue('--folder-icon-hue')
+  expect(hue.length).toBeGreaterThan(0)
+  expect(clearsSemanticHues(Number(hue))).toBe(true)
+  expect(card.dataset.folderIconRecency).toBe(tone)
+  expect(actual.filter).toBe(tone === 'full' ? 'saturate(.8)' : tone === 'subdued' ? 'saturate(.65)' : 'saturate(.2)')
+  const ink = light ? tone === 'full' ? '40% 36%' : tone === 'subdued' ? '32% 40%' : '20% 44%'
+    : tone === 'full' ? '52% 74%' : tone === 'subdued' ? '42% 70%' : '28% 66%'
+  const fill = light ? tone === 'full' ? '40% 40% / .16' : tone === 'subdued' ? '32% 40% / .11' : '20% 40% / .06'
+    : tone === 'full' ? '40% 50% / .22' : tone === 'subdued' ? '35% 50% / .16' : '20% 50% / .09'
+  expect(actual.color).toBe(`hsl(${hue} ${ink})`)
+  expect(actual.backgroundColor).toBe(`hsl(${hue} ${fill})`)
+  expect(card.title).toContain(tone === 'unknown' ? 'activity time unknown' : tone === 'quiet' ? 'over 12 hours ago' : tone === 'full' ? 'within 1 hour' : '1–12 hours ago')
 }
 async function documentVisible(value: DocumentVisibilityState) {
   visibility = value
@@ -268,7 +296,7 @@ it('the actual App Settings path cancels the Folder clock through ProjectRail an
   expect(api.sessions.snapshot).not.toHaveBeenCalled()
 })
 
-it('does not start the activity clock before appearance resolves, and stops when the actual image fails', async () => {
+it('does not start before appearance resolves and retains activity on the confirmed monogram when the image fails', async () => {
   let resolve!: (value: { kind: 'repository'; icon: string }) => void
   vi.mocked(api.workspaces.appearance).mockImplementation(() => new Promise(done => { resolve = done }))
   await mount([agent('owned', NOW)])
@@ -276,12 +304,12 @@ it('does not start the activity clock before appearance resolves, and stops when
   await act(async () => resolve({ kind: 'repository', icon: ASSET }))
   expectTone('full'); expect(vi.getTimerCount()).toBe(1)
   await act(async () => image().dispatchEvent(new Event('error')))
-  expect(container.querySelector('img')).toBeNull(); expect(vi.getTimerCount()).toBe(0)
-  expect(container.querySelector('[data-monogram]')?.textContent).toBe('P')
+  expect(container.querySelector('img')).toBeNull(); expect(vi.getTimerCount()).toBe(1)
+  expectMonogramTone('full'); expect(monogram().textContent).toBe('P')
   expect(api.workspaces.appearance).toHaveBeenCalledTimes(1)
 })
 
-it('keeps manual Folder, absent-image monogram, Topic and Mote identity free of activity paint or clocks', async () => {
+it('keeps manual Folder, Topic and Mote neutral while restoring the actual automatic Folder monogram activity', async () => {
   const key = folderSpaceIconTarget({ hostId: project.hostId, repoPath: project.path, name: project.name }).key
   useAppStore.setState({ spaceObjectIcons: { [key]: 'code' } })
   await mount([agent('owned', NOW)], [project], <><WorkspaceSidebar /><SpaceObjectIcon kind="topic" name="Topic" manualIcon={null} lastActivityAt={NOW} /><SpaceObjectIcon kind="mote" name="Mote" manualIcon={null} lastActivityAt={NOW} /></>)
@@ -291,8 +319,11 @@ it('keeps manual Folder, absent-image monogram, Topic and Mote identity free of 
   expect(vi.getTimerCount()).toBe(0); expect(api.workspaces.appearance).not.toHaveBeenCalled()
   vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
   await act(async () => useAppStore.setState({ spaceObjectIcons: {} }))
-  expect(container.querySelector('[data-monogram]')).not.toBeNull()
-  expect(container.querySelectorAll('img')).toHaveLength(0); expect(vi.getTimerCount()).toBe(0)
+  expectMonogramTone('full')
+  expect(container.querySelectorAll('img')).toHaveLength(0); expect(vi.getTimerCount()).toBe(1)
+  const topic = [...container.querySelectorAll<HTMLElement>('[data-monogram]')].find(node => node.textContent === 'T')
+  expect(topic).toBeDefined(); expect(topic!.hasAttribute('data-folder-icon-recency')).toBe(false)
+  expect(getComputedStyle(topic!).filter).toBe('grayscale(1)')
 })
 
 it('leaves the actual Focus lane and default ProjectIcon consumer in their original quiet presentation', async () => {
@@ -334,4 +365,125 @@ it('memoized primitive observations ignore unrelated Sessions/timelines and upda
   expect(api.workspaces.appearance).not.toHaveBeenCalled()
   const semantic = useAppStore.getState().sessions.find(session => session.id === owned.id)
   expect(semantic?.kind === 'agent' ? semantic.semanticStatus?.stateEnteredAt : undefined).toBe(1)
+})
+
+it.each(([
+  [HOUR - 1, 'full'], [HOUR, 'full'], [HOUR + 1, 'subdued'],
+  [12 * HOUR - 1, 'subdued'], [12 * HOUR, 'subdued'], [12 * HOUR + 1, 'quiet'], [null, 'unknown']
+] as const).flatMap(([age, tone]) => [false, true].map(light => [age, tone, light] as const)))('the actual absent-image Folder at age %s uses %s (light theme %s)', async (age, tone, light) => {
+  vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
+  if (light) document.documentElement.dataset.appearance = 'light'
+  await mount(age === null ? [] : [agent('owned', NOW - age)])
+  expectMonogramTone(tone, project.id, light)
+  expect(monogram().textContent).toBe('P')
+})
+
+it('uses the durable Host + Project root across rename, preferred worktree, Session, order and remount', async () => {
+  vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
+  const checkout: WorkspaceRecord = { id: 'checkout', name: 'Branch', hostId: 'local', path: '/checkout', repoPath: '/repo', kind: 'worktree', branch: 'feature/private' }
+  const remote: WorkspaceRecord = { ...project, id: 'remote-project', hostId: 'remote' }
+  const sibling: WorkspaceRecord = { ...project, id: 'sibling-project', path: '/another' }
+  const key = folderSpaceIconTarget({ hostId: project.hostId, repoPath: project.path, name: project.name }).key
+  await mount([agent('owned', NOW)], [project, checkout, remote, sibling])
+  const hue = monogram().style.getPropertyValue('--folder-icon-hue')
+  expect(hue).toBe(String(speakerColorHue(key)))
+  expect(monogram(remote.id).style.getPropertyValue('--folder-icon-hue')).toBe(String(speakerColorHue(folderSpaceIconTarget({ hostId: remote.hostId, repoPath: remote.path, name: remote.name }).key)))
+  expect(monogram(sibling.id).style.getPropertyValue('--folder-icon-hue')).toBe(String(speakerColorHue(folderSpaceIconTarget({ hostId: sibling.hostId, repoPath: sibling.path, name: sibling.name }).key)))
+  const before = [monogram().style.getPropertyValue('--folder-icon-hue'), monogram(remote.id).style.getPropertyValue('--folder-icon-hue'), monogram(sibling.id).style.getPropertyValue('--folder-icon-hue')]
+  expect(new Set(before).size).toBeGreaterThan(1)
+  await act(async () => useAppStore.setState({ config: { ...config, workspaces: [sibling, remote, checkout, { ...project, name: 'Renamed project' }] }, sessions: [agent('different-session', NOW, 'acp', checkout.path)] }))
+  expect(monogram().textContent).toBe('R'); expectMonogramTone('full')
+  expect(monogram().style.getPropertyValue('--folder-icon-hue')).toBe(hue)
+  await act(async () => useAppStore.setState({ config: { ...config, workspaces: [sibling, remote, checkout] } }))
+  expectMonogramTone('full', checkout.id)
+  expect(monogram(checkout.id).style.getPropertyValue('--folder-icon-hue')).toBe(hue)
+  expect(api.workspaces.appearance).toHaveBeenCalledWith(checkout.id)
+  await act(async () => root!.render(null))
+  expect(container.querySelectorAll('[data-monogram]')).toHaveLength(0)
+  await act(async () => root!.render(<WorkspaceSidebar />))
+  expectMonogramTone('full', checkout.id)
+  expect(monogram(checkout.id).style.getPropertyValue('--folder-icon-hue')).toBe(hue)
+})
+
+it('the monogram clock naturally crosses both boundaries, stops while hidden, catches up and releases on unmount', async () => {
+  vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
+  const intervals = vi.spyOn(globalThis, 'setInterval')
+  await mount([agent('owned', NOW - HOUR)])
+  const card = monogram(), hue = card.style.getPropertyValue('--folder-icon-hue')
+  expectMonogramTone('full'); expect(vi.getTimerCount()).toBe(1)
+  await advance(1); expectMonogramTone('subdued')
+  await documentVisible('hidden'); expect(vi.getTimerCount()).toBe(0)
+  await advance(11 * HOUR); expect(card.dataset.folderIconRecency).toBe('subdued')
+  await documentVisible('visible'); expectMonogramTone('quiet'); expect(vi.getTimerCount()).toBe(0)
+  vi.setSystemTime(NOW)
+  await documentVisible('visible'); expectMonogramTone('full'); expect(vi.getTimerCount()).toBe(1)
+  await act(async () => root!.render(<WorkspaceSidebar visible={false} />))
+  expect(vi.getTimerCount()).toBe(0)
+  vi.setSystemTime(NOW + 2 * HOUR)
+  await act(async () => root!.render(<WorkspaceSidebar visible />))
+  expectMonogramTone('subdued'); expect(vi.getTimerCount()).toBe(1)
+  expect(monogram()).toBe(card); expect(card.style.getPropertyValue('--folder-icon-hue')).toBe(hue)
+  await act(async () => root!.unmount()); root = undefined
+  expect(card.isConnected).toBe(false); expect(vi.getTimerCount()).toBe(0)
+  await documentVisible('hidden'); await documentVisible('visible')
+  expect(vi.getTimerCount()).toBe(0); expect(intervals).not.toHaveBeenCalled()
+  expect(api.workspaces.appearance).toHaveBeenCalledTimes(1)
+  expect(api.sessions.snapshot).not.toHaveBeenCalled(); expect(api.ui.requestStorageFlush).not.toHaveBeenCalled()
+})
+
+it('the confirmed monogram rejects untrusted and invalid observations and isolates a fresh child Project', async () => {
+  vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
+  const child: WorkspaceRecord = { ...project, id: 'child', path: '/repo/child' }
+  await mount([agent('process', NOW, 'run-process'), agent('bytes', NOW, 'terminal-output'), agent('input', NOW, 'user'),
+    agent('future', NOW + 1), agent('nan', Number.NaN), agent('child', NOW, 'acp', child.path)], [project, child])
+  expect(useAppStore.getState().sessions).toHaveLength(6)
+  expectMonogramTone('unknown'); expectMonogramTone('full', child.id)
+  expect(vi.getTimerCount()).toBe(1)
+  await act(async () => useAppStore.setState({ sessions: [agent('old', NOW - 24 * HOUR), agent('child', NOW, 'acp', child.path)] }))
+  expectMonogramTone('quiet'); expectMonogramTone('full', child.id)
+})
+
+it('unresolved appearance and an empty glyph never invent a colored identity or clock', async () => {
+  let resolve!: (value: { kind: 'directory'; icon: null }) => void
+  vi.mocked(api.workspaces.appearance).mockImplementation(() => new Promise(done => { resolve = done }))
+  await mount([agent('owned', NOW)])
+  expect(container.querySelectorAll('[data-monogram], [data-folder-icon-recency]')).toHaveLength(0)
+  expect(vi.getTimerCount()).toBe(0)
+  await act(async () => resolve({ kind: 'directory', icon: null }))
+  expectMonogramTone('full'); expect(vi.getTimerCount()).toBe(1)
+  await act(async () => useAppStore.setState({ config: { ...config, workspaces: [{ ...project, name: '   ' }] } }))
+  expect(container.querySelectorAll('[data-monogram], [data-folder-icon-recency]')).toHaveLength(0)
+  expect(row().querySelector('svg.lucide-folder')).not.toBeNull(); expect(vi.getTimerCount()).toBe(0)
+})
+
+it('the default ProjectIcon and Topic monograms stay neutral without a Space Folder identity', async () => {
+  vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
+  await mount([agent('owned', NOW)], [project], <><WorkspaceSidebar /><ProjectIcon workspaceId={project.id} name="Default project" /><SpaceObjectIcon kind="topic" name="Topic" manualIcon={null} lastActivityAt={NOW} /></>)
+  expectMonogramTone('full')
+  const cards = [...container.querySelectorAll<HTMLElement>('[data-monogram]')]
+  expect(cards).toHaveLength(3)
+  const neutral = cards.filter(card => card.textContent === 'D' || card.textContent === 'T')
+  expect(neutral).toHaveLength(2)
+  for (const card of neutral) {
+    expect(card.hasAttribute('data-folder-icon-recency')).toBe(false)
+    expect(card.style.getPropertyValue('--folder-icon-hue')).toBe('')
+    expect(getComputedStyle(card).filter).toBe('grayscale(1)')
+  }
+  expect(vi.getTimerCount()).toBe(1)
+})
+
+it('unrelated Session updates do not repaint the monogram and an owned observation updates the same card without probing', async () => {
+  vi.mocked(api.workspaces.appearance).mockResolvedValue({ kind: 'directory', icon: null })
+  const owned = agent('owned', NOW - 24 * HOUR)
+  await mount([owned])
+  expectMonogramTone('quiet')
+  const card = monogram(), hue = card.style.getPropertyValue('--folder-icon-hue'), paint = vi.spyOn(recency, 'folderIconRecency')
+  for (let index = 1; index <= 5; index += 1) await act(async () => useAppStore.setState({ sessions: [
+    { ...owned, updatedAt: NOW + index, latestOutputBytes: index }, agent('unrelated', NOW, 'native-hook', '/unregistered')
+  ] }))
+  expect(paint).not.toHaveBeenCalled(); expect(monogram()).toBe(card)
+  await act(async () => useAppStore.setState({ sessions: [agent('owned', NOW)] }))
+  expectMonogramTone('full'); expect(monogram()).toBe(card)
+  expect(card.style.getPropertyValue('--folder-icon-hue')).toBe(hue)
+  expect(api.workspaces.appearance).toHaveBeenCalledTimes(1)
 })
