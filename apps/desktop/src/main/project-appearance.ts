@@ -12,12 +12,11 @@ const MAX_ICON_BYTES = 256 * 1024
 // bounded walk too. Descend at most this many directory levels below the root.
 const MAX_DIR_DEPTH = 3
 // A bounded-depth walk can still be expensive on a huge or network-mounted tree; cap the dirs scanned
-// and degrade to the folder glyph rather than hang. ponytail: fixed cap, make it configurable only if a
-// real repo is ever found to hide its icon past dir #400.
+// and return the neutral identity when no project asset is found within the budget.
 const MAX_DIRS_SCANNED = 400
-// Never walk into these: node_modules is enormous, the rest are build output or nested worktrees whose
-// icons are not this project's identity. Removing this set is a measured regression (test guards it).
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', '.next', '.cache', '.worktrees'])
+// Dependencies, build output and hidden tool data do not own the project's identity. In particular,
+// temporary run directories must not exhaust the budget before actual source assets are reached.
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage'])
 // Conventional locations, tried before the walk so the common case costs a handful of stats, not a BFS.
 const FIXED_CANDIDATES = [
   'icon.png', 'icon.svg', 'logo.svg', 'logo.png', 'favicon.svg', 'favicon.ico', 'favicon.png',
@@ -87,7 +86,7 @@ async function findIcon(root: string): Promise<Hit | null> {
     }
     if (depth < MAX_DIR_DEPTH) {
       for (const entry of entries) {
-        if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) queue.push({ dir: join(dir, entry.name), depth: depth + 1 })
+        if (entry.isDirectory() && !entry.name.startsWith('.') && !SKIP_DIRS.has(entry.name)) queue.push({ dir: join(dir, entry.name), depth: depth + 1 })
       }
     }
   }

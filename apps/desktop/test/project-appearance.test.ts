@@ -57,6 +57,25 @@ describe('projectAppearance', () => {
     expect(await projectAppearance(root)).toMatchObject({ icon: expect.stringContaining('data:image/webp;base64,') })
   })
 
+  it('finds the project icon without spending its directory budget on hidden tool data', async () => {
+    const root = await newRoot()
+    await Promise.all(Array.from({ length: 410 }, (_, index) =>
+      mkdir(join(root, '.tool-cache', `run-${index}`), { recursive: true })))
+    await put(root, 'packages/client/resources/icon.png', PNG)
+    expect(await projectAppearance(root)).toEqual({
+      kind: 'directory', icon: `data:image/png;base64,${PNG.toString('base64')}`
+    })
+  })
+
+  it('does not borrow an identity from hidden tool data', async () => {
+    const root = await newRoot()
+    await put(root, '.tool-cache/icon.png', PNG)
+    await put(root, 'client/resources/logo.webp', WEBP)
+    expect(await projectAppearance(root)).toEqual({
+      kind: 'directory', icon: `data:image/webp;base64,${WEBP.toString('base64')}`
+    })
+  })
+
   it('trusts magic bytes over a lying extension: a text file named icon.png is not the icon', async () => {
     const root = await newRoot()
     // MUTATION TARGET #3: if the probe encodes by extension instead of sniffing, this text file named
