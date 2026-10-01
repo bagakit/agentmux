@@ -340,11 +340,11 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       onPointerEnter={enter} onPointerLeave={leave}
       onClick={(event) => { if (preview.current && open) { event.preventDefault(); pin() } }}>
       <Mail size={14} aria-hidden="true" />
-      {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={9} className="composer-mailbox__progress" aria-hidden="true" /> : null}
-      {system.unread.length ? <Bell size={7} className="composer-mailbox__attention" aria-hidden="true" /> : null}
-      <span className="composer-mailbox__inbox-count" aria-hidden="true">
-        {unread ? <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span> : null}
-      </span>
+      {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={10} className="composer-mailbox__progress" aria-hidden="true" /> : null}
+      {system.unread.length ? <Bell size={10} className="composer-mailbox__attention" aria-hidden="true" /> : null}
+      {unread ? <span className="composer-mailbox__inbox-count" aria-hidden="true">
+        <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span>
+      </span> : null}
     </button>
     <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
       data-state={open ? 'open' : 'closed'}
