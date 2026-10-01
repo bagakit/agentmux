@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
+import { MoteWorkface } from '../../../src/renderer/src/components/MoteWorkface'
+import { GlobalSurveySurface } from '../../../src/renderer/src/components/GlobalSurveySurface'
 import { PmoTeamsTopicEntry } from '../../../src/renderer/src/components/PmoTeamsTopicEntry'
 import { PmoTeamsTopicFloatingPanel } from '../../../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
@@ -11,7 +13,9 @@ import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOv
 import { useAppStore, executorDetectionKey, warmTerminalKey, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
-import { usePmoTeamsTopicFloatingState, readPmoTeamsTopicFloatingState, pmoTeamsTopicFloatingViewTargets } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
+import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
+import { workbenchProjectionSlotId, type WorkbenchProjection } from '../../../src/renderer/src/lib/workbench-projection'
+import { usePmoTeamsTopicFloatingState, readPmoTeamsTopicFloatingState, pmoTeamsTopicFloatingViewTargets, requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { draftDocument } from '../../../src/renderer/src/components/InlineComposer'
 import type { Editor } from '@tiptap/core'
@@ -21,7 +25,20 @@ import '../../../src/renderer/src/styles/index.css'
 // The production Workbench/Region, rich inputs, CSS and xterm run unchanged. Only native preview
 // facts are controlled. This is not a vendor CLI or installed user-App proof.
 const restarting = new URLSearchParams(location.search).get('phase') === 'restart'
+const moteOnly = new URLSearchParams(location.search).get('suite') === 'terminal-host-mote'
 const restartFacts = (window as typeof window & { launchpadFixtureBootFacts?: any }).launchpadFixtureBootFacts
+// The preview file owner uses relative keys; the desktop directory owner returns
+// absolute directory facts. Preserve that production contract at this controlled API seam.
+for (const name of ['listTopics'] as const) {
+  const original = api.scratch[name] as (...args: any[]) => Promise<any>
+  ;(api.scratch[name] as (...args: any[]) => Promise<any>) = async (workspaceId: string, ...args: any[]) => {
+    const result = await original(workspaceId, ...args)
+    const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)
+    const absolute = (topic: any) => topic && workspace && !topic.directoryPath.startsWith('/')
+      ? { ...topic, directoryPath: workspace.path.replace(/\/+$/, '') + '/' + topic.directoryPath } : topic
+    return Array.isArray(result) ? result.map(absolute) : absolute(result)
+  }
+}
 if (!restarting) {
   const initial=await api.config.get()
   await api.config.save({...initial,workspaces:[...initial.workspaces.map(item=>item.path==='home//agentmux'?{...item,path:_hygiene_fixturePath("Users/preview/projects/agentmux")}:item),{id:SCRATCH_WORKSPACE_ID,name:'No Project',path:_hygiene_fixturePath("Users/preview/.agentmux/scratch"),hostId:'local',kind:'folder'}]},initial)
@@ -47,7 +64,8 @@ const workspace = baseConfig.workspaces[0]!, workspaceId = workspace.id
 const tabId = 'launchpad-tab', regionId = 'launchpad-input', neighborId = 'launchpad-neighbor', groupId = 'launchpad-group'
 const snapshot = await api.sessions.snapshot()
 const agents = snapshot.sessions.filter(session => session.kind === 'agent')
-const warm = restarting ? restartFacts.warm : await api.sessions.launchTerminal({ hostId: workspace.hostId, workspacePath: workspace.path })
+const warmWorkspace = moteOnly ? baseConfig.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)! : workspace
+const warm = restarting ? restartFacts.warm : await api.sessions.launchTerminal({ hostId: warmWorkspace.hostId, workspacePath: warmWorkspace.path })
 const neighbor = restarting ? restartFacts.neighbor : await api.sessions.launchTerminal({ hostId: workspace.hostId, workspacePath: workspace.path })
 const calls = { stops: [] as unknown[], browsers: [] as unknown[], files: [] as unknown[], submissions: [] as unknown[], launches: [] as unknown[] }
 // Controlled native history facts keep the normal UI scene separate from the
@@ -71,16 +89,37 @@ if (!restarting) {
     return {...result,session:{...result.session,latestOutputBytes:Math.max(0,...result.replay.map(chunk=>chunk.endByte))},currentSize:{cols:80,rows:24},terminal:{type:'basic-vt',checkpoint:{runId:args[0].run.runId,throughByte:0,resizeRevision:0,size:{cols:80,rows:24}},restoreBytes:new Uint8Array(),resizes:[]}}
   }
 }
-if (!restarting) useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID,'terminal','hidden')
 const root = createRoot(document.getElementById('root')!)
 let fixtureVisible = true
+let fixtureHost: 'ordinary' | 'survey' | 'mote' | 'original-mote' = moteOnly ? 'original-mote' : 'ordinary'
+let fixtureEntity: 'tab' | 'zone' = 'tab'
 function Shell() {
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const tabs=useAppStore(state=>state.tabs),layouts=useAppStore(state=>state.layouts),agentFocus=useAppStore(state=>state.agentFocus)
   const targets=pmoTeamsTopicFloatingViewTargets(floating,tabs,layouts[SCRATCH_WORKSPACE_ID],agentFocus.pmo.sessionId)
-  return <><div id="fixture-workbench" hidden={!fixtureVisible} inert={!fixtureVisible}><WorkspaceWorkbench workspaceId={workspaceId} visible={fixtureVisible} /></div>
+  const reference = { displayWorkspaceId: workspaceId, groupId, tabId, regionId }
+  const catalog = spatialCatalog(useAppStore.getState(), [])
+  const zoneId = catalog.tabs.find(tab => tab.tabId === tabId)?.zoneId
+  const projection: WorkbenchProjection | undefined = fixtureHost === 'survey' && zoneId ? {
+    entity: fixtureEntity === 'tab' ? { kind: 'tab', tabId } : { kind: 'zone', zoneId },
+    presentationId: 'survey-workbench', displayWorkspaceId: workspaceId, catalog,
+    selection: [reference], onSelect() {}
+  } : undefined
+  const hostId = workbenchProjectionSlotId('survey-workbench-slot', reference)
+  return <>{!moteOnly ? <div id="fixture-workbench" hidden={!fixtureVisible || fixtureHost === 'original-mote'} inert={!fixtureVisible || fixtureHost === 'original-mote'}>
+    {projection ? <GlobalSurveySurface catalog={catalog} projection={projection} visible={fixtureVisible}
+      tabViewControl={{ active: fixtureEntity === 'tab', available: true, onToggle() {} }} /> : null}
+    <div className={projection ? 'workspace-workbench-slot workspace-workbench-slot--parked' : 'launcher-fixture-original'}>
+      <WorkspaceWorkbench workspaceId={workspaceId} visible={fixtureVisible && fixtureHost === 'ordinary'} viewTargets={projection ? {
+        [tabId]: [{ hostId, active: true, visible: fixtureVisible, surface: 'survey', reference, projection, retainedRegionId: regionId }]
+      } : undefined} />
+    </div></div> : null}
     <footer id="fixture-footer"><span>{useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)?.name}</span><PmoTeamsTopicEntry /></footer>
-    <div className="workspace-workbench-slot workspace-workbench-slot--parked" aria-hidden inert><WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} visible={false} viewTargets={targets} /></div>
+    <div className={fixtureHost === 'original-mote' ? 'launcher-fixture-original-mote' : 'workspace-workbench-slot workspace-workbench-slot--parked'}
+      aria-hidden={fixtureHost !== 'original-mote'} inert={fixtureHost !== 'original-mote'}>
+      <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId="launcher:design" visible={fixtureVisible && fixtureHost === 'original-mote'}>
+        <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId="launcher:design" visible={fixtureVisible && fixtureHost === 'original-mote'} viewTargets={targets} />
+      </MoteWorkface></div>
     <WindowOverlayHost><PmoTeamsTopicFloatingPanel floating={floating} setFloating={setFloating} /></WindowOverlayHost></>
 }
 const probe = {
@@ -90,6 +129,20 @@ const probe = {
   bootFacts() { const state=useAppStore.getState(); return {config:state.config,snapshot:{...snapshot,sessions:state.sessions,timelines:state.timelines,recoveryCandidates:state.recoveryCandidates},warm,neighbor} },
   settings() { flushSync(()=>root.render(<div style={{display:'flex',width:'100%',height:'100%'}}><SettingsPanel onClose={()=>probe.scene()} /></div>)) },
   visibility(visible: boolean) { fixtureVisible = visible; flushSync(() => root.render(<Shell />)) },
+  host(surface: typeof fixtureHost, entity: typeof fixtureEntity = 'tab') {
+    fixtureHost = surface; fixtureEntity = entity
+    if (surface === 'survey') {
+      const state = useAppStore.getState(), catalog = spatialCatalog(state, [])
+      const zoneId = catalog.tabs.find(tab => tab.tabId === tabId)?.zoneId
+      if (!zoneId) throw new Error('The real original Launcher Zone is absent')
+      const reference = { displayWorkspaceId: workspaceId, groupId, tabId, regionId }
+      useAppStore.setState({ surveyZoneSelection: { zoneId, selection: [reference], active: reference },
+        surveyCollectedZones: { ...state.surveyCollectedZones, [zoneId]: true }, surveySidebarCollapsed: true })
+    }
+    if (surface === 'mote') requestPmoTeamsTopicFloatingOpen({ targetTopicId: 'launcher:design' })
+    else requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+    flushSync(() => root.render(<Shell />))
+  },
   documentVisibility(hidden: boolean) {
     // Controlled browser signals exercise production visibility listeners; this is not an OS window claim.
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
@@ -100,7 +153,7 @@ const probe = {
     const config = useAppStore.getState().config!
     flushSync(() => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: absolute } }))
   },
-  scene({ split = false, long = false, theme = 'dark', ratio = 0.5 } = {}) {
+  scene({ split = false, long = false, theme = 'dark', ratio = 0.5, mount = true } = {}) {
     document.documentElement.dataset.appearance = theme
     const config = structuredClone(baseConfig)
     config.executors = Object.fromEntries(Object.entries(config.executors).slice(0, 6))
@@ -119,14 +172,14 @@ const probe = {
       tabs: { ...Object.fromEntries(Object.entries(state.tabs).filter(([, item]) => item.workspaceId !== workspaceId)), [tabId]: tab },
       layouts: { ...state.layouts, [workspaceId]: createWorkspaceLayout(groupId, [tabId]) }, activeWorkspaceId: workspaceId,
       mainSurface: 'workbench', loading: false, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, workbenchSpaceSelection: null,
-      warmTerminal: { key: warmTerminalKey(workspace.hostId, workspace.path), ownerLauncherId: `region:${regionId}`, session: warm, ready: Promise.resolve(warm) },
+      warmTerminal: { key: warmTerminalKey(warmWorkspace.hostId, warmWorkspace.path), ownerLauncherId: `region:${regionId}`, session: warm, ready: Promise.resolve(warm) },
       recoveryCandidates: agents.map(session => ({ agentSessionId: session.id, hostId: session.hostId, workspacePath: session.workspacePath,
         providerId: session.providerId!, executorId: session.executorId!, capabilities: session.capabilities, label: session.label,
         createdAt: session.createdAt, updatedAt: session.updatedAt, run: session.control.run })),
       agentNames: { ...state.agentNames, [agents[0]!.id]: 'Runtime architecture', [agents[1]!.id]: 'Renderer composition' },
       timelines: snapshot.timelines,
       agentComposerDrafts: { [regionId]: 'Review the launch experience and preserve the original working context.\nFocus on clear runtime facts and small Region usability.', ...state.agentComposerDrafts } }))
-    flushSync(() => root.render(<Shell />))
+    if (mount) flushSync(() => root.render(<Shell />))
   },
   async motes() {
     const state = useAppStore.getState()
@@ -150,17 +203,31 @@ const probe = {
     if (!node?.editor) throw new Error('Actual Note editor is absent')
     node.editor.commands.setContent(draftDocument(text)); node.editor.commands.focus()
   },
-  terminalFacts() { const records=(window as any).launchpadTerminals??[];const node=document.querySelector(`[data-workbench-region-id="${regionId}"] .launch-terminal__body .xterm`);const actual=records.find((item:any)=>item.element===node&&!item.disposed);if(!actual)return null;const buffer=actual.buffer.active;return {rows:actual.rows,cols:actual.cols,lines:Array.from({length:actual.rows},(_,index)=>buffer.getLine(buffer.viewportY+index)?.translateToString(true)??'')} },
+  terminalFacts() { const records=(window as any).launchpadTerminals??[];const node=document.querySelector(`[data-workbench-region-id="${regionId}"] .launch-terminal__body .xterm`);const actual=records.find((item:any)=>item.element===node&&!item.disposed);if(!actual)return null;const buffer=actual.buffer.active;return {rows:actual.rows,cols:actual.cols,fontSize:actual.options.fontSize,fontFamily:actual.options.fontFamily,lines:Array.from({length:actual.rows},(_,index)=>buffer.getLine(buffer.viewportY+index)?.translateToString(true)??'')} },
+  moteLauncher() { const tab=Object.values(useAppStore.getState().tabs).find(tab=>tab.workspaceId===SCRATCH_WORKSPACE_ID&&tab.topicId==='launcher:design');return tab ? [...document.querySelectorAll<HTMLElement>('[data-mote-workface="launcher:design"] [data-workbench-region-id] .launch-surface')].find(node=>node.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id')===tab.layout.activeRegionId&&getComputedStyle(node).visibility==='visible'&&node.getBoundingClientRect().width>0)??null:null },
+  moteTerminalFacts() { const records=(window as any).launchpadTerminals??[];const node=probe.moteLauncher()?.querySelector('.launch-terminal__body .xterm');const actual=records.find((item:any)=>item.element===node&&!item.disposed);if(!actual)return null;const buffer=actual.buffer.active;return {rows:actual.rows,cols:actual.cols,fontSize:actual.options.fontSize,fontFamily:actual.options.fontFamily,lines:Array.from({length:actual.rows},(_,index)=>buffer.getLine(buffer.viewportY+index)?.translateToString(true)??'')} },
   facts() {
     const state = useAppStore.getState(), launcher = useLauncherState.getState()
-    return { sections: launcher.sections[workspaceId], drafts: launcher.drafts[`region:${regionId}`], selectedExecutor: launcher.executors[workspaceId],
+    return { sections: launcher.sections[workspaceId], allSections: launcher.sections, drafts: launcher.drafts[`region:${regionId}`], selectedExecutor: launcher.executors[workspaceId],
       sourceDraft: state.agentComposerDrafts[regionId], agentDrafts: state.agentComposerDrafts, activeWorkspaceId: state.activeWorkspaceId,
       tab: state.tabs[tabId], layout: state.layouts[workspaceId], warmRun: state.warmTerminal?.session?.control.run.runId,
-      originalWarmRun: warm.control.run.runId, neighborRun: neighbor.control.run.runId, calls, floating: readPmoTeamsTopicFloatingState(),
+      originalWarmRun: warm.control.run.runId, warmOwner: state.warmTerminal?.ownerLauncherId, warmKey: state.warmTerminal?.key, warmPath: state.warmTerminal?.session?.workspacePath, neighborRun: neighbor.control.run.runId, calls, floating: readPmoTeamsTopicFloatingState(),
       storageBytes: localStorage.getItem('agentmux-launcher'), workbenchStorageBytes: localStorage.getItem('agentmux-workbench-v1'), persistenceIssue: launcher.persistenceIssue }
   },
+  moteHostFacts() {
+    const state = useAppStore.getState()
+    return { workspace: state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID),
+      snapshot: state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID],
+      tabs: Object.values(state.tabs).filter(tab => tab.workspaceId === SCRATCH_WORKSPACE_ID),
+      hosts: [...document.querySelectorAll('.mote-workface')].map(node => ({ identity: node.getAttribute('data-mote-workface'), launchers: node.querySelectorAll('.launch-surface').length })) }
+  },
   geometry() {
-    const region = document.querySelector<HTMLElement>(`[data-workbench-region-id="${regionId}"]`)!, surface = region.querySelector<HTMLElement>('.launch-surface')!
+    const region = fixtureHost === 'mote'
+      ? probe.moteLauncher()!.closest<HTMLElement>('[data-workbench-region-id]')!
+      : fixtureHost === 'original-mote'
+      ? probe.moteLauncher()!.closest<HTMLElement>('[data-workbench-region-id]')!
+      : document.querySelector<HTMLElement>(`[data-workbench-region-id="${regionId}"]`)!
+    const surface = region.querySelector<HTMLElement>('.launch-surface')!
     const box = (e: Element) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom } }
     return { region: box(region), surface: box(surface), clientWidth: surface.clientWidth, scrollWidth: surface.scrollWidth,
       clientHeight: surface.clientHeight, scrollHeight: surface.scrollHeight,
@@ -168,4 +235,8 @@ const probe = {
   }
 }
 Object.assign(window, { launchpad: probe })
-if (restarting) flushSync(()=>root.render(<Shell />)); else probe.scene()
+if (restarting) flushSync(()=>root.render(<Shell />)); else if (moteOnly) {
+  // This independent scenario begins at an already confirmed real Mote owner.
+  // An unrelated temporary empty Group before directory/Tab discovery is not its host.
+  probe.scene({ mount: false }); await probe.motes(); flushSync(()=>root.render(<Shell />))
+} else probe.scene()

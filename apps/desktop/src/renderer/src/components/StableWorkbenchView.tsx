@@ -55,12 +55,13 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; children: 
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
   homeId: string
   kind?: 'tab' | 'region'
   targetId: string | null
   active: boolean
   retainedRegionId: string | null
+  surface?: import('../lib/workbench-presentation').WorkbenchViewTarget['surface']
   survey?: boolean | undefined
   controlsOpen?: boolean | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
@@ -76,8 +77,8 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     element.className = kind === 'region' ? 'retained-workbench-region' : 'retained-workbench-view'
     return element
   })
-  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference }),
-    [active, retainedRegionId, targetId, homeId, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference])
+  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference }),
+    [active, retainedRegionId, targetId, homeId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)

@@ -1,11 +1,12 @@
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '../lib/composer-insertion'
 import { Check, ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
-import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
+import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { currentHostCheck } from '../lib/host-check'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { configuredExecutors } from '../lib/executors'
@@ -51,7 +52,14 @@ export function NewTabSurface({
   /** Hidden Workbench slots stay mounted, but only the visible launcher may own the warm PTY. */
   visible?: boolean
 }) {
-  const presentationActive = useWorkbenchPresentationActive()
+  const presentation = useWorkbenchBrowserPresentation()
+  const presentationActive = presentation.active
+  const moteWorkface = useContext(MoteWorkfaceContext)
+  // A projected View uses its actual destination; an original Mote uses its
+  // Workface owner. Resource Workspace and global navigation are not hosts.
+  const terminalDefault = (presentation.surface
+    ? presentation.surface === 'mote' || presentation.surface === 'survey'
+    : presentation.survey || Boolean(moteWorkface)) ? 'collapsed' : 'expanded'
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden)
   const motionActive = visible && presentationActive && documentVisible
   useEffect(() => {
@@ -193,7 +201,7 @@ export function NewTabSurface({
   const unavailableExecutors = executors.filter(executor => executor.detection?.state === 'missing')
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
-  const sections = { ...DEFAULT_LAUNCHER_SECTIONS, ...savedSections }
+  const sections: Record<LauncherSection, LauncherSectionMode> = { ...DEFAULT_LAUNCHER_SECTIONS, terminal: terminalDefault, ...savedSections }
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
   const saveSection = useLauncherState(state => state.setSection)
   const saveExecutor = useLauncherState(state => state.selectExecutor)

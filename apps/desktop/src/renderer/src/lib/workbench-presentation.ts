@@ -5,7 +5,7 @@ import type { WorkbenchProjection, WorkbenchProjectionSelection } from './workbe
 
 /** Spatial visibility alone does not authorize launcher activation or a focus move. */
 export type BrowserControlConfirmation = (regionId: string, unconfirmed: boolean) => void
-export type WorkbenchPresentation = { active: boolean; retainedRegionId: string | null; tabHostId?: string | undefined; survey?: boolean | undefined; controlsOpen?: boolean | undefined; onBrowserControlConfirmation?: BrowserControlConfirmation | undefined; onSelectRegion?: ((regionId: string) => void) | undefined; projection?: WorkbenchProjection | undefined; reference?: WorkbenchProjectionSelection | undefined }
+export type WorkbenchPresentation = { active: boolean; retainedRegionId: string | null; tabHostId?: string | undefined; surface?: WorkbenchViewTarget['surface']; survey?: boolean | undefined; controlsOpen?: boolean | undefined; onBrowserControlConfirmation?: BrowserControlConfirmation | undefined; onSelectRegion?: ((regionId: string) => void) | undefined; projection?: WorkbenchProjection | undefined; reference?: WorkbenchProjectionSelection | undefined }
 export const WorkbenchPresentationContext = createContext<WorkbenchPresentation>({ active: true, retainedRegionId: null })
 export function useWorkbenchPresentationActive(): boolean { return useContext(WorkbenchPresentationContext).active }
 /** The existing View owner supplies only the retained hint applicable to this presentation. */
