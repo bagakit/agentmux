@@ -12,6 +12,7 @@ import { encodeHostedValue, decodeHostedValue } from '../src/hosted-value.js'
 function fixture() {
   let eventListener: ((event: AgentMuxClientEvent) => void) | undefined
   const attachment: AgentMuxRunAttachment = { run: {
+    nativeService: null,
     runId: 'original-run', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
     workspacePath: upstreamFixturePath("private-workspace"), pid: 421, state: 'running', cols: 100, rows: 30,
     observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0

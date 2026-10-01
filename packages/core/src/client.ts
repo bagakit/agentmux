@@ -454,7 +454,8 @@ function projectRunWith(
     rows: run.rows,
     observedAt,
     latestOutputBytes: run.latestOutputBytes,
-    acceptedInputBytes: run.acceptedInputBytes ?? 0,
+    acceptedInputBytes: run.acceptedInputBytes,
+    nativeService: run.nativeService,
     ...(run.state.type === 'exited'
       ? {
           exitCode: run.state.code,
@@ -4950,6 +4951,10 @@ export class AgentMuxClient {
 
   private acceptKernelEvent(event: CtxmuxAdapterEvent): void {
     const agentSession = this.registry.findByRun(runRef(event.runId))
+    if (event.type === 'service') {
+      this.publisher.publishRunService(runRef(event.runId), event.nativeService, event.observedAt, agentSession?.agentSessionId)
+      return
+    }
     if (event.type === 'data') {
       const projected: AgentMuxRunDataEvent = {
         type: 'data',

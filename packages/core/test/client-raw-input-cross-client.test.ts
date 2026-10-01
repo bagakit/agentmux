@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
@@ -30,14 +30,14 @@ async function fixture() {
   const store = new AgentMuxMemoryAgentSessionStore()
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'cross-client-agent', providerId: 'claude', executorId: 'claude',
-    hostId: 'local', workspacePath: upstreamFixturePath("private-fixture"), run: { runId: 'cross-client-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("private-fixture"), run: { runId: 'cross-client-run' }, retiredRuns: [],
     hookBindingId: 'cross-client-binding', hookToken: 'cross-client-token', createdAt: 1, updatedAt: 2
   }
   await store.compareAndSwap(null, stored)
   let cursor = 0
   const writes: Input[] = []
   const rejected: Input[] = []
-  const run = (): CtxmuxAdapterRun => ({ runId: stored.run.runId, lifecycleOperationId: null,
+  const run = (): CtxmuxAdapterRun => ({ nativeService: null, runId: stored.run.runId, lifecycleOperationId: null,
     program: 'generic', args: [], workspacePath: stored.workspacePath, pid: 123,
     state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0,
     firstAvailableByte: 0, acceptedInputBytes: cursor })

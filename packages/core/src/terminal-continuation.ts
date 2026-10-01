@@ -32,6 +32,15 @@ function continuationSize(value: unknown): void {
   }
 }
 
+/** Check the synthetic seed before an emulator mutates its grid or history policy. */
+export function assertTerminalCheckpointRestore(checkpoint: AgentMuxTerminalCheckpoint, restoreBytes: Uint8Array): void {
+  continuationSize(checkpoint.size)
+  continuationSize(checkpoint.restoreSize)
+  const prefix = continuationCursor(checkpoint.resizeAfterRestoreBytes)
+  if (!(restoreBytes instanceof Uint8Array) || prefix > restoreBytes.byteLength) invalidContinuation()
+  if (checkpoint.restoreScrollbackRows !== null) continuationCursor(checkpoint.restoreScrollbackRows)
+}
+
 /** Validate the original Attachment DTO at another client boundary. This owner
  * also supplies the existing byte/resize ordering; it does not recreate a screen. */
 export function parseTerminalContinuation(value: unknown, snapshot: {
@@ -47,12 +56,13 @@ export function parseTerminalContinuation(value: unknown, snapshot: {
     if (typeof terminal.reason !== 'string' || !['origin_unknown', 'source_gap', 'tail_evicted', 'checkpoint_too_large', 'invalid_checkpoint'].includes(terminal.reason)) invalidContinuation()
   } else if (kind === 'basic-vt') {
     const terminal = continuationRecord(value, ['type', 'checkpoint', 'restoreBytes', 'resizes'])
-    const checkpoint = continuationRecord(terminal.checkpoint, ['runId', 'throughByte', 'resizeRevision', 'size'])
+    const checkpoint = continuationRecord(terminal.checkpoint, ['runId', 'throughByte', 'resizeRevision', 'size', 'restoreSize', 'restoreScrollbackRows', 'resizeAfterRestoreBytes'])
     let throughByte = continuationCursor(checkpoint.throughByte), currentRevision = continuationCursor(checkpoint.resizeRevision)
     continuationSize(checkpoint.size)
     if (checkpoint.runId !== snapshot.run.runId || throughByte > latest ||
       !(terminal.restoreBytes instanceof Uint8Array) || terminal.restoreBytes.byteLength < 1 ||
       terminal.restoreBytes.byteLength > 32 * 1024 * 1024 || !Array.isArray(terminal.resizes) || terminal.resizes.length > 1024) return invalidContinuation()
+    assertTerminalCheckpointRestore(checkpoint as AgentMuxTerminalCheckpoint, terminal.restoreBytes)
     for (const item of terminal.resizes) {
       const resize = continuationRecord(item, ['throughByte', 'resizeRevision', 'size'])
       const at = continuationCursor(resize.throughByte), nextRevision = continuationCursor(resize.resizeRevision)

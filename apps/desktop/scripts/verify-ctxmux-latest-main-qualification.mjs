@@ -1,5 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -7,7 +8,6 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
-import { canonicalInstallPath } from './package-identity.mjs'
 import { stopProbeProcesses } from './probe-process.mjs'
 
 const exec = promisify(execFile), repository = resolve(import.meta.dirname, '../../..')
@@ -15,7 +15,10 @@ const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-main-qualification-"))
 const require = createRequire(join(repository, 'packages/core/package.json'))
 const { build } = await import(require.resolve('esbuild'))
 const coreRelative = 'Contents/Resources/app/node_modules/@agentmux/core'
-const previous = join(canonicalInstallPath(homedir()), coreRelative, 'vendor/ctxmux/darwin-arm64')
+// These private inputs pin the outgoing Main artifact and selected producer.
+// Neither an installed App nor an upstream branch can change this qualification.
+const previous = join(repository, '.tmp/ctxmux-main-baseline')
+const inputsPath = join(repository, '.tmp/ctxmux-candidate-inputs.json')
 const sourceRepository = resolve(homedir(), 'proj/priv/bagaking/ctxmux')
 const candidate = join(repository, 'packages/core/vendor/ctxmux/darwin-arm64')
 const envBefore = { runtime: process.env.AGENTMUX_RUNTIME_DIRECTORY, state: process.env.AGENTMUX_STATE_DIRECTORY }
@@ -53,8 +56,16 @@ try {
   const oldVendor = join(oldCore, 'vendor/ctxmux/darwin-arm64')
   const oldManifest = JSON.parse(await readFile(join(oldVendor, 'manifest.json')))
   const manifest = JSON.parse(await readFile(join(candidate, 'manifest.json')))
-  const source = (await exec('git', ['-C', sourceRepository, 'rev-parse', 'refs/heads/main'])).stdout.trim()
+  const inputs = JSON.parse(await readFile(inputsPath, 'utf8'))
+  assert.equal(manifest.source.commit, inputs.source.commit)
+  assert.equal(manifest.source.tree, inputs.source.tree)
+  assert.equal(manifest.source.worktree_clean, true)
+  assert.equal(createHash('sha256').update(await readFile(join(candidate, 'manifest.json'))).digest('hex'), inputs.manifestSha256)
+  assert.equal(createHash('sha256').update(await readFile(join(previous, 'manifest.json'))).digest('hex'), inputs.previousManifestSha256)
+  const source = (await exec('git', ['-C', sourceRepository, 'rev-parse', manifest.source.commit])).stdout.trim()
+  const tree = (await exec('git', ['-C', sourceRepository, 'rev-parse', `${manifest.source.commit}^{tree}`])).stdout.trim()
   assert.equal(manifest.source.commit, source)
+  assert.equal(manifest.source.tree, tree)
   assert.ok(manifest.product.protocol > oldManifest.product.protocol)
   const sdkRoot = join(root, 'old-sdk')
   await mkdir(sdkRoot)

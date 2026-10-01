@@ -7,7 +7,7 @@ import type { AgentMuxHostedBootstrap, AgentMuxHostedInvocation, AgentMuxHostedR
 import type { AgentMuxClientEvent, AgentMuxRunAttachment } from '../src/types.js'
 
 function attachment(runId: string): AgentMuxRunAttachment {
-  return { run: { runId, kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
+  return { run: { nativeService: null, runId, kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
     workspacePath: upstreamFixturePath("private-workspace"), pid: 421, state: 'running', cols: 80, rows: 24, observedAt: 1,
     latestOutputBytes: 4, acceptedInputBytes: 0 }, replay: [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 }
 }

@@ -252,6 +252,7 @@ function eventAgentSessionId(event: RuntimeEvent['event']): string | null {
   if (event.type === 'agent-session') return event.session.agentSessionId
   if (
     event.type === 'process-state' ||
+    event.type === 'run-service' ||
     event.type === 'agent-error' ||
     event.type === 'run-removed'
   ) return event.agentSessionId ?? null
@@ -625,6 +626,12 @@ export function projectRuntimeEvent(
   if (pendingAgentSessionId && !existingEventSession) {
     return { state, sessionMembershipGap: true }
   }
+  if (core.type === 'run-service') {
+    return { state: { ...state, sessions: state.sessions.map(item =>
+      item.hostId === event.hostId && ownsRunEvent(item, core.agentSessionId, core.run) &&
+      (item.nativeService == null || core.nativeService.revision > item.nativeService.revision)
+        ? { ...item, nativeService: core.nativeService } : item) } }
+  }
   if (core.type === 'process-state') {
     // 「进程事实 → 界面那一行状态」走 Core 的共享投影，与主进程快照路径（runtime-controller 的
     // projectSession）是**同一个**实现。这里只负责把事件的字段形状取出来喂给它。
@@ -709,6 +716,7 @@ export function projectRuntimeEvent(
     const next = {
       ...current,
       providerId: core.session.providerId,
+      nativeService: sameRun(item.control.run, core.session.run) ? item.nativeService ?? null : null,
       ...(core.session.nativeHandle ? { nativeSessionId: core.session.nativeHandle.sessionId } : {}),
       hostId: core.session.hostId,
       workspacePath: core.session.workspacePath,

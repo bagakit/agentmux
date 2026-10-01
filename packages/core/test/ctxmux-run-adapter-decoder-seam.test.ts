@@ -71,7 +71,8 @@ function seamAttachment(events: () => AsyncGenerator<RunEvent, void, void>) {
         durable_output_bytes: null,
         first_available_byte: 0,
         attachments: 1,
-        applied_input_bytes: null
+        applied_input_bytes: null,
+        native_service: null
       },
       replay: {
         chunks: [seamReplayChunk()],

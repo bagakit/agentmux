@@ -16,6 +16,7 @@ import { parseToolkitSnapshot } from './toolkit.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { parseTerminalContinuation } from './terminal-continuation.js'
+import { parseRpcControlFailure } from './public-rpc-frame.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, isAgentMuxRpcStream,
   type AgentMuxRpcEndpoint, type AgentMuxRpcCredentials, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
@@ -179,9 +180,10 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates'], 'CONTROL_PROTOCOL_ERROR')
+    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' ||
       error.detail !== undefined && typeof error.detail !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
+    if (error.controlFailure !== undefined) parseRpcControlFailure(error.controlFailure)
     return event
   }
   rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR')
@@ -294,8 +296,9 @@ class RpcClient implements AgentMuxRpcClient {
           if (finished) return
           handlers!.onEvent(event as AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>)
           if (event.type === 'end') end()
-          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown };
-            end(new AgentMuxRpcError(failure.message, failure.code, -32000, failure.details, failure.candidates, failure.detail)) }
+          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown };
+            end(new AgentMuxRpcError(failure.message, failure.code, -32000, failure.details, failure.candidates, failure.detail,
+              failure.controlFailure === undefined ? undefined : parseRpcControlFailure(failure.controlFailure))) }
         }
       } catch (error) { end(transportError(error)) }
     }

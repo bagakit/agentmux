@@ -39,7 +39,7 @@ async function fixture() {
   const client = new Client({ store }), inner = client as unknown as Internals
   const accepted = new Map<string, { run: CtxmuxAdapterRun; appliedByteRange: { startByte: number; endByte: number } }>()
   const cursor = new Map<string, number>(), writes: string[] = [], events: AgentMuxClientEvent[] = []
-  const run = (runId = 'initial-run'): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: 'fixture', args: [],
+  const run = (runId = 'initial-run'): CtxmuxAdapterRun => ({ nativeService: null, runId, lifecycleOperationId: null, program: 'fixture', args: [],
     workspacePath: root, pid: 123, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0,
     firstAvailableByte: 0, acceptedInputBytes: cursor.get(runId) ?? 0 })
   const configure = async (owner: DefaultClient) => {

@@ -11,7 +11,7 @@ export type ContinuousProgressObservation = {
   lastTickId?: string
   lastCompletionId?: string
   /** Candidate only; the final nullable Native fence authorizes new admission. */
-  inputByte: number
+  inputByte: number | null
   inputOccupied: boolean
 }
 
@@ -31,6 +31,7 @@ export function decideContinuousProgress(observation: ContinuousProgressObservat
   if (observation.inputOccupied) {
     return { kind: 'skip', reason: 'user-input-changed' }
   }
+  if (observation.inputByte === null) return { kind: 'skip', reason: 'unknown-status' }
   if (current.process !== 'running') return { kind: 'skip', reason: 'unknown-status' }
   if (session.pendingInteraction || current.semantic === 'awaiting-input') return { kind: 'skip', reason: 'interaction-pending' }
   if (current.readiness !== 'ready') return { kind: 'skip', reason: 'readiness-unconfirmed' }

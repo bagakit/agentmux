@@ -25,7 +25,7 @@ const cwdEnv = { ...process.env, ...fixtureEnvironment }
 for (const key of Object.keys(cwdEnv)) if (key.startsWith('AGENTMUX_') && !Object.hasOwn(fixtureEnvironment, key)) delete cwdEnv[key]
 Object.assign(process.env, fixtureEnvironment)
 const { CtxmuxClient } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')))
-const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
 const receipt = { schema: 'agentmux.focus-terminal-recovery.v1', passed: false, temporaryRoot: root, userRuntimeTouched: false,
   startedAt: Date.now(), limitations: ['Private ordinary compiled GUI processes; no installed-package qualification.',
     'Target Terminal recovery creates a new Run. Ordinary GUI restart creates a new xterm; no original target PTY continuity claim.'], cleanup: {} }
@@ -66,11 +66,12 @@ async function cdpConnect(url) {
     return reply.result.value
   } }); return cdp
 }
-async function control(operation, fields = {}) {
-  const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation, ...fields }, join(runtimeDirectory, 'control.sock'))
-  assert.equal(reply.ok, true, JSON.stringify(reply)); assert.equal(reply.operation, operation); return reply.result
+async function control(method, params = {}) {
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try { return await client.call(method, params) }
+  finally { await client.dispose() }
 }
-async function observe() { return (await control('inspect.client')).observation }
+async function observe() { return (await control('app.inspect')).observation }
 function durableWorkbench(observation) {
   const { activeWorkspaceId, mainSurface, focus, layouts, tabs } = observation.workbench
   return { activeWorkspaceId, mainSurface, focus, layouts, tabs: tabs.map(tab => ({
@@ -171,7 +172,7 @@ async function terminalGeometry(regionId, runId) {
       return { regionId:region.dataset.workbenchRegionId, viewport:rect(viewport),screen:rect(screen),panels:Array.from(split.children).filter(e=>e.hasAttribute('data-panel-id')).map(e=>({bounds:rect(e),grow:Number(e.style.flexGrow)})) }
     })()`)
     if (!dom || dom.panels.length !== 2 || dom.viewport.width < 50 || dom.screen.width > dom.viewport.width + 1 || dom.screen.width < dom.viewport.width - 32) return null
-    const region=(await control('inspect.region',{target:{kind:'region',regionId}})).region, run=await sdk.status(runId)
+    const region=(await control('space.inspect',{target:{regionId}})).presentation.region, run=await sdk.status(runId)
     if (!region.terminalView?.liveReady || region.terminalView.runId!==runId || region.terminalView.viewGrid.cols!==run.current_size?.cols || region.terminalView.viewGrid.rows!==run.current_size?.rows) return null
     return { dom, view:region.terminalView, run:{id:run.id,pid:run.pid,state:run.state,current_size:run.current_size} }
   })
@@ -204,12 +205,12 @@ try {
   await launch('before');await click(`.project-rail-row[data-workspace-id="${workspaceId}"]`);await click('button[title="New tab"]')
   const launcher=await waitFor('actual workspace launcher',async()=>{const value=await observe();return value.workbench.tabs.filter(tab=>tab.workspaceId===workspaceId).flatMap(tab=>tab.regions).find(region=>region.kind==='launcher')})
   const openedReport=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:launcher.regionId},focus:true});assert.equal(openedReport.outcome,'opened');const opened=openedReport.to;assert.ok(opened)
-  terminal=(await control('open.terminal',{shellCommand:'/bin/sh',destination:{kind:'split',direction:'right',region:{kind:'region',regionId:opened.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)
+  terminal=(await control('terminal.open',{shellCommand:'/bin/sh',destination:{kind:'split',direction:'right',region:{kind:'region',regionId:opened.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)
   const oldSnapshot=(await active.cdp.evaluate('(async()=>await window.agentmux.sessions.snapshot())()')).sessions.find(s=>s.control.run.runId===terminal.runId);assert.equal(oldSnapshot?.kind,'terminal')
   phase='natural-terminal-exit';await active.cdp.evaluate(`window.agentmux.sessions.write(${JSON.stringify(oldSnapshot.control)},${JSON.stringify('exit 7\n')},'user')`)
   const exitedRun=await waitFor('actual target Run exits',async()=>{const run=await sdk.status(terminal.runId);return run.state.type==='exited'?run:null})
   receipt.exitedRun={id:exitedRun.id,pid:exitedRun.pid,state:exitedRun.state}
-  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.regionId}})
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.regionId}})
   // Recover the ended Shell in the Agent's actual split workspace shown by Focus.
   await click('[aria-label^="Focus: show execution contexts"]')
   receipt.before=await observe();const tab=receipt.before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId));assert.ok(tab);assert.equal(tab.regions.length,2);assert.equal(tab.layout.activeRegionId,opened.regionId);assert.equal(receipt.before.workbench.focus.executionSessionId,agent.agentSessionId)

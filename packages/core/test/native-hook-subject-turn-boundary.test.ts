@@ -1,4 +1,4 @@
-import { fixtureEpoch as upstreamFixtureEpoch, fixturePath as upstreamFixturePath } from './helpers/history-fixture-values.js'
+import { fixtureEpoch, fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -16,7 +16,11 @@ import { releaseSubagentRoster } from '../dist/hook-normalizer.js'
 import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from '../dist/agent-usage-transcript.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentTurnUsage } from '../src/types.js'
 
-const isolation = await vi.hoisted(async () => { const { fixturePath: upstreamFixturePath } = await import("./helpers/history-fixture-values.js"); return ({ homedir: upstreamFixturePath("synthetic/unset-home") }) })
+const isolation = await vi.hoisted(async () => {
+  const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os')
+  const { join } = await import('node:path')
+  return { homedir: join(tmpdir(), 'agentmux-fixtures', "synthetic/unset-home") }
+})
 vi.mock('node:os', async importOriginal => ({
   ...await importOriginal<typeof import('node:os')>(), homedir: () => isolation.homedir
 }))
@@ -118,6 +122,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
   const writes: string[] = [], chunks: OutputChunk[] = []
   const streams = new Set<{ push(event: RunEvent): void; close(): void }>()
   const run = () => ({
+    native_service: null,
     id: runId, spec: { program: 'synthetic-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: outputCursor,
     durable_output_bytes: outputCursor, first_available_byte: 0, attachments: streams.size,
@@ -161,7 +166,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
     streams.add(stream)
     return {
       snapshot: { run: run(), resize_revision: 0,
-        terminal: { type: 'basic_vt', checkpoint: { run_id: runId, through_byte: 0,
+        terminal: { type: 'basic_vt', checkpoint: { restore_size: { cols: 80, rows: 24 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: runId, through_byte: 0,
           resize_revision: 0, size: { cols: 80, rows: 24 } }, resizes: [] },
         terminal_restore: new TextEncoder().encode('\u001bc'),
         replay: { chunks: [...chunks], first_available_byte: 0,
@@ -256,6 +261,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
           const observedRun = (await client.listRuns()).find(run => run.runId === observed.run.runId)
           expect(observedRun).toBeDefined()
           if (!observedRun) throw new Error('Expected the fixture Run input observation')
+          if (observedRun.acceptedInputBytes === null) throw new Error('Expected the fixture owner-confirmed input fence')
           expectedInputByte = observedRun.acceptedInputBytes
           inputFences.set(operationId, expectedInputByte)
         }
@@ -779,11 +785,11 @@ describe('explicit generic producer facts control roster availability', () => {
 })
 
 const parentUsage = {
-  inputTokens: 137, outputTokens: 29, totalTokens: 166, observedAt: upstreamFixtureEpoch(1, 10801, 111),
+  inputTokens: 137, outputTokens: 29, totalTokens: 166, observedAt: fixtureEpoch(1, 10801, 111),
   context: { capacityTokens: 200000, usedTokens: 19117 }
 } satisfies AgentTurnUsage
 const childUsage = {
-  inputTokens: 90, outputTokens: 9, totalTokens: 99, observedAt: upstreamFixtureEpoch(1, 10802, 222),
+  inputTokens: 90, outputTokens: 9, totalTokens: 99, observedAt: fixtureEpoch(1, 10802, 222),
   context: { capacityTokens: 4096, usedTokens: 990 }
 } satisfies AgentTurnUsage
 const pendingCases = modes.flatMap(mode => [false, true].map(childCarriesUsage => ({ mode, childCarriesUsage })))
@@ -888,7 +894,7 @@ describe('real main usage updates and absence through public Core', () => {
       expect((await h.stored()).turnUsage).toEqual(parentUsage)
       expect(await h.feed('UserPromptSubmit', {}, 'new-main-start')).toBe(204)
       expect((await h.stored()).turnUsage).toEqual(parentUsage)
-      const currentUsage = { inputTokens: 17, outputTokens: 23, totalTokens: 40, observedAt: upstreamFixtureEpoch(1, 10803, 333),
+      const currentUsage = { inputTokens: 17, outputTokens: 23, totalTokens: 40, observedAt: fixtureEpoch(1, 10803, 333),
         context: { capacityTokens: 200000, usedTokens: 12000 } } satisfies AgentTurnUsage
       expect(parseTurnUsage(currentUsage)).toEqual(currentUsage)
       expect(await h.feed('finish', { [HOOK_PAYLOAD_USAGE_KEY]: currentUsage }, 'new-real-main-sample')).toBe(204)

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -77,7 +77,7 @@ describe('Claude provider', () => {
 
     it('三个补装的事件确实写进了 settings.json，而不只是进了常量清单', () => {
       // 常量清单绿了但计划没渲染出来，等于装了个假。这条读真实渲染结果。
-      const plan = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: upstreamFixturePath("tmp/work") }) ?? null)
+      const plan = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)
       const written = JSON.parse(plan!.mutations[0]!.content) as {
         hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>>
       }
@@ -91,7 +91,7 @@ describe('Claude provider', () => {
     it('三个 tool 事件都带 matcher，其余生命周期事件都不带', () => {
       // 本机 bundle 内嵌文档的 Hook Events 表里，PreToolUse/PostToolUse/PostToolUseFailure 的
       // Matcher 列都是 "Tool name"。缺了 matcher，Claude 对 tool 事件不会分派到我们这条。
-      const written = JSON.parse(createClaudeManagedHookPlan(upstreamFixturePath("tmp/work")).mutations[0]!.content) as {
+      const written = JSON.parse(createClaudeManagedHookPlan(fixturePath("tmp/work")).mutations[0]!.content) as {
         hooks: Record<string, Array<{ matcher?: string }>>
       }
       const withMatcher = Object.entries(written.hooks)
@@ -210,10 +210,10 @@ describe('Claude provider', () => {
   describe('nativeHandle 与 usage 的声明都有本机佐证', () => {
     it('从负载读出 session_id 与 transcript_path，两者都是 resume 与用量的前提', () => {
       const event = hook('Stop', {
-        stop_hook_active: false, transcript_path: upstreamFixturePath("tmp/t.jsonl"), last_assistant_message: 'done'
+        stop_hook_active: false, transcript_path: fixturePath("tmp/t.jsonl"), last_assistant_message: 'done'
       })
       expect(event.nativeHandle).toEqual({
-        kind: 'provider', providerId: 'claude', sessionId: 'sess-1', transcriptPath: upstreamFixturePath("tmp/t.jsonl")
+        kind: 'provider', providerId: 'claude', sessionId: 'sess-1', transcriptPath: fixturePath("tmp/t.jsonl")
       })
     })
 
@@ -279,6 +279,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
     const chunks: OutputChunk[] = []
     const streams = new Set<{ push(event: RunEvent): void; close(): void }>()
     const run = () => ({
+      native_service: null,
       id: runId,
       spec: { program: 'claude', args: [], cwd: workspacePath, env: {} },
       lineage: null,
@@ -338,7 +339,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
           resize_revision: 0,
           terminal: {
             type: 'basic_vt',
-            checkpoint: { run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } },
+            checkpoint: { restore_size: { cols: 80, rows: 24 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } },
             resizes: []
           },
           terminal_restore: new TextEncoder().encode('\u001bc'),
@@ -454,7 +455,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
         // Send real Claude Stop payload over HTTP
         const status = await h.feed('Stop', {
           session_id: 'sess-claude',
-          transcript_path: upstreamFixturePath("tmp/claude.jsonl"),
+          transcript_path: fixturePath("tmp/claude.jsonl"),
           stop_hook_active: false,
           last_assistant_message: 'Finished inspecting files.'
         })
@@ -485,6 +486,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
         const automaticRun = (await reopenedClient.listRuns()).find(run => run.runId === automaticSession.run.runId)
         expect(automaticRun).toBeDefined()
         expect(Number.isSafeInteger(automaticRun!.acceptedInputBytes)).toBe(true)
+        if (!automaticRun || automaticRun.acceptedInputBytes === null) throw new Error('Expected the fixture owner-confirmed input fence')
         await expect(
           reopenedClient.submitAgentPrompt({
             ...agentPromptCondition(automaticSession),
@@ -492,7 +494,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
             operationId: 'auto-submit',
             prompt: 'next prompt',
             expectedCompletionId: JSON.stringify([runId, 1]),
-            expectedInputByte: automaticRun!.acceptedInputBytes
+            expectedInputByte: automaticRun.acceptedInputBytes
           })
         ).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
 
@@ -540,6 +542,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
         const failureRun = (await reopenedClient.listRuns()).find(run => run.runId === failureSession.run.runId)
         expect(failureRun).toBeDefined()
         expect(Number.isSafeInteger(failureRun!.acceptedInputBytes)).toBe(true)
+        if (!failureRun || failureRun.acceptedInputBytes === null) throw new Error('Expected the fixture owner-confirmed input fence')
         await expect(
           reopenedClient.submitAgentPrompt({
             ...agentPromptCondition(failureSession),
@@ -547,7 +550,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
             operationId: 'auto-submit-after-failure',
             prompt: 'next auto prompt',
             expectedCompletionId: JSON.stringify([runId, failedStored.hookReceipt!.observedAt]),
-            expectedInputByte: failureRun!.acceptedInputBytes
+            expectedInputByte: failureRun.acceptedInputBytes
           })
         ).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
 

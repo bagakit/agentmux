@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume', 'claude'], ['discuss', 'kimi'], ['discuss', 'claude']] as const)('%s %s records actual delivery and retains a healthy Run on uncertain input', async (operation, providerId) => {
   for (const confirmed of providerId === 'kimi' ? [false, true] : [true]) {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-launch-mail-"))
+    const root = await mkdtemp(fixturePath("tmp/amux-launch-mail-"))
     vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
     vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
@@ -26,12 +26,12 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     }
     const provider = new AgentProviderRegistry().get(providerId)
     const old: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'mail-agent', providerId, executorId: providerId,
-      hostId: 'local', workspacePath: upstreamFixturePath("repo"), run: { runId: 'old-run' }, retiredRuns: [],
+      hostId: 'local', workspacePath: fixturePath("repo"), run: { runId: 'old-run' }, retiredRuns: [],
       createdAt: 1, updatedAt: 1, hookBindingId: 'binding-old', hookToken: 'token-old', nativeHandle: { kind: 'provider', providerId, sessionId: 'native' } }
     if (operation !== 'create') await store.compareAndSwap(null, { ...old, capabilityHash: hashAgentCapability('valid-capability') })
     await internals.registry.load('local')
     internals.connected = true
-    const run = (id: string): CtxmuxAdapterRun => ({ runId: id, lifecycleOperationId: null, program: providerId, args: [], workspacePath: upstreamFixturePath("repo"),
+    const run = (id: string): CtxmuxAdapterRun => ({ nativeService: null, runId: id, lifecycleOperationId: null, program: providerId, args: [], workspacePath: fixturePath("repo"),
       pid: 123, state: id === 'old-run' ? { type: 'exited', code: 0, signal: null } : { type: 'running' },
       cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 })
     internals.kernel.isConnected = () => true
@@ -57,7 +57,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     client.onEvent((event) => { if (event.type === 'agent-error') errors.push(event) })
     try {
       const discussionInput = { callerAgentSessionId: 'mail-agent', capability: 'valid-capability', executorId: providerId,
-        providerId, workspacePath: upstreamFixturePath("repo"), body: 'exact words', operationId: 'discussion-mail' }
+        providerId, workspacePath: fixturePath("repo"), body: 'exact words', operationId: 'discussion-mail' }
       if (operation === 'discuss') {
         await expect(client.startDiscussion({ ...discussionInput, capability: 'forged' }))
           .rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
@@ -65,7 +65,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
       }
       const discussion = operation === 'discuss' ? await client.startDiscussion(discussionInput) : undefined
       const result = discussion ? discussion.session : operation === 'create'
-        ? await client.createAgent({ agentSessionId: 'mail-agent', executorId: providerId, providerId, workspacePath: upstreamFixturePath("repo"), prompt: 'exact words', injectAgentMuxGuide: false })
+        ? await client.createAgent({ agentSessionId: 'mail-agent', executorId: providerId, providerId, workspacePath: fixturePath("repo"), prompt: 'exact words', injectAgentMuxGuide: false })
         : await client.resumeAgent({ agentSessionId: 'mail-agent', operationId: 'resume-mail', prompt: 'exact words' })
       if (discussion) {
         expect(discussion.thread.delivery.state).toBe(confirmed ? 'delivered' : 'queued')

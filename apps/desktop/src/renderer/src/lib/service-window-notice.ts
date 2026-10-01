@@ -181,6 +181,23 @@ export function serviceNoticeAriaLive(kind: ServiceNoticeClass['kind']): Service
  *
  * 「重启后会话恢复」是唯一还没接线的消费者：它落地后会在这里多加一个自己的 marker 分支，共用同一存活判定。
  */
+export function nativeSessionServiceOutcome(session: SessionSnapshot): StepOutcome {
+  const service = session.nativeService
+  if (!service) return { completed: true }
+  const unavailable = [
+    service.owner.type === 'stopped' && service.owner.reason !== 'historical' ? 'owner stopped' : null,
+    service.output.type === 'unavailable' && service.output.reason !== 'historical' ? 'original output unavailable' : null,
+    service.input.phase.type === 'unavailable' && service.input.phase.reason !== 'historical' ? 'input unavailable' : null,
+    service.terminalFault ? `terminal view ${service.terminalFault.stage} at byte ${service.terminalFault.throughByte}` : null
+  ].filter((value): value is string => value !== null)
+  if (!unavailable.length) return { completed: true }
+  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
+    label: 'Native terminal service',
+    degradedMode: `${unavailable.join('; ')}. The child was last observed ${session.processState}. Original output, input delivery and terminal rendering remain separate facts.`,
+    restore: 'Keep this Session and refresh its original service observation. Restore the unavailable lane before using it; do not resend unconfirmed input.'
+  } }
+}
+
 export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
 

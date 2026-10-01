@@ -1,10 +1,10 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { observeAgent } from '../src/agent-status-freshness.js'
 import { decideContinuousProgress } from '../src/continuous-progress.js'
 
 const base = {
-  agentSessionId: 's', hostId: 'local', providerId: 'codex' as const, workspacePath: upstreamFixturePath("w"),
+  agentSessionId: 's', hostId: 'local', providerId: 'codex' as const, workspacePath: fixturePath("w"),
   run: { runId: 'r' }, semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 1000 },
   terminalPromptReadiness: { id: 'ready-1', source: 'native-stop' as const, run: { runId: 'r' }, outputCursorBytes: 1, readyThroughByte: 1 }
 }
@@ -18,6 +18,11 @@ function observation(session: { semanticStatus: Parameters<typeof observeAgent>[
 describe('decideContinuousProgress', () => {
   it('sends once for an unconsumed ready stop', () => {
     expect(decideContinuousProgress({ inputByte: 0, inputOccupied: false, observation: observation(base, 2000), session: base, tickId: 't1', now: 2000 })).toEqual({ kind: 'send', tickId: 't1', completionId: '["r",1000]' })
+  })
+  it('preserves an unknown input fence without treating it as byte zero or consuming the ready stop', () => {
+    const input = { inputOccupied: false, observation: observation(base, 2000), session: base, tickId: 't1', now: 2000 }
+    expect(decideContinuousProgress({ ...input, inputByte: null })).toEqual({ kind: 'skip', reason: 'unknown-status' })
+    expect(decideContinuousProgress({ ...input, inputByte: 0 })).toEqual({ kind: 'send', tickId: 't1', completionId: '["r",1000]' })
   })
   it('does not send while working or awaiting interaction, but missing readiness is not a gate', () => {
     expect(decideContinuousProgress({ inputByte: 0, inputOccupied: false, observation: observation({ ...base, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1000 } }, 2000), session: { ...base, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1000 } }, tickId: 't1', now: 2000 })).toEqual({ kind: 'skip', reason: 'working' })
@@ -35,7 +40,7 @@ describe('decideContinuousProgress', () => {
 })
 
 it('does not reuse done while a manual admission is waiting for its native start event', () => {
-  const session = { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: upstreamFixturePath("w"), run: { runId: 'r' },
+  const session = { agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: fixturePath("w"), run: { runId: 'r' },
     semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 },
     promptCompletionAdmission: { completionId: '["r",1]', operationId: 'manual-input', startByte: 0, endByte: 5 } }
   expect(decideContinuousProgress({ inputByte: 0, inputOccupied: false, observation: observation(session, 1), session, tickId: 't', now: 1 })).toEqual({ kind: 'skip', reason: 'completion-consumed' })

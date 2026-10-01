@@ -19,7 +19,8 @@ import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-vi
 // separately owns the real PTY checkpoint/SDK and Chromium wheel delivery.
 const fixture = vi.hoisted(() => ({
   terminals: [] as BrowserTerminal[],
-  focus: vi.fn(), writes: [] as Uint8Array[], grids: [] as Array<{cols:number;rows:number}>
+  focus: vi.fn(), writes: [] as Uint8Array[], grids: [] as Array<{cols:number;rows:number}>,
+  writeFacts: [] as Array<{ cols: number; rows: number; scrollback: number | undefined }>
 }))
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
@@ -31,6 +32,7 @@ vi.mock('@xterm/xterm', async () => {
     }
     write(data: string | Uint8Array, callback?: () => void) {
       fixture.writes.push(typeof data === 'string' ? new TextEncoder().encode(data) : data.slice())
+      fixture.writeFacts.push({ cols: this.cols, rows: this.rows, scrollback: this.options.scrollback })
       super.write(data, callback)
     }
     resize(cols: number, rows: number) { fixture.grids.push({cols,rows}); super.resize(cols,rows) }
@@ -91,7 +93,7 @@ async function ready(result: SessionAttachResult) {
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  fixture.terminals.length = 0; fixture.writes.length = 0; fixture.grids.length = 0; fixture.focus.mockClear()
+  fixture.terminals.length = 0; fixture.writes.length = 0; fixture.grids.length = 0; fixture.writeFacts.length = 0; fixture.focus.mockClear()
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(repaint))
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
@@ -118,7 +120,8 @@ function continuation(seed: string, tail = '', resizes: Extract<AgentMuxTerminal
   return {
     attachmentId:'wheel-attachment', session:{...session, latestOutputBytes:endByte},
     currentSize:resizes.at(-1)?.size ?? {cols:80,rows:24}, gap:null, resizeRevision:resizes.at(-1)?.resizeRevision ?? 3,
-    terminal:{type:'basic-vt',checkpoint:{runId:session.control.run.runId,throughByte:fence,resizeRevision:3,size:{cols:80,rows:24}},
+    terminal:{type:'basic-vt',checkpoint:{runId:session.control.run.runId,throughByte:fence,resizeRevision:3,size:{cols:80,rows:24},
+      restoreSize:{cols:80,rows:24},restoreScrollbackRows:null,resizeAfterRestoreBytes:0},
       restoreBytes:encoder.encode(seed),resizes},
     replay:dataBytes.length ? [{type:'data',runId:session.control.run.runId,startByte:fence,endByte,dataBytes,data:tail}] : []
   }
@@ -135,6 +138,33 @@ function contents(terminal: BrowserTerminal) {
   const buffer = terminal.buffer.active
   return Array.from({length:buffer.length},(_,i)=>buffer.getLine(i)!.translateToString(true)).join('\n')
 }
+
+it('imports prefix and suffix at their distinct owner grids with temporary scrollback before live bytes and input continue', async () => {
+  const prefix = '0123456789ABC\r\nfirst line\r\n', suffix = 'final-seed'
+  const result = continuation(prefix + suffix)
+  if (result.terminal.type !== 'basic-vt') throw new Error('Missing test checkpoint')
+  result.terminal.checkpoint.restoreSize = { cols: 12, rows: 6 }
+  result.terminal.checkpoint.restoreScrollbackRows = 31
+  result.terminal.checkpoint.resizeAfterRestoreBytes = encoder.encode(prefix).length
+  const terminal = await ready(result)
+  expect(fixture.writeFacts.slice(0, 2)).toEqual([
+    { cols: 12, rows: 6, scrollback: 31 }, { cols: 80, rows: 24, scrollback: 31 }
+  ])
+  expect(terminal.options.scrollback).toBe(5_000)
+  const actual = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
+  const reference = new actual.Terminal({ cols: 12, rows: 6, scrollback: 31 })
+  try {
+    await new Promise<void>(resolve => reference.write(prefix, resolve))
+    reference.resize(80, 24)
+    await new Promise<void>(resolve => reference.write(suffix, resolve))
+    reference.options.scrollback = terminal.options.scrollback
+    expect(contents(terminal)).toBe(contents(reference))
+    await delivered(output(fence, 'RAW'))
+    expect(contents(terminal)).toContain('final-seedRAW')
+    await act(async () => terminal.input('z'))
+    expect(write).toHaveBeenCalledExactlyOnceWith(session.control, 'z', 'user')
+  } finally { reference.dispose() }
+})
 async function delivered(event: RuntimeEvent) {
   await act(async () => { receive(event); await new Promise(resolve => setTimeout(resolve,25)) })
 }
@@ -445,7 +475,7 @@ it('keeps the tracked reading line when a successful observation refresh applies
   await act(async () => terminal.scrollToLine(300))
   expect(terminal.buffer.active.getLine(300)!.translateToString(true)).toBe('LONG1277')
   vi.spyOn(api.sessions, 'refresh').mockResolvedValue({ ...session, latestOutputBytes: fence })
-  const refresh = vi.spyOn(api.sessions, 'refreshAttachment').mockResolvedValue(continuation('', '', [
+  const refresh = vi.spyOn(api.sessions, 'refreshAttachment').mockResolvedValue(continuation('\x1bc', '', [
     { throughByte: fence, resizeRevision: 4, size: { cols: 80, rows: 9 } }
   ]))
   expect(refreshObservation).toBeTypeOf('function')
