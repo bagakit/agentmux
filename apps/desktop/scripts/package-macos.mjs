@@ -24,6 +24,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
+import { prepareSemanticHostReload, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -860,11 +861,17 @@ export async function installApplication(appPath, { intent = installIntent, home
   await rm(next, { recursive: true, force: true })
   await run('ditto', [appPath, next], { capture: true })
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
-  let runtimeUpgrade = null, uiRuntime = null, before = null
+  let runtimeUpgrade = null, uiRuntime = null, before = null, semanticHost = null
   let native = { status: 'unchanged' }
   const previousScope = await scopedProcesses(currentPath)
-  const running = previousScope.serving
+  let running = previousScope.serving
   try {
+    if (previouslyInstalled && intent === 'full') {
+      semanticHost = await prepareSemanticHostReload(currentPath, next)
+      // A semantic worker may still be parented by the GUI. Its explicit
+      // namespace owner above, rather than general Node classification, owns exit.
+      running = running.filter(pid => pid !== semanticHost?.owner.pid)
+    }
     if (running.length > 0) before = await qualifyUi(currentPath, null, { outgoing: true })
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
     if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
@@ -881,6 +888,19 @@ export async function installApplication(appPath, { intent = installIntent, home
     const quitOutcome = previouslyInstalled && running.length > 0
       ? await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)))
       : { wasRunning: false, pids: [] }
+    try {
+      if (!semanticHost && previouslyInstalled && intent === 'full') {
+        semanticHost = await prepareSemanticHostReload(currentPath, next)
+      }
+      await stopSemanticHostForInstall(semanticHost)
+      if (uiRuntime) await confirmUiRuntime(uiRuntime)
+    } catch (error) {
+      if (quitOutcome.wasRunning) {
+        await launch(destination)
+        await awaitUiActivation(destination, before, uiRuntime)
+      }
+      throw Object.assign(error, { transaction: { intent, ui: { status: quitOutcome.wasRunning ? 'restored' : 'not-started', error: error.message }, native } })
+    }
     // A pending action in the old GUI could have started a Runtime after the
     // first absent-listener observation. Recheck that same owner after GUI exit.
     if (intent === 'full' && runtimeChanged && !runtimeUpgrade) {
@@ -951,6 +971,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     try {
       relaunched = await launch(destination)
       observed = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
+      await confirmSemanticHostReload(semanticHost, destination)
     } catch (error) {
       const result = { intent, ui: { status: 'unknown', error: error.message }, native, candidate: destination, previous: previousInstall ?? null }
       // An unobserved GUI cannot be force-quit or treated as safely rolled back.

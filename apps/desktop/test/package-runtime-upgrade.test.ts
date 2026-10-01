@@ -35,7 +35,8 @@ it('preflights the exact selected Runtime before quit, and confirms handoff afte
   const cutover = renames.find((node) => node.arguments[0]?.getText(parsed) === 'next' && node.arguments[1]?.getText(parsed) === 'destination')
   const launches = calls(install, 'launch')
   expect(prepare).toHaveLength(2); expect(finish).toHaveLength(1); expect(quits).toHaveLength(1)
-  expect(cutover).toBeDefined(); expect(launches).toHaveLength(5)
+  expect(cutover).toBeDefined(); expect(launches.length).toBeGreaterThan(0)
+  expect(launches.every(node => node.pos > quits[0]!.pos)).toBe(true)
   expect(prepare[0]!.getStart(parsed)).toBeLessThan(quits[0]!.getStart(parsed))
   expect(prepare[1]!.getStart(parsed)).toBeGreaterThan(quits[0]!.getStart(parsed))
   expect(prepare[1]!.getStart(parsed)).toBeLessThan(cutover!.getStart(parsed))
@@ -77,7 +78,7 @@ it('cleans the owned inspection SDKs even when cutover, handoff or GUI launch fa
   const lifecycle = tryBlocks.find((node) => node.finallyBlock && calls(node.finallyBlock, 'closeRuntimeUpgrade').length === 2)
   expect(lifecycle).toBeDefined()
   expect(calls(lifecycle!.tryBlock, 'finishRuntimeUpgrade')).toHaveLength(1)
-  expect(calls(lifecycle!.tryBlock, 'launch')).toHaveLength(5)
+  expect(calls(lifecycle!.tryBlock, 'launch').map(node => node.pos)).toEqual(calls(install, 'launch').map(node => node.pos))
 })
 
 it('reports the actual UI and Native results independently to the product caller', async () => {
