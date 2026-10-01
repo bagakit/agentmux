@@ -1,14 +1,21 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
+    "allowJs": true,
     "types": ["node"],
     "baseUrl": "../../../../..",
-    "paths": { "@agentmux/core/control": ["packages/core/src/control.ts"] }
+    "paths": {
+      "@agentmux/core/control": ["packages/core/src/control.ts"],
+      "@agentmux/core": ["apps/desktop/scripts/fixtures/browser-external-target/core-exports.ts"]
+    }
   },
   "include": [
     "../../../src/main/browser-page-transport.ts",
     "../../../src/main/browser-cdp-session.ts",
     "../../../src/main/browser-page-dispatch.ts",
-    "../../../test/browser-page-dispatch.test.ts"
+    "../../../test/browser-page-dispatch.test.ts",
+    "../../../src/main/browser-external-bridge.ts",
+    "../../../src/main/browser-external-target.ts",
+    "../../../test/browser-external-target.test.ts"
   ]
 }

@@ -1,0 +1,12 @@
+:root { color-scheme: light dark; font: 13px system-ui, sans-serif; }
+body { width: 290px; min-width: 212px; max-width: calc(100vw - 28px); margin: 0; padding: 14px; }
+form { display: grid; gap: 8px; }
+input, button { font: inherit; padding: 7px 9px; border-radius: 7px; }
+input { min-width: 0; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+button { border: 0; cursor: pointer; background: color-mix(in srgb, currentColor 9%, transparent); color: inherit; }
+button:disabled { opacity: .5; cursor: default; }
+p { margin: 12px 0; opacity: .8; }
+ul { list-style: none; padding: 0; margin: 10px 0 0; }
+li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 8px 0; }
+li span { overflow-wrap: anywhere; }
+small { display: block; opacity: .65; }
