@@ -1,43 +1,39 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { moteExpression } from '../lib/mote-expression'
+import { observeMoteMotion } from '../lib/mote-face-motion'
 import type { MoteExpression } from './MoteFace'
 
 export type MoteIdentityMotionProps = {
   moteSessionId?: string | undefined; moteHostId?: string | undefined
   moteAvailability?: 'static' | 'no-agent' | 'restoring' | undefined; visible?: boolean | undefined
 }
+type Props = MoteIdentityMotionProps & { children(expression: MoteExpression): ReactNode }
 
-/** No animation clock in JavaScript. These event/visibility gates only control native CSS animations. */
-export function MoteIdentityMotion({ moteSessionId, moteHostId, moteAvailability = 'static', visible = true, children }: MoteIdentityMotionProps & {
-  children(expression: MoteExpression): ReactNode
-}) {
-  const ref = useRef<HTMLSpanElement>(null)
-  // Select one primitive expression. History/updatedAt changes cannot re-render this identity.
+/** Static identity animation consumes no Session store; execution expression still has its original owner. */
+export function MoteIdentityMotion(props: Props) {
+  return !props.moteSessionId
+    ? <MotionSurface expression={moteExpression(undefined, props.moteAvailability ?? 'static', undefined)} visible={props.visible}>{props.children}</MotionSurface>
+    : <SessionMotion {...props} />
+}
+function SessionMotion({ moteSessionId, moteHostId, moteAvailability = 'static', visible, children }: Props) {
   const expression = useAppStore(state => {
     const candidate = moteSessionId ? sessionPresentationById(state.sessions).get(moteSessionId) : undefined
     const session = candidate?.kind === 'agent' && candidate.hostId === moteHostId ? candidate : undefined
     return moteExpression(session, moteSessionId && !session ? 'restoring' : moteAvailability,
       moteSessionId ? state.timelines[moteSessionId]?.liveTool : undefined)
   })
-  const [inView, setInView] = useState(false), [pageVisible, setPageVisible] = useState(!document.hidden), [reduced, setReduced] = useState(true)
-  useEffect(() => {
-    const element = ref.current
-    if (!element || !visible) { setInView(false); return }
-    const observer = new IntersectionObserver(entries => {
-      const entry = entries.find(one => one.target === element)
-      if (entry) setInView(entry.isIntersecting && entry.intersectionRatio > 0)
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [visible])
-  useEffect(() => {
-    const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const motion = () => setReduced(preference.matches), visibility = () => setPageVisible(!document.hidden)
-    motion(); visibility(); preference.addEventListener('change', motion); document.addEventListener('visibilitychange', visibility)
-    return () => { preference.removeEventListener('change', motion); document.removeEventListener('visibilitychange', visibility) }
+  return <MotionSurface expression={expression} visible={visible}>{children}</MotionSurface>
+}
+function MotionSurface({ expression, visible = true, children }: { expression: MoteExpression; visible?: boolean | undefined; children(expression: MoteExpression): ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const motion = useRef<ReturnType<typeof observeMoteMotion> | null>(null)
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const identity = observeMoteMotion(ref.current, expression, visible); motion.current = identity
+    return () => { identity.dispose(); motion.current = null }
   }, [])
-  const active = visible && inView && pageVisible && !reduced && ['sleep', 'idle', 'thinking', 'tool', 'starting'].includes(expression)
-  return <span ref={ref} className="mote-identity-motion space-object-icon" data-mote-expression={expression} data-mote-motion={active ? 'on' : 'off'}>{children(expression)}</span>
+  useLayoutEffect(() => { motion.current?.update(expression, visible) }, [expression, visible, children])
+  return <span ref={ref} className="mote-identity-motion space-object-icon" data-mote-expression={expression} data-mote-motion="off">{children(expression)}</span>
 }

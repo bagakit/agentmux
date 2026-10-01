@@ -24,6 +24,8 @@ beforeEach(async () => {
 })
 afterEach(async () => { await app.dispose(); dispose?.(); dispose = undefined; vi.unstubAllGlobals() })
 function button(label: string) {
+  if (label === 'Save avatar' && document.querySelector('[data-avatar-source=face][aria-pressed=true]')) label = 'Save face'
+
   const scope = document.querySelector('.space-icon-picker[role="dialog"]') ?? document
   const value = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label || node.getAttribute('aria-label') === label)
   expect(value, label).toBeDefined(); return value!
@@ -90,7 +92,7 @@ it('the actual face editor paints one checked outline per nonempty group without
     function painted(parts: boolean) {
       const source = document.querySelector('.mote-avatar-source')!
       expect(source.querySelectorAll('button')).toHaveLength(2)
-      const fields = [...document.querySelectorAll('.mote-face-editor fieldset')]
+      const fields = [...document.querySelectorAll('.mote-face-editor:not([hidden]) fieldset')]
       expect(fields).toHaveLength(parts ? 6 : 0)
       const groups = [source, ...fields]
       expect(groups).toHaveLength(parts ? 7 : 1)
@@ -106,8 +108,10 @@ it('the actual face editor paints one checked outline per nonempty group without
           expect(markStyle.width).toBe('12px'); expect(markStyle.height).toBe('12px')
           expect(markStyle.position).toBe('absolute'); expect(markStyle.pointerEvents).toBe('none')
           expect(markStyle.visibility).toBe(selected ? 'visible' : 'hidden')
-          expect(node.classList.contains('small-button--active')).toBe(selected)
-          if (selected) expect(getComputedStyle(node).boxShadow).toContain('inset 0 0 0 1px')
+          if (group !== source) {
+            expect(node.classList.contains('small-button--active')).toBe(selected)
+            if (selected) expect(getComputedStyle(node).boxShadow).toContain('inset 0 0 0 1px')
+          }
         }
       }
     }
@@ -117,7 +121,7 @@ it('the actual face editor paints one checked outline per nonempty group without
     expect(useAppStore.getState().spaceObjectIcons).toEqual({})
     expect(button('Save avatar').classList.contains('primary-button')).toBe(true)
     expect(button('Cancel').classList.contains('primary-button')).toBe(false)
-    await moteClick(button('Icons & image')); painted(false)
+    await moteClick(button('Icon or image')); painted(false)
     await moteClick(button('Make a face')); painted(true)
     expect(button('Eyes · spark').getAttribute('aria-pressed')).toBe('true')
     expect(button('Color · peach').getAttribute('aria-pressed')).toBe('true')
@@ -160,4 +164,21 @@ it('plain Topic and Folder keep the original icon editor; malformed face cannot 
   for (const invalid of [{ ...DEFAULT_MOTE_FACE, eyes: '<script>' }, { ...DEFAULT_MOTE_FACE, palette: 'https://remote' }, { ...DEFAULT_MOTE_FACE, extra: true }, { kind: 'face' }]) expect(isMoteFace(invalid)).toBe(false)
   const saved = restoreSpaceIconOverrides({ [primary.key]: { ...DEFAULT_MOTE_FACE, eyes: '<script>' }, [custom.key]: DEFAULT_MOTE_FACE, [plain.key]: 'book' })
   expect(saved).toEqual({ [custom.key]: DEFAULT_MOTE_FACE, [plain.key]: 'book' })
+})
+
+it.each(['book', { kind: 'image', fileName: 'a'.repeat(64) + '.png' }])('opens Make a face first, preserves the alternative draft and saves exactly the visible face for %j', async original => {
+  vi.spyOn(api.scratch, 'readMoteAvatar').mockResolvedValue({ dataUrl: 'data:image/png;base64,ORIGINAL', width: 256, height: 256 })
+  await useAppStore.getState().setSpaceObjectIcon(primary.key, original as never)
+  const close = vi.fn(); await app.mount(<SpaceIconPicker target={primary} onClose={close} />)
+  expect(document.querySelector('[data-avatar-source="face"]')!.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector('.mote-face-editor__preview [data-mote-face-palette="mint"]')).not.toBeNull()
+  expect(button('Save face').textContent).toBe('Save face')
+  await moteClick(button('Eyes · oval')); await moteClick(button('Icon or image'))
+  const alternative = document.querySelector('.mote-avatar-preview')!
+  expect(alternative).not.toBeNull(); expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual(original)
+  expect(alternative.querySelector(typeof original === 'string' ? '[data-space-icon="book"]' : 'img')).not.toBeNull()
+  await moteClick(button('Make a face')); expect(button('Eyes · oval').getAttribute('aria-pressed')).toBe('true')
+  expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual(original)
+  await moteClick(button('Save face')); expect(close).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual({ ...DEFAULT_MOTE_FACE, eyes: 'oval' })
 })

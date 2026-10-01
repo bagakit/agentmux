@@ -1,0 +1,51 @@
+.mote-workface { display: flex; flex: 1; position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.mote-workface__original { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.mote-workface__original > .workspace-workbench { flex: 1; min-width: 0; min-height: 0; }
+.pane-content { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+.pane-content > .pane-body { flex: 1; min-width: 0; min-height: 0; }
+[data-mote-workface] .pane-tabbar { flex: none; }
+.mote-discussion-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 var(--sp-2); font-size: var(--fs-body); font-weight: 500; color: var(--text); }
+.mote-conversations { display: flex; flex-direction: column; flex: 0 0 176px; width: 176px; min-width: 0; min-height: 0; background: var(--surface-2); border-right: 1px solid var(--line-soft); padding: var(--sp-2) var(--sp-1); }
+[data-mote-navigation-open="false"] > .pane-content > .mote-conversations { display: none; }
+[data-mote-navigation-narrow="true"] > .pane-content > .mote-conversations { flex-basis: min(176px, 40%); width: min(176px, 40%); }
+.mote-conversations__identity { display: flex; flex-direction: column; flex: none; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-3); }
+.mote-conversations__identity small { font-size: var(--fs-micro); color: var(--text-3); }
+.mote-conversations__identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 500; }
+.mote-conversations__heading { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.mote-conversations__heading > button, .mote-materials header > button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
+.mote-conversations__heading > button:hover, .mote-materials header > button:hover { background: var(--surface-3); color: var(--text); }
+.mote-conversations__list { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.mote-conversations__tabs { display: flex; flex-direction: column; gap: var(--sp-1); }
+.mote-conversations .workbench-tab { display: flex; flex: none; width: 100%; max-width: none; min-width: 0; min-height: 30px; height: auto; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; box-shadow: none; }
+.mote-conversations .workbench-tab:hover { background: var(--surface-3); }
+.mote-conversations .workbench-tab--active { background: var(--surface-3); color: var(--text); font-weight: 500; outline: 1px solid color-mix(in srgb, var(--text-3) 28%, transparent); outline-offset: -1px; }
+.mote-conversations .workbench-tab__label { flex: 1; min-width: 0; }
+.mote-conversations .workbench-tab__close { flex: none; }
+.mote-conversations .workbench-tab-marks { flex: none; }
+.mote-conversations__regions { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--sp-1) var(--sp-2) var(--sp-3); }
+.mote-conversations__regions > button { display: flex; align-items: center; gap: var(--sp-1); min-height: 26px; min-width: 0; padding: var(--sp-1); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; font-size: var(--fs-meta); }
+.mote-conversations__regions > button > span:not(.status-dot) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-conversations__regions > button:hover, .mote-conversations__regions > button[aria-current="true"] { background: var(--surface-1); color: var(--text-2); }
+.mote-conversations__region-mark { flex: 0 0 7px !important; }
+.mote-conversations__secondary { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-1) 0; border-top: 1px solid var(--line-soft); }
+.mote-conversations__secondary > button { display: flex; align-items: center; gap: var(--sp-2); min-height: 28px; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; font-size: var(--fs-meta); }
+.mote-conversations__secondary > button:hover { background: var(--surface-3); color: var(--text); }
+.mote-materials { position: absolute; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(300px, 100%); min-height: 0; background: var(--surface-2); border-left: 1px solid var(--line); box-shadow: -6px 0 16px var(--scrim-1); z-index: var(--layer-popover); }
+.mote-materials > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; min-height: 36px; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.mote-materials > header > span { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mote-materials > header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: var(--fs-meta); }
+.mote-materials__scope { flex: none; align-self: flex-start; margin: var(--sp-1) var(--sp-2); padding: var(--sp-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.mote-materials__scope:hover { background: var(--surface-3); color: var(--text); }
+.mote-materials .file-explorer { flex: 1; min-height: 0; }
+.mote-conversations button:focus-visible, .mote-materials button:focus-visible, .mote-materials__scope:focus-visible { outline: 2px solid var(--green-2); outline-offset: -2px; }
+.mote-rename__field { display: flex; flex-direction: column; gap: var(--sp-3); margin-block: var(--sp-5); color: var(--text-2); font-size: var(--fs-body); }
+.mote-rename__field input { width: 100%; padding: var(--sp-2) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+
+/* The original Activity messages stay one continuous, left-aligned conversation. */
+.activity-feed[data-mote-conversation="true"] { background: var(--surface-0); }
+.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"] { width: auto; margin: 0; padding: var(--sp-3) var(--sp-4); grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); border: 0; border-radius: 0; background: transparent; }
+.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"] .log-turn__node { grid-column: 1; grid-row: 1; width: 32px; height: 32px; background: transparent; }
+.activity-feed[data-mote-conversation="true"] .log-turn[data-message-bubble="true"] :is(.log-turn__head, .log-turn__body, .log-turn__continue) { grid-column: 2; }
+.activity-feed[data-mote-conversation="true"] .log-turn__who { flex: 0 1 auto; min-width: 0; font-weight: 500; }
+.activity-feed[data-mote-conversation="true"] .log-turn__time { font-family: var(--font-sans); font-size: var(--fs-micro); }
+.conversation-message-avatar--mote > .space-object-icon { width: 32px; height: 32px; border-radius: 50%; }

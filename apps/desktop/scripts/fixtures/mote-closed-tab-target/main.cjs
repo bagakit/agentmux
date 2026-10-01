@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { createHash } = require('node:crypto')
 const { app, BrowserWindow } = require('electron')
 const [html, privateRoot, phase, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
@@ -36,16 +37,17 @@ app.whenReady().then(async () => {
     await input('Emulation.setFocusEmulationEnabled', { enabled: true })
     const panel = 'document.getElementById("pmo-teams-topic-floating-panel")'
     const entry = 'document.querySelector("[data-pmo-teams-topic-launcher] button")'
-    const click = async expression => {
+    const click = async (expression, button = 'left') => {
       const point = await read('(()=>{const e=' + expression + ';if(!e)throw new Error(' + JSON.stringify('Missing real control: ' + expression) + ');const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)throw new Error("Empty real control");return{x:r.x+r.width/2,y:r.y+r.height/2}})()')
-      for (const type of ['mousePressed', 'mouseReleased']) await input('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
+      for (const type of ['mousePressed', 'mouseReleased']) await input('Input.dispatchMouseEvent', { type, ...point, button, clickCount: 1 })
     }
     const capture = async name => {
       if (process.env.MOTE_CLOSED_TAB_AFFECTED_EMPTY_ONLY === '1' && !name.includes('empty')) return
       await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
       const file = phase + '-' + name + '.png'
-      await fs.writeFile(path.join(evidence, file), (await bounded(win.webContents.capturePage(), 'Renderer capture')).toPNG())
-      result.frames.push({ name, file, source: 'original-renderer-no-native-browser-claim' })
+      const png = (await bounded(win.webContents.capturePage(), 'Renderer capture')).toPNG()
+      await fs.writeFile(path.join(evidence, file), png)
+      result.frames.push({ name, file, sha256: createHash('sha256').update(png).digest('hex'), source: 'original-renderer-no-native-browser-claim' })
     }
     const visible = async (topic, tab) => {
       await until(panel + '?.matches(":popover-open") && ' + panel + '.dataset.moteTargetTopic===' + JSON.stringify(topic) + ' && (' + panel + '.dataset.moteTargetTab??null)===' + JSON.stringify(tab))
@@ -60,16 +62,14 @@ app.whenReady().then(async () => {
     }
     const keepClose = async id => {
       assert.ok((await facts()).tabs[id], 'Real nonempty original Tab exists before closing')
+      const navigation = panel + '.querySelector(' + JSON.stringify('.mote-navigation-toggle') + ')'
+      if (await read(navigation + '?.getAttribute("aria-expanded")==="false"')) await click(navigation)
       await click(panel + '.querySelector(' + JSON.stringify('button[data-workbench-tab-id="' + id + '"] .workbench-tab__close') + ')')
       await until('[...document.querySelectorAll("[role=dialog] button")].some(e=>e.textContent==="Keep Session & Close")')
       await click('[...document.querySelectorAll("[role=dialog] button")].find(e=>e.textContent==="Keep Session & Close")')
       await until('!window.closedTabProof.facts().tabs[' + JSON.stringify(id) + ']')
-      if (!await read(panel + '?.matches(":popover-open")')) {
-        // The existing window-level confirmation portal light-dismisses the native auto popover.
-        // Reopen through the real original footer; never seed or change its repaired target.
-        ;(result.reopenedAfterConfirmation ??= []).push({ closedTabId: id, repairedBeforeReopen: (await facts()).floating })
-        await click(entry)
-      }
+      assert.equal(await read(panel + '?.matches(":popover-open")'), true,
+        'Trusted Keep & Close retains its original native auto-popover without reopening')
     }
     const forbidden = current => current.calls.filter(call => ['stop', 'launchAgent', 'launchTerminal', 'write', 'submitPrompt'].includes(call.operation))
     result.initial = await facts()
@@ -78,6 +78,136 @@ app.whenReady().then(async () => {
       assert.equal(result.initial.initialization.seedApplied, true)
       assert.deepEqual(Object.keys(result.initial.tabs).sort(), ['custom-mote-tab', 'mote-neighbor-tab', 'mote-primary-tab', 'original-project-tab'])
       await visible('launcher:leader', 'mote-primary-tab')
+      if (process.env.MOTE_CLOSED_TAB_OVERLAY_ACTIONS === '1') {
+        result.step = 'trusted-ordinary-window-dialog-after-Mote-navigation'
+        await choose('launcher:reviewer', 'custom-mote-tab')
+        await choose('launcher:leader', 'mote-primary-tab')
+        await click(panel + '.querySelector(' + JSON.stringify('[aria-label="Close Mote"]') + ')')
+        await until('!' + panel + '.matches(":popover-open")')
+        result.initialFooterHit = await read(`(()=>{const e=${entry},r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{width:r.width,height:r.height,inside:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,hit:!!h&&(h===e||e.contains(h)),hostDisplay:getComputedStyle(document.querySelector('[data-overlay-host="interaction"]')).display}})()`)
+        assert.equal(result.initialFooterHit.hit, true); assert.equal(result.initialFooterHit.inside, true); assert.equal(result.initialFooterHit.hostDisplay, 'none')
+        await click('document.querySelector(' + JSON.stringify('button[data-workbench-tab-id="original-project-tab"] .workbench-tab__close') + ')')
+        await pause(100)
+        result.ordinaryOpening = await read(`(()=>{const d=document.querySelector('.confirmation-dialog'),h=document.querySelector('[data-overlay-host="interaction"]');return{dialog:!!d,active:document.activeElement?.outerHTML,hostParent:h?.parentElement?.id,hostOpen:h?.matches(':popover-open'),floatOpen:${panel}.matches(':popover-open'),dialogRect:d?JSON.stringify(d.getBoundingClientRect()):null}})()`)
+        await until('document.querySelector(".confirmation-dialog") && document.activeElement?.textContent==="Cancel"')
+        result.ordinaryConfirmation = await read(`(()=>{const d=document.querySelector('.confirmation-dialog'),h=d.closest('[popover]'),r=d.getBoundingClientRect();return{hostOpen:h.matches(':popover-open'),rootParent:h.parentElement===document.getElementById('agentmux-window-overlay-host'),floatOpen:${panel}.matches(':popover-open'),hit:d.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),inside:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight}})()`)
+        assert.deepEqual(result.ordinaryConfirmation, { hostOpen: true, rootParent: true, floatOpen: false, hit: true, inside: true })
+        await capture('trusted-ordinary-window-confirmation')
+        await input('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+        await input('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
+        await until('!document.querySelector(".confirmation-dialog")')
+        assert.equal(await read(panel + '.matches(":popover-open")'), false, 'Ordinary Dialog never reopens the closed Mote')
+        assert.deepEqual((await facts()).tabs, result.initial.tabs)
+        result.afterOrdinaryFooterHit = await read(`(()=>{const e=${entry},r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{hit:!!h&&(h===e||e.contains(h)),hostDisplay:getComputedStyle(document.querySelector('[data-overlay-host="interaction"]')).display}})()`)
+        assert.deepEqual(result.afterOrdinaryFooterHit, { hit: true, hostDisplay: 'none' })
+        // A bounded generic protocol case keeps closing DOM present, including a
+        // nested listbox. No runtime or Mote identity is simulated by this node.
+        result.retainedClosingSurfaces = []
+        for (const role of ['dialog', 'menu']) {
+          await read(`(()=>{const e=document.createElement('div');e.id='retained-closing-protocol';e.role=${JSON.stringify(role)};e.dataset.state='closed';e.style.cssText='position:fixed;inset:0;animation:retained-protocol-exit 1s';const child=document.createElement('div');child.role='listbox';e.append(child);document.querySelector('[data-overlay-host="interaction"]').append(e)})()`)
+          await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+          const closed = await read(`(()=>{const e=document.getElementById('retained-closing-protocol'),h=e.parentElement,f=${entry},r=f.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{hostOpen:h.matches(':popover-open'),hostDisplay:getComputedStyle(h).display,surfaceDisplay:getComputedStyle(e).display,surfaceWidth:e.getBoundingClientRect().width,footerHit:!!hit&&(hit===f||f.contains(hit))}})()`)
+          assert.deepEqual(closed, { hostOpen: false, hostDisplay: 'none', surfaceDisplay: 'none', surfaceWidth: 0, footerHit: true })
+          result.retainedClosingSurfaces.push({ role, ...closed })
+          await read('document.getElementById("retained-closing-protocol").remove()')
+        }
+        await click(entry)
+        await visible('launcher:leader', 'mote-primary-tab')
+        const beforeConfirmation = await facts()
+        assert.deepEqual(beforeConfirmation.viewModes, { ...result.initial.viewModes, 'mote-primary': 'activity' }, 'An explicit reopen selects conversation only for that original Mote Session')
+        result.step = 'trusted-window-confirmation-cancel-and-object-menu-dialog'
+        const navigation = panel + '.querySelector(' + JSON.stringify('.mote-navigation-toggle') + ')'
+        await until(panel + '.querySelector("[data-message-id=private-mote-reply] [data-mote-author]")')
+        const chatQualification = () => read(`(()=>{const p=${panel},w=p.querySelector('[data-mote-workface]'),feed=p.querySelector('.activity-feed[data-mote-conversation="true"]'),own=feed?.querySelector('[data-message-id="private-mote-reply"]'),unknown=feed?.querySelector('[data-message-id="private-unknown-reply"]'),avatar=own?.querySelector('[data-mote-author] .space-object-icon'),originalAvatar=p.querySelector('[data-mote-topic-id="launcher:leader"] .space-object-icon__avatar'),group=p.querySelector('[data-pane-group-id]'),name=own?.querySelector('.log-turn__who'),rect=e=>e?JSON.parse(JSON.stringify(e.getBoundingClientRect())):null,hit=e=>{if(!e)return false;const b=e.getBoundingClientRect(),h=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return !!h&&!!own?.contains(h)},r=feed?.getBoundingClientRect();return{geometry:{narrow:group?.dataset.moteNavigationNarrow,open:group?.dataset.moteNavigationOpen,pane:rect(group?.querySelector('.pane-content')),navigation:rect(group?.querySelector('.mote-conversations')),body:rect(group?.querySelector('.pane-body')),name:rect(name),avatar:rect(avatar),nameHit:hit(name),avatarHit:hit(avatar)},topic:w?.dataset.moteWorkface,tab:p.dataset.moteTargetTab,discussions:p.textContent.includes('Discussions'),author:own?.querySelector('.log-turn__who')?.textContent,avatarOwner:own?.querySelector('[data-mote-author]')?.dataset.moteAuthor,avatarSource:avatar?.dataset.spaceIconSource,avatarImage:avatar?.querySelector('img')?.src,originalAvatarImage:originalAvatar?.src,unknownAuthor:unknown?.querySelector('.log-turn__who')?.textContent,unknownMoteAvatar:!!unknown?.querySelector('[data-mote-author]'),feedVisible:!!r&&r.width>0&&r.height>0,viewport:{width:innerWidth,height:innerHeight}}})()`)
+        const composerQualification = () => read(`(()=>{const p=${panel},c=p.querySelector('.composer'),e=c?.querySelector('.composer__editor .tiptap'),tools=c?.querySelector('.composer__toolbar > div:first-child'),controls=c?.querySelector('.composer-session-controls'),rect=e=>e?JSON.parse(JSON.stringify(e.getBoundingClientRect())):null;let hit=false;if(e){const r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);hit=!!h&&(h===e||e.contains(h))}return{composer:rect(c),editor:rect(e),tools:rect(tools),controls:rect(controls),draft:e?.textContent,editorHit:hit}})()`)
+        const readableComposer = (current) => {
+          assert.equal(current.draft, 'Original unsent draft · mote-primary', 'Original unsent draft remains exact')
+          assert.ok(current.composer.width > 0 && current.editor.width > 0 && current.controls.width > 0, 'Original editor and controls have real area')
+          assert.ok(current.editor.width >= current.composer.width - 2, 'Narrow original editor keeps the full Composer line')
+          assert.ok(current.tools.top >= current.editor.bottom - 1 && current.controls.top >= current.editor.bottom - 1, 'Original tools yield a separate row below editable text')
+          assert.ok(current.controls.right <= current.composer.right && current.controls.bottom <= current.composer.bottom, 'Original Session controls remain inside the Composer')
+          assert.equal(current.editorHit, true, 'Original draft editing area remains reachable')
+        }
+        result.chatBeforeNavigation = await chatQualification()
+        await capture('wide-default-mote-chat')
+        if (await read(navigation + '?.getAttribute("aria-expanded")==="false"')) await click(navigation)
+        result.chatWide = await chatQualification()
+        assert.equal(result.chatWide.topic, 'launcher:leader'); assert.equal(result.chatWide.tab, 'mote-primary-tab')
+        assert.equal(result.chatWide.discussions, true); assert.equal(result.chatWide.author, 'Mote')
+        assert.equal(result.chatWide.avatarOwner, 'launcher:leader'); assert.equal(result.chatWide.avatarSource, 'automatic')
+        assert.ok(result.chatWide.avatarImage); assert.equal(result.chatWide.avatarImage, result.chatWide.originalAvatarImage)
+        assert.equal(result.chatWide.unknownAuthor, 'unavailable-original-author'); assert.equal(result.chatWide.unknownMoteAvatar, false)
+        assert.equal(result.chatWide.feedVisible, true)
+        const readableChat = (chat) => {
+          const g = chat.geometry
+          assert.ok(g.navigation.width > 0 && g.body.width > 0, 'Original navigation and body have real area')
+          assert.ok(g.body.left >= g.navigation.right - 1, 'Discussions reserve layout width; the original body is not covered')
+          assert.ok(g.name.width > 0 && g.name.height > 0 && g.avatar.width > 0 && g.avatar.height > 0, 'Original Mote author and avatar have real area')
+          assert.equal(g.nameHit, true, 'Original Mote author is painted above its own message')
+          assert.equal(g.avatarHit, true, 'Original Mote avatar is painted above its own message')
+        }
+        readableChat(result.chatWide)
+        result.composerWide = await composerQualification(); readableComposer(result.composerWide)
+        await capture('wide-qualified-mote-chat')
+        win.setContentSize(640, 680); await until('innerWidth===640')
+        result.chatNarrow = await chatQualification()
+        assert.equal(result.chatNarrow.topic, 'launcher:leader'); assert.equal(result.chatNarrow.author, 'Mote'); assert.equal(result.chatNarrow.feedVisible, true)
+        assert.equal(result.chatNarrow.avatarSource, 'automatic'); assert.equal(result.chatNarrow.avatarImage, result.chatNarrow.originalAvatarImage)
+        readableChat(result.chatNarrow)
+        result.composerNarrow = await composerQualification(); readableComposer(result.composerNarrow)
+        await capture('narrow-qualified-mote-chat')
+        await click(navigation)
+        result.chatNarrowReading = await chatQualification()
+        assert.equal(result.chatNarrowReading.geometry.open, 'false'); assert.equal(result.chatNarrowReading.geometry.nameHit, true); assert.equal(result.chatNarrowReading.geometry.avatarHit, true)
+        await capture('narrow-reading-mote-chat')
+        await click(navigation)
+        win.setContentSize(1100, 760); await until('innerWidth===1100')
+        await click(panel + '.querySelector(' + JSON.stringify('[data-workbench-tab-id="mote-primary-tab"] .workbench-tab__close') + ')')
+        await until('document.querySelector(".confirmation-dialog") && document.activeElement?.textContent==="Cancel"')
+        result.confirmation = await read(`(()=>{const d=document.querySelector('.confirmation-dialog'),h=d.closest('[popover]'),r=d.getBoundingClientRect();return{hostOpen:h.matches(':popover-open'),nativeParent:h.parentElement===${panel},floatOpen:${panel}.matches(':popover-open'),defaultFocus:document.activeElement.textContent,hit:d.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),inside:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight}})()`)
+        assert.deepEqual(result.confirmation, { hostOpen: true, nativeParent: true, floatOpen: true, defaultFocus: 'Cancel', hit: true, inside: true })
+        await capture('trusted-window-confirmation')
+        const backdropTarget = panel + '.querySelector(' + JSON.stringify('[data-mote-topic-id="launcher:reviewer"]') + ')'
+        result.modalBackdrop = await read(`(()=>{const e=${backdropTarget},r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{hitScrim:!!hit?.closest('.confirmation-dialog__overlay'),originalMote:${panel}.dataset.moteTargetTopic}})()`)
+        assert.deepEqual(result.modalBackdrop, { hitScrim: true, originalMote: 'launcher:leader' })
+        await click(backdropTarget)
+        await until('!document.querySelector(".confirmation-dialog")')
+        const afterBackdrop = await facts()
+        assert.equal(await read(panel + '.matches(":popover-open")'), true, 'Modal backdrop dismisses only its Dialog')
+        assert.equal(afterBackdrop.floating.targetTopicId, 'launcher:leader', 'Scrim consumes the pointer over another Mote')
+        for (const key of ['tabs', 'drafts', 'outbox', 'runs', 'viewModes']) assert.deepEqual(afterBackdrop[key], beforeConfirmation[key], 'Backdrop preserves ' + key)
+        assert.deepEqual(forbidden(afterBackdrop), [])
+        await click(panel + '.querySelector(' + JSON.stringify('[data-workbench-tab-id="mote-primary-tab"] .workbench-tab__close') + ')')
+        await until('document.querySelector(".confirmation-dialog") && document.activeElement?.textContent==="Cancel"')
+        await click('[...document.querySelectorAll(".confirmation-dialog button")].find(e=>e.textContent==="Cancel")')
+        await until('!document.querySelector(".confirmation-dialog")')
+        assert.equal(await read(panel + '.matches(":popover-open")'), true, 'Trusted Cancel retains the original auto-popover')
+        const row = panel + '.querySelector(' + JSON.stringify('[data-mote-topic-id="launcher:reviewer"]') + ')'
+        await click(row, 'right')
+        await until('[...document.querySelectorAll("[role=menuitem]")].some(e=>e.textContent==="Rename Mote…")')
+        const menuState = `(()=>{const m=document.querySelector('.tab-context-menu[role="menu"][data-state="open"]');return m?{open:true,opacity:getComputedStyle(m).opacity,animations:m.getAnimations().map(a=>({name:a.animationName,state:a.playState,duration:a.effect?.getTiming().duration}))}:null})()`
+        result.menuEntryBeforeCapture = await read(menuState)
+        assert.equal(result.menuEntryBeforeCapture?.open, true, 'The original object menu is open before its animation settles')
+        await read(`(()=>{const m=document.querySelector('.tab-context-menu[role="menu"][data-state="open"]');if(!m)throw new Error('Original menu closed before capture');return Promise.all(m.getAnimations().map(a=>a.finished))})()`)
+        result.menuEntryFinal = await read(menuState)
+        assert.equal(result.menuEntryFinal?.open, true); assert.equal(result.menuEntryFinal.opacity, '1', 'Capture the original menu after its real entry animation')
+        await capture('trusted-original-object-menu')
+        await click('[...document.querySelectorAll("[role=menuitem]")].find(e=>e.textContent==="Rename Mote…")')
+        await until('document.querySelector(".mote-rename input")===document.activeElement')
+        result.menuDialog = await read(`(()=>{const d=document.querySelector('.mote-rename'),h=d.closest('[popover]'),r=d.getBoundingClientRect();return{hostOpen:h.matches(':popover-open'),nativeParent:h.parentElement===${panel},floatOpen:${panel}.matches(':popover-open'),hit:d.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),name:document.querySelector('.mote-rename input').value}})()`)
+        assert.equal(result.menuDialog.hostOpen, true); assert.equal(result.menuDialog.nativeParent, true); assert.equal(result.menuDialog.floatOpen, true); assert.equal(result.menuDialog.hit, true)
+        await capture('trusted-menu-rename-dialog')
+        await input('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+        await input('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
+        await until('!document.querySelector(".mote-rename")')
+        assert.equal(await read(panel + '.matches(":popover-open")'), true, 'The topmost Dialog alone consumes Escape')
+        result.menuFocusAfterEscape = await read(`({active:document.activeElement?.outerHTML,originalRow:document.activeElement===${row}})`)
+        // Radix restores the original FocusScope after its exit commit. Observe
+        // that completion; never synthesize focus or reopen the original Mote.
+        await until('document.activeElement===' + row)
+        result.menuFocusSettled = await read(`({active:document.activeElement?.outerHTML,originalRow:document.activeElement===${row}})`)
+        assert.equal(await read('document.activeElement===' + row), true, 'Menu Dialog returns to its original Mote')
+      }
       result.step = 'actual-selected-keep-close-continues-original-neighbor'
       await keepClose('mote-primary-tab')
       result.remaining = await visible('launcher:leader', 'mote-neighbor-tab')
@@ -139,6 +269,8 @@ app.whenReady().then(async () => {
       assert.deepEqual(result.unknown.tabs, beforeUnknown.tabs)
       assert.deepEqual(result.unknown.drafts, beforeUnknown.drafts)
       assert.deepEqual(result.unknown.focus.execution, beforeUnknown.focus.execution)
+      result.unknownQualification = await read(`(()=>{const p=${panel},w=p.querySelector('[data-mote-workface]');return{topic:w?.dataset.moteWorkface,tab:p.dataset.moteTargetTab,status:p.textContent.includes('Original Tab retained'),newSessionClaim:p.textContent.includes('New Session')}})()`)
+      assert.equal(result.unknownQualification.topic, 'launcher:leader'); assert.equal(result.unknownQualification.tab, 'saved-unavailable-tab'); assert.equal(result.unknownQualification.status, true)
       await capture('wide-unknown-exact-reference')
       result.final = await choose('launcher:reviewer', null)
     }

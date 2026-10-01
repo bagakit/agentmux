@@ -35,6 +35,14 @@ const topic = (id, title) => {
     soul: { path: directoryPath + '/SOUL.md', content: '# Coordinate this original Topic', version: 'private-original-v1' } }
 }
 const topics = [topic(PMO_TEAMS_TOPIC_ID, 'Mote'), topic(customId, 'Review the next step')]
+// These controlled public records exercise the original message owners. They
+// are Renderer evidence, never a claim that a real Agent produced this text.
+const timelines = { 'mote-primary': { agentSessionId: 'mote-primary', revision: 1, items: [
+  { id: 'private-mote-reply', agentSessionId: 'mote-primary', kind: 'assistant_message', source: 'native-hook', status: 'complete',
+    title: 'Original controlled reply', content: 'We can keep this discussion focused on the current goal. Your other discussion and its Session stay separate.', createdAt: 1000, updatedAt: 1000 },
+  { id: 'private-unknown-reply', agentSessionId: 'mote-primary', authorAgentSessionId: 'unavailable-original-author', kind: 'assistant_message', source: 'native-hook', status: 'complete',
+    title: 'Original unknown author', content: 'This record keeps its original author identity. An unavailable author is not presented as the current Mote.', createdAt: 2000, updatedAt: 2000 }
+] } }
 api.config.get = async () => structuredClone({ ...publicConfig, hosts: publicConfig.hosts.filter(host => host.id === 'local'), workspaces: [project, scratch] })
 api.demands.list = async () => []
 api.scratch.listTopics = async () => structuredClone(topics)
@@ -49,7 +57,7 @@ api.sessions.snapshot = async () => ({ sessions: structuredClone(sessions).map(o
   ['mote-neighbor', 'project-worker'].includes(one.id) && !recovered.has(one.id) ? {
     ...one, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: Date.now() },
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() }
-  } : one), timelines: {}, recoveryCandidates: [] })
+  } : one), timelines: structuredClone(timelines), recoveryCandidates: [] })
 api.sessions.onEvent = () => () => {}
 const sessionFor = control => sessions.find(one => one.id === control.agentSessionId && one.control.run.runId === control.run.runId)
 api.sessions.recover = async control => {
@@ -117,7 +125,7 @@ const facts = () => {
     runs: current.sessions.map(session => session.control), floating: JSON.parse(localStorage.getItem(floatingKey) ?? 'null'),
     ui: { target: panel?.dataset.moteTargetTab ?? null, topic: panel?.dataset.moteTargetTopic,
       visible: panel?.matches(':popover-open'), text: panel?.textContent,
-      newTab: !!panel?.querySelector('[aria-label="New Tab"]') },
+      newTab: !!panel?.querySelector('[aria-label="New Tab"], [aria-label="New discussion"]') },
     initialization: { initializeCalls, seedApplied: phase === 'seed', initialDurable, initialFloating, afterOrdinaryInitialize } }
 }
 const root = createRoot(document.getElementById('root'))

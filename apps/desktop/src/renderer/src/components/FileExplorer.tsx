@@ -1,4 +1,5 @@
 import { Link2 } from 'lucide-react'
+import { fileExplorerContains } from '../lib/file-explorer-scope'
 import {
   DndContext,
   DragOverlay,
@@ -356,10 +357,10 @@ function FileTreeRow({
   )
 }
 
-function FileExplorerRootDropTarget({ disabled }: { disabled: boolean }) {
+function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disabled: boolean; rootPath: string; rootLabel: string }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: 'file-explorer-target:workspace-root',
-    data: { kind: 'file-explorer-directory', directoryPath: '' } satisfies FileExplorerDropData,
+    id: 'file-explorer-target:root:' + rootPath,
+    data: { kind: 'file-explorer-directory', directoryPath: rootPath } satisfies FileExplorerDropData,
     disabled
   })
   return (
@@ -368,24 +369,30 @@ function FileExplorerRootDropTarget({ disabled }: { disabled: boolean }) {
       className={`file-tree-root-target ${isOver ? 'file-tree-root-target--over' : ''}`}
       data-move-drop-disabled={disabled ? 'true' : 'false'}
     >
-      <FolderOpen size={12} /><span>Workspace Root</span>
+      <FolderOpen size={12} /><span>{rootLabel}</span>
     </div>
   )
 }
 
 export function FileExplorer({
-  revealRequest
+  revealRequest, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal
 }: {
   revealRequest?: FileExplorerRevealRequest | undefined
+  workspaceId?: string | undefined
+  rootPath?: string | undefined
+  rootLabel?: string | undefined
+  onOpenPath?: ((path: string) => Promise<unknown>) | undefined
+  onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
 }) {
-  const workspaceId = useAppStore((state) => state.activeWorkspaceId)
+  const workspaceId = useAppStore((state) => requestedWorkspaceId ?? state.activeWorkspaceId)
   const workspace = useAppStore((state) =>
-    state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
+    state.config?.workspaces.find((item) => item.id === workspaceId)
   )
   const activePath = useAppStore((state) =>
-    workspaceId ? state.lastActiveFileByWorkspace[workspaceId] : undefined
+    workspaceId && fileExplorerContains(rootPath, state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
   )
-  const openFile = useAppStore((state) => state.openFile)
+  const originalOpenFile = useAppStore((state) => state.openFile)
+  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) => onOpenPath ? onOpenPath(path) : originalOpenFile(path, groupId, undefined, resourceId ?? undefined)
   const createPath = useAppStore((state) => state.createPath)
   const renamePath = useAppStore((state) => state.renamePath)
   const deletePath = useAppStore((state) => state.deletePath)
@@ -395,7 +402,7 @@ export function FileExplorer({
   const copyPathsAsAbsolute = useAppStore((state) => state.config?.copyPathsAsAbsolute)
   const setConfig = useAppStore((state) => state.setConfig)
   const activePaneId = useAppStore((state) => (
-    state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId]?.activeGroupId : undefined
+    workspaceId ? state.layouts[workspaceId]?.activeGroupId : undefined
   ))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   // Source-control status projected straight onto the tree — no second copy of "what changed" in the
@@ -435,10 +442,10 @@ export function FileExplorer({
   const lastRevealRequestIdRef = useRef<number | null>(null)
   const autoRevealRequestIdRef = useRef(0)
   const observedFileRevisionRef = useRef(workspaceFileRevision)
-  const expanded = explorerState.expandedPaths
+  const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => fileExplorerContains(rootPath, path))), [explorerState.expandedPaths, rootPath])
   const selection = explorerState.selection
   const selectedPath = selection.activePath
-  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded)
+  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath)
   const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
@@ -477,7 +484,8 @@ export function FileExplorer({
     setScrollTarget(null)
     setInlineEdit(null)
     return () => clearHoverExpand()
-  }, [workspaceId])
+    setQuery('')
+  }, [workspaceId, rootPath])
 
   useEffect(() => {
     if (observedFileRevisionRef.current === workspaceFileRevision) return
@@ -506,6 +514,7 @@ export function FileExplorer({
     if (
       !revealRequest ||
       revealRequest.workspaceId !== workspaceId ||
+      !fileExplorerContains(rootPath, revealRequest.path) ||
       revealRequest.requestId === lastRevealRequestIdRef.current
     ) return
     lastRevealRequestIdRef.current = revealRequest.requestId
@@ -522,7 +531,7 @@ export function FileExplorer({
       requestId: revealRequest.requestId,
       focus: true
     })
-  }, [revealRequest, workspaceId])
+  }, [revealRequest, workspaceId, rootPath])
 
   useEffect(() => {
     if (!scrollTarget) return
@@ -560,7 +569,7 @@ export function FileExplorer({
   const selectedNode = selectedPath ? rowProjection.getRowByPath(selectedPath) : null
   const createParent = selectedNode?.isDirectory
     ? selectedNode.path
-    : selectedNode ? workspacePathParent(selectedNode.path) : ''
+    : selectedNode ? workspacePathParent(selectedNode.path) : rootPath
   const loadedTreeNodes = useMemo(
     () => Object.values(tree.dirCache).flatMap((entry) => entry.children),
     [tree.dirCache]
@@ -581,7 +590,7 @@ export function FileExplorer({
     await runFileExplorerMove({
       sourcePath,
       destinationPath,
-      move: renamePath,
+      move: (source, destination) => renamePath(source, destination, workspaceId ?? undefined),
       refreshDirectory: tree.refreshDir
     })
   }
@@ -673,6 +682,7 @@ export function FileExplorer({
 
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
     if (!workspace || !activePaneId || !node.isDirectory) return
+    if (onOpenTerminal) { await onOpenTerminal(node.path); return }
     await launchTerminal(activePaneId, undefined, joinWorkspacePath(workspace.path, node.path))
   }
 
@@ -752,7 +762,7 @@ export function FileExplorer({
         const createdIn = await createPath({
           path,
           kind: edit.kind === 'create-file' ? 'file' : 'directory'
-        })
+        }, workspaceId)
         await tree.refreshDir(edit.parentPath)
         setSelection(createSingleFileExplorerSelection(path))
         if (edit.kind === 'create-file') await openFile(path, undefined, undefined, createdIn)
@@ -767,7 +777,7 @@ export function FileExplorer({
     if (!node || deleting) return
     setDeleting(true)
     try {
-      await deletePath(node.path)
+      await deletePath(node.path, workspaceId ?? undefined)
       await tree.refreshDir(workspacePathParent(node.path))
       setDeleteRequest(null)
     } finally {
@@ -861,7 +871,7 @@ export function FileExplorer({
     ? inlineEdit
     : null
   const createRow = createEdit ? (
-    <div className="tree-create-row" style={{ '--tree-depth': createEdit.parentPath ? createEdit.parentPath.split('/').length : 0 } as React.CSSProperties}>
+    <div className="tree-create-row" style={{ '--tree-depth': createEdit.parentPath ? Math.max(0, createEdit.parentPath.split('/').length - (rootPath ? rootPath.split('/').length : 0)) : 0 } as React.CSSProperties}>
       {createEdit.kind === 'create-directory' ? <Folder size={14} /> : <FilePlus2 size={13} />}
       <input
         autoFocus
@@ -880,7 +890,7 @@ export function FileExplorer({
     </div>
   ) : null
   return (
-    <section className="file-explorer">
+    <section className="file-explorer" data-file-workspace={workspaceId} data-file-root={rootPath}>
       <div className="explorer-header">
         <span>Explorer</span>
         <div className="explorer-header__actions">
@@ -915,8 +925,8 @@ export function FileExplorer({
           tabIndex={0}
           onKeyDown={handleTreeKeyDown}
         >
-          <FileExplorerRootDropTarget disabled={isMoveDropDisabled('')} />
-          {createEdit && !createEdit.parentPath ? createRow : null}
+          <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
+          {createEdit?.parentPath === rootPath ? createRow : null}
           {visibleRows.map((node, rowIndex) => (
             <Fragment key={node.path}>
               <FileTreeRow
@@ -1011,7 +1021,7 @@ export function FileExplorer({
               </div>
             </div>
           ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
-            <div className="tree-empty"><strong>{query ? 'No loaded files match' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
+            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
           ) : null}
         </div>
         <DragOverlay dropAnimation={null}>

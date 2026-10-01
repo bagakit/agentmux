@@ -200,6 +200,7 @@ export function ConversationMessage({
           name={displayName}
           project={described?.project}
           providerId={displayProvider}
+          mote={described?.mote}
         /> : <SemanticIcon name="neutral" size={12} />}
       </span>
       <div className="log-turn__head">

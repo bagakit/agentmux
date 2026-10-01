@@ -23,6 +23,7 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
+import { MoteWorkface } from './components/MoteWorkface'
 import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { desktopSurface } from './lib/desktop-focus-navigation'
 import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
@@ -491,6 +492,8 @@ function DesktopApp() {
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >
+                        <MoteWorkface workspaceId={candidate.id} visible={visible}
+                          topicId={candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
                         <WorkspaceWorkbench
                           workspaceId={candidate.id}
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
@@ -500,6 +503,7 @@ function DesktopApp() {
                           onBrowserControlConfirmation={onBrowserControlConfirmation}
                           interactiveResize={windowResizeActive || isResizing}
                         />
+                        </MoteWorkface>
                       </div>
                     )
                   })}

@@ -1,4 +1,6 @@
 import { AgentAvatar } from './AgentAvatar'
+import { useMoteWorkfaceScope } from '../lib/mote-workface'
+import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import {
   Activity,
   ArrowUpRight,
@@ -60,6 +62,10 @@ function WorkspaceFilesTool({
   workspace: WorkspaceRecord
   isScratch: boolean
 }) {
+  const mote = useMoteWorkfaceScope(workspace.id)
+  const materials = useMoteMaterialsActions(mote)
+  const [allFiles, setAllFiles] = useState(false)
+  useEffect(() => setAllFiles(false), [mote?.topic.id])
   const presentation = contentSlotPresentation(isScratch)
   const explorerCollapsedOverride = useAppStore((state) => state.explorerCollapsed[workspace.id])
   const setExplorerCollapsed = useAppStore((state) => state.setExplorerCollapsed)
@@ -81,7 +87,7 @@ function WorkspaceFilesTool({
     })
   }
 
-  const bottomHalf = presentation.showTopics ? (
+  const bottomHalf = mote ? null : presentation.showTopics ? (
     <WorkspaceTopicsPanel
       workspace={workspace}
       onRevealDirectory={revealDirectoryInExplorer}
@@ -133,14 +139,17 @@ function WorkspaceFilesTool({
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
         <span title={workspace.path}>
-          <strong>{workspace.name}</strong>
-          {isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
+          <strong>{mote ? allFiles ? workspace.name : mote.topic.title : workspace.name}</strong>
+          {mote ? <small>{allFiles ? 'All files' : 'Mote materials'}</small> : isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
         ) : null}
       </div>
-      {collapsed ? (
+      {mote ? <><button type="button" className="mote-materials__scope" onClick={() => setAllFiles(value => !value)}>{allFiles ? 'Back to this Mote' : 'Show all files'}</button>
+        {!collapsed ? <FileExplorer key={workspace.id + mote.topic.id + allFiles} workspaceId={workspace.id}
+          rootPath={allFiles ? '' : mote.rootPath} rootLabel={allFiles ? workspace.name : mote.topic.title}
+          onOpenPath={materials.open} onOpenTerminal={materials.terminal} /> : null}</> : collapsed ? (
         // 折叠＝没有可切分的第二块，所以整块直接由 bottomHalf 占满，不渲染 PanelGroup / 把手（见评审
         // §2.3.1：折叠态不进 react-resizable-panels，否则折叠状态会有 store 与库两个源）。「可拖但无意义
         // 的死把手」因此不可能存在——把手根本没被渲染。

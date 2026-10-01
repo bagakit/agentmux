@@ -27,6 +27,8 @@ beforeEach(async () => {
 afterEach(async () => { await app.dispose(); dispose?.(); dispose = undefined; vi.unstubAllGlobals() })
 function images(owner: ParentNode = app.container) { return [...owner.querySelectorAll<HTMLImageElement>('[data-space-icon-source="image"] img')] }
 function button(label: string) {
+  if (label === 'Save avatar' && document.querySelector('[data-avatar-source=face][aria-pressed=true]')) label = 'Save face'
+
   const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label || value.getAttribute('aria-label') === label)
   expect(found, label).toBeDefined(); return found!
 }
@@ -89,7 +91,7 @@ it.each(['localStorage', 'platform'] as const)('failed %s save keeps both origin
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
   useAppStore.setState({ projectRailOpen: true }); await app.mount(); const before = useAppStore.getState(); await menu()
   expect(app.panel().matches(':popover-open')).toBe(false)
-  await moteClick(button('Book icon'))
+  await moteClick(button('Icon or image')); await moteClick(button('Book icon'))
   if (failure === 'localStorage') vi.spyOn(window.localStorage, 'setItem').mockImplementationOnce(() => { throw new Error('quota unavailable') })
   else vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('platform unconfirmed'))
   await moteClick(button('Save avatar'))
@@ -140,7 +142,7 @@ it('late save completion and failure do not close or leave busy in a newly selec
   vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => saving)
   const close = vi.fn()
   await app.mount(<SpaceIconPicker target={primary} onClose={close} />)
-  await moteClick(button('Book icon')); await moteClick(button('Save avatar'))
+  await moteClick(button('Icon or image')); await moteClick(button('Book icon')); await moteClick(button('Save avatar'))
   expect(button('Saving…').disabled).toBe(true)
   await app.mount(<SpaceIconPicker target={custom} onClose={close} />)
   expect(button('Save avatar').disabled).toBe(false)
@@ -153,9 +155,9 @@ it('Cancel and Escape leave choice and asset writes untouched through the real o
   const save = vi.spyOn(api.scratch, 'saveMoteAvatar')
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: customMoteId, targetTabId: customTab.id }))
   await app.mount(); const before = useAppStore.getState(); await menu()
-  await moteClick(button('Book icon')); await moteClick(button('Cancel'))
+  await moteClick(button('Icon or image')); await moteClick(button('Book icon')); await moteClick(button('Cancel'))
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
-  await menu(); await moteClick(button('Brain icon'))
+  await menu(); await moteClick(button('Icon or image')); await moteClick(button('Brain icon'))
   await act(async () => document.querySelector('.space-icon-picker[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
   expect(document.querySelector('.space-icon-picker[role="dialog"]')).toBeNull()
   expect(save).not.toHaveBeenCalled(); quiet(before)
@@ -180,6 +182,7 @@ function browserBitmap() {
   })
 }
 async function chooseImage() {
+  if (document.querySelector('[data-avatar-source=face][aria-pressed=true]')) await moteClick(button('Icon or image'))
   const input = document.querySelector<HTMLInputElement>('input[aria-label="Choose Mote image"]')
   expect(input).not.toBeNull()
   Object.defineProperty(input!, 'files', { configurable: true, value: [new File(['bounded image'], 'avatar.png', { type: 'image/png' })] })
@@ -232,7 +235,7 @@ it('an old image asset finishing after same-key editor B confirms cannot enter t
   expect(api.scratch.saveMoteAvatar).toHaveBeenCalledTimes(1)
   await app.mount(<SpaceIconPicker target={null} onClose={close} />)
   await app.mount(<SpaceIconPicker target={primary} onClose={close} />)
-  await moteClick(button('Book icon')); await moteClick(button('Save avatar'))
+  await moteClick(button('Icon or image')); await moteClick(button('Book icon')); await moteClick(button('Save avatar'))
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toBe('book'); expect(close).toHaveBeenCalledTimes(1)
   await act(async () => finish(primaryRef)); await settleMoteApp()
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toBe('book'); expect(close).toHaveBeenCalledTimes(1)
@@ -245,7 +248,7 @@ it('the reachable same-image explicit Save retries failed Footer and Space consu
   const failed = useAppStore.getState().spaceObjectIcons[primary.key]
   expect(app.entry().querySelector('img')).toBeNull(); expect(app.entry().querySelector('[data-space-icon-source="image"]')?.getAttribute('title')).toContain('Change avatar')
   vi.mocked(api.scratch.readMoteAvatar).mockResolvedValue({ width: 256, height: 256, dataUrl: 'data:image/png;base64,RECOVERED' })
-  await menu(); await moteClick(button('Save avatar'))
+  await menu(); await moteClick(button('Icon or image')); await moteClick(button('Save avatar'))
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual(primaryRef)
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).not.toBe(failed)
   expect(app.entry().querySelector('img')?.getAttribute('src')).toContain('RECOVERED')
@@ -265,6 +268,7 @@ it('preparation rejection exposes choose-image-again rather than a false saving 
 it('the original image picker declares PNG/JPEG and rejects unsupported formats without preview or asset writes', async () => {
   const preview = vi.spyOn(api.scratch, 'previewMoteAvatar'), save = vi.spyOn(api.scratch, 'saveMoteAvatar')
   await app.mount(<SpaceIconPicker target={primary} onClose={vi.fn()} />)
+  if (document.querySelector('[data-avatar-source=face][aria-pressed=true]')) await moteClick(button('Icon or image'))
   const input = document.querySelector<HTMLInputElement>('input[aria-label="Choose Mote image"]')
   expect(input).not.toBeNull(); expect(input!.accept).toBe('image/png,image/jpeg')
   Object.defineProperty(input!, 'files', { configurable: true, value: [new File(['unsupported image'], 'avatar.webp', { type: 'image/webp' })] })
@@ -290,4 +294,20 @@ it.each(['ready', 'unavailable-canvas'] as const)('choosing the same image again
   expect(draw.mock.calls.length).toBeGreaterThan(before); expect(button('Save avatar').disabled).toBe(false)
   await moteClick(button('Save avatar')); expect(save).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual(primaryRef)
+})
+
+it('source pages retain the original prepared crop node and authored zoom while a face draft is edited', async () => {
+  browserBitmap(); const draw = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect: vi.fn(), drawImage: draw } as never)
+  vi.spyOn(api.scratch, 'previewMoteAvatar').mockResolvedValue({ dataUrl: 'data:image/png;base64,CROP-DRAFT', width: 256, height: 256 })
+  await app.mount(<SpaceIconPicker target={primary} onClose={vi.fn()} />); await chooseImage()
+  const crop = document.querySelector('canvas[aria-label="Circular avatar preview"]')!
+  const zoom = document.querySelector<HTMLInputElement>('[aria-label="Avatar zoom"]')!
+  expect(crop).not.toBeNull(); expect(zoom.value).toBe('1'); const before = draw.mock.calls.length
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(zoom, '2'); zoom.dispatchEvent(new Event('input', { bubbles: true })) })
+  expect(draw.mock.calls.length).toBeGreaterThan(before); expect(zoom.value).toBe('2')
+  await moteClick(button('Make a face')); await moteClick(button('Eyes · oval')); await moteClick(button('Icon or image'))
+  expect(document.querySelector('canvas[aria-label="Circular avatar preview"]')).toBe(crop)
+  expect(document.querySelector('[aria-label="Avatar zoom"]')).toBe(zoom); expect(zoom.value).toBe('2')
+  expect(button('Save avatar').disabled).toBe(false); expect(useAppStore.getState().spaceObjectIcons).toEqual({})
 })

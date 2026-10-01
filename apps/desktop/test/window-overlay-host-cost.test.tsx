@@ -15,7 +15,8 @@ describe('window overlay host ownership', () => {
     const queryAll = vi.spyOn(document, 'querySelectorAll')
     const lookup = vi.spyOn(document, 'getElementById')
     const first = resolveOverlayContainer() as HTMLElement
-    expect(first.parentElement).toBe(document.body)
+    const persistent = first.parentElement!
+    expect(persistent.parentElement).toBe(document.body)
     expect(first.hasAttribute('data-overlay-host')).toBe(true)
     expect(first.classList.contains('window-overlay-host')).toBe(true)
     expect(first.id).not.toBe('')
@@ -24,7 +25,7 @@ describe('window overlay host ownership', () => {
     expect(lookup).toHaveBeenCalledTimes(52)
     expect(query).not.toHaveBeenCalled()
     expect(queryAll).not.toHaveBeenCalled()
-    expect(Array.from(document.body.children)).toEqual([workbench, first])
+    expect(Array.from(document.body.children)).toEqual([workbench, persistent])
   })
 
   it('recreates a removed host and routes custom containers without resolving the default', () => {
@@ -33,8 +34,8 @@ describe('window overlay host ownership', () => {
     const recreated = resolveOverlayContainer() as HTMLElement
     expect(recreated).not.toBe(first)
     expect(recreated.id).toBe(first.id)
-    expect(recreated.parentElement).toBe(document.body)
-    expect(Array.from(document.body.children)).toEqual([recreated])
+    expect(recreated.parentElement?.parentElement).toBe(document.body)
+    expect(Array.from(document.body.children)).toEqual([recreated.parentElement])
     const lookup = vi.spyOn(document, 'getElementById')
     const custom = document.createDocumentFragment()
     expect(resolveOverlayContainer(custom)).toBe(custom)

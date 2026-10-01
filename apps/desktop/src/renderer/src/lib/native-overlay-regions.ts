@@ -31,7 +31,12 @@ export function observeNativeOverlayRegions(
       if (portal.matches(OPEN_FLOAT)) nodes.push(portal)
       nodes.push(...portal.querySelectorAll(OPEN_FLOAT))
     }
-    for (const node of topLayers) if (node.isConnected) nodes.push(node)
+    for (const node of topLayers) if (node.isConnected) {
+      nodes.push(node)
+      // A transparent native layer container exposes its actual painted Portal
+      // surfaces. The opened container is bounded; #root stays unscanned.
+      if (win.getComputedStyle(node).pointerEvents === 'none') nodes.push(...node.querySelectorAll(OPEN_FLOAT))
+    }
     // A menu's checked item also has data-state=open. Capture its mounted Content once.
     const unique = [...new Set(nodes)]
     const candidates = unique.filter(node => {
@@ -41,7 +46,15 @@ export function observeNativeOverlayRegions(
       return !(rect.width >= win.innerWidth && rect.height >= win.innerHeight &&
         style.backgroundColor === 'rgba(0, 0, 0, 0)' && unique.some(child => child !== node && node.contains(child)))
     })
-    const floats = candidates.filter(node => !candidates.some(parent => parent !== node && parent.contains(node)))
+    const nativeOwner = (node: Element): Element | null => {
+      const owner = node.closest('[popover]')
+      return owner && topLayers.has(owner) ? owner : null
+    }
+    // DOM descendants in another native top layer paint independently of their
+    // ancestor. Capturing only the ancestor would crop the child's dialog.
+    const nativeOrder = new Map([...topLayers].map((node, index) => [node, index + 1]))
+    const floats = candidates.filter(node => !candidates.some(parent => parent !== node && parent.contains(node) && nativeOwner(parent) === nativeOwner(node)))
+      .sort((left, right) => (nativeOrder.get(nativeOwner(left)!) ?? 0) - (nativeOrder.get(nativeOwner(right)!) ?? 0))
     const regions: NativeOverlayRegion[] = []
     const activeFloats: Element[] = []
     const stages: Element[] = []

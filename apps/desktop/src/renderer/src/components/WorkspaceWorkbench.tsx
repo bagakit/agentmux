@@ -15,11 +15,13 @@ import {
 import {
   SortableContext,
   horizontalListSortingStrategy,
+  verticalListSortingStrategy,
   useSortable
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
   GripVertical,
+  PanelLeft,
   Plus,
   Square,
   SquareTerminal,
@@ -56,6 +58,8 @@ import { SessionRegionHost } from './SessionRegionHost'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
+import { MoteDiscussionTitle, MoteTabRegions, MoteWorkfaceNavigation, useMoteNavigationWidth } from './MoteWorkface'
+import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
@@ -137,6 +141,7 @@ function SortableWorkbenchTab({
   workspaceId: string
 }) {
   const projection = useContext(WorkbenchProjectionContext)
+  const mote = useContext(MoteWorkfaceContext)
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
@@ -406,7 +411,8 @@ function SortableWorkbenchTab({
               ? sessionTabTooltip(session, displayName, regionSummary)
               : surfaceTabTooltip(displayName, regionSummary)
           }
-          onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : activateTab(workspaceId, group.id, tab.id)}
+          aria-current={mote && group.activeTabId === tab.id ? 'page' : undefined}
+          onClick={() => mote ? mote.selectTab(tab.id, group.id) : projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : activateTab(workspaceId, group.id, tab.id)}
           {...attributes}
           {...listeners}
         >
@@ -451,6 +457,7 @@ function SortableWorkbenchTab({
           </span>
         </button>
       </WorkbenchTabContextMenu>
+      {mote && group.activeTabId === tab.id ? <MoteTabRegions tab={tab} groupId={group.id} /> : null}
       <ConfirmationDialog
         open={pendingClose !== null}
         title={pendingClose?.agentSessionCount
@@ -1028,6 +1035,8 @@ function PaneGroup({
   onNewTab(groupId: string): void
 }) {
   const projection = useContext(WorkbenchProjectionContext)
+  const mote = useContext(MoteWorkfaceContext)
+  const navigation = useMoteNavigationWidth(Boolean(mote))
   const tabsById = useAppStore(useShallow((state) => projection
     ? Object.fromEntries(group.tabOrder.flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, allLayout)))
@@ -1098,6 +1107,11 @@ function PaneGroup({
     }
   }
 
+  const tabNavigation = <SortableContext items={group.tabOrder} strategy={mote ? verticalListSortingStrategy : horizontalListSortingStrategy}>
+    {mote ? <div className="mote-conversations__tabs">{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} />)}</div>
+      : <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} />)}</WorkbenchTabStrip>}
+  </SortableContext>
+
   return (
     <section
       ref={setNodeRef}
@@ -1105,7 +1119,10 @@ function PaneGroup({
         isOver ? 'pane-group--drop-over' : ''
       }`}
       data-pane-group-id={group.id}
-      onPointerDown={() => projection ? activeTab && selectWorkbenchProjectionTab(projection, group.id, activeTab,
+      data-mote-navigation-open={mote ? String(navigation.open) : undefined}
+      data-mote-navigation-narrow={mote ? String(navigation.narrow) : undefined}
+      onKeyDown={mote ? navigation.onKeyDown : undefined}
+      onPointerDown={() => mote?.floating ? undefined : projection ? activeTab && selectWorkbenchProjectionTab(projection, group.id, activeTab,
         projection.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId)
         : focusTabGroup(workspaceId, group.id)}
     >
@@ -1113,18 +1130,8 @@ function PaneGroup({
         {showWindowChrome ? (
           <TopRowLeadingChrome />
         ) : null}
-        <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-          <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>
-            {tabs.map((tab) => (
-              <SortableWorkbenchTab
-                key={tab.id}
-                tab={tab}
-                group={group}
-                workspaceId={workspaceId}
-              />
-            ))}
-          </WorkbenchTabStrip>
-        </SortableContext>
+        {mote ? <><button type="button" className="pane-action mote-navigation-toggle" aria-label="Show Mote discussions" aria-expanded={navigation.open}
+          onClick={navigation.toggle}><PanelLeft size={14} /></button><MoteDiscussionTitle tab={activeTab} /></> : tabNavigation}
         <div className="pane-tabbar__actions">
           {activeRuntimeSession && canStopSessionRun(activeRuntimeSession) ? (
             <button
@@ -1149,14 +1156,14 @@ function PaneGroup({
               if (activeTab) arrangeTabRegions(activeTab.workspaceId, activeTab.id, mode)
             }}
           />
-          <button
+          {!mote ? <button
             type="button"
             className="pane-action"
             onClick={() => onNewTab(group.id)}
             title="New tab"
           >
             <Plus size={13} />
-          </button>
+          </button> : null}
         </div>
       <div className="service-disclosure-home" data-workbench-moved-focus={focusMoved ? '' : undefined}>
         <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['local:focus-moved', workspaceId, group.id]),
@@ -1168,7 +1175,12 @@ function PaneGroup({
         } } : null} />
       </div>
       </header>
-      <div className="pane-body">
+      <div ref={navigation.ref} className={mote ? 'pane-content pane-content--mote' : 'pane-content'}>
+        {mote ? <aside className="mote-conversations" aria-label={mote.topic.title + ' discussions'}
+          onClick={event => { if ((event.target as Element).closest('.workbench-tab, [data-mote-session-region]')) navigation.close() }}>
+          <MoteWorkfaceNavigation onNewTab={() => onNewTab(group.id)} root={Boolean(isRootLeaf || showWindowChrome || mote.floating && layout.activeGroupId === group.id)}>{tabNavigation}</MoteWorkfaceNavigation>
+        </aside> : null}
+      <div className="pane-body" key="original-body">
         {showEmptySpace ? storedSpaceLayout && emptySpaceTopic && !hasOriginalTopicTab ? <div className="pane-state" data-mote-empty-space={emptySpaceTopic.id}
           onPointerDown={event => event.stopPropagation()}>
           <span>{emptySpaceTopic.title}</span>
@@ -1204,6 +1216,7 @@ function PaneGroup({
           projection ? <div role="status" className="workbench-restore-notice">Select a Tab in this Zone to display its original content.</div>
             : <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
         ) : null}
+      </div>
       </div>
       <ConfirmationDialog
         open={pendingStopSessionId !== null}
@@ -1442,6 +1455,7 @@ export function WorkspaceWorkbench({
   /** Controlled exact Zone projection; the original workface keeps entity/content ownership. */
   projection?: WorkbenchProjection | undefined
 }) {
+  const moteContext = useContext(MoteWorkfaceContext)
   const workbenchRef = useRef<HTMLDivElement>(null)
   const projectionEntity = projection?.entity
   const projectionKey = projectionEntity ? `${projection?.presentationId}:${projectionEntity.kind}:${projectionEntity.kind === 'zone' ? projectionEntity.zoneId : projectionEntity.kind === 'tab' ? projectionEntity.tabId : projectionEntity.regionId}` : null
@@ -1589,7 +1603,7 @@ export function WorkspaceWorkbench({
       if (tab) projection.onSelect({ displayWorkspaceId: workspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId })
       return
     }
-    const projectedTopicId = topicId ?? (layout ? activeTopicIdFromLayout(layout, tabs) : undefined)
+    const projectedTopicId = topicId ?? moteContext?.topic.id ?? (layout ? activeTopicIdFromLayout(layout, tabs) : undefined)
     const tabId = openLauncher({ workspaceId, tabGroupId: groupId,
       ...(projectedTopicId ? { topicId: projectedTopicId } : {}), reveal: viewOwnership === 'owner' })
     if (tabId) onTabSelect?.(tabId)

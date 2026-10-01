@@ -138,6 +138,13 @@ try {
   const entry = join(root, 'entry.mjs'); await writeFile(entry, source)
   await build({ absWorkingDir: base, entryPoints: [entry], outfile: worker, bundle: true, packages: 'external', external: [happyDomPath],
     platform: 'node', format: 'esm', plugins: [{ name: 'local-workspace-source', setup(bundler) {
+      bundler.onResolve({ filter: /^@agentmux\/core(?:\/.*)?$/ }, args => {
+        const manifest = JSON.parse(require('node:fs').readFileSync(join(base, 'packages/core/package.json'), 'utf8'))
+        const subpath = args.path === '@agentmux/core' ? '.' : '.' + args.path.slice('@agentmux/core'.length)
+        const entry = manifest.exports[subpath]?.import
+        assert.ok(entry, 'The original Core public export must be explicit: ' + args.path)
+        return { path: join(base, 'packages/core', entry), external: true }
+      })
       bundler.onResolve({ filter: /^@agentmux\/layout$/ }, args => ({ path: join(base, 'packages/layout', JSON.parse(require('node:fs').readFileSync(join(base, 'packages/layout/package.json'), 'utf8')).exports['.'].import) }))
       // This Node host does not provide Electron's optional OS resource sampling.
       // Runtime lifecycle, public Core and persistence remain their actual implementations.

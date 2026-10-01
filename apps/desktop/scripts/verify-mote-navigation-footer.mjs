@@ -11,6 +11,9 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const fixture = join(desktop, 'scripts/fixtures/mote-navigation-footer')
 const require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
+const avatarRefinement = process.env.AGENTMUX_AVATAR_REFINEMENT === '1'
+const avatarFromChooser = process.env.AGENTMUX_AVATAR_FROM_CHOOSER === '1'
+assert.ok(!avatarFromChooser || avatarRefinement, 'Joint chooser proof uses the background-only avatar refinement mode')
 let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, moteIdentity = false, moteArchive = false, motePaperdoll = false, reuseRenderer = null
 if (args[0] === '--reuse') {
   const { recapture } = await import('./fixtures/mote-navigation-footer/recapture.mjs')
@@ -310,7 +313,7 @@ try {
       const destination = join(evidence, phase); await mkdir(destination)
       const phaseLogs = []
       const exit = await runProbeProcess(require('electron'), [join(fixture, motePaperdoll ? 'paperdoll-main.cjs' : 'archive-main.cjs'),
-        join(outDir, motePaperdoll ? 'paperdoll.html' : 'archive.html'), privateRoot, destination, phase], {
+        join(outDir, motePaperdoll ? 'paperdoll.html' : 'archive.html'), privateRoot, destination, phase, ...(avatarRefinement ? ['refinement', ...(avatarFromChooser ? ['from-chooser'] : [])] : [])], {
         temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 60000, onLine: line => phaseLogs.push(line)
       })
       await writeFile(join(destination, 'renderer.log'), phaseLogs.join('\n'))

@@ -184,6 +184,12 @@
   .composer-tool__label { display: none; }
   .composer-tool { padding-inline: var(--sp-2); gap: 0; flex-shrink: 0; }
 }
+/* A narrow editor keeps its full line; the same controls share the row below. */
+@container composer (max-width: 400px) {
+  .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 1 / -1; grid-row: 1; }
+  .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 2; }
+  .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 2 / -1; justify-self: end; }
+}
 .composer__toolbar > div:first-child { overflow-x: auto; scrollbar-width: none; }
 .composer__toolbar > div:last-child { flex-shrink: 0; }
 .composer-feedback { display: flex; align-items: baseline; gap: var(--sp-2); grid-column: 1 / -1; padding: var(--sp-2) var(--sp-3); color: var(--amber); font-size: var(--fs-micro); }

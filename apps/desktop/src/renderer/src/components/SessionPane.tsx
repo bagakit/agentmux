@@ -45,6 +45,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { AgentRegionHeader } from './AgentRegionHeader'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
+import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
 
 const NO_TIMELINE_ITEMS: never[] = []
@@ -100,6 +101,7 @@ export function SessionPane({
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
+  const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId, visible)
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const timelineSnapshot = useAppStore((state) => state.timelines[sessionId])
   const userName = useAppStore((state) => state.agentNames?.[sessionId])
@@ -217,8 +219,8 @@ export function SessionPane({
       firstPromptFromTimeline(state.timelines[id]), workspace?.id, workspace?.repoPath, workspace?.branch,
       workspace?.name, projectRoot?.id, projectRoot?.name]
   }) : []))
-  const describeSpeaker = useMemo(
-    () => createSpeakerResolver({
+  const describeSpeaker = useMemo(() => {
+    const original = createSpeakerResolver({
       lookupAgent: (id) => {
         const state = useAppStore.getState()
         const sender = currentConversationSpeakerMetadata(id, {
@@ -239,8 +241,14 @@ export function SessionPane({
         } : undefined
       },
       ...(session?.kind === 'agent' ? { currentSession: session } : {})
-    }),
-    [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts]
+    })
+    return (speaker: Parameters<typeof original>[0]) => {
+      const described = original(speaker)
+      const mote = speaker.role === 'agent' ? moteConversationIdentity(moteOwner,
+        sessionPresentationById(useAppStore.getState().sessions).get(speaker.id)) : undefined
+      return mote ? { ...described, name: mote.name, mote } : described
+    }
+  }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
   )
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverSession = useAppStore((state) => state.recoverSession)
@@ -528,6 +536,7 @@ export function SessionPane({
       openHttpLink={onProseLinkClick}
       {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
       describeSpeaker={describeSpeaker}
+      moteConversation={moteOwner !== null}
               />
   }
   const resultReview = session.kind === 'agent'

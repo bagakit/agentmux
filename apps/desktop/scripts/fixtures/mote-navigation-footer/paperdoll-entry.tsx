@@ -24,7 +24,7 @@ declare global {
     moteFaceCosts: { commits: number; seen: Record<string, number>; renders: Record<string, number>; currentCommit: { start: number; end: number } | null }
   }
 }
-const bridge = window.motePaperdollNative
+const bridge = window.motePaperdollNative ?? (location.protocol.startsWith('http') ? (await import('./paperdoll-browser')).browserPaperdollBridge : null)
 if (!bridge) throw new Error('The real private Scratch IPC bridge is required')
 const boot = await bridge.bootstrap(), phase = boot.phase, now = Date.now()
 const scratch = boot.config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)!, project = boot.config.workspaces.find(item => item.id === 'project')!
@@ -109,12 +109,13 @@ function protectedFacts() {
 function animationFacts(node: Element) {
   return { expression: node.getAttribute('data-mote-expression'), motion: node.getAttribute('data-mote-motion'), rect: rectangle(node),
     animations: node.getAnimations({ subtree: true }).map(animation => ({ state: animation.playState, time: animation.currentTime, name: 'animationName' in animation ? String(animation.animationName) : null })),
+    follow: node.querySelector('.mote-face__gaze-follow') ? getComputedStyle(node.querySelector('.mote-face__gaze-follow')!).transform : null,
     gaze: node.querySelector('.mote-face__gaze') ? getComputedStyle(node.querySelector('.mote-face__gaze')!).transform : null }
 }
 function editorFacts() {
   const dialog = document.querySelector('.space-icon-picker')
   if (!dialog) return null
-  const groups = [...dialog.querySelectorAll('.mote-avatar-source, .mote-face-editor fieldset')].map(group => ({
+  const groups = [...dialog.querySelectorAll('.mote-avatar-source, .mote-face-editor:not([hidden]) fieldset')].map(group => ({
     label: group.getAttribute('aria-label') ?? group.querySelector('legend')?.textContent,
     buttons: [...group.querySelectorAll('button')].map(button => {
       const style = getComputedStyle(button)
