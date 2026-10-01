@@ -44,6 +44,7 @@
 - **候选必须携带可核对的来源身份**：至少包含源码 commit、tree、应用版本、平台与
   架构。安装前后都核对同一身份；版本号相同不等于产物相同，启动排障不能只看
   `CFBundleVersion`。
+- 系统截图授权与安装代码身份的连续性只引用[《Message Tools 失败反馈与 Browser Region 选中态》](conversation-input.md#message-tools-失败反馈与-browser-region-选中态)，不以构建成功或签名校验通过替代该授权结果。
 - **安装面只保留一个活动副本**。安装动作完成后，旧的 AgentMux App 不得继续被
   LaunchServices 选中；清理旧副本时保留到系统 Trash 以便恢复，不删除用户的
   Application Support、Session、Run 或其他运行数据。
