@@ -210,6 +210,19 @@
   grid-template-columns: minmax(0, 1fr) 32px;
   background: var(--surface-1);
 }
+/* Incoming human text keeps a natural measure; Agent surfaces retain their own layout. */
+.log-turn[data-message-bubble='true'][data-speaker-role='human'] {
+  width: fit-content;
+  max-width: min(calc(100% - var(--sp-4)), 72ch);
+  height: auto;
+  border: 0;
+  border-radius: var(--radius) var(--radius) var(--radius-sm) var(--radius);
+  background: color-mix(in srgb, var(--blue) 8%, var(--surface-1));
+}
+.log-turn[data-message-bubble='true'][data-speaker-role='human'] .log-turn__who {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__head,
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__body,
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__continue {

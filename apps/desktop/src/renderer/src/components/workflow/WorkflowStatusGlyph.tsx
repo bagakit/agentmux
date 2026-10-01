@@ -2,8 +2,13 @@ import { WORKFLOW_STATUS_LABEL, type WorkflowAgentStatus, type WorkflowStatus } 
 import { WorkflowSemanticIcon } from '../semantic-icons'
 
 export function WorkflowStatusGlyph({ status, size = 12 }: { status: WorkflowAgentStatus; size?: number }) {
-  // "running 就转圈"这个决定归 `WorkflowSemanticIcon` 所有，这里不再写第二遍——
-  // 写两遍渲染出来就是 `class="… spin spin"`（实测），两处将来还会各自漂移。
+  if (status === 'running') {
+    return <svg className="wf-ico wf-ico--running wf-streaming-glyph" width={size} height={size}
+      viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="5.5" opacity=".16" />
+      <circle cx="8" cy="8" r="5.5" pathLength="100" strokeDasharray="30 70" strokeLinecap="round" />
+    </svg>
+  }
   return <WorkflowSemanticIcon status={status} size={size} className={`wf-ico wf-ico--${status}`} />
 }
 

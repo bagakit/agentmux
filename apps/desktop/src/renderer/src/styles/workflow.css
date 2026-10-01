@@ -74,6 +74,8 @@
 .wf-rail__fill { display: block; height: 100%; background: var(--wf-accent); transition: width var(--dur-enter) ease; }
 .wf-ico { flex: 0 0 auto; color: var(--text-3); }
 .wf-ico--running { color: var(--text-2); }
+.wf-streaming-glyph { transform-origin: center; animation: wf-streaming-turn 1.6s linear infinite; }
+@keyframes wf-streaming-turn { to { transform: rotate(360deg); } }
 .wf-ico--completed { color: var(--green); }
 .wf-ico--failed { color: var(--red); }
 .wf-ico--paused { color: var(--amber); }
@@ -124,15 +126,17 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .wf-chev, .wf-rail__fill { transition: none; }
+  .wf-streaming-glyph { animation: none; }
 }
 
 .wf-agent--compact { min-width: 0; }
 
 /* Real recorded steps use the same disclosure family without workflow statistics. */
-.wf-card--observation { margin-block: var(--sp-2); padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); overflow: hidden; }
+.wf-card--observation { margin-block: var(--sp-2); padding: 0; border: 0; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 45%, transparent); }
 .wf-card--observation > .wf-head { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4); min-height: 28px; }
+.wf-card--observation .wf-chip { padding-inline: 0; border-radius: 0; background: transparent; }
 .wf-card--observation .log-fold__label { flex: 1; }
-.wf-observation__body { margin: var(--sp-1) var(--sp-3) var(--sp-2) var(--sp-4); padding-left: 0; }
+.wf-observation__body { margin: var(--sp-1) var(--sp-3) var(--sp-2) var(--sp-4); border-left: 0; padding-left: 0; }
 .wf-observation__recorded { color: var(--text-3); font-size: var(--fs-micro); }
 .wf-observation__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: 0 var(--sp-4) var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
 .wf-observation__caption { margin-right: auto; color: var(--text-3); }
@@ -145,7 +149,7 @@
 .wf-tool-row--observation[data-status='failed'] > .log-row__node { color: var(--red); }
 .wf-tool-row--observation[data-status='failed'] > .log-row__title { color: var(--red-text); }
 .wf-tool-row--observation[aria-expanded='true'] > .log-row__title { color: var(--text); font-weight: 560; }
-.wf-tool-row--observation .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.wf-tool-row--observation .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: 0; border-radius: 0; background: transparent; }
 .wf-tool-row--observation .log-row__source { font-size: var(--fs-micro); }
 @media (max-width: 560px) {
   .wf-card--observation > .wf-head { flex-wrap: nowrap; padding-inline: var(--sp-3); gap: var(--sp-2); }
