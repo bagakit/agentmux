@@ -48,7 +48,7 @@ import { selectSpatialCatalog, spatialCatalog } from './lib/space-agent-control'
 import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
 import { projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import type { WorkbenchViewTarget } from './lib/workbench-presentation'
+import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs } from './lib/workbench-resource-display'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './lib/scratch-topic-layout'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
@@ -214,37 +214,40 @@ function DesktopApp() {
   const ordinaryLayout = currentOrdinaryLayout ?? (retainedOrdinaryLayout.current?.workspaceId === activeWorkspaceId ? retainedOrdinaryLayout.current.layout : undefined)
   const ordinaryTargets = useMemo(() => {
     const layout = ordinaryLayout
-    if (!layout || !activeWorkspaceId || mainSurface !== 'workbench' || settingsRoute) return {}
+    if (!layout || !activeWorkspaceId) return {}
     const choice = workbenchSpaceSelection?.workspaceId === activeWorkspaceId ? workbenchSpaceSelection : null
     const held = retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const topicId = choice?.topicId ?? held?.topicId ?? activeTopicIdFromLayout(layout, tabs)
     const displayed = layoutForLogicalRegionFocus(layoutForActiveTopic(layout, tabs, topicId,
       !(activeWorkspaceId === SCRATCH_WORKSPACE_ID && choice?.topicId)), tabs, held)
-    return ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId)
+    const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId)
+    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsRoute }))]))
   }, [activeWorkspaceId, ordinaryLayout, tabs, mainSurface, settingsRoute, workbenchSpaceSelection, retainedSpatialFocus])
-  const viewTargets = useMemo<Readonly<Record<string, WorkbenchViewTarget>>>(() => {
-    const targets: Record<string, WorkbenchViewTarget> = { ...moteViewTargets }
+  const viewTargets = useMemo<WorkbenchViewTargets>(() => {
+    const targets: Record<string, WorkbenchViewTarget[]> = {}
+    const append = (tabId: string, target: WorkbenchViewTarget) => (targets[tabId] ??= []).push(target)
+    for (const [tabId, occurrences] of Object.entries(ordinaryTargets)) for (const target of occurrences) append(tabId, target)
+    for (const [tabId, occurrences] of Object.entries(moteViewTargets ?? {})) for (const target of occurrences) append(tabId, target)
     if (surveyVisible && surveyProjection && surveyProjectedLayout?.layout) {
       for (const group of surveyProjectedLayout.layout.groups) {
         const tabId = group.activeTabId
         const reference = surveyProjection.selection.find(reference => reference.displayWorkspaceId === surveyProjection.displayWorkspaceId && reference.groupId === group.id && reference.tabId === tabId)
-        if (!tabId || !reference || surveyProjectedLayout.unsupportedTabIds.has(tabId) || moteViewTargets?.[tabId]) continue
-        targets[tabId] = { hostId: workbenchProjectionSlotId(`${surveyProjection.presentationId}-slot`, reference),
+        if (!tabId || !reference || surveyProjectedLayout.unsupportedTabIds.has(tabId)) continue
+        append(tabId, { hostId: workbenchProjectionSlotId(`${surveyProjection.presentationId}-slot`, reference),
           active: !(surveyToolsOpen && narrowControls), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', controlsOpen: surveyToolsOpen,
           projection: surveyProjection, reference,
-          retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) }
+          retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) })
       }
     }
     if (mainSurface === 'agents' && focusProjection && focusTab) {
       const reference = focusProjection.selection[0]!
-      if (!targets[focusTab.id]) targets[focusTab.id] = {
+      append(focusTab.id, {
         hostId: focusProjection.entity.kind === 'region' ? workbenchRegionProjectionSlotId(`${focusProjection.presentationId}-slot`, reference) : workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
         active: focusVisible, visible: focusVisible, surface: 'focus', retainedRegionId: reference.regionId,
         headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
-      }
+      })
     }
-    for (const [tabId, target] of Object.entries(ordinaryTargets)) if (!targets[tabId]) targets[tabId] = target
     return targets
   }, [moteViewTargets, surveyVisible, surveyProjection, surveyProjectedLayout, surveyToolsOpen, narrowControls, selectSurveyReference,
     focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets])
@@ -304,9 +307,9 @@ function DesktopApp() {
     return () => { unsubscribeStore(); unsubscribeRejectedLoads() }
   }, [fileEditingProbe])
   const projectedVisibleTabIds = useMemo(() => new Set([
-    ...Object.entries(viewTargets).flatMap(([tabId, target]) => target.visible === false || target.projection?.entity.kind === 'region' ? [] : [tabId])
+    ...Object.entries(viewTargets).flatMap(([tabId, targets]) => targets.some(target => target.visible !== false && target.projection?.entity.kind !== 'region') ? [tabId] : [])
   ]), [viewTargets])
-  const projectedVisibleRegionIds = useMemo(() => new Set(Object.values(viewTargets).flatMap(target =>
+  const projectedVisibleRegionIds = useMemo(() => new Set(Object.values(viewTargets).flat().flatMap(target =>
     target.visible !== false && target.projection?.entity.kind === 'region' && target.reference?.regionId === target.projection.entity.regionId
       ? [target.reference.regionId] : [])), [viewTargets])
   // A Workbench is a window-owned surface, not a route component. Keep only Workspaces the user has

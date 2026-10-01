@@ -58,6 +58,7 @@ import type {
   BrowserPresentationGeometry,
   BrowserPresentationOccurrence,
   BrowserPresentationCaptureAck,
+  BrowserPresentationActivation,
   BrowserPng,
   BrowserProfileDeleteApproval,
   BrowserViewport,
@@ -1096,10 +1097,13 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:ackPresentationCapture', event)
     return browsers.ackPresentationCapture(event.sender, event.senderFrame, captureId, ack)
   })
-  handleWithEvent('browser:activatePresentation', (event, leaseId: string) => {
+  handleWithEvent('browser:activatePresentation', async (event, leaseId: string, activation: BrowserPresentationActivation) => {
     requireTrustedSender('browser:activatePresentation', event)
-    browsers.activatePresentation(event.sender, event.senderFrame, leaseId)
-    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+    const receipt = await browsers.activatePresentation(event.sender, event.senderFrame, leaseId, activation)
+    if (receipt.outcome === 'selected' || receipt.outcome === 'input-dispatched') {
+      void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+    }
+    return receipt
   })
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => {
     browsers.setBounds(id, bounds)

@@ -1,6 +1,6 @@
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import { workbenchProjectionSlotId, type WorkbenchProjectionSelection } from './workbench-projection'
-import type { WorkbenchViewTarget } from './workbench-presentation'
+import type { WorkbenchViewTarget, WorkbenchViewTargets } from './workbench-presentation'
 import type { WorkbenchTab } from './workbench-tabs'
 
 type Tabs = Readonly<Record<string, WorkbenchTab>>
@@ -66,23 +66,18 @@ export function workbenchDisplayTabs(tabs: Tabs, workspaceId: string, layout?: W
   return byWorkspace.get(workspaceId)!
 }
 
-/** One ordinary destination per foreign entity; an explicit active Group disambiguates selection. */
-export function ordinaryWorkbenchViewTargets(layout: WorkspaceLayout | undefined, tabs: Tabs, displayWorkspaceId: string, prefix = 'workbench-tab-slot'): Record<string, WorkbenchViewTarget> {
-  const references = new Map<string, WorkbenchProjectionSelection | null>()
-  if (!layout) return {}
+/** All ordinary occurrences; only a confirmed Browser can actually mirror its content. */
+export function ordinaryWorkbenchViewTargets(layout: WorkspaceLayout | undefined, tabs: Tabs, displayWorkspaceId: string, prefix = 'workbench-tab-slot'): WorkbenchViewTargets {
+  const targets: Record<string, WorkbenchViewTarget[]> = {}
+  if (!layout) return targets
   const visibleGroups = displayMembership(layout).visible
-  const activeByGroup = displayMembership(layout).active
-  const selectedTabId = activeByGroup.get(layout.activeGroupId)
-  for (const group of layout.groups) if (visibleGroups.has(group.id)) for (const id of new Set(group.tabOrder)) {
-    const tab = tabs[id], regionId = tab?.layout.activeRegionId
-    if (!tab || tab.workspaceId === displayWorkspaceId || !tab.regions[regionId!]) continue
-    const reference = { displayWorkspaceId, groupId: group.id, tabId: id, regionId: regionId! }
-    const selected = group.id === layout.activeGroupId && group.activeTabId === id
-    if (selected || !references.has(id)) references.set(id, reference)
-    else if (selectedTabId !== id || references.get(id)?.groupId !== layout.activeGroupId) references.set(id, null)
+  for (const group of layout.groups) if (visibleGroups.has(group.id)) for (const tabId of new Set(group.tabOrder)) {
+    const tab = tabs[tabId], regionId = tab?.layout.activeRegionId
+    if (!tab || !regionId || !tab.regions[regionId]) continue
+    const reference = { displayWorkspaceId, groupId: group.id, tabId, regionId }
+    const target: WorkbenchViewTarget = { hostId: workbenchProjectionSlotId(prefix, reference), active: true,
+      visible: group.activeTabId === tabId, surface: 'space', reference }
+    ;(targets[tabId] ??= []).push(target)
   }
-  return Object.fromEntries([...references].flatMap(([id, reference]) => reference ? [[id, {
-    hostId: workbenchProjectionSlotId(prefix, reference), active: true, surface: 'space' as const,
-    visible: activeByGroup.get(reference.groupId) === id, reference
-  }]] : []))
+  return targets
 }

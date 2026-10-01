@@ -31,6 +31,7 @@ import type {
   BrowserPresentationGeometry,
   BrowserPresentationOccurrence,
   BrowserPresentationCaptureAck,
+  BrowserPresentationActivation,
   BrowserPresentationEvent,
   BrowserEvent,
   BrowserOperator,
@@ -411,7 +412,7 @@ const api: AgentMuxPreloadApi = {
     armPresentationCapture: (leaseId: string) => ipcRenderer.invoke('browser:armPresentationCapture', leaseId),
     ackPresentationCapture: (captureId: string, ack: BrowserPresentationCaptureAck) =>
       ipcRenderer.invoke('browser:ackPresentationCapture', captureId, ack),
-    activatePresentation: (leaseId: string) => ipcRenderer.invoke('browser:activatePresentation', leaseId),
+    activatePresentation: (leaseId: string, activation: BrowserPresentationActivation) => ipcRenderer.invoke('browser:activatePresentation', leaseId, activation),
     onPresentationEvent(listener: (event: BrowserPresentationEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserPresentationEvent): void => listener(value)
       ipcRenderer.on(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)

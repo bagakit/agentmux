@@ -25,7 +25,8 @@ import {
 import type {
   BrowserPresentationOccurrence, BrowserPresentationGeometry, BrowserPresentationLease,
   BrowserPresentationCapture, BrowserPresentationCaptureAck, BrowserPresentationEvent,
-  BrowserPresentationRevocationReason
+  BrowserPresentationRevocationReason, BrowserPresentationActivation, BrowserPresentationActivationReceipt,
+  BrowserPresentationViewportPoint, BrowserPresentationMouseModifier
 } from '../shared/contracts.js'
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
@@ -115,6 +116,26 @@ type BrowserEntry = {
   presentationLeaseIds: Set<string>
   captureId: string | null
   inputLeaseId: string | null
+  firstPress: PresentationFirstPress | null
+}
+
+type PresentationFirstPress = {
+  id: string
+  lease: PresentationLease
+  source: WebContentsView
+  capture: PresentationCapture
+  navigationId: string
+  sourceBounds: BrowserBounds
+  sourceInputLeaseId: string | null
+  geometry: BrowserPresentationGeometry
+  zoom: number
+  viewport: BrowserViewport
+  down: BrowserPresentationViewportPoint
+  button: 'left' | 'middle' | 'right'
+  clickCount: 1 | 2
+  modifiers: readonly BrowserPresentationMouseModifier[]
+  state: 'prepared' | 'dispatching' | 'dispatched' | 'cancelled'
+  result: BrowserPresentationActivationReceipt | null
 }
 
 type PresentationDocument = { frame: WebFrameMain; session: Session; url: string }
@@ -486,14 +507,128 @@ export class BrowserViewManager {
     if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
   }
 
-  activatePresentation(sender: WebContents, frame: WebFrameMain | null, leaseId: string): void {
+  async activatePresentation(sender: WebContents, frame: WebFrameMain | null,
+    leaseId: string, activation: BrowserPresentationActivation): Promise<BrowserPresentationActivationReceipt> {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
-    if (!lease.geometry.visible) throw new Error('Browser presentation is hidden')
-    // Only explicit input selection moves the original Native owner. Other videos contain its viewport.
+    const entry = lease.entry
+    const unconfirmed = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'],
+      message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
+    if (activation?.kind === 'select') {
+      if (!lease.geometry.visible) return unconfirmed('hidden', 'This Browser presentation is hidden. The original page remains available.')
+      entry.firstPress = null
+      this.selectPresentation(lease)
+      return { outcome: 'selected' }
+    }
+    if (activation?.kind === 'prepare-first-press') {
+      this.validatePresentationPoint(activation.down)
+      this.validatePresentationModifiers(activation.modifiers)
+      if (!['left', 'middle', 'right'].includes(activation.button) || ![1, 2].includes(activation.clickCount)) {
+        throw new Error('Browser first press requires a known mouse button and click count')
+      }
+      if (!lease.geometry.visible || !entry.bounds) return unconfirmed('hidden', 'The original Browser viewport or this presentation is hidden.')
+      if (!this.window.isFocused()) return unconfirmed('window-not-focused', 'Focus this window before taking control of the Browser.')
+      if (entry.navigationId !== activation.navigationId || entry.view.webContents.isLoadingMainFrame()) {
+        return unconfirmed('navigation-changed', 'The displayed Browser navigation changed. Wait for its current frame and try again.')
+      }
+      const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
+      if (!capture || capture.id !== activation.captureId || capture.document !== lease.document || !capture.trackIds ||
+        !this.isPresentationCaptureCurrent(capture)) return unconfirmed('capture-changed', 'The displayed Browser frame is no longer authorized. The original page remains available.')
+      const press: PresentationFirstPress = {
+        id: randomUUID(), lease, source: entry.view, capture, navigationId: entry.navigationId,
+        sourceBounds: entry.bounds, sourceInputLeaseId: entry.inputLeaseId,
+        geometry: lease.geometry, zoom: entry.view.webContents.getZoomFactor(), viewport: entry.viewport,
+        down: { ...activation.down }, button: activation.button, clickCount: activation.clickCount,
+        modifiers: [...activation.modifiers], state: 'prepared', result: null
+      }
+      entry.firstPress = press
+      return { outcome: 'prepared', inputScopeId: press.id,
+        sourceViewport: { width: press.sourceBounds.width, height: press.sourceBounds.height, zoomFactor: press.zoom } }
+    }
+    if (!activation || !['commit-first-press', 'cancel-first-press'].includes(activation.kind)) throw new Error('Unknown Browser presentation activation')
+    const press = entry.firstPress
+    if (!press || press.id !== activation.inputScopeId || press.lease !== lease) return unconfirmed('unknown-input-scope', 'This Browser input intent has expired. No input was replayed.')
+    if (activation.kind === 'cancel-first-press') {
+      if (press.state !== 'prepared') return press.result ?? unconfirmed('input-dispatch-failed', 'Input dispatch has already begun; its page effect is unconfirmed.')
+      press.state = 'cancelled'
+      return press.result = { outcome: 'cancelled', inputScopeId: press.id }
+    }
+    this.validatePresentationPoint(activation.up)
+    this.validatePresentationModifiers(activation.modifiers)
+    if (press.state === 'cancelled') return press.result!
+    if (press.state === 'dispatching') return unconfirmed('input-dispatch-failed', 'This input is already being dispatched; it will not be replayed.')
+    if (press.state === 'dispatched') return press.result?.outcome === 'input-dispatched'
+      ? { outcome: 'already-dispatched', inputScopeId: press.id } : press.result!
+    const invalid = this.presentationFirstPressInvalid(press)
+    if (invalid) { press.state = 'cancelled'; return press.result = invalid }
+    // Consume BEFORE transport. A duplicate IPC cannot dispatch this gesture twice.
+    press.state = 'dispatching'
+    const contents = press.source.webContents
+    let finishUp: (value: boolean) => void = () => {}
+    const observedUp = new Promise<boolean>(resolve => { finishUp = resolve })
+    const onInput = (_event: unknown, input: Electron.InputEvent): void => {
+      if (input.type === 'mouseUp') {
+        const mouse = input as Electron.MouseInputEvent
+        if (mouse.button === press.button && mouse.x === Math.floor(activation.up.x * press.sourceBounds.width) &&
+          mouse.y === Math.floor(activation.up.y * press.sourceBounds.height)) finishUp(true)
+      }
+    }
+    contents.on('input-event', onInput)
+    const timeout = setTimeout(() => finishUp(false), 250)
+    try {
+      // The ORIGINAL captured viewport stays authoritative for both events, including its zoom.
+      // Chromium performs the DIP→page conversion; capture video pixel dimensions are irrelevant.
+      contents.sendInputEvent({ type: 'mouseDown', x: Math.floor(press.down.x * press.sourceBounds.width),
+        y: Math.floor(press.down.y * press.sourceBounds.height), button: press.button,
+        clickCount: press.clickCount, modifiers: [...press.modifiers] })
+      contents.sendInputEvent({ type: 'mouseUp', x: Math.floor(activation.up.x * press.sourceBounds.width),
+        y: Math.floor(activation.up.y * press.sourceBounds.height), button: press.button,
+        clickCount: press.clickCount, modifiers: [...activation.modifiers] })
+      if (!await observedUp) return press.result = unconfirmed('input-dispatch-failed', 'Browser input delivery could not be confirmed. The healthy original page remains in place; do not replay automatically.')
+      // A transport observation is not a page-effect acknowledgement. Give the ordered Native
+      // input queue its turn before moving/resizing; the actual first-click counter verifies effects.
+      await new Promise<void>(resolve => setImmediate(resolve))
+      const changed = this.presentationFirstPressInvalid(press)
+      if (changed) return press.result = changed
+      this.selectPresentation(lease)
+      return press.result = { outcome: 'input-dispatched', inputScopeId: press.id }
+    } catch {
+      return press.result = unconfirmed('input-dispatch-failed', 'Browser input dispatch is unconfirmed. The original page remains available; no automatic replay was attempted.')
+    } finally {
+      clearTimeout(timeout)
+      contents.removeListener('input-event', onInput)
+      press.state = 'dispatched'
+    }
+  }
+
+  private selectPresentation(lease: PresentationLease): void {
+    if (!lease.geometry.visible) return
     this.setBounds(lease.entry.id, lease.geometry.bounds)
-    lease.entry.inputLeaseId = leaseId
+    lease.entry.inputLeaseId = lease.id
     lease.entry.view.webContents.focus()
-    this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId })
+    this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId: lease.id })
+  }
+
+  private presentationFirstPressInvalid(press: PresentationFirstPress): BrowserPresentationActivationReceipt | null {
+    const entry = press.lease.entry
+    const fail = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'], message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
+    if (entry.firstPress !== press || this.entries.get(entry.id) !== entry || entry.view !== press.source ||
+      press.source.webContents.isDestroyed() || !this.isPresentationDocumentCurrent(press.lease.document)) return fail('source-changed', 'This Browser input source changed; no further input or transfer was attempted.')
+    if (this.presentationLeases.get(press.lease.id) !== press.lease || !press.lease.geometry.visible) return fail('hidden', 'This Browser presentation is no longer visible.')
+    if (entry.navigationId !== press.navigationId || press.source.webContents.isLoadingMainFrame()) return fail('navigation-changed', 'The original Browser navigation changed.')
+    if (entry.captureId !== press.capture.id || !this.isPresentationCaptureCurrent(press.capture)) return fail('capture-changed', 'The Browser capture changed.')
+    if (entry.bounds !== press.sourceBounds || entry.inputLeaseId !== press.sourceInputLeaseId ||
+      press.lease.geometry !== press.geometry || entry.viewport !== press.viewport ||
+      press.source.webContents.getZoomFactor() !== press.zoom) return fail('geometry-changed', 'The captured Browser viewport or presentation geometry changed.')
+    if (!this.window.isFocused()) return fail('window-not-focused', 'This Browser window is no longer focused.')
+    return null
+  }
+
+  private validatePresentationPoint(point: BrowserPresentationViewportPoint): void {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1) throw new Error('Browser first press requires a point within the actual captured frame')
+  }
+
+  private validatePresentationModifiers(modifiers: readonly BrowserPresentationMouseModifier[]): void {
+    if (!Array.isArray(modifiers) || modifiers.some(value => !['shift', 'control', 'alt', 'meta'].includes(value)) || new Set(modifiers).size !== modifiers.length) throw new Error('Browser first press has invalid mouse modifiers')
   }
 
   private requirePresentationDocument(sender: WebContents, frame: WebFrameMain | null): PresentationDocument {
@@ -762,7 +897,7 @@ export class BrowserViewManager {
       activeRun: undefined,
       runInFlight: false,
       feedbackRevision: 0,
-      presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null
+      presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null, firstPress: null
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
