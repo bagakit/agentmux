@@ -20,6 +20,7 @@
 - [Hover 说明](#hover-说明)
 - [Project Rail 与 Topic 行密度](#project-rail-与-topic-行密度)
 - [Topic 行的 Region 与 Agent 在场状态](#topic-行的-region-与-agent-在场状态)
+- [Space 的统一工作面框架](#space-的统一工作面框架)
 - [Space 与 Focus 全局工作面](#space-与-focus-全局工作面)
 - [Survey 的 Zone 工作面与液体玻璃](#survey-的-zone-工作面与液体玻璃)
 - [Scratch Topic 工作面可见性](#scratch-topic-工作面可见性)
@@ -166,7 +167,7 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 ## Project Rail 与 Topic 行密度
 
-- Folder/Project 与 Topic 两类 Space 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 默认一级节点使用特殊图标，其下 Topic 子项保持树的紧凑节奏；产品归属只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
+- Folder/Project、Topic 与 Mote 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 默认一级节点使用特殊图标，其下 Topic 子项保持树的紧凑节奏；产品归属与共同框架分别见交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)与[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。
 - 用户提供的 Topics 总览截图是本轮保留参照：现有已经 polish 过的列表页继续可达，保留标题与计数、`+`、连续列表容器、逐行标题和次级摘要、邻接的 pin、右侧 Agent/Tab/Region 簇、尾部定位动作及选中 Surface。树的子项与总览列表使用各自适合的密度，树整合不能把总览缩成只有一列名称；两处都消费同一事实和既有控件能力。Topics 分类入口保留可辨身份，列表行首图标继续遵守[《控件语言》](shared-rules.md#控件语言)中同图标不重复占位的规则。
 - Space 树中 Folder/Project 与 Topic 的显示应可区分。Folder/Project 的主身份表达目录或项目；Topic 的主身份使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头通用 `+` 打开紧凑动作菜单，各分区另有就地 `+`；入口含义与 Topic 的自动识别规则只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
 - Topic 与一般 Folder 的类型可从分区和必要的类型图标辨认；Topics 的默认分类入口与 Folder 分组均有可读标签，真实父子缩进清楚，分区标签不冒充目录父子关系，避免靠颜色或底层目录地址猜类别。两类复用同一行密度和工作面操作语言，目标是好懂好找。
@@ -204,6 +205,12 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 ## Topic 行的 Region 与 Agent 在场状态
 
 选中 Region 的绿框只需 1px，保持四边可见且不增加叠加光晕；原生 Browser 为焦点环让出的尺寸必须与同一宽度一致。Topic 的 Agent 图标缩小放在对应 Region 格子里，形成一个整体，几何仍表达真实分屏；窄格内不得溢出覆盖相邻格。Agent 状态与可见性语义见 desktop-interaction 同名段。
+
+## Space 的统一工作面框架
+
+框架职责、功能组、原内容复用与保护边界唯一见交互 SSOT[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。视觉按一级 Space 对象树、顶部二级功能切换与主区域的原 Zone 工作面建立清楚层级；二级功能切换与原 Tab 页签各有可辨作用域，类型差异沿同一控件和密度语言表达，不叠重复标题或额外导航层。
+
+正常与窄窗都让树中当前位置、当前功能组和原正文动作可读可达；Zone、Tab、Region 不同加载层级沿原公共 chrome 呈现，低层级不套上层多余工具带。未知与恢复说明留在原服务窗并让已可用的原内容仍可见可操作，不以卡片墙、另造文件面板或专属 Tab 排布来包装一种 Space。具体身份、绑定与加载行为不在本页重复定义。
 
 ## Space 与 Focus 全局工作面
 

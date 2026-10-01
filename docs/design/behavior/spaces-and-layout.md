@@ -14,6 +14,7 @@
 - [Scratch 的交互与组织](#scratch-的交互与组织)
 - [Agent Region 关闭与身份入口](#agent-region-关闭与身份入口)
 - [统一概念与空间寻址](#统一概念与空间寻址)
+- [Space 的统一工作面框架](#space-的统一工作面框架)
 - [Space、Folder 与 Topic](#spacefolder-与-topic)
 - [Project 与 Workspace](#project-与-workspace)
 - [Agent 自助创建与空间操作](#agent-自助创建与空间操作)
@@ -168,13 +169,30 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 
 Topic 多 Zone 的完整产品闭环不由本节代签；实际来源差异、命令语法与实施验收见 来源核对与差异清单（本机过程资料：`docs/reviews/space-zone-concept-unification-review.md`） 及 [Agent-first 的 Space 工作入口](public-control.md#agent-first-的-space-工作入口)；CLI 合同（本机过程资料：`docs/plans/pmo-cross-workspace-worktree-cli-design.md`）。既有 Renderer 文案与视觉不作全仓机械改名。
 
+## Space 的统一工作面框架
+
+各类 Space 都在既有工作面框架内设计。本节定义共用框架中的职责与区域；实体身份和资源事实仍见[《统一概念与空间寻址》](#统一概念与空间寻址)，实体与展示位置的关系仍见[《Zone→Tabs→Regions 的实体与展示绑定》](#zonetabsregions-的实体与展示绑定)，树上层级不成为实体的唯一父归属。
+
+| 层级 | 框架中的职责 |
+| --- | --- |
+| **Space** | 承载所选对象的导航上下文、功能组与资源入口；Folder、Topic、Mote 的差异在共同框架内表达。 |
+| **Zone** | 原公共工作面容器，承载其 Tab、Group 与分割布局；不是因打开某个功能组而重新生成的一份页面。 |
+| **Tab** | 一张完整工作面，承载原 Region 组合、布局和动作；Tab 不与 Session 同义。 |
+| **Region** | 最小内容与交互承载位置，显示原 Agent、Terminal、文件、Browser 或启动面。Agent 在界面中通过原 Region 工作；其 Session/Run 仍由 Core/ctxmux 持有，展示不另造执行生命周期。 |
+
+一级菜单是选择 Space 的对象树；二级菜单在顶部切换所选 Space 的功能组，每个子菜单承载一组功能，通常有一个使用原文件系统的默认组。不同 Space 可以包装不同的二级内容和对象能力，但导航层级、文件树与内容动作沿同一公共 owner。Mote 与 Topic 使用同一文件树；资源根或目标范围的变化只是原文件能力的作用域，不成为另一套树。
+
+主区域显示原 Zone 工作面，其内容可在其他位置按 Zone、Tab 或 Region 任一级加载。每次加载使用原实体与完整准确的展示位置引用（displayWorkspaceId/groupId/tabId/regionId），继续同一内容、输入与动作 owner；加载较低层级不带上层多余 chrome，具体边界见[《Zone→Tabs→Regions 的实体与展示绑定》](#zonetabsregions-的实体与展示绑定)。切换功能组本身不新建 Zone、Tab 或 Session，不清草稿；明确创建与文件动作仍由原能力消费用户意图，不把 Space 写成 Zone 的唯一父或为每处加载启动新 Agent。
+
+新增一种 Space 不能重新实现整套 Zone、Tab/Group/Region、分割、焦点、文件动作或恢复；只在底层调用共享组件，却另造一套 Zone 导航、文件树或 Tab 管理，也不满足共同框架约束。对象选择和专属二级内容在上述框架内表达，工作面操作仍沿公共实现。框架确有能力缺口时在公共 owner 补全，不在单类对象造旁路，也不抹去其必要的二级内容。设计与能力补全保原身份、全部合法展示绑定、健康 Session/Run、草稿、焦点和恢复；位置、握手或恢复未确认不拿走已有可用内容，保原工作面与持续服务窗。共同机制仍遵守 Core、ctxmux 与 client 的原分层及相关消费者成本。
+
 ## Space、Folder 与 Topic
 
 用户提出：「沿用 Space 的定义的话，那么这里我们可以拓展为两类 Space 定义，一类就是 Project（或者就叫 Folder），另一类就是 Topic，他们的特点不一样」，并确认这里要表达「一个更外层的抽象概念：space」。当前统一定义见[《统一概念与空间寻址》](#统一概念与空间寻址)：Space 是 Folder 与 Topic/Mote 共用的外层产品概念，Project 表达可选项目来源，不能与 Space 等同。两类 Space 的组织特点必须可辨认，不能因为共用入口而抹平差异。用户补充：「topic 和一般 folders 虽然底层行为一致，但视觉上还是区分开，目标是好懂好找」；共同工作能力不变，树中使用可读分组、类型图标和父子层级帮助定位。历史 Folder/Project 文案不能改变这两个对象的当前含义。
 
 - Folder/Project 类围绕已有目录组织工作。Project 可以由普通目录承载，Git 能力按真实仓库事实提供；不因采用 Space 概念就要求目录使用 Topic 的 Wiki 脚手架。
 - Topic 类围绕一件事情组织工作，保留独立 Wiki、资料、产出与 Agent 铭牌。Topic 的存在与耐久内容不依赖 Agent 或 Tab 是否仍打开。
-- 两类 Space 共用既有 Agent、Terminal、Browser、文件与 Tab/Region 工作能力，遵守同一重启恢复与健康 Session 保留合同。Space 不复制 Core 的 Session/Agent 状态或 ctxmux 的 Run 事实，启动继续恢复用户上次工作面。
+- Folder、Topic 与 Mote 的共同工作能力遵守[《Space 的统一工作面框架》](#space-的统一工作面框架)及同一重启恢复与健康 Session 保留合同。Space 不复制 Core 的 Session/Agent 状态或 ctxmux 的 Run 事实，启动继续恢复用户上次工作面。
 
 用户进一步要求：「在 space 树里他们显示不太一样，比如 topic 会自动根据规则去读 topic.md 来显示，且 topic 会自动识别和显示，不用手动绑定」，树上的 `+` 提供 `Open Folder As a Project` 与 `Create Another Topic` 两类入口。
 
