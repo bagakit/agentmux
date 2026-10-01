@@ -2,6 +2,7 @@ import { AgentMuxError } from './errors.js'
 import type {
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
+  AgentSessionHistoryCollaboration,
   AgentSessionHistoryItem,
   AgentSessionHistorySource
 } from './types.js'
@@ -27,6 +28,44 @@ function optionalTime(value: unknown): number | undefined {
   if (value === undefined) return undefined
   if (!Number.isSafeInteger(value) || (value as number) < 0) return invalid()
   return value as number
+}
+
+function choice<T extends string>(value: unknown, values: readonly T[]): T {
+  if (typeof value !== 'string' || !values.includes(value as T)) return invalid()
+  return value as T
+}
+
+function nativeReference(value: unknown): AgentSessionHistorySource {
+  const reference = object(value)
+  return { providerId: nonempty(reference.providerId), nativeSessionId: nonempty(reference.nativeSessionId) }
+}
+
+function collaboration(value: unknown): AgentSessionHistoryCollaboration {
+  const record = object(value)
+  if (record.kind === 'agent-activity') {
+    if (record.path !== undefined && typeof record.path !== 'string') return invalid()
+    return { kind: 'agent-activity',
+      event: choice(record.event, ['started', 'interacted', 'interrupted', 'completed']),
+      agent: nativeReference(record.agent),
+      ...(record.path === undefined ? {} : { path: record.path }) }
+  }
+  if (record.kind !== 'operation' || !Array.isArray(record.receivers) || !Array.isArray(record.agentStates)) return invalid()
+  if (record.prompt !== undefined && typeof record.prompt !== 'string') return invalid()
+  return { kind: 'operation',
+    ...(record.operation === undefined ? {} : { operation: choice(record.operation,
+      ['spawn', 'send-input', 'send-message', 'followup', 'wait', 'resume', 'interrupt', 'close', 'list']) }),
+    ...(record.status === undefined ? {} : { status: choice(record.status, ['running', 'completed', 'failed', 'interrupted']) }),
+    ...(record.sender === undefined ? {} : { sender: nativeReference(record.sender) }),
+    receivers: record.receivers.map(nativeReference),
+    ...(record.prompt === undefined ? {} : { prompt: record.prompt }),
+    agentStates: record.agentStates.map(value => {
+      const agent = object(value)
+      if (agent.message !== undefined && typeof agent.message !== 'string') return invalid()
+      return { source: nativeReference(agent.source),
+        ...(agent.state === undefined ? {} : { state: choice(agent.state,
+          ['pending', 'running', 'completed', 'failed', 'interrupted', 'stopped', 'not-found']) }),
+        ...(agent.message === undefined ? {} : { message: agent.message }) }
+    }) }
 }
 
 export function normalizeSessionHistoryPage(
@@ -84,7 +123,11 @@ export function normalizeSessionHistoryPage(
     if (item.title !== undefined && typeof item.title !== 'string') return invalid()
     const startedAt = optionalTime(item.startedAt)
     const completedAt = optionalTime(item.completedAt)
+    if (item.messagePhase !== undefined && item.kind !== 'assistant-message') return invalid()
+    if (item.collaboration !== undefined && item.kind !== 'activity') return invalid()
     return { id, kind: item.kind, contentParts,
+      ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
+      ...(item.collaboration === undefined ? {} : { collaboration: collaboration(item.collaboration) }),
       ...(item.turnId === undefined ? {} : { turnId: nonempty(item.turnId) }),
       ...(item.title === undefined ? {} : { title: item.title }),
       ...(startedAt === undefined ? {} : { startedAt }),

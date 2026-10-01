@@ -593,6 +593,33 @@ export type AgentSessionHistoryContentPart =
 
 export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
 
+/** A Provider-recorded assistant phase, not reasoning or task-completion authority. */
+export type AgentSessionHistoryMessagePhase = 'progress' | 'final'
+
+/** Native collaboration references are read-only locators, never AgentMux Session or Run IDs. */
+export type AgentSessionHistoryCollaboration =
+  | {
+      kind: 'operation'
+      operation?: 'spawn' | 'send-input' | 'send-message' | 'followup' | 'wait' | 'resume' | 'interrupt' | 'close' | 'list'
+      status?: 'running' | 'completed' | 'failed' | 'interrupted'
+      sender?: AgentSessionHistorySource
+      receivers: AgentSessionHistorySource[]
+      prompt?: string
+      /** Last recorded target states; independent of this operation and current Runtime state. */
+      agentStates: {
+        source: AgentSessionHistorySource
+        state?: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'stopped' | 'not-found'
+        message?: string
+      }[]
+    }
+  | {
+      kind: 'agent-activity'
+      event: 'started' | 'interacted' | 'interrupted' | 'completed'
+      agent: AgentSessionHistorySource
+      /** Native logical path, not an execution directory or filesystem authority. */
+      path?: string
+    }
+
 /** The durable locator for reading; deliberately carries no Run or input authority. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
   'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'createdAt'>
@@ -610,6 +637,9 @@ export type AgentSessionHistoryItem = {
   id: string
   turnId?: string
   kind: 'user-message' | 'assistant-message' | 'activity'
+  messagePhase?: AgentSessionHistoryMessagePhase
+  /** Original contentParts remain complete and copyable alongside this optional summary. */
+  collaboration?: AgentSessionHistoryCollaboration
   title?: string
   contentParts: AgentSessionHistoryContentPart[]
   startedAt?: number

@@ -4,6 +4,8 @@ import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
+  AgentSessionHistoryCollaboration,
+  AgentSessionHistorySource,
   AgentSessionHistoryItem
 } from '../types.js'
 
@@ -110,7 +112,50 @@ function webSearchOutput(action: unknown, results: unknown): string {
   return parts.join('\n\n')
 }
 
-function itemEntry(value: unknown): AgentSessionHistoryItem {
+/** Only exact native fields provide these summaries; the original payload remains readable. */
+function knownValue<T extends string>(value: unknown, mapping: Readonly<Record<string, T>>): T | undefined {
+  return typeof value === 'string' && Object.hasOwn(mapping, value) ? mapping[value] : undefined
+}
+
+function nativeCollaboration(item: Record<string, unknown>, source: AgentSessionHistorySource): AgentSessionHistoryCollaboration | undefined {
+  const reference = (id: unknown): AgentSessionHistorySource | undefined => typeof id === 'string' && id.length > 0
+    ? { providerId: source.providerId, nativeSessionId: id } : undefined
+  if (item.type === 'subAgentActivity') {
+    const event = knownValue(item.kind, { started: 'started', interacted: 'interacted', interrupted: 'interrupted', completed: 'completed' })
+    const agent = reference(item.agentThreadId)
+    if (!event || !agent) return undefined
+    return { kind: 'agent-activity', event, agent,
+      ...(typeof item.agentPath === 'string' ? { path: item.agentPath } : {}) }
+  }
+  const operation = knownValue(item.tool, {
+    spawnAgent: 'spawn', sendInput: 'send-input', sendMessage: 'send-message', followupTask: 'followup',
+    wait: 'wait', resumeAgent: 'resume', interruptAgent: 'interrupt', closeAgent: 'close', listAgents: 'list'
+  })
+  const status = knownValue(item.status, { inProgress: 'running', completed: 'completed', failed: 'failed', interrupted: 'interrupted' })
+  const sender = reference(item.senderThreadId)
+  const states = item.agentsStates && typeof item.agentsStates === 'object' && !Array.isArray(item.agentsStates)
+    ? Object.entries(item.agentsStates) : []
+  return { kind: 'operation',
+    ...(operation === undefined ? {} : { operation }),
+    ...(status === undefined ? {} : { status }),
+    ...(sender === undefined ? {} : { sender }),
+    receivers: Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.flatMap(id => {
+      const target = reference(id)
+      return target ? [target] : []
+    }) : [],
+    ...(typeof item.prompt === 'string' ? { prompt: item.prompt } : {}),
+    agentStates: states.flatMap(([id, value]) => {
+      const target = reference(id)
+      if (!target) return []
+      const agent = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+      const state = knownValue(agent.status, { pendingInit: 'pending', running: 'running', completed: 'completed',
+        errored: 'failed', interrupted: 'interrupted', shutdown: 'stopped', notFound: 'not-found' })
+      return [{ source: target, ...(state === undefined ? {} : { state }),
+        ...(typeof agent.message === 'string' ? { message: agent.message } : {}) }]
+    }) }
+}
+
+function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSessionHistoryItem {
   const entry = object(value)
   const item = object(entry.item)
   const type = string(item.type)
@@ -118,6 +163,7 @@ function itemEntry(value: unknown): AgentSessionHistoryItem {
   const turnId = string(entry.turnId)
   let kind: AgentSessionHistoryItem['kind'] = 'activity'
   let contentParts: AgentSessionHistoryContentPart[] = []
+  let collaboration: AgentSessionHistoryCollaboration | undefined
 
   if (type === 'userMessage') {
     if (!Array.isArray(item.content)) throw protocolError()
@@ -126,6 +172,9 @@ function itemEntry(value: unknown): AgentSessionHistoryItem {
   } else if (type === 'agentMessage') {
     kind = 'assistant-message'
     contentParts = [{ kind: 'text', text: string(item.text) }]
+  } else if (type === 'collabAgentToolCall' || type === 'subAgentActivity') {
+    collaboration = nativeCollaboration(item, source)
+    contentParts = [{ kind: 'text', text: JSON.stringify(item, null, 2) }]
   } else if (type === 'reasoning') {
     const text = extractReasoningText(item)
     if (text) {
@@ -351,7 +400,11 @@ function itemEntry(value: unknown): AgentSessionHistoryItem {
   }
   const startedAt = timestamp(entry.startedAtMs)
   const completedAt = timestamp(entry.completedAtMs)
+  const messagePhase = type === 'agentMessage'
+    ? knownValue(item.phase, { commentary: 'progress', final_answer: 'final' }) : undefined
   return { id, turnId, kind, contentParts,
+    ...(messagePhase === undefined ? {} : { messagePhase }),
+    ...(collaboration === undefined ? {} : { collaboration }),
     ...(kind === 'activity' ? { title: type } : {}),
     ...(startedAt === undefined ? {} : { startedAt }),
     ...(completedAt === undefined ? {} : { completedAt }) }
@@ -377,7 +430,7 @@ export async function readCodexSessionHistoryPage(
     }))
     if (!Array.isArray(result.data) || result.data.length > context.limit) throw protocolError()
     if (result.nextCursor !== null && typeof result.nextCursor !== 'string') throw protocolError()
-    return { source: { ...context.source }, items: result.data.map(itemEntry).reverse(),
+    return { source: { ...context.source }, items: result.data.map(value => itemEntry(value, context.source)).reverse(),
       nextCursor: result.nextCursor as string | null }
   })
 }
