@@ -357,6 +357,10 @@ Terminal 与 Activity 的 History 进入和返回行为只见交互合同《Agen
 | S3 | `--surface-3` | Selected、Segment、Badge、浮层按钮 | 小面积使用，不铺成整列 |
 | Accent | Mint / Blue / Amber / Red | Focus、Host、Attention、Danger | 颜色表达状态，不兼任布局线 |
 
+### System Reminder 的默认与本次控件
+
+两层选择的行为唯一见交互 SSOT《[System Reminder 的默认与单次选择](agentmux-desktop-interaction.md#system-reminder-的默认与单次选择)》。Settings 与 Launch 复用各自既有表单的轻量 checkbox、标签与键盘焦点语言，明确区分「默认开启」和「本次会话开启」，继承说明只出现一次；不为一个布尔选择新增设置页、独立状态条或装饰卡片。宽窄窗口的名称、当前选择和必要说明均可读，原固定关闭／保存动作与输入工作面保持。提醒语义尚未确认时，本段只记录已确认的控件约束，不宣称产品已提供开关或提醒能力。
+
 ## 控件语言
 
 用户要求替换 Mote 和项目中制式的 AI 星芒图标。Mote 默认类型图形使用原创 SVG 标记，以克制的不对称实体轮廓与留白表达微小但稳定的身份；在 12–24px 保持清楚，跟随当前文字颜色，无渐变、阴影、滤镜、装饰性星芒或动画。相同 Mote 类型入口共用同一标记；对象可按《Project Rail 与 Topic 行密度》的共用身份规则选择手动图标。项目自己的通用 AI 星芒（Lucide Sparkles / WandSparkles）退场：新建工作面用创建语义、技能用技能语义、跳过权限提示用明确权限语义；现头像 spark 徽标保留原数据含义而更换其字形。保留 Provider 官方品牌资产，不能把它们当成制式 AI 图标替换。产品身份边界见 interaction《Space、Folder 与 Topic》。
