@@ -207,7 +207,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   function projectRow({ project, depth }: ProjectRailNode) {
     const target = folderSpaceIconTarget(project)
     const manualIcon = icons[target.key] ?? null
-    const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId}
+    const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId} folderIdentityKey={target.key}
       manualIcon={manualIcon} lastActivityAt={manualIcon === null ? lastActivityByProject.get(project.id) ?? null : undefined}
       visible={manualIcon === null ? visible : undefined} />
     const ancestors = projectRelations.ancestors.get(project.id) ?? []
