@@ -41,6 +41,8 @@ export type PmoTeamsTopicFloatingState = {
   /** Navigation presentation only; unrelated to an Agent's explicit view mode. */
   railMode?: 'cards' | 'avatars' | undefined
   size?: PmoTeamsTopicFloatingSize | undefined
+  /** Focus Chat recipient: absent follows floating; null retains an unconfirmed saved choice. */
+  focusChatTopicId?: string | null | undefined
   /** Advisory UI persistence failure; never disables the retained workspace. */
   preferenceIssue?: string | undefined
 }
@@ -58,15 +60,18 @@ function readState(): PmoTeamsTopicFloatingState {
   if (typeof window === 'undefined') return CLOSED
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return CLOSED
+    if (raw === null) return CLOSED
     const value = JSON.parse(raw) as Partial<PmoTeamsTopicFloatingState>
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Mote preferences')
+    const invalidChoice = value.focusChatTopicId !== undefined && (typeof value.focusChatTopicId !== 'string' || !value.focusChatTopicId.trim())
     return { open: value.open === true, preview: false,
       ...(typeof value.targetTopicId === 'string' && value.targetTopicId.trim() ? { targetTopicId: value.targetTopicId.trim() } : {}),
       ...(value.targetTabId === null ? { targetTabId: null } :
         typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}),
       ...(value.railMode === 'cards' || value.railMode === 'avatars' ? { railMode: value.railMode } : {}),
-      ...(validSize(value.size) ? { size: value.size } : {}) }
-  } catch { return { ...CLOSED, preferenceIssue: 'Mote preferences could not be read. This window uses the default size; reload the app to retry.' } }
+      ...(validSize(value.size) ? { size: value.size } : {}),
+      ...(invalidChoice ? { focusChatTopicId: null, preferenceIssue: 'The saved Chat recipient is unconfirmed. Select a Mote to confirm the recipient.' } : typeof value.focusChatTopicId === 'string' ? { focusChatTopicId: value.focusChatTopicId.trim() } : {}) }
+  } catch { return { ...CLOSED, focusChatTopicId: null, preferenceIssue: 'Mote preferences could not be read. Select a Mote to confirm the Chat recipient; reload the app to retry the saved choice and size.' } }
 }
 
 function snapshot(): PmoTeamsTopicFloatingState {
@@ -75,16 +80,19 @@ function snapshot(): PmoTeamsTopicFloatingState {
 function cancelClose(): void { clearTimeout(closeTimer); closeTimer = undefined }
 function update(next: Partial<PmoTeamsTopicFloatingState>): void {
   const current = snapshot()
+  const explicitChoice = Object.hasOwn(next, 'focusChatTopicId') && Boolean(next.focusChatTopicId?.trim())
+  const retryPreference = Boolean(current.preferenceIssue && (explicitChoice || Object.hasOwn(next, 'size')))
   const resolved = { ...current, ...next }
   if (resolved.open === current.open && resolved.preview === current.preview &&
     resolved.targetTopicId === current.targetTopicId && resolved.targetTabId === current.targetTabId &&
-    resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.preferenceIssue === current.preferenceIssue) return
+    resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.focusChatTopicId === current.focusChatTopicId &&
+    resolved.preferenceIssue === current.preferenceIssue && !retryPreference) return
   state = resolved
-  if (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size)) {
+  if (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open,
-      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, railMode: resolved.railMode, size: resolved.size }))
+      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
       state = { ...resolved, preferenceIssue: undefined }
-    } catch { state = { ...resolved, preferenceIssue: 'Mote preferences could not be saved. This window keeps your size; resize again to retry.' } }
+    } catch { state = { ...resolved, preferenceIssue: 'Mote preferences could not be saved. This window keeps your choice and size; select the Mote or resize again to retry.' } }
   }
   for (const listener of listeners) listener()
 }

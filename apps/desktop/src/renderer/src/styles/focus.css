@@ -345,9 +345,29 @@
 .focus-toolbar__action:hover { background: var(--surface-3); color: var(--text); }
 .focus-toolbar__action:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-toolbar__action:disabled { opacity: .55; cursor: default; }
+.focus-toolbar__chat { display: inline-flex; flex: none; align-items: center; min-width: 0; height: 24px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.focus-toolbar__chat > .focus-toolbar__action { height: 22px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.focus-toolbar__mote-choice { display: inline-flex; align-items: center; gap: 4px; min-width: 28px; max-width: 164px; height: 22px; padding: 0 5px; border: 0; border-left: 1px solid var(--line); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.focus-toolbar__mote-choice > svg, .focus-toolbar__mote-choice > .project-rail-row__icon { flex: none; }
+.focus-toolbar__mote-choice .project-rail-row__icon { width: 14px; height: 14px; font-size: 10px; }
+.focus-toolbar__mote-choice .project-rail-row__icon :is(svg, img) { width: 14px; height: 14px; }
+.focus-toolbar__mote-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-toolbar__mote-choice:hover, .focus-toolbar__mote-choice[data-state='open'] { background: var(--surface-3); color: var(--text); }
+.focus-toolbar__mote-choice:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+.focus-toolbar__mote-warning { color: var(--amber); }
+.focus-chat-mote-menu { width: min(300px, calc(100vw - 16px)); max-height: min(420px, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; }
+.focus-chat-mote-menu__label, .focus-chat-mote-menu__notice { margin: 0; padding: 6px 8px; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.focus-chat-mote-menu__notice { color: var(--amber); }
+.focus-chat-mote-menu__item { align-items: flex-start; white-space: normal; }
+.focus-chat-mote-menu .focus-chat-mote-menu__item > .project-rail-row__icon { flex: none; width: 16px; height: 16px; }
+.focus-chat-mote-menu .focus-chat-mote-menu__item > span:last-child { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.focus-chat-mote-menu__item small { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-chat-mote-menu__check { flex: 0 0 12px; }
 @container focus-context-area (max-width: 400px) {
   .focus-toolbar__action > span, .focus-toolbar__review > span { display: none; }
   .focus-toolbar__action, .focus-toolbar__review { width: 24px; height: 24px; padding: 0; justify-content: center; }
+  .focus-toolbar__mote-name { display: none; }
+  .focus-toolbar__mote-choice { padding: 0 4px; }
 }
 @media (max-width: 900px) {
   .focus-filters .global-board-toolbar__controls { gap: 3px; }
