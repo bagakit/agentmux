@@ -5,3 +5,5 @@
 `docs/benchmarks/results/` 是测量结果，同样忽略。
 
 长期文件在 `docs/design/`、`docs/architecture/`、`docs/specs/`、`docs/guides/`、`docs/testing/`、`docs/casestudy/`，以及 `docs/benchmarks/` 里的协议正文、`docs/settings-module-contributions.md` 和本说明。
+
+读者入口见[项目文档导航](README.md)，事实归属与更新规则见[文档事实与维护](guides/document-truth-and-maintenance.md)。本页只拥有过程目录的留存与跟踪边界。

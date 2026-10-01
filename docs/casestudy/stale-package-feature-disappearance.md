@@ -1,5 +1,7 @@
 # 功能已经做过，界面却像没做过：启动了旧 App 包
 
+本文记录一次旧安装包的历史现场；提交、时间与版本保留原观察范围。文末当时提出的强制退出升级方案已被现行约束取代：普通安装在 graceful quit 超时后停止，不升级为强杀用户应用或健康 Run。当前更新路线见 [Desktop updates](../architecture/desktop-updates.md)，交互边界见[设计 SSOT](../design/agentmux-desktop-interaction.md)。
+
 ## 看到的现象
 
 用户看到 Scratch/Topic 的体验退化了：Topic 隔离、Topic Agent 头像、底部状态栏与

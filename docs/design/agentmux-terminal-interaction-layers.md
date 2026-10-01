@@ -15,7 +15,7 @@
 | 层 | 归属 | 它拥有什么 | 它坏掉时的典型症状 |
 |---|---|---|---|
 | L1 PTY / ctxmux | 进程外 | 字节流、retained scrollback、终端几何 | 内容缺失、replay 与 live 重叠或断档 |
-| L2 xterm.js | 依赖（vendored 5.5.0） | 解析器、缓冲区、选区服务、键盘编码器、链接 provider | 选区恒空、和弦被 `preventDefault` 吃掉、粘贴两次 |
+| L2 xterm.js | 依赖（版本与补丁以 [Desktop package](../../apps/desktop/package.json)、[lockfile](../../pnpm-lock.yaml) 和 [workspace patch 配置](../../pnpm-workspace.yaml) 为准；与 Core 的 headless emulator 分开） | 解析器、缓冲区、选区服务、键盘编码器、链接 provider | 选区恒空、和弦被 `preventDefault` 吃掉、粘贴两次 |
 | L3 Renderer | 我们 | 复制/粘贴路径、快捷键裁决、IME、重排恢复、链接落点 | 手势无反应、组字被覆写、重启后花屏 |
 | L4 Electron main | 我们 | 剪贴板 IPC、原生菜单与它的加速键、窗口安全 | 原生 Paste 消失、加速键抢走按键 |
 | L5 OS / macOS | 平台 | ⌘ vs Ctrl、AppKit 菜单优先级、系统剪贴板 | 平台分支写反，一侧永远是死键 |

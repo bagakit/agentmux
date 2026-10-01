@@ -2,7 +2,7 @@
 
 AgentMux 把本地 Coding Agent 的 Provider、Agent Session、Hook、Permission、ACP 与 Client 投影收口成一个可嵌入的 TypeScript Core；Desktop 是它的第一方 Client。
 
-产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。Agent-first 空间 CLI 的命令、失败保留与查询合同见空间 CLI 设计（本机计划证据：pmo-cross-workspace-worktree-cli-design）。
+产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。Agent-first 空间 CLI 的命令、失败保留与查询合同见[空间 CLI 使用合同](docs/guides/agentmux-cli-object-control.md)。
 
 Run 层只有一个 Owner：`ctxmux`。AgentMux 不持有 PTY、子进程、Replay、Socket wire 或进程树，也没有 Backend Selector、兼容层和 fallback。
 
@@ -44,22 +44,22 @@ PTY 写入成功只能证明字节进入了 Runtime 边界，不能证明 Agent 
 证明 Run 终止，不能证明任务成功。AgentMux 可以引用 ctxmux 的 Run revision、byte range 和
 lineage 作为 Evidence，但语义解释仍由 AgentMux 持有。
 
-## 当前实现状态
+## 当前实现与验证范围
 
-当前 Local Run、Codex 代表纵切与 Desktop Control 纵切已经跑通：
+以下介绍源码中的接入边界。构建、安装和运行实例可能处于不同版本；验证结果须绑定候选身份，具体 oracle 与历史证据边界见[测试策略](docs/testing/strategy.md)。
 
-- 固定 CtxMux clean commit `e4d3dd7d32dccc82e6dcd54620e0c79dec0f4943`、protocol 18；
+- 随包 CtxMux 的 source commit/tree、product/SDK protocol 和支持平台唯一取自 [vendor manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json)，不在本文另存版本号；
 - `packages/core/vendor/ctxmux/darwin-arm64` 携带其 manifest、SDK tarball、`ctxmux` 与 `ctxmuxd`；
 - Core typecheck 与构建直接消费固定 tarball 的官方 SDK 类型和实现，不保留手写 wire 声明；公开包仍不暴露 CtxMux 类型，也不读取相邻 checkout、全局安装或下载；
 - Local endpoint 使用稳定宿主 namespace；已有服务按公开身份、协议与能力核验，产物更新不另建 Runtime；
 - `AgentMuxRunRef` 只包含 CtxMux `runId`，没有第二个 incarnation identity；
-- Local Terminal 已通过同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；
+- Local Terminal 的 packed consumer oracle 覆盖同 Run/PID 重连、累计 byte replay、fragmented UTF-8、丢失 Input receipt 后的跨 Client 去重恢复、Resize、Interrupt-still-live 与 stubborn process-tree Stop；当前候选是否通过以本轮 receipt 为准；
 - Remote/SSH 明确返回 `REMOTE_UNSUPPORTED`；
 - 旧自建 daemon、wire、journal、`node-pty` Owner 和 Remote artifact 已删除；包仍按 `packages/core/package.json` 的 `bin` 字段暴露 `agentmux`、`ctxmux`、`ctxmuxd` 三个可执行入口。
 - 平台边界是 **darwin-arm64 only**，且是 fail-closed 的硬边界而非软约定：`ctxmux-run-adapter.ts` 逐字段校验 vendor manifest，`support.platform` / `support.architecture` 与当前 `process.platform` / `process.arch` 对不上就抛 `CTXMUX_ARTIFACT_INVALID`，不降级、不回退到别的产物。
 - Codex 继续使用 AgentMux Provider 的 Launch/Resume/Hook/Permission 语义，只把物化后的通用 `RunSpec` 和物理 Run 操作交给同一个 `CtxmuxRunAdapter`；ctxmux 不提供第二份 Agent-specific Provider；
 - Core File Store/Resolver 是 `agentSessionId ↔ exact runId ↔ Provider native session id/ACP handle` 的唯一身份 Owner，Desktop 与 CLI 不再各存一份；
-- checkout-external packed consumer 已证明 Codex create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 失败关闭和 Stop；
+- checkout-external packed consumer 的 Codex 纵切检查 create、Hook/permission、native-id 反查、跨 Client 同 Run/PID reconnect、send、Interrupt、provider-native Resume 保持 AgentMux ID 但切换 RunId、旧 Run 拒绝控制和 Stop；
 - `agentmux inspect --session|--run|--*-native`、`list sessions` 与 `output` 由短命 CLI 直接读取 Core；Session 操作使用 `agentSessionId`，Run 操作使用 ctxmux `runId`，`output --follow` 输出 JSON Lines；
 - Core 的 `RuntimeProjection` 只投影 Run 与 Agent Session，不表示界面。Desktop 只用 Tab、Region 与 Surface 表达展示；
 - `agent open`、`space ls/inspect/mv` 与既有 Control 命令通过版本化 Control Host 进入各自 Owner。Renderer 的既有 Workbench 持有 Space/Zone 绑定与 Tab/Region 布局，Desktop Main 持有配置、Git worktree、长期 RuntimeController 与 Browser owner；
@@ -177,8 +177,10 @@ pnpm test:native
 pnpm check
 ```
 
-证据与残余边界见：
+按改动选择验证命令；列出命令不代表本轮已执行。阅读入口与边界见：
 
-- [CtxMux cutover](docs/plans/ctxmux-cutover.md)
-- [Testing strategy](docs/testing/strategy.md)
-- [Run / Agent Session model](docs/plans/agentmux-semantic-session.md)
+- [项目文档导航](docs/README.md)
+- [协作约束](AGENTS.md)与[文档事实与维护规范](docs/guides/document-truth-and-maintenance.md)
+- [测试策略](docs/testing/strategy.md)
+- [Core 接入与 Run / AgentSession 边界](packages/core/README.md)
+- [Terminal Runtime 所有权](docs/architecture/terminal-runtime.md)

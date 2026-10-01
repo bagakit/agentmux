@@ -2,11 +2,11 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址)：Space/Zone/Tab/Region 属于 client 空间，Project/Workspace 是来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run。公开 Control 可以表达空间目标和回执，Core 不拥有 UI 空间生命周期。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[实施合同](../../docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址)。Desktop Client 组合自己的配置、Git 与持久布局 owner，Core 只传输类型化空间协议并执行公开 Agent API。
+产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址)：Space/Zone/Tab/Region 属于 client 空间，Project/Workspace 是来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run。公开 Control 可以表达空间目标和回执，Core 不拥有 UI 空间生命周期。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[空间 CLI 使用合同](../../docs/guides/agentmux-cli-object-control.md)。Desktop Client 组合自己的配置、Git 与持久布局 owner，Core 只传输类型化空间协议并执行公开 Agent API。
 
 当前 Local Run 只由随包 [manifest](vendor/ctxmux/darwin-arm64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
-Local Client 不接受外部 socket/state 注入。默认 Endpoint 与持久状态使用稳定宿主 namespace，产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
+`connectLocalAgentMux` 不提供逐调用 socket/state 参数。[runtime-paths.ts](src/runtime-paths.ts) 持有进程级路径策略：默认 Endpoint 与持久状态使用稳定宿主 namespace，持久状态在用户目录；`AGENTMUX_RUNTIME_DIRECTORY` 与 `AGENTMUX_STATE_DIRECTORY` 可指定绝对路径。产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
 
 ## Runtime 边界
 
@@ -46,7 +46,7 @@ Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTermin
 
 Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `output` 与 `output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的「ordered bytes 的公开传输边界」。
 
-Shell checkpoint 已证明：same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live、complete stubborn-tree Stop，以及 checkout-external packed consumer。
+Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live 和 complete stubborn-tree Stop。源码与历史通过记录不代签当前候选；oracle 和证据范围见[测试策略](../../docs/testing/strategy.md)。
 
 Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core 生成 Launch/Resume Plan、归一化 Hook/Permission，并在 daemon-issued RunId 返回后把每次 Hook binding 锁定到 exact Run。Core File Store/Resolver 独占 `agentSessionId`、当前 RunId、Provider native session id/ACP handle 与有界 retired Run tombstone；旧 Run、未知 native id 和冲突绑定失败关闭。Desktop 与 CLI 共用该 Store，不再维护第二份身份文件。
 
