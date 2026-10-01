@@ -6,7 +6,7 @@ const { pathToFileURL } = require('node:url')
 const { app, BrowserWindow, ipcMain } = require('electron')
 // Closing the owned window is ordinary; final owner disposal completes before app.quit().
 app.on('window-all-closed', () => {})
-const [html, ownerBundle, privateRoot, evidence, phase, asset, cli] = process.argv.slice(2)
+const [html, ownerBundle, privateRoot, evidence, phase, asset, cli, qualifiedScene] = process.argv.slice(2)
 for (const key of ['home', 'userData', 'sessionData']) { const value = path.join(privateRoot, key); fs.mkdirSync(value, { recursive: true }); app.setPath(key, value) }
 const preparationScope = process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE ?? 'full'
 assert.ok(['full', 'layout', 'models', 'actions', 'qualification'].includes(preparationScope), 'Known bounded preparation scope')
@@ -147,7 +147,8 @@ app.whenReady().then(async () => {
     }
     raw.before = await read('window.toolkitScene.surface()')
     if(qualification) {
-      await require('./qualification.cjs')({win,raw,owner,store,toolkit,read,until,click,frame,pause,work,privateRoot,evidence,cli,stage,saveHold})
+      assert.equal(typeof qualifiedScene, 'string', 'The capture supplies its bound qualification scene')
+      await require(qualifiedScene)({win,raw,owner,store,toolkit,read,until,click,frame,pause,work,privateRoot,evidence,cli,stage,saveHold})
     } else {
     if (preparationScope === 'actions') {
       await click('.surface-navigation [aria-label="Settings"]'); await click('[data-settings-target="toolkit"]')
@@ -316,7 +317,8 @@ app.whenReady().then(async () => {
     raw.after = await read('window.toolkitScene.surface()')
     assert.deepEqual(raw.after, raw.before, 'Nonempty original preview workbench and draft remain exact')
     raw.facts = await read('window.toolkitScene.facts()')
-    assert.equal(raw.facts.snapshots.length, 2)
+    assert.ok(raw.facts.tools.length > 0, 'The actual retained tool set is nonempty')
+    assert.deepEqual(raw.facts.snapshots.map(value => value.toolId).sort(), raw.facts.tools.map(value => value.id).sort(), 'Every retained tool has its exact snapshot')
     assert.equal(raw.facts.snapshots.reduce((sum, value) => sum + value.consumerCount, 0), 0, 'Closing only releases all owned readers')
     raw.qualified = true
   } catch (error) { raw.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
