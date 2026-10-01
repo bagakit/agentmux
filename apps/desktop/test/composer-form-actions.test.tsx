@@ -1,7 +1,7 @@
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
-import { AgentComposer } from '../src/renderer/src/components/AgentComposer.js'
+import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentComposerTools } from '../src/renderer/src/components/AgentComposerTools.js'
 import { allStyleRules } from './helpers/styles.js'
 

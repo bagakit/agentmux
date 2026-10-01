@@ -1,8 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import type { BrowserAnnotation } from '../src/renderer/src/lib/browser-annotations.js'

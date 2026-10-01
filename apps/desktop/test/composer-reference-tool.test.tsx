@@ -1,7 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from 'vitest'
-import type { ComposerReferenceToolProps } from '../src/renderer/src/components/ComposerReferenceTool'
+import type { ComposerReferenceToolProps } from '@agentmux/client-ui/components/ComposerReferenceTool'
 
 const presentation = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -9,8 +9,8 @@ const presentation = vi.hoisted(() => {
 })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 // Replace only the shared presentation; both real hosts keep their API, insertion and draft owners.
-vi.mock('../src/renderer/src/components/ComposerReferenceTool', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/renderer/src/components/ComposerReferenceTool')>()
+vi.mock('@agentmux/client-ui/components/ComposerReferenceTool', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@agentmux/client-ui/components/ComposerReferenceTool')>()
   return {
     ...actual,
     ComposerReferenceTool: (props: ComposerReferenceToolProps) => presentation.replace
@@ -61,7 +61,7 @@ for (const replace of [false, true]) {
 }
 
 it('the production leaf preserves its accessible name, 14px icon, disabled state and controlled callback', async () => {
-  const { ComposerReferenceTool } = await vi.importActual<typeof import('../src/renderer/src/components/ComposerReferenceTool')>('../src/renderer/src/components/ComposerReferenceTool')
+  const { ComposerReferenceTool } = await vi.importActual<typeof import('@agentmux/client-ui/components/ComposerReferenceTool')>('@agentmux/client-ui/components/ComposerReferenceTool')
   const select = vi.fn()
   const label = 'Reference files for the Agent to read'
   await dom.render(<ComposerReferenceTool disabled={true} onSelect={select} label={label} />)

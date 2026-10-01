@@ -1,16 +1,11 @@
+import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { autoUpdate, computePosition, flip, inline, offset, shift, size } from '@floating-ui/dom'
 import { ChevronDown, X } from 'lucide-react'
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type RefObject } from 'react'
-import type { ConversationAnnotation } from './ConversationMessage'
+import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ComposerTextarea } from './ComposerTextarea'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
-export type ConversationAnnotationSelection = {
-  messageId: string
-  quote: string
-  range: Range
-  contextElement: HTMLElement
-}
 export type ConversationAnnotationNoteHandle = {
   select(target: ConversationAnnotationSelection, sourceSessionId: string): void
 }

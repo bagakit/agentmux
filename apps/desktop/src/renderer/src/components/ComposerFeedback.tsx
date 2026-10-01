@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 type Action = () => void | Promise<void>
 type Failure = { generation: number; message: string; retry?: () => void }

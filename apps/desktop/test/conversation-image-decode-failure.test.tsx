@@ -1,16 +1,17 @@
 // @vitest-environment happy-dom
 import { act, createElement, useLayoutEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown'
-import { ConversationImage, type ReadPastedImage } from '../src/renderer/src/components/ConversationImage'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { ConversationImage, type ReadPastedImage } from '@agentmux/client-ui/components/ConversationImage'
 import { readPastedImage } from '../src/main/pasted-image-read'
 import { pastedDirectory } from '../src/main/pasted-directory'
-import type { PastedImage } from '../src/shared/contracts'
+import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 
 // Read real confined bytes. DOM error events prove the loaded Renderer handlers; Chromium decode
 // and full workface pixels are separately captured by the owning Native scene.

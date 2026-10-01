@@ -2,6 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { enclosingBindingPath, findCallsToIdentifier, readAndParse } from './helpers/effect-reachability.js'
 
 // 复制到剪贴板从三处（容错三个档，含一处裸 `void` 静默失败）收敛成一个出口。这组测试守三件事：
@@ -104,6 +105,24 @@ function withoutComments(source: string): string {
 }
 
 describe('剪贴板写入只有一个出口', () => {
+  it('共享对话的 Desktop copy port 接到同一个容错出口', () => {
+    const { sourceFile } = readAndParse(`${RENDERER_SRC}/components/DesktopClientUiProvider.tsx`)
+    const ports: ts.Expression[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === 'desktopPlatform' &&
+          node.initializer && ts.isObjectLiteralExpression(node.initializer)) {
+        for (const property of node.initializer.properties) {
+          if (ts.isPropertyAssignment(property) && property.name.getText(sourceFile) === 'copyText') {
+            ports.push(property.initializer)
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
+    expect(ports.map(port => port.getText(sourceFile))).toEqual(['copyTextToClipboard'])
+  })
+
   it('整棵 renderer 源码树里只有出口自己调 api.ui.writeClipboardText', () => {
     const offenders: string[] = []
     for (const file of sourceFiles(RENDERER_SRC)) {
@@ -214,7 +233,8 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     // 它守的东西与别处不同：别处复制的是路径、地址、身份这些**还能再找回来**的短文本，这里复制的
     // 是一整条 Agent 回合的正文。删掉它，那段字仍在屏幕上，但取出来的唯一一键没了——
     // 而 `copyState` 三档（idle/copied/failed）还会照常渲染，按钮看着是好的。
-    ['components/ConversationMessage.tsx', ['ConversationMessage > copyMessage']]
+    // ConversationMessage's copy IO is now supplied by DesktopClientUiProvider; its exact port use
+    // and failed-copy retry are exercised by the shared conversation DOM tests.
   ]
 
   it('每个壳的每个具名转发位置上都恰好有一次对出口的调用', () => {

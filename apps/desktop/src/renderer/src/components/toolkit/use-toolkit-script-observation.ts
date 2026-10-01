@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ToolkitDesktopApi, ToolkitScriptSnapshot, ToolkitSnapshot } from '../../../../shared/toolkit'
-import { presentError } from '../../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 /** Selected, visible reading only. Closing releases this reader and never calls stop. */
 export function useToolkitScriptObservation(api: Pick<ToolkitDesktopApi, 'get' | 'observe'>, toolId: string, active: boolean) {

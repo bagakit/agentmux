@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentTimelineItem } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { createSpeakerResolver, isConversationTurn, speakerOf } from '../src/renderer/src/lib/conversation-speaker'
+import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { isConversationTurn, speakerOf } from '../src/renderer/src/lib/conversation-speaker'
 import { api } from '../src/renderer/src/lib/api'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

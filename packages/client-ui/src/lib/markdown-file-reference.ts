@@ -1,4 +1,4 @@
-import { detectTerminalPathLinks, resolveWorkspaceRelativePath, type TerminalPathLink } from './terminal-path-link'
+import { detectTerminalPathLinks, resolveWorkspaceRelativePath, type TerminalPathLink } from './terminal-path-link.js'
 
 /**
  * Which references in an agent's markdown answer point at a file in this Workspace — and where each

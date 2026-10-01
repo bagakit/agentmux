@@ -7,7 +7,7 @@ import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch
 import { agentDisplayName, firstPromptFromTimeline, workspaceForSession } from './workbench-tabs'
 import { isNeedsYouState } from './attention-vocabulary'
 import { turnWorking } from './activity-working-state'
-import { clampStep } from './activity-step-summary'
+import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import { sessionRecentActivity } from './session-recency'
 import { sessionStatusLabel } from './session-presentation'
 import { launcherTimelineRecap, type LauncherRecap } from './launcher-resume'

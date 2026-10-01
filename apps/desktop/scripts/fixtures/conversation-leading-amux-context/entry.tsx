@@ -1,4 +1,4 @@
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { useState } from 'react'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'

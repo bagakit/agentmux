@@ -1,7 +1,7 @@
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { memo, useState } from 'react'
-import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
-import type { ReadPastedImage } from './ConversationImage'
+import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
+import type { ReadPastedImage } from './ConversationImage.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 

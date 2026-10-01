@@ -1,11 +1,6 @@
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { extname, sep } from 'node:path'
-import {
-  PASTED_IMAGE_MAX_BYTES,
-  PASTED_IMAGE_MIME_TYPES,
-  type PastedImage,
-  type PastedImageExtension
-} from '../shared/contracts.js'
+import { PASTED_IMAGE_MAX_BYTES, PASTED_IMAGE_MIME_TYPES, type PastedImage, type PastedImageExtension } from '@agentmux/client-ui/pasted-images'
 import { pastedDirectory } from './pasted-directory.js'
 
 /**

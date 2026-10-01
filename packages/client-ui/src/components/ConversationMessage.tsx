@@ -2,17 +2,15 @@ import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionUserM
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ChevronRight, Copy } from 'lucide-react'
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { formatClock, formatOffset } from '../lib/activity-ruler'
-import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
-import { ConversationInputDetails } from './ConversationInputDetails'
-import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
-import type { ReadPastedImage } from './ConversationImage'
-import { ConversationMessageAvatar } from './ConversationMessageAvatar'
-import { ConversationToolTrace } from './ConversationToolTrace'
-import { ConversationReasoningTrace } from './ConversationReasoningTrace'
-import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
-import { SemanticIcon } from './semantic-icons'
+import { formatClock, formatOffset } from '../lib/conversation-time.js'
+import { useClientUiPlatform } from '../platform.js'
+import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { ConversationInputDetails } from './ConversationInputDetails.js'
+import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
+import type { ReadPastedImage } from './ConversationImage.js'
+import { ConversationToolTrace } from './ConversationToolTrace.js'
+import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
+import type { ConversationAnnotationSelection } from '../lib/conversation-annotation.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
@@ -90,6 +88,7 @@ export function ConversationMessage({
   speaker: recordedSpeaker, conversationSessionId, inputSource, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
+  const platform = useClientUiPlatform()
   const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -151,7 +150,7 @@ export function ConversationMessage({
     }
     const text = parts.map(partText).filter((t) => t.length > 0).join('\n')
     if (!text) return
-    const accepted = await copyTextToClipboard(text, () => {
+    const accepted = await platform.copyText(text, () => {
       if (activeCopyActionRef.current === actionId) {
         setCopyState('failed')
       }
@@ -195,13 +194,7 @@ export function ConversationMessage({
       data-message-bubble={!isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
-        {speaker ? <ConversationMessageAvatar
-          speaker={speaker}
-          name={displayName}
-          project={described?.project}
-          providerId={displayProvider}
-          mote={described?.mote}
-        /> : <SemanticIcon name="neutral" size={12} />}
+        {speaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker, name: displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
       </span>
       <div className="log-turn__head">
         <span className="log-turn__who">{isDeclaredSender ? <><span className="log-turn__source-caption">Message from </span>{prefix.sourceLabel}</> : displayName}</span>
@@ -209,13 +202,13 @@ export function ConversationMessage({
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {isPeerAgent || isSystemContext ? <span className="log-turn__sender-kind">{isSystemContext ? 'System' : 'Agent'}</span> : null}
         {status === 'streaming' ? (
-          <span className="log-row__chip" role="status"><SemanticIcon name="working" size={12} />Streaming</span>
+          <span className="log-row__chip" role="status">{platform.renderIcon('working', 12)}Streaming</span>
         ) : null}
         {status === 'failed' ? (
-          <span className="log-row__chip log-row__chip--failed" role="status"><SemanticIcon name="failed" size={12} />Failed</span>
+          <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span>
         ) : null}
         {status === 'unverified' ? (
-          <span className="log-row__chip log-row__chip--unverified" role="status"><SemanticIcon name="neutral" size={12} />Unverified</span>
+          <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
         ) : null}
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
           ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>

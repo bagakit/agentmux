@@ -1,9 +1,9 @@
 import { fixtureCivil as _hygiene_fixtureCivil } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage.js'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
 
 /**

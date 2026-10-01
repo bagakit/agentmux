@@ -13,7 +13,7 @@ import type {
 } from '../../../shared/contracts'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 export type BrowserProfileSurface = Pick<
   BrowserWorkbenchSurface,

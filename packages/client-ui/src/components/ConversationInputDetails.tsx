@@ -1,8 +1,8 @@
 import type { AgentSessionUserMessageSource } from '@agentmux/core'
 import { Flag, Info } from 'lucide-react'
 import { useId, useState } from 'react'
-import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker'
-import { ProjectIcon } from './ProjectIcon'
+import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { useClientUiPlatform } from '../platform.js'
 
 /** Opening this disclosure never changes the message's author. */
 export function ConversationInputDetails({ messageId, source, speaker, declaredAgentSessionId, describeSpeaker }: {
@@ -12,6 +12,7 @@ export function ConversationInputDetails({ messageId, source, speaker, declaredA
   declaredAgentSessionId?: string | null | undefined
   describeSpeaker?: DescribeSpeaker | undefined
 }) {
+  const platform = useClientUiPlatform()
   const senderId = speaker?.role === 'agent' ? speaker.id : declaredAgentSessionId
   const declared = speaker?.role !== 'agent' && Boolean(senderId)
   const identity = JSON.stringify([messageId, source, speaker, senderId])
@@ -41,7 +42,7 @@ export function ConversationInputDetails({ messageId, source, speaker, declaredA
         <h4>{declared ? 'Current details from message header' : 'Current sender'}</h4>
         {details ? <>
           <div className="conversation-input-details__identity">
-            {details.project ? <ProjectIcon workspaceId={details.project.workspaceId} name={details.project.name} /> : null}
+            {details.project ? platform.renderProjectIcon(details.project) : null}
             <span><strong>{details.label}</strong>{details.project ? <small title={details.project.path}>{details.project.name}{details.project.branch ? ` · ${details.project.branch}` : ''}</small> : <small>Project not recorded.</small>}</span>
           </div>
           <dl><dt>Session</dt><dd><code>{details.sessionId}</code></dd><dt>Provider</dt><dd>{details.providerId}</dd>

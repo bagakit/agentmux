@@ -1,12 +1,13 @@
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import '../src/renderer/src/styles/chrome.css'
-import '../src/renderer/src/styles/conversation-avatar.css'
+import '../../../packages/client-ui/src/styles/conversation-avatar.css'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 // The actual App route and ProjectRail stay mounted. Native workbench surfaces are outside this color projection.
@@ -29,7 +30,7 @@ import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLa
 const HOUR = 60 * 60_000, NOW = _hygiene_fixtureTime(32774400000)
 const ASSET = 'data:image/svg+xml;base64,PHN2Zy8+'
 const CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/chrome.css'), 'utf8')
-const AVATAR_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/conversation-avatar.css'), 'utf8')
+const AVATAR_CSS = readFileSync(join(import.meta.dirname, '../../../packages/client-ui/src/styles/conversation-avatar.css'), 'utf8')
 const project: WorkspaceRecord = { id: 'project', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' }
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'private.invalid' }],
   executors: {}, workspaces: [project], appearance: { terminalTheme: 'graphite' },

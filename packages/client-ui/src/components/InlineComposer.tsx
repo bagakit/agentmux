@@ -1,14 +1,13 @@
-import { insertComposerContent, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion'
+import { insertComposerContent, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
 import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react'
 import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { ConversationImage, type ReadPastedImage } from './ConversationImage'
-import { splitPastedImageReferences } from '../lib/pasted-image-reference'
-import { composerKeywordMatches } from '../../../shared/composer-shortcut-library'
-import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference'
-import { useAppStore } from '../store'
-import { desktopElementVisible } from '../lib/desktop-presentation'
+import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
+import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
+import { composerKeywordMatches } from '../lib/composer-keywords.js'
+import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
+import { useClientUiPlatform } from '../platform.js'
 
 export function draftDocument(value: string): JSONContent {
   return { type: 'doc', content: value.split('\n').map((line) => ({
@@ -130,6 +129,7 @@ export type InlineComposerProps = {
 }
 
 export function InlineComposer(props: InlineComposerProps) {
+  const platform = useClientUiPlatform()
   const editorRef = useRef<Editor | null>(null)
   const latest = useRef(props)
   latest.current = props
@@ -177,31 +177,15 @@ export function InlineComposer(props: InlineComposerProps) {
     editorProps
   })
   editorRef.current = editor
-  const regionCaretFocus = useAppStore(state => state.regionCaretFocus)
   useEffect(() => {
-    if (!editor || editor.isDestroyed || props.disabled || !regionCaretFocus) return
-    const target = editor.view.dom
-    const region = target.closest<HTMLElement>('[data-workbench-region-id]')
-    // In terminal mode the live xterm owns Region keyboard input. Activity/launcher
-    // composers consume the same exact intent, never a neighbouring input or overlay.
-    if (region?.dataset.workbenchRegionId !== regionCaretFocus.regionId || target.closest('[data-input-surface="terminal"]')) return
-    const nonce = regionCaretFocus.nonce
-    let observer: MutationObserver | undefined
-    const dispose = () => observer?.disconnect()
-    const attempt = (): void => {
-      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return dispose()
-      if (desktopElementVisible(target) && editor.isEditable) {
-        editor.view.focus()
-        if (target === document.activeElement || target.contains(document.activeElement)) useAppStore.getState().clearRegionCaretFocus(nonce)
-      }
-      if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) dispose()
-    }
-    attempt()
-    if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
-    observer = new MutationObserver(attempt)
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
-    return dispose
-  }, [editor, props.disabled, regionCaretFocus])
+    if (!editor || editor.isDestroyed || props.disabled) return
+    return platform.bindComposerFocus(editor.view.dom, () => {
+      if (editor.isDestroyed || !editor.isEditable) return false
+      editor.view.focus()
+      const target = editor.view.dom
+      return target === document.activeElement || target.contains(document.activeElement)
+    })
+  }, [editor, props.disabled, platform])
   useImperativeHandle(props.insertionRef, () => ({
     insert: async (resolve, options) => {
       if (editor && !editor.isDestroyed) await insertComposerContent(editor, resolve, draftDocument, options)

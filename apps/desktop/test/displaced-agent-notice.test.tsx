@@ -3,7 +3,8 @@ import { initializeSpatialControlFixture } from './helpers/spatial-control-owner
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 // @vitest-environment happy-dom
 import { act, type ReactElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // The App mounts SessionPane→TerminalView for placed sessions; a displaced Agent has no Region so it

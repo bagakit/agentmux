@@ -1,3 +1,5 @@
+import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react'
 import { useAppStore } from '../store'
@@ -16,18 +18,18 @@ import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-r
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
-import { createSpeakerResolver } from '../lib/conversation-speaker'
+import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { useSessionUserMessages } from '../lib/session-user-messages'
-import type { LinkClickModifiers } from './AgentMarkdown'
+import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
-import type { ConversationAnnotation } from './ConversationMessage'
-import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle, type ConversationAnnotationSelection } from './ConversationAnnotationNote'
+import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
-import { errorIdentity } from '../lib/error-presentation'
+import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
-import { AgentInteractionCard } from './AgentInteractionCard'
+import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
@@ -260,7 +262,7 @@ export function SessionPane({
       const described = original(speaker)
       const mote = speaker.role === 'agent' ? moteConversationIdentity(moteOwner,
         sessionPresentationById(useAppStore.getState().sessions).get(speaker.id)) : undefined
-      return mote ? { ...described, name: mote.name, mote } : described
+      return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} /> } : described
     }
   }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
   )

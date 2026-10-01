@@ -3,7 +3,7 @@ import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
-import { AgentComposer } from '../src/renderer/src/components/AgentComposer'
+import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'

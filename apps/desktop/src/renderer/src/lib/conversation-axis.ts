@@ -29,7 +29,8 @@
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import { createRulerScale } from './activity-ruler'
-import { speakerOf, type ConversationSpeaker } from './conversation-speaker'
+import { speakerOf } from './conversation-speaker'
+import { type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
 export type ConversationAxisItem = AgentTimelineItem | AgentSessionUserMessage
 

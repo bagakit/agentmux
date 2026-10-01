@@ -11,9 +11,9 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourcePaths = [
   'apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx',
   'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx',
-  'apps/desktop/src/renderer/src/components/ConversationMessage.tsx',
+  'packages/client-ui/src/components/ConversationMessage.tsx',
   'apps/desktop/src/renderer/src/components/ConversationMessageAvatar.tsx',
-  'apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx',
+  'packages/client-ui/src/components/ConversationInputDetails.tsx',
   'apps/desktop/src/renderer/src/lib/conversation-speaker.ts',
   'apps/desktop/src/renderer/src/lib/conversation-sender-details.ts',
   'apps/desktop/src/renderer/src/lib/session-user-messages.ts',

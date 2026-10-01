@@ -7,7 +7,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
-import { composerExtensions, draftDocument, documentDraft } from '../src/renderer/src/components/InlineComposer'
+import { composerExtensions, draftDocument, documentDraft } from '@agentmux/client-ui/components/InlineComposer'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, executorDetectionKey } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'

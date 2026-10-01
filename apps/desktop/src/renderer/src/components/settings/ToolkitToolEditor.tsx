@@ -6,7 +6,7 @@ import { ToolkitIcon, toolkitIconLabels } from '../toolkit/ToolkitIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
-import { presentError } from '../../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './use-toolkit-drafts'
 
 const ScriptEditor = lazy(() => import('./ToolkitScriptEditor'))

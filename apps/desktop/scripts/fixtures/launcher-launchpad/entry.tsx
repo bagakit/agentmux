@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import React from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
@@ -17,7 +17,7 @@ import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-contro
 import { workbenchProjectionSlotId, type WorkbenchProjection } from '../../../src/renderer/src/lib/workbench-projection'
 import { usePmoTeamsTopicFloatingState, readPmoTeamsTopicFloatingState, pmoTeamsTopicFloatingViewTargets, requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
-import { draftDocument } from '../../../src/renderer/src/components/InlineComposer'
+import { draftDocument } from '@agentmux/client-ui/components/InlineComposer'
 import type { Editor } from '@tiptap/core'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../../../src/shared/scratch-topics'
 import '../../../src/renderer/src/styles/index.css'

@@ -11,7 +11,7 @@ import { FOCUS_TIMELINE_NAME_WIDTH_MIN, FOCUS_TIMELINE_NAME_WIDTH_MAX } from '..
 import { useSidebarResize } from '../hooks/useSidebarResize'
 import { AgentAvatar } from './AgentAvatar'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
-import { createSpeakerResolver, speakerOfUserMessage } from '../lib/conversation-speaker'
+import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
@@ -24,7 +24,7 @@ import { createFocusTimeFormatters, focusDateCandidates, focusRulerLabels, focus
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { api } from '../lib/api'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWindowLabel, focusWorkSegment, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
 

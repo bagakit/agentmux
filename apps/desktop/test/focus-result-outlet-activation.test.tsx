@@ -1,7 +1,8 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, Fragment, type ReactNode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { activateTab as activateLayoutTab, createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
@@ -21,7 +22,7 @@ vi.mock('react-resizable-panels', async () => {
 })
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({ ActivityView: () => null }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({ AgentInteractionCard: () => null }))
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => null }))
 // Region chrome is real; HappyDOM does not qualify Monaco paint/native geometry.
 vi.mock('../src/renderer/src/components/EditorPane.js', () => ({ EditorPane: () => null }))
 

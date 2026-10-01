@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true))
 // Unrelated surfaces stay outside this input slice. The three callers and shared input are real.

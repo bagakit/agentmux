@@ -1,10 +1,11 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown.js'
-import type { PastedImage } from '../src/shared/contracts.js'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 
 // T-005: the thumbnail enlarges in a lightbox. It uses @radix-ui/react-dialog (the in-repo overlay
 // primitive) so the focus trap and Escape-to-close are the primitive's, not hand-rolled. Assert:

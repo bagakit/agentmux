@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
 
 // The gallery intentionally runs as the standalone web entry, not the Electron bridge.

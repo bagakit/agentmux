@@ -1,7 +1,7 @@
 import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import {act, createElement} from 'react'
-import {createRoot} from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import {expect, it, vi} from 'vitest'
 import {api} from '../src/renderer/src/lib/api'
 import {useAppStore} from '../src/renderer/src/store'

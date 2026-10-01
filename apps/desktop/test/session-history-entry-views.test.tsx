@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, useEffect, useLayoutEffect } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { App } from '../src/renderer/src/App'

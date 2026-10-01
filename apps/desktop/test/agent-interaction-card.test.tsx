@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentInteractionCard } from '../src/renderer/src/components/AgentInteractionCard.js'
-import { permissionTierClassName } from '../src/renderer/src/lib/agent-interaction-plan.js'
+import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
+import { permissionTierClassName } from '@agentmux/client-ui/agent-interaction-plan'
 import { RISK_TIERS } from '@agentmux/core'
 import type { AgentMuxPermissionOption } from '@agentmux/core'
 

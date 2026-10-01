@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
-import { AgentInteractionCard } from '../src/renderer/src/components/AgentInteractionCard'
+import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { SessionResultReviewContent } from '../src/renderer/src/components/SessionResultReviewContent'
 import { AgentStatusPromptActions } from '../src/renderer/src/components/AgentStatusPromptActions'

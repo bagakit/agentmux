@@ -4,16 +4,16 @@ import {
   parseAgentMarkdown,
   type BlockNode,
   type InlineNode
-} from '../lib/agent-markdown'
+} from '../lib/agent-markdown.js'
 import {
   classifyMarkdownLinkHref,
   referenceRevealLocation,
   splitMarkdownFileReferences,
   type MarkdownFileReference
-} from '../lib/markdown-file-reference'
-import { splitPastedImageReferences } from '../lib/pasted-image-reference'
-import { ConversationImage, type ReadPastedImage } from './ConversationImage'
-import { parseHttpLinkUrl } from '../lib/open-destination'
+} from '../lib/markdown-file-reference.js'
+import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
+import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
+import { parseHttpLinkUrl } from '../lib/link-url.js'
 
 // Rendering an agent's answer as prose.
 //

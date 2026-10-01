@@ -1,11 +1,12 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown.js'
-import { splitPastedImageReferences } from '../src/renderer/src/lib/pasted-image-reference.js'
-import type { PastedImage } from '../src/shared/contracts.js'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { splitPastedImageReferences } from '@agentmux/client-ui/pasted-image-reference'
+import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 
 // T-004: a pasted image cited in the conversation renders as a thumbnail, not the dead text link the user
 // reported. Load-bearing constraints:

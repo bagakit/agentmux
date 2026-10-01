@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -17,16 +18,21 @@ import { fileURLToPath } from 'node:url'
  * 不可观测，直到第一个 happy-dom 测试要读样式表（记忆 property-unobservable-in-default-env）。
  */
 const STYLES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'renderer', 'src', 'styles')
+const require = createRequire(import.meta.url)
 
 function importOrder(): string[] {
   const index = readFileSync(join(STYLES_DIR, 'index.css'), 'utf8')
-  const order = [...index.matchAll(/@import\s+'\.\/([\w-]+\.css)'/g)].map((match) => match[1]!)
+  const order = [...index.matchAll(/@import\s+'([^']+\.css)'/g)].map((match) => match[1]!)
   if (order.length === 0) throw new Error('index.css 里没有 @import——样式入口变了，这个读取器要跟着改')
   const present = readdirSync(STYLES_DIR).filter((name) => name.endsWith('.css') && name !== 'index.css')
-  const missing = present.filter((name) => !order.includes(name))
+  const missing = present.filter((name) => !order.includes(`./${name}`))
   // 一个没被 @import 的样式文件是死文件：它的规则永远不生效，而契约测试会照常扫描它并放行。
   if (missing.length > 0) throw new Error(`这些样式文件没有被 index.css @import：${missing.join(', ')}`)
   return order
+}
+
+function stylesheetPath(specifier: string): string {
+  return specifier.startsWith('.') ? join(STYLES_DIR, specifier) : require.resolve(specifier)
 }
 
 /**
@@ -49,7 +55,7 @@ export function stripCssComments(css: string): string {
 /** 全部样式文件，按层叠顺序拼成一张表。 */
 export function allStyles(): string {
   return importOrder()
-    .map((name) => readFileSync(join(STYLES_DIR, name), 'utf8'))
+    .map((name) => readFileSync(stylesheetPath(name), 'utf8'))
     .join('\n')
 }
 
@@ -61,7 +67,7 @@ export function allStyleRules(): string {
 /** 每个样式文件的内容，用于逐文件的断言（比如 :root 只能出现在 tokens.css）。 */
 export function styleFiles(): Array<{ name: string; text: string }> {
   return importOrder().map((name) => ({
-    name,
-    text: readFileSync(join(STYLES_DIR, name), 'utf8')
+    name: basename(stylesheetPath(name)),
+    text: readFileSync(stylesheetPath(name), 'utf8')
   }))
 }

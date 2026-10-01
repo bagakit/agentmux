@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ConversationSpeakerAvatar } from '../src/renderer/src/components/ConversationSpeakerAvatar.js'
 import { speakerColorHue } from '../src/renderer/src/lib/conversation-avatar-color.js'
-import { HUMAN_SPEAKER_ID } from '../src/renderer/src/lib/conversation-speaker.js'
+import { HUMAN_SPEAKER_ID } from '@agentmux/client-ui/conversation-speaker'
 
 /**
  * 说话人头像组件的验收。

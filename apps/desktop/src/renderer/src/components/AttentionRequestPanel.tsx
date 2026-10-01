@@ -3,8 +3,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import { useAppStore } from '../store'
 import { nextAttentionSessionId } from '../lib/agent-attention'
-import { presentError } from '../lib/error-presentation'
-import { AgentInteractionCard } from './AgentInteractionCard'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { isNeedsYouState } from '../lib/attention-vocabulary'
 
 type SubmittedInteraction = {

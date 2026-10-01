@@ -200,8 +200,6 @@
 }
 .log-row__count { margin-left:var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .log-row__meta { display: inline-flex; align-items: center; gap:var(--sp-3); }
-.log-row__chip { padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font-size: var(--fs-micro); letter-spacing: .06em; }
-.log-row__chip--failed { color: var(--red-text); background: var(--red-wash); }
 /* Provenance repeats down a run; showing it only on the first row and on hover keeps the column quiet
    without hiding where a fact came from. */
 .log-row__source { color: var(--text-3); font-size: var(--fs-micro); letter-spacing: .06em; text-transform: uppercase; opacity: 0; }

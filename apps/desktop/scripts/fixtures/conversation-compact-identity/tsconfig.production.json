@@ -3,6 +3,6 @@
   "include": [
     "../../../src/renderer/src/global.d.ts",
     "../../../src/renderer/src/components/SessionPane.tsx",
-    "../../../src/renderer/src/components/ConversationMessage.tsx"
+    "../../../../../packages/client-ui/src/components/ConversationMessage.tsx"
   ]
 }

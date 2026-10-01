@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ConversationAxis } from '../src/renderer/src/components/ConversationAxis.js'
 import { conversationAxis, speaksAsAgent, speaksAsHuman } from '../src/renderer/src/lib/conversation-axis.js'
-import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID } from '../src/renderer/src/lib/conversation-speaker.js'
-import type { ConversationSpeaker } from '../src/renderer/src/lib/conversation-speaker.js'
+import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID } from '@agentmux/client-ui/conversation-speaker'
+import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
 /**
  * 两条轴的渲染验收。

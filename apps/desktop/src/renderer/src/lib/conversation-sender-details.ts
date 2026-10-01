@@ -1,5 +1,5 @@
 import type { AgentTimelineSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import type { ConversationSenderDetails } from './conversation-speaker'
+import type { ConversationSenderDetails } from '@agentmux/client-ui/conversation-speaker'
 import type { DemandRecord } from './global-demand-board'
 import { agentDisplayName, firstPromptFromTimeline } from './workbench-tabs'
 import { projectWorkspaces, workspaceProjectId } from './workspace-projects'

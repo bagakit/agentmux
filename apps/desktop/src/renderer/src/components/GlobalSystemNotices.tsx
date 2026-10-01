@@ -7,7 +7,7 @@ import { classifyServiceNotice, serviceNoticeToRender } from '../lib/service-win
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
-import { errorIdentity } from '../lib/error-presentation'
+import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {

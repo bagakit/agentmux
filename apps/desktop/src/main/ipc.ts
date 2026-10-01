@@ -91,16 +91,8 @@ import type {
 } from '../shared/git-contracts.js'
 import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
 import type { SessionHistoryPageOptions } from '../shared/contracts.js'
-import {
-  AGENT_ATTENTION_ACTIVATE_CHANNEL,
-  CONTROL_CANCEL_CHANNEL,
-  CONTROL_REQUEST_CHANNEL,
-  CONTROL_RESPONSE_CHANNEL,
-  PASTED_IMAGE_EXTENSIONS,
-  PASTED_IMAGE_MAX_BYTES,
-  SESSION_HISTORY_OBSERVATION_CHANNEL,
-  WORKSPACE_FILE_INVALIDATED_CHANNEL
-} from '../shared/contracts.js'
+import { AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
+import { PASTED_IMAGE_EXTENSIONS, PASTED_IMAGE_MAX_BYTES } from '@agentmux/client-ui/pasted-images'
 import { terminalPalette } from '../shared/terminal-palettes.js'
 import { createAgentNotifier } from './agent-notifier.js'
 import { BrowserViewManager } from './browser-view-manager.js'

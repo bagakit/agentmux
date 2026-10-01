@@ -1,7 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // SessionPane → lib/api，api 在模块加载时就读这个 build-time define 决定跑在哪个宿主里。
@@ -11,7 +11,7 @@ vi.hoisted(() => {
 })
 
 import type { SessionSnapshot } from '../src/shared/contracts.js'
-import type { LinkClickModifiers } from '../src/renderer/src/components/AgentMarkdown.js'
+import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { OpenDestination, OpenHttpLinkOrigin } from '../src/renderer/src/lib/open-destination.js'
 
 // The conversation's http links must reach the SAME destination menu + Store exit the Terminal uses,
@@ -88,7 +88,7 @@ vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
     <div data-test-agent-composer={disabled ? 'disabled' : 'enabled'} />
   )
 }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({
   AgentInteractionCard: ({ disabled }: { disabled?: boolean }) => (
     <div data-test-interaction-card={disabled ? 'disabled' : 'enabled'} />
   )

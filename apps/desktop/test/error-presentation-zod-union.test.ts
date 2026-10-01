@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { describeError, presentError } from '../src/renderer/src/lib/error-presentation'
+import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
 
 // A union rejection must name the field that failed, and dedup must not hide how many rows conflict.
 //

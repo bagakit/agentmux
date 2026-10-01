@@ -1,11 +1,11 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentProviderRegistry, AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage.js'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { api } from '../src/renderer/src/lib/api.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 

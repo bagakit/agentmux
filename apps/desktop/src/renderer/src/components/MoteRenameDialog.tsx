@@ -3,8 +3,8 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_TOPIC_TITLE_MAX_LENGTH } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
-import { presentError } from '../lib/error-presentation'
-import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** A name edits the original Topic title, never a Session or directory identity. */

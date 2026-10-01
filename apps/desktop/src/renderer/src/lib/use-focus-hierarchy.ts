@@ -5,7 +5,7 @@ import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { api } from './api'
-import { presentError } from './error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { EMPTY_FOCUS_HIERARCHY, focusProjectRoots, retainedWorktreeFacts, type FocusHierarchyFacts } from './focus-project-lanes'
 import type { FocusContext } from './focus-context'
 

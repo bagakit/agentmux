@@ -1,7 +1,8 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, forwardRef, useImperativeHandle, type ReactNode } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render';
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest';
 import type { SessionSnapshot, SessionRecoveryResult } from '../src/shared/contracts';
 import { api } from '../src/renderer/src/lib/api';

@@ -1,5 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { useState } from 'react'
 import type { AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { AgentSessionControl, AppConfig, SessionSnapshot } from '../../../src/shared/contracts'

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, startTransition, Suspense } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type {
   AgentSessionHistoryPage,
@@ -12,7 +13,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
-import { createSpeakerResolver } from '../src/renderer/src/lib/conversation-speaker'
+import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 
 /**
  * Notice on Controlled Public DTO:

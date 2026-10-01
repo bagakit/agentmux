@@ -4,8 +4,8 @@ import type {
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse
 } from '@agentmux/core'
-import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan'
-import { presentError } from '../lib/error-presentation'
+import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan.js'
+import { presentError } from '../lib/error-presentation.js'
 
 /** The single typed plan owns answer semantics; this card owns presentation and submission state. */
 export function AgentInteractionCard({

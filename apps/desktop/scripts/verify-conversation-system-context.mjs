@@ -136,11 +136,17 @@ async function command(ref, expectedExit) {
   await bound({ path: run.log, sha256: run.logSHA256 })
   return run
 }
-const requiredUI = ['components/ActivityView.tsx', 'components/ConversationMessage.tsx', 'components/ConversationSpeakerAvatar.tsx', 'lib/conversation-speaker.ts']
+const requiredUI = [
+  'apps/desktop/src/renderer/src/components/ActivityView.tsx',
+  'packages/client-ui/src/components/ConversationMessage.tsx',
+  'apps/desktop/src/renderer/src/components/ConversationSpeakerAvatar.tsx',
+  'apps/desktop/src/renderer/src/lib/conversation-speaker.ts',
+  'packages/client-ui/src/lib/conversation-speaker.ts'
+]
 async function loadedUI(ref, mutation) {
   const inputs = await rows(ref)
-  for (const suffix of requiredUI) {
-    const path = `apps/desktop/src/renderer/src/${suffix}`, matches = inputs.filter(input => input.path === path)
+  for (const path of requiredUI) {
+    const matches = inputs.filter(input => input.path === path)
     assert.equal(matches.length, 1, path)
     assert.equal(matches[0].originalSHA256, identity(ui.source[path]), path)
   }

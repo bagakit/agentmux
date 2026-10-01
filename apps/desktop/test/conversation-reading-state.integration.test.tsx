@@ -1,7 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, useEffect } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '@agentmux/core'
@@ -12,7 +13,7 @@ import { join } from 'node:path'
 import type { AgentSessionControl, SessionSnapshot } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 import { useAppStore } from '../src/renderer/src/store'

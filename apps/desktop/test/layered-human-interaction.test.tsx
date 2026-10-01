@@ -6,7 +6,7 @@ import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAge
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-private-terminal="true" /> }))
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { AgentInteractionCard } from '../src/renderer/src/components/AgentInteractionCard'
+import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'

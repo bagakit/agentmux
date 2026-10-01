@@ -226,7 +226,7 @@ const DIAGNOSTIC_SUFFIX = /\s*Diagnostic:\s[\s\S]*$/u
  * This exists because a user dismisses a *cause*, not a string. `reportError` deduped on whole-message
  * equality, and the readiness refusal carries `latestOutputBytes` in its `Diagnostic:` tail — so a
  * still-generating Agent made every re-report a *different* string, the equality never matched, and the
- * dismissed banner came back over and over (field report prior observation; the diagnostic is the only part
+ * dismissed banner came back over and over (field report during error-banner review; the diagnostic is the only part
  * that changed between them).
  *
  * Identity strips presentation context and keeps the sentence, so two reports of the same refusal

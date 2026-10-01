@@ -1,7 +1,7 @@
 import { fixtureData as _hygiene_fixtureData } from "../../lib/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { RecentFocusTimeline } from '../../../src/renderer/src/components/RecentFocusTimeline'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
 import { deriveFocusProjectLanes } from '../../../src/renderer/src/lib/focus-project-lanes'

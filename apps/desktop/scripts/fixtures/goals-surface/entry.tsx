@@ -1,5 +1,5 @@
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../../lib/fixture-values.mjs"
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { projectLinksPreview } from './project-links'

@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { RecentFocusTimeline } from '../../../src/renderer/src/components/RecentFocusTimeline'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
 import { useAppStore } from '../../../src/renderer/src/store'

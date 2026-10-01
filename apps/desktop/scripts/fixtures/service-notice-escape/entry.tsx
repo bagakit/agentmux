@@ -1,7 +1,7 @@
 import React from 'react'
 import { BrowserPane } from '../../../src/renderer/src/components/BrowserPane'
 import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'

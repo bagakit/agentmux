@@ -1,11 +1,11 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { fixtureClock as _hygiene_fixtureClock, fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ActivityView } from '../src/renderer/src/components/ActivityView.js'
-import { createSpeakerResolver } from '../src/renderer/src/lib/conversation-speaker.js'
+import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { allStyles } from './helpers/styles.js'
 
 function activity(

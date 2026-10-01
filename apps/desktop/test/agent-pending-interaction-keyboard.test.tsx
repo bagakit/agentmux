@@ -3,8 +3,8 @@ import { renderComponentBoundary } from './helpers/render-component-boundary'
 import { Children, type ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts'
-import type { AgentComposerProps } from '../src/renderer/src/components/AgentComposer'
-import type { InlineComposerProps } from '../src/renderer/src/components/InlineComposer'
+import type { AgentComposerProps } from '@agentmux/client-ui/components/AgentComposer'
+import type { InlineComposerProps } from '@agentmux/client-ui/components/InlineComposer'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 const fixture = vi.hoisted(() => ({
@@ -26,8 +26,8 @@ vi.mock('../src/renderer/src/store', () => ({
   )
 }))
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { AgentComposer } from '../src/renderer/src/components/AgentComposer'
-import { InlineComposer } from '../src/renderer/src/components/InlineComposer'
+import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
+import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
 
 afterEach(() => { vi.clearAllMocks() })
 

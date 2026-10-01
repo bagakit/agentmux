@@ -7,7 +7,7 @@ import { documentKey, tabGroupForTab, type FileWorkbenchSurface } from '../lib/w
 import { joinWorkspacePath } from '../lib/workspace-paths'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { useAppStore } from '../store'
-import { AgentMarkdown } from './AgentMarkdown'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { FilePreviewPane, ImageContent } from './FilePreviewPane'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'

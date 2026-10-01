@@ -1,5 +1,5 @@
 import { createElement, type ReactElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it } from 'vitest'
 import { Ruler } from '../src/renderer/src/components/ActivityView.js'
 import { createRulerScale } from '../src/renderer/src/lib/activity-ruler.js'
@@ -7,7 +7,7 @@ import type { AgentTimelineItem } from '../src/shared/contracts.js'
 import { ConversationAxis } from '../src/renderer/src/components/ConversationAxis.js'
 import { speaksAsHuman } from '../src/renderer/src/lib/conversation-axis.js'
 import type { ConversationAxisMark } from '../src/renderer/src/lib/conversation-axis.js'
-import type { ConversationSpeaker } from '../src/renderer/src/lib/conversation-speaker.js'
+import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
 /**
  * 轴标记的原话面板：出口接线的验收。

@@ -2,8 +2,8 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { describe, expect, it } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { workspaceForSession, workspaceRootForPath } from '../src/renderer/src/lib/workbench-tabs.js'
-import { stepSummary } from '../src/renderer/src/lib/activity-step-summary.js'
-import { resolveWorkspaceRelativePath } from '../src/renderer/src/lib/terminal-path-link.js'
+import { stepSummary } from '@agentmux/client-ui/activity-step-summary'
+import { resolveWorkspaceRelativePath } from '@agentmux/client-ui/terminal-path-link'
 
 // 一格终端／时间线把绝对路径缩短时，用的是**哪个**仓根。
 //

@@ -15,7 +15,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-mailbox-reading-")), evidence = join(root, '.tmp/mailbox-reading-flow', mode.slice(2)+'-'+globalThis.crypto.randomUUID())
 const result = { schema: 'agentmux.mailbox-reading-flow-proof.v1', mode, passed: false, userRunTouched: false, sharedSourceWritten: false,
   aestheticReview: 'not-performed', mutations: [], cleanup: {} }
-const productPaths = ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx', 'apps/desktop/src/renderer/src/styles/composer.css', 'apps/desktop/src/renderer/src/components/ComposerOutbox.tsx', 'apps/desktop/src/renderer/src/components/MailboxReading.tsx']
+const productPaths = ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx', 'packages/client-ui/src/styles/composer.css', 'apps/desktop/src/renderer/src/components/ComposerOutbox.tsx', 'apps/desktop/src/renderer/src/components/MailboxReading.tsx']
 const originals = Object.fromEntries(await Promise.all(productPaths.map(async path => [path, await readFile(join(root,path),'utf8')])))
 await mkdir(evidence,{recursive:true})
 async function sourceTest(label, expectRed) {
@@ -74,7 +74,7 @@ async function native(label, badGeometry=false) {
   }}]}},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
   assert.equal(mutationRecords.length,badGeometry?1:0,'A requested production CSS mutation must be applied exactly once')
   for(const path of ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/ComposerOutbox.tsx','apps/desktop/src/renderer/src/components/MailboxReading.tsx'])assert.ok(loadedSourceInputs[path],'Actual source consumed: '+path)
-  for(const path of ['apps/desktop/src/renderer/src/styles/composer.css','apps/desktop/src/renderer/src/styles/agent-avatar.css'])assert.equal(importedStyleInputs[path],hash(await readFile(join(root,path))))
+  for(const path of ['packages/client-ui/src/styles/composer.css','apps/desktop/src/renderer/src/styles/agent-avatar.css'])assert.equal(importedStyleInputs[path],hash(await readFile(join(root,path))))
   assert.ok(Object.keys(compiledCoreInputs).length>0,'Existing compiled Core consumption is nonempty')
   const identity={loadedSourceInputs,importedStyleInputs,compiledCoreInputs,compiledFiles:await compiled(outDir),privateMainSha256:hash(mainBytes),terminalWrapperSha256:hash(await readFile(wrapper)),electronVersion:require('electron/package.json').version,existingCompiledCore:true,otherRuntimeEntries:'existing compiled package; private preview does not certify real Runtime',mutationRecords}
   await writeFile(join(directory,'compiled.json'),JSON.stringify(identity,null,2))

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 // Same installed browser primary used by the existing owning ratio/Header fixtures.

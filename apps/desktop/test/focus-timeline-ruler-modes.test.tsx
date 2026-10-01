@@ -1,7 +1,8 @@
 import { fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, expect, it, vi } from 'vitest'
 import { focusDateCandidates, focusRulerTicks, createFocusTimeFormatters, DEFAULT_FOCUS_RULER, type FocusRulerPreferences } from '../src/renderer/src/lib/focus-timeline-ruler'
 import { useAppStore, restorePersistedUiState } from '../src/renderer/src/store'

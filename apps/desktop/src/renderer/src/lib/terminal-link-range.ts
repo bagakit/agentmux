@@ -1,5 +1,5 @@
 import type { IBuffer, IBufferCell, IBufferLine, IBufferRange } from '@xterm/xterm'
-import { detectTerminalPathLinks, type TerminalPathLink } from './terminal-path-link'
+import { detectTerminalPathLinks, type TerminalPathLink } from '@agentmux/client-ui/terminal-path-link'
 
 // One hover window, independent of scrollback size. This also bounds combined-cell text.
 const TERMINAL_LINK_WINDOW_CELLS = 4096

@@ -11,12 +11,8 @@ import {
   OpenDestinationPopover,
   nextFocusedDestination
 } from '../src/renderer/src/components/OpenDestinationBar.js'
-import {
-  OPEN_DESTINATIONS,
-  openDestinationNeedsRegion,
-  parseHttpLinkUrl,
-  type OpenDestination
-} from '../src/renderer/src/lib/open-destination.js'
+import { OPEN_DESTINATIONS, openDestinationNeedsRegion, type OpenDestination } from '../src/renderer/src/lib/open-destination.js'
+import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 
 function renderPopoverMarkup(props: ComponentProps<typeof OpenDestinationPopover>): string {
   const container = document.createElement('div')

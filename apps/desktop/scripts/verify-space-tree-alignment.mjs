@@ -52,7 +52,7 @@ try {
       'apps/desktop/src/renderer/src/components/ProjectIcon.tsx',
       'apps/desktop/src/renderer/src/lib/project-monogram.ts',
       'apps/desktop/src/renderer/src/styles/chrome.css',
-      'apps/desktop/src/renderer/src/styles/conversation-avatar.css',
+      'packages/client-ui/src/styles/conversation-avatar.css',
       'apps/desktop/src/renderer/src/components/SpaceSectionHeader.tsx',
       'apps/desktop/src/renderer/src/styles/index.css'
     ]) {

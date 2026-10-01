@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { scratchTopicsScope } from '../lib/scratch-topic-snapshots'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'

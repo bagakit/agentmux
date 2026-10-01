@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { PastedImage } from '../../../shared/contracts'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import type { PastedImage } from '../lib/pasted-images.js'
+import { useClientUiPlatform } from '../platform.js'
 
 /**
  * Read a pasted image (`<home>/.agentmux/pasted/…`) back as an `<img>`-ready data URI, or null when it
@@ -43,6 +43,7 @@ export function ConversationImage({
   path: string
   readPastedImage: ReadPastedImage
 }) {
+  const platform = useClientUiPlatform()
   const [loaded, setLoaded] = useState<LoadedImage | null>(null)
   const [failed, setFailed] = useState<LoadedImage | null>(null)
   const [open, setOpen] = useState<LoadedImage | null>(null)
@@ -83,7 +84,7 @@ export function ConversationImage({
           <img className="md-conversation-image__thumb" src={image.dataUrl} alt={path} onError={decodeFailed} />
         </button>
       </Dialog.Trigger>
-      <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <Dialog.Portal container={platform.overlayContainer() as HTMLElement}>
         <Dialog.Overlay className="md-conversation-image__overlay" />
         <Dialog.Content className="md-conversation-image__lightbox" aria-describedby={undefined}>
           {/* Radix requires a title for the dialog; it is visually hidden but read to assistive tech.

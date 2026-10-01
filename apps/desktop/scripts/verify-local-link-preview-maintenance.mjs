@@ -25,11 +25,12 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const bind = path => ({ path, sha256: sha(readFileSync(resolve(root, path))) })
 const relative = path => path.replace(`${root}/`, '')
 const base = 'apps/desktop/src/', renderer = base + 'renderer/src/'
-const markdown = renderer + 'lib/markdown-file-reference.ts', terminal = renderer + 'lib/terminal-path-link.ts'
-const agent = renderer + 'components/AgentMarkdown.tsx', image = renderer + 'components/ConversationImage.tsx'
+const shared = 'packages/client-ui/src/'
+const markdown = shared + 'lib/markdown-file-reference.ts', terminal = shared + 'lib/terminal-path-link.ts'
+const agent = shared + 'components/AgentMarkdown.tsx', image = shared + 'components/ConversationImage.tsx'
 const fileView = renderer + 'components/FileSurfaceView.tsx', session = renderer + 'components/SessionPane.tsx'
 const store = renderer + 'store.ts', reader = base + 'main/pasted-image-read.ts'
-const sourcePaths = lane === 'markdown' ? [markdown, terminal, agent, renderer + 'lib/agent-markdown.ts', fileView,
+const sourcePaths = lane === 'markdown' ? [markdown, terminal, agent, shared + 'lib/agent-markdown.ts', fileView,
   renderer + 'components/FilePreviewPane.tsx', session, store, renderer + 'lib/session-project-file-context.ts']
   : [image, agent, session, reader, base + 'main/pasted-directory.ts', base + 'main/ipc.ts', base + 'preload/index.ts', base + 'shared/contracts.ts']
 const testNames = lane === 'markdown' ? ['markdown-file-reference.test.tsx', 'markdown-local-link-preview.test.tsx', 'file-preview-open.test.tsx',
@@ -41,6 +42,8 @@ const compilerConfig = `apps/desktop/.tmp/local-link-preview-maintenance/${lane}
 const compiler = () => ({ extends: '../../../tsconfig.json', compilerOptions: { baseUrl: '../../../../..',
   paths: Object.fromEntries(sourceAliases.map(item => [item.find, [relative(item.replacement)]])) } })
 const helpers = [config, 'apps/desktop/scripts/fixtures/bookmark-local-link/vitest.owning.config.mts', 'vitest.setup.ts',
+  'packages/client-ui/package.json', 'packages/client-ui/src/platform.tsx',
+  'apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
   'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/tsconfig.json', 'tsconfig.base.json', compilerConfig,
   'packages/core/package.json', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json', 'packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz',
   'packages/core/node_modules/@ctxmux/sdk/package.json',

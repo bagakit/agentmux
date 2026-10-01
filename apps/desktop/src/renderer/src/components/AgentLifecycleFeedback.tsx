@@ -2,7 +2,7 @@ import { useAppStore } from '../store'
 import { useRef } from 'react'
 import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFeedbackOwner } from '../lib/agent-lifecycle-feedback'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
-import { errorIdentity } from '../lib/error-presentation'
+import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 
 /** Launcher and Session project the one existing error owner; dismissal only acknowledges it. */
 export function AgentLifecycleFeedback({ owner, retry, busy = false, refreshObservation, visible = true }: {

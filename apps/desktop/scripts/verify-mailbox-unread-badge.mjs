@@ -15,7 +15,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-mailbox-badge-")), evidence = join(root, '.tmp/mailbox-unread-badge', mode.slice(2)+'-'+globalThis.crypto.randomUUID())
 const result = { schema: 'agentmux.mailbox-unread-badge-proof.v1', mode, passed: false, userRunTouched: false, sharedSourceWritten: false,
   aestheticReview: 'not-performed', mutations: [], cleanup: {} }
-const productPaths = ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx', 'apps/desktop/src/renderer/src/styles/composer.css']
+const productPaths = ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx', 'packages/client-ui/src/styles/composer.css']
 const originals = Object.fromEntries(await Promise.all(productPaths.map(async path => [path, await readFile(join(root,path),'utf8')])))
 await mkdir(evidence,{recursive:true})
 async function sourceTest(label, expectRed) {
@@ -77,7 +77,7 @@ async function native(label, oldSize=false) {
   }}]}},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
   assert.equal(mutationRecords.length,oldSize?1:0,'A requested production CSS mutation must be applied exactly once')
   for(const path of ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/AgentAvatar.tsx','packages/core/src/control.ts','packages/core/src/errors.ts'])assert.ok(loadedSourceInputs[path],'Actual source consumed: '+path)
-  for(const path of ['apps/desktop/src/renderer/src/styles/composer.css','apps/desktop/src/renderer/src/styles/agent-avatar.css'])assert.equal(importedStyleInputs[path],hash(await readFile(join(root,path))))
+  for(const path of ['packages/client-ui/src/styles/composer.css','apps/desktop/src/renderer/src/styles/agent-avatar.css'])assert.equal(importedStyleInputs[path],hash(await readFile(join(root,path))))
   const identity={loadedSourceInputs,importedStyleInputs,compiledFiles:await compiled(outDir),privateMainSha256:hash(mainBytes),terminalWrapperSha256:hash(await readFile(wrapper)),electronVersion:require('electron/package.json').version,exactCoreControlSourceAlias:true,otherRuntimeEntries:'existing compiled package; private preview does not certify real Runtime',mutationRecords}
   await writeFile(join(directory,'compiled.json'),JSON.stringify(identity,null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE

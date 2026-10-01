@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement, forwardRef, useEffect, useId, useImperativeHandle, useRef } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ImperativePanelGroupHandle, PanelGroupProps, PanelResizeHandleProps } from 'react-resizable-panels'
 import { addTabPlacement, createWorkspaceLayout } from '@agentmux/layout'

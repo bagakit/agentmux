@@ -1,4 +1,4 @@
-import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
+import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { conversationAxis, type ConversationAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 

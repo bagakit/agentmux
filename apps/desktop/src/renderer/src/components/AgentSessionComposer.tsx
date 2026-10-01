@@ -1,13 +1,14 @@
+import { PosturePicker } from './PosturePicker'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { useRef, type ReactNode } from 'react'
-import type { ComposerInsert, ComposerInsertionHandle } from '../lib/composer-insertion'
+import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { appendFileReferences } from '../lib/composer-file-reference'
-import { appendSemanticReference, encodeSemanticReference, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '../lib/composer-semantic-reference'
+import { appendSemanticReference, encodeSemanticReference, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { AGENT_COMMAND_GROUP_LABEL, composerShortcutForBareWord, composerShortcutSuggestion, composerShortcutsForProvider, resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import {
@@ -22,12 +23,12 @@ import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit 
 import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { AgentComposer } from './AgentComposer'
+import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { useComposerFeedback } from './ComposerFeedback'
-import { errorIdentity } from '../lib/error-presentation'
+import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
@@ -320,7 +321,6 @@ export function AgentSessionComposer({
       primaryAction={submitMode.primaryAction}
       onHistoryRecall={historyRecall}
       {...(activeFile ? { activeFile } : {})}
-      {...(postureControl ? { postureControl } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
       // Interrupt rides `primaryAction`, NOT `canSubmit`. They answer different questions and
       // composer-submit-mode.ts keeps them apart on purpose ("Stop … independent of `canSubmit`"); wiring
@@ -351,7 +351,7 @@ export function AgentSessionComposer({
       // it cannot be buffered or replayed through that restoration boundary.
       {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' &&
         session.processState === 'running' && session.status.state !== 'disconnected'
-        ? { onSetPosture: (modeId: string) => void setPosture(sessionId, modeId) } : {})}
+        ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
       {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
         onQueue: () => queue()
       } : {})}

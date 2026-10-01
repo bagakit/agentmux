@@ -1,4 +1,4 @@
-import { isImeOwnedKeyboardEvent } from './ime-composition-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { isMacPlatform } from './host-platform'
 import { shouldBypassXtermKeyboardEvent } from './xterm-bypass-policy'
 

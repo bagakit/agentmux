@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { describe, expect, it, vi } from 'vitest'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 

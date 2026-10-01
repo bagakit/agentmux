@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { DesktopClientUiProvider } from './components/DesktopClientUiProvider'
 import { installUnobservedFailureReporter } from './lib/unobserved-failure'
 import { installFileDropGuard } from './lib/file-drop-guard'
 import { prepareRendererUpdate, useAppStore } from './store'
@@ -19,7 +20,7 @@ installFileDropGuard(window)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <DesktopClientUiProvider><App /></DesktopClientUiProvider>
   </StrictMode>
 )
 

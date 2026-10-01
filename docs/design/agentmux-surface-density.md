@@ -527,51 +527,67 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 ## 样式表的组织
 
 一个 2551 行的 `styles.css` 不是"文件大"的问题，是**找不到东西**的问题：改 Topic 行要先 grep 出
-它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构：
+它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构。以下清单按 Desktop 入口的实际层叠顺序排列；共同对话样式归 `packages/client-ui/src/styles`，Desktop 在原层叠位置导入，其他 Client 直接消费共享包样式：
 
 ```
 styles/
   index.css       入口：@import 的顺序即层叠顺序
-  tokens.css      唯一的 :root——颜色、字号、间距、圆角、阴影、动效
-  base.css        reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
-  chrome.css      Titlebar、Project Rail、Tabbar、Attention Bar
+  tokens.css  唯一的 :root——颜色、字号、间距、圆角、阴影、动效
+  base.css  reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
+  chrome.css  Titlebar、Project Rail、Tabbar、Attention Bar
   space-tree.css  Space 查找、分类、折叠与目录 pins 归属
   space-object-appearance.css  Space 共用身份图标与紧凑选择面
-  selector.css    同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
-  dock.css        Tool Dock 这个容器本身及其 Topics / Agents 面板
+  selector.css  同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
+  dock.css  Tool Dock 这个容器本身及其 Topics / Agents 面板
   topic-topology.css  Topic 行尾的工作台拓扑：Region 缩略图、在场簇、悬停展开的 Tab/Region 检视面
-  file-explorer.css   被塞进工具槽的文件浏览器：Explorer 头、搜索、文件树、文件列表
+  file-explorer.css  被塞进工具槽的文件浏览器：Explorer 头、搜索、文件树、文件列表
   source-control.css  Source Control 面板：Branches 与 Changes 两视图及其共用外壳
-  workbench.css   Pane、Region、分屏、拖放
-  terminal.css    终端表面与它的状态覆盖层
-  surfaces.css    Settings、New Tab、Launch、Welcome
+  workbench.css  Pane、Region、分屏、拖放
+  file-preview.css  共用文件预览与就地编辑
+  note.css  Note 阅读、编辑与恢复
+  terminal.css  终端表面与它的状态覆盖层
+  surfaces.css  Settings、New Tab、Launch、Welcome
   settings-overview.css  Settings overview 的实际分区与紧凑身份行
-  board.css       Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
+  settings-toolkit.css  Settings 工具目录
+  settings-keyboard-shortcuts.css  Settings 键盘快捷键
+  board.css  Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
-  goals.css       现有 Agent Goal 与任务约束表面
-  focus.css       Focus 三段工作面：历史、状态、选中的 Session
+  goals.css  现有 Agent Goal 与任务约束表面
+  focus.css  Focus 三段工作面：历史、状态、选中的 Session
+  focus-timeline-ruler.css  Focus 时间轴与有界标尺
   pmo-teams-topic.css  Mote 快捷面、对象选择与 compact 入口
-  browser.css     Browser 工具与地址栏
+  mote-workface.css  Mote 工作面与导航底栏
+  browser.css  Browser 工具与地址栏
   browser-operation-surface.css  Browser 操作轨迹与回放表面
   browser-step-evidence.css  Browser 步骤证据详情
   browser-structured-fields.css  Browser 有限结构化字段与来源
   browser-task-assets.css  Browser 版本资产与参数编辑
-  agent.css       Agent 会话外壳、状态栏、Provider 选择、权限卡点
+  agent.css  Agent 会话外壳、状态栏与 Provider 选择
+  interaction.css  权限与问题卡（packages/client-ui/src/styles）
+  settings-prompts.css  Settings 用户 Prompt
+  settings-materials.css  Settings 素材目录
+  survey.css  结构化问答表面
   result-review.css  Result ready 的紧凑入口、结果详情与复查动作
   service-notice.css  服务提醒的轻量入口、收起、复查与有界详情
   status-prompts.css  用户 Prompt 的状态绑定与 Composer 快捷动作
   agent-region-header.css  Agent Region 身份与就地操作
   session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
-  composer.css    Composer——Agent 那格底部的输入条
-  activity.css    Activity 时间线、机器步骤与标尺
-  activity-conversation.css  Activity 对话回合与 Markdown 内容
-  conversation-tool-trace.css  原生对话工具调用与结果
+  composer.css  Composer——Agent 那格底部的输入条（packages/client-ui/src/styles）
+  launcher.css  新 Agent 启动入口
+  resume.css  已有 Session 恢复入口
+  activity.css  Activity 时间线、机器步骤与标尺
+  conversation-message.css  对话回合、消息动作与状态（packages/client-ui/src/styles）
+  markdown.css  共同正文的 Markdown、资源与图片（packages/client-ui/src/styles）
+  conversation-input-details.css  消息来源、作者与输入详情（packages/client-ui/src/styles）
+  conversation-tool-trace.css  原生对话工具调用与结果（packages/client-ui/src/styles）
+  conversation-native-thread.css  原生对话过程与消息顺序（packages/client-ui/src/styles）
   session-history.css  持久会话记录的内联阅读
-  workflow.css    Workflow 观察画廊：组件目录、章节与流程图
-  conversation-avatar.css    两条对话轴共用的说话人身份标记
-  conversation-axis.css      说话人轴与 this-agent 轴（标尺之上的身份轨）
-  overlays.css    Dialog、Context Menu、Quick Switch、Tooltip
+  workflow.css  Workflow 观察画廊：组件目录、章节与流程图
+  conversation-avatar.css  两条对话轴共用的说话人身份标记（packages/client-ui/src/styles）
+  conversation-axis.css  说话人轴与 this-agent 轴（标尺之上的身份轨）
+  overlays.css  Dialog、Context Menu、Quick Switch、Tooltip
   agent-panels.css  Agent 的 Portal 面板（花名册、计数树、资源用量）——紧跟 overlays
+  performance-toolkit.css  性能观察与脚本工具
   agent-avatar.css  执行器头像的 Provider 轮廓、角标、状态、计数与设置预览
   full-page-loading.css  启动与全页 loading/recovering/failed 大屏的网格、切片、品牌层和动效
 ```

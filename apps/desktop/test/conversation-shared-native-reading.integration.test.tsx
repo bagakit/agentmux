@@ -1,7 +1,8 @@
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +12,7 @@ import { projectSessionUserMessages } from '@agentmux/core/session-user-messages
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { parseTraceDisclosureKey } from '../src/renderer/src/components/ConversationMessage'
+import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
 import { api } from '../src/renderer/src/lib/api'
 
 let host: HTMLDivElement

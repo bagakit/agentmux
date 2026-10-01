@@ -1,5 +1,5 @@
 import { act, createElement, Fragment, type ReactNode } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../helpers/client-ui-render'
 import { expect, vi } from 'vitest'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })

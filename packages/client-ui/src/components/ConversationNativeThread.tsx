@@ -1,9 +1,9 @@
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { memo, useMemo } from 'react'
-import { buildNativeContinuationPrompt } from '../lib/session-continuation'
-import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker'
-import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage'
+import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
+import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation'>

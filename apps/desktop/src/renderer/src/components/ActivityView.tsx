@@ -15,32 +15,22 @@ import {
   toolCallToDiff,
   type ToolDiff
 } from '../lib/activity-diff'
-import {
-  createRulerScale,
-  describeReadout,
-  describeRulerAxis,
-  describeSpan,
-  describeActivityRecordTime,
-  formatClock,
-  formatDuration,
-  rulerBand,
-  stepRulerSelection,
-  type RulerReadoutText,
-  type RulerScale
-} from '../lib/activity-ruler'
-import { stepTitle } from '../lib/activity-step-summary'
+import { createRulerScale, describeReadout, describeRulerAxis, describeSpan, describeActivityRecordTime, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
+import { formatClock, formatDuration } from '@agentmux/client-ui/conversation-time'
+import { stepTitle } from '@agentmux/client-ui/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { speaksAsAgent, type ConversationAxisItem, type ConversationAxisMark } from '../lib/conversation-axis'
 import { buildContinuationPrompt } from '../lib/session-continuation'
-import { isConversationTurn, speakerOf, speakerOfUserMessage } from '../lib/conversation-speaker'
+import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'
+import { speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
-import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
-import type { ReadPastedImage } from './ConversationImage'
+import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
+import type { ReadPastedImage } from '@agentmux/client-ui/components/ConversationImage'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
-import { ConversationMessage } from './ConversationMessage'
-import { ConversationNativeThread } from './ConversationNativeThread'
-import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'

@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { flushSync } from 'react-dom'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { FileExplorer } from '../../../src/renderer/src/components/FileExplorer'
@@ -9,7 +10,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab, documentKey, fileTabId } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { useNativeOverlayChrome } from '../../../src/renderer/src/hooks/useNativeOverlayChrome'
-import { ConversationMessage } from '../../../src/renderer/src/components/ConversationMessage'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import '../../../src/renderer/src/styles/index.css'
 
 const boot = (window as any).previewFixtureBoot
@@ -46,7 +47,7 @@ function Shell() {
       <TransientErrorNotice error={error} dismissed={dismissed} lastError={lastError} onDismiss={() => useAppStore.getState().dismissError()} onReopen={() => useAppStore.getState().reopenError()} />
     </div></div><WindowOverlayHost /></>
 }
-flushSync(() => root.render(<Shell />))
+flushSync(() => root.render(<DesktopClientUiProvider><Shell /></DesktopClientUiProvider>))
 const sourceTabId = fileTabId(workspaceId, 'docs/readme.md')
 const source = () => useAppStore.getState().tabs[sourceTabId]!
 const probe = {
@@ -71,9 +72,9 @@ const probe = {
   },
   conversation(content: string, ratio = .65) {
     messageProjection = { content, ratio }
-    flushSync(() => root.render(<Shell />))
+    flushSync(() => root.render(<DesktopClientUiProvider><Shell /></DesktopClientUiProvider>))
   },
-  hideConversation() { messageProjection = null; flushSync(() => root.render(<Shell />)) },
+  hideConversation() { messageProjection = null; flushSync(() => root.render(<DesktopClientUiProvider><Shell /></DesktopClientUiProvider>)) },
   activate(tabId: string) { const state = useAppStore.getState(); state.activateTab(workspaceId, state.layouts[workspaceId]!.activeGroupId, tabId) },
   theme(theme: 'light' | 'dark') { document.documentElement.dataset.appearance = theme },
   flush() { return prepareRendererUpdate('quit') }

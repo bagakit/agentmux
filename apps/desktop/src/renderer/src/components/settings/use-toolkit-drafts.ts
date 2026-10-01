@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ToolkitToolDefinition, ToolkitToolFields } from '@agentmux/core/control'
-import { presentError } from '../../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { configValuesEqual } from '../../../../shared/config-edit'
 
 const fields = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions'] as const

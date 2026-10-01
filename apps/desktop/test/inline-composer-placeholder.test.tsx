@@ -2,7 +2,7 @@
 import { act } from 'react'
 import type { Editor } from '@tiptap/core'
 import { expect, it, vi } from 'vitest'
-import { InlineComposer, documentDraft } from '../src/renderer/src/components/InlineComposer'
+import { InlineComposer, documentDraft } from '@agentmux/client-ui/components/InlineComposer'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'

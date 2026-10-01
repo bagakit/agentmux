@@ -8,7 +8,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useStore } from 'zustand'
 import { browserOpenError } from '../lib/browser-open-feedback'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useReleasedBrowserRegionIds } from '../lib/surface-memory-budget-coordinator'
 import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, surveyZoneTopicFacts, type SurveyZoneSelection } from '../lib/survey-workface'
 import { type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'

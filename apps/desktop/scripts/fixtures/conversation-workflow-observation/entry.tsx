@@ -1,5 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { useState } from 'react'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { ActivityView } from '../../../src/renderer/src/components/ActivityView'

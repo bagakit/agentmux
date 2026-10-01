@@ -4,12 +4,12 @@ import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUs
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionControl, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
-import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown'
-import { ConversationMessage, parseTraceDisclosureKey } from './ConversationMessage'
-import type { ConversationAnnotationSelection } from './ConversationAnnotationNote'
-import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker'
+import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
+import { ConversationMessage, parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
+import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
+import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
 type ReadingAnchor = { id: string; offset: number }
 type ReadingState = {

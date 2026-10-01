@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { LoaderCircle, RefreshCw } from 'lucide-react'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'

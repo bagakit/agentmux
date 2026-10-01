@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Camera, LoaderCircle, MessagesSquare, SquareTerminal } from 'lucide-react'
 import type { AgentCatalogEntry, AgentSkill } from '@agentmux/core'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SessionViewMode } from '../lib/session-state'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'

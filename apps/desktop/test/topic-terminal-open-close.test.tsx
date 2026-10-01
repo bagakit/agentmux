@@ -2,7 +2,8 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { act, createElement, useEffect } from 'react'
 import { readFileSync } from 'node:fs'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import type { SessionSnapshot } from '../src/shared/contracts'

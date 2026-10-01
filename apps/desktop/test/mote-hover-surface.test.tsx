@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement, Fragment, useMemo } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
