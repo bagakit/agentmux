@@ -8,12 +8,19 @@
   color: var(--text); background: var(--surface-0); gap: var(--sp-2); padding: var(--sp-2);
 }
 .global-survey-surface[hidden], .survey-management[hidden], .survey-tabs[hidden] { display: none; }
-.survey-tabs, .survey-management, .survey-start-input, .survey-topic-menu {
+.survey-navigation, .survey-management, .survey-start-input, .survey-topic-menu {
   background: linear-gradient(135deg, var(--wash-1), transparent 48%), var(--survey-glass);
   backdrop-filter: blur(20px) saturate(110%); border: 1px solid var(--survey-edge);
   box-shadow: inset 0 1px var(--wash-2), var(--elev-1);
 }
-.survey-tabs { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); border-color: transparent; border-radius: var(--radius); container: survey-list / inline-size; }
+.survey-navigation { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); border-color: transparent; border-radius: var(--radius); container: survey-list / inline-size; }
+.survey-navigation[data-collapsed="true"] { min-width: 40px; max-width: 40px; align-items: center; padding-inline: var(--sp-1); }
+.survey-tabs { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.survey-item-actions { display: flex; flex: none; align-items: center; gap: var(--sp-2); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--survey-edge); }
+.survey-item-actions > button { flex: 1; min-width: 0; justify-content: center; }
+.survey-navigation[data-collapsed="true"] .survey-item-actions { flex-direction: column; }
+.survey-navigation[data-collapsed="true"] .survey-item-actions > button { flex: none; width: 28px; height: 28px; padding: 0; }
+.survey-navigation[data-collapsed="true"] .survey-item-actions > button > span { display: none; }
 .survey-sidebar-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .survey-icon-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .survey-icon-button:hover, .survey-icon-button[data-state="open"] { color: var(--text); background: var(--wash-2); }
@@ -24,8 +31,8 @@
 .survey-width-handle:focus-visible { box-shadow: var(--focus-ring); }
 .survey-new-page { flex: 1; min-width: 0; min-height: 28px; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; cursor: pointer; font: inherit; font-size: var(--fs-body); }
 .survey-new-page:hover { background: var(--wash-2); }
-.survey-tabs button:focus-visible, .survey-management header button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
-.survey-tabs button:disabled { opacity: .5; cursor: default; }
+.survey-navigation button:focus-visible, .survey-management header button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+.survey-navigation button:disabled { opacity: .5; cursor: default; }
 .survey-page-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
 .survey-item-row { position: relative; min-width: 0; flex: none; border-radius: var(--radius); }
 .survey-item-row:hover { background: var(--wash-1); }
@@ -106,12 +113,13 @@
 @container survey-list (max-width: 140px) {
   .survey-item { gap: var(--sp-2); }
   .survey-item-meta { gap: var(--sp-1); }
+  .survey-item-actions > button > span { display: none; }
 }
 @supports not (backdrop-filter: blur(1px)) { .global-survey-surface, .survey-topic-menu { --survey-glass: var(--surface-1); } }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .global-survey-surface, .survey-topic-menu { --survey-glass: var(--surface-1); --survey-edge: var(--line); } }
 
 .survey-page-content > .survey-relation-notice { flex: none; padding: var(--sp-3) var(--sp-5); }
-@media (max-height: 480px) { .survey-tabs { gap: var(--sp-4); padding-block: var(--sp-3); } .survey-start { gap: var(--sp-4); padding: var(--sp-5); } }
+@media (max-height: 480px) { .survey-navigation { gap: var(--sp-3); padding-block: var(--sp-2); } .survey-start { gap: var(--sp-4); padding: var(--sp-5); } }
 
 .survey-start-heading { max-width: 520px; text-align: center; }
 .survey-start-heading h1 { margin: 0 0 var(--sp-3); color: var(--text); font-size: var(--fs-display); font-weight: 550; letter-spacing: -.025em; }

@@ -286,7 +286,7 @@ it('flat list keeps exact original order across projects, worktrees, Scratch and
 
 it('resizes the actual Survey sidebar with pointer and keyboard while preserving its original work surface and saved preference in narrow space', async () => {
   await dom.render(<App />); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
-  const sidebar = dom.container.querySelector<HTMLElement>('[aria-label="Survey items"]')!, handle = sidebar.querySelector<HTMLElement>('[aria-label="Resize Survey items"]')!
+  const sidebar = dom.container.querySelector<HTMLElement>('[aria-label="Exploration navigation"]')!, handle = sidebar.querySelector<HTMLElement>('[aria-label="Resize Survey items"]')!
   const state = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!, field = address()
   await fill(field, 'Original sidebar input'); field.setSelectionRange(2, 9)
   expect(handle.getAttribute('aria-orientation')).toBe('vertical'); expect(sidebar.style.width).toBe('220px')
@@ -878,7 +878,7 @@ it('keeps a distinct unnamed exploration instead of concatenating its mixed Tab 
   expect(row.querySelector('strong')!.textContent).toBe('Untitled exploration')
   expect(row.querySelector('.survey-item')!.getAttribute('title')).toBe('Untitled exploration')
   expect(row.querySelector('.survey-item')!.getAttribute('aria-label')).toBe('Show survey item: Untitled exploration')
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(false)
+  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
   expect(row.textContent).not.toContain('2 tabs')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
 })
@@ -904,8 +904,15 @@ it('flat list exposes one Item-options menu in either sidebar state and keeps th
   const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!
   expect(original).not.toBeNull()
   expect(dom.container.querySelectorAll('[aria-label="Exploration options"]')).toHaveLength(1)
+  const actions = dom.container.querySelector<HTMLElement>('[aria-label="Current exploration actions"]')!
+  expect(actions).not.toBeNull()
+  expect(actions.closest('[aria-label="Exploration navigation"]')).not.toBeNull()
+  expect(actions.querySelector('[aria-label="Exploration options"]')).not.toBeNull()
+  expect(actions.querySelector('[aria-label="Add note to this exploration"]')).not.toBeNull()
+  expect(dom.container.querySelector('.survey-page-content [aria-label="Exploration options"]')).toBeNull()
+  expect(dom.container.querySelector('.survey-page-content [aria-label="Add note to this exploration"]')).toBeNull()
   expect(dom.container.querySelector('.survey-item-details')).toBeNull()
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(false)
+  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
   const optionsTrigger = await openItemOptions()
   expect(document.querySelector('.survey-item-menu')!.textContent).toContain('Agent')
   await act(async () => document.querySelector('.survey-item-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
@@ -914,7 +921,10 @@ it('flat list exposes one Item-options menu in either sidebar state and keeps th
   await openItemOptions(); await dom.click('[aria-label="Hide Survey items"]')
   expect(document.querySelector('[role="menu"]')).toBeNull()
   expect(dom.container.querySelectorAll('[aria-label="Exploration options"]')).toHaveLength(1)
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(false)
+  expect(actions.querySelector('[aria-label="Exploration options"]')).not.toBeNull()
+  expect(actions.querySelector('[aria-label="Add note to this exploration"]')).not.toBeNull()
+  expect(dom.container.querySelector('.survey-page-content [aria-label="Exploration options"]')).toBeNull()
+  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
   await openItemSubmenu('Choose original work surface')
   const candidate = [...document.querySelectorAll<HTMLElement>('.survey-panel-choice')].find(item => JSON.parse(item.dataset.surveyPanelReference!).regionId === pageB.regionId)!
   expect(candidate).not.toBeNull()
@@ -1052,7 +1062,7 @@ it('restores the exact exploration name through the original UI owner without dr
   expect(restored.surveyCollectedZones).toEqual({ 'retained-unknown-zone': true })
 })
 
-it('adds a Note in a foreign nonactive display Group while preserving the original global selection', async () => {
+it('adds a Note from the collapsed left actions in a foreign nonactive display Group while preserving the original global selection', async () => {
   const writes = new Map<string, string>(), foreignGroup = 'foreign-note-group'
   const original = createWorkspaceLayout('original-group', [mixed.id])
   const display = { ...original, root: { type: 'split' as const, direction: 'horizontal' as const, ratio: .4, first: original.root, second: { type: 'leaf' as const, groupId: foreignGroup } },
@@ -1063,15 +1073,37 @@ it('adds a Note in a foreign nonactive display Group while preserving the origin
   await dom.render(<App />); await enterSurvey(); await choose()
   const reference = { displayWorkspaceId: otherWorkspace.id, groupId: foreignGroup, tabId: mixed.id, regionId: pageA.regionId }
   await act(async () => useAppStore.getState().setSurveyZoneSelection({ zoneId: originalZoneId(), selection: [reference], active: reference }))
+  await dom.click('[aria-label="Hide Survey items"]')
+  const actions = dom.container.querySelector<HTMLElement>('[aria-label="Current exploration actions"]')!
+  expect(actions).not.toBeNull()
+  expect(actions.closest('[aria-label="Exploration navigation"]')).not.toBeNull()
+  expect(actions.querySelector<HTMLButtonElement>('[aria-label="Add note to this exploration"]')!.disabled).toBe(false)
   const before = useAppStore.getState()
   await dom.click('[aria-label="Add note to this exploration"]')
   await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.active?.tabId).not.toBe(mixed.id))
   const current = useAppStore.getState(), active = current.surveyZoneSelection!.active!
   expect(active.displayWorkspaceId).toBe(otherWorkspace.id); expect(active.groupId).toBe(foreignGroup)
   expect(current.tabs[active.tabId]!.workspaceId).toBe(workspace.id); expect(current.tabs[active.tabId]!.space?.zoneId).toBe(originalZoneId())
+  expect(current.surveySidebarCollapsed).toBe(true)
   expect(current.activeWorkspaceId).toBe(before.activeWorkspaceId)
   expect(current.layouts[otherWorkspace.id]!.activeGroupId).toBe(before.layouts[otherWorkspace.id]!.activeGroupId)
   expect(current.layouts[otherWorkspace.id]!.groups[0]!.activeTabId).toBe(before.layouts[otherWorkspace.id]!.groups[0]!.activeTabId); healthy()
+})
+
+it('opens the exploration name editor from the collapsed left Organize menu while preserving its original workface', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!
+  expect(original).not.toBeNull()
+  await dom.click('[aria-label="Hide Survey items"]')
+  await openItemOptions()
+  const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Rename exploration')!
+  expect(rename).not.toBeNull()
+  await act(async () => { rename.focus(); rename.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+  expect(useAppStore.getState().surveySidebarCollapsed).toBe(false)
+  expect(dom.container.querySelector('[aria-label="Survey items"]')!.contains(dom.container.querySelector('[aria-label="Exploration name"]'))).toBe(true)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original); healthy()
 })
 
 
