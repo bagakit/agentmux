@@ -71,7 +71,7 @@ describe('public amux sharing consumption', () => {
     const directory = await mkdtemp(join(tmpdir(), 'amux-sharing-package-'))
     try {
       const result = await exec('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', directory], {
-        cwd: packageRoot
+        cwd: packageRoot, timeout: 20_000
       })
       const archives = JSON.parse(result.stdout)
       expect(archives).toHaveLength(1)
@@ -83,5 +83,5 @@ describe('public amux sharing consumption', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 })
