@@ -366,3 +366,53 @@ it('hidden original source still refuses an unfocused requester without page inp
   expect(f.source.webContents.sendInputEvent).not.toHaveBeenCalled()
   expect(f.source.getVisible()).toBe(false);expect(f.source.webContents.dead).toBe(false)
 })
+
+
+it('passive selection restores native geometry and input authority while preserving keyboard focus', async () => {
+  const f = await fixture(), a = f.register('A')
+  expect(f.source.bounds.width).toBe(0)
+  expect(await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId,
+    { kind: 'select', focus: 'preserve' })).toEqual({ outcome: 'selected' })
+  expect(f.source.bounds).toEqual(geometry.bounds)
+  expect(f.source.getVisible()).toBe(true)
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  const shifted = { ...geometry.bounds, x: 52 }
+  f.manager.updatePresentation(f.app as never, f.frame as never, a.leaseId, { visible: true, bounds: shifted })
+  expect(f.source.bounds).toEqual(shifted)
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['original-page'] })
+  const prepared = await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId,
+    { kind: 'prepare-first-press', navigationId: f.browser.navigationId, captureId: capture.captureId,
+      down: { x: 0.25, y: 0.5 }, button: 'left', clickCount: 1, modifiers: [] })
+  expect(prepared.outcome).toBe('prepared')
+  if (prepared.outcome !== 'prepared') throw new Error('Actual original page input scope required')
+  expect(await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId,
+    { kind: 'commit-first-press', inputScopeId: prepared.inputScopeId, up: { x: 0.25, y: 0.5 }, modifiers: [] }))
+    .toEqual({ outcome: 'input-dispatched', inputScopeId: prepared.inputScopeId })
+  expect(f.source.webContents.focus).toHaveBeenCalledTimes(1)
+  expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+})
+it('rejects an invalid selection focus policy before changing the original native owner', async () => {
+  const f = await fixture(), a = f.register('A')
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId,
+    { kind: 'select', focus: 'invented-policy' } as never)).rejects.toThrow('Unknown Browser presentation focus policy')
+  expect(f.source.bounds.width).toBe(0)
+  expect(f.source.getVisible()).toBe(false)
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  expect(f.source.webContents.dead).toBe(false)
+})
+
+it('an invalid selection leaves an already-visible original and prepared human press usable', async () => {
+  const f = await firstPressFixture()
+  const originalBounds = { ...f.source.bounds }
+  const originalEvents = f.events().length
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, f.b.leaseId,
+    { kind: 'select', focus: 'invented-policy' } as never)).rejects.toThrow('Unknown Browser presentation focus policy')
+  expect(f.source.bounds).toEqual(originalBounds)
+  expect(f.source.getVisible()).toBe(true)
+  expect(f.events()).toHaveLength(originalEvents)
+  expect(f.source.webContents.dead).toBe(false)
+  expect(await f.commit()).toEqual({ outcome: 'input-dispatched', inputScopeId: f.prepared.inputScopeId })
+  expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+})

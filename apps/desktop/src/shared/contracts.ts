@@ -1304,7 +1304,7 @@ export type BrowserPresentationMouseModifier = 'shift' | 'control' | 'alt' | 'me
 export type BrowserPresentationSourceViewport = { width: number; height: number; zoomFactor: number }
 
 export type BrowserPresentationActivation =
-  | { kind: 'select' }
+  | { kind: 'select'; /** Passive restoration keeps the existing keyboard recipient. */ focus?: 'preserve' }
   | {
       kind: 'prepare-first-press'
       /** Exact current original BrowserSnapshot.navigationId, never the displayed URL/title. */
