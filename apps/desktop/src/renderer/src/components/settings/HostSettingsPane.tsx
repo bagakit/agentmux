@@ -5,6 +5,7 @@ import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRe
 import { useAppStore, type HostCheckState } from '../../store'
 import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
+import { DeviceManagementSettings } from './DeviceManagementSettings'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 
 const NO_SESSIONS: SessionSnapshot[] = []
@@ -122,6 +123,7 @@ export function HostSettingsPane({ config, onSave, active }: {
         })}
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
+      <DeviceManagementSettings active={active} />
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove SSH host?"

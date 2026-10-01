@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path'
 import { startAgentMuxHost, agentMuxHostStore } from './host.js'
-import { defaultPrivateAccessConfigurationPath, readPrivateAccessConfiguration,
+import { defaultPrivateAccessConfigurationPath, isPrivateAccessConfigurationPath, readPrivateAccessConfiguration,
   type PrivateAccessConfiguration } from './private-access-configuration.js'
 
 const storePath = process.env.AGENTMUX_AGENT_SESSION_STORE
@@ -10,8 +10,10 @@ if (storeArgument !== -1 && process.argv[storeArgument + 1] !== storePath) throw
 const privateArgument = process.argv.indexOf('--private-access')
 const privatePath = privateArgument === -1 ? defaultPrivateAccessConfigurationPath(storePath) : process.argv[privateArgument + 1]
 let privateAccess: PrivateAccessConfiguration | undefined, privateAccessIssue: string | undefined
+let privateAccessConfigurationPath: string | undefined
 try {
-  if (!privatePath || !isAbsolute(privatePath) || process.argv.filter(value => value === '--private-access').length > 1) throw new Error('Private mobile access needs one absolute non-secret manifest path. Correct this startup option; the original Unix Host and Runs remain available.')
+  if (!isPrivateAccessConfigurationPath(privatePath) || process.argv.filter(value => value === '--private-access').length > 1) throw new Error('Private mobile access needs one absolute non-secret manifest path. Correct this startup option; the original Unix Host and Runs remain available.')
+  privateAccessConfigurationPath = privatePath
   privateAccess = await readPrivateAccessConfiguration(privatePath)
 } catch (error) {
   if (!(privateArgument === -1 && (error as NodeJS.ErrnoException).code === 'ENOENT')) {
@@ -19,7 +21,8 @@ try {
   }
 }
 const host = await startAgentMuxHost({ store: agentMuxHostStore(storePath),
-  ...(privateAccess ? { privateAccess } : {}), ...(privateAccessIssue ? { privateAccessIssue } : {}) })
+  ...(privateAccess ? { privateAccess } : {}),
+  ...(privateAccessConfigurationPath ? { privateAccessConfigurationPath } : {}), ...(privateAccessIssue ? { privateAccessIssue } : {}) })
 let stopping = false
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   if (stopping) return; stopping = true
