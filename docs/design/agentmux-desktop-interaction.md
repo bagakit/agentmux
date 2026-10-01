@@ -1114,6 +1114,12 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 - Permission option 是并列的一套按 Provider 声明（见 `packages/core/src/agent-interaction.ts` 的 `TerminalPermissionOption`）：与 launch option 同构地拆成 describe/contribute 两半——DESCRIBE 半边（id/label/kind/description/tier）跨 IPC，CONTRIBUTE 半边（回答提示的 PTY 按键 `input`）只留在 Core，于 reply 时解析。两者的区别在于作用时机：launch option 作用在 spawn 的 argv，permission option 作用在运行中 Provider 自己的编号提示上；同样只声明位置稳定、对真实 CLI 核实过的行。
 - Posture control 是第三套并列声明（见 `packages/core/src/agent-interaction.ts` 的 `PostureControlDeclaration` 与 `createPostureControl`），是 Composer 上"这些权限设置也要能在聊天框上设"这一诉求唯一诚实的兑现方式。它专治运行时的 live 权限姿态：与 permission option 同处 Provider 的 interaction protocol 声明，同样拆成 DESCRIBE 半边（`AgentPostureControl`：control 的 id/label + 每个 mode 的 id/label/description/tier）跨 IPC，CONTRIBUTE 半边（每个 mode 的 in-band 按键 `input`）只留在 Core，由 `planPostureSet(modeId)` 在 set 时解析、经既有 PTY-input 通道（`setAgentPosture` → `writeAgentInput`）写入。诚实性由结构强制：一个 posture control **必须**声明 ≥2 个 mode，每个 mode 的按键**非空且互异**——因此一个只有盲态 Shift+Tab cycle（一枚按键在读不到的状态间轮转）的 Provider 结构上无法被表达成 set-mode 控件，绝不会伪装成"切到 mode X"。**盲发按键是真实风险，故只声明效果确定、可寻址的控件**：仅当存在能指名目标态的 slash 命令时才声明。据此对着真实二进制复核后，只有 grok 合格——它的 `/always-approve [on|off]`（clap ValueEnum 核实）给出 Ask / Auto-approve 两个各由独立 slash 命令 SET 的具名 mode；claude、gemini、codex 只有盲态 cycle（codex 另有无法盲导航的 `/approvals` 弹窗），一律不声明，Composer 对它们不画任何控件（未声明即不渲染）。控件是 fire-and-forget 的 SET，不是有状态开关：Composer 从不标记"当前 mode"，因为 live 姿态活在读不到的 CLI TUI 里，标一个 active mode 就是谎称掌握了它——菜单只提供可寻址的目标态，当前落点归 CLI 自己。
 
+### System Reminder 的默认与单次选择
+
+用户要求 System Reminder 有两层选择：Settings 设置「默认是否开启」，Launch 可以覆盖「本次会话是否开启」，参照现有 AgentMux guide 的默认初始指令设置。Settings 的选择提供新会话的默认值；Launch 未覆盖时沿用默认，显式选择只作用于本次会话，不回写 Settings 或改动其他已有会话。默认值与本次选择必须分别可理解，不能用一个含糊的开关同时表示两者。
+
+本项已确认的是默认与单次覆盖的关系，尚未确认提醒正文、触发时机或频率、出厂初值、默认配置的具体作用域，以及已有会话恢复时是否继续原选择。不能据「System Reminder」名称自行推定周期调度、system-role 协议、额外提醒 Store，或把 Provider 原生历史里的 reminder 当作 AgentMux 通用提醒能力。提醒的实际语义与发送 owner 明确前，不交付只改配置却不能兑现效果的开关；保存、开启、启动或历史出现提醒文字，都不冒充提醒已按约定送达。提醒流程失败按原健康能力与服务窗合同如实说明，不取消已有可用输入或启动；既有 AgentMux guide 保持其原合同。
+
 ### Provider 能力对齐与移植边界
 
 - 用户要求「很多 Provider 的实现不完整」，全面分析后对照最新参考实现逐家完善，尤其是 Agent 的 Session 分析、对话模式与 trace 观察。每个 Provider 的能力闭环必须分别可验证：原生 Session 身份与记录解析、完整对话与资源顺序、工具与推理等观察事实、恢复与交互能力不能只凭启动成功或 Hook 存在宣称完成。已有参考实现的能力应核验并复用；缺少协议依据时如实保留未知或不支持，不能把观察缺口变成健康 Agent 的阻断。完善任务按 Provider 分开验收，共享协议与展示只有一个 owner。
