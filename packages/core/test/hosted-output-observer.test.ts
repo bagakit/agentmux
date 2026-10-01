@@ -11,7 +11,7 @@ function fixture(fence = 0, gap: AgentMuxRpcOutputInitial['gap'] = null) {
   const session: AgentMuxRpcOutputInitial['session'] = { kind: 'agent', agentSessionId: 'a123456789012345',
     providerId: 'codex', executorId: 'private-executor', hostId: 'local', workspacePath: upstreamFixturePath("private-workspace"),
     run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
-  const original: AgentMuxRpcOutputInitial = { session, run: { runId: session.run.runId, kind: 'agent',
+  const original: AgentMuxRpcOutputInitial = { session, run: { nativeService: null, runId: session.run.runId, kind: 'agent',
     agentSessionId: session.agentSessionId, providerId: session.providerId, executorId: session.executorId,
     workspacePath: session.workspacePath, pid: 421, state: 'running', cols: 100, rows: 30,
     observedAt: 1, latestOutputBytes: fence, acceptedInputBytes: 0 }, gap,
@@ -92,7 +92,8 @@ describe('Hosted independent public output observer', () => {
   it('returns the original same-attachment terminal facts and nonzero resize revision without another snapshot or a substituted default', async () => {
     const f = fixture(2), client = await connectHostedAgentMux({ rpc: f.port })
     const terminal: AgentMuxRpcOutputInitial['terminal'] = { type: 'basic-vt',
-      checkpoint: { runId: f.original.run.runId, throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 } },
+      checkpoint: { runId: f.original.run.runId, throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 },
+        restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
       restoreBytes: Uint8Array.of(27, 99, 0xff),
       resizes: [{ throughByte: 2, resizeRevision: 7, size: { cols: 100, rows: 30 } }] }
     f.behavior.initial = { ...f.original, terminal, resizeRevision: 7 }

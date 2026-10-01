@@ -645,9 +645,12 @@ assert.ok(codexPid)
 await codexFirst.dispose()
 codexFirst = null
 
-const packedControlClient = await connectLocalAgentMux()
+let packedControlClient = await connectLocalAgentMux()
 const packedHost = await startPackedPublicControl({ codex, fakeCodex,
-  coreClients: () => [{ hostId: 'local', client: packedControlClient }] })
+  coreClients: () => packedControlClient ? [{ hostId: 'local', client: packedControlClient }] : [],
+  connectCore: async () => packedControlClient,
+  // Both RPC and Desktop control borrow this client; the phase owns its disposal.
+  disposeCore: async () => {} })
 const { controlServer, agentRegion } = packedHost
 controlEndpoint = controlServer.path
 const managedEnv = { AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: codex.agentSessionId,
@@ -826,8 +829,13 @@ await assert.rejects(
   (error) => error?.code === 'STALE_AGENT_SESSION'
 )
 await codexSecond.dispose()
+// The public RPC server borrows the current phase's semantic owner. Release its previous
+// client before the two continuity clients compete for the single Hook ingress.
+await packedControlClient.dispose()
+packedControlClient = null
 
 const continuityClient = await connectLocalAgentMux()
+packedControlClient = continuityClient
 const continuityContender = await connectLocalAgentMux()
 const continuityTimelineBefore = await continuityClient.sessionTimeline(codex.agentSessionId)
 const continuityResults = await Promise.all([
@@ -846,7 +854,8 @@ const continuityResults = await Promise.all([
 ])
 assert.deepEqual(
   continuityResults.map((result) => result.kind).sort(),
-  ['conflict', 'resumed']
+  ['conflict', 'resumed'],
+  JSON.stringify(continuityResults.map(({ kind, evidence }) => ({ kind, evidence })))
 )
 const continuityConflict = continuityResults.find((result) => result.kind === 'conflict')
 assert.equal(continuityConflict?.evidence.kind, 'hook-ingress-owner')
@@ -904,6 +913,7 @@ await waitFor('promptless continuity Run exit', async () => (
 ))
 await continuityClient.dispose()
 await continuityContender.dispose()
+packedControlClient = null
 
 const resumeRollbackDelegate = new AgentMuxFileAgentSessionStore()
 let failedResumeReservation = null
@@ -933,6 +943,7 @@ const resumeRollbackStore = {
   }
 }
 const resumeRollbackClient = await connectLocalAgentMux({ store: resumeRollbackStore })
+packedControlClient = resumeRollbackClient
 const runsBeforeResumeRollback = new Set((await resumeRollbackClient.listRuns()).map((run) => run.runId))
 let resumeRollbackError = null
 try {
@@ -961,12 +972,14 @@ assert.equal(
 assert.ok(failedResumeReservation)
 await resumeRollbackDelegate.releaseLifecycle(failedResumeReservation, failedResumeRetiredRuns)
 await resumeRollbackClient.dispose()
+packedControlClient = null
 
+packedControlClient = await connectLocalAgentMux()
 const resumePrompt = 'packed native resume prompt'
 const resumeResult = JSON.parse((await cli([
   'agent', 'resume', '--session', codex.agentSessionId, '--text', resumePrompt
 ])).stdout)
-const codexThird = await connectLocalAgentMux()
+const codexThird = packedControlClient
 const resumed = codexThird.agentSession(codex.agentSessionId)
 assert.equal(resumeResult.result.runId, resumed.run.runId)
 assert.equal(resumed.agentSessionId, codex.agentSessionId)
@@ -1048,7 +1061,10 @@ await waitFor('resumed Codex Run natural exit', async () => (
   (await codexThird.statusAgent(resumed.agentSessionId)).run.state === 'exited'
 ))
 await codexThird.dispose()
+packedControlClient = await connectLocalAgentMux()
 await cli(['agent', 'stop', '--session', resumed.agentSessionId])
+await packedControlClient.dispose()
+packedControlClient = null
 const codexStopped = await connectLocalAgentMux()
 assert.deepEqual(codexStopped.agentSessions(), [])
 const retiredContinuity = await codexStopped.ensureAgentContinuity({
@@ -1069,6 +1085,7 @@ assert.equal(typeof retiredContinuity.evidence.observedAt, 'number')
 await codexStopped.dispose()
 
 const literalPromptClient = await connectLocalAgentMux()
+packedControlClient = literalPromptClient
 const literalPromptEvents = []
 literalPromptClient.onEvent((event) => literalPromptEvents.push(event))
 const literalPromptAgent = await literalPromptClient.createAgent({
@@ -1091,6 +1108,7 @@ await waitFor('literal option-like prompt submitted', () => (
   output(literalPromptEvents, literalPromptAgent.run.runId).includes('codex-submit:--help:accepted')
 ))
 await literalPromptClient.dispose()
+packedControlClient = null
 const literalPromptCleanup = await connectLocalAgentMux()
 await literalPromptCleanup.stopAgent(literalPromptAgent.agentSessionId, literalPromptAgent.run)
 await literalPromptCleanup.dispose()
@@ -1822,6 +1840,7 @@ const acpSession = {
   nativeHandle: { kind: 'acp', adapterId: 'packed-acp', sessionId: 'packed-native' }
 }
 await acpStore.compareAndSwap(null, acpSession)
+packedControlClient = await connectLocalAgentMux()
 const resolvedAcp = JSON.parse((await cli([
   'agent', 'inspect', '--acp-native', 'packed-native', '--adapter', 'packed-acp'
 ])).stdout)

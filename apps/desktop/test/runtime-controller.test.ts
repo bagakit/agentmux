@@ -56,7 +56,7 @@ const runtimeFixture = vi.hoisted(() => {
     })
     readonly listRuns = vi.fn(async (): Promise<Array<{
       runId: string
-      acceptedInputBytes: number
+      acceptedInputBytes: number | null
     }>> => [])
     readonly attachTerminal = vi.fn(async (runId: string) => ({
       run: {
@@ -1048,6 +1048,7 @@ describe('RuntimeController configuration transaction', () => {
     inner.connected = true
     const cursors = new Map<string, number>()
     const run = (runId: string): CtxmuxAdapterRun => ({
+      nativeService: null,
       runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: _hygiene_fixturePath("repo"),
       pid: runId === 'run-1' ? 123 : 124, state: { type: 'running' }, cols: 80, rows: 24,
       latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0
@@ -1635,7 +1636,8 @@ describe('RuntimeController configuration transaction', () => {
           observedAt: 2,
           latestOutputBytes: 0,
           acceptedInputBytes: 0,
-          interruptionReason: 'daemon_restart'
+          interruptionReason: 'daemon_restart',
+          nativeService: null
         }
       }]
     })
@@ -2148,6 +2150,21 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.writeTerminal.mock.calls[0]?.[1].operationId).not.toBe(
       client.writeTerminal.mock.calls[1]?.[1].operationId
     )
+  })
+
+  it('retains the terminal while its input fence is unknown and admits input when the original fence becomes known', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    client.listRuns.mockResolvedValue([{ runId: 'run-1', acceptedInputBytes: null }])
+    const control: SessionControl = { kind: 'terminal', hostId: 'local', runId: 'run-1', run: { runId: 'run-1' } }
+    await expect(controller.write(control, 'A', 'user')).rejects.toThrow('Input cursor is unavailable')
+    expect(client.writeTerminal).not.toHaveBeenCalled()
+    expect(client.dispose).not.toHaveBeenCalled()
+    expect(client.releaseRunAttachment).not.toHaveBeenCalled()
+    client.listRuns.mockResolvedValue([{ runId: 'run-1', acceptedInputBytes: 4 }])
+    await controller.write(control, 'A', 'user')
+    expect(client.writeTerminal).toHaveBeenCalledOnce()
+    expect(client.writeTerminal.mock.calls[0]?.[1].expectedByte).toBe(4)
   })
 
   it('answers split Codex color queries only after Core publishes the ready Agent Session', async () => {

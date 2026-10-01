@@ -23,6 +23,8 @@ import {
   type RecoverableStopOperation,
   type RunEvent,
   type RunInfo,
+  type NativeServiceSnapshot,
+  type NativeServiceFailure,
   type RuntimeIdentity
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
@@ -31,7 +33,7 @@ import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
 import { missingHostEnvironmentKeys, removeInheritedHostSignals } from './terminal-environment-policy.js'
-import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation } from './types.js'
+import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation, AgentMuxNativeService, AgentMuxNativeServiceFailure } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
   defaultAgentMuxRuntimeDirectory,
@@ -45,8 +47,8 @@ import {
 // by CTXMUX_MANIFEST_SHA256). Bundled artifact diagnostics and terminalEnvironment import these
 // instead of retyping them. The serving listener's identity comes from public RuntimeIdentity;
 // its source commit is not exposed by that protocol and must not be inferred from this bundle.
-export const CTXMUX_COMMIT = 'e4d3dd7d32dccc82e6dcd54620e0c79dec0f4943'
-const CTXMUX_TREE = 'f1f7fdf6e62541e18181340a0d3dc91a0b8e94db'
+export const CTXMUX_COMMIT = 'b061b8d05b8553398bb5ad43bf7e81b7f42733a6'
+const CTXMUX_TREE = '1f643ee07f48c5810e9e34ef9715c78e8024ba38'
 export const CTXMUX_VERSION = '0.1.0'
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
@@ -133,6 +135,7 @@ export type CtxmuxAdapterRun = {
   latestOutputBytes: number
   firstAvailableByte: number
   acceptedInputBytes: number | null
+  nativeService: AgentMuxNativeService | null
 }
 
 export type CtxmuxAdapterDataEvent = {
@@ -171,6 +174,7 @@ export type CtxmuxAdapterEvent =
   | CtxmuxAdapterExitEvent
   | CtxmuxAdapterGapEvent
   | CtxmuxAdapterResizedEvent
+  | { type: 'service'; runId: string; nativeService: AgentMuxNativeService; observedAt: number }
 
 export type CtxmuxAdapterObservationEvent =
   | CtxmuxAdapterEvent
@@ -360,7 +364,10 @@ function artifactDirectory(): string {
 
 function translateCtxmuxError(error: unknown): AgentMuxError {
   if (error instanceof CtxmuxCommandError) {
-    return new AgentMuxError(error.message, `CTXMUX_${error.code}`, error.disposition)
+    return new AgentMuxError(error.message, `CTXMUX_${error.code}`, error.disposition, {
+      disposition: error.disposition,
+      confirmedInputBytes: error.confirmedInputBytes
+    })
   }
   if (error instanceof CtxmuxProtocolError) {
     return new AgentMuxError(error.message, `CTXMUX_${error.code}`)
@@ -648,6 +655,35 @@ function liveResizedSize(event: RunEvent): OwnerConfirmedSize | null {
   return { cols: size.cols, rows: size.rows }
 }
 
+function projectServiceFailure(reason: NativeServiceFailure): AgentMuxNativeServiceFailure {
+  return typeof reason === 'string' ? reason : {
+    ownerIoFailed: { stage: reason.owner_io_failed.stage, osError: reason.owner_io_failed.os_error }
+  }
+}
+
+function projectNativeService(service: NativeServiceSnapshot): AgentMuxNativeService {
+  return {
+    revision: service.revision,
+    owner: service.owner.type === 'stopped'
+      ? { type: 'stopped', reason: projectServiceFailure(service.owner.reason) } : { ...service.owner },
+    output: service.output.type === 'unavailable'
+      ? { type: 'unavailable', reason: projectServiceFailure(service.output.reason) } : { ...service.output },
+    input: {
+      phase: service.input.phase.type === 'unavailable'
+        ? { type: 'unavailable', reason: projectServiceFailure(service.input.phase.reason) } : { ...service.input.phase },
+      unsettledCommands: service.input.unsettled_commands,
+      unsettledRequestBytes: service.input.unsettled_request_bytes,
+      writeBlocked: service.input.write_blocked,
+      completedInputBytes: service.input.completed_input_bytes,
+      currentSize: service.input.current_size,
+      activeConfirmedBytes: service.input.active_confirmed_bytes
+    },
+    terminalFault: service.terminal_fault === null ? null : {
+      stage: service.terminal_fault.stage, throughByte: service.terminal_fault.through_byte
+    }
+  }
+}
+
 export class CtxmuxRunAdapter {
   readonly socketPath = defaultCtxmuxSocketPath()
   readonly stateDirectory = defaultCtxmuxStateDirectory()
@@ -679,7 +715,8 @@ export class CtxmuxRunAdapter {
       rows: size?.rows ?? null,
       latestOutputBytes: run.latest_output_bytes,
       firstAvailableByte: run.first_available_byte,
-      acceptedInputBytes: run.applied_input_bytes
+      acceptedInputBytes: run.applied_input_bytes,
+      nativeService: run.native_service === null ? null : projectNativeService(run.native_service)
     }
   }
 
@@ -1148,7 +1185,10 @@ export class CtxmuxRunAdapter {
             runId: source.checkpoint.run_id,
             throughByte: source.checkpoint.through_byte,
             resizeRevision: source.checkpoint.resize_revision,
-            size: source.checkpoint.size
+            size: source.checkpoint.size,
+            restoreSize: source.checkpoint.restore_size,
+            restoreScrollbackRows: source.checkpoint.restore_scrollback_rows,
+            resizeAfterRestoreBytes: source.checkpoint.resize_after_restore_bytes
           },
           restoreBytes: snapshot.terminal_restore,
           resizes: source.resizes.map((resize) => ({
@@ -1335,6 +1375,9 @@ export class CtxmuxRunAdapter {
       }
     }
     if (event.type === 'output') return decodeChunk(runId, decoder, event.chunk)
+    if (event.type === 'service_changed') {
+      return { type: 'service', runId, nativeService: projectNativeService(event.service), observedAt: Date.now() }
+    }
     if (event.type === 'gap') {
       return { type: 'gap', runId, latestOutputBytes: event.latest_output_bytes }
     }

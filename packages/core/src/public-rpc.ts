@@ -235,7 +235,7 @@ export type AgentMuxRpcStreamInitial<M extends AgentMuxRpcStreamMethod> =
   : { observation: import('./metrics.js').MetricsObservation }
 export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'end'; data: unknown }
-  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown } }
+  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure } }
   | (M extends 'runtime.events' | 'runtime.history-watch' ? Extract<import('./hosted-client-contract.js').AgentMuxHostedStreamEvent, { type: 'snapshot' }>
     : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }

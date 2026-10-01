@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -47,11 +47,12 @@ type KernelDataEvent = { type: 'resized'; runId: string; cols: number; rows: num
 
 function runningRun(runId: string, overrides: Partial<CtxmuxAdapterRun> = {}): CtxmuxAdapterRun {
   return {
+    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     pid: 4321,
     state: { type: 'running' as const },
     cols: 80,
@@ -162,7 +163,7 @@ function storedSession(overrides: Partial<AgentMuxStoredAgentSession> = {}): Age
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'binding-1',

@@ -25,7 +25,7 @@ export async function rpcOwnerFixture(ids = ['caller', 'recipient']) {
   const inner = client as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
   const run = (runId: string): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: root,
-    pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 3, firstAvailableByte: 0, acceptedInputBytes: 0 })
+    pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 3, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null })
   inner.kernel.status = vi.fn(async (id: string) => run(id))
   const observers = new Set<(event: CtxmuxAdapterObservationEvent) => void>(), closes = vi.fn()
   inner.kernel.observeOutput = vi.fn(async (id: string, _after: number, listener: (event: CtxmuxAdapterObservationEvent) => void) => {

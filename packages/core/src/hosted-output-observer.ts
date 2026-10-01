@@ -59,7 +59,7 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
             if (!initial) throw new AgentMuxError('Output arrived before its original attachment identity.', 'CONTROL_PROTOCOL_ERROR')
             if (event.type === 'error') {
               fail(new AgentMuxError(event.error.message, event.error.code,
-                typeof event.error.details === 'string' ? event.error.details : undefined)); return
+                event.error.detail ?? (typeof event.error.details === 'string' ? event.error.details : undefined), event.error.controlFailure)); return
             }
             if (event.type === 'output') {
               const output = event.data

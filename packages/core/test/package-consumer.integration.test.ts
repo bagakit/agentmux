@@ -329,7 +329,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
   'packed @agentmux/core ctxmux consumer',
   () => {
     it('runs the Shell vertical outside the checkout with the pinned SDK and binaries', async () => {
-      const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-packed-ctxmux-"))
+      const root = await realpath(await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-packed-ctxmux-")))
       roots.push(root)
       const packDirectory = join(root, 'pack')
       const packWorkspace = join(root, 'pack-workspace')
@@ -501,7 +501,16 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         [name, version === 'workspace:*' ? manifests.get(name)!.version : version]))
       expect(installedManifest.dependencies).toEqual(publishedDependencies)
       expect(installedManifest.dependencies['@agentmux/demand']).toBe(manifests.get('@agentmux/demand')!.version)
-      expect(JSON.stringify(installedManifest)).not.toMatch(/(?:workspace|file|link):/u)
+      const developmentSdk = 'file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz'
+      expect(installedManifest.devDependencies['@ctxmux/sdk']).toBe(developmentSdk)
+      const sdkArchive = await realpath(join(packageRoot, developmentSdk.slice('file:'.length)))
+      expect(sdkArchive.startsWith(`${resolvedPackageRoot}/`)).toBe(true)
+      expect(sdkArchive.startsWith(repositoryRoot)).toBe(false)
+      const artifactManifest = JSON.parse(await readFile(join(packageRoot, 'vendor/ctxmux/darwin-arm64/manifest.json'), 'utf8'))
+      expect(createHash('sha256').update(await readFile(sdkArchive)).digest('hex')).toBe(artifactManifest.sdk.archive.sha256)
+      const publicManifest = structuredClone(installedManifest)
+      delete publicManifest.devDependencies['@ctxmux/sdk']
+      expect(JSON.stringify(publicManifest)).not.toMatch(/(?:workspace|file|link):/u)
       expect(await realpath(join(consumerDirectory, 'node_modules/@agentmux/demand'))).toBe(join(consumerDirectory, 'node_modules/@agentmux/demand'))
       await Promise.all([
         writeFile(join(consumerDirectory, 'consumer.ts'), [

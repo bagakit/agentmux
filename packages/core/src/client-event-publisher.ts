@@ -10,6 +10,7 @@ import type {
   AgentMuxRun,
   AgentMuxRunDataEvent,
   AgentMuxRunExitEvent,
+  AgentMuxNativeService,
   AgentTimelineCommit,
   NormalizedHookEvent
 } from './types.js'
@@ -88,6 +89,13 @@ export class AgentMuxClientEventPublisher {
         run: runRef(run)
       }
     })
+    if (run.nativeService !== null) this.publishRunService(run, run.nativeService, run.observedAt, agentSessionId)
+  }
+
+  publishRunService(run: { runId: string }, nativeService: AgentMuxNativeService, observedAt: number, agentSessionId?: string): void {
+    const evidence: AgentMuxEvidence = { source: 'run-process', observedAt, run: runRef(run) }
+    const scope = agentSessionId === undefined ? {} : { agentSessionId }
+    this.publish({ type: 'run-service', ...scope, run: runRef(run), nativeService, evidence })
   }
 
   publishRunEvent(

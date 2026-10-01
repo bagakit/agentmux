@@ -160,7 +160,7 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'demand.delete': true,
   'demand.link-session': true,
   'demand.link-project': true,
-  'demand.decision-log': true
+  'demand.decision-log': true,
   'agent.view': true,
   'space.view': true,
   'space.swap': true,

@@ -269,6 +269,7 @@ function projectSession(
         ? { turnUsage: structuredClone(subject.agentSession.turnUsage) }
         : {}),
       latestOutputBytes: run.latestOutputBytes,
+      nativeService: run.nativeService,
       control: {
         kind: 'agent',
         hostId: subject.hostId,
@@ -290,6 +291,7 @@ function projectSession(
     ...runInterruptionFact(run),
     status: processStatus,
     latestOutputBytes: run.latestOutputBytes,
+    nativeService: run.nativeService,
     control: {
       kind: 'terminal',
       hostId: subject.hostId,
@@ -323,7 +325,7 @@ export class RuntimeController {
   private readonly hostReconfigurationReservations = new Set<string>()
   private readonly executorConfigReservations = new Set<string>()
   private readonly admittedExecutorLaunches = new Map<string, number>()
-  private readonly terminalInputCursors = new Map<string, number>()
+  private readonly terminalInputCursors = new Map<string, number | null>()
   private readonly terminalInputTails = new Map<string, Promise<void>>()
   private readonly terminalColorQueryRemainders = new Map<string, string>()
   private readonly pendingAgentColorQueryReplies = new Map<string, string>()
@@ -1631,7 +1633,7 @@ export class RuntimeController {
     const previous = this.terminalInputTails.get(key) ?? Promise.resolve()
     const operation = previous.catch(() => {}).then(async () => {
       let expectedByte = this.terminalInputCursors.get(key)
-      if (expectedByte === undefined) {
+      if (expectedByte == null) {
         const run = (await client.listRuns()).find((candidate) => candidate.runId === control.runId)
         if (!run || run.acceptedInputBytes === null) {
           throw new Error(`Terminal Input cursor is unavailable: ${control.runId}`)

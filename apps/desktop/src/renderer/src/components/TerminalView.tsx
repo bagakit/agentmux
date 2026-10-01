@@ -82,7 +82,7 @@ import {
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
-import { agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { agentSessionServiceOutcome, nativeSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -889,12 +889,25 @@ export function TerminalView({
           if (disposed) return
           if (step.type === 'restore') {
             if (preserve) continue
-            viewport.acceptOwnerSize(step.checkpoint.size)
-            await restoreTerminalCheckpoint(step.restoreBytes, async (data) => {
-              if (!disposed) {
-                await writeTerminal(data)
+            const checkpoint = step.checkpoint
+            const scrollback = terminal.options.scrollback!
+            viewport.acceptOwnerSize(checkpoint.restoreSize)
+            if (checkpoint.restoreScrollbackRows !== null) terminal.options.scrollback = checkpoint.restoreScrollbackRows
+            try {
+              await restoreTerminalCheckpoint(step.restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), async (data) => {
+                if (!disposed) await writeTerminal(data)
+              })
+              if (disposed) return
+              if (checkpoint.size.cols !== checkpoint.restoreSize.cols || checkpoint.size.rows !== checkpoint.restoreSize.rows) {
+                viewport.acceptOwnerSize(checkpoint.size)
               }
-            })
+              await restoreTerminalCheckpoint(step.restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes), async (data) => {
+                if (!disposed) await writeTerminal(data)
+              })
+            } finally {
+              terminal.options.scrollback = scrollback
+            }
+            if (disposed) return
             cursor = step.checkpoint.throughByte
             resizeRevision = step.checkpoint.resizeRevision
           } else if (step.type === 'resized') {
@@ -1565,7 +1578,8 @@ export function TerminalView({
   const continuationNotice = serviceNoticeToRender(classifyServiceNotice(
     terminalContinuationOutcome(continuationAbsence, session.processState)
   ))
-  const sessionObservationNotice = session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null
+  const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session))) ??
+    (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null)
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}; current availability and input delivery are unconfirmed. Your Session, history and draft are kept.`,

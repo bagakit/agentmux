@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { AgentMuxControlServer } from '../dist/control-host.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -29,7 +29,7 @@ afterEach(async () => {
 }, 20_000)
 
 async function privateRoot(): Promise<string> {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-delivery-"))
+  const root = await mkdtemp(fixturePath("tmp/amux-delivery-"))
   roots.push(root)
   return root
 }
@@ -40,7 +40,7 @@ function envelope(id: string, recipient = 'reader-one'): AgentMuxMessageAppendIn
     sender: { kind: 'agent-session', agentSessionId: 'sender' },
     recipient: { kind: 'agent-session', agentSessionId: recipient },
     threadId: 'synthetic-thread', correlationId: 'synthetic-correlation', replyTo: null,
-    workspaceId: upstreamFixturePath("synthetic-workspace"), senderSessionId: 'sender', senderRunId: 'sender-run',
+    workspaceId: fixturePath("synthetic-workspace"), senderSessionId: 'sender', senderRunId: 'sender-run',
     recipientSessionId: recipient, recipientRunId: 'original-reader-run', body: `Synthetic ${id}`
   }
 }
@@ -437,6 +437,7 @@ describe('actual built agentmux deliveries CLI', () => {
     expect(after.run.state).toBe('running')
     await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('reader-one')), agentSessionId: 'reader-one', expectedRun: sessions[0]!.run,
       operationId: 'healthy-typed-input', prompt: 'Synthetic input remains usable' })
+    if (after.run.acceptedInputBytes === null) throw new Error('Expected the fixture owner-confirmed input fence')
     expect((await client.statusAgent('reader-one')).run.acceptedInputBytes).toBeGreaterThan(after.run.acceptedInputBytes)
     const oldCapability = credentials.get('reader-one')!.capability
     const oldRun = sessions[0]!.run

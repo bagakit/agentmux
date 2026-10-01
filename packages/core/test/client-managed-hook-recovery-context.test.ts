@@ -252,7 +252,7 @@ describe('managed Hook recovery uses the explicit continuity configuration', () 
       expect((await loadAgentSessions(new AgentMuxFileAgentSessionStore(fixture.storePath))).map(session => session.agentSessionId).sort())
         .toEqual(['scope-a', 'scope-b'])
       console.log(JSON.stringify({ schema: 'agentmux.hook-recovery-context.v1', kind: 'scoped-reattach-and-native-resume',
-        daemon: 'actual vendored protocol18 ctxmuxd', agent: 'private Node Pi API fixture loading the generated extension',
+        daemon: 'actual vendored protocol21 ctxmuxd', agent: 'private Node Pi API fixture loading the generated extension',
         sessions: fresh.agentSessions().map(session => ({ id: session.agentSessionId, run: session.run })),
         originalPids: pids, resumedPid: resumedTrace.find(entry => entry.type === 'resume')!.pid,
         targetSha256: createHash('sha256').update(a.content).digest('hex'), sanitizedAgentMuxEnv: true }))

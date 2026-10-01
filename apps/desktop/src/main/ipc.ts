@@ -1,4 +1,5 @@
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
+import { sessionInputWriteResult } from '../shared/session-input-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
@@ -80,6 +81,7 @@ import type {
   RunFanOutInput,
   RunFanOutResult,
   SessionControl,
+  SessionInputWriteResult,
   TerminalLaunchInput,
   WorkspaceFileWriteInput,
   WorkspaceRecord
@@ -840,13 +842,13 @@ export async function registerIpc(args: {
     requireTrustedSender('continuousProgress:pauseForInput', event)
     await args.progressLoops.pauseTarget(control, 'Paused for your draft or queued message. Resume explicitly after sending or clearing it.')
   })
-  handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => {
+  handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<SessionInputWriteResult> => {
     if (source === 'user' && data.length > 0) pauseUserProgress(session, 'Paused for your terminal input.')
-    await args.runtime.write(session, data, source)
+    return await sessionInputWriteResult(() => args.runtime.write(session, data, source))
   })
-  handle('sessions:paste', async (session: SessionControl, text: string, terminalData: string) => {
+  handle('sessions:paste', async (session: SessionControl, text: string, terminalData: string): Promise<SessionInputWriteResult> => {
     if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
-    await args.runtime.paste(session, text, terminalData)
+    return await sessionInputWriteResult(() => args.runtime.paste(session, text, terminalData))
   })
   handleWithEvent('sessions:submitPrompt', async (
     event,

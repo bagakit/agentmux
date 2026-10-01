@@ -23,6 +23,8 @@ import type {
   AgentProviderId,
   LaunchOptionSelection,
   AgentMuxClientEvent,
+  AgentMuxNativeService,
+  AgentMuxControlFailure,
   AgentMuxEvidenceSource,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
@@ -900,6 +902,8 @@ type SessionSnapshotBase = {
   interruptionReason?: string
   status: SessionStatus
   latestOutputBytes: number
+  /** Core's coherent Run-local service facts; absence is unobserved, never child exit. */
+  nativeService?: AgentMuxNativeService | null
 }
 
 /**
@@ -976,6 +980,11 @@ export type RuntimeEvent = {
   hostId: string
   event: AgentMuxClientEvent
 }
+
+/** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
+export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
+  code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure
+} }
 
 export type RuntimeSnapshot = {
   /** Connected hosts whose daemon launch provenance could not be verified. */

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -12,7 +12,7 @@ const clients: AgentMuxClient[] = []
 afterEach(async () => { for (const client of clients.splice(0)) await client.dispose(); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 const RUN_ID = 'ingress-run'
 const AGENT_SESSION_ID = 'ingress-agent'
-const WORKSPACE = upstreamFixturePath("tmp/ingress-agent")
+const WORKSPACE = fixturePath("tmp/ingress-agent")
 
 function storedSession(
   extra: Partial<AgentMuxStoredAgentSession> = {}
@@ -37,6 +37,7 @@ function storedSession(
 
 function runProjection(acceptedInputBytes: number) {
   return {
+    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'traex',

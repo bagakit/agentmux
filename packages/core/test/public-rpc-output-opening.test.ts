@@ -24,11 +24,11 @@ async function fixture() {
     env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] }, lineage: null, backend: { type: 'native' },
     capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: false, fork_level_b: false, replay: 'raw_from_start' },
     pid: null, state: { type: 'running' }, latest_output_bytes: 3, durable_output_bytes: 3,
-    first_available_byte: 0, attachments: 1, applied_input_bytes: 0, current_size: { ...size } })
+    first_available_byte: 0, attachments: 1, applied_input_bytes: 0, native_service: null, current_size: { ...size } })
   const attach = vi.fn(async () => {
     const snapshot: AttachedSnapshot = { run: info(), resize_revision: revision,
       terminal: kind === 'basic_vt' ? { type: kind, checkpoint: { run_id: 'run-output-agent', through_byte: 0,
-        resize_revision: revision - 1, size: { cols: 80, rows: 24 }, restore_bytes: restore.length },
+        resize_revision: revision - 1, size: { cols: 80, rows: 24 }, restore_size: { cols: 91, rows: 9 }, restore_scrollback_rows: 31, resize_after_restore_bytes: 3, restore_bytes: restore.length },
         resizes: [{ through_byte: 2, resize_revision: revision, size: { ...size } }] }
         : kind === 'unknown' ? { type: kind, reason: 'origin_unknown' } : { type: kind },
       terminal_restore: kind === 'basic_vt' ? restore : new Uint8Array(0),
@@ -102,7 +102,7 @@ describe('output opening keeps one original Attachment', () => {
     expect(opening.terminal.type).toBe('basic-vt')
     if (opening.terminal.type !== 'basic-vt') throw new Error('The original terminal scope was lost')
     expect(opening.terminal.restoreBytes).toBeInstanceOf(Uint8Array); expect(opening.terminal.restoreBytes).toEqual(f.restore)
-    expect(opening.terminal.checkpoint).toEqual({ runId: 'run-output-agent', throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 } })
+    expect(opening.terminal.checkpoint).toEqual({ runId: 'run-output-agent', throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 }, restoreSize: { cols: 91, rows: 9 }, restoreScrollbackRows: 31, resizeAfterRestoreBytes: 3 })
     expect(opening.terminal.resizes).toEqual([{ throughByte: 2, resizeRevision: 7, size: { cols: 80, rows: 24 } }])
     expect(frames[0]).toMatchObject({ result: { initial: { resizeRevision: 7, terminal: { restoreBytes: encodeHostedValue(f.restore) } } } })
     expect(events.filter(event => event.type === 'output').flatMap(event => [...Buffer.from(event.data.dataBase64, 'base64')])).toEqual([0xe4, 0xb8, 0xad])
@@ -112,7 +112,8 @@ describe('output opening keeps one original Attachment', () => {
 
   it('rejects missing, fabricated or foreign terminal facts instead of filling unknown with zero or not-requested', async () => {
     const f = await fixture(), session = f.client.agentSession('output-agent'), run = (await f.client.statusAgent('output-agent')).run
-    const basic = { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 } },
+    const basic = { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 },
+      restoreSize: { cols: 91, rows: 9 }, restoreScrollbackRows: 31, resizeAfterRestoreBytes: 3 },
       restoreBytes: encodeHostedValue(f.restore), resizes: [{ throughByte: 2, resizeRevision: 7, size: { cols: 80, rows: 24 } }] }
     const cases = [
       { terminal: { type: 'not-requested' } }, { resizeRevision: 7 },
@@ -121,9 +122,12 @@ describe('output opening keeps one original Attachment', () => {
       { terminal: { type: 'unknown', reason: ['origin_unknown'] }, resizeRevision: 7 },
       { terminal: { ...basic, checkpoint: { ...basic.checkpoint, runId: 'foreign-run' } }, resizeRevision: 7 },
       { terminal: { ...basic, resizes: [{ ...basic.resizes[0]!, resizeRevision: 8 }] }, resizeRevision: 7 },
-      { terminal: { ...basic, restoreBytes: { 0: 27, 1: 99 } }, resizeRevision: 7 }
+      { terminal: { ...basic, restoreBytes: { 0: 27, 1: 99 } }, resizeRevision: 7 },
+      { terminal: { ...basic, checkpoint: { ...basic.checkpoint, resizeAfterRestoreBytes: f.restore.length + 1 } }, resizeRevision: 7 },
+      { terminal: { ...basic, checkpoint: { ...basic.checkpoint, restoreSize: { cols: 0, rows: 9 } } }, resizeRevision: 7 },
+      { terminal: { ...basic, checkpoint: { ...basic.checkpoint, restoreScrollbackRows: -1 } }, resizeRevision: 7 }
     ]
-    expect(cases).toHaveLength(9)
+    expect(cases).toHaveLength(12)
     for (const [index, facts] of cases.entries()) {
       const path = join(f.root, `invalid-${index}.sock`), initial = vi.fn(), events = vi.fn()
       const server = createServer(socket => socket.once('data', chunk => {

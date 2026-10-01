@@ -1,4 +1,5 @@
-import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay, fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { droidNativeSessionFixture } from './droid-fixtures/source-derived-native-session.js'
+import { fixtureClock, fixtureDay, fixturePath } from '../helpers/fixture-values.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -103,8 +104,7 @@ describe('Droid session analysis and native history', () => {
   })
 
   it('reads exact source-derived native fixture with ordered trace and correct item kinds', async () => {
-    const fixturePath = join(__dirname, 'droid-fixtures', 'source-derived-native-session.jsonl')
-    const rawFixture = await readFile(fixturePath)
+    const rawFixture = droidNativeSessionFixture()
     const sessionId = '00000000-0000-4000-8000-000000000001'
 
     const f = await createDroidTestFixture(rawFixture, { sessionId })
@@ -216,7 +216,7 @@ describe('Droid session analysis and native history', () => {
     expect(docMsg.kind).toBe('user-message')
     expect(docMsg.contentParts).toEqual([
       { kind: 'text', text: 'Parsed document excerpt' },
-      { kind: 'resource', resourceType: 'file', reference: upstreamFixturePath("fixture/report.pdf"), label: 'report.pdf' }
+      { kind: 'resource', resourceType: 'file', reference: fixturePath("fixture/report.pdf"), label: 'report.pdf' }
     ])
 
     // 9: compaction_state
@@ -244,7 +244,7 @@ describe('Droid session analysis and native history', () => {
       const sessionId = 'droid-missing-header'
       // First line is a message instead of session_start
       const records = [
-        { type: 'message', id: 'msg-1', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z", message: { role: 'user', content: 'hello' } }
+        { type: 'message', id: 'msg-1', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z", message: { role: 'user', content: 'hello' } }
       ]
 
       const f = await createDroidTestFixture(jsonl(records), { sessionId })
@@ -256,7 +256,7 @@ describe('Droid session analysis and native history', () => {
     it('rejects transcript with foreign session_start id', async () => {
       const records = [
         { type: 'session_start', id: 'other-session-uuid', title: 'Foreign' },
-        { type: 'message', id: 'msg-1', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z", message: { role: 'user', content: 'hello' } }
+        { type: 'message', id: 'msg-1', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z", message: { role: 'user', content: 'hello' } }
       ]
 
       const f = await createDroidTestFixture(jsonl(records), { sessionId: 'my-expected-session-id' })
@@ -269,7 +269,7 @@ describe('Droid session analysis and native history', () => {
       const sessionId = 'droid-missing-role'
       const records = [
         { type: 'session_start', id: sessionId, title: 'No role test' },
-        { type: 'message', id: 'msg-norole', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z", message: { content: 'Where is the role?' } }
+        { type: 'message', id: 'msg-norole', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z", message: { content: 'Where is the role?' } }
       ]
 
       const f = await createDroidTestFixture(jsonl(records), { sessionId })
@@ -286,7 +286,7 @@ describe('Droid session analysis and native history', () => {
       const records = [
         { type: 'session_start', id: sessionId, title: 'Flat rows' },
         { type: 'completion', finalText: 'Exec stdout completion', usage: { input_tokens: 10, output_tokens: 5 } },
-        { type: 'system', model: 'claude-3-5-sonnet', cwd: upstreamFixturePath("repo") }
+        { type: 'system', model: 'claude-3-5-sonnet', cwd: fixturePath("repo") }
       ]
 
       const f = await createDroidTestFixture(jsonl(records), { sessionId })
@@ -319,7 +319,7 @@ describe('Droid session analysis and native history', () => {
       const sessionId = 'droid-partial-tail'
       const complete = jsonl([
         { type: 'session_start', id: sessionId, title: 'Tail test' },
-        { type: 'message', id: 'msg-1', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z", message: { role: 'user', content: [{ type: 'text', text: 'complete message' }] } }
+        { type: 'message', id: 'msg-1', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z", message: { role: 'user', content: [{ type: 'text', text: 'complete message' }] } }
       ])
       const brokenData = Buffer.concat([
         Buffer.from(complete),
@@ -339,7 +339,7 @@ describe('Droid session analysis and native history', () => {
       const records: Record<string, unknown>[] = Array.from({ length: 35 }, (_, i) => ({
         type: 'message',
         id: `large-${i}`,
-        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z",
+        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z",
         message: {
           role: 'user',
           content: [{ type: 'text', text: largeText }]
@@ -360,7 +360,7 @@ describe('Droid session analysis and native history', () => {
       const records: Record<string, unknown>[] = Array.from({ length: 7 }, (_, i) => ({
         type: 'message',
         id: `msg-${i}`,
-        timestamp: `${upstreamFixtureDay(1)}T00:0${i}:00.000Z`,
+        timestamp: `${fixtureDay(1)}T00:0${i}:00.000Z`,
         message: {
           role: i % 2 === 0 ? 'user' : 'assistant',
           content: [{ type: 'text', text: `Turn ${i} content` }]
@@ -370,8 +370,8 @@ describe('Droid session analysis and native history', () => {
         type: 'session_start',
         id: sessionId,
         title: 'Paged task',
-        cwd: upstreamFixturePath("repo"),
-        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z"
+        cwd: fixturePath("repo"),
+        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z"
       })
 
       const f = await createDroidTestFixture(jsonl(records), { sessionId })
@@ -411,9 +411,9 @@ describe('Droid session analysis and native history', () => {
     it('recovers identically on a fresh AgentMuxClient instance without store modification', async () => {
       const sessionId = 'droid-fresh-client'
       const records = [
-        { type: 'session_start', id: sessionId, title: 'Recovery', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z" },
-        { type: 'message', id: 'msg-u', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 5, "000") + "Z", message: { role: 'user', content: [{ type: 'text', text: 'Persisted turn' }] } },
-        { type: 'message', id: 'msg-a', timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 10, "000") + "Z", message: { role: 'assistant', content: [{ type: 'text', text: 'Persisted answer' }] } }
+        { type: 'session_start', id: sessionId, title: 'Recovery', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z" },
+        { type: 'message', id: 'msg-u', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 5, "000") + "Z", message: { role: 'user', content: [{ type: 'text', text: 'Persisted turn' }] } },
+        { type: 'message', id: 'msg-a', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 10, "000") + "Z", message: { role: 'assistant', content: [{ type: 'text', text: 'Persisted answer' }] } }
       ]
 
       const f = await createDroidTestFixture(jsonl(records), { sessionId })
@@ -434,8 +434,7 @@ describe('Droid session analysis and native history', () => {
       const root = await mkdtemp(join(tmpdir(), 'agentmux-droid-hook-prod-'))
       const sessionId = '00000000-0000-4000-8000-000000000001'
       const transcriptPath = join(root, `${sessionId}.jsonl`)
-      const fixtureSource = join(__dirname, 'droid-fixtures', 'source-derived-native-session.jsonl')
-      await writeFile(transcriptPath, await readFile(fixtureSource))
+      await writeFile(transcriptPath, droidNativeSessionFixture())
 
       const providers = new AgentProviderRegistry()
       const droid = providers.get('droid')
@@ -451,7 +450,7 @@ describe('Droid session analysis and native history', () => {
           hook_event_name: 'SessionStart',
           session_id: sessionId,
           transcript_path: transcriptPath,
-          cwd: upstreamFixturePath("fixture/workspace")
+          cwd: fixturePath("fixture/workspace")
         }
       }, {})
 
@@ -503,8 +502,7 @@ describe('Droid session analysis and native history', () => {
       const root = await mkdtemp(join(tmpdir(), 'agentmux-droid-http-'))
       const mainSessionId = '00000000-0000-4000-8000-000000000001'
       const transcriptPath = join(root, `${mainSessionId}.jsonl`)
-      const fixtureSource = join(__dirname, 'droid-fixtures', 'source-derived-native-session.jsonl')
-      await writeFile(transcriptPath, await readFile(fixtureSource))
+      await writeFile(transcriptPath, droidNativeSessionFixture())
 
       const agentSessionId = 'http-droid-session'
       const runId = 'http-droid-run'
@@ -532,6 +530,7 @@ describe('Droid session analysis and native history', () => {
       vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'queue.ndjson'))
 
       const run = {
+        native_service: null,
         id: runId,
         spec: { program: 'droid', args: [], cwd: root, env: {} },
         lineage: null,
@@ -606,7 +605,7 @@ describe('Droid session analysis and native history', () => {
           hook_event_name: 'SessionStart',
           calling_session_id: mainSessionId,
           session_id: 'child-session-999',
-          transcript_path: upstreamFixturePath("tmp/child.jsonl"),
+          transcript_path: fixturePath("tmp/child.jsonl"),
           cwd: root
         })
         expect(childStatus).toBe(204)
@@ -701,7 +700,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'owner-message',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'user',
             content: [{
@@ -738,7 +737,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'unparsed-pdf-msg',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'user',
             content: [{
@@ -775,7 +774,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'parsed-pdf-msg',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'user',
             content: [{
@@ -814,7 +813,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'tool-with-doc',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'user',
             content: [{
@@ -864,7 +863,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'owner-message',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'user',
             content: [{
@@ -905,7 +904,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'tool-with-text-doc',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'user',
             content: [{
@@ -1018,7 +1017,7 @@ describe('Droid session analysis and native history', () => {
           type: 'message',
           id: 'owner-message',
           seq: 1,
-          timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(1, 0, 0, "000") + "Z",
+          timestamp: fixtureDay(1) + "T" + fixtureClock(1, 0, 0, "000") + "Z",
           message: {
             role: 'assistant',
             content: [

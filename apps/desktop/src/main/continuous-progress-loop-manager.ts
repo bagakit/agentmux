@@ -138,7 +138,7 @@ export class ContinuousProgressLoopManager {
           if (!isCurrent()) continue
           const decision = decideContinuousProgress({ ...observation, ...(claim.loop.lastCompletionId ? { lastCompletionId: claim.loop.lastCompletionId } : {}) })
           if (decision.kind === 'skip') this.patch(claim.loop.loopId, { lastDecision: decision.reason })
-          if (decision.kind === 'send') {
+          if (decision.kind === 'send' && observation.inputByte !== null) {
             // A pending operation is retried only by explicit resume and keeps its identity.
             // If the observed completion changed, the old claim has no authority to send.
             if (!pending) pending = { id: decision.completionId, operationId: claim.tickId,

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/history-fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -15,7 +15,11 @@ import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { defaultAgentMuxHookPort } from '../src/runtime-paths.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentHookReceipt } from '../src/types.js'
 
-const isolation = await vi.hoisted(async () => { const { fixturePath: upstreamFixturePath } = await import("./helpers/history-fixture-values.js"); return ({ homedir: upstreamFixturePath("synthetic/unset-home") }) })
+const isolation = await vi.hoisted(async () => {
+  const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os')
+  const { join } = await import('node:path')
+  return { homedir: join(tmpdir(), 'agentmux-fixtures', "synthetic/unset-home") }
+})
 vi.mock('node:os', async importOriginal => ({
   ...await importOriginal<typeof import('node:os')>(), homedir: () => isolation.homedir
 }))
@@ -109,6 +113,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
   const writes: string[] = [], chunks: OutputChunk[] = []
   const streams = new Set<{ push(event: RunEvent): void; close(): void }>()
   const run = () => ({
+    native_service: null,
     id: runId, spec: { program: 'synthetic-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: outputCursor,
     durable_output_bytes: outputCursor, first_available_byte: 0, attachments: streams.size,
@@ -162,7 +167,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
     streams.add(stream)
     return {
       snapshot: { run: run(), resize_revision: 0,
-        terminal: { type: 'basic_vt', checkpoint: { run_id: runId, through_byte: 0,
+        terminal: { type: 'basic_vt', checkpoint: { restore_size: { cols: 80, rows: 24 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: runId, through_byte: 0,
           resize_revision: 0, size: { cols: 80, rows: 24 } }, resizes: [] },
         terminal_restore: new TextEncoder().encode('\u001bc'),
         replay: { chunks: [...chunks], first_available_byte: 0,
@@ -238,6 +243,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
           const observedRun = (await client.listRuns()).find(run => run.runId === observed.run.runId)
           expect(observedRun).toBeDefined()
           if (!observedRun) throw new Error('Expected the fixture Run input observation')
+          if (observedRun.acceptedInputBytes === null) throw new Error('Expected the fixture owner-confirmed input fence')
           expectedInputByte = observedRun.acceptedInputBytes
           inputFences.set(operationId, expectedInputByte)
         }
@@ -519,7 +525,7 @@ describe('manual admission after native cancellation', () => {
 
 function boundaryFixture(): AgentMuxStoredAgentSession {
   return { kind: 'agent', agentSessionId: sessionId, providerId: 'synthetic', executorId: 'synthetic',
-    hostId: 'local', workspacePath: upstreamFixturePath("synthetic/workspace"), run: { runId }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("synthetic/workspace"), run: { runId }, retiredRuns: [],
     hookBindingId: 'b'.repeat(43), hookToken: token, createdAt: 1, updatedAt: 300,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 100 },
     hookReceipt: { id: 'end-2', providerId: 'synthetic', agentSessionId: sessionId,
