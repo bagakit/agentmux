@@ -18,6 +18,7 @@ import { topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } f
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
+import { MoteRenameDialog } from './MoteRenameDialog'
 
 /** Filesystem objects and existing Session facts; no separate Space or heat registry. */
 export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: {
@@ -59,6 +60,8 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   const archive = useMoteArchiveAction(workspace)
   const [showArchived, setShowArchived] = useState(false)
   const tree = useRef<HTMLDivElement>(null)
+  const [renameTarget, setRenameTarget] = useState<ScratchTopicSnapshot | null>(null)
+  const renameId = useRef<string | null>(null)
   const archivedMotes = motes.filter(topic => topic.moteArchive?.state === 'archived')
 
   async function openOverview(): Promise<void> {
@@ -97,7 +100,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
       {expanded ? ids.map((id) => {
         const topic = byId.get(id)!
         const isMote = label === 'Motes'
-        const name = id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title
+        const name = topic.title
         const target = topicSpaceIconTarget(workspace, { ...topic, title: name })
         const selected = activeWorkspaceId === workspace.id && current === id
         const bucket = byTopic.get(id) ?? []
@@ -106,7 +109,12 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         const archived = topic.moteArchive?.state === 'archived'
         const togglePin = () => togglePinned(SCRATCH_WORKSPACE_ID, id), editMote = () => void openMote(id, true)
         return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon} {...(isMote ? {
-          moteActions: { pinned: isPinned, onTogglePin: togglePin, onEdit: editMote }, moteArchive: {
+          moteActions: { pinned: isPinned, onTogglePin: togglePin, onEdit: editMote,
+            onRename: () => { renameId.current = topic.id; setRenameTarget(topic) },
+            onNewDiscussion: () => { void openMote(id).then(() => { const state = useAppStore.getState(); const layout = state.layouts[workspace.id]
+              if (layout) state.openLauncher({ workspaceId: workspace.id, tabGroupId: layout.activeGroupId, topicId: id, reveal: true }) }) },
+            onMaterials: () => { void openMote(id).then(() => { setWorkspaceTool('files-branches'); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { ...useAppStore.getState().explorerCollapsed, [workspace.id]: false } }) }) }
+          }, moteArchive: {
           archived, disabled: archive.pending === id || id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
           ...(id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),
           onChange: () => archive.change(topic, !archived),
@@ -148,5 +156,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
     {section('Topics', entries)}
     {error ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
     <MoteArchiveNotice workspaceId={workspace.id} issue={archive.issue} />
+    <MoteRenameDialog target={renameTarget ? { topic: renameTarget, workspace } : null} onClose={() => setRenameTarget(null)}
+      returnFocus={() => tree.current?.querySelector<HTMLButtonElement>('[data-space-nav="topic:' + renameId.current + '"]') ?? null} />
   </div>
 }

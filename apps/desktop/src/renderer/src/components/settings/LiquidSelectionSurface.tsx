@@ -8,7 +8,7 @@ const sameBounds = (a: Bounds | null, b: Bounds) => a !== null && (['x', 'y', 'w
 export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
   selected: string | null
   active: boolean
-  targetAttribute: 'data-settings-target' | 'data-prompt-id' | 'data-executor-id'
+  targetAttribute: `data-${string}`
 }) {
   const surface = useRef<HTMLSpanElement>(null)
   const painted = useRef<Bounds | null>(null)
@@ -74,11 +74,13 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
       lens.style.height = `${next.height}px`
       lens.style.transform = transform(next)
       if (flow && from && !paused && !sameBounds(from, next)) {
-        const direction = Math.sign(next.y - from.y)
+        const horizontal = Math.abs(next.x - from.x) > Math.abs(next.y - from.y)
+        const direction = Math.sign(horizontal ? next.x - from.x : next.y - from.y)
+        lens.dataset.liquidAxis = horizontal ? 'x' : 'y'
         animation = lens.animate([
           { transform: transform(from, from.width / next.width, from.height / next.height), offset: 0 },
-          { transform: transform({ ...next, x: from.x + (next.x - from.x) * 0.35, y: from.y + (next.y - from.y) * 0.35 }, 0.93, 1.45), borderRadius: direction > 0 ? '18px 18px 26px 26px' : '26px 26px 18px 18px', offset: 0.34 },
-          { transform: transform({ ...next, y: next.y + direction * 2 }, 1.03, 0.94), borderRadius: '11px', offset: 0.78 },
+          { transform: transform({ ...next, x: from.x + (next.x - from.x) * 0.35, y: from.y + (next.y - from.y) * 0.35 }, horizontal ? 1.45 : 0.93, horizontal ? 0.93 : 1.45), borderRadius: direction > 0 ? '18px 18px 26px 26px' : '26px 26px 18px 18px', offset: 0.34 },
+          { transform: transform({ ...next, x: next.x + (horizontal ? direction * 2 : 0), y: next.y + (horizontal ? 0 : direction * 2) }, horizontal ? 0.94 : 1.03, horizontal ? 1.03 : 0.94), borderRadius: '11px', offset: 0.78 },
           { transform: transform(next), borderRadius: 'var(--radius)', offset: 1 }
         ], { duration: 420, easing: 'cubic-bezier(.22,.72,.2,1)' })
       }

@@ -11,6 +11,7 @@
 
 import type { AgentProviderId, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
+import type { MoteConversationIdentity } from './mote-conversation-identity'
 
 /**
  * 说话人的类别。**不是身份**——身份是 {@link ConversationSpeaker.id}。
@@ -66,6 +67,7 @@ export type ConversationSenderDetails = {
  */
 export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
   name: string
+  mote?: MoteConversationIdentity
   project?: ConversationSenderDetails['project']
   providerId?: AgentProviderId
   /** Invoked only when the reader explicitly opens this sender's details. */

@@ -25,6 +25,7 @@ beforeEach(async () => {
     node?: Element
     constructor(private readonly listener: IntersectionObserverCallback) {}
     observe(node: Element) { this.node = node; const emit = (visible: boolean) => this.listener([{ target: node, isIntersecting: visible, intersectionRatio: visible ? 1 : 0 } as IntersectionObserverEntry], this as unknown as IntersectionObserver); intersections.push({ node, emit }); emit(true) }
+    unobserve(node: Element) { intersections = intersections.filter(row => row.node !== node) }
     disconnect() { intersections = intersections.filter(row => row.node !== this.node) }
   })
   vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ media: query, get matches() { return reduce }, addEventListener(_name: string, callback: () => void) { mediaListeners.push(callback) }, removeEventListener(_name: string, callback: () => void) { mediaListeners = mediaListeners.filter(one => one !== callback) } } as MediaQueryList))
@@ -215,13 +216,16 @@ it('offscreen, hidden, document-hidden and reduced-motion stop real native-anima
   await app.mount(node(false)); const still = [...app.container.querySelectorAll<HTMLElement>('[data-mote-expression="thinking"]')].at(-1)!
   expect(still.dataset.moteMotion).toBe('off'); expect(still.querySelector('.mote-face')).not.toBeNull(); expect(isolated()).toBeNull()
 })
-it('a static directory identity renders the saved face without a motion/store/visibility consumer', async () => {
-  await app.mount(); const watchers = intersections.length, preferenceListeners = mediaListeners.length
-  await app.mount(<div data-static-face><SpaceObjectIcon kind="mote" name="Directory identity" manualIcon={DEFAULT_MOTE_FACE} /></div>)
+it('a static directory face participates in native motion without subscribing to Session facts', async () => {
+  await app.mount(); let renders = 0
+  await app.mount(<Profiler id="static-face" onRender={() => renders++}><div data-static-face><SpaceObjectIcon kind="mote" name="Directory identity" manualIcon={DEFAULT_MOTE_FACE} /></div></Profiler>)
   const identity = app.container.querySelector('[data-static-face]')!
-  expect(identity).not.toBeNull(); expect(identity.querySelector('[data-space-icon-source="face"] .mote-face')).not.toBeNull()
-  expect(identity.querySelector('[data-mote-expression]')).toBeNull()
-  expect(intersections.length).toBe(watchers); expect(mediaListeners.length).toBe(preferenceListeners)
+  expect(identity.querySelector('[data-space-icon-source="face"] .mote-face')).not.toBeNull()
+  expect(identity.querySelector<HTMLElement>('[data-mote-expression]')!.dataset.moteExpression).toBe('identity')
+  expect(identity.querySelector<HTMLElement>('[data-mote-expression]')!.dataset.moteMotion).toBe('on')
+  const baseline = renders
+  await event(timeline({ type: 'append', agentSessionId: executionAgent.id, item: tool('unrelated-static', 110, executionAgent.id) }, { sessionId: executionAgent.id }))
+  expect(renders).toBe(baseline)
 })
 it('the profiling observer counts nonempty current Face work and excludes stale bailout duration from a previous commit', () => {
   const html = readFileSync(new NodeURL('../scripts/fixtures/mote-navigation-footer/paperdoll.html', import.meta.url), 'utf8')
@@ -230,7 +234,7 @@ it('the profiling observer counts nonempty current Face work and excludes stale 
   const window: { moteFaceCosts?: { currentCommit: { start: number; end: number }; renders: Record<string, number>; seen: Record<string, number> }; __REACT_DEVTOOLS_GLOBAL_HOOK__?: { onCommitFiberRoot(id: number, root: unknown): void } } = {}
   runInNewContext(scripts[0]![1]!, { window })
   const costs = window.moteFaceCosts!, hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__!
-  const fiber = { type: function MoteIdentityMotion() {}, memoizedProps: { moteSessionId: 'default-agent' }, actualStartTime: 15, actualDuration: 2, child: null, sibling: null }
+  const fiber = { type: function SessionMotion() {}, memoizedProps: { moteSessionId: 'default-agent' }, flags: 1, actualStartTime: 15, actualDuration: 2, child: null, sibling: null }
   costs.currentCommit = { start: 10, end: 20 }; hook.onCommitFiberRoot(1, { current: fiber })
   expect(costs.renders).toEqual({ 'default-agent': 1 }); expect(costs.seen).toEqual({ 'default-agent': 1 })
   // The previous actual duration remains positive, precisely the realistic false count this observer must reject.
@@ -240,4 +244,8 @@ it('the profiling observer counts nonempty current Face work and excludes stale 
   expect(costs.renders).toEqual({ 'default-agent': 2 })
   fiber.actualStartTime = 50; hook.onCommitFiberRoot(1, { current: fiber })
   expect(costs.renders).toEqual({ 'default-agent': 2 })
+  fiber.actualStartTime = 36; fiber.actualDuration = 0; hook.onCommitFiberRoot(1, { current: fiber })
+  expect(costs.renders).toEqual({ 'default-agent': 3 })
+  fiber.flags = 0; hook.onCommitFiberRoot(1, { current: fiber })
+  expect(costs.renders).toEqual({ 'default-agent': 3 })
 })

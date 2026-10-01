@@ -29,12 +29,17 @@ export function ConfirmationDialog({
   onConfirm: () => void
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
+  const previousFocus = useRef<HTMLElement | null>(null)
+  const openedContent = useRef<Element | null>(null)
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && !busy && onCancel()}>
       <Dialog.Portal container={resolveOverlayContainer()}>
         <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface" aria-busy={busy}
-          onOpenAutoFocus={(event) => { event.preventDefault(); cancelRef.current?.focus() }}
+          onOpenAutoFocus={(event) => { event.preventDefault(); previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+            openedContent.current = event.target instanceof Element ? event.target : null; cancelRef.current?.focus() }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement
+            if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }}
           onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
           onInteractOutside={(event) => { if (busy) event.preventDefault() }}>
           <header className="confirmation-dialog__heading">

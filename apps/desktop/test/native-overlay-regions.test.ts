@@ -206,6 +206,23 @@ it('transparent holes are never replaced by the Main background and their unsupp
   expect(publish.mock.calls[0]![1]).toContain('Browser remains available')
 })
 
+it('preserves separately painted native child dialogs and their real layer order without projecting the transparent viewport host', () => {
+  const parent = node('dialog', { x: 30, y: 40, width: 500, height: 400 })
+  parent.setAttribute('popover', 'auto'); document.getElementById('root')!.append(parent)
+  const host = document.createElement('div'); host.setAttribute('popover', 'manual')
+  host.style.pointerEvents = 'none'; host.style.backgroundColor = 'rgba(0, 0, 0, 0)'
+  host.getBoundingClientRect = () => ({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }) as DOMRect
+  parent.append(host)
+  const dialog = node('dialog', { x: 300, y: 250, width: 320, height: 120 }); host.append(dialog)
+  const publish = vi.fn(); stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
+  for (const target of [parent, host]) { const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' }); target.dispatchEvent(event) }
+  flushFrame()
+  expect(publish.mock.calls.at(-1)).toEqual([[
+    { id: 'chrome-1', bounds: { x: 30, y: 40, width: 500, height: 400 }, radius: 8 },
+    { id: 'chrome-2', bounds: { x: 300, y: 250, width: 320, height: 120 }, radius: 8 }
+  ], undefined])
+})
+
 it('zero floats observe no geometry and terminal churn inside root does no overlay work', async () => {
   const observe = vi.fn()
   vi.stubGlobal('ResizeObserver', class { observe = observe; disconnect() {} })

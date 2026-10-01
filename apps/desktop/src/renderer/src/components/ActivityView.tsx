@@ -658,7 +658,8 @@ export function ActivityView({
   fileReferenceNotice,
   onContinue,
   onSelectAnnotation,
-  describeSpeaker
+  describeSpeaker,
+  moteConversation = false
 }: {
   sessionId: string
   items: AgentTimelineItem[]
@@ -686,6 +687,7 @@ export function ActivityView({
    * 价值在于认出身份，没有名字的头像认不出谁，画出来只是一排装饰。
    */
   describeSpeaker?: DescribeSpeaker
+  moteConversation?: boolean
 }) {
   const { unifiedItems, segments } = useMemo(() => {
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
@@ -848,7 +850,7 @@ export function ActivityView({
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
-      <div className="activity-feed" ref={setFeedEl}>
+      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
         {readNotice}
         {fileReferenceNotice}
         <div className="activity-feed__empty">
@@ -859,7 +861,7 @@ export function ActivityView({
   }
   if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, items)) {
     return (
-      <div className="activity-feed" ref={setFeedEl}>
+      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
         {readNotice}
         {fileReferenceNotice}
         {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
@@ -872,7 +874,7 @@ export function ActivityView({
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
   if (!hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
-      <div className="activity-feed" ref={setFeedEl}>
+      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
         {readNotice}
         {fileReferenceNotice}
         <WorkingIndicator />
@@ -890,7 +892,7 @@ export function ActivityView({
   }
 
   return (
-    <div className="activity-feed" ref={setFeedEl}>
+    <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
       {readNotice}
         {fileReferenceNotice}
       {capability === 'unavailable' ? (

@@ -2,7 +2,7 @@ import { Archive, Check, Circle, X, Maximize2, PanelLeftClose, PanelLeftOpen } f
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { homeZoneId, spatialSources } from '../../../shared/space-addresses'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -17,19 +17,25 @@ import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+import { MoteWorkface } from './MoteWorkface'
 import { WorkbenchPresentationContext } from '../lib/workbench-presentation'
 import { StatusDot } from './StatusDot'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
-import { topicSpaceIconTarget } from '../lib/space-object-appearance'
+import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
+import { useMoteWorkfaceScope } from '../lib/mote-workface'
+import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
+import { SpaceIconPicker } from './SpaceIconPicker'
+import { MoteRenameDialog } from './MoteRenameDialog'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { primaryMoteHasBot } from '../lib/primary-mote-executor'
 
-const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId }: {
+const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId, onRename, onAvatar, onMaterials, onOpenSpace }: {
   topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | null | undefined
   onSelect(topicId: string, tabId: string | undefined): void
   onIdentity(anchor: HTMLButtonElement | null): void
   onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null; currentTopicId: string
+  onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onMaterials(topicId: string, tabId: string | undefined): void; onOpenSpace(topicId: string, tabId: string | undefined): void
 }) {
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
     targetTopicId: topic.id, ...(selected ? { targetTabId: savedTabId } : {}) }), [topic.id, selected, savedTabId])
@@ -42,6 +48,9 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const session = useAppStore(state => region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined)
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
   const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
+  const pinned = useAppStore(state => state.pinnedItems[SCRATCH_WORKSPACE_ID]?.includes(topic.id) === true)
+  const scope = useMoteWorkfaceScope(SCRATCH_WORKSPACE_ID, topic.id)
+  const files = useMoteMaterialsActions(scope, { floating: true, onTabSelect: id => onSelect(topic.id, id) })
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const retainedPrimaryBot = useAppStore(state => topic.id === PMO_TEAMS_TOPIC_ID && primaryMoteHasBot(state))
   const targetStatus = moteTargetStatus(tab, session, tabId)
@@ -65,7 +74,15 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
     </span>
     {selected ? <Check className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
   </button>
-  return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} moteArchive={{
+  return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} onChangeIcon={onAvatar} moteActions={{
+    pinned, onTogglePin: () => useAppStore.getState().togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id),
+    onRename: () => onRename(topic), onEdit: () => { if (scope) void files.open(scope.rootPath + '/' + MOTE_SOUL_PATH) },
+    onNewDiscussion: () => { const state = useAppStore.getState(), layout = state.layouts[SCRATCH_WORKSPACE_ID]
+      if (!layout) return
+      const id = state.openLauncher({ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: layout.activeGroupId, topicId: topic.id, reveal: false })
+      if (id) onSelect(topic.id, id)
+    }, onMaterials: () => onMaterials(topic.id, tabId), onOpenSpace: () => onOpenSpace(topic.id, tabId)
+  }} moteArchive={{
     archived: topic.moteArchive?.state === 'archived', disabled: pending === topic.id || topic.id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
     ...(topic.id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),
     onChange: () => onArchive(topic, topic.moteArchive?.state !== 'archived'),
@@ -97,11 +114,12 @@ function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
   return <div ref={ref} role="tooltip" className="mote-chooser__identity">{label}</div>
 }
 
-const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onOpenSpace, onClose, onArchive, pending, container }: {
+const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onOpenSpace, onClose, onArchive, pending, container, onRename, onAvatar, onMaterials, onOpenMoteSpace }: {
   topics: readonly ScratchTopicSnapshot[]; topicId: string; tabId: string | null | undefined
   railMode: 'cards' | 'avatars'; onToggleMode(): void
   onSelect(topicId: string, tabId: string | undefined): void; onOpenSpace(): void; onClose(): void
   onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null
+  onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onMaterials(topicId: string, tabId: string | undefined): void; onOpenMoteSpace(topicId: string, tabId: string | undefined): void
 }) {
   const [showArchived, setShowArchived] = useState(false)
   const [identityAnchor, setIdentityAnchor] = useState<HTMLButtonElement | null>(null)
@@ -111,7 +129,7 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
   }, [railMode])
   return <div className="mote-chooser">
     <div className="mote-chooser__choices" role="group" aria-label="Motes">
-      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} />)}
+      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onMaterials={onMaterials} onOpenSpace={onOpenMoteSpace} />)}
     </div>
     <div className="mote-chooser__actions">
       <button type="button" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><Archive size={13} /></button>
@@ -154,6 +172,14 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   const spaceActionRef = useRef<AbortController | null>(null)
   const [preparationAttempt, setPreparationAttempt] = useState(0)
   const [preparationIssue, setPreparationIssue] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<ScratchTopicSnapshot | null>(null)
+  const [avatarTarget, setAvatarTarget] = useState<SpaceIconTarget | null>(null)
+  const [materialsRequest, setMaterialsRequest] = useState<{ topicId: string; token: object } | null>(null)
+  const actionTopicId = useRef<string | null>(null)
+  const returnToMote = useCallback(() => {
+    const panel = panelRef.current
+    return panel?.matches(':popover-open') ? panel.querySelector<HTMLButtonElement>('[data-mote-topic-id="' + actionTopicId.current + '"]') ?? null : null
+  }, [])
   const positionRef = useRef<(() => Promise<void>) | undefined>(undefined)
   const availableSize = useRef<PmoTeamsTopicFloatingSize>({ width: 0, height: 0 })
   const drag = useRef<{ pointerId: number; handle: HTMLElement; x: number; y: number;
@@ -289,18 +315,18 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     setFloating({ open: true, preview: false, targetTopicId: topicId, targetTabId: tabId ?? null })
   }, [setFloating])
   const close = useCallback(() => { endResize(false); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [endResize])
-  const openSpace = useCallback(() => {
+  const openSpace = useCallback((topicId = target.topicId, tabId = target.tabId) => {
     spaceActionRef.current?.abort()
     const controller = new AbortController(); spaceActionRef.current = controller
-    const opening = target.tabId ? openScratchTopic(target.topicId, SCRATCH_WORKSPACE_ID, {
-      tabId: target.tabId, signal: controller.signal
+    const opening = tabId ? openScratchTopic(topicId, SCRATCH_WORKSPACE_ID, {
+      tabId, signal: controller.signal
     }) : (async () => {
-      const topic = await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, target.topicId)
+      const topic = await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, topicId)
       if (controller.signal.aborted) return
       const current = useAppStore.getState()
       if (!current.config) throw new Error('The Workspace is still restoring')
       const sources = spatialSources(current.config, [topic], current.spaceZoneBindings)
-      const space = sources.spaces.find(space => space.topicId === target.topicId)
+      const space = sources.spaces.find(space => space.topicId === topicId)
       const zone = space && sources.zones.find(zone => zone.zoneId === homeZoneId(space.spaceId) && zone.workspaceId === SCRATCH_WORKSPACE_ID &&
         sources.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === space.spaceId))
       if (!space || !zone) throw new Error('The original Topic Space is not available')
@@ -313,8 +339,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     const unsubscribe = useAppStore.subscribe(state => {
       if (state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId) {
         // This action's own successful empty-Space selection is an expected navigation.
-        if (!target.tabId && state.mainSurface === 'workbench' && state.activeWorkspaceId === SCRATCH_WORKSPACE_ID &&
-          state.workbenchSpaceSelection?.topicId === target.topicId) return
+        if (!tabId && state.mainSurface === 'workbench' && state.activeWorkspaceId === SCRATCH_WORKSPACE_ID &&
+          state.workbenchSpaceSelection?.topicId === topicId) return
         controller.abort()
       }
     })
@@ -380,7 +406,11 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       }} /> : null}
     {visible ? <MoteChooser topics={motes} topicId={target.topicId} tabId={floating.targetTabId === null ? null : target.tabId} railMode={railMode}
       onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
-      onSelect={selectMote} onOpenSpace={openSpace} onClose={close} onArchive={archive.change} pending={archive.pending} container={menuContainer} /> : null}
+      onSelect={selectMote} onOpenSpace={() => openSpace()} onClose={close} onArchive={archive.change} pending={archive.pending} container={menuContainer}
+      onRename={topic => { actionTopicId.current = topic.id; setRenameTarget(topic) }}
+      onAvatar={icon => { actionTopicId.current = icon.avatarTarget?.topicId ?? null; setAvatarTarget(icon) }}
+      onMaterials={(topicId, tabId) => { selectMote(topicId, tabId); setMaterialsRequest({ topicId, token: {} }) }}
+      onOpenMoteSpace={openSpace} /> : null}
     <div className="pmo-teams-topic-floating__content">
     {floating.preferenceIssue ? <div role="status" className="workbench-restore-notice mote-size-notice">{floating.preferenceIssue}</div> : null}
     {selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
@@ -397,10 +427,14 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     <div className="pmo-teams-topic-floating__body">
       {!target.tabId && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
+        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} materialsRequest={materialsRequest}
+          onTabSelect={tabId => { if (tabId !== target.tabId) { spaceActionRef.current?.abort(); setFloating({ targetTabId: tabId }) } }}>
         <WorkspaceWorkbench workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
         viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX} projectionTabId={target.tabId} visible={visible} interactiveResize={false}
-        onTabSelect={tabId => { if (tabId !== target.tabId) { spaceActionRef.current?.abort(); setFloating({ targetTabId: tabId }) } }} />}
+        onTabSelect={tabId => { if (tabId !== target.tabId) { spaceActionRef.current?.abort(); setFloating({ targetTabId: tabId }) } }} /></MoteWorkface>}
     </div>
     </div>
+    <MoteRenameDialog target={renameTarget && scratch ? { topic: renameTarget, workspace: scratch } : null} onClose={() => setRenameTarget(null)} returnFocus={returnToMote} />
+    <SpaceIconPicker target={avatarTarget} onClose={() => setAvatarTarget(null)} returnFocus={returnToMote} />
   </div></WorkbenchPresentationContext.Provider>
 }
