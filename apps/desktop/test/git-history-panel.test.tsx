@@ -3,6 +3,7 @@ const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } =
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import type { GitHistoryCommit, GitHistoryResult, GitHistorySnapshot } from '../src/shared/git-contracts.js'
 
@@ -31,11 +32,15 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 let host: HTMLDivElement, root: Root
+let stylesheet: HTMLStyleElement
 let history: ReturnType<typeof vi.fn>
 const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  stylesheet = document.createElement('style')
+  stylesheet.textContent = readFileSync('apps/desktop/src/renderer/src/styles/git-history.css', 'utf8')
+  document.head.append(stylesheet)
   history = vi.fn()
   Object.defineProperty(window, 'agentmux', { configurable: true, value: { git: { history } } })
   fixture.state.config.copyPathsAsAbsolute = false
@@ -43,6 +48,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove()
+  stylesheet.remove()
   Object.defineProperty(window, 'agentmux', { configurable: true, value: undefined })
   if (originalVisibility) Object.defineProperty(document, 'visibilityState', originalVisibility)
   else Reflect.deleteProperty(document, 'visibilityState')
@@ -64,6 +70,40 @@ async function select(value: string) {
 function rows() { return [...host.querySelectorAll('[data-history-oid]')].map(row => row.getAttribute('data-history-oid')) }
 
 describe('mounted GitHistoryPanel with production hook and bridge', () => {
+  it('keeps long messages, refs and hashes on one row and exposes complete metadata on hover', async () => {
+    const subject = 'Keep a long commit title readable without wrapping or adding another metadata line'
+    const first = commit(a, subject, [b])
+    const refs = Array.from({ length: 3 }, (_, index) => ({ name: `refs/heads/long-branch-name-${index}`, kind: 'local' as const, oid: a }))
+    history.mockResolvedValue(page([{ ...first, refs }, { ...commit(b, '', []), refs: [], authoredAt: null }]))
+    await render()
+    const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
+    expect(rendered).toHaveLength(2)
+    expect(stylesheet.sheet!.cssRules.length).toBeGreaterThan(0)
+    for (const row of rendered) {
+      const style = getComputedStyle(row)
+      expect(style.display).toBe('flex')
+      expect(style.flexDirection).toBe('row')
+      expect(style.whiteSpace).toBe('nowrap')
+      expect(style.alignItems).toBe('center')
+      expect(row.style.height).toBe('24px')
+      expect(row.querySelector(':scope > strong')).not.toBeNull()
+      expect(row.querySelector(':scope > .git-history-hash')).not.toBeNull()
+      expect(row.textContent).not.toContain(first.author)
+      expect(row.title).toContain(row.dataset.historyOid)
+      expect(row.title).toContain(first.author)
+      // The title inherits the row's complete hover rather than masking it with subject only.
+      expect(row.querySelector('strong')?.hasAttribute('title')).toBe(false)
+    }
+    expect(rendered.map(row => row.children.length)).toEqual([3, 2])
+    expect(rendered[0]!.querySelector(':scope > .git-history-refs')?.textContent).toContain('+1')
+    expect(rendered[0]!.title).toContain(subject)
+    expect(rendered[0]!.title).toContain(new Date(first.authoredAt!).toLocaleString())
+    expect(rendered[0]!.title.split('\n').slice(2)).toEqual(refs.map(ref => ref.name))
+    expect(rendered[1]!.title).toBe(`(No commit message)\n${b} · History author`)
+    expect([...host.querySelectorAll('.git-history-parent')].map(path => path.getAttribute('d'))).toEqual(['M 10 12 C 10 18, 10 18, 10 24'])
+    expect([...host.querySelectorAll('.git-history-node')].map(node => Number(node.getAttribute('cy')))).toEqual([12, 36])
+  })
+
   it('draws every actual merge parent and boundary, keeps 219 refs in their picker and formats the exact host path', async () => {
     const refs = Array.from({ length: 219 }, (_, i) => ({ name: `refs/heads/branch-${i}`, kind: 'local' as const, oid: a }))
     const many: GitHistorySnapshot = { ...snapshot, refs: [...refs, ...snapshot.refs] }
@@ -142,7 +182,7 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(shifted).toHaveLength(3) // two passing branches and the root's incoming track
     const routes = shifted.filter(path => path.getAttribute('d')?.includes(' C '))
     expect(routes).toHaveLength(2)
-    expect(routes.map(path => path.getAttribute('d'))).toEqual(['M 24 80 C 24 100, 10 100, 10 120', 'M 38 80 C 38 100, 24 100, 24 120'])
+    expect(routes.map(path => path.getAttribute('d'))).toEqual(['M 24 48 C 24 60, 10 60, 10 72', 'M 38 48 C 38 60, 24 60, 24 72'])
     expect(routes.map(path => hue(path))).toEqual([mainHue, topicHue])
     await click('Load more')
     expect(rows()).toEqual([e, a, f, c, b, d])
@@ -160,12 +200,12 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(refs.find(ref => ref.getAttribute('title') === tag.name)?.hasAttribute('data-branch-ref')).toBe(false)
     expect(host.querySelectorAll('.git-history-refs')).toHaveLength(4)
     const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
-    expect(rendered.map(row => row.style.height)).toEqual(['40px', '40px', '40px', '40px', '40px', '40px'])
-    expect(rendered.map(row => row.children.length)).toEqual([2, 2, 2, 2, 2, 2])
+    expect(rendered.map(row => row.style.height)).toEqual(['24px', '24px', '24px', '24px', '24px', '24px'])
+    expect(rendered.map(row => row.children.length)).toEqual([3, 3, 3, 2, 3, 2])
     expect(rendered[3]!.querySelector('.git-history-refs')).toBeNull()
-    expect(rendered[1]!.querySelector('.git-history-meta > .git-history-refs')).not.toBeNull()
-    expect([...host.querySelectorAll('.git-history-node')].map(circle => Number(circle.getAttribute('cy')))).toEqual([20, 60, 100, 140, 180, 220])
-    expect(host.querySelector('svg[aria-label="Loaded commit graph"]')?.getAttribute('height')).toBe('240')
+    expect(rendered[1]!.querySelector(':scope > .git-history-refs')).not.toBeNull()
+    expect([...host.querySelectorAll('.git-history-node')].map(circle => Number(circle.getAttribute('cy')))).toEqual([12, 36, 60, 84, 108, 132])
+    expect(host.querySelector('svg[aria-label="Loaded commit graph"]')?.getAttribute('height')).toBe('144')
     await click('Refresh history')
     expect(rows()).toEqual([a, b, c, d, e, f])
     expect(node(a)?.getAttribute('cx')).toBe('10')

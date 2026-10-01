@@ -60,7 +60,7 @@
 
 ## Git 源码控制与 PR
 
-用户要求最新提交历史更紧凑、不同分支用不同颜色，并优化分支线条。视觉约束归密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/conversation-input.md)；真实 Git 分支、固定分页、全部 parent 与未读边界仍沿[《Git 源码控制与 PR》](#git-源码控制与-pr)，呈现改变不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
+History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/conversation-input.md#explorer-提交历史的密度分支颜色与连线)。收敛提交行只改变呈现，真实 Git 分支身份、固定分页、全部 parent 与未读边界仍沿本节；不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
 
 - 用户要求 Git 增加「所有历史分支」选项：History 默认看已存在本地分支、本地已知 remote-tracking 引用与当前 HEAD 所可达的提交和真实分叉／合并关系，可明确选择一个引用读取其历史，再回到全部范围；它与 Branches 的工作线管理、Changes 的未提交改动各有清楚职责。远程引用只是本地已知事实，已读提交上的 tag 可作真实装饰，不为 tag 另扩根集合；查看不自动 fetch、checkout、创建 worktree、修改索引或触发 Agent。已删除引用／reflog 的范围尚未确认，不冒称包含。
 - History 每次读取固定准确仓库／Host、范围与 tip commit，提交身份和全部真实 parent 关系来自 Desktop Main 的 Git 事实。长历史有界、按需继续，范围、已加载边界与未读 parent 可辨；不能把一页当全历史、把缺对象或读取失败画成根节点／空仓库，不能让后来移动的引用混入同一分页快照。切 Workspace／引用或 History 不可见后停止无效读取，迟到结果不抢回旧选择，不把错误伪装成零提交。同 Workspace 内切 Branches／Changes／History、临时被设置覆盖或窗口隐藏时，仍存在的历史阅读面保留同一范围已读页；离开整个工具面或换 Workspace 后重新进入可重新读取，不把旧范围内容带入新范围。文件树收起但 History 仍可见时保持读取。单个历史读取失败仍保原工作面与健康 Run。视觉唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。

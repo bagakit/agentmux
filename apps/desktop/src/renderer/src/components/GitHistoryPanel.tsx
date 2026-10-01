@@ -6,7 +6,7 @@ import type { useGitHistory } from '../hooks/useGitHistory'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
 
-const ROW_HEIGHT = 40
+const ROW_HEIGHT = 24
 const LANE_WIDTH = 14
 const x = (lane: number) => 10 + lane * LANE_WIDTH
 
@@ -91,7 +91,7 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
                   data-child-oid={commit.oid} data-parent-oid={parent}
                   data-branch-ref={graph.guides.get(commit.parents[0] === parent ? commit.oid : parent)}
                   style={branchStyle(graph.guides.get(commit.parents[0] === parent ? commit.oid : parent))}
-                  d={`M ${x(lane)} ${middle} C ${x(lane)} ${bottom - 12}, ${x(after.indexOf(parent))} ${bottom - 12}, ${x(after.indexOf(parent))} ${bottom}`} />)}
+                  d={`M ${x(lane)} ${middle} C ${x(lane)} ${bottom - ROW_HEIGHT / 4}, ${x(after.indexOf(parent))} ${bottom - ROW_HEIGHT / 4}, ${x(after.indexOf(parent))} ${bottom}`} />)}
                 <circle className="git-history-node" data-commit-oid={commit.oid} data-branch-ref={graph.guides.get(commit.oid)}
                   style={branchStyle(graph.guides.get(commit.oid))} cx={x(lane)} cy={middle} r={3}>
                   <title>{commit.oid}{commit.parents.length === 0 ? ' · Root commit' : ` · ${commit.parents.length} parent${commit.parents.length > 1 ? 's' : ''}`}</title>
@@ -104,10 +104,9 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
           </svg>
         </div>
         <ol className="git-history-commits">
-          {ready.commits.map(commit => <li className="git-history-commit" key={commit.oid} data-history-oid={commit.oid} style={{ height: ROW_HEIGHT }}>
-            <strong title={commit.subject || '(No commit message)'}>{commit.subject || '(No commit message)'}</strong>
-            <div className="git-history-meta" title={`${commit.oid} · ${commit.author}${commit.authoredAt === null ? '' : ` · ${new Date(commit.authoredAt).toLocaleString()}`}`}>
-              <code>{commit.oid.slice(0, 7)}</code><span>{commit.author}</span>
+          {ready.commits.map(commit => <li className="git-history-commit" key={commit.oid} data-history-oid={commit.oid} style={{ height: ROW_HEIGHT }}
+            title={`${commit.subject || '(No commit message)'}\n${commit.oid} · ${commit.author}${commit.authoredAt === null ? '' : ` · ${new Date(commit.authoredAt).toLocaleString()}`}${commit.refs.length ? `\n${commit.refs.map(ref => ref.name).join('\n')}` : ''}`}>
+            <strong>{commit.subject || '(No commit message)'}</strong>
               {commit.refs.length > 0 && <div className="git-history-refs" title={commit.refs.map(ref => ref.name).join('\n')}>
                 {commit.refs.slice(0, 2).map(ref => {
                   const guide = ref.kind === 'local' || ref.kind === 'remote' ? ref.name : ref.kind === 'head' ? graph.guides.get(commit.oid) : undefined
@@ -116,7 +115,7 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
                 })}
                 {commit.refs.length > 2 && <span className="git-history-ref-count">+{commit.refs.length - 2}</span>}
               </div>}
-            </div>
+            <code className="git-history-hash">{commit.oid.slice(0, 7)}</code>
           </li>)}
         </ol>
       </div>

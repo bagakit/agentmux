@@ -112,7 +112,8 @@ it('joins actual file IO, fixed real Git history, source-control switching, coll
   expect(rows()).toHaveLength(2)
   for (let i = 0; i < 2; i++) { await click('.git-history-footer button'); await settle(() => rows().length === Math.min(4 + i * 2, 5)) }
   expect(new Set(rows())).toEqual(new Set(expectedOids))
-  const merge = element('.git-history-commit strong[title="Merge both work lines"]')
+  const merge = [...dom.container.querySelectorAll('.git-history-commit strong')].find(row => row.textContent === 'Merge both work lines')!
+  expect(merge).toBeDefined()
   const mergeOid = merge.closest<HTMLElement>('[data-history-oid]')!.dataset.historyOid!
   const parentEdges = [...dom.container.querySelectorAll<SVGPathElement>(`[data-child-oid="${mergeOid}"]`)]
   expect(parentEdges.map(edge => edge.getAttribute('data-parent-oid'))).toEqual([expectedOids[1], expectedOids[2]])
@@ -121,12 +122,12 @@ it('joins actual file IO, fixed real Git history, source-control switching, coll
   const parentEnds = parentEdges.map(edge => {
     const point = /, ([-\d.]+) ([-\d.]+)$/.exec(edge.getAttribute('d')!)
     expect(point, 'Actual parent curve endpoint').not.toBeNull()
-    expect(Number(point![2])).toBe((mergeRow + 1) * 40)
+    expect(Number(point![2])).toBe((mergeRow + 1) * 24)
     return Number(point![1])
   })
   expect(new Set(parentEnds).size).toBe(2)
-  expect([...dom.container.querySelectorAll<HTMLElement>('.git-history-commit')].map(row => row.style.height)).toEqual(['40px', '40px', '40px', '40px', '40px'])
-  expect([...dom.container.querySelectorAll('.git-history-node')].map(node => Number(node.getAttribute('cy')))).toEqual([20, 60, 100, 140, 180])
+  expect([...dom.container.querySelectorAll<HTMLElement>('.git-history-commit')].map(row => row.style.height)).toEqual(['24px', '24px', '24px', '24px', '24px'])
+  expect([...dom.container.querySelectorAll('.git-history-node')].map(node => Number(node.getAttribute('cy')))).toEqual([12, 36, 60, 84, 108])
   expect(history).toHaveBeenCalledTimes(3)
   await click('[aria-label="Hide file tree"]')
   expect(rows()).toHaveLength(5); expect(history).toHaveBeenCalledTimes(3)
