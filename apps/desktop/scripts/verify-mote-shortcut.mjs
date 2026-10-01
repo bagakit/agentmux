@@ -54,12 +54,14 @@ const binding = {
   }
 }
 const result = { schema: 'agentmux.mote-shortcut-proof.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false,
-  phases: [], privateProfile: join(privateRoot, 'user-data'), limitations: ['Session snapshots, attachment and recovery use a controlled public API boundary. The second process receives a retained ended Session with fresh native idle-entry evidence, and ordinary initialization asks recovery for its exact original identity; the controlled API returns it as reattachable. These receipts do not claim actual Core/ctxmux Run survival or whole-product acceptance.'], cleanup: null }
+  phases: [], privateProfile: join(privateRoot, 'user-data'), limitations: ['Session snapshots, attachment and recovery use a controlled public API boundary. The second process receives a retained ended Session with fresh native turn-ended evidence, and ordinary initialization asks recovery for its exact original identity; the controlled API returns it as reattachable. These receipts do not claim actual Core/ctxmux Run survival or whole-product acceptance.'], cleanup: null }
 await mkdir(evidence, { recursive: true })
 result.limitations.push('The Renderer compiles the actual desktop Browser stage branch. Only the single api.ts export is privately transformed to choose its typed data mock; native Browser and overlay methods use a sandboxed preload and the original Main owners. Renderer capturePage excludes native WebContentsViews. Independent original native-page/Chrome images and actual topmost owner/trusted-input receipts verify their separate scopes; they are not an OS-composited window. Exact-PID OS capture is supplementary and retains provider failures. DevTools input is trusted native input, not physical hardware or OS IME.')
 result.limitations.push('Native Escape verifies the actual non-composing before-input-event. A separate diagnostic found that DevTools imeSetComposition starts trusted DOM composition, but CDP raw Escape still reports native isComposing=false; it cannot certify the composing key path. Source owning tests and effective mutation verify the isComposing guard; native OS IME remains unverified.')
 try {
-  coreSdkDist = join(await realpath(join(desktop, 'node_modules/@agentmux/core')), 'dist')
+  // Dependency bytes may be exposed through a private dist symlink. Vite uses
+  // canonical paths, so the compiled SDK binding must use the same identity.
+  coreSdkDist = await realpath(join(await realpath(join(desktop, 'node_modules/@agentmux/core')), 'dist'))
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), ...['main.cjs', 'preload.cjs', 'browser.html', 'index.html', 'scenario.md'].map(name => join(fixture, name))]) inputs.set(file, hash(await readFile(file)))
   const outDir = join(privateRoot, 'renderer')
   const nativeDir = join(privateRoot, 'native')
@@ -78,7 +80,28 @@ try {
   // Vite embeds maintained SDK dependencies; Electron and Node retain their ordinary resolution.
   await symlink(join(desktop, 'node_modules'), join(nativeDir, 'node_modules'), 'dir')
   const nativeBundle = join(nativeDir, 'native.mjs')
+  // Only the Renderer consumes current public Source exports. The native slice
+  // above keeps its separately bound compiled SDK dependency scope.
+  const aliases = []
+  for (const name of ['core', 'demand', 'layout']) {
+    const directory = join(repository, 'packages', name), manifestFile = join(directory, 'package.json')
+    const bytes = await readFile(manifestFile), manifest = JSON.parse(bytes)
+    inputs.set(manifestFile, hash(bytes))
+    const entries = Object.entries(manifest.exports)
+    assert.ok(entries.length > 0, 'Nonempty public Source exports: ' + name)
+    for (const [subpath, target] of entries) {
+      assert.ok(target.import.startsWith('./dist/') && target.import.endsWith('.js') ||
+        target.import.startsWith('./src/') && target.import.endsWith('.ts'), 'Explicit Source mapping: ' + name + subpath)
+      const specifier = '@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))
+      const source = target.import.endsWith('.ts') ? target.import :
+        target.import.replace('./dist/', name === 'demand' ? './' : './src/').replace(/\.js$/, '.ts')
+      const replacement = resolve(directory, source)
+      await readFile(replacement)
+      aliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement })
+    }
+  }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
+    resolve: { alias: aliases },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     css: { postcss: { plugins: [stylesheetBinding] } },
     plugins: [binding, { name: 'private-mote-public-api-boundary', enforce: 'pre', transform(code, id) {

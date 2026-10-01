@@ -208,19 +208,21 @@ describe('Mote shortcut current context', () => {
       : new Promise<void>((resolve) => { finish.push(resolve) }) })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
-    const before = active.size
-    // The bound React hook owns its original selector subscriptions. This public
-    // subscribe seam counts the action's added whole-store navigation consumers.
-    expect(before).toBe(0)
+    const before = new Set(active)
+    expect(before.size).toBeGreaterThan(0)
+    // Keep the mounted original workface's consumers. This public seam observes
+    // only the navigation action's added whole-store subscription and its release.
+    const navigationConsumers = () => [...active].filter(listener => !before.has(listener))
     await act(async () => button('Open Mote Space').click())
-    expect(active.size).toBe(before + 1)
+    expect(navigationConsumers()).toHaveLength(1)
+    expect([...before].every(listener => active.has(listener))).toBe(true)
     await act(async () => button('Open Mote Space').click())
     expect(finish).toHaveLength(2)
-    expect(active.size).toBe(before + 1)
+    expect(navigationConsumers()).toHaveLength(1)
     await act(async () => button('Close Mote').click()); await settle()
-    expect(active.size).toBe(before)
+    expect(active).toEqual(before)
     await act(async () => finish.forEach((resolve) => resolve())); await settle()
-    expect(active.size).toBe(before)
+    expect(active).toEqual(before)
     expect(saved().open).toBe(false)
   })
 

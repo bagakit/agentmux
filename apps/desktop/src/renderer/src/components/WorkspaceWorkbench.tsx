@@ -1214,9 +1214,9 @@ function PaneGroup({
         {showEmptySpace ? storedSpaceLayout && emptySpaceTopic && !hasOriginalTopicTab ? <div className="pane-state" data-mote-empty-space={emptySpaceTopic.id}
           onPointerDown={event => event.stopPropagation()}>
           <span>{emptySpaceTopic.title}</span>
-          <strong role="status">No Tab in this context</strong>
-          <button type="button" className="small-button" aria-label="New Tab" title="New tab"
-            onClick={() => onNewTab(group.id)}><Plus size={13} /> New Tab</button>
+          <strong role="status">No discussion yet</strong>
+          <button type="button" className="small-button" aria-label="New discussion" title="New discussion"
+            onClick={() => onNewTab(group.id)}><Plus size={13} /> New discussion</button>
         </div> : <div role="status" className="workbench-restore-notice">Original context retained · Topic or Tab placement is still being confirmed · Reopen this context in Space to continue recovery</div> : null}
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
             此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
@@ -1705,9 +1705,10 @@ export function WorkspaceWorkbench({
   if (viewOwnership === 'projection' && !projectionTabId && !projection) {
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
       {layout ? <div className="pane-state">
-        <strong role="status">No Tab in this context</strong>
-        <button type="button" className="small-button" aria-label="New Tab" title="New tab"
-          onClick={() => newTab(layout.activeGroupId)}><Plus size={13} /> New Tab</button>
+        <strong role="status">{moteContext ? 'No discussion yet' : 'No Tab in this context'}</strong>
+        <button type="button" className="small-button" aria-label={moteContext ? 'New discussion' : 'New Tab'}
+          title={moteContext ? 'New discussion' : 'New tab'}
+          onClick={() => newTab(layout.activeGroupId)}><Plus size={13} /> {moteContext ? 'New discussion' : 'New Tab'}</button>
       </div> : <div role="status" className="workbench-restore-notice">Original context retained · Workspace layout is still restoring</div>}
     </div>
   }

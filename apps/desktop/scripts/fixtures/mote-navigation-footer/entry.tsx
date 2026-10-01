@@ -259,7 +259,7 @@ function presentationReview() {
     flushIdentity: () => prepareRendererUpdate(),
     preferenceSaveFailure: (fail: boolean) => { failPreferenceSave = fail },
     footerCounts: (working: number, attention: number) => {
-      const originals = controlledSessions.map(session => ({ ...session, status: { ...session.status, state: 'idle' as const } }))
+      const originals = controlledSessions.map(session => ({ ...session, status: { ...session.status, state: 'done' as const } }))
       const counted = (count: number, state: 'working' | 'error') => Array.from({ length: count }, (_, index) => {
         const id = `footer-${state}-${index}`
         return { ...executionAgent, id, label: id, status: { ...executionAgent.status, state, observedAt },

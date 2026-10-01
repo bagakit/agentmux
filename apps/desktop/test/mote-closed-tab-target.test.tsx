@@ -65,7 +65,7 @@ it('actual App Tab X → Keep Session & Close selects the same Mote original rem
   expectQuiet(before, stop)
 })
 
-it('last actual Tab close persists null, survives remount and Mote switching, and creates only via explicit New Tab', async () => {
+it('last actual Tab close persists null, survives remount and Mote switching, and creates only via explicit New discussion', async () => {
   removeNeighbor(); await openSavedTarget()
   const before = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
   await closeSelected()
@@ -81,7 +81,7 @@ it('last actual Tab close persists null, survives remount and Mote switching, an
   await choose(PMO_TEAMS_TOPIC_ID)
   expect(persisted().targetTabId).toBeNull()
   expect(Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === PMO_TEAMS_TOPIC_ID)).toEqual([])
-  const newTab = app.panel().querySelector<HTMLButtonElement>('button[aria-label="New Tab"]')
+  const newTab = app.panel().querySelector<HTMLButtonElement>('button[aria-label="New discussion"]')
   expect(newTab).not.toBeNull(); await moteClick(newTab!)
   const created = Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === PMO_TEAMS_TOPIC_ID)
   expect(created).toHaveLength(1)
@@ -106,8 +106,8 @@ it('empty Open Mote Space selects the same Topic without preparing a launcher', 
   const empty = document.querySelector<HTMLElement>(`[data-mote-empty-space="${PMO_TEAMS_TOPIC_ID}"]`)
   expect(empty).not.toBeNull()
   expect(empty!.textContent).toContain('Mote')
-  expect(empty!.querySelector('[role="status"]')?.textContent).toBe('No Tab in this context')
-  const create = empty!.querySelector<HTMLButtonElement>('[aria-label="New Tab"]')
+  expect(empty!.querySelector('[role="status"]')?.textContent).toBe('No discussion yet')
+  const create = empty!.querySelector<HTMLButtonElement>('[aria-label="New discussion"]')
   expect(create).not.toBeNull(); await moteClick(create!)
   const created = Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === PMO_TEAMS_TOPIC_ID)
   expect(created).toHaveLength(1)
@@ -182,8 +182,8 @@ it('an unconfirmed Topic with no target keeps the preparation notice without cla
   await openSavedTarget(null, 'launcher:not-confirmed')
   expect(app.panel().dataset.moteTargetTab).toBeUndefined()
   expect(app.panel().textContent).toContain('Topic directory is still being confirmed')
-  expect(app.panel().textContent).not.toContain('No Tab in this context')
-  expect(app.panel().querySelector('[aria-label="New Tab"]')).toBeNull()
+  expect(app.panel().textContent).not.toContain('No discussion yet')
+  expect(app.panel().querySelector('[aria-label="New discussion"]')).toBeNull()
   expect(useAppStore.getState().tabs[defaultTab.id]).toBe(defaultTab)
   expect(app.launch).not.toHaveBeenCalled()
   await act(async () => { useAppStore.setState({ mainSurface: 'workbench', workbenchSpaceSelection: {
@@ -278,7 +278,7 @@ it('late metadata prepare does not create a closed Tab or replace a newly select
   expect(app.launch).not.toHaveBeenCalled()
 })
 
-it('deferred empty Topic ensure failure and Retry context preserve empty until explicit New Tab', async () => {
+it('deferred empty Topic ensure failure and Retry context preserve empty until explicit New discussion', async () => {
   const { [customTab.id]: removed, ...tabs } = useAppStore.getState().tabs
   expect(removed).toBe(customTab)
   useAppStore.setState({ tabs, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', Object.keys(tabs)) } })
@@ -294,7 +294,7 @@ it('deferred empty Topic ensure failure and Retry context preserve empty until e
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(app.panel().dataset.moteTargetTab).toBeUndefined()
   expect(app.warm).not.toHaveBeenCalled()
-  const newTab = app.panel().querySelector<HTMLButtonElement>('[aria-label="New Tab"]')
+  const newTab = app.panel().querySelector<HTMLButtonElement>('[aria-label="New discussion"]')
   expect(newTab).not.toBeNull(); await moteClick(newTab!)
   const created = Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === customMoteId)
   expect(created).toHaveLength(1)

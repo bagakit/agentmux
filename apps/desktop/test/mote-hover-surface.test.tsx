@@ -78,6 +78,9 @@ beforeEach(() => {
   // These cases observe an already expanded input. Its existing preference owns
   // that presentation; hovering must never expand or activate the Launcher.
   expect(useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID, 'agents', 'expanded')).toBe(true)
+  // Mote's unsaved Terminal section defaults to collapsed. An explicitly saved
+  // expanded section lets this fixture observe its original prewarm owner.
+  expect(useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID, 'terminal', 'expanded')).toBe(true)
   warm = vi.fn(); detect = vi.fn(async () => {}); launch = vi.fn(); send = vi.fn(() => true)
   useAppStore.setState({ prewarmTerminal: warm, detectExecutors: detect, launchAgent: launch, send, reportError: vi.fn() })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(moteTopics)
@@ -127,8 +130,15 @@ describe('one operative Mote hover surface', () => {
     expect(container.querySelector(`[data-original-workbench] [data-workbench-tab-id="${neighbor.id}"] [aria-label="Agent prompt"]`)).toBe(input)
     expect(input.textContent).toBe('Neighbor unsent')
     expect(warm.mock.calls).toHaveLength(calls)
-    expect(pmoTeamsTopicFloatingViewTargets({ open: true, preview: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id },
-      original.tabs, original.layouts[SCRATCH_WORKSPACE_ID], original.agentFocus.pmo.sessionId)).toBeUndefined()
+    const targets = pmoTeamsTopicFloatingViewTargets({ open: true, preview: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id },
+      original.tabs, original.layouts[SCRATCH_WORKSPACE_ID], original.agentFocus.pmo.sessionId)
+    if (availability === 'unplaced') {
+      // The known original View stays available without inventing a Group
+      // placement or lending input to the neighboring launcher.
+      expect(targets?.[defaultTab.id]).toEqual([{ hostId: `mote-floating-tab-slot:${defaultTab.id}`,
+        active: true, visible: true, surface: 'mote' }])
+      expect(targets?.[defaultTab.id]?.[0]?.reference).toBeUndefined()
+    } else expect(targets).toBeUndefined()
     expect(useAppStore.getState().layouts).toBe(original.layouts)
     expect(useAppStore.getState().tabs).toBe(original.tabs)
     expect(useAppStore.getState().sessions).toBe(original.sessions)
@@ -138,7 +148,7 @@ describe('one operative Mote hover surface', () => {
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
   })
 
-  it('keeps an empty Mote through deferred identity failure and retry until explicit New Tab', async () => {
+  it('keeps an empty Mote through deferred identity failure and retry until explicit New discussion', async () => {
     const { [quietTab.id]: _tab, ...tabs } = useAppStore.getState().tabs
     useAppStore.setState({ tabs, layouts: { ...useAppStore.getState().layouts,
       [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', Object.keys(tabs)) } })
@@ -173,7 +183,7 @@ describe('one operative Mote hover surface', () => {
     expect(warm).not.toHaveBeenCalled()
     expect(api.scratch.readTopic).not.toHaveBeenCalled()
     expect(useAppStore.getState().tabs).toBe(before.tabs)
-    const newTab = panel().querySelector<HTMLButtonElement>('[aria-label="New Tab"]')!
+    const newTab = panel().querySelector<HTMLButtonElement>('[aria-label="New discussion"]')!
     expect(newTab).not.toBeNull(); await click(newTab)
     const tabId = panel().dataset.moteTargetTab!, tab = useAppStore.getState().tabs[tabId]!
     expect(tab?.topicId).toBe(quietMoteId)
@@ -193,7 +203,7 @@ describe('one operative Mote hover surface', () => {
     await mount(); await hover(); await click(choice(customMoteId))
     const before = useAppStore.getState(), group = before.layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!
     const previousIds = Object.keys(before.tabs)
-    const plus = panel().querySelector<HTMLButtonElement>('[title="New tab"]')!
+    const plus = panel().querySelector<HTMLButtonElement>('[aria-label="New discussion"]')!
     expect(plus).not.toBeNull()
     await click(plus)
     const state = useAppStore.getState(), createdIds = Object.keys(state.tabs).filter(id => !previousIds.includes(id))
@@ -220,7 +230,7 @@ describe('one operative Mote hover surface', () => {
     expect(useAppStore.getState().agentComposerDrafts[customAgent.id]).toBe('Analyst unsent')
     // A second header action must retain its own new Tab instead of letting a
     // late DOM listener borrow the original durable active Tab behind it.
-    await click(panel().querySelector<HTMLButtonElement>('[title="New tab"]')!)
+    await click(panel().querySelector<HTMLButtonElement>('[aria-label="New discussion"]')!)
     const next = useAppStore.getState(), secondIds = Object.keys(next.tabs).filter(id => !Object.keys(state.tabs).includes(id))
     expect(secondIds).toHaveLength(1)
     const secondId = secondIds[0]!
@@ -429,7 +439,7 @@ describe('one operative Mote hover surface', () => {
       else {
         expect(panel().dataset.moteTargetTab).toBeUndefined()
         expect(Object.values(useAppStore.getState().tabs).filter(tab => tab.topicId === customMoteId)).toEqual([])
-        expect(panel().querySelector('[aria-label="New Tab"]')).not.toBeNull()
+        expect(panel().querySelector('[aria-label="New discussion"]')).not.toBeNull()
         expect(panel().dataset.moteTargetSession).toBeUndefined()
       }
     }

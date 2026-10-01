@@ -45,7 +45,7 @@ export async function installMoteNative(options: Options) {
     userRunTouched: false, userAppInput: false,
     boundary: 'Production BrowserViewManager, NativeOverlaySurfaces, BrowserProfileManager and ledger in one exact private BrowserWindow. Trusted DevTools input addresses an original native WebContents only after its actual topmost owner is observed; the UI bridge must be delivered by the real WebContents input-event, never manually called. OS captures come from the exact private PID/window; individual WebContents images never claim OS composition. Physical hardware, OS focus and Core/ctxmux Run survival are not tested.',
     fixturePage: { path: fixturePage, sha256: digest(fixtureHtml) },
-    profiles: [], bindings: [], bounds: [], overlayUpdates: [], warnings: [], browserInputs: [], nativeInputEvents: [], keyboardEvents: [], inputs: [], nativeFrames: [], osFrames: [], failures: [], disposed: false
+    profiles: [], bindings: [], bounds: [], presentationOperations: [], overlayUpdates: [], warnings: [], browserInputs: [], nativeInputEvents: [], chromeInputEvents: [], keyboardEvents: [], inputs: [], nativeFrames: [], osFrames: [], failures: [], disposed: false
   }
   const profiles = new BrowserProfileManager(new BrowserProfileStore(join(privateRoot, 'user-data', 'browser-profiles.json')))
   await profiles.initialize()
@@ -131,6 +131,39 @@ export async function installMoteNative(options: Options) {
       ownerWindowId: BrowserWindow.fromWebContents(view.webContents)?.id, created: added.length === 1 })
     return snapshot
   }
+  // Mirror the current public ipc.ts presentation bridge. The original production
+  // manager retains requester/frame authorization, leases, media grants and input.
+  // These receipts observe its calls; the harness never creates a lease or capture.
+  const refreshChrome = () => {
+    void nativeChrome.refresh().then(value => {
+      receipt.overlayUpdates.push({ at: Date.now(), operation: 'presentation-refresh', receipt: clone(value) })
+    }).catch(() => warn('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+  }
+  const handlePresentation = (method: string, work: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) => {
+    const channel = `mote-native:${method}`
+    ipcMain.handle(channel, async (event, ...args) => {
+      requireSender(event)
+      const record: any = { at: Date.now(), method, args: clone(args) }
+      receipt.presentationOperations.push(record)
+      try { const result = await work(event, ...args); record.result = clone(result); return result }
+      catch (error) { record.failure = { name: (error as Error).name, message: (error as Error).message }; throw error }
+    })
+    handled.push(channel)
+  }
+  handlePresentation('browser:registerPresentation', (event, input) => browsers.registerPresentation(event.sender, event.senderFrame, input))
+  handlePresentation('browser:updatePresentation', (event, leaseId, geometry) => {
+    browsers.updatePresentation(event.sender, event.senderFrame, leaseId, geometry); refreshChrome()
+  })
+  handlePresentation('browser:removePresentation', (event, leaseId) => {
+    browsers.removePresentation(event.sender, event.senderFrame, leaseId); refreshChrome()
+  })
+  handlePresentation('browser:armPresentationCapture', (event, leaseId) => browsers.armPresentationCapture(event.sender, event.senderFrame, leaseId))
+  handlePresentation('browser:ackPresentationCapture', (event, captureId, ack) => browsers.ackPresentationCapture(event.sender, event.senderFrame, captureId, ack))
+  handlePresentation('browser:activatePresentation', async (event, leaseId, activation) => {
+    const result = await browsers.activatePresentation(event.sender, event.senderFrame, leaseId, activation)
+    if (result.outcome === 'selected' || result.outcome === 'input-dispatched') refreshChrome()
+    return result
+  })
   handle('browser:create', (id: string, url: string, workspaceId: string | null) => bind(id, 'create', () => browsers.create(id, checkUrl(id, url), workspaceId)))
   handle('browser:navigate', (id: string, url: string) => browsers.navigate(id, checkUrl(id, url)))
   handle('browser:back', (id: string) => browsers.back(id))
@@ -336,6 +369,48 @@ export async function installMoteNative(options: Options) {
     await saveReceipt()
     return observation
   }
+  async function verifyChromeControl(bounds: BrowserBounds, label: string) {
+    labelName(label)
+    const observation: any = { label, action: 'original-chrome-click', passed: false, before: owners(),
+      mechanism: 'Trusted DevTools input to the exact actual topmost Chrome WebContents. Production NativeOverlaySurfaces forwards the real input-event to the original Renderer; no manual UI callback, physical hardware or OS-composition claim.' }
+    receipt.inputs.push(observation)
+    try {
+      const projections = Reflect.get(nativeChrome, 'projections') as Map<string, ChromeProjection>
+      const matches = [...projections.values()].filter(projection => JSON.stringify(projection.region.bounds) === JSON.stringify(bounds))
+      assert.equal(matches.length, 1, 'The original control has one exact bound native Chrome owner')
+      const projection = matches[0], view = projection.view, contents = view.webContents
+      assert.equal(projection.interactive, true); assert.equal(projection.paintStage, 'Chrome image')
+      assert.equal(view.getVisible(), true); assert.equal(BrowserWindow.fromWebContents(contents), window)
+      assert.deepEqual(view.getBounds(), bounds)
+      const point = { x: bounds.width / 2, y: bounds.height / 2 }, world = { x: bounds.x + point.x, y: bounds.y + point.y }
+      const topmost = [...nativeChildren()].reverse().find(candidate => candidate.getVisible() && inside(world, candidate.getBounds()))
+      assert.equal(topmost, view, 'Native control input must hit the actual topmost original Chrome owner')
+      Object.assign(observation, { region: clone(projection.region), webContentsId: contents.id, ownerWindowId: window.id,
+        childIndex: window.contentView.children.indexOf(view), point, world, topmostWebContentsId: topmost?.webContents.id })
+      const events: any[] = [], onInput = (_event: unknown, input: Electron.InputEvent) => events.push(clone(input))
+      contents.on('input-event', onInput)
+      const debuggerApi = contents.debugger, attachedHere = !debuggerApi.isAttached()
+      if (attachedHere) debuggerApi.attach('1.3')
+      try {
+        await debuggerApi.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+        for (const type of ['mousePressed', 'mouseReleased']) await debuggerApi.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
+        await pause(80)
+      } finally {
+        contents.off('input-event', onInput)
+        if (attachedHere && debuggerApi.isAttached()) debuggerApi.detach()
+      }
+      observation.nativeEvents = events
+      receipt.chromeInputEvents.push({ label, webContentsId: contents.id, events })
+      assert.ok(events.some(input => input.type === 'mouseMove'))
+      assert.ok(events.some(input => input.type === 'mouseDown'))
+      assert.ok(events.some(input => input.type === 'mouseUp'))
+      observation.after = owners(); observation.passed = true
+    } catch (error) {
+      observation.failure = { name: (error as Error).name, message: (error as Error).message, stack: (error as Error).stack }
+      observation.failedOwners = owners(); receipt.failures.push({ label, ...observation.failure })
+    }
+    await saveReceipt(); return observation
+  }
   async function verifyPageEscape(id: string, label: string, composing = false) {
     labelName(label)
     const observation: any = { label, browserId: id, action: 'escape', composing, passed: false, before: owners(),
@@ -446,6 +521,6 @@ export async function installMoteNative(options: Options) {
     assert.equal(receipt.afterDispose.resources.browserViews, 0)
     await saveReceipt()
   }
-  return { receipt, browsers, nativeChrome, fixturePageUrl, owners, pageFacts, verifyPageInput,
+  return { receipt, browsers, nativeChrome, fixturePageUrl, owners, pageFacts, verifyPageInput, verifyChromeControl,
     verifyPageHover: (id: string, label: string) => verifyPageInput(id, label, 'move'), verifyPageEscape, captureNativeFrames, captureOsWindow, dispose }
 }

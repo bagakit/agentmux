@@ -44,7 +44,7 @@ app.whenReady().then(async () => {
     }
     const waitNative = async predicate => {
       const deadline = Date.now() + 8000
-      do { if (predicate(native.owners())) return; await pause(30) } while (Date.now() < deadline)
+      do { const current = native.owners(); if (predicate(current)) return current; await pause(30) } while (Date.now() < deadline)
       throw new Error('Native owner did not settle: ' + JSON.stringify(native.owners()))
     }
     const facts = () => read('window.moteProof.facts()')
@@ -86,16 +86,18 @@ app.whenReady().then(async () => {
       assert.equal(current.ui.panelVisible, true)
       assert.equal(current.ui.globalChrome, 0, 'Projection cannot copy Goals/Focus global chrome')
       assert.equal(current.ui.titleRows, 0, 'The redundant independent title row is removed')
-      assert.equal(current.ui.footerHeight, 32)
+      assert.equal(current.ui.footerHeight, 24)
       const footer = current.ui.footerRect
       assert.ok(current.ui.entryRect && current.ui.entryAvatarRect, 'The real entry and avatar geometry are nonempty')
       for (const rect of [current.ui.entryRect, current.ui.entryAvatarRect, current.ui.entryStatusRect].filter(Boolean)) {
         assert.ok(rect.width > 0 && rect.height > 0, 'Each actual painted entry part has a positive area')
-        assert.ok(rect.y >= footer.y && rect.bottom <= footer.bottom, 'The complete Mote entry remains inside the original footer, clear of native Browser drawing')
+        assert.ok(rect.y >= 0 && rect.bottom <= footer.bottom && rect.bottom >= footer.y,
+          'The complete larger Mote entry stays visible at the low footer; native drawing clearance is verified separately')
       }
       assert.deepEqual(current.ui.choices.map(one => one.topicId).sort(), ['launcher:custom-coordinator', 'launcher:custom-research', 'launcher:leader'])
       assert.equal(current.ui.choices.length, 3, 'One choice per real object, regardless of Tab/Session count')
-      assert.equal(current.ui.actions.length, 2)
+      assert.deepEqual(current.ui.actions.map(action => action.label).sort(),
+        ['Show archived Motes', 'Show Mote avatars only', 'Open Mote Space', 'Close Mote'].sort())
       for (const action of current.ui.actions) {
         assert.ok(action.width >= 20 && action.height >= 20, 'Original actions retain their actual hit areas')
         assert.ok(action.right <= win.getContentBounds().width && action.bottom <= win.getContentBounds().height)
@@ -108,18 +110,54 @@ app.whenReady().then(async () => {
       return current
     }
     const verifyNativeEntryClearance = async label => {
-      const current = await facts(), owners = native.owners(), zoom = win.webContents.getZoomFactor()
-      const entryBox = current.ui.entryRect
+      const before = await facts(), zoom = win.webContents.getZoomFactor(), entryBox = before.ui.entryRect
       assert.ok(entryBox && entryBox.width > 0 && entryBox.height > 0)
       const bounds = { x: entryBox.x * zoom, y: entryBox.y * zoom, width: entryBox.width * zoom, height: entryBox.height * zoom }
-      const drawn = owners.orderedChildren.filter(owner => owner.drawn)
-      assert.ok(drawn.length > 0, 'Actual native surfaces are present for the entry-clearance check')
-      for (const owner of drawn) {
-        const box = owner.bounds
-        assert.ok(bounds.x + bounds.width <= box.x || box.x + box.width <= bounds.x || bounds.y + bounds.height <= box.y || box.y + box.height <= bounds.y,
-          'The actual native owner cannot cover any part of the original footer entry')
+      const owners = await waitNative(current => current.chrome.some(owner => owner.drawn && owner.interactive &&
+        JSON.stringify(owner.region.bounds) === JSON.stringify(bounds)))
+      const matches = owners.chrome.filter(owner => JSON.stringify(owner.region.bounds) === JSON.stringify(bounds))
+      assert.equal(matches.length, 1, 'The real original entry has exactly one locally bounded Chrome projection')
+      const entryOwner = matches[0]
+      assert.equal(entryOwner.ownerWindowId, win.id); assert.equal(entryOwner.region.radius, bounds.width / 2)
+      assert.deepEqual(entryOwner.bounds, bounds)
+      const inside = (point, box) => point.x >= box.x && point.x < box.x + box.width && point.y >= box.y && point.y < box.y + box.height
+      const points = [{ x: bounds.x + bounds.width / 2, y: bounds.y + 2 },
+        { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }]
+      for (const point of points) {
+        const topmost = [...owners.orderedChildren].reverse().find(owner => owner.drawn && inside(point, owner.bounds))
+        assert.equal(topmost?.webContentsId, entryOwner.webContentsId, 'Raised and center entry points hit its actual original Chrome, not the underlying Browser')
       }
-      ;(result.nativeEntryClearance ??= []).push({ label, entry: bounds, owners: drawn.map(owner => ({ webContentsId: owner.webContentsId, bounds: owner.bounds })) })
+      const browsers = owners.browsers.filter(owner => owner.drawn)
+      assert.ok(browsers.length > 0, 'An original Native Browser is actually present')
+      const near = { x: bounds.x + bounds.width + 8, y: bounds.y + 2 }
+      const nearbyBrowser = browsers.find(owner => inside(near, owner.bounds))
+      if (label === 'browser-behind-mote') {
+        assert.ok(nearbyBrowser, 'The original Browser still occupies the space beside the local entry box')
+        assert.equal([...owners.orderedChildren].reverse().find(owner => owner.drawn && inside(near, owner.bounds))?.webContentsId,
+          nearbyBrowser.webContentsId, 'The local entry projection does not cover the adjacent original page')
+      }
+      const closeInput = await native.verifyChromeControl(bounds, label + '-entry-close')
+      assert.equal(closeInput.passed, true, JSON.stringify(closeInput.failure))
+      await until('!' + panel + '?.matches(":popover-open")')
+      const closed = await facts()
+      assert.equal(closed.ui.entryTarget, before.ui.entryTarget)
+      await waitNative(current => current.chrome.some(owner => owner.drawn && owner.interactive &&
+        JSON.stringify(owner.region.bounds) === JSON.stringify(bounds)))
+      const reopenInput = await native.verifyChromeControl(bounds, label + '-entry-open')
+      assert.equal(reopenInput.passed, true, JSON.stringify(reopenInput.failure))
+      await until(panel + '?.matches(":popover-open") && ' + panel + '.dataset.motePresentation==="pinned"')
+      const reopened = await facts()
+      assert.equal(reopened.ui.panelTarget, before.ui.panelTarget); assert.equal(reopened.ui.panelTopic, before.ui.panelTopic)
+      for (const key of ['tabs', 'layouts', 'activeWorkspaceId', 'mainSurface', 'drafts', 'outbox', 'runs'])
+        assert.deepEqual(reopened[key], before[key], 'Actual native entry input preserves ' + key)
+      assert.deepEqual(reopened.focus.execution, before.focus.execution)
+      const finalOwners = await waitNative(current => current.chrome.some(owner => owner.drawn && owner.interactive &&
+        JSON.stringify(owner.region.bounds) === JSON.stringify(bounds)))
+      const originalBrowsers = owner => owner.browsers.map(({ browserId, webContentsId, ownerWindowId, bounds, drawn, attached }) =>
+        ({ browserId, webContentsId, ownerWindowId, bounds, drawn, attached }))
+      assert.deepEqual(originalBrowsers(finalOwners), originalBrowsers(owners), 'Native entry input keeps original Browser identity, geometry and attachment')
+      ;(result.nativeEntryClearance ??= []).push({ label, entry: bounds, owner: entryOwner, points, near,
+        closeInput, reopenInput, closedTarget: closed.ui.entryTarget, reopenedTarget: reopened.ui.panelTarget, owners: finalOwners })
     }
     const choose = async (topic, target) => {
       const choice = panel + '.querySelector(' + JSON.stringify('[data-mote-topic-id="' + topic + '"]') + ')'
@@ -131,7 +169,14 @@ app.whenReady().then(async () => {
       await click(choice)
       if (target) {
         await until(panel + '.dataset.moteTargetTopic===' + JSON.stringify(topic))
-        if ((await facts()).ui.panelTarget !== target) await click(panel + '.querySelector(' + JSON.stringify('button[data-workbench-tab-id="' + target + '"]') + ')')
+        if ((await facts()).ui.panelTarget !== target) {
+          const toggle = panel + '.querySelector("button[aria-label=\'Show Mote discussions\']")'
+          if (await read(toggle + '?.getAttribute("aria-expanded")==="false"')) {
+            await click(toggle)
+            await until(toggle + '?.getAttribute("aria-expanded")==="true"')
+          }
+          await click(panel + '.querySelector(' + JSON.stringify('button[data-workbench-tab-id="' + target + '"]') + ')')
+        }
         return visible(target, topic)
       }
       await until(panel + '.dataset.moteTargetTopic===' + JSON.stringify(topic))
@@ -160,7 +205,9 @@ app.whenReady().then(async () => {
       let current = await visible('mote-primary-tab', 'launcher:leader')
       assert.equal(current.floating.open, false, 'Hover is not a durable pin')
       for (const protectedKey of ['focus', 'drafts', 'viewModes', 'outbox', 'mainSurface', 'activeWorkspaceId']) assert.deepEqual(current[protectedKey], result.initial[protectedKey], 'Hover preserves ' + protectedKey)
-      assert.deepEqual(current.calls.filter(one => ['ensureTopic', 'ensureMote'].includes(one.operation)), [], 'Hover must not prepare or launch another workface')
+      assert.deepEqual(current.calls.filter(one => ['ensureTopic', 'ensureMote'].includes(one.operation)),
+        result.initial.calls.filter(one => ['ensureTopic', 'ensureMote'].includes(one.operation)),
+        'Hover adds no preparation beyond ordinary primary Mote initialization')
       assert.match(current.ui.entryTitle, /Working/)
       await capture('wide-hover-all-motes')
       result.step = 'hover-crosses-button-gap-into-original-portaled-view'
@@ -199,7 +246,8 @@ app.whenReady().then(async () => {
       await click(entry)
       current = await visible('mote-primary-tab', 'launcher:leader')
       assert.equal(current.floating.open, true)
-      assert.deepEqual(current.viewModes, focused.viewModes, 'Peek to pin keeps the same effective presentation without mode writes')
+      assert.deepEqual(current.viewModes, focused.viewModes,
+        'The already effective dialogue mode needs no additional stored write; neighboring modes remain unchanged')
       await move({ x: 1090, y: 200 }); await pause(230)
       await visible('mote-primary-tab', 'launcher:leader')
       await capture('wide-pinned')
@@ -212,6 +260,9 @@ app.whenReady().then(async () => {
       const customComposer = panel + '.querySelector("[data-workbench-region-id=custom-mote-region] [contenteditable=true]")'
       await until('!!' + customComposer)
       await click(customComposer)
+      // Place the test caret deliberately; trusted input still reaches the exact
+      // original Composer. Clicking the center may choose a wrapped middle line.
+      await read('(()=>{const e=' + customComposer + ',r=document.createRange();r.selectNodeContents(e);r.collapse(false);const s=getSelection();s.removeAllRanges();s.addRange(r)})()')
       await input('Input.insertText', { text: ' · typed in the original owner' })
       await until('window.moteProof.facts().drafts["custom-mote"]==="Keep the custom Mote draft · typed in the original owner"')
       assert.deepEqual((await facts()).focus.execution, beforeChoice.focus.execution)
@@ -325,6 +376,19 @@ app.whenReady().then(async () => {
       await until('window.moteProof.facts().viewModes["custom-mote"]==="terminal" && ' + customModeOwner + '.querySelector("[data-agent-surface-mode=terminal]")')
       assert.ok(await read('!!' + customModeOwner + '.querySelector("button[aria-label=\'Show Activity\']")'), 'The original mode control describes the actual original pane')
       await capture('wide-final-custom-pinned')
+      const explicitTerminal = await facts()
+      await close(); await pin()
+      await until('window.moteProof.facts().viewModes["custom-mote"]==="activity" && ' + customModeOwner + '.querySelector("[data-agent-surface-mode=activity]")')
+      const explicitlyReopened = await facts()
+      assert.deepEqual(explicitlyReopened.viewModes, { ...explicitTerminal.viewModes, 'custom-mote': 'activity' },
+        'Explicit reopening returns the exact original Agent to dialogue without changing neighboring modes')
+      assert.deepEqual(explicitlyReopened.drafts, explicitTerminal.drafts)
+      result.explicitReopen = { target: explicitlyReopened.ui.panelTarget, session: explicitlyReopened.ui.panelSession,
+        viewModes: explicitlyReopened.viewModes, drafts: explicitlyReopened.drafts }
+      // A later manual Terminal choice is durable; ordinary process restore is
+      // not another human reopen and must retain that current choice.
+      await click(customModeOwner + '.querySelector("button[aria-label=\'Show Terminal\']")')
+      await until('window.moteProof.facts().viewModes["custom-mote"]==="terminal"')
     } else {
       result.step = 'ordinary-process-restart-retains-original-workface'
       const prior = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8')).final
