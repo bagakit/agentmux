@@ -32,6 +32,9 @@ const NUL = String.fromCharCode(0)
  */
 export const BOOKMARK_FILE_EXTENSIONS = ['webloc', 'url'] as const
 
+/** Bookmark previews share one bounded byte budget across local and remote hosts. */
+export const BOOKMARK_FILE_MAX_BYTES = 4 * 1024 * 1024
+
 export type BookmarkFileKind = (typeof BOOKMARK_FILE_EXTENSIONS)[number]
 
 /**
@@ -87,12 +90,21 @@ function escapeXml(value: string): string {
 }
 
 function unescapeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
+  // One pass: the result of &amp;#38; is the literal text &#38;, never a second decode.
+  return value.replace(/&(lt|gt|quot|apos|amp|#\d+|#x[\da-fA-F]+);/g, (entity, name: string) => {
+    switch (name) {
+      case 'lt': return '<'
+      case 'gt': return '>'
+      case 'quot': return '"'
+      case 'apos': return "'"
+      case 'amp': return '&'
+    }
+    const code = name.startsWith('#x') ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1))
+    // XML 1.0 character ranges; malformed entities remain text rather than throwing.
+    return code === 9 || code === 10 || code === 13 ||
+      code >= 0x20 && code <= 0xd7ff || code >= 0xe000 && code <= 0xfffd ||
+      code >= 0x10000 && code <= 0x10ffff ? String.fromCodePoint(code) : entity
+  })
 }
 
 /**
@@ -170,7 +182,15 @@ export function bookmarkFileNameFromTitle(title: string): string {
     out += ch === '/' || ch === '\\' || ch === ':' || code < 0x20 ? ' ' : ch
   }
   const cleaned = out.replace(/\s+/g, ' ').trim().replace(/^\.+/, '').trim()
-  // 按码点截，不按 UTF-16 code unit：`slice(0, 120)` 若切在代理对中间会留下半个字符（孤立
-  // 代理），派生名里就多个坏字符。`Array.from` 逐码点，切 emoji/CJK 边界也整。
-  return cleaned.length > 0 ? Array.from(cleaned).slice(0, 120).join('') : 'Bookmark'
+  // Leave room for the .webloc suffix and all fifty collision candidates on byte-limited filesystems.
+  const encoder = new TextEncoder()
+  let result = '', points = 0, bytes = 0
+  for (const ch of cleaned) {
+    const length = encoder.encode(ch).byteLength
+    if (points >= 120 || bytes + length > 240) break
+    result += ch
+    points += 1
+    bytes += length
+  }
+  return result || 'Bookmark'
 }
