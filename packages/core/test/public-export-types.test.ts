@@ -9,6 +9,12 @@ it('compiles the complete public Core export graph without Node ambient types or
   try {
     const consumer = join(directory, 'consumer.mts')
     await writeFile(consumer, `import * as core from '@agentmux/core'
+import { openAgentMuxRpcHttpRequest, parseRpcResponse, rpcResponseError } from '@agentmux/core/public-rpc-http'
+const fetchRequest: typeof openAgentMuxRpcHttpRequest = openAgentMuxRpcHttpRequest
+const response = parseRpcResponse({ jsonrpc: '2.0', id: 'portable', result: {} })
+const failure = rpcResponseError(response)
+void fetchRequest
+void failure
 const connect: typeof core.connectAgentMuxRpc = core.connectAgentMuxRpc
 declare const client: core.AgentMuxRpcClient
 const subscribe: core.AgentMuxRpcClient['subscribe'] = client.subscribe
@@ -25,7 +31,10 @@ void subscribe('toolkit.watch', request, handlers)
       moduleResolution: ts.ModuleResolutionKind.NodeNext,
       types: [],
       skipLibCheck: false,
-      paths: { '@agentmux/core': [resolve(import.meta.dirname, '../dist/index.d.ts')] }
+      paths: {
+        '@agentmux/core': [resolve(import.meta.dirname, '../dist/index.d.ts')],
+        '@agentmux/core/public-rpc-http': [resolve(import.meta.dirname, '../dist/public-rpc-http.d.ts')]
+      }
     })
     const diagnostics = ts.getPreEmitDiagnostics(program)
     expect(diagnostics.map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([])

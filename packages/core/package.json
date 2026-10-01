@@ -103,6 +103,10 @@
     "./agent-interaction-state": {
       "types": "./dist/agent-interaction-state.d.ts",
       "import": "./dist/agent-interaction-state.js"
+    },
+    "./public-rpc-http": {
+      "types": "./dist/public-rpc-http.d.ts",
+      "import": "./dist/public-rpc-http.js"
     }
   },
   "bin": {

@@ -862,7 +862,7 @@ export function resolveAgentMuxRegion(regions: readonly AgentMuxRegion[], target
  */
 export const AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS = 2_000
 export const AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS = 60_000
-export const AGENTMUX_CONTROL_MAX_MESSAGE_BYTES = 256 * 1024
+export { AGENTMUX_RPC_MAX_MESSAGE_BYTES as AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } from './public-rpc-frame.js'
 
 /**
  * 每个操作的等待预算档位——逐个写死，不许按前缀或形状推断。

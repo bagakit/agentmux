@@ -1,9 +1,9 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import {
-  AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxControlServer, parseAgentMuxControlReceipt, requestAgentMuxControl,
+  AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxControlServer, parseAgentMuxControlReceipt, connectAgentMuxRpc,
   type AgentMuxControlResult, type AgentMuxInspectedRegion, type AgentMuxTerminalViewObservation
 } from '../src/index.js'
 
@@ -24,7 +24,7 @@ function receipt(region: unknown) {
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 
-it('public inspected receipts carry exact normal/alternate and input facts with the unchanged schema', () => {
+it('internal inspected DTO receipts carry exact normal/alternate and input facts with the unchanged owner schema', () => {
   expect(AGENTMUX_CONTROL_SCHEMA_VERSION).toBe(5)
   const cases = [{ ...terminal, terminalView: normal }, { ...agent, terminalView: alternate }]
   expect(cases).toHaveLength(2)
@@ -57,7 +57,7 @@ it('strictly rejects malformed present observations instead of presenting partia
 
 it('only inspected Agent or Terminal regions can carry the observation and a Terminal must match its Run', () => {
   const otherRegions = [{ ...base, kind: 'browser', browserId: 'private-browser' },
-    { ...base, kind: 'file', path: upstreamFixturePath("private/fixture.txt") }, { ...base, kind: 'launcher' }, { ...base, kind: 'view' }]
+    { ...base, kind: 'file', path: fixturePath("private/fixture.txt") }, { ...base, kind: 'launcher' }, { ...base, kind: 'view' }]
   expect(otherRegions).toHaveLength(4)
   for (const region of otherRegions) expect(() => parseAgentMuxControlReceipt(receipt({ ...region, terminalView: normal })))
     .toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
@@ -86,25 +86,29 @@ it('projects only public facts, preserves all mouse modes and does not infer a b
 })
 
 it('actual public Unix-socket inspection carries a nonempty mixed Tab and the exact current view without input or lifecycle calls', async () => {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-terminal-view-")); roots.push(root)
+  const root = await mkdtemp(fixturePath("tmp/amux-terminal-view-")); roots.push(root)
   const path = join(root, 'control.sock'), seen: string[] = []
   const regions: AgentMuxInspectedRegion[] = [{ ...terminal, terminalView: normal },
     { ...agent, regionId: 'private-agent-region', terminalView: alternate }]
-  const server = new AgentMuxControlServer({ async execute(request): Promise<AgentMuxControlResult> {
+  const server = new AgentMuxControlServer({ coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
     seen.push(request.operation)
     if (request.operation === 'inspect.tab') return { operation: request.operation,
       tab: { tabId: base.tabId, workspaceId: base.workspaceId, regions } }
     if (request.operation === 'inspect.region') return { operation: request.operation, region: regions[1]! }
+    if (request.operation === 'space.inspect') return { operation: request.operation, catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] } }
     throw new Error('Inspection must not invoke input or lifecycle')
   } }, path)
   await server.start()
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
   try {
-    await expect(requestAgentMuxControl({ schemaVersion: 5, requestId: 'socket-tab', operation: 'inspect.tab',
-      target: { kind: 'tab', tabId: base.tabId } }, path)).resolves.toEqual({ schemaVersion: 5,
-      requestId: 'socket-tab', ok: true, operation: 'inspect.tab', result: { tab: { tabId: base.tabId, workspaceId: base.workspaceId, regions } } })
-    await expect(requestAgentMuxControl({ schemaVersion: 5, requestId: 'socket-region', operation: 'inspect.region',
-      target: { kind: 'region', regionId: regions[1]!.regionId } }, path)).resolves.toEqual({ schemaVersion: 5,
-      requestId: 'socket-region', ok: true, operation: 'inspect.region', result: { region: regions[1] } })
-    expect(seen).toEqual(['inspect.tab', 'inspect.region'])
-  } finally { await server.stop() }
+    await expect(client.call('space.inspect', { target: { tabId: base.tabId } })).resolves.toEqual({
+      catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
+      presentation: { tab: { tabId: base.tabId, workspaceId: base.workspaceId, regions }, region: null, unavailable: [] }
+    })
+    await expect(client.call('space.inspect', { target: { regionId: regions[1]!.regionId } })).resolves.toEqual({
+      catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
+      presentation: { region: regions[1], tab: null, unavailable: [] }
+    })
+    expect(seen).toEqual(['inspect.tab', 'space.inspect', 'inspect.region', 'space.inspect'])
+  } finally { await client.dispose(); await server.stop() }
 })
