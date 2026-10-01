@@ -38,7 +38,7 @@
 - 页面**元素选择**产出结构化上下文——tagName、role、可访问名、selector、文本、邻近文本、白名单属性与净化后的 HTML——并以文本形式进入 Composer 草稿，与其他附件同一条通路。净化在 Main 侧完成，Renderer 不把原始 DOM 当证据传递。当前**不采集 computed CSS**，截图也**只进剪贴板、不并入 prompt**：这两点是已知边界，不以"看起来完整"的措辞掩盖。
 - Agent 发起的元素上下文通过 Browser drive 的显式 `elementContext(ref)` 入口提供：目标必须来自当前 Browser snapshot 的授权 ref，经 Main-owned CDP 句柄解析；入口只能读取结构化字段（tagName、role、可访问名、selector、文本、邻近文本、白名单属性、净化 HTML），不能返回原始 DOM 或执行事件。入口与人工选择是两条有意分开的能力：人工选择继续由真实 `event.isTrusted` 门禁保护，Agent 入口不得删除或绕过该门禁。
 - `elementContext` 失败必须保持可区分：ref 不在当前快照、ref 解析后不是 Element、页面导航/句柄失效和提取/净化错误分别给出可行动诊断；不能静默返回空对象或把失败伪装成 Agent 没有权限。读取结果沿 Browser drive 的 typed receipt/Composer 通路交付，不能在 Renderer 另建一份 DOM 事实。
-- 截屏与标记编辑属于 Browser 自己的工具，产物是可验证证据而非装饰：标记后的图像仍是同一次观察的产物，不重建第二份截图生命周期。
+- 截屏与标记编辑属于 Browser 自己的工具，产物是可验证证据而非装饰：标记后的图像仍是同一次观察的产物，不重建第二份截图生命周期。 Browser 页截图只取原页面，不以系统屏幕选区或音频采集授权作为前置，也不暗中切换成系统选区截图。系统截图入口的副本身份、授权、取消与失败边界只引用[《Message Tools 失败反馈与 Browser Region 选中态》](conversation-input.md#message-tools-失败反馈与-browser-region-选中态)。
 - 链接打开使用统一的**目的地菜单**（当前 Region / 分屏 / 新 Tab），与 Terminal 链接共享同一套目的地语汇，不让浏览器另发明一套打开语义。
 - **Agent 正在驱动某个 Browser 时，不切过去也要知道是哪一格。** 页面内角标只在人看着那一页时成立，
   而人恰恰是"在别处干活、想知道那边跑到哪了"。所以标签上的 Browser 标记在被驱动期间要与闲着的
