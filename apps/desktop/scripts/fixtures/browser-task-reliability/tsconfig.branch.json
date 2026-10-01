@@ -1,0 +1,28 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@agentmux/layout": [
+        "packages/layout/src/index.ts"
+      ],
+      "@agentmux/core/control": [
+        "packages/core/src/control.ts"
+      ],
+      "@agentmux/client-ui/pasted-images": [
+        "packages/client-ui/src/lib/pasted-images.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../src/shared/browser-task-reliability.ts",
+    "../../../test/browser-task-reliability-branch.test.ts"
+  ]
+}

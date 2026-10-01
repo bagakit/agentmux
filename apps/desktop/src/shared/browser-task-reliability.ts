@@ -1,6 +1,7 @@
 import type { BrowserOperation } from './browser-operation.js'
 import type { BrowserOutcomeAssetRun, BrowserOutcomeCriterion, BrowserRegisteredOutcomeCriterion } from './browser-outcome-criteria.js'
 import type { BrowserTaskAssetRun, BrowserTaskAssetState, BrowserTaskVersion } from './browser-task-assets.js'
+import { browserTaskNextIndex } from './browser-task-path.js'
 
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
 export type BrowserTaskReliability = {
@@ -36,6 +37,53 @@ function conditionKey(value: BrowserOutcomeCriterion | BrowserRegisteredOutcomeC
 }
 function sameConditions(left: readonly (BrowserOutcomeCriterion | BrowserRegisteredOutcomeCriterion)[], right: readonly (BrowserOutcomeCriterion | BrowserRegisteredOutcomeCriterion)[]): boolean {
   return left.length > 0 && left.length === right.length && left.every((value, index) => conditionKey(value) === conditionKey(right[index]!))
+}
+
+function completed(operation: BrowserOperation | undefined): boolean {
+  return !!operation && operation.phase === 'completed' && operation.steps.length > 0 && operation.steps.every(step => step.status === 'completed')
+}
+
+/** Join the original forward cursor and its recorded bindings, including earlier read-only observations. */
+function executedPath(run: BrowserTaskAssetRun, version: BrowserTaskVersion, journal: readonly BrowserOperation[]): Map<string, string> | null {
+  const bindings = run.stepExecutions
+  if (!bindings?.length || bindings.length !== journal.length || new Set(bindings.map(fact => fact.operationId)).size !== bindings.length ||
+      bindings.some((fact, index) => fact.operationId !== journal[index]?.id) ||
+      new Set(version.steps.map(step => step.id)).size !== version.steps.length) return null
+  const decisions = run.branchDecisions ?? []
+  if (new Set(decisions.map(fact => fact.stepId)).size !== decisions.length) return null
+  const path = new Map<string, string>(), visitedBranches = new Set<string>()
+  let cursor = 0, position = 0
+  try {
+    while (cursor < version.steps.length) {
+      const step = version.steps[cursor]!
+      if (step.kind === 'checkpoint') { cursor = browserTaskNextIndex(version.steps, cursor); continue }
+      if (bindings[position]?.stepId !== step.id) return null
+      if (step.kind === 'branch') {
+        const decision = decisions.find(fact => fact.stepId === step.id)
+        if (!step.branch || !decision || !decision.navigationId || (decision.result !== 'true' && decision.result !== 'false')) return null
+        const destination = decision.result === 'true' ? step.branch.onTrue : step.branch.onFalse
+        if (decision.nextStepId !== destination) return null
+        // The runner may stop after an unknown/failed observation and observe this same cursor again.
+        // These are not successful actions: only the latest known observation selects the next step.
+        while (bindings[position]?.stepId === step.id) {
+          const observation = journal[position]!
+          if (!['completed', 'failed', 'indeterminate'].includes(observation.phase) || !observation.steps.length ||
+              observation.steps.some(item => item.method !== 'pageInfo' && item.method !== 'snapshot')) return null
+          position++
+        }
+        const latest = journal[position - 1]!
+        if (decision.operationId !== latest.id || !completed(latest) || latest.steps.some(item => item.evidence?.some(reference =>
+          reference.operationId !== latest.id || reference.browserId !== run.browserId || reference.navigationId !== decision.navigationId))) return null
+        path.set(step.id, latest.id); visitedBranches.add(step.id)
+        cursor = browserTaskNextIndex(version.steps, cursor, destination)
+      } else {
+        if (!completed(journal[position])) return null
+        path.set(step.id, journal[position]!.id); position++
+        cursor = browserTaskNextIndex(version.steps, cursor, step.nextStepId)
+      }
+    }
+  } catch { return null }
+  return position === bindings.length && visitedBranches.size === decisions.length ? path : null
 }
 
 /** Retained immutable facts only: no page verification, clock, polling or second success store. */
@@ -97,23 +145,30 @@ function classify(run: BrowserTaskAssetRun, version: BrowserTaskVersion, operati
   if (run.nextStep !== version.steps.length || !version.steps.length) return { result: 'unavailable', reason: 'The retained execution did not complete its exact version.' }
   const operationIds = [...new Set(run.operationIds)]
   const journal = operationIds.map(id => operations.get(id))
-  if (!operationIds.length || operationIds.length < version.steps.filter(step => step.kind !== 'checkpoint').length || journal.some((operation, index) => !operation || conflicts.has(operationIds[index]!) || operation.phase !== 'completed' ||
-      !operation.steps.length || operation.steps.some(step => step.status !== 'completed'))) {
+  if (!operationIds.length || journal.some((operation, index) => !operation || conflicts.has(operationIds[index]!))) {
     return { result: 'unavailable', reason: 'A bound completed operation or its completed steps are missing.' }
+  }
+  const boundJournal = journal as BrowserOperation[]
+  const nonlinear = version.steps.some(step => step.kind === 'branch' || step.nextStepId !== undefined)
+  const path = run.stepExecutions !== undefined ? executedPath(run, version, boundJournal) : null
+  if (run.stepExecutions !== undefined ? !path : nonlinear || operationIds.length < version.steps.filter(step => step.kind !== 'checkpoint').length || boundJournal.some(operation => !completed(operation))) {
+    return { result: 'unavailable', reason: 'The original completed execution path could not be joined.' }
   }
   const declared = version.completion?.criteria.map(criterion => criterion.kind === 'download-readable'
     ? { kind: criterion.kind, path: criterion.path } : { kind: criterion.kind, checkpointId: criterion.checkpointId })
   if (!declared?.length) return { result: 'unknown', reason: 'Script completed without a declared business outcome.' }
+  const producingStep = version.completion?.criteria.find(criterion => criterion.kind === 'download-readable')?.stepId ??
+    version.steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch')?.id
+  const producerIndex = version.steps.filter(step => step.kind !== 'checkpoint').findIndex(step => step.id === producingStep)
+  const producerOperationId = path ? path.get(producingStep ?? '') : operationIds[producerIndex]
+  if (!producerOperationId) return { result: 'unavailable', reason: 'The declared outcome producing step was not executed on this path.' }
   const outcomes = journal.flatMap(operation => operation?.outcome ? [{ operation: operation!, outcome: operation.outcome }] : [])
     .filter(({ outcome }) => sameRun(outcome.registration.assetRun, run))
   if (outcomes.length !== 1) return { result: 'unavailable', reason: 'The exact complete outcome registration is missing or ambiguous.' }
   const { operation, outcome } = outcomes[0]!
   const registration = outcome.registration, evaluation = outcome.evaluation
-  const producingStep = version.completion?.criteria.find(criterion => criterion.kind === 'download-readable')?.stepId ??
-    version.steps.find(step => step.kind !== 'checkpoint')?.id
-  const producerIndex = version.steps.filter(step => step.kind !== 'checkpoint').findIndex(step => step.id === producingStep)
   if (!evaluation || registration.context.browserId !== run.browserId || registration.context.operationId !== operation.id ||
-      !registration.context.workspaceId || !registration.context.navigationId || producerIndex < 0 || operationIds[producerIndex] !== operation.id ||
+      !registration.context.workspaceId || !registration.context.navigationId || producerIndex < 0 || producerOperationId !== operation.id ||
       !run.operationIds.includes(operation.id) || !sameRun(evaluation.assetRun, run) ||
       JSON.stringify(evaluation.context) !== JSON.stringify(registration.context) ||
       !sameConditions(declared, registration.criteria) || !sameConditions(declared, evaluation.conditions.map(condition => condition.criterion)) ||
