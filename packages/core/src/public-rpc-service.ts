@@ -19,6 +19,8 @@ import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import type { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
 import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
+import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult,
+  type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
@@ -43,6 +45,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Client-owned real filesystem/config observations, not a second registry. */
   snapshot?(params: AgentMuxRpcSnapshotParams): Promise<Partial<AgentMuxRpcSnapshot>>
+  /** Original Host Authority and native confirmation owner; never constructed here. */
+  deviceAdministration?: AgentMuxRpcDeviceAdministration
   /** Borrow the Host's original SDK business owner; never connect a second Runtime. */
   hostedRuntime?(): Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'> |
     Promise<Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'>>
@@ -52,7 +56,9 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   forwardSubscription?<M extends AgentMuxRpcStreamMethod>(method: M, params: import('./public-rpc.js').AgentMuxRpcStreamParams<M>,
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
-export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal }
+export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+  /** Actual receiving hop, supplied only by the transport owner. */
+  transport?: 'unix' | 'http' }
 export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = AgentMuxRpcStreamMethod> = {
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
@@ -73,7 +79,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -189,6 +195,17 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isAgentMuxRpcDeviceMethod(method)) {
+      // Unix provenance permits a request, never substitutes for Host OS confirmation.
+      if (context.caller !== undefined || context.transport !== 'unix' || context.principal?.kind !== 'user' ||
+        !context.principal.id || context.principal.id.includes('\0')) {
+        throw new AgentMuxError('Device management requires a local Unix user request and original Host confirmation. Nothing was submitted.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = parseAgentMuxRpcDeviceParams(method, params)
+      if (!this.ports.deviceAdministration) throw new AgentMuxError('The original Host device administration owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted()
+      return parseAgentMuxRpcDeviceResult(method, await this.ports.deviceAdministration.call(method, input, context), input) as AgentMuxRpcResult<M>
+    }
     if (method === 'runtime.bootstrap' || method === 'runtime.invoke' || method === 'runtime.release-consumer') {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.call(method, hosted.params, { ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>

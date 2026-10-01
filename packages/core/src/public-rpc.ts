@@ -5,6 +5,8 @@ import type { AgentRoleBinding } from './agent-role-directory.js'
 import type { AgentMuxMessageReceipt } from './agent-global-message-queue.js'
 import type { AgentMuxDoctorReport } from './doctor.js'
 import type { FollowOutput } from './session-output-follow.js'
+import { AGENTMUX_RPC_DEVICE_METHODS } from './public-rpc-device.js'
+import type { AgentMuxRpcDeviceMethod, AgentMuxRpcDeviceParameterMap, AgentMuxRpcDeviceResultMap } from './public-rpc-device.js'
 
 /** Canonical public names and their existing business owner. No wire aliases. */
 export const AGENTMUX_RPC_CONTROL_METHODS = {
@@ -135,7 +137,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = {
+type NativeParams = AgentMuxRpcDeviceParameterMap & {
   'runtime.bootstrap': { consumerId: string }
   'runtime.invoke': { consumerId: string; invocation: import('./hosted-client-contract.js').AgentMuxHostedInvocation }
   'runtime.release-consumer': { consumerId: string }
@@ -164,7 +166,7 @@ type NativeParams = {
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = {
+type NativeResult = AgentMuxRpcDeviceResultMap & {
   'runtime.bootstrap': import('./hosted-client-contract.js').AgentMuxHostedBootstrap
   'runtime.invoke': { value: unknown }
   'runtime.release-consumer': { released: boolean }
@@ -195,7 +197,7 @@ type NativeResult = {
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = (M extends keyof NativeParams
+export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = M extends AgentMuxRpcDeviceMethod ? NativeParams[M] : (M extends keyof NativeParams
   ? NativeParams[M] : M extends ControlMethod ? ControlParams<M> : never) & { operationId?: string }
 export type AgentMuxRpcResult<M extends AgentMuxRpcMethod> = M extends keyof NativeResult
   ? NativeResult[M] : M extends 'space.inspect' ? OperationKeys<BusinessResult<M>> & { presentation?: AgentMuxRpcSpacePresentation }
@@ -207,6 +209,7 @@ export type AgentMuxRpcSpacePresentation = {
 }
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
+  ...AGENTMUX_RPC_DEVICE_METHODS,
   'runtime.bootstrap': 'short', 'runtime.invoke': 'long', 'runtime.release-consumer': 'long',
   'runtime.events': 'long', 'runtime.history-watch': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short',

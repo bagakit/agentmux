@@ -15,6 +15,8 @@ import { AgentMuxRpcLines, AgentMuxRpcError, AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpc
 export type AgentMuxRpcConnection = {
   /** Trusted transport identity; JSON params cannot mint or replace it. */
   principal?: AgentMuxRpcPrincipal
+  /** Actual receiving hop; a frame cannot assert its own provenance. */
+  transport?: 'unix' | 'http'
   signal: AbortSignal
   stream: boolean
   send(frame: AgentMuxRpcFrame): void | Promise<void>
@@ -34,6 +36,7 @@ export class AgentMuxRpcDispatcher {
           const { caller, ...params } = rpcRecord(request.params ?? {})
           const context: AgentMuxRpcCallContext = { signal: channel.signal,
             ...(channel.principal === undefined ? {} : { principal: channel.principal }),
+            ...(channel.transport === undefined ? {} : { transport: channel.transport }),
             ...(caller === undefined ? {} : { caller: rpcRecord(caller, ['agentSessionId', 'capability']) as NonNullable<AgentMuxRpcCallContext['caller']> }) }
           let result: unknown
           if (method === 'system.subscription.cancel') result = { disposed: await channel.cancel(String(params.subscriptionId ?? '')) }

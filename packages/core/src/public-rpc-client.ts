@@ -5,6 +5,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
 import { JSONRPCClient, type JSONRPCRequest, type JSONRPCResponse } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
+import { isAgentMuxRpcDeviceMethod } from './public-rpc-device.js'
 import { agentMuxControlTimeoutMs } from './control.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
@@ -249,7 +250,12 @@ class RpcClient implements AgentMuxRpcClient {
     const abort = () => controller.abort()
     signal?.addEventListener('abort', abort, { once: true })
     const deadline = setTimeout(() => {
-      end(new AgentMuxError('RPC response timed out; the business operation is unconfirmed. Inspect its operation ID before another write.', 'CONTROL_TIMEOUT'))
+      const recovery = isAgentMuxRpcDeviceMethod(method)
+        ? method === 'device.invite'
+          ? 'Read agentmux device ls for original device facts. The lost invitation token cannot be recovered; do not automatically request another invitation.'
+          : 'Read agentmux device ls and inspect the exact device ID facts before an explicit new request. Do not automatically retry device management.'
+        : 'Inspect its operation ID before another write.'
+      end(new AgentMuxError('RPC response timed out; the business operation is unconfirmed. ' + recovery, 'CONTROL_TIMEOUT'))
     }, timeout(method) + (this.endpoint.transport === 'ssh' ? SSH_STARTUP_BUDGET_MS : 0))
     const end = (error?: Error) => {
       if (finished) return; finished = true; clearTimeout(deadline); signal?.removeEventListener('abort', abort)
@@ -309,6 +315,9 @@ class RpcClient implements AgentMuxRpcClient {
     return { response, reader: finalReader!, ...(subscriptionId === undefined ? {} : { subscriptionId }) }
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options: { signal?: AbortSignal } = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isAgentMuxRpcDeviceMethod(method) && this.endpoint.transport !== 'unix') {
+      throw new AgentMuxError('Device management requires the local Unix endpoint and original Host confirmation. Nothing was connected or submitted.', 'CONTROL_PERMISSION_DENIED')
+    }
     if (isAgentMuxRpcStream(method, rpcRecord(params))) throw new AgentMuxError('This method returns a subscription; use subscribe().', 'INVALID_CONTROL_REQUEST')
     const exchange = await this.exchange(method, params, undefined, options.signal)
     try { return resultBody(method, exchange.response.result, params, this.credentials) as AgentMuxRpcResult<M> } finally { await exchange.reader.dispose(); this.readers.delete(exchange.reader) }

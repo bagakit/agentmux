@@ -128,6 +128,25 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     } })
   })
 
+  it('keeps an uncertain device mutation as one request and reads current facts without certifying the lost reply', async () => {
+    const fixture = await probe(request => {
+      if (request.method === 'device.approve') throw Object.assign(new Error('Device mutation outcome is unconfirmed.'), { code: 'CONTROL_TIMEOUT' })
+      return { hostId: 'original-host', devices: [{ deviceId: 'DEVICE', name: 'Original device', createdAt: 1 }], requests: [] }
+    })
+    const mutation = await fixture.run(['device', 'approve', '--device', 'DEVICE', '--confirmation-code', '012345'])
+    expect(mutation.code).toBe(1)
+    expect(JSON.parse(mutation.stderr)).toMatchObject({ operation: 'device.approve', error: { code: 'CONTROL_TIMEOUT' } })
+    expect(fixture.requests.map(request => [request.method, request.params])).toEqual([
+      ['device.approve', { deviceId: 'DEVICE', confirmationCode: '012345' }]
+    ])
+    const current = await fixture.run(['device', 'ls'])
+    expect(current.code, current.stderr).toBe(0)
+    expect(JSON.parse(current.stdout)).toEqual({ ok: true, operation: 'device.ls', result: {
+      hostId: 'original-host', devices: [{ deviceId: 'DEVICE', name: 'Original device', createdAt: 1 }], requests: []
+    } })
+    expect(fixture.requests.map(request => request.method)).toEqual(['device.approve', 'device.ls'])
+  })
+
   it('renders the PMO manual without a service request or user material change', async () => {
     const fixture = await probe(() => { throw new Error('A manual must not invoke business.') })
     const soul = join(fixture.root, 'SOUL.md'), wiki = join(fixture.root, 'Wiki.md')
