@@ -8,7 +8,7 @@ palette 与 TUI 自身表现层的边界。
 
 # Terminal 运行时：CtxMux 内核与外观所有权
 
-本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/agentmux-desktop-interaction.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)。
+本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)。
 
 ctxmux 独立 Runtime 与 Core 的分层见 [Core 接入说明](../../packages/core/README.md#runtime-边界)。当前随包身份唯一取自 [manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)；不能从该身份推断正在服务的 daemon 已被更新。
 
@@ -64,7 +64,7 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
 Core 的 [Control 合同](../../packages/core/src/control.ts) 只表达类型化的
 `inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
 请求和 receipt；它不保存
-布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令在同一个持久 Workbench 中记录 Space/Zone 绑定和最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；Renderer 的空间归属独立于执行 cwd，恢复时保留布局并自动尝试原 Session。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计见 `docs/plans/agentmux-ai-native-desktop-composition-cli.md`；当前空间命令以实施合同为准。布局变化最终只通过既有 viewport
+布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令在同一个持久 Workbench 中记录 Space/Zone 绑定和最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；Renderer 的空间归属独立于执行 cwd，恢复时保留布局并自动尝试原 Session。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计保存在本机过程资料，可用于追溯；当前空间命令以公开源码和实施合同为准，理解现机制不依赖该本机文件。布局变化最终只通过既有 viewport
 synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
 
 ## 2. 所有权矩阵
@@ -142,7 +142,7 @@ Desktop 启动时通过用户 `SHELL` 的交互式登录模式读取全部导出
 
 Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线；SDK 的 `RunSpec.env` 仍然是 additive，删除 client 的 key 不会清掉常驻 daemon 已持有的同名变量。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
 
-基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`。最终 `CtxmuxRunAdapter.start` 用系统 `/usr/bin/env -u … -- program args…` 显式 unset 清理后缺省的策略 key，再 exec 原程序；PID、PTY、cwd、literal argv 和退出/信号语义保持，显式有效覆盖值继续生效。新建与 semantic resume 都走该边界，已启动进程的环境不能在线改写。产品源码与实际安装现场验收分开记录；[颜色修复交付证据](../reviews/resume-terminal-colors-product-delivery.md) 是可选本机历史记录，缺席时不证明当前候选通过。
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`。最终 `CtxmuxRunAdapter.start` 用系统 `/usr/bin/env -u … -- program args…` 显式 unset 清理后缺省的策略 key，再 exec 原程序；PID、PTY、cwd、literal argv 和退出/信号语义保持，显式有效覆盖值继续生效。新建与 semantic resume 都走该边界，已启动进程的环境不能在线改写。产品源码与实际安装现场验收分开记录；颜色修复交付证据（本机过程资料：`docs/reviews/resume-terminal-colors-product-delivery.md`） 是可选本机历史记录，缺席时不证明当前候选通过。
 
 ## 4. 完整 ANSI palette 与 Graphite 工作面
 
@@ -273,7 +273,7 @@ Attach continuation 是状态恢复，不是历史动画。`TerminalView.applyCo
 
 CtxMux 的原始 Replay 有界；Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已经淘汰，保留后缀不能被宣称为完整终端屏幕。当前 Core 与 Renderer 经 `terminalContinuationSteps` 消费公开 continuation：`basic-vt` 的 checkpoint、restore bytes 及后续 ordered output/Resize，或没有 checkpoint 的原始字节恢复。restore bytes 是恢复材料，不计为新的 PTY output；checkpoint 能恢复当前画面不代表缺失 scrollback 已补全。
 
-缺失提示留在 xterm 字节流之外。仍在运行的 Run 确需重绘时，`TerminalViewportSynchronizer.requestContentRedraw()` 经唯一 Resize Owner 临时减少一行再恢复最终网格，促使同一 Run 重新输出当前画面。历史 Run 不发送 Resize 或 Input。这只是当前画面的恢复动作，不能作为原始历史恢复或活跃终端连续向上阅读的通过证据；后者按[设计 SSOT](../design/agentmux-desktop-interaction.md#terminal-连续向上阅读历史) 验收。
+缺失提示留在 xterm 字节流之外。仍在运行的 Run 确需重绘时，`TerminalViewportSynchronizer.requestContentRedraw()` 经唯一 Resize Owner 临时减少一行再恢复最终网格，促使同一 Run 重新输出当前画面。历史 Run 不发送 Resize 或 Input。这只是当前画面的恢复动作，不能作为原始历史恢复或活跃终端连续向上阅读的通过证据；后者按[设计 SSOT](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史) 验收。
 
 PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间尺寸串成 Promise 队列。
 它只保留一个 in-flight 请求和一个可替换的 pending size（`requestResize`/`drainPendingResizes`）；新尺寸覆盖尚未

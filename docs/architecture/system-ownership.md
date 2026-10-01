@@ -1,0 +1,70 @@
+# 系统分层、身份与事实归属
+
+本文以当前已提交源码说明 Core、ctxmux 与客户端如何分工，以及接入时应向哪个 owner 读取事实。产品必须满足的约束归 [交互设计](../design/agentmux-desktop-interaction.md)；源码合同、工作树副本、安装包与实际运行能力分别核对。
+
+## 从哪一层接入
+
+AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它的第一方 client。包消费者从 [Core 接入说明](../../packages/core/README.md) 开始，了解导出边界见 [公共能力来源导航](../specs/public-capabilities.md)。
+
+| 层或模块 | 持有的事实与职责 | 当前来源 |
+| --- | --- | --- |
+| ctxmux | 通用 Run、PTY、进程生命周期、ordered bytes、Replay、Gap 与 Attachment | [随包 artifact manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)、[Core 的唯一适配器](../../packages/core/src/ctxmux-run-adapter.ts) |
+| AgentMux Core | AgentSession、Provider、Hook、Permission、Prompt readiness、Agent status、语义恢复及 Session 与 Run 的关联 | [`AgentMuxClient`](../../packages/core/src/client.ts)、[Session Store](../../packages/core/src/agent-session-store.ts) |
+| Provider | 解释原生 Agent 协议，贡献启动／恢复计划、输入协议、Hook 归一化与原生历史能力 | [`AgentProvider` / `defineAgentProvider`](../../packages/core/src/agent-provider.ts)、[内置 Provider](../../packages/core/src/providers/) |
+| Desktop Main | 宿主配置、文件／Git／Topic、Browser 与 Toolkit 等能力；通过 Core 管理 Agent 与 Run | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
+| Desktop Renderer | Tab／Region 的展示关系、分割布局、焦点、输入归属及工作面持久投影 | [应用 Store](../../apps/desktop/src/renderer/src/store.ts)、[工作面持久投影](../../apps/desktop/src/renderer/src/lib/workbench-persistence.ts) |
+| `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享 React 呈现和编辑；宿主能力经平台适配器与 typed props 注入 | [包说明](../../packages/client-ui/README.md)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
+| `@agentmux/layout` | 分屏树结构、比例、几何寻址与布局 reducer 的纯代数；不持有展示记录或 Session 生命周期 | [包说明](../../packages/layout/README.md)、[导出入口](../../packages/layout/src/index.ts) |
+| `@agentmux/demand` | Demand／Goal 的 durable 文件事实、关联、决策、目标确认和结果接受的状态 | [包说明](../../packages/demand/README.md)、[Store](../../packages/demand/src/demand-store.ts)、[Goal 类型与规则](../../packages/demand/src/goals.ts) |
+
+Provider 是 Core 内部的原生协议边界，不是另一套 Runtime。Core 通过 `CtxmuxRunAdapter` 消费 ctxmux SDK；不向公共 API 导出其 wire 类型。包的当前版本、平台、依赖与 artifact 身份分别读取 [Core package](../../packages/core/package.json) 和 manifest，不在本页重列。
+
+共享 UI 由 `ClientUiProvider` 接收显式平台适配器，注入剪贴板错误报告、overlay 目标、编辑器焦点登记及身份／图标呈现；文件打开、导航、图片 IO、发送／排队／中断与结构化回答沿组件 props 回到宿主。Desktop 的实际入口是 [`DesktopClientUiProvider`](../../apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx) 和 [Renderer main](../../apps/desktop/src/renderer/src/main.tsx)。`client-ui` 不持有 Runtime client、Provider adapter、Session Store 或会话日志；Core 不依赖它、React 或 Electron，原事实 owner 与工作面焦点仍各归其层。
+
+## 身份与位置分开
+
+| 要定位的对象 | 身份表示及来源 | 不能代替什么 |
+| --- | --- | --- |
+| Agent 语义会话 | `agentSessionId`；[Session Registry](../../packages/core/src/agent-session-registry.ts) 解释 Core／Provider-native lookup | Run、原生会话 handle、Tab 或 Region |
+| 一次执行 | `AgentMuxRunRef` 的 `runId`；[Runtime 类型](../../packages/core/src/types.ts) 与 ctxmux 事实 | AgentSession 或业务操作 ID |
+| 展示位置 | Space／Zone／Tab／Region 与 display Workspace／Group；[空间 Control 类型](../../packages/core/src/space-control.ts) | Project／Workspace 资源身份或执行 cwd |
+| 执行事实投影 | `AgentMuxRuntimeSubject`；[Runtime Projection](../../packages/core/src/runtime.ts) | Desktop View 或另一份 Session registry |
+| 一次请求或业务操作 | 当前 Control 的 `requestId`，以及具体业务自己的 operation ID；[Control 类型](../../packages/core/src/control.ts) | Session／Run，也不自动证明副作用未发生或完成 |
+
+完整空间定义和行为约束只在 [统一概念与空间寻址](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)。Provider-native resume 可以保留 AgentSession 并创建新 Run；移动一个展示不改变原执行目录。恢复判定从 Core 的 [continuity](../../packages/core/src/agent-session-continuity.ts) 与 Provider provenance 取得，不从 Tab 标题或终端文字猜身份。
+
+## 当前执行与展示链路
+
+```mermaid
+flowchart LR
+  Package["包消费者"] --> Core["AgentMuxClient"]
+  CLI["agentmux CLI"] --> Control["Control Server"]
+  Control --> Main["Desktop Main handlers"]
+  Renderer["Desktop Renderer"] --> Main
+  Renderer --> SharedUI["client-ui 呈现 / 编辑"]
+  Main --> Core
+  Core --> Adapter["CtxmuxRunAdapter"]
+  Adapter --> Runtime["ctxmux Run Runtime"]
+```
+
+这是当前主要执行链，不是每个命令都已统一为公共业务服务的声明。[`agentmux.ts`](../../packages/core/src/agentmux.ts) 调用 `requestAgentMuxControl`；[`AgentMuxControlServer`](../../packages/core/src/control-host.ts) 在 Main 的 [IPC 入口](../../apps/desktop/src/main/ipc.ts) 注册宿主 handlers。工作面操作经 [DesktopControlIpcBridge](../../apps/desktop/src/main/control-ipc-bridge.ts) 和 Renderer 的 [Control 接收入口](../../apps/desktop/src/renderer/src/lib/control-api.ts) 进入 [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)，空间判定复用 [Control helpers](../../apps/desktop/src/renderer/src/lib/control.ts)。
+
+Agent 生命周期由 Main 的 `RuntimeController` 调用 Core 公共 API。Browser 操作事实和订阅由 Main 的 [operation journal](../../apps/desktop/src/main/browser-operation-journal.ts) 提供，Toolkit 能力由 [ToolkitOwner](../../apps/desktop/src/main/toolkit-owner.ts) 提供。当前 CLI 还有本地 Session Store 查询和角色文件操作，不能据图声称 CLI 已完成去本地业务判断。
+
+## 持久事实与观察投影
+
+| 事实 | 持有与恢复入口 |
+| --- | --- |
+| 通用 Run 及其字节、生命周期 | ctxmux；Core 经 `CtxmuxRunAdapter` 核对身份并消费 |
+| AgentSession、原生 handle、当前 Run 关联与 Timeline | [Core Session Store](../../packages/core/src/agent-session-store.ts)；默认目录由 [runtime-paths.ts](../../packages/core/src/runtime-paths.ts) 决定，Desktop 注入 [userData Store 路径](../../apps/desktop/src/main/agent-session-store-path.ts) |
+| 宿主配置、Executor 与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[config-store.ts](../../apps/desktop/src/main/config-store.ts) 保存 |
+| Tab／Region／布局及展示偏好 | Renderer Store 的 `partializeAppState` / `initialize`，经 `projectPersistedWorkbench` / `restorePersistedWorkbench` 投影与恢复 |
+| Goal／Demand 内容与确认记录 | [Demand Store](../../packages/demand/src/demand-store.ts)；宿主提供明确 root，读取失败不替换成空 Store |
+
+通用 Core 的默认目录策略和 Desktop 的宿主目录策略是不同接入上下文，不能把一种路径套给所有消费者。布局记录先恢复，再核对其引用的执行事实；Core snapshot、展示位置和保存回执不互相代签。要求归 [工作面恢复与终端阅读](../../AGENTS.md#工作面恢复与终端阅读)，终端机制另见 [Terminal Runtime](terminal-runtime.md)。
+
+## 当前边界与目标
+
+目前 [Control Server](../../packages/core/src/control-host.ts) 使用 Node Unix socket、换行 JSON framing 和 [Control 定义](../../packages/core/src/control.ts) 中的自定义信封。对象优先 CLI、统一类型化 JSON-RPC 服务以及 HTTP／SSH 传输是 [对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 的已确认目标；本页不把它们写成已经交付。
+
+[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 与 [`SshExecutionHost`](../../packages/core/src/execution-host.ts) 的执行／转发入口当前明确返回 `REMOTE_UNSUPPORTED`。Host 配置包含 SSH 字段不证明远端 Agent Runtime 已可用。具体能力应核对实际连接 owner 的事实；来源不可用保持未知，健康 Agent 与原工作面沿原约束保留。

@@ -1,0 +1,295 @@
+# 空间与布局的呈现
+
+本文保存本主题的视觉、密度与控件约束；行为、身份和动作资格引用交互合同，不在这里复制。原有未确认范围按正文状态阅读。
+
+[返回视觉与密度合同](../agentmux-surface-density.md) · [同主题交互](../behavior/spaces-and-layout.md)
+
+**本页章节**
+
+- [左下角导航与右下角工具组](#左下角导航与右下角工具组)
+- [Topic 导航反馈](#topic-导航反馈)
+- [Agent Region 的关闭与动作密度](#agent-region-的关闭与动作密度)
+- [Scratch Topic 首次打开的工作面反馈](#scratch-topic-首次打开的工作面反馈)
+- [三工作面与注意力密度](#三工作面与注意力密度)
+- [顶行与 Tabbar](#顶行与-tabbar)
+- [Agent 空间与身份呈现](#agent-空间与身份呈现)
+- [悬停菜单](#悬停菜单)
+- [Projects 层级与活动语言](#projects-层级与活动语言)
+- [单格临时铺满](#单格临时铺满)
+- [Region 移位菜单](#region-移位菜单)
+- [Hover 说明](#hover-说明)
+- [Project Rail 与 Topic 行密度](#project-rail-与-topic-行密度)
+- [Topic 行的 Region 与 Agent 在场状态](#topic-行的-region-与-agent-在场状态)
+- [Space 与 Focus 全局工作面](#space-与-focus-全局工作面)
+- [Survey 的 Zone 工作面与液体玻璃](#survey-的-zone-工作面与液体玻璃)
+- [Scratch Topic 工作面可见性](#scratch-topic-工作面可见性)
+- [Topic topology 的摘要与展开密度](#topic-topology-的摘要与展开密度)
+- [Topic topology 计数与浮层的空间密度](#topic-topology-计数与浮层的空间密度)
+- [Topic topology Tab 缩略图的空间密度](#topic-topology-tab-缩略图的空间密度)
+- [跨视图 Session 定位与 Agent Input 宽度](#跨视图-session-定位与-agent-input-宽度)
+- [Topic Tab Rail 与 Region 地图密度](#topic-tab-rail-与-region-地图密度)
+- [全局工作面标题栏留白与名称](#全局工作面标题栏留白与名称)
+- [Space Folder 状态计数角标](#space-folder-状态计数角标)
+- [初始 Launcher 的现代工作台密度](#初始-launcher-的现代工作台密度)
+
+## 左下角导航与右下角工具组
+
+全局导航以窗口左下角为稳定锚点。入口顺序、Space/Goals 命名、PMO 浮窗和焦点语义只定义在交互 SSOT[《左下角导航、Space 与 Goals》](../behavior/spaces-and-layout.md#左下角导航space-与-goals)。
+
+Settings覆盖当前背景绑定时的原生 Browser 局部可见性与实体保留只见交互 SSOT[《左下角导航、Space 与 Goals》](../behavior/spaces-and-layout.md#左下角导航space-与-goals)。不增遮挡条、第二背景层、独立开关或新chrome；不以某个surface或唯一Portal作为实体的视觉归属。
+
+- 用户此前要求「status bar 高度不应改变」，现在进一步认为整条 status bar 太高，希望只有 Mote 图标大一点、其他 bar 降低。底栏采用约24px的低条，常规导航与右侧工具使用约22px级命中区并完整留在条内；工作面、设置与窄窗切换不增高整条底栏，不裁掉右侧性能、服务提醒、工具与键盘焦点。实际精确尺寸按定向看图收敛。
+- 用户希望左下入口「圆角矩形改成圆形试试并稍微上提」。Mote 独立于工作面导航组，使用约34px圆形入口、约26px完整龙头像，局部上提；只有它获准越过低条上沿，头像、真实状态与完整焦点轮廓仍清楚可见。圆形不是另一份展开状态；不裁图、不变形，不覆盖相邻入口或其命中区，不用抬高整条 bar 为它留位。突出部分只有实际不透明绘制轮廓承担窗口 chrome 覆盖，透明容器不当作遮挡面、不复制整条底栏；圆形只是外观，入口保持完整的正面积 bounding hitbox（约34×34px），其自身区域允许局部覆盖；完整 hitbox 外 Browser 的其余原 bounds、内容与输入保持，不能声明原生圆角 cutout 穿透点击，也不能扩大到该 box 之外、遮住整面或停放无关健康 Browser。精确提升量由实际图审决定。
+- Space、Focus、Goals、Survey 与设置使用同一条紧凑图标基线和完整命中区。四个工作面共用单一选中 Surface；设置是打开现有设置面的动作，不冒充第五个工作面。PMO 的展开状态也不冒充工作面选中状态。
+- 用户最新认为「按钮太土」。左侧工作面与 Settings、右侧 Keyboard 和 Toolkit 使用同一套轻量辅助按钮语言：常态裸线图标、透明底，图标的光学粗细与基线一致；真实当前工作面和已展开入口用低对比、小面积的整面状态清楚表达，hover 比选中／展开更轻，键盘焦点有独立、完整可见的轮廓。仅图标的 Toolkit 入口与其余常规命中区同级，带文字的入口保留用户选择和可读文字，状态、hover 与按压不使图标／文字变形或跳位。微反馈短促、克制，减少动态效果时保持静态；不给每个按钮叠玻璃滤镜、浮起阴影、鲜亮色块或持续动画。底栏仍沿原低条与完整命中区，不将整组包成胶囊工具坞。PMO 的独立轮廓和头像承担局部强调，本轮不改它。
+- 快捷键帮助和状态摘要位于右侧；响应式先收紧间距与次级状态文字，入口、键盘焦点与需要处理的状态保持可达。Mote 的局部突出不让其余入口或整条底栏跟随长高，不把整组导航做成第二条浮起工具栏。
+
+## Topic 导航反馈
+
+- Topic 选中行与右侧可见 Tabs 必须一致；布局、焦点和读取失败约束见交互合同[《Topic 点击必须打开可见 Tabs》](../behavior/spaces-and-layout.md#topic-点击必须打开可见-tabs)。使用现有选中态和服务窗，不加重复导航栏或无限全页加载。
+
+## Agent Region 的关闭与动作密度
+
+行为与身份归属见交互合同[《Agent Region 关闭与身份入口》](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)。关闭命中区是 Region 的固定保留区；History 入口、阅读工具条、服务窗和长文本不能进入该区，不能仅提高层级后让两个控件视觉叠在一起。正常与窄分屏都保持原关闭尺寸、焦点环和完整可访问名称，不靠 hover 才找得到。
+
+已停止或关闭流程未确认的 Tab/Region「不能撞墙」及共享语义展示面在合法 Run 变化后的关闭约束只见交互合同[《Session、Run 与 View》](../behavior/session-recovery.md#sessionrun-与-view)。复用原 X、确认中的保留 Session 选项与服务窗，局部关闭和保存未知可辨；不增加第二条关闭工具栏，不用全页错误遮住原出口。
+
+Terminal 与 Activity 的 History 进入和返回行为只见交互合同[《Agent Region 关闭与身份入口》](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)；同一阅读面及返回控件须完整位于当前 Region 内容区内，保持原身份菜单和关闭保留区，不增加另一条入口或常驻工具栏。
+
+搜索条、输入框和各按钮须完整保持在实际可用 Region 内，可见且可操作；不得为给右上角动作让位而裁掉左端输入框或挤小按钮。
+
+用户最新反馈：「24 px 太高，另外这么点信息，弄个自适应的角标放右上角就行」。正常工作面只保留按内容自适应的右上角名字、More 与原关闭按钮，不为少量身份再占一条整行；Executor/Provider、短 Session ID 等低频信息不再常驻占位，完整信息仍按交互合同按需可读。Read-only 等实际模式保持清楚可辨，不将未知和服务窗的三事实藏进菜单。
+
+角标沿既有字号、间距、控件与焦点语言，不以缩小字号或动作尺寸、固定标题行、宽大背景、装饰容器、另一条 toolbar 或第二名称栏实现。正常、长名、只读与窄分屏保持紧凑的一小组，名字先截断且完整可访问名称保留，More 与 X 不换行、不相压。角标可以局部覆盖在工作面右上方，安静状态的实际首行字形须可读，阅读工具与输入仍可达；hover／open 的临时表面沿原菜单规则。透明整面不能拦截终端操作，不能为角标收窄整个终端正文或以全高右侧留白牺牲列数。是否足够轻与紧凑须由实际完整画面的独立看图判断，几何测量只核对命中区与不遮挡等工程事实；不能以 24px 改为另一固定整行冒充自适应角标。
+
+## Scratch Topic 首次打开的工作面反馈
+
+- Topic 首次打开时，Terminal 的 launching 状态直接占据目标 Region，并沿用全页加载/恢复的阶段语汇；不得短暂露出空白 Launcher 作为成功结果。
+- 启动完成后加载层卸载，Terminal 露出真实内容；失败态保持同一几何和密度预算，显示原因与 Retry，不用空白面或只留一个无动作的占位块。
+- Topic 行的主要内容区承担导航命中面，标题、摘要和 Board 行保持同一点击密度；定位、头像等辅助动作单独保留自己的命中区，不把打开 Topic 压缩成一枚孤立图标。
+
+## 三工作面与注意力密度
+
+- 窗口只保留一组主导航，位置与分组见[《左下角导航与右下角工具组》](#左下角导航与右下角工具组)；顶行不重复主导航。
+- Agents 收件箱按注意力排序，Needs you 使用现有琥珀语义，working 使用现有绿色/蓝色语义，结果审查入口使用低对比度次级动作；不为同一状态增加第二枚常驻徽章。
+- Board 卡片先读 Task 身份，再读 Project 和状态；Session 名称、Provider 与执行状态进入次级元信息，不抢 Task 标题层级。
+- 没有选中 Task 时主区占满可用宽度；不画空右栏、不画占位边框、不使用“从右到左”的方向性动画。只有多个 Region 真实存在时才显示 arrangement 控件。
+
+| 层级 | 视觉语言 | 用途 |
+| --- | --- | --- |
+| Primary | 实心品牌绿渐变、深色文字、顶部高光 | 页面唯一主操作 |
+| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认。**落地类名只有 `.small-button` 一个**，见下「一档控件只有一个类名」 |
+| Ghost / Icon | 透明底，hover 才提升 Surface | 图标按钮与工具栏动作 |
+| Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态 |
+| Danger | 实心红色变体、深色文字、顶部高光 | 删除、移除等破坏性主操作 |
+
+补充规则：
+
+- 同一语义在不同容器中使用同一控件层级。
+- **一档控件只有一个类名。** 上表五档各自只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。**不得按表里的档位名另造一个类名**——那个名字读起来像"就该存在"，于是没人会去查它有没有规则。实证：`.secondary-button` 被这样写出来过一次（启动页 Resume），全仓零规则，而 `base.css` 的全局 `button` 只重置 `font`/`color`、**不重置 `background`**，于是它落到 macOS 原生按钮样式——一颗浅灰实心药丸，在深色主题里比紧邻的品牌绿主操作还重，恰好推翻上表"Primary＝页面唯一主操作"。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住：它的扫描面除 BEM 记号外**还收 `-button` 结尾的扁平类名**，渲染了却没有规则即红。扁平名此前整族在扫描面之外（判据只认 `__`/`--`），这不是漏登记而是结构性缺席，所以修的是判据形状而不是加一条豁免。
+- **`justify-content: space-between` 是一份「有几簇」的契约，不是"把东西摊开"的通用手法。** 它把自由空间**摊在子元素之间**，所以结果是子元素**个数**的纯函数：两簇时各抱一端（这才是它的用途），三个以上松散子元素则被甩向两极、中间留出大洞。这份"应该有几簇"的期待写在 CSS 里，而供给子元素的是另一个文件里的 JSX，两边没有任何东西对齐它们——**供错形状不报错，只是默默排错**，而本仓测试跑在 happy-dom 下不算布局，没有任何 gate 会红。因此：**space-between 只用于子元素集合固定且已知的容器**；凡是"一个留在左缘、其余聚到右缘"的工具栏与页脚，一律用 `justify-content: flex-end` 配首元素 `margin-right:auto`——它对 2、3、4 个子元素都成立，**契约本身被删掉了**，而不是被记在文档里等人遵守。这套写法本仓已有多处（`surfaces.css` 的 `.settings-pane-actions`、`dock.css` 的 `.workspace-composer > footer`、`board.css` 的 `.discussion-canvas__footer`）。实证：`.composer__toolbar` 与 `.settings-pane-toolbar` 都配了 `> div` 的两簇写法，各自有一个调用方老实给两簇、另一个调用方给四个松散子元素，于是同一条规则在两个界面上同时排错。
+- **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 与 `border-left: <n>px ...`（含 `border-inline-start`）这两种拼法都不得用于表达选中——它们在屏幕上是同一根线，禁的是那根线而不是某一种画法。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出两种拼法的所有左缘竖条并在选中态类名上断言其不存在，加回一条会红；两个形状判定各自带一条自证（拿合法的容器分隔线与内容引用条当样本），因为一个认不出竖条的检查会因"没找到"而全绿。
+- **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（重复的 Topic 类型图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（对象的手动或自动身份、状态、Provider 身份）或干脆留白；Space 的共用对象身份槽遵守[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)。
+- Project Rail 的选中与活动分开：选中用中性 Surface 填充，活动用独立控件。项目图标、分组和目录的区分见文末“Projects”约束；分组文字仍比项目名轻，区别靠角色与结构。
+- 文件树目录右键菜单的“作为项目打开”使用现有菜单语言，不增加常驻图标或行高；行为见 [Desktop interaction](../agentmux-desktop-interaction.md)。
+- 分屏菜单的 `Move to New Tab` 继续表达搬动，完成后源处不留同一 Agent 的副本；不新增常驻重复视图提示。移动与额外投影的行为约束见 [Desktop interaction](../agentmux-desktop-interaction.md)。
+- Project Rail 的“移除视图”放在项目行的 context menu 中，使用危险动作语义但不画成常驻删除图标；确认文案必须说清楚“只从侧栏移除，磁盘文件不受影响”。路径失效时的“重设路径”是错误面中的次级按钮，与 Retry 并列但不抢错误标题，选择成功后仍回到同一行的工作面。
+- 用户反馈“自动放到一起并缩进，但是视觉上区分度不高”，分组必须优雅且清晰：真实目录集合的成员向内一格，真实嵌套继续缩进，组间紧凑留白明确归属。 进一步明确去掉箭头与线带来的噪声：不再画细结构线，以本层[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)的明确左缘差与权重表达归属。分组头仍轻于项目标题。
+- **同一族列表行共用一套表现层**。Branch/Worktree 条与 Topic 条回答的是同一种形状的问题——"这一组条目里挑一个，进去是一组 Tab、每个 Tab 是一套 Region 分屏"。因此列表容器（标题 + 计数 + 动作位）与行（状态槽 + identity + 尾部 Agent 簇）**只有一套实现**，数据源、选中判定与动作由调用方注入。两者的**选中真相模型确实不同**——Branch 换的是 `activeWorkspaceId`（worktree 自成一个 workspace），Topic 是对同一份 Scratch layout 做投影——这条差异归交互合同，表现层不感知它，也不得为了"统一"把其中一侧改成另一侧。判据：两个条上看起来相同的东西（计数徽章、Agent 簇、hover、选中填充）必须真的是同一段代码，不是两处长得像的写法。
+- 失效的声明比错的声明更危险。`-var(--sp-2)` 这类写法不是合法 CSS，浏览器**静默丢弃整条声明**——它不报错、不回退、在样式表里看起来完全正常，而它想做的事从未发生（负外边距归零，靠它做居中或叠压的东西一直是错位的）。数值型契约测试抓不到这一族，因为压根没有数字字面值可扫。负值必须写成 `calc(-1 * var(--sp-2))`，或改用不依赖数值的手法（如 `translate(-50%)` 随自身尺寸走）。这条由 `apps/desktop/test/stylesheet-organisation.test.ts` 守住：它扫全表断言 `-var(` 出现零次并报出文件与行号。**这类失效还会掩盖第二层错误**——声明既然从未生效，写在里面的数值对不对也就从来没人验证过；修复时要重新核算那个值，而不是照抄进 `calc()`。
+- hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
+- 输入聚焦统一使用 `--focus-line` 与 `--focus-ring`。
+- 圆角只使用 `--radius-sm`、`--radius`、`--radius-lg` 三档，**两类例外据实开放**：其一是紧凑交互控件——24px 图标按钮、Tree/File Row、Tab 与 Region 的关闭键、pane 动作等在 6px 下会显得过圆，故取 4–5px；其二是微标与装饰件——状态点、hairline 轨道、ruler tick、图标裁角、选中标记等取 1–3px。例外只对**这两类**成立：面性容器（卡片、菜单、弹窗、输入框、工具坞）一律走 token，不得因为"看起来更合适"而硬编码。这条由 `apps/desktop/test/surface-radius-contract.test.ts` 守住：它从 CSS 推出所有低于最小 token 的圆角并核对是否落在已声明的例外清单内，新增一个未声明的硬编码圆角会红。
+- **状态在场标志与规则必须成对，判定按元素而非按属性名。**`data-x={cond ? '' : undefined}`（只有空串与不在场两种取值）对 JS 携带零信息，它存在的唯一理由就是被 `[data-x]` 选中；因此渲染了它却没有 `.那个class[data-x]` 规则，要么是规则在重构里丢了，要么这个属性本就多余、该删。**没有例外清单**——这个记号和 BEM 一样按定义成立。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住，它逐元素配对：起因是那份测试原本只查选择器**名**在不在，于是删掉 `.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }` 之后折叠箭头永久不转，而它自己 3 条 + `stylesheet-organisation` 8 条全绿（实测）——`[data-open]` 因为 `.log-row__chevron[data-open]` 还在而"依然出现过"。按属性名判会漏掉的正是它自己那次事故的形状，所以判据必须落到"同一个元素上的 class × 该元素的标志"，并另有一条自证钉住这个区别（拿一对成对的与一对属性名存在但元素不对的当样本）。
+- **受控表单控件必须有写回口，或显式声明它永不接受输入。** 判据不是自拟清单，而是 React 运行时自己的规则：给了 `value`/`checked` 却既无 `onChange`/`onInput` 也无无条件的 `readOnly`/`disabled`，React 会报 "without an `onChange` handler … read-only"。受控取值与写回口按定义成对（单独一个 `value` 没有任何用途——用户敲不进去），与上一条的在场标志同一形状，故同样**没有例外清单**：`defaultValue`、`readOnly`、`disabled` 本身就是判据的另一半。这条由 `apps/desktop/test/controlled-input-is-writable.test.tsx` 守住，它静态扫每一个组件文件、并把 React 的那句告警接成断言钉住判据。起因：启动对话框那两格名字输入删掉 `onChange` 之后永久不可写（用户填什么都送不出去），涉及该组件的 23 条测试与 `tsc --noEmit` **全绿**（实测）——本仓只有 `renderToStaticMarkup`，不跑 effect、不派发 DOM 事件，这类失效没有行为测试能覆盖。**只有无条件的 `disabled` 才算自洽**：事故现场那两格正带着 `disabled={busy !== null}`（忙时才禁用），把任何 `disabled` 都算过的话这次变异照旧全绿（实测）。
+- Tab 选中态使用轻微背景和底部 2px 横条，不使用顶部高光或整圈描边。
+- Composer 表面同样不使用描边：它靠比所在 Region 高一档的 Surface 填充与顶部高光界定自己，四周 margin 与紧邻其上的审批卡片一致，读作工作面的一部分而非浮在上面的盒子。这也消解了卡片刻意不用描边的那条理由——两处不再争夺同一条边界。去掉常驻描边后 focus 不再能寄生在 `border-color` 上，故由 `--focus-ring` 加一道 inset `--focus-line` 独立承担，可见性不因"更平"而退化，且内阴影不改变盒模型、不引起布局位移。
+- **装饰性强调图标格不是卡片元素**。给一段说明卡挂一个品牌绿的 36px 图标格（原 Settings 的 `.settings-card--hero` / `.settings-card__icon`），是把最抢眼的强调色花在一段不可操作的文字上。强调（品牌绿实心格/描边）只表达**状态**或页面**唯一主操作**；说明性卡片靠字号阶梯与留白分级，不靠一枚彩色图标求存在感。每节导航前缀的**区分性**图标不在此列——它们各不相同，是身份标识而非装饰（见"一列全同的图标"那条的反面）。
+
+## 顶行与 Tabbar
+
+- CLI 与界面的显示名改动沿交互合同[《显示名与身份》](../behavior/spaces-and-layout.md#显示名与身份)；复用原名称位置与截断／完整阅读语言，不新增名字条、CLI 身份行或外观。
+- Projects 与 Workspace tools 两个固定开关位于 macOS 红绿灯之后，只用 active treatment 表达开合，不翻转图标方向。
+- Session 顶层 Tabbar 是最上方的工作面平面：单 Pane 时与窗口顶行合并为 36px；分屏时由左上方首个 Pane 的 Tabbar 承载一次必要的窗口 chrome，其余 Pane 直接从同一顶边开始使用 31px Tabbar，不再给没有 Tab 的全局 chrome 行预留 36px。
+- Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
+- Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches` 或 `Agents` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 使用可读 `+` 和完整可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。Browser 管理密度统一见[《Survey 的 Zone 工作面与液体玻璃》](#survey-的-zone-工作面与液体玻璃)，不在 Space 工具栏留一份重复入口。创建作用域与失败恢复合同引用 interaction[《顶部与项目栏》](../behavior/spaces-and-layout.md#顶部与项目栏)。
+- Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
+- Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)。
+- 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park；跨 Workspace 隐藏的 Workbench 仍保持 warm，避免项目切换制造二次 replay。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。
+- Core 侧用于 prompt/readiness 的屏幕证据同样计入内存预算：不得为每次观察临时堆出与全会话历史等长的 headless 终端尖峰；增量或帧起点有界证据是交互合同要求，本层只要求该证据不得变成常驻无界缓存，且 cold-park 唤醒不得依赖「从 byte 0 重放全史」作为唯一重建路径。
+- Durable Runtime 的异常使用同一套紧凑服务窗语言：瞬态 WAL busy 的重试不占据 Terminal 内容区，也不显示永久 loading；只有重试耗尽、磁盘不足或完整性失败才在原 Region 旁显示一行分类告示与下一步。数据库达到容量上限时标题必须说明“状态库已满/启动未完成”这一阶段，保留已恢复工作面，不把 readiness 超时写成 Agent 故障。退出清理中的 attach 门禁同样只在原 Region 旁短暂告示，清理完成后自动收敛，不使用永久全局遮罩。具体状态与 Owner 边界归交互合同的[《Durable Runtime 健康》](../behavior/session-recovery.md#durable-runtime-健康)，本层不复制错误码或另造控件。相关回归测试必须在隔离临时 state-dir 注入 I/O 失败，不填满宿主磁盘、不改用户 runtime；测试只验证服务窗分类与恢复边界，不把宿主带入故障态。
+- 用户要求的「体系」「提醒」沿交互合同[《我们的流程坏了，不等于 Agent 坏了》](../behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)表达：新建入口与 resume 所属 Session 使用既有局部反馈／服务窗，紧凑说明失败步骤、当前可用或未知的能力与可执行动作。原始原因可查看；未知和流程失败沿同一轻声提醒分类，不用一条底层错误同时堆叠局部与全局告警，不抢焦点或遮住仍能工作的 Terminal。临时端点与持久状态生命周期归[《Durable Runtime 健康》](../behavior/session-recovery.md#durable-runtime-健康)，本层不增加路径状态栏或第二份错误码表。
+- 输出 Gap 的已知 Host/Run、当前 Agent／普通 Terminal 归属与未知原因只定义在交互合同[《完成与 error 判定可信度》](../behavior/session-recovery.md#完成与-error-判定可信度)的“输出 Gap 不等于 Native owner 停止”；沿现有告示详情可定位原 Session，不新增监控栏、错误登记表或遮罩，也不以告示推测进程死亡。
+- Gap 复发的阶段、时间与可核游标／未知边界归交互合同“复发 Gap 必须能按本次观察复核”；沿现有告示详情呈现，摘要保持紧凑，不新增监控面板、常驻计数器或重复告警。 默认主文只保留范围与 Gap 说明，观察字段和完整原文放入可展开 Details；长范围／窄面不能让诊断展开量挤占原恢复控件。
+- 默认持久位置与当前 listener 实际绑定的区分只定义在交互合同[《Durable Runtime 健康》](../behavior/session-recovery.md#durable-runtime-健康)；需要复核时沿既有详情与服务窗表达已确认来源或未知，不增加常驻路径指示，不把候选地址显示为恢复成功。
+- Prompt 投递与 Store 读取未确认的错误类型及恢复动作归交互合同《CLI 只做适配，不做判断》；本层沿用现有紧凑服务窗，不建立第二错误码清单。
+- WAL 增长预算与真实数据损坏的区分同样归[《Durable Runtime 健康》](../behavior/session-recovery.md#durable-runtime-健康)；恢复使用现有局部服务窗，不新增遮罩、常驻指标或诊断轮询，不把健康 Run 的正常输入与原工作面拿走。
+- 资源面板和基线报告按 Main/Renderer/GPU/Utility/Browser 进程与 Terminal/Monaco/Browser/attachment owner 分栏；不把共享 RSS 或 V8 已保留容量重复计入，也不以单一总 RSS 推断泄漏。跨客户端比较只采用同窗口、同场景、同等待窗口的相对变化。
+- Session 恢复状态使用现有服务窗/状态行表达，不新增一条常驻的“Resume”工具栏或第二套 Tab chrome；自动恢复成功不占视觉空间，只有分类失败或待处理状态才在原 Region 旁给出短告示和动作入口。
+- 启动时先显示已保存的布局；单个 Host/runtime 探测失败只占用对应服务窗/状态行的密度，不得用全屏 loading 或空态覆盖工作面。具体恢复顺序与错误边界归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)。
+- 新建 Tab 的视觉归属沿用当前工作线，不增加额外的 Topic 标签、层级条或第二条 Tab chrome；Topic 绑定与继承规则以交互合同为准（见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)）。
+- Agent/Terminal Pane 不显示 Session Info Bar。Stop Run 进入 Tabbar；Recent message 回到 Activity。
+
+## Agent 空间与身份呈现
+
+- 新 Agent 的落点必须在当前可见工作面中可辨识，不能用 Tab 条上的相邻标题冒充屏幕右侧分栏。空间是否足够取决于分割后的可读宽高与内容用途，不仅比较面积；少动现有布局，不为自动整理持续重排。
+- 自定义 Executor 与内置 Executor 共用名称、Provider 身份和状态语汇；详细 ID、归属与能力由检查面承载，不把完整机器元信息塞进窄 Tab 标题。
+- 空间与启动流程降级沿用持续、中性服务窗，说明发生了什么、Agent 在哪里或是否尚未展示、如何恢复。空间决策、完整元信息与布局包边界见 [Desktop interaction](../agentmux-desktop-interaction.md) 的“Agent 自助创建与空间操作”。
+
+## 悬停菜单
+
+- Split 与同类下拉菜单沿用现有按钮、箭头、菜单尺寸和选中语言；降低操作次数，不增加常驻控件。触发器与浮层之间的视觉间距不能成为指针操作的断点。行为以 [Desktop interaction](../agentmux-desktop-interaction.md) 的“少一步操作”为准。
+- Settings 的窄窗分类入口沿 [Desktop interaction](../agentmux-desktop-interaction.md)「少一步操作」。浮层保留分组和当前选中标记；输入仍在编辑时，指针经过的可操作菜单项也有清楚的 hover 高亮，键盘焦点和禁用状态保持可辨。沿原菜单尺寸、层级和可用空间约束，搜索、关闭与底部 status bar 可见可命中，其密度引用[《左下角导航与右下角工具组》](#左下角导航与右下角工具组)；不增加第二品牌或第二套导航。
+- 共享菜单保留输入焦点时，原菜单项和必要图标、文字仍有明确的指针反馈；键盘高亮、禁用状态和原有等级颜色保持可辨，不能因不夺焦点而丢掉现有反馈或改变等级颜色的优先级。
+
+## Projects 层级与活动语言
+
+- 左侧菜单降低字重与重复装饰，状态栏内使用低对比语义图标和短标签承载 Agent 状态；数量作为辅助信息，不再由单点加数字承担全部语义。
+- Branch 与 Topic 的 recap 使用同一紧凑摘要表面，放在工作线行的次级信息层，不抢主标题。
+- Projects 栏与主工作区之间保留一条可拖拽的窄分隔带；悬停和拖拽时提高边界对比度并显示 resize cursor，静止时保持低干扰。宽度变化即时反映在项目名称、层级缩进与状态槽的可用空间中，结束拖拽后只持久化一个最终宽度，不增加第二份布局状态。行为约束见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)「顶部与项目栏」。
+- 分组使用轻量目录集合图标和分类标签；项目使用自身图标或仓库图标，普通目录用文件夹。真实父子通过标题左缘差和分组权重表达层级，不画连接线，避免只靠文字亮度猜层级；具体层级差唯一见[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent，表现约束见[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)。
+- running/error 汇总使用紧凑图标微标与短数字；hover activity 面板以小尺寸 Provider 图标、单行最近活动与停止时长构成，避免大块数字方框和空白。
+- 运行状态采用细小节奏条和简短文案，尊重减少动画偏好；待处理采用有语义图标与原因短语，移除“点＋数字方框”和“数字＋叹号方框”。详情在悬停面板中显示 Agent 名称与状态，点击定位。行为见 [Desktop interaction](../agentmux-desktop-interaction.md)“Projects 结构与状态可读性”。
+
+## 单格临时铺满
+
+- 沿现有 Region chrome 放一个紧凑中性图标按钮，在“铺满此格／还原分屏”间切换，保留 tooltip 与可访问名称；不加工具栏行、持续色块或新的边框。右键菜单复用同一动词；结构缩略图标明原布局。行为及重启边界见交互合同「单格临时铺满 Tab 后还原」。
+
+## Region 移位菜单
+Region 移位属于低频布局动作，放入右键菜单，不增加常驻按钮；菜单项使用简短动词并在 hover/子菜单中呈现可用目标。
+交换目标使用该格当前可辨认的名称，长名保留完整可访问名称与详情出口，不挤走动作；名称来源、重名与精确寻址约束只定义在交互合同[《Agent Region 关闭与身份入口》](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)。
+
+## Hover 说明
+低频图标按钮的解释放入 tooltip，正文保持紧凑；tooltip 文案同时说明动作和快捷键，避免用户多次试错。
+
+- Tab 排序与 Region 拆分使用不同的 drop affordance：排序保持紧凑，边缘方位才显示拆分目标；Split 默认向右，方位菜单沿用全局组件。
+
+## Project Rail 与 Topic 行密度
+
+- Folder/Project 与 Topic 两类 Space 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 默认一级节点使用特殊图标，其下 Topic 子项保持树的紧凑节奏；产品归属只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
+- 用户提供的 Topics 总览截图是本轮保留参照：现有已经 polish 过的列表页继续可达，保留标题与计数、`+`、连续列表容器、逐行标题和次级摘要、邻接的 pin、右侧 Agent/Tab/Region 簇、尾部定位动作及选中 Surface。树的子项与总览列表使用各自适合的密度，树整合不能把总览缩成只有一列名称；两处都消费同一事实和既有控件能力。Topics 分类入口保留可辨身份，列表行首图标继续遵守[《控件语言》](shared-rules.md#控件语言)中同图标不重复占位的规则。
+- Space 树中 Folder/Project 与 Topic 的显示应可区分。Folder/Project 的主身份表达目录或项目；Topic 的主身份使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头通用 `+` 打开紧凑动作菜单，各分区另有就地 `+`；入口含义与 Topic 的自动识别规则只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
+- Topic 与一般 Folder 的类型可从分区和必要的类型图标辨认；Topics 的默认分类入口与 Folder 分组均有可读标签，真实父子缩进清楚，分区标签不冒充目录父子关系，避免靠颜色或底层目录地址猜类别。两类复用同一行密度和工作面操作语言，目标是好懂好找。
+- 用户反馈：「你自己看看, 缩进和样式都有点问题, 很一般」，并要求「发挥你的全部能力, 优化这里的交互体验」。本轮进一步明确「最左边有个 padding 浪费空间」「很土的箭头和线」「顶部 icon 两层、有多余标题」。树的同级对象共享自然左缘，整棵树只有一份必要的外缘留白；没有折叠动作的叶节点不再保留空箭头槽，没有信息的类型图标也不留空框。分类成员与真实路径聚合、父子关系的层级差统一遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent；分类不是实体目录，不叠加容器留白与层级缩进。层级由清楚的标题左缘差、类型与分组权重表达，不画树干、拐线或虚线。行高与图标随同一密度档变化，真实层级缩进遵守同表，不随密度压缩。长标题、省略、尾部动作与键盘焦点在窄栏保持完整，不靠颜色猜层级。Mote、Topics 和 Folders 属于同一可滚动树，短窗口中仍能找到下方 Folder。原 Topics 总览的独立密度继续遵守本节保留参照。
+- 用户继续要求左树达到更高水准。名称必须是主要扫描轨道：普通条目使用克制字重，当前对象以完整行的选中 Surface、明确文字与 `aria-current` 区别于 hover；不能让 hover 和选中只有相同填充，也不靠单侧色条表达选中。Motes、Topics、Folders 分类、真实路径分组和具体对象具有可读的权重次序；分类之间以紧凑段距分区，不借厚边框或卡片堆叠。Topic 成员以语义标题、分类成员缩进与共用身份槽表达归属，不伪造实体 Folder，也不逐项重复无区分价值的类型图标；其类型、pin 与语义标题仍可辨认。就地查找紧凑地位于树头，清除、无结果与命中上下文可见，不能新增第二个大标题或抢走名称宽度。Mote 人格编辑与未置顶时的 pin 动作在 hover、键盘焦点或菜单打开时清楚可达；已置顶标记安静时仍可见，安静状态不重复陈列低频动作。所有 Space 行共用状态入口，最多保留两类最需处理的精确 icon+count：待回答和错误同时存在时都保留；安静时保留当前最相关的 working、idle 或 completed 一类，其余准确分类进入既有展开面。状态图形和数量不可混成含义不明的总数，不改变 Session 状态事实。三档密度、窄栏与短窗口均需保留可读名称、清晰命中区及可见键盘焦点；交互与过滤恢复合同引用 interaction[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
+- 顶部仅一层控制行：侧栏开关与通用创建共面排列，保留 macOS 交通灯所需避让，不在下一层重复 `Spaces`/`Projects` 标题或同组 icon。三档密度常驻于紧凑查找行尾，不能以窄栏为由隐藏进设置或增加第二层 toolbar；查找不能拿搜索标签凑出第二个标题。分区头使用轻标签、准确成员数和尾部常驻 `+`；折叠状态将真实注意力放在同一尾部轨道，不能用一个无解释的彩色点代替准确状态。`+` 的命中区、hover 和可见焦点与现有 icon-button 一致，180px 窄栏仍能明确创建的类别。
+- 折叠字形只属于确有子项的类型/分组槽：类型图标与折叠控制不同时抢两列，指针 hover 或键盘焦点显露紧凑 disclosure，`aria-expanded` 和独立可访问名保持明确。叶节点没有箭头，也没有为箭头空出的 gutter；标题和动作的点击互不触发。标记、当前对象和热度分别占身份邻接位、完整行 Surface 与尾部状态轨道，不能用同一装饰同时承担三种事实。
+- 用户追问「你自己满意了吗」后的视觉收敛：Space 顶部侧栏开关的静息选中保留完整表面填充与可辨文字，但视觉重量低于当前对象的行选中，不叠加强化阴影；hover、按压反馈与独立键盘焦点仍清楚。此约束仅属于 Space 的顶部控制行，不改变其他工作面的开关语言；28px 命中区与 80px 原生交通灯避让保持。分区段距随用户密度档为默认 12px、紧凑 8px、更紧凑 6px，轻标签、成员数与就地 `+` 仍可辨；层级缩进遵守[《密度预算》](shared-rules.md#密度预算)表，不随段距压缩。真实注意力的图形与上标数字继续共用原 16px 信息预算，不为视觉收敛加宽尾部状态轨道；行为保全见交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
+- 用户继续反馈「Mote 和 Topic 没有缩进」「Folders 与内部聚合组图标一样」「pin 图标过大不精致」「自动图标太跳」，要求共用手动图标并让目录连同 pins 形成背景区域。Motes、Topics、Folders 的分类成员缩进、身份槽和标题基准唯一遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent；路径聚合组与真实后代沿同表增加层级，不把分类投影成目录，不增加空箭头槽或连接线。
+- Folders 分类与路径派生聚合组使用不同且能表达作用的图形；聚合组表达共同路径，不伪装成另一枚对象 Folder。Space 自动字母牌、默认类型图形与手动线型身份保持低彩度、轻底色、细线条；Folder 已有彩色自动项目图像采用本节[《Folder 自动图像的近期活跃色调》](#folder-自动图像的近期活跃色调)，不一律压成低彩度。名称仍是主扫描轨道，不让 Mote 身份色或派生彩色牌压过选中与真实注意力，不改变 Agent 会话头像。用户选择的图标与已有项目自动图像共用同一紧凑身份槽；Mote 默认类型图形也允许手动覆盖，图标本身不扩大行高或尾部预算。三类对象的手动优先与恢复规则只见交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。选择面为有界的现有线型图标集合，不扩为上传系统。
+- Mote/Topic 的 pin 按钮与 Folder Branch pin 的实际绘制图形为精细的 10–11px，不被通用 SVG 规则拉大为身份槽尺寸；操作命中区与独立焦点仍完整，已固定安静可见，未固定动作仍渐进出现，不出现常驻空按钮列。Folder 存在自己的 pins 时，Folder 行与这些 pins 位于同一连续、低对比背景区域；区域不延伸到邻居、其他 Host、其他目录后代或路径聚合组，不用厚边框、重阴影或逐行卡片。无 pins 的目录保持轻量单行，完整行选中、hover 与键盘焦点仍比区域背景清楚。
+
+- Mote 未指定手动身份时使用自己的类型图标与名称；手动身份规则引用交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)，共用 Space 行的密度、选择、焦点与状态语言；正常大小写为 `Mote`，不采用全大写缩写。Topics、Mote 和 Folder/Project 共用顶部控制行的密度与通用 `+` 菜单，各自分区有就地 `+`，保留总览的独立密度。产品身份与创建/人格行为只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。PMO 默认角色与 Provider/Executor 身份各有含义，不能让预制头像冒充底层执行者或运行状态；具体 PMO 入口与浮窗密度继续复用对应章节。
+- Project Rail 的所有真实树层级采用同一个 `--rail-depth` 公式；group header、project row、pinned child 不再各自补缩进。Pinned child 的标题比普通项目小一档，hover 只使用下划线，不使用项目行的 Surface 填充；它和所属 Project 之间仅由一层缩进和 pin 标记表达关系，不再画连接线。
+- 用户原话：「左侧项目菜单的缩进有点多, 图标有点大, 每个项的高度有点高了, 可以更加紧凑些, 或者在顶层的 projects 上的加号旁边增加一个组件, 调整紧凑程度」。 的「缩进有点看不出来」收紧了这一约束：密度可同时收紧行高与图标，但分类归属与真实 Folder/Branch pin 层级差仍遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent，不能压成与字间距等同。整栏变紧来自删掉重复留白、空槽和标题，不牺牲层级辨认。
+- 密度档由用户拥有，控件落在紧凑查找行尾；它是**可见的常驻控件**，不是隐藏偏好，也不进设置页——用户要在看着树的同时调。档位数保持极少（默认、紧凑、更紧凑三档），不做无级滑块：滑块要求用户自己找一个好值，而这件事只有几个稳定好值。各档行高与图标联动，真实缩进始终遵守本节最小可辨预算。
+- 密度档是 durable 的：重启后仍是用户选的那一档。缺席即默认档，不回写。
+- 通知胶囊默认保持 icon+count 的窄态，hover/focus 才过渡到 icon+count+label；状态颜色只作辅助，图形和数字始终存在。
+- Topic 行的 pin、Agent presence、Region mosaic 和标题按固定轨道排列；pin 与标题相邻，Agent presence 与其对应的 Tab/Region 在同一语义组内。
+
+### Folder 自动图像的近期活跃色调
+
+用户要求图标饱和度跟活跃程度：最近 1 小时内原彩色，1–12 小时略暗，超过 12 小时沿用当前灰态。Space Folder 行首已有彩色自动项目图像与确认无图的自动字母牌采用三档：距最后确认活动不超过 1 小时保持原图色彩或字母牌的稳定低对比身份色；超过 1 小时且不超过 12 小时为可辨的轻微降饱和、略暗；超过 12 小时采用现有安静灰态。未知活动是独立事实，但外观沿用安静态，不伪造它的时长。来源、Project 归属和未知边界只定义在 interaction[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)同日近期活跃约束。
+
+三档保留同一图像、尺寸、身份槽与行高，原彩色不加发光、边框或放大；中间档在正常与窄栏中既可辨又克制，名称、选中与真实注意力仍清楚。时间自然越过边界时颜色更新，不要求点击才降档；当前选中、hover、折叠、手动图标与非 Space 的项目身份不能冒充近期程度。不新增常驻计时器文案、徽章或设置项。
+
+用户继续反馈：「没看到这个效果」「全是灰的」。实际 Space 中具备近期可信活动的彩色自动 Folder 图像必须可见原色或对应略暗态，不能全部落为同一灰态；未知时间仍采用原安静外观。实际事实与显示链的约束只见 interaction[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)的对应反馈；本轮不改三档阈值、图像来源、身份槽或其他对象的视觉范围。
+
+已有图像发现与真正无图的边界引用 interaction 同节「Space 左侧 Folders」反馈：无图时保留原字母牌或图形，不伪造项目图像；有图时显示原身份并按本节三档呈现。
+
+用户随后要求「优化吧」：自动 Folder 字母牌也要看出活跃程度。牌面采用与既有主题、文字和 surface 同调的稳定低对比身份色、轻底色与可读字素，颜色让开需要回答、错误和选中等语义，不能变成一列抢眼彩色徽章。近期时轻而可辨，中间档稍收敛，安静与未知仍低饱和；衰减不换身份色相，不能把字母也暗到读不清。原字素、紧凑尺寸、圆角、行高和身份槽保持一致，不加发光、边框、动画、徽章或新控件；正常与窄栏、明暗主题均让名称、选中和真实注意力优先。身份来源、原图优先、未知与非 Folder 范围唯一见 interaction 同节「优化吧」约束。
+
+字母牌仍保留现有完整字素（中文、标点、emoji）；原生 emoji 不伪装成可被文字颜色统一染色的图像，整个 Folder 身份槽沿同一近期分档保持克制，不新增字素类型或图像来源。
+
+## Topic 行的 Region 与 Agent 在场状态
+
+选中 Region 的绿框只需 1px，保持四边可见且不增加叠加光晕；原生 Browser 为焦点环让出的尺寸必须与同一宽度一致。Topic 的 Agent 图标缩小放在对应 Region 格子里，形成一个整体，几何仍表达真实分屏；窄格内不得溢出覆盖相邻格。Agent 状态与可见性语义见 desktop-interaction 同名段。
+
+## Space 与 Focus 全局工作面
+
+Focus 的“只看此 Region／返回整个 Tab”是原顶部动作中的紧凑层级切换，默认完整 Tab；不增加第二标题行、常驻工具栏或嵌套内容框。单 Region 呈现保原内容、菜单与关闭命中区，准确来源在需要时可读；其原地址、输入／草稿、兄弟叶与成本边界只见交互合同[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)。
+
+Tab 级投影只保当前展示位置的一行身份／操作带，不再套上层 Group 页签工具带；标题可由调用位置提供，内部原 Regions 正文与焦点不以 CSS 隐藏或重挂换层次。行为引用交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)。
+
+顶级入口的名称和职责见交互合同[《左下角导航、Space 与 Goals》](../behavior/spaces-and-layout.md#左下角导航space-与-goals)。Space 表达工作现场，不把 Session 生命周期误当作顶级导航。Focus 和 Goals 都是全局表面，打开后 Project Rail 不占空间；Project 归属在内容中以紧凑元数据表达。Agents 引力图的具体布局属于独立 Feature，当前表面先保持可扫描和可恢复。
+
+## Survey 的 Zone 工作面与液体玻璃
+
+探索名称、创建作用域与直接笔记入口的行为唯一见 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。左栏以安静的单行名称呈现一次探索，明确改名可达；不把内部结构铺成标题。起步页保持中央网页输入，以短标题和一枚直接笔记动作表达浏览与记录的共同用途，不增加教程、功能卡墙或项目分组。当前探索的添加笔记与整理动作集中于左侧列表底部，与顶部新建入口分开；收起后保留左侧图标入口，作用域行为只见交互合同[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。右侧 Tab 上方不叠这两项探索动作；无需重复铺来源项目、路径、计数或结构术语。外层探索与内层内容标签通过控件作用域和留白区分，宽窄窗口都能读懂和操作。 Note 正文优先，来源检查沿按需展开的底部入口可达，失败说明保持持续可见；空白笔记给出轻量落笔提示，不让目录信息和空工具层抢在正文之前。
+
+用户希望 Survey「本身像浏览器」、默认 Browser 起步、左侧竖向 Item 且「整个要液体玻璃效果」；进一步明确 Item 是临时 Zone，右侧复用原 Tab / Region 多类型结构，并能关联多个 Topic。关联与当前展示、焦点独立，左 Item 不因关联迁走。公共实体和展示合同引用 interaction[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)；Survey 的行为、关系、控制、关闭与恢复只引用[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。原完整内容是主对象。
+
+用户在实际运行版中进一步反馈左侧 Survey Item 不现代、文字啰嗦、宽度固定，随后要求重做 Item 与整体界面。本轮重做须同时建立清楚的探索列表、唯一的当前 Zone 上下文和原内容工作面的层级；不能仅在原行布局上换颜色、加圆角或声明 blur。左栏平铺原 Item，以真实内容标题为第一层，来源信息归原 Details；平铺、顺序和身份边界只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。内容类型、关系和可信操作事实按需表达。重复通用图标、常驻更多按钮、路径和状态文案不挤掉标题；完整信息与动作在指针、键盘及触屏下仍可达，未知／失败不靠隐藏信息换简洁。自动发现与明确收集边界唯一引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。
+
+- **可调宽的安静列表。** 左栏有可发现而克制的分隔手柄，hover、拖动和键盘焦点可辨；正常宽度先保标题，窄时压缩次层并保选择、关系与管理入口，短窗保有界滚动，不靠缩字号、裁掉动作或大块空白撑现代感。调整范围让原工作面始终可用，沿现有 Surface、字体与命中语言，不为行新增一层卡片或玻璃。宽度、键盘与恢复行为只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。
+
+- **次级动作集中，正常态少一层栏。** 原内容与 Tab 导航优先，不再为来源名和 Tab 数量保留一条重复上下文栏。关系、来源、Browser 管理等次级动作集中于一处轻量 Item options，指针、键盘和触屏都可到原动作；不另铺常驻标签、计数或工具列。查看当前 Tab 时，返回完整 Item 的动作持续可见。原 Browser 地址栏只属于对应 Browser Region，原 Tab 栏与分割控制仍表达各自对象范围。当前 Panel 未确认时，持续显示简短「Panel not confirmed」及直接的「Choose panel…」入口；完整原因、准确引用与恢复动作按需可达，不能只藏入菜单或以猜目标换简洁。原位置选择的表达与准确目标边界只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)的位置选择约束。
+
+- **标题表达内容，来源留在详情。** 平铺行为只引用 interaction 的列表约束。Item 以真实内容标题或可辨内容摘要为主，不以「3 pages」等数量充当主身份，不重复项目标签、路径或计数；没有确认标题时如实表达，不猜第一个内容或用显示文字造身份。真实类型与选中状态保留克制而清楚的表达；完整资源与来源打开入口沿原 Details 可达，不为项目另设组头或卡片。
+
+- **外层 Item、内层原 Tab。** 左栏一项呈现一原 Zone，内容标题与选中为第一层，来源归原 Details，行内真实关系和当前事实按需呈现。不将同 Zone 的多个 Browser、Tab、Group 或关联重复成左标签，不设互斥归属分段；Mote 保持真实身份。右侧复用 Space 原 Tab 栏、Group / Region 分割、状态标记与动作语言，不另造工作面或全 Zone 假地址栏。新建名称对应真实创建范围，只增加 Tab 不称新 Item。
+- **关系是轻信息与明确动作。** 一处紧凑「关联 Topic…」菜单用原勾选语言显示真实关系，左行可轻提示关系数量，完整长名单按需可达，不铺徽章墙。勾选增加指定关系，取消勾选只移除该关系；「打开 Topic」是独立明确的导航动作，键盘路径可达。关系更新不移行、不挤走当前内容，也不以颜色或动画暗示实体已迁移、复制或关闭。未知目标、失败和本地已生效但保存未确认的说明可读，不藏在 tooltip；完整保存合同只归交互。
+- **选择与操作事实分开。** Item 选中使用整行填充与字重，hover、键盘焦点、attention、操作中和恢复未确认独立可辨，不靠边线或颜色单独判态。多 Browser / Agent 只显示事实允许的简短范围与可信身份，混合或未知可读；不把整 Zone 画成一个人正在输入，也不把历史操作者当当前操作者。完整 Item、Topic、来源项目、host、worktree 和当前范围在指针及键盘下可达。
+- **玻璃统一用于导航与控制。** 沿 Graphite / Mint、原字体、间距、命中区和焦点 tokens；左 Item 导航、所选上下文、原 Browser 控制与按需管理使用一层较高不透明度的 Surface、柔和内缘高光和克制 blur 表达深度。标题与元信息靠文字层级，分段靠对齐和留白；行、按钮与 Region 不各套玻璃卡，Mint 不染遍整页，装饰不扩充占屏标题或代替对象关系。
+- **原内容清晰，材料事实诚实。** 网页、Agent、Terminal、File 保持原像素清晰与可输入内容，不整页模糊、染色、降低透明度或以截图替代。玻璃不遮原 Native 输入，不宣称 CSS 能穿透 WebContentsView 像素或 Electron 等同原生 Apple Liquid Glass。已知减少透明、增强对比时用同层级实色表面与清楚边界；减少动态时静态反馈完整。未取得平台偏好事实时保守可读，不冒称已响应。动态只回应明确交互或关系变化，不常驻，也不新增无关 Session 消费者。
+- **宽窄保对象与原内容优先。** 开始面中央网页输入与创建来源清楚，体现探索的起点，不叠大标题、步骤器或知识库空壳。有 Item 时原内容占主面积；左栏开合、调宽和恢复行为只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)，控件可辨且让原内容优先。窄窗先让导航和低频控制让位，Note、File、Browser 的原控制以紧凑溢出菜单或原有可达动作保持清楚，不把原多 Region 内容挤成难以阅读的细条、层层按钮竖叠，或仅靠宽度 clamp 冒可用。呈现调整不改原分割结构、比例、选择、实体或 Run，不猜 active Group；原树与每个明确位置持续可达。短窗保列表和正文的有界独立滚动；菜单遮挡、输入与资源仍消费公共事实，原 Tab 溢出、Region 分割和真实关闭确认继续原语言。 显式查看原当前 Tab 与返回完整 Item 的范围、准确目标和未确认边界，只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)的窄窗查看约束。
+- **管理按需且作用可读。** Browser bar、Profiles、标注保留紧凑管理面；当前 Browser / 项目、未保存、保存中、失败、过期、无可用 Agent 和删除确认可读。低频设置不抢主内容，危险作用域明确；草稿与显式保存只归交互 SSOT，不借材质或动画改 owner。
+- **笔记以语义块连续阅读。** Note 是 Survey 的知识整理能力，内容与引用行为唯一见 interaction[《Survey 中的 Note 与块知识》](../behavior/spaces-and-layout.md#survey-中的-note-与块知识)。块通过缩进、段落间距、克制折叠柄与清楚焦点表达结构；卡片只用于需要独立聚焦或嵌入的内容，不给每段各套玻璃边框。正文是主层，来源、引用和反向链接计数为按需次层，长内容可连续滚读，控制不抢输入或遮住原 Browser。
+- **引用呈现原内容与准确来源。** 单块引用、子树嵌入和原块编辑状态可辨，完整来源及返回入口在指针和键盘下可达；双向链接按来源正文组织，不铺标签墙或巨大图谱。缺失、重复或读取未知的持续说明可读，不能用空白卡、零计数或颜色冒完整结果。创建中的草稿、已建但显示失败及保存冲突沿交互合同就地说明，宽窄／短 Region 保编辑、保存和返回可达。
+
+- **实际新场景决定品质。** 正常、窄、短窗口与明暗真实内容、多 Group / Tab / 混合 Region、多条长 Topic 关系、来源项目、当前操作混合或未知、关联添加或取消、保存未确认及非空管理，层级、滚动、命中、焦点、材料与内容清晰一起可见。独立 Agent 实际逐图评审，问题修正后重拍；旧空首页、CSS 数值、采图成功不代签新设计。原对象连续性、健康 Run 与普通重启证明只归交互，不用图冒称真实厂商或全部平台材质。
+
+## Scratch Topic 工作面可见性
+
+Scratch 的 Files + Topics 工具栏与右侧 Workbench 是同一工作区的两块表面。打开 Topic 后，右侧必须保留普通 Workbench 的 Tab bar、Region 和 Terminal/Agent 内容；不得把 Scratch 从 Workbench registry 排除而只留下全幅空底。
+
+## Topic topology 的摘要与展开密度
+
+Topic 行的 topology 收起态是一排紧凑 Tab 图标位；每枚只表达一个 Tab，不增加整排宽大的底座或重复的 Agent 头像簇。展开面板保持单一连续 surface：Tab 标题在上、Region 几何在中、Agent 头像、Executor 与最近活动在 Region 内或紧邻其下；状态色只做辅助，文字负责解释含义。当前 Tab 使用清楚的边界，不能靠纯颜色区分。
+
+## Topic topology 计数与浮层的空间密度
+
+收起态使用横向 Tab strip 列出全部 Tab；每枚 Tab 只占一个紧凑图标位，当前项用边界建立层级，不再重复放总计数。Tab strip 在窄宽度下水平滚动但不隐藏 Tab 事实。Inspector 使用顶层 viewport 浮层的密度和边界，展示当前 hover/focus Tab 的完整 Region 几何、Agent 头像、Executor 和最近活动；它可以在锚点上方或下方翻转，不能被列表滚动区域裁切，也不能因为靠近面板顶部而只露出一条残片。
+
+## Topic topology Tab 缩略图的空间密度
+
+收起态的每枚 Tab 只占一个小图标槽位：单 Region 直接放该 Region 的图标，不再套一层空心方框；多 Region 按真实 bounds 形成紧凑方形宫格。相邻槽位不再被一整块带内边距的胶囊包住；图标之间用间距与当前项边界建立可读性，不在槽位中写 `Tn`、`nR` 或其它实现计数。右侧不重复堆叠已在 Tab 中出现的 Agent 头像。Inspector 采用较窄的内容宽度，以 Agent 头像为身份锚点，名称、surface 类型和最近活动紧邻其后；超长文字省略但保留完整 tooltip/无障碍名称。
+
+多个 Tab 的图标槽位采用与 Agent presence 相同的轻微叠压：相邻 Tab 约重叠一个小间距，整体宽度按簇收敛；当前、hover 和 focus 项通过层级浮到最上面，不改变其它图标的位置。叠压只表达同一 Topic 的集合关系，不遮住图标的主要识别形状。
+
+## 跨视图 Session 定位与 Agent Input 宽度
+
+Focus、Space、Goals 共用一个选中 Session 上下文。切换器只换主表面投影；Space 展开已有 Region，Focus 保留右侧观察面，Goals 高亮对应执行事实。不要为跨视图连续性新增重复卡片、隐藏 Session 或第二套选中状态。
+
+Agent Input 的 collapsed composer 采用“左右有界控件 + 中间弹性编辑区”的密度：编辑区占据全部剩余宽度，工具和会话动作只占自身命中区。长消息可以换行，身份 rail 单独承担 Agent 名称、Executor 和 Session 摘要；不能用固定中间列、居中窄框或重复身份文字降低可输入面积。
+
+## Topic Tab Rail 与 Region 地图密度
+
+Topic rail 以紧凑的 Tab 图标簇表达打开面，不再用宽大的 chip 或重复计数抢占 Topic 标题空间。点击目标 Tab 直接切换工作面；hover 只负责预览，不承担导航的唯一入口。预览浮层使用一个按实际分栏比例绘制的 Region map，去掉地图下方重复的 Region 列表，地图内只保留必要的身份图标和截断标签。
+
+## 全局工作面标题栏留白与名称
+
+Focus 在 Project Rail 缺席时，必要过滤控件从系统窗口控制区右侧开始，不额外保留标题栏；Goals 的顶栏标题从该控制区右侧开始；macOS 的三色按钮和文字不能叠放。让位属于顶栏 chrome，使用与已有窗口按钮留白相同的几何来源，不在各自的内容面板里另加一份边距。非 macOS 不因 macOS 按钮预留无意义的空白，窄窗中次级面包屑可截断，主名称仍可读。
+
+底部导航、面包屑、工作面工具栏和单项操作使用一致的用户可见名称，具体语义归交互合同[《左下角导航、Space 与 Goals》](../behavior/spaces-and-layout.md#左下角导航space-与-goals)；不在不同 chrome 中保留旧称。
+
+## Space Folder 状态计数角标
+
+用户反馈：「Space 每个 folder 右侧 Agent 状态图标 + 数字占宽太多，数字改图标角标并缩间距」。Folder 行的状态簇采用图标与其邻接角标，把数量紧贴所属状态；不再把每个数量作为额外宽文本列。沿用现有状态来源、计数与优先级，数字可辨认，tooltip 与无障碍描述保留状态名称和完整数量；零数量不增加装饰。窄行继续优先保留可读名称，状态簇不挤出行的操作与焦点。与折叠汇总共享既有真相，不新增轮询或计数注册表。终端关闭的行为只定义在 interaction[《Topic 默认终端与可发现关闭》](../behavior/spaces-and-layout.md#topic-默认终端与可发现关闭)。
+
+## 初始 Launcher 的现代工作台密度
+
+用户要求初始画面「更加现代化和高级，至少不能逊色于设置界面」，降低杂讯与重复、让 Launch options 节省空间、适配不同 Region，并能按需要关闭或展开内容。对象、行为、恢复与事实边界唯一见交互 SSOT[《初始 Launcher：紧凑、可定制的工作起点》](../behavior/spaces-and-layout.md#初始-launcher紧凑可定制的工作起点)。
+
+- **以工作为主，不做卡片墙或第二个欢迎页。** 延续 Settings 已有排版、材质、控件和动效质量：一个安静的上下文头部、一个主输入与主启动动作，辅助工作面轻量分组。项目名、Agent 名、Provider、Ready、选项计数与页面说明各自只在帮助决策的位置出现，不用 eyebrow / 标题 / 副标题 / 卡片副文案反复讲同一件事；不为升级高级感加一组空洞指标或装饰图标。
+- **Executor 阵容沿同一紧凑选择面呈现。** 首屏复用已有可换行的多行 catalog 与 LiquidSelection，头像、名称、选中标记保持清楚对齐；宽窄 Region 中候选完整可达，不增加重复大卡片或第二组身份摘要。默认展示范围、最近选择与主动收起 / 关闭的行为只见交互 SSOT[《初始 Launcher：紧凑、可定制的工作起点》](../behavior/spaces-and-layout.md#初始-launcher紧凑可定制的工作起点)。
+- **Options 与可选命名不抢正文。** 折叠入口和有意义的已选值同启动工具区，默认不单独占一整行；展开面复用原控件和风险语义。展开不挤走主输入、主动作或制造无限纵向列表；长选项换行或有界滚动。选中态用整面、字重与明确非颜色信号，不以孤立细边条代替可读选择。
+- **环境可扫读、有分量但克制。** 当前项目 / 实际目录与 Local / 已配置 Host 形成明确上下文层；完整路径、探测详情和未支持的未来环境进入按需面。已有且必要的健康状态只保留一次。环境入口能表达重头戏的稳定位置，不能用假的已连接、容器图标或厂商名称补充不存在的运行能力。
+- **辅助工作面是工具，不是重复营销文案。** 用户希望展开的 Terminal「占空间稍大，当前太小」：有空间的 Region 应提供明显更多真实终端行，不能仍是小型预览条；高度随这块 Region 的可用空间收敛，矮面保留输入、展开 / 收起和主要动作，不靠缩小终端字号或挤出主 Composer 扩大阅读面。实际宿主默认与明确偏好只见交互 SSOT 同节。Terminal 展开呈现原实时内容，收起成为紧凑按钮；Browser 与 Note 没有显式偏好时默认收起，Browser 展开呈现清楚可输入的地址 / 搜索框，Note 展开有可辨正文与打开动作。关闭 / 展开 / 恢复按钮沿统一命中区、键盘焦点与 tooltip 语言。Mote 使用既有头像和真实名称，入口明确表达“让 Mote 帮我创建”，紧邻可辨的真实目标选择，不用只有“准备”含义的文案让人猜关系，不增加第二个常驻浮动头像。提交 / 等待 / 失败保持同一轻量动作面，结果不能夸称已创建；行为唯一见交互 SSOT 的同节。
+- **Resume 是可扫读的候选清单。** 项目 / 全局 scope、查找与列表形成一个可理解的面；Agent 名和 recap 为主层，项目 / Host、Provider / Executor、最近活动及短 ID 为次层，完整 ID / 路径按需。缺 recap 保持诚实空态；同名候选能凭真实 ID 与来源分开。不把所有元信息压成一条难读的灰字，也不让 ID 占据主标题。
+- **按 Region 宽高收敛层级。** 宽工作面保持合理阅读列与精确左右对齐；窄面转单列与紧凑工具，不只缩小字号；矮面优先留下输入和主动作，辅助块可以滚动或收起。弹层根据当前 Region / 视口碰撞范围适配；长名字、路径、ID、Provider 声明与空 / 加载 / 降级状态仍可读。减少装饰间距而不缩窄可编辑区域或按钮命中区。
+- **This Mac 展开应是精致的环境详情。** 环境摘要与按需详情同一材质和清楚的信息层级，实际目录、Host、连接检查等可扫读；详情紧邻触发入口，以有界按需面呈现，不挤动整个工作面。避免裸字段表、重复的 Local / This Mac 标签和大段实现说明。长路径与探测详情有明确换行、边界和可达收起入口，宽窄面都不压垮主工作。目录表示规则只引用交互 SSOT 同节。
+- **Options、Mote 与启动动作有清楚归属。** Options 紧邻当前 Agent 输入的工具行；Create with Mote 是轻量委托动作，与紧凑的所选目标组成独立可理解的创建入口，与直接 Launch 的关系可读。Launch 与 Resume 等高成组，以静态平面色、统一材质和焦点语言形成主次；主动作突出但不使用强渐变大色块或游离在另一行的按钮；长目标、忙碌、未知与窄 Region 不打散动作归属或挡住入口。
+- **Browser 从工具入口平滑展开成输入行。** 图标、地址 / 搜索输入、提交与收起属于同一行，省去重复 Browser 标题和第二层卡片；输入行占据可用宽度，窄面也保留真实命中区。展开与收起用短暂、克制的空间和透明度变化表达，不循环播放；减少动态时直接完成状态切换。隐藏或 retained inert 面不运行装饰动画，开合不丢失原地址 / 搜索草稿。首次开合及明确偏好只沿交互 SSOT 同节。
+- **Launcher 的反馈应有 Settings 同等连续品质。** 用户追问的原话与键盘、即时状态、快速重开、草稿 / 健康 Run、减少动态和隐藏停止边界只见交互 SSOT 同节。Agent 真实选择复用共享 LiquidSelection 的局部连续材质，文字、头像与编辑内容保持清楚稳定，不为每个候选叠另一份选中背景；原选中标记和独立 focus-visible 仍可辨。Host / Options 有短促有限的进入与退出，Agent 实际编辑区展开沿设置页已有轻量入场，Browser 保留原单行双向形态；hover / press、chevron 和主次按钮沿同一微交互节奏。复用 Settings 已有动态 token / 曲线和共享控件，材质跟随真实选择与状态，不画假加载或循环装饰；独立审美须实际查看操作中的中间帧与宽窄静态终态，只有动画声明或终态截图不能代称连续反馈已达到要求。
+- **完成度用真实图与操作判。** 本批实际宽、窄、矮 Region、Options 展开、scope 切换、Terminal 收起 / 展开、Browser 搜索、Note 编辑和 Mote 联动都要有可复查的实际状态；独立 Agent 按既有《Agent 主观审美端到端验证》看图，修正后重新采图。截图成功和单项测试通过不能代称美学通过；本批结论供更新 Renderer / 交付消费，不另设打包前全量回归门。

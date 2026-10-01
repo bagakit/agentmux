@@ -7,16 +7,19 @@
 | 要了解什么 | 入口 |
 | --- | --- |
 | 产品定位、安装与 Core 使用概览 | [项目 README](../README.md) |
+| 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
+| 公开 API / CLI 的实际合同与接线来源 | [公共能力源码入口](specs/public-capabilities.md) |
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |
 | Core 公共 API、Provider 与 Session | [Core 接入说明](../packages/core/README.md) |
 | 分屏树代数 / 目标存储 | [Layout](../packages/layout/README.md)、[Demand](../packages/demand/README.md) |
+| 共享对话、Composer 与客户端平台适配 | [Client UI](../packages/client-ui/README.md) |
 
 ## 按改动定位规则
 
 | 任务 | 唯一规则或机制入口 |
 | --- | --- |
-| 产品对象、行为、身份、恢复、终端连续阅读 | [交互设计 SSOT](design/agentmux-desktop-interaction.md) |
-| 视觉、密度、主题 token、控件语言 | [Surface 与密度 SSOT](design/agentmux-surface-density.md) |
+| 产品对象、行为、身份、恢复、终端连续阅读 | [交互专题索引](design/agentmux-desktop-interaction.md) |
+| 视觉、密度、主题 token、控件语言 | [呈现专题索引](design/agentmux-surface-density.md) |
 | 终端复制、粘贴、键盘、IME、链接的机制判别 | [终端交互分层](design/agentmux-terminal-interaction-layers.md) |
 | 字节到画面、Attachment 与 viewport 链路 | [Terminal Runtime 架构](architecture/terminal-runtime.md) |
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
@@ -24,6 +27,7 @@
 | 任务验证、变异、调用者、假绿防护 | [测试策略](testing/strategy.md) |
 | UI 场景采图与独立审美评审 | [视觉验收指南](guides/agent-visual-e2e-review.md) |
 | Agent 用 CLI 操作原工作面 | [对象操作指南](guides/agentmux-cli-object-control.md) |
+| 整理具有长期价值的事故案例 | [事故案例写作指南](guides/incident-writing.md) |
 | 新增设置能力 | [Settings 贡献约定](settings-module-contributions.md) |
 | Browser 展示媒体接口与资源 | [ABI](specs/browser-presentation-abi.md)、[资源合同](specs/browser-presentation-resource-contract.md) |
 
@@ -39,4 +43,4 @@
 
 [事故复盘](casestudy/) 保留当时现场和改进动作；[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
 
-计划、评审、交接、交付清单、状态快照和原型属于本机过程资料，目录规则见 [过程目录](process-directories.md)。它们帮助追溯，不取代长期设计或官方任务状态。受控仓库中的长期入口应独立可读；本机资料缺席须明确缺证，不把缺席伪装成通过。
+**过程性文档不提交。** 调研、计划、评审、交接、交付清单、状态快照和原型留本机，目录与已有暂存文件的保全规则见[过程资料边界](process-directories.md)。它们帮助追溯，不取代长期设计或官方任务状态。受控仓库中的长期入口应独立可读；本机资料缺席须明确缺证，不把缺席伪装成通过。
