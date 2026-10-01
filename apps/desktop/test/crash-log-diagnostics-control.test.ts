@@ -1,4 +1,5 @@
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
+import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, chmod, mkdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,7 +21,7 @@ const ipc = vi.hoisted(() => ({ root: '',
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
 vi.mock('electron', () => ({
-  app: { getPath: () => ipc.root || tmpdir() },
+  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: { showItemInFolder: vi.fn() }
@@ -63,7 +64,7 @@ async function registered() {
   const commit = vi.spyOn(runtime, 'commit').mockImplementation(() => {})
   const attach = vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
   vi.spyOn(store, 'get').mockResolvedValue(config)
-  const sender = { id: 919, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } }
+  const sender = Object.assign(new EventEmitter(), { id: 919, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const progressLoops = new ContinuousProgressLoopManager(ContinuousProgressLoopStore.forUserData(root),
     async () => { throw new Error('Host diagnostic cannot deliver progress input') }, undefined,
     async () => { throw new Error('Host diagnostic cannot observe progress input') })
@@ -150,14 +151,15 @@ describe('registered Main crash log diagnostics share one fixed-path owner', () 
     const f = await registered(), core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
     const socket = join(f.root, 'owned-control.sock'), server = new core.AgentMuxControlServer({ execute: f.execute }, socket)
     await server.start()
+    const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
     try {
-      const receipt = await core.requestAgentMuxControl({ ...envelope, operation: 'diagnostics.crash-log.get' }, socket)
-      expect(receipt.result).toEqual({ path: join(f.root, 'crash-log.ndjson'), outcome: 'absent' })
-      await expect(core.requestAgentMuxControl({ ...envelope, operation: 'diagnostics.crash-log.reveal' }, socket)).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: expect.stringContaining('ENOENT') })
+      const receipt = await rpc.call('system.crash-log.inspect', {})
+      expect(receipt).toEqual({ path: join(f.root, 'crash-log.ndjson'), outcome: 'absent' })
+      await expect(rpc.call('system.crash-log.reveal', {})).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: expect.stringContaining('ENOENT') })
       await writeFile(join(f.root, 'crash-log.ndjson'), 'never output this body')
       vi.mocked(shell.showItemInFolder).mockImplementationOnce(() => { throw Object.assign(new Error('Original shell request failed'), { code: 'EIO' }) })
-      await expect(core.requestAgentMuxControl({ ...envelope, operation: 'diagnostics.crash-log.reveal' }, socket)).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: expect.stringContaining('EIO · Original shell request failed') })
+      await expect(rpc.call('system.crash-log.reveal', {})).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: expect.stringContaining('EIO · Original shell request failed') })
       expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(join(f.root, 'crash-log.ndjson'))
-    } finally { await server.stop(); await f.dispose() }
+    } finally { await rpc.dispose(); await server.stop(); await f.dispose() }
   })
 })

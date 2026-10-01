@@ -261,7 +261,7 @@ export class AgentMuxRpcService {
       if ((request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') && request.target.kind === 'agent-session') {
         request.target = { kind: 'agent-session', agentSessionId: (await this.owner(request.target.agentSessionId)).agentSessionId }
       }
-      if ((request.operation === 'demand.start' || request.operation === 'demand.handoff' || request.operation === 'demand.link-session') && request.sessionId !== undefined) {
+      if (request.operation === 'demand.start' && request.sessionId !== undefined) {
         request.sessionId = (await this.owner(request.sessionId)).agentSessionId
       }
       if (request.operation === 'toolkit.run' || request.operation === 'toolkit.stop') {
