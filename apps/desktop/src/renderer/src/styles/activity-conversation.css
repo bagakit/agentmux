@@ -321,14 +321,16 @@
 
 /* Both speakers use a quiet bubble; identity and direction remain separate facts. */
 .log-turn[data-message-bubble='true'] {
-  width: min(92%, 760px);
-  margin: var(--sp-4) var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
+  width: min(calc(100% - var(--sp-4)), 760px);
+  margin: var(--sp-2) var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--line-soft);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--surface-1);
-  column-gap: var(--sp-4);
+  column-gap: var(--sp-3);
 }
+.log-turn[data-message-bubble='true'] .log-turn__head { column-gap: var(--sp-1); }
+.log-turn[data-message-bubble='true'] .log-turn__who { flex-basis: 120px; min-width: min(120px, 100%); }
 .log-turn[data-message-bubble='true'][data-speaker-role='agent'] {
   grid-template-columns: 32px minmax(0, 1fr);
 }
