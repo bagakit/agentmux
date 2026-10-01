@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
+import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { readCodexSessionHistoryPage } from './codex-native-history.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -112,6 +113,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     }),
     hook: CODEX_HOOKS,
     readSessionHistoryPage: readCodexSessionHistoryPage,
+    observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
