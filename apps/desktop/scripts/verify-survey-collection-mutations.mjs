@@ -9,7 +9,7 @@ const app='apps/desktop/src/renderer/src/App.tsx'
 const components='apps/desktop/src/renderer/src/components/'
 const mutations=flatList ? [
  {label:'flat-original-item-order',file:global,before:'{items.map(zone => {',after:'{[...items].reverse().map(zone => {'},
- {label:'actual-content-title',file:global,before:"return names.length ? names.join(' · ') : 'Exploration · title unconfirmed'",after:"return '3 pages'"},
+ {label:'actual-content-title',file:global,before:'return surveyExplorationName(explorationNames[zone.zoneId], (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? [tabs[id]!] : []))',after:"return '3 pages'"},
  {label:'item-options-exact-nonfirst-target',file:choices,before:'ordinal={ordinal} onSelect={onSelect}',after:'ordinal={ordinal} onSelect={() => onSelect(choices[0]!)}'},
  {label:'persistent-unknown-panel-entry',file:global,before:'const panelUnconfirmed = !!selection && !selection.active && retainedLocations.length > 0',after:'const panelUnconfirmed = false'}
 ] : tabView ? [
