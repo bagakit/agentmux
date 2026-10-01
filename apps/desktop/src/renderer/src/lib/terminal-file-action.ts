@@ -1,5 +1,5 @@
 import { FolderOpen, PackageOpen } from 'lucide-react'
-import { isSystemArtifactPath, type TerminalPathLink } from './terminal-path-link'
+import { isSystemArtifactPath, type TerminalPathLink } from '@agentmux/client-ui/terminal-path-link'
 import { revealInFileManagerLabel } from './host-platform'
 
 /** The one click route for terminal file links; system errors never fall back to an editor tab. */

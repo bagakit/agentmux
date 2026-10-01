@@ -1,0 +1,66 @@
+{
+  "name": "@agentmux/client-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "browser": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./components/*": {
+      "types": "./src/components/*.tsx",
+      "browser": "./src/components/*.tsx",
+      "import": "./dist/components/*.js"
+    },
+    "./*": {
+      "types": "./src/lib/*.ts",
+      "browser": "./src/lib/*.ts",
+      "import": "./dist/lib/*.js"
+    },
+    "./platform": {
+      "types": "./src/platform.tsx",
+      "browser": "./src/platform.tsx",
+      "import": "./dist/platform.js"
+    },
+    "./styles.css": "./src/styles/index.css",
+    "./styles/*": "./src/styles/*"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config vitest.config.ts",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@agentmux/core": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "lucide-react": "^0.468.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.4",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "happy-dom": "^20.14.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

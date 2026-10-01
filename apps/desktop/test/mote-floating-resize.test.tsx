@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen,
   resolvePmoTeamsTopicFloatingSize, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating.js'

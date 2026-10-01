@@ -6,7 +6,7 @@ import { dirname, relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..'), output = resolve(root, (".tmp/focus-message-author-consumer-qualification-" + (globalThis.crypto.randomUUID()) + ""))
 mkdirSync(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const paths = ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx', 'apps/desktop/src/renderer/src/lib/conversation-speaker.ts', 'apps/desktop/src/renderer/src/styles/activity-conversation.css', 'apps/desktop/src/renderer/src/styles/conversation-avatar.css', 'apps/desktop/src/renderer/src/styles/focus.css', 'apps/desktop/test/focus-message-author-consumer.test.tsx', 'apps/desktop/scripts/fixtures/focus-message-author-consumer/vitest.owning.config.mts']
+const paths = ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx', 'apps/desktop/src/renderer/src/lib/conversation-speaker.ts', 'packages/client-ui/src/lib/conversation-speaker.ts', 'packages/client-ui/src/styles/conversation-message.css', 'packages/client-ui/src/styles/conversation-avatar.css', 'apps/desktop/src/renderer/src/styles/focus.css', 'apps/desktop/test/focus-message-author-consumer.test.tsx', 'apps/desktop/scripts/fixtures/focus-message-author-consumer/vitest.owning.config.mts']
 const binding = () => Object.fromEntries(paths.map(file => [file, hash(readFileSync(resolve(root, file)))]))
 const slice = process.argv[process.argv.indexOf('--slice') + 1]; assert.ok(['source', 'visual'].includes(slice))
 const receipt = { schema: 'agentmux.focus-message-author-consumer-qualification.v1', passed: false, sourcePass: false, taskDone: false, slice, before: binding(), stages: [], boundary: 'Focus author consumption only. Genuine controlled manual Composer/Main/Core accepted receipt/FileStore/public projection and compiled UI; no physical human/CLI/Runtime, writer-wide qualification, full App restart or user installation.' }
@@ -72,7 +72,7 @@ try {
     assert.ok(sceneFile && reviewFile, 'Actual compiled scenes and independent Agent visual review required')
     const bytes = readFileSync(resolve(root, sceneFile)), reviewBytes = readFileSync(resolve(root, reviewFile)), scene = JSON.parse(bytes), review = JSON.parse(reviewBytes)
     assert.equal(scene.passed, true); assert.deepEqual(scene.actual.controls, ['focus-author-sender']); assert.equal(scene.cleanup.privateRootRemoved, true); assert.ok(scene.images.length >= 5)
-    for (const file of paths.slice(0, 6)) assert.equal(scene.inputs[file], receipt.before[file])
+    for (const file of paths.filter(file => !file.includes('/test/') && !file.includes('/fixtures/'))) assert.equal(scene.inputs[file], receipt.before[file])
     assert.equal(review.verdict, 'pass'); assert.ok(review.reviewerAgentId?.length > 0); assert.equal(review.sceneReceiptSHA256, hash(bytes))
     for (const image of scene.images) { const actualPath = resolve(dirname(resolve(root, sceneFile)), image.path); assert.equal(hash(readFileSync(actualPath)), image.sha256); assert.ok(review.viewedImages.some(item => (item.path === image.path || resolve(root, item.path) === actualPath) && item.sha256 === image.sha256 && item.observation?.trim().length > 0)) }
     receipt.scene = { file: sceneFile, sha256: hash(bytes), images: scene.images }; receipt.visualReview = { file: reviewFile, sha256: hash(reviewBytes), reviewerAgentId: review.reviewerAgentId }

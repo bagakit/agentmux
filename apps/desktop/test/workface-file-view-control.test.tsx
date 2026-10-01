@@ -1,7 +1,8 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises'
 import { createHash } from 'node:crypto'

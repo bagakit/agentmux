@@ -1,14 +1,15 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/ActivityView.js', () => ({ ActivityView: () => null }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({ AgentInteractionCard: () => null }))
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => null }))
 
 import { SessionPane } from '../src/renderer/src/components/SessionPane.js'
 import { useAppStore } from '../src/renderer/src/store.js'

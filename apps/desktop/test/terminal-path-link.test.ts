@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   detectTerminalPathLinks,
   resolveWorkspaceRelativePath
-} from '../src/renderer/src/lib/terminal-path-link.js'
+} from '@agentmux/client-ui/terminal-path-link'
 
 const ROOT = _hygiene_fixturePath("Users/dev/proj")
 

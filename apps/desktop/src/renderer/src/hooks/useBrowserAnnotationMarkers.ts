@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { browserAnnotationMarkers, type BrowserAnnotation } from '../lib/browser-annotations'
-import { errorIdentity, presentError } from '../lib/error-presentation'
+import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 
 type Input = {

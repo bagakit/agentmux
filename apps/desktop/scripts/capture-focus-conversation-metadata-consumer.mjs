@@ -18,8 +18,8 @@ assert.equal(hash(producer), 'eb3f0a68f5068ed2bb66dc11f2b6f744d7527cdaacecdc5c25
 const privateRoot = await fs.mkdtemp(_hygiene_fixturePath("tmp/amux-focus-metadata-"))
 const product = [
   'apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx',
-  'apps/desktop/src/renderer/src/components/ConversationMessage.tsx', 'apps/desktop/src/renderer/src/components/ConversationMessageAvatar.tsx',
-  'apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx', 'apps/desktop/src/renderer/src/lib/conversation-speaker.ts',
+  'packages/client-ui/src/components/ConversationMessage.tsx', 'apps/desktop/src/renderer/src/components/ConversationMessageAvatar.tsx',
+  'packages/client-ui/src/components/ConversationInputDetails.tsx', 'apps/desktop/src/renderer/src/lib/conversation-speaker.ts',
   'apps/desktop/src/renderer/src/lib/conversation-sender-details.ts', 'apps/desktop/src/renderer/src/lib/session-user-messages.ts',
   'apps/desktop/src/renderer/src/styles/focus.css'
 ]

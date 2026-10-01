@@ -1,7 +1,7 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queue-drain'
-import { errorIdentity } from './error-presentation'
+import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
 import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './agent-lifecycle-feedback'

@@ -1,10 +1,12 @@
-import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import * as UserMessages from '@agentmux/core/session-user-messages'

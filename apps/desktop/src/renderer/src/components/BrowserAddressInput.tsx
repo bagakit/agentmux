@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import type { BrowserInputHistorySnapshot, BrowserInputHistoryTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { composerCompositionHandlers, composerRenderValue, type ComposerCompositionState } from '../lib/composer-composition'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
 export type BrowserAddressInputHandle = { submit(): void }

@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
-import { AgentComposer } from '../src/renderer/src/components/AgentComposer'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { AgentComposerTools, nextToolDockPhase } from '../src/renderer/src/components/AgentComposerTools.js'
@@ -165,7 +165,7 @@ describe('Message Tools three-state interaction', () => {
     expect(markup).toContain('aria-label="Show the message tool row"')
     expect(markup).toContain('lucide-panel-bottom-open')
     expect(markup).not.toContain('disabled=""')
-    const composer = readFileSync(resolve(import.meta.dirname, '../src/renderer/src/components/AgentComposer.tsx'), 'utf8')
+    const composer = readFileSync(resolve(import.meta.dirname, '../../../packages/client-ui/src/components/AgentComposer.tsx'), 'utf8')
     const toolbar = composer.indexOf('<div className="composer__toolbar">')
     const tools = composer.indexOf('{tools}', toolbar)
     const fileButton = composer.indexOf('<button', toolbar)
@@ -253,7 +253,7 @@ it('cycles the real Composer without replacing its editor or draft, with a disti
 })
 
 it('uses the Region width to shed tool text while retaining labelled icon controls', () => {
-  const css = readFileSync(resolve(import.meta.dirname, '../src/renderer/src/styles/composer.css'), 'utf8')
+  const css = readFileSync(resolve(import.meta.dirname, '../../../packages/client-ui/src/styles/composer.css'), 'utf8')
   const start = css.indexOf('@container composer (max-width: 560px)')
   const end = css.indexOf('\n.composer__toolbar > div:first-child', start)
   expect(start).toBeGreaterThan(-1)

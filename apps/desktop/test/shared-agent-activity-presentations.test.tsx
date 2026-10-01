@@ -3,7 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { createRequire } from 'node:module'
 import { writeFileSync } from 'node:fs'
 import { act, createElement, useEffect } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, type WorkspaceLayout } from '@agentmux/layout'
 import type { AgentSessionHistoryObservation } from '@agentmux/core'

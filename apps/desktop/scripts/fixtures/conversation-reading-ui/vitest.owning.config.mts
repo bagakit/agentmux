@@ -7,6 +7,8 @@ import original from '../../../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../../../..')
 
 export default defineConfig({
+  resolve: { conditions: ['browser', 'import', 'default'] },
+  ssr: { noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } },
   ...original,
   root,
   plugins: [
@@ -16,12 +18,12 @@ export default defineConfig({
       enforce: 'pre',
       transform(code, id) {
         const file = id.split('?')[0]!
-        if (!file.startsWith(`${root}/apps/desktop/src/renderer/src/`) || !/\.[cm]?[jt]sx?$/u.test(file)) return
+        if (!(file.startsWith(`${root}/apps/desktop/src/renderer/src/`) || file.startsWith(`${root}/packages/client-ui/src/`)) || !/\.[cm]?[jt]sx?$/u.test(file)) return
         const originalCode = code
         const mutation = process.env.AGENTMUX_CONVERSATION_READING_MUTATION
 
         if (mutation) {
-          if (file === `${root}/apps/desktop/src/renderer/src/components/ConversationMessage.tsx`) {
+          if (file === `${root}/packages/client-ui/src/components/ConversationMessage.tsx`) {
             const partsDefinition =
               "const parts: readonly AgentSessionHistoryContentPart[] = isStringContent\n    ? [{ kind: 'text', text: content }]\n    : content"
 
@@ -45,9 +47,9 @@ export default defineConfig({
             }
           }
 
-          if (file === `${root}/apps/desktop/src/renderer/src/components/ConversationReasoningTrace.tsx`) {
+          if (file === `${root}/packages/client-ui/src/components/ConversationReasoningTrace.tsx`) {
             const markdownBlock =
-              `<div className="log-turn__trace-body">\n              <MemoizedAgentMarkdown\n                content={part.text}\n                workspaceRoot={workspaceRoot}\n                {...(openWorkspaceFile ? { openWorkspaceFile } : {})}\n                {...(readPastedImage ? { readPastedImage } : {})}\n                {...(openHttpLink ? { openHttpLink } : {})}\n              />\n            </div>`
+              `<div className="log-turn__trace-body">\n              <MemoizedAgentMarkdown\n                content={part.text}\n                workspaceRoot={workspaceRoot}\n                homeDir={homeDir}\n                {...(openWorkspaceFile ? { openWorkspaceFile } : {})}\n                {...(readPastedImage ? { readPastedImage } : {})}\n                {...(openHttpLink ? { openHttpLink } : {})}\n              />\n            </div>`
 
             const rawFallback =
               `<pre className="log-turn__trace-raw-fallback">\n              {part.text}\n            </pre>`
@@ -86,6 +88,7 @@ export default defineConfig({
   cacheDir: resolve(root, '.tmp/conversation-reading-ui-cache'),
   test: {
     ...original.test,
+    server: { deps: { inline: ['@agentmux/client-ui'] } },
     include: ['apps/desktop/test/conversation-reading-ui.integration.test.tsx'],
     passWithNoTests: false,
     fileParallelism: false

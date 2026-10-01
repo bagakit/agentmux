@@ -1,7 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,7 +16,7 @@ import * as RadixDialog from '@radix-ui/react-dialog'
 import { ConfirmationDialog } from '../src/renderer/src/components/ConfirmationDialog.js'
 import { BranchContextMenu } from '../src/renderer/src/components/BranchContextMenu.js'
 import { TopicContextMenu } from '../src/renderer/src/components/TopicContextMenu.js'
-import { ConversationImage } from '../src/renderer/src/components/ConversationImage.js'
+import { ConversationImage } from '@agentmux/client-ui/components/ConversationImage'
 import { WorkbenchTabContextMenu } from '../src/renderer/src/components/WorkbenchTabContextMenu.js'
 import {
   getWindowOverlayHost,

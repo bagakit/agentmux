@@ -11,7 +11,7 @@ import { workbenchTabDisplayName, workbenchAgentFactsFor } from '../lib/workbenc
 import { agentDisplayName, type WorkbenchTab } from '../lib/workbench-tabs'
 import { regionDisplayNames, regionSurfaceLabel } from '../lib/region-display-name'
 import { isSessionSurface } from '../lib/workbench-surface-kinds'
-import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { FileExplorer } from './FileExplorer'
 import { StatusDot } from './StatusDot'
 

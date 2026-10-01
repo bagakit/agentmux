@@ -1,7 +1,7 @@
 import type { AgentProviderId } from '@agentmux/core'
 import { CircleDot, SquareTerminal, UserRound } from 'lucide-react'
 import type { CSSProperties } from 'react'
-import type { ConversationSpeaker } from '../lib/conversation-speaker'
+import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
 import { AgentProviderIcon } from './AgentProviderIcon'
 

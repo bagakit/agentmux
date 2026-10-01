@@ -3,7 +3,7 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '@agentmux/core'
-import { describeError, errorIdentity, presentError } from '../src/renderer/src/lib/error-presentation'
+import { describeError, errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../src/renderer/src/store'
 
 const initialStore = useAppStore.getState()

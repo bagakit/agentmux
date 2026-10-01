@@ -5,7 +5,7 @@ import {
   clampStep,
   stepSummary,
   stepTitle
-} from '../src/renderer/src/lib/activity-step-summary.js'
+} from '@agentmux/client-ui/activity-step-summary'
 
 // 用户要的是：折叠状态本身可读——不展开就知道那步干了什么。三行裸 `Bash` 满足不了这件事。
 

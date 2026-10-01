@@ -63,8 +63,6 @@
 .agent-body[data-pending-interaction] { display: grid; grid-template-rows: minmax(0, 1fr) fit-content(min(320px, 55%)); }
 .agent-body[data-pending-interaction] > .agent-terminal-stage { min-height: 0; height: auto; }
 .agent-body > .agent-interaction { min-height: 0; overflow: auto; margin-bottom: var(--sp-3); }
-.agent-interaction__status { margin: 0 0 var(--sp-2); color: var(--amber); font-size: var(--fs-micro); line-height: 1.4; }
-.agent-interaction button[aria-pressed='true'] { color: var(--text); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--focus-line); }
 /* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
@@ -172,79 +170,6 @@
   background: var(--surface-1);
 }
 .agent-input-stack[data-input-surface='terminal'] .composer { margin: 0; border-color: var(--line-soft); background: var(--surface-0); }
-/* The request is an interruption, so it earns weight from surface fill + elevation and an amber STATUS
-   icon — not from a permanent coloured rail (accent expresses state, not decoration) and not from an
-   outline (a stroke here would compete with the composer directly beneath it). */
-.agent-interaction {
-  margin:var(--sp-3) var(--sp-4) 0;
-  padding:var(--sp-4);
-  border-radius: var(--radius);
-  background: var(--surface-1);
-  box-shadow: var(--elev-2), var(--hl);
-}
-.agent-interaction__heading { display: flex; align-items: flex-start; gap:var(--sp-4); color: var(--amber); }
-.agent-interaction__heading > svg { flex: 0 0 auto; }
-.agent-interaction__heading > div { min-width: 0; display: grid; gap:var(--sp-1); }
-.agent-interaction__heading strong { color: var(--text); font-size: var(--fs-body); line-height: 1.35; }
-.agent-interaction__heading span { color: var(--text-2); font-size: var(--fs-meta); }
-.agent-interaction pre { max-height: 84px; margin:var(--sp-4) 0 0; padding:var(--sp-3) var(--sp-4); overflow: auto; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-interaction__options { display: grid; gap:var(--sp-2); margin-top:var(--sp-4); }
-.agent-interaction__error { margin: var(--sp-3) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
-.agent-interaction__options button { display: grid; gap:var(--sp-1); padding:var(--sp-3) var(--sp-4); text-align: left; }
-.agent-interaction__options small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
-.agent-interaction__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-4); }
-/* Every action is the same button: one height, one padding, icon and label centred on a shared axis —
-   so a row of mixed icon and text-only actions lines up instead of stepping. */
-.agent-interaction button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap:var(--sp-2);
-  min-height: 26px;
-  padding:0 var(--sp-4);
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  background: var(--surface-2);
-  box-shadow: var(--hl);
-  font-size: var(--fs-meta);
-  font-weight: 450;
-  line-height: 1;
-  cursor: pointer;
-  transition: color 90ms ease, background 90ms ease;
-}
-.agent-interaction__options button { display: grid; justify-content: start; min-height: 0; padding:var(--sp-3) var(--sp-4); line-height: 1.4; }
-.agent-interaction button > svg { flex: 0 0 auto; }
-.agent-interaction button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
-/* The one affirmative action carries the solid brand fill; everything else stays secondary. */
-.agent-interaction button.is-primary { color: var(--bg); background: var(--green); box-shadow: var(--hl-strong); }
-.agent-interaction button.is-primary:hover:not(:disabled) { color: var(--bg); background: color-mix(in srgb, var(--green) 88%, #ffffff); }
-.agent-interaction button:disabled { opacity: .45; cursor: default; }
-/* Dismissing is an exit, not a verdict on the tool: it sits on the far side of the row and stays
-   ghost-weight so the actual decision keeps the emphasis. */
-.agent-interaction__dismiss { margin-right:auto; color: var(--text-3); background: none; box-shadow: none; }
-.agent-interaction__dismiss:hover:not(:disabled) { color: var(--text-2); background: var(--surface-2); }
-/* When a provider offers more than one affirmative (allow-once + allow-always), the affirmatives adopt
-   the CLI's own vertical numbered rhythm: full-width, left-aligned rows carrying a tier dot + label +
-   scope description. This mirrors .agent-interaction__options and keeps the compact row for the 1-allow case. */
-.agent-interaction__grants { display: grid; gap:var(--sp-2); margin-top:var(--sp-4); }
-.agent-interaction__grants button {
-  justify-content: start;
-  min-height: 34px;
-  padding:var(--sp-4) var(--sp-4);
-  gap:var(--sp-4);
-  line-height: 1.4;
-  text-align: left;
-}
-.agent-interaction__grant-text { min-width: 0; display: grid; gap:var(--sp-1); }
-.agent-interaction__grant-text small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
-.agent-interaction button.is-primary .agent-interaction__grant-text small { color: var(--scrim-3); }
-/* Risk state, encoded as a restrained 6px dot — the only accent, and never a rail or a border. */
-.agent-interaction__tier { flex: 0 0 auto; width: 6px; height: 6px; margin-top:var(--sp-2); border-radius: 50%; background: var(--text-3); }
-.agent-interaction__tier--safe { background: var(--green); }
-.agent-interaction__tier--caution { background: var(--amber); }
-.agent-interaction__tier--danger { background: var(--red); }
-
 .settings-executor-identity { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin: 0; }
 .settings-executor-identity > div { display: grid; gap: var(--sp-2); min-width: 0; }
 .settings-executor-identity dt { color: var(--text-3); font-size: var(--fs-meta); }

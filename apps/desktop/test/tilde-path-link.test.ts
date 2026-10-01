@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import {
   detectTerminalPathLinks,
   resolveWorkspaceRelativePath
-} from '../src/renderer/src/lib/terminal-path-link.js'
+} from '@agentmux/client-ui/terminal-path-link'
 import {
   classifyMarkdownLinkHref,
   splitMarkdownFileReferences
-} from '../src/renderer/src/lib/markdown-file-reference.js'
+} from '@agentmux/client-ui/markdown-file-reference'
 
 // Guard for tracker #793: a `~/`-prefixed path in agent prose or terminal output must become a
 // clickable file link WHEN it resolves inside the active Workspace, and must stay inert otherwise.

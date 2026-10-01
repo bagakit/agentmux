@@ -1,7 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { beforeEach, afterEach, describe, it, expect, vi, type MockInstance } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { SessionSnapshot, AppConfig, AgentSessionControl } from '../src/shared/contracts'
@@ -18,7 +19,7 @@ vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegion
 vi.mock('../src/renderer/src/components/SessionConnectingSurface', () => ({ SessionConnectingSurface: () => <div data-leaf="connecting" /> }))
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
 vi.mock('../src/renderer/src/components/AgentLifecycleFeedback', () => ({ AgentLifecycleFeedback: () => null }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => <div data-leaf="interaction" /> }))
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => <div data-leaf="interaction" /> }))
 vi.mock('../src/renderer/src/components/OpenDestinationBar', () => ({ OpenDestinationPopover: () => null }))
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 

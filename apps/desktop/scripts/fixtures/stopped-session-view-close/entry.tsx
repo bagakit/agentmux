@@ -1,4 +1,4 @@
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
 import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
 import { App } from '../../../src/renderer/src/App'

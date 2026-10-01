@@ -1,13 +1,13 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown.js'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import {
   classifyMarkdownLinkHref,
   referenceRevealLocation,
   splitMarkdownFileReferences
-} from '../src/renderer/src/lib/markdown-file-reference.js'
+} from '@agentmux/client-ui/markdown-file-reference'
 
 const ROOT = _hygiene_fixturePath("work/repo")
 

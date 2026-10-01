@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 const root=resolve(import.meta.dirname,'../../..'), arg=name=>process.argv.find(value=>value.startsWith(name+'='))?.slice(name.length+1), sha=bytes=>createHash('sha256').update(bytes).digest('hex')
 const evidence=resolve(root,arg('--output')??"docs/reviews/evidence/local-file-preview/source-renderer-final")
 const base=['run','--root',root,'--maxWorkers=1',...(arg('--config')?['--config',arg('--config')]:[])]
-const pane='apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',router='apps/desktop/src/renderer/src/components/FileSurfaceView.tsx',store='apps/desktop/src/renderer/src/store.ts',href='apps/desktop/src/renderer/src/lib/markdown-file-reference.ts'
+const pane='apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',router='apps/desktop/src/renderer/src/components/FileSurfaceView.tsx',store='apps/desktop/src/renderer/src/store.ts',href='packages/client-ui/src/lib/markdown-file-reference.ts'
 const paneTest='apps/desktop/test/file-preview-pane.test.tsx',openTest='apps/desktop/test/file-preview-open.test.tsx'
 const mutants=[
  ['existing-media-doc-router',router,'if ((format && !format.sourceEditable) || (!doc && binary))','if (!doc && (binary || (format && !format.sourceEditable)))',openTest,'an existing PNG text draft'],

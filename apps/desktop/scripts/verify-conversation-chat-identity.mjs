@@ -12,23 +12,25 @@ const owningConfig = 'apps/desktop/scripts/fixtures/conversation-chat-identity/v
 const owningTypes = 'apps/desktop/scripts/fixtures/conversation-chat-identity/tsconfig.owning.json'
 const productPaths = [
   "apps/desktop/src/renderer/src/lib/conversation-speaker.ts",
-  "apps/desktop/src/renderer/src/components/ConversationMessage.tsx",
+  "packages/client-ui/src/lib/conversation-speaker.ts",
+  "packages/client-ui/src/components/ConversationMessage.tsx",
   "apps/desktop/src/renderer/src/components/ConversationAxis.tsx",
   "apps/desktop/src/renderer/src/components/ActivityView.tsx",
   "apps/desktop/src/renderer/src/components/SessionHistoryView.tsx",
-  "apps/desktop/src/renderer/src/styles/activity-conversation.css"
+  "packages/client-ui/src/styles/conversation-message.css"
 ]
 const sourcePaths = [...productPaths, owningTest, owningConfig, owningTypes]
 const loadedPaths = [
   "apps/desktop/src/renderer/src/lib/conversation-speaker.ts",
-  "apps/desktop/src/renderer/src/components/ConversationMessage.tsx",
+  "packages/client-ui/src/lib/conversation-speaker.ts",
+  "packages/client-ui/src/components/ConversationMessage.tsx",
   "apps/desktop/src/renderer/src/components/ConversationAxis.tsx",
   "apps/desktop/src/renderer/src/components/ActivityView.tsx",
   "apps/desktop/src/renderer/src/components/SessionHistoryView.tsx"
 ]
 const mutants = {
-  "unknown-appearance": "apps/desktop/src/renderer/src/lib/conversation-speaker.ts",
-  "peer-identity": "apps/desktop/src/renderer/src/components/ConversationMessage.tsx",
+  "unknown-appearance": "packages/client-ui/src/lib/conversation-speaker.ts",
+  "peer-identity": "packages/client-ui/src/components/ConversationMessage.tsx",
   "activity-context": "apps/desktop/src/renderer/src/components/ActivityView.tsx"
 }
 const adjacentTests = [
@@ -39,7 +41,7 @@ const adjacentTests = [
 const callers = [
   [
     "messageDisplay",
-    "apps/desktop/src/renderer/src/components/ConversationMessage.tsx",
+    "packages/client-ui/src/components/ConversationMessage.tsx",
     "speakerForDisplay(",
     1
   ],

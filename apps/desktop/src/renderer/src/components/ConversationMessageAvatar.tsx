@@ -1,5 +1,5 @@
 import type { AgentProviderId } from '@agentmux/core'
-import type { ConversationSenderDetails, ConversationSpeaker } from '../lib/conversation-speaker'
+import type { ConversationSenderDetails, ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ProjectIcon } from './ProjectIcon'
 import type { MoteConversationIdentity } from '../lib/mote-conversation-identity'

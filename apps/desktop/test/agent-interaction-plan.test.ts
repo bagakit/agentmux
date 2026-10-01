@@ -6,7 +6,7 @@ import {
   isAffirmative,
   permissionPlan,
   questionPlan
-} from '../src/renderer/src/lib/agent-interaction-plan.js'
+} from '@agentmux/client-ui/agent-interaction-plan'
 
 // 「点这个控件，Agent 收到什么」——分两层守，因为这两层的失效方式不一样。
 //
@@ -19,7 +19,7 @@ import {
 //
 // 两层的变异必须各红各自那一条：改坏映射只该红取值层，改坏转发只该红接线层。
 
-const CARD = '../src/renderer/src/components/AgentInteractionCard.tsx'
+const CARD = '../../../packages/client-ui/src/components/AgentInteractionCard.tsx'
 const cardSource = readFileSync(new URL(CARD, import.meta.url), 'utf8')
 
 describe('permission verdict projection', () => {

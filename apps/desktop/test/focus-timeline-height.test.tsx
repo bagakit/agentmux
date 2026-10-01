@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
 import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store'

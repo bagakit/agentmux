@@ -1,14 +1,15 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
-import { createSpeakerResolver, speakerOfUserMessage } from '../src/renderer/src/lib/conversation-speaker'
+import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { api } from '../src/renderer/src/lib/api'
 import type { AgentSessionControl } from '../src/shared/contracts'
 

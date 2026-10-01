@@ -2,7 +2,8 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { chooseFocusFilter } from './fixtures/focus-filter-menu'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentTimelineItem, AgentTimelineSnapshot, SessionSnapshot } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'

@@ -30,7 +30,7 @@ import {
  */
 
 const SHELL = resolve(__dirname, '../src/renderer/src/components/ComposerTextarea.tsx')
-const CONSUMER = resolve(__dirname, '../src/renderer/src/components/AgentComposer.tsx')
+const CONSUMER = resolve(__dirname, '../../../packages/client-ui/src/components/AgentComposer.tsx')
 
 function parse(path: string): ts.SourceFile {
   return ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)

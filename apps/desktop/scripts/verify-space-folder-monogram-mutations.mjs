@@ -4,7 +4,7 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 const sidebar = 'apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx'
 const identity = 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx'
 const project = 'apps/desktop/src/renderer/src/components/ProjectIcon.tsx'
-const css = 'apps/desktop/src/renderer/src/styles/conversation-avatar.css'
+const css = 'packages/client-ui/src/styles/conversation-avatar.css'
 
 await verifyRendererSourceMutations({
   name: ("space-folder-monogram-mutations-" + (globalThis.crypto.randomUUID()) + "-" + (randomUUID().slice(0, 8)) + ""),

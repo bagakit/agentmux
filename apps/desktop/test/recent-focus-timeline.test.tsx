@@ -1,7 +1,8 @@
 import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import type { SessionSnapshot, AgentTimelineItem } from '../src/shared/contracts.js'

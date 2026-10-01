@@ -1,12 +1,13 @@
 import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
 import type { AgentMuxMessageEnvelope, AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { api } from '../src/renderer/src/lib/api'

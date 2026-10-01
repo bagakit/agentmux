@@ -1,11 +1,12 @@
 import { fixtureClock as _hygiene_fixtureClock, fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { formatClock } from '../src/renderer/src/lib/activity-ruler'
+import { formatClock } from '@agentmux/client-ui/conversation-time'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })

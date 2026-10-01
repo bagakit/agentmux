@@ -2,7 +2,8 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 import { act, type ReactNode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot, SessionAttachResult } from '../src/shared/contracts'

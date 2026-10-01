@@ -12,24 +12,25 @@ const aliases = Object.entries(pkg.exports).flatMap(([name, value]) => {
   return existsSync(source) ? [{ find: new RegExp('^' + spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: source }] : []
 })
 
-export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
-  resolve: { alias: [...aliases, { find: 'react', replacement: resolve(root, 'apps/desktop/node_modules/react') }, { find: 'react-dom', replacement: resolve(root, 'apps/desktop/node_modules/react-dom') }] },
+export default defineConfig({
+  ssr: { noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } }, ...original, root, esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
+  resolve: { conditions: ['browser', 'import', 'default'], alias: [...aliases, { find: 'react', replacement: resolve(root, 'apps/desktop/node_modules/react') }, { find: 'react-dom', replacement: resolve(root, 'apps/desktop/node_modules/react-dom') }] },
   cacheDir: resolve(root, '.bagakit/feature-tracker/conversation-input-cards-artifacts/T011/cache'),
   plugins: [...(original.plugins ?? []), { name: 'compact-identity-actual-loaded-source', enforce: 'pre', transform(code, id) {
     const file = id.split('?')[0]!
-    if (!(file.startsWith(root + '/apps/desktop/src/') || file.startsWith(root + '/packages/core/src/'))) return
+    if (!(file.startsWith(root + '/apps/desktop/src/') || (file.startsWith(root + '/packages/core/src/') || file.startsWith(root + '/packages/client-ui/src/')))) return
     const before = code, mutation = process.env.AGENTMUX_COMPACT_IDENTITY_MUTATION
     const edits: Record<string, [string, string, string]> = {
-      'ignore-renamed': ['lib/conversation-sender-details.ts', 'userName: snapshot.agentNames[sender.id]', 'userName: undefined'],
-      'borrow-recipient-project': ['lib/conversation-sender-details.ts', 'item.path === sender.workspacePath', 'true'],
-      'eager-details': ['components/ConversationInputDetails.tsx', 'const details = open ? opened.details : undefined',
+      'ignore-renamed': ['apps/desktop/src/renderer/src/lib/conversation-sender-details.ts', 'userName: snapshot.agentNames[sender.id]', 'userName: undefined'],
+      'borrow-recipient-project': ['apps/desktop/src/renderer/src/lib/conversation-sender-details.ts', 'item.path === sender.workspacePath', 'true'],
+      'eager-details': ['packages/client-ui/src/components/ConversationInputDetails.tsx', 'const details = open ? opened.details : undefined',
         "const details = open ? opened.details : (senderId ? describeSpeaker?.({ role: 'agent', id: senderId }).readDetails?.() : undefined)"],
-      'copy-body-only': ['components/ConversationMessage.tsx', "const text = parts.map(partText).filter((t) => t.length > 0).join('\\n')",
+      'copy-body-only': ['packages/client-ui/src/components/ConversationMessage.tsx', "const text = parts.map(partText).filter((t) => t.length > 0).join('\\n')",
         "const text = prefix?.body ?? parts.map(partText).filter((t) => t.length > 0).join('\\n')"]
     }
     const edit = mutation ? edits[mutation] : undefined
     if (mutation && !edit) throw new Error('Unknown compact identity mutation ' + mutation)
-    if (edit && file === root + '/apps/desktop/src/renderer/src/' + edit[0]) {
+    if (edit && file === resolve(root, edit[0])) {
       if (code.split(edit[1]).length !== 2) throw new Error('Missing unique compact identity mutation target ' + mutation)
       code = code.replace(edit[1], edit[2])
     }
@@ -38,5 +39,5 @@ export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic', js
       originalSHA256: createHash('sha256').update(before).digest('hex'), sha256: createHash('sha256').update(code).digest('hex'), bytes: Buffer.byteLength(code), ...(before !== code ? { mutation } : {}) }) + '\n') }
     if (before !== code) return { code, map: null }
   } }],
-  test: { ...original.test, globalSetup: [], include: ['apps/desktop/test/conversation-compact-identity.integration.test.tsx'], passWithNoTests: false, fileParallelism: false }
+  test: { ...original.test, server: { deps: { inline: ['@agentmux/client-ui'] } }, globalSetup: [], include: ['apps/desktop/test/conversation-compact-identity.integration.test.tsx'], passWithNoTests: false, fileParallelism: false }
 })

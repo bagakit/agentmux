@@ -2,7 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -89,7 +89,11 @@ vi.mock('electron', () => ({
     send: vi.fn()
   },
   webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => fakeTrustedSender.session.getStoragePath() },
+  app: {
+    getPath: () => fakeTrustedSender.session.getStoragePath(),
+    getAppPath: () => join(import.meta.dirname, '..'),
+    isPackaged: false
+  },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
       bridge.handlers.set(channel, handler)
@@ -140,14 +144,16 @@ vi.mock('../src/main/agent-notifier', () => ({
 }))
 
 import '../src/preload/index'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { speakerOf, speakerOfUserMessage, createSpeakerResolver } from '../src/renderer/src/lib/conversation-speaker'
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage'
+import { speakerOf } from '../src/renderer/src/lib/conversation-speaker'
+import { speakerOfUserMessage, createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 
 const SESSION_ID = 'test-author-session'
 const RUN_ID = `run-${SESSION_ID}`

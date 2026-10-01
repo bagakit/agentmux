@@ -12,19 +12,27 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceNames = ['src/shared/bookmark-file.ts', 'src/main/bookmark-file.ts', 'src/main/workspace-files.ts', 'src/main/pasted-image-read.ts', 'src/main/pasted-directory.ts',
   'src/main/browser-view-manager.ts', 'src/main/native-overlay-surfaces.ts', 'src/shared/native-overlay.ts', 'src/renderer/src/hooks/useNativeOverlayChrome.ts', 'src/renderer/src/lib/native-overlay-regions.ts',
   'src/main/browser-profile-manager.ts', 'src/main/browser-profile-store.ts', 'src/main/browser-ref-ledger-store.ts', 'src/preload/index.ts', 'src/renderer/src/store.ts',
-  'src/renderer/src/lib/workbench-persistence.ts', 'src/renderer/src/lib/workbench-tabs.ts', 'src/renderer/src/lib/markdown-file-reference.ts', 'src/renderer/src/lib/terminal-path-link.ts',
-  'src/renderer/src/lib/agent-markdown.ts', 'src/renderer/src/components/AgentMarkdown.tsx', 'src/renderer/src/components/ConversationImage.tsx', 'src/renderer/src/components/ConversationMessage.tsx', 'src/renderer/src/components/SessionPane.tsx',
+  'src/renderer/src/lib/workbench-persistence.ts', 'src/renderer/src/lib/workbench-tabs.ts', '../../packages/client-ui/src/lib/markdown-file-reference.ts', '../../packages/client-ui/src/lib/terminal-path-link.ts',
+  '../../packages/client-ui/src/lib/agent-markdown.ts', '../../packages/client-ui/src/components/AgentMarkdown.tsx', '../../packages/client-ui/src/components/ConversationImage.tsx', '../../packages/client-ui/src/components/ConversationMessage.tsx', 'src/renderer/src/components/SessionPane.tsx',
+  'src/renderer/src/components/DesktopClientUiProvider.tsx', '../../packages/client-ui/src/platform.tsx',
   'src/renderer/src/components/FileSurfaceView.tsx', 'src/renderer/src/components/FilePreviewPane.tsx', 'src/renderer/src/components/BrowserPane.tsx', 'src/renderer/src/components/FileExplorer.tsx',
   'src/renderer/src/components/WorkspaceWorkbench.tsx', 'src/renderer/src/styles/browser.css', 'src/renderer/src/styles/index.css',
   ...['entry.tsx', 'main.cjs', 'preload.ts', 'native-owner.ts', 'index.html', 'vitest.owning.config.mts', 'native-proof.mjs'].map(name => 'scripts/fixtures/local-link-preview-maintenance/' + name),
   'scripts/fixtures/bookmark-local-link/vitest.owning.config.mts', 'scripts/verify-local-link-preview-maintenance.mjs']
 async function bindings(root) {
-  const entries = []; for (const file of sourceNames) entries.push(['apps/desktop/' + file, sha(await readFile(join(root, 'apps/desktop', file)))])
+  const entries = []; for (const file of sourceNames) entries.push([join('apps/desktop', file), sha(await readFile(join(root, 'apps/desktop', file)))])
   const sdk = 'packages/core/node_modules/@ctxmux/sdk'
   const dependencies = ['packages/core/vendor/ctxmux/darwin-arm64/manifest.json', 'packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz', sdk + '/package.json',
     ...(await readdir(join(root, sdk, 'dist'), { recursive: true, withFileTypes: true })).filter(entry => entry.isFile()).map(entry => join(entry.parentPath, entry.name).slice(root.length + 1)).sort()]
   for (const file of dependencies) entries.push([file, sha(await readFile(join(root, file)))])
   return Object.fromEntries(entries)
+}
+function assertRendererOwners(loaded, identity) {
+  const required = sourceNames.map(file => join('apps/desktop', file)).filter(file =>
+    (file.startsWith('apps/desktop/src/renderer/') || file.startsWith('packages/client-ui/src/')) && !file.endsWith('.css'))
+  assert.ok(required.length > 0, 'Required compiled Renderer owners must be nonempty')
+  assert.ok(required.some(file => file.startsWith('packages/client-ui/src/')), 'Shared Renderer owners must be present')
+  for (const file of required) assert.equal(loaded[file], identity[file], 'Actual compiled production module: ' + file)
 }
 function assertFrames(frames, lane) {
   assert.ok(frames.length > 0); const browserLayers = frames.flatMap(frame => frame.layers).filter(layer => layer.kind === 'browser')
@@ -59,6 +67,7 @@ export async function consumeNative({ root, evidence, lane }) {
   for (const frame of receipt.frames) { assert.equal(sha(await readFile(join(evidence, frame.file))), frame.sha256); assert.equal(sha(await readFile(join(evidence, frame.root.file))), frame.root.sha256); for (const layer of frame.layers) assert.equal(sha(await readFile(join(evidence, layer.file))), layer.sha256) }
   assert.ok(Object.keys(receipt.compiled.archive).length > 0)
   for (const [file, hash] of Object.entries(receipt.compiled.archive)) assert.equal(sha(await readFile(join(evidence, 'compiled', file))), hash)
+  assertRendererOwners(receipt.compiled.loaded, identity)
   for (const [file, hash] of Object.entries(receipt.compiled.loaded)) if (identity[file]) assert.equal(identity[file], hash)
   assert.deepEqual(receipt.cleanup.remaining, []); assert.equal(receipt.cleanup.rootRemoved, true); assert.equal(receipt.userRunTouched, false)
   console.log(JSON.stringify({ passed: true, lane, mode: 'read-only-current-native-proof', frames: receipt.frames.length, sourceDigest: receipt.sourceDigest }))
@@ -77,12 +86,18 @@ export async function runNative({ root, evidence, lane }) {
     await writeFile(join(workspace, 'notes.md'), '# Original neighbor\n\nThis File Region retains its reading context.\n')
     await writeFile(join(workspace, 'docs/readme.md'), '# Local previews\n\nThe current document owns these paths.\n\n![Photo with spaces](images/photo%20one.png)\n\n![中文图片](./图片.png)\n\n[Research & Notes](./Research%20%26%20Notes.webloc)\n\nPlain root code stays strict: `src/example.ts:3`.\n')
     await writeFile(join(workspace, 'docs/Research & Notes.webloc'), `<?xml version="1.0"?><plist version="1.0"><dict><key>URL</key><string>${httpUrl}</string></dict></plist>`)
-    const loaded = {}, styles = {}, alias = sourceAliases
+    const shared = join(root, 'packages/client-ui/src')
+    const styleAliases = (await readdir(join(shared, 'styles'), { withFileTypes: true }))
+      .filter(entry => entry.isFile() && entry.name.endsWith('.css'))
+      .map(entry => ({ find: '@agentmux/client-ui/styles/' + entry.name, replacement: join(shared, 'styles', entry.name) }))
+    assert.ok(styleAliases.length > 0, 'Owning shared styles must be present')
+    const loaded = {}, styles = {}, alias = [...styleAliases, ...sourceAliases]
+    const isRendererSource = file => file.startsWith(desktop + '/src/') || file.startsWith(shared + '/')
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias }, plugins: [{ name: 'preview-owning-production-identity', enforce: 'pre',
-      transform(bytes, id) { if (id.startsWith(desktop + '/src/') && !id.includes('?')) loaded[id.slice(root.length + 1)] = sha(bytes) },
-      async generateBundle() { for (const file of this.getWatchFiles()) if (file.startsWith(desktop + '/src/') && file.endsWith('.css')) styles[file.slice(root.length + 1)] = sha(await readFile(file)) } }],
+      transform(bytes, id) { if (isRendererSource(id) && !id.includes('?')) loaded[id.slice(root.length + 1)] = sha(bytes) },
+      async generateBundle() { for (const file of this.getWatchFiles()) if (isRendererSource(file) && file.endsWith('.css')) styles[file.slice(root.length + 1)] = sha(await readFile(file)) } }],
       define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, build: { outDir, emptyOutDir: true } })
-    for (const file of sourceNames.filter(file => file.startsWith('src/renderer/') && !file.endsWith('.css'))) assert.equal(loaded['apps/desktop/' + file], identity['apps/desktop/' + file], 'Actual compiled production module: ' + file)
+    assertRendererOwners(loaded, identity)
     for (const file of sourceNames.filter(file => file.endsWith('.css'))) assert.equal(styles['apps/desktop/' + file], identity['apps/desktop/' + file])
     const nativeModule = join(privateRoot, 'native-owner.mjs')
     await esbuild.build({ entryPoints: [join(fixture, 'native-owner.ts')], outfile: nativeModule, bundle: true, platform: 'node', format: 'esm', banner: { js: "import { createRequire as previewProofCreateRequire } from 'node:module'; const require = previewProofCreateRequire(import.meta.url);" }, external: ['electron'], alias: Object.fromEntries(alias.map(item => [item.find, item.replacement])), logLevel: 'error' })

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readPastedImage } from '../src/main/pasted-image-read.js'
 import { pastedDirectory } from '../src/main/pasted-directory.js'
-import { PASTED_IMAGE_MAX_BYTES } from '../src/shared/contracts.js'
+import { PASTED_IMAGE_MAX_BYTES } from '@agentmux/client-ui/pasted-images'
 
 // T-003: the read's trust boundary is the pasted directory, not a workspace root. These tests exercise
 // the real function against a real temp directory — a data URI comes back for a genuine pasted image,

@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'

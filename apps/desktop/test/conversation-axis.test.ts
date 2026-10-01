@@ -6,7 +6,8 @@ import {
   speaksAsAgent,
   speaksAsHuman
 } from '../src/renderer/src/lib/conversation-axis.js'
-import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, speakerOf } from '../src/renderer/src/lib/conversation-speaker.js'
+import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID } from '@agentmux/client-ui/conversation-speaker'
+import { speakerOf } from '../src/renderer/src/lib/conversation-speaker.js'
 
 /**
  * 两条轴（说话人轴、自我 Agent 轴）收敛成一个纯函数之后，这里钉的是那个函数的四条验收：

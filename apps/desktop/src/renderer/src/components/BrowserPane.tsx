@@ -63,7 +63,7 @@ import {
   rendererCssBoundsToWindowDip
 } from '../lib/browser-bounds-sync'
 import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'

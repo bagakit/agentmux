@@ -13,7 +13,7 @@ import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pi
   type PmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { moteTargetStatus, usePmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 import { pmoFocusSessionId } from '../lib/agent-focus'
-import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'

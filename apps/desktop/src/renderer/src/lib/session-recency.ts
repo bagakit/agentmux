@@ -8,7 +8,7 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import type { AgentDisplayState } from '@agentmux/core'
-import { clampStep, stepTitle } from './activity-step-summary'
+import { clampStep, stepTitle } from '@agentmux/client-ui/activity-step-summary'
 
 /**
  * Agent「此刻正在推进工作」的状态。只有在这些状态下，一条**已完成**的 tool_call 才还算「最近」——

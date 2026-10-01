@@ -1,9 +1,9 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it } from 'vitest'
-import { InlineComposer, draftDocument, documentDraft } from '../src/renderer/src/components/InlineComposer.js'
-import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind, encodeSemanticReference, parseComposerDraft } from '../src/renderer/src/lib/composer-semantic-reference.js'
+import { InlineComposer, draftDocument, documentDraft } from '@agentmux/client-ui/components/InlineComposer'
+import { appendSemanticReference, expandSemanticReferences, semanticReferenceKind, encodeSemanticReference, parseComposerDraft } from '@agentmux/client-ui/composer-semantic-reference'
 
 describe('composer semantic references', () => {
   it('keeps a short token in the draft and expands it only at submission', () => {

@@ -1,6 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../../scripts/lib/fixture-values.mjs"
 import { act, type ReactNode } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './client-ui-render'
 import { afterEach, beforeEach, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../../src/shared/contracts'
 import { useAppStore } from '../../src/renderer/src/store'

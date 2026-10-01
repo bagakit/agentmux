@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts'
 
 const draws = vi.hoisted(() => ({ headers: 0 }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => createElement('div', { 'data-terminal-leaf': true }) }))
 vi.mock('../src/renderer/src/components/ActivityView', () => ({ ActivityView: () => null }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => null }))
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => null }))
 vi.mock('../src/renderer/src/components/StatusDot', () => ({ StatusDot: () => { draws.headers++; return null } }))
 // Keep actual AgentSessionComposer selectors/handlers; only the rich input leaf is replaced.
-vi.mock('../src/renderer/src/components/AgentComposer', () => ({ AgentComposer: ({ value }: { value: string }) => createElement('output', { 'data-draft': true }, value) }))
+vi.mock('@agentmux/client-ui/components/AgentComposer', () => ({ AgentComposer: ({ value }: { value: string }) => createElement('output', { 'data-draft': true }, value) }))
 import { useAppStore } from '../src/renderer/src/store'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionObservationRegions } from '../src/renderer/src/components/SessionObservationRegions'

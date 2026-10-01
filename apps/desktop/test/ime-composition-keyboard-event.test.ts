@@ -5,12 +5,8 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
-import {
-  isImeCompositionKeyDown,
-  isImeOwnedKeyboardEvent,
-  resolveImeModifierGesture,
-  useImeEnterGestureOwnership
-} from '../src/renderer/src/lib/ime-composition-keyboard-event'
+import { isImeCompositionKeyDown, resolveImeModifierGesture, useImeEnterGestureOwnership } from '../src/renderer/src/lib/ime-composition-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 
 /**
  * Lane A：CJK 组字确认用的 Enter 不能触发「回车即提交」的输入框，否则会以半转换的草稿提交。
@@ -270,6 +266,7 @@ describe('useImeEnterGestureOwnership', () => {
 // 仍**不**保证 React 会把 handler 接成 DOM 监听器、Chromium 会按此顺序派发 composition 事件——那要真 DOM。
 // ---------------------------------------------------------------------------
 const RENDERER = resolve(__dirname, '../src/renderer/src')
+const SHARED_UI = resolve(__dirname, '../../../packages/client-ui/src')
 const GUARD = 'isImeCompositionKeyDown'
 // React wrapper and native predicate share one implementation; both must inspect this handler's event.
 const GUARDS = new Set([GUARD, 'isImeOwnedKeyboardEvent'])
@@ -462,9 +459,9 @@ type DiscoveryResult = { handlers: DiscoveredHandler[]; unresolvable: Unresolvab
 function discoverCommitOnEnterHandlers(): DiscoveryResult {
   const handlers: DiscoveredHandler[] = []
   const unresolvable: UnresolvableHandler[] = []
-  for (const path of walkTsxFiles(RENDERER)) {
+  for (const path of [...walkTsxFiles(RENDERER), ...walkTsxFiles(SHARED_UI)]) {
     const sf = parse(path)
-    const file = path.slice(RENDERER.length + 1)
+    const file = path.startsWith(RENDERER + '/') ? path.slice(RENDERER.length + 1) : '../../../../../packages/client-ui/src/' + path.slice(SHARED_UI.length + 1)
     const visit = (node: ts.Node): void => {
       if (
         ts.isJsxAttribute(node) &&
@@ -695,7 +692,7 @@ describe('part c：发现式接线层——每个 commit-on-Enter 的 onKeyDown 
       expect(used.length, `${file}: no guard calls found`).toBeGreaterThan(0)
       const imported = sourceFile.statements.flatMap((statement) => {
         if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
-            !statement.moduleSpecifier.text.endsWith('ime-composition-keyboard-event')) return []
+            !['ime-composition-keyboard-event', 'ime-keyboard-event'].some(module => statement.moduleSpecifier.text.replace(/\.js$/, '').endsWith(module))) return []
         const bindings = statement.importClause?.namedBindings
         return bindings && ts.isNamedImports(bindings)
           ? bindings.elements.filter((item) => !item.propertyName || item.propertyName.text === item.name.text).map((item) => item.name.text) : []

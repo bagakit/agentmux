@@ -104,7 +104,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
-import { errorIdentity, presentError } from './lib/error-presentation'
+import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'

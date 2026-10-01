@@ -12,17 +12,18 @@ const aliases = Object.entries(pkg.exports).flatMap(([name, value]) => {
   return existsSync(source) ? [{ find: new RegExp('^' + spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: source }] : []
 })
 
-export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
-  resolve: { alias: [...aliases, { find: 'react', replacement: resolve(root, 'apps/desktop/node_modules/react') }, { find: 'react-dom', replacement: resolve(root, 'apps/desktop/node_modules/react-dom') }] },
+export default defineConfig({
+  ssr: { noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } }, ...original, root, esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
+  resolve: { conditions: ['browser', 'import', 'default'], alias: [...aliases, { find: 'react', replacement: resolve(root, 'apps/desktop/node_modules/react') }, { find: 'react-dom', replacement: resolve(root, 'apps/desktop/node_modules/react-dom') }] },
   cacheDir: resolve(root, '.bagakit/feature-tracker/conversation-input-cards-artifacts/T014/cache'),
   plugins: [...(original.plugins ?? []), { name: 'context-spacing-actual-loaded-source', enforce: 'pre', transform(code, id) {
     const file = id.split('?')[0]!
-    if (!(file.startsWith(root + '/apps/desktop/src/') || file.startsWith(root + '/packages/core/src/'))) return
+    if (!(file.startsWith(root + '/apps/desktop/src/') || (file.startsWith(root + '/packages/core/src/') || file.startsWith(root + '/packages/client-ui/src/')))) return
     const before = code, mutation = process.env.AGENTMUX_CONTEXT_SPACING_MUTATION
     const edits: Record<string, [string, string, string, number]> = {
-      'bypass-separator-display': ['apps/desktop/src/renderer/src/components/ConversationMessage.tsx', "prefix.body.replace(/^(?:\\r?\\n){1,2}/u, '')", 'prefix.body', 1],
-      'remove-fallback-class': ['apps/desktop/src/renderer/src/components/AgentMarkdown.tsx', "className={className ? `${className} md-paragraph` : 'md-paragraph'}", 'className={className}', 2],
-      'trim-start-display': ['apps/desktop/src/renderer/src/components/ConversationMessage.tsx', "prefix.body.replace(/^(?:\\r?\\n){1,2}/u, '')", 'prefix.body.trimStart()', 1]
+      'bypass-separator-display': ['packages/client-ui/src/components/ConversationMessage.tsx', "prefix.body.replace(/^(?:\\r?\\n){1,2}/u, '')", 'prefix.body', 1],
+      'remove-fallback-class': ['packages/client-ui/src/components/AgentMarkdown.tsx', "className={className ? `${className} md-paragraph` : 'md-paragraph'}", 'className={className}', 2],
+      'trim-start-display': ['packages/client-ui/src/components/ConversationMessage.tsx', "prefix.body.replace(/^(?:\\r?\\n){1,2}/u, '')", 'prefix.body.trimStart()', 1]
     }
     const edit = mutation ? edits[mutation] : undefined
     if (mutation && !edit) throw new Error('Unknown context spacing mutation ' + mutation)
@@ -35,5 +36,5 @@ export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic', js
       originalSHA256: createHash('sha256').update(before).digest('hex'), sha256: createHash('sha256').update(code).digest('hex'), bytes: Buffer.byteLength(code), ...(before !== code ? { mutation } : {}) }) + '\n') }
     if (before !== code) return { code, map: null }
   } }],
-  test: { ...original.test, globalSetup: [], include: ['apps/desktop/test/conversation-declared-context-spacing.integration.test.tsx'], passWithNoTests: false, fileParallelism: false }
+  test: { ...original.test, server: { deps: { inline: ['@agentmux/client-ui'] } }, globalSetup: [], include: ['apps/desktop/test/conversation-declared-context-spacing.integration.test.tsx'], passWithNoTests: false, fileParallelism: false }
 })

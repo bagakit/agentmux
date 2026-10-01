@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
 import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '../../../packages/core/src/control-host'

@@ -1,3 +1,4 @@
+import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
@@ -10,9 +11,9 @@ import { AgentRegionHeader } from './AgentRegionHeader'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { SessionRegionHost } from './SessionRegionHost'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
-import type { LinkClickModifiers } from './AgentMarkdown'
-import type { ConversationAnnotation } from './ConversationMessage'
-import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle, type ConversationAnnotationSelection } from './ConversationAnnotationNote'
+import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
+import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
 export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel,

@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentTimelineItem } from '../src/shared/contracts.js'
-import {
-  HUMAN_SPEAKER_ID,
-  UNKNOWN_SPEAKER_ID,
-  isConversationTurn,
-  speakerOf
-} from '../src/renderer/src/lib/conversation-speaker.js'
+import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID } from '@agentmux/client-ui/conversation-speaker'
+import { isConversationTurn, speakerOf } from '../src/renderer/src/lib/conversation-speaker.js'
 
 /**
  * 「这一条是谁说的」——把散在渲染层三处的二值判定收敛成一个判据之后，这里钉的是那个判据本身。

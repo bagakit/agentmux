@@ -30,7 +30,7 @@ import {
  */
 
 const componentUrl = (name: string): string =>
-  new URL(`../src/renderer/src/components/${name}`, import.meta.url).pathname
+  new URL(name === 'InlineComposer.tsx' ? `../../../packages/client-ui/src/components/${name}` : `../src/renderer/src/components/${name}`, import.meta.url).pathname
 
 describe('renderer effect 可达性（插一句早退让 effect 变 no-op → 这里红）', () => {
   it('InlineComposer：可见时聚焦输入框那条 effect 里，focus() 之前没有早退', () => {

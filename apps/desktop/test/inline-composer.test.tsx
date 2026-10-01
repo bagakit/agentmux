@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { draftDocument, documentDraft, keywordUnderlineExtension } from '../src/renderer/src/components/InlineComposer.js'
-import { appendSemanticReference, expandSemanticReferences, type ComposerSemanticReference } from '../src/renderer/src/lib/composer-semantic-reference.js'
+import { draftDocument, documentDraft, keywordUnderlineExtension } from '@agentmux/client-ui/components/InlineComposer'
+import { appendSemanticReference, expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 
 describe('inline composer durable reference surface', () => {
   const ref: ComposerSemanticReference = { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' }

@@ -1,5 +1,5 @@
 import { fixtureData as _hygiene_fixtureData } from "../../lib/fixture-values.mjs"
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot, AgentTimelineSnapshot } from '../../../src/shared/contracts'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'

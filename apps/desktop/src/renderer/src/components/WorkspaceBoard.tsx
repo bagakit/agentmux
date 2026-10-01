@@ -24,7 +24,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useBoardRows } from '../hooks/useBoardRows'
 import { api } from '../lib/api'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import {
   BOARD_COLUMN_DESCRIPTIONS,
   PROJECT_BOARD_COLUMNS,

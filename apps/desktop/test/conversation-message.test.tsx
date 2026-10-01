@@ -1,11 +1,11 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
-import { ConversationMessage } from '../src/renderer/src/components/ConversationMessage.js'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 
 const base = {
   speaker: { role: 'agent' as const, id: 'agent-review' },

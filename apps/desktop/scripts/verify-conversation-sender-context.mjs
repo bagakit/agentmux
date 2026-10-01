@@ -40,9 +40,9 @@ for (const name of ['ConversationInputDetails.tsx', 'ConversationMessage.tsx', '
 }
 const mutations = {
   'native-source-omitted': 'apps/desktop/src/renderer/src/components/ActivityView.tsx',
-  'header-author-claimed': 'apps/desktop/src/renderer/src/components/ConversationMessage.tsx',
-  'ended-from-updated': 'apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx',
-  'closed-project-icon': 'apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx',
+  'header-author-claimed': 'packages/client-ui/src/components/ConversationMessage.tsx',
+  'ended-from-updated': 'packages/client-ui/src/components/ConversationInputDetails.tsx',
+  'closed-project-icon': 'packages/client-ui/src/components/ConversationInputDetails.tsx',
   'unlinked-goal': 'apps/desktop/src/renderer/src/lib/conversation-sender-details.ts'
 }
 assert.deepEqual(proof.mutations.map(pair => pair.name).sort(), Object.keys(mutations).sort())
@@ -93,7 +93,7 @@ const visualGraph = JSON.parse(await bound(visual.actualLoaded)); assert.ok(visu
 for (const [path, input] of Object.entries(proof.source).filter(([path]) => path.startsWith('apps/desktop/src/'))) assert.ok(visualGraph.some(row => row.path === path && row.sha256 === input.sha256), path)
 if (proof.integration) {
   const join = proof.integration
-  assert.deepEqual(join.allowedChangedPaths.sort(), ['apps/desktop/src/renderer/src/components/ConversationMessage.tsx', 'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx'].sort())
+  assert.deepEqual(join.allowedChangedPaths.sort(), ['packages/client-ui/src/components/ConversationMessage.tsx', 'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx'].sort())
   for (const [path, input] of Object.entries(proof.source)) if (input.sha256 !== currentSource[path].sha256) assert.ok(join.allowedChangedPaths.includes(path), path)
   await command(join.owning, 0, currentSource)
   const g = await report(join.owning.report, 13, 1); assert.equal(g.numPassedTests, 13); assert.equal(g.numFailedTests, 0)
@@ -106,7 +106,7 @@ assert.equal(sourceReview.decision, 'PASS'); assert.equal(visualReview.result, '
 assert.ok(visualReview.images.length >= 5)
 assert.ok(visualReview.images.every(image => image.actuallyViewed === true), 'independent actual image inspection required')
 for (const image of visualReview.images) { await bound(image); assert.ok(visual.scenes.some(scene => scene.image.path === image.path && scene.image.sha256 === image.sha256)) }
-assert.equal(sourceReview.source['apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx'].sha256, proof.source['apps/desktop/src/renderer/src/components/ConversationInputDetails.tsx'].sha256)
+assert.equal(sourceReview.source['packages/client-ui/src/components/ConversationInputDetails.tsx'].sha256, proof.source['packages/client-ui/src/components/ConversationInputDetails.tsx'].sha256)
 assert.equal(sourceReview.css.sha256, proof.css.sha256)
 assert.equal(visualReview.feature, 'f-2ha8ftgxa'); assert.equal(visualReview.task, 'T-002')
 assert.equal(proof.originalAppRuntimeRunControls, 0)

@@ -1,14 +1,12 @@
-import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion'
+import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion.js'
 import type { ReactNode, Ref } from 'react'
 import { AtSign, ArrowUp, Square } from 'lucide-react'
-import type { AgentPostureControl } from '@agentmux/core'
-import { composerKeywordAtCaret } from '../../../shared/composer-shortcut-library'
-import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
-import { PosturePicker } from './PosturePicker'
-import { InlineComposer } from './InlineComposer'
-import { ComposerReferenceTool } from './ComposerReferenceTool'
-import type { ReadPastedImage } from './ConversationImage'
-import type { ComposerSemanticReference } from '../lib/composer-semantic-reference'
+import { composerKeywordAtCaret } from '../lib/composer-keywords.js'
+import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
+import { InlineComposer } from './InlineComposer.js'
+import { ComposerReferenceTool } from './ComposerReferenceTool.js'
+import type { ReadPastedImage } from './ConversationImage.js'
+import type { ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
 
 /**
  * 候选浮层里的一条。四类候选（`/` 命令、`$` 技能、`@` 引用、裸词识别词）共用这一个形状。
@@ -42,7 +40,7 @@ export type AgentComposerProps = {
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
   primaryAction?: 'send' | 'stop'
   feedback?: ReactNode
-  postureControl?: AgentPostureControl
+  postureTool?: ReactNode
   // Shell-style history recall on the up/down arrows. The shell owns the keys; the semantics (line
   // boundary + the recall reducer) live in the adapter so they stay unit-testable — this component cannot
   // run its own handlers under this repo's node-env vitest. Returns the value to place in the box, or null
@@ -56,7 +54,6 @@ export type AgentComposerProps = {
   onAttach?: () => void
   onPasteImage?: ComposerPasteImage
   insertionRef?: Ref<ComposerInsertionHandle>
-  onSetPosture?: (modeId: string) => void
 }
 
 export function AgentComposer({
@@ -76,7 +73,7 @@ export function AgentComposer({
   onSelectSuggestion,
   primaryAction = 'send',
   feedback,
-  postureControl,
+  postureTool,
   onChange,
   onSubmit,
   onQueue,
@@ -85,7 +82,6 @@ export function AgentComposer({
   onAttach,
   onPasteImage,
   insertionRef,
-  onSetPosture,
   onHistoryRecall,
   promptKeywords = []
 }: AgentComposerProps) {
@@ -219,9 +215,7 @@ export function AgentComposer({
           ) : null}
           {/* Absence hides: only a Provider that declared an addressable posture control renders this,
               and only while the composer can write to the live process. */}
-          {onSetPosture ? (
-            <PosturePicker control={postureControl} disabled={disabled} onSet={onSetPosture} />
-          ) : null}
+          {postureTool}
         </div>
         <div>
           <div className="composer-session-controls" role="group" aria-label="Session controls">

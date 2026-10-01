@@ -1,17 +1,7 @@
 import { fixtureClock as _hygiene_fixtureClock, fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import {
-  createRulerScale,
-  describeReadout,
-  describeRulerAxis,
-  describeSpan,
-  formatClock,
-  formatDuration,
-  formatOffset,
-  rulerBand,
-  stepRulerSelection,
-  type RulerReadout
-} from '../src/renderer/src/lib/activity-ruler.js'
+import { createRulerScale, describeReadout, describeRulerAxis, describeSpan, rulerBand, stepRulerSelection, type RulerReadout } from '../src/renderer/src/lib/activity-ruler.js'
+import { formatClock, formatDuration, formatOffset } from '@agentmux/client-ui/conversation-time'
 
 describe('activity ruler mapping', () => {
   it('places events at their real elapsed fraction on a temporal axis', () => {

@@ -1,17 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import {
-  AGENT_COMMAND_GROUP_LABEL,
-  COMPOSER_PROMPT_STATES,
-  composerKeywordAtCaret,
-  composerKeywordMatches,
-  composerShortcutForBareWord,
-  composerShortcutSuggestion,
-  composerShortcutsForProvider,
-  resolveComposerShortcuts,
-  SHORTCUT_GROUP_LABEL
-} from '../src/shared/composer-shortcut-library.js'
+import { AGENT_COMMAND_GROUP_LABEL, COMPOSER_PROMPT_STATES, composerShortcutForBareWord, composerShortcutSuggestion, composerShortcutsForProvider, resolveComposerShortcuts, SHORTCUT_GROUP_LABEL } from '../src/shared/composer-shortcut-library.js'
+import { composerKeywordAtCaret, composerKeywordMatches } from '@agentmux/client-ui/composer-keywords'
 import type { ComposerShortcut } from '../src/shared/contracts.js'
 
 const generic: ComposerShortcut = { id: 'p-1', keyword: 'eli5', label: 'Explain simply', body: 'Explain this like I am five.' }

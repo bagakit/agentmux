@@ -1,9 +1,10 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 
 let root: Root, container: HTMLDivElement
 beforeEach(() => {

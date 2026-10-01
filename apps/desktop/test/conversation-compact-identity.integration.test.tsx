@@ -3,7 +3,8 @@ import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values
 import { act } from 'react'
 import { appendFile, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxClient } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
@@ -20,7 +21,7 @@ vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegion
 vi.mock('../src/renderer/src/components/SessionConnectingSurface', () => ({ SessionConnectingSurface: () => null }))
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
 vi.mock('../src/renderer/src/components/AgentLifecycleFeedback', () => ({ AgentLifecycleFeedback: () => null }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => null }))
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({ AgentInteractionCard: () => null }))
 vi.mock('../src/renderer/src/components/OpenDestinationBar', () => ({ OpenDestinationPopover: () => null }))
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 

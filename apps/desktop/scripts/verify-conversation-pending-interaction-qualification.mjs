@@ -38,7 +38,7 @@ const owning=await command(proof.owning,0),ownReport=await report(proof.owning.r
 assert.equal(ownReport.numPassedTests,17);assert.equal(ownReport.numFailedTests,0)
 const loaded=(await bound(owning.receipt.loaded)).toString().trim().split('\n').map(line=>JSON.parse(line))
 assert.ok(loaded.length>0,'actual transform set must be nonempty')
-for(const path of ['apps/desktop/src/renderer/src/components/SessionPane.tsx','apps/desktop/src/renderer/src/components/AgentInteractionCard.tsx']){
+for(const path of ['apps/desktop/src/renderer/src/components/SessionPane.tsx','packages/client-ui/src/components/AgentInteractionCard.tsx']){
   const rows=loaded.filter(row=>row.path===path);assert.equal(rows.length,1,path);assert.equal(rows[0].sha256,proof.source[path].sha256)
 }
 assert.deepEqual(proof.mutations.map(pair=>pair.name).sort(),['detachConversation','earlyUnlock','readonly','wrongOption'])

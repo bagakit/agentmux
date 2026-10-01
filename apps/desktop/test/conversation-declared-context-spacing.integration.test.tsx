@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
@@ -9,7 +10,7 @@ import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { AgentMarkdown } from '../src/renderer/src/components/AgentMarkdown'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { api } from './api'
-import { presentError } from './error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 /** Metadata for this mounted reader, never a Session registry or body cache. */
 export function useFocusHistorySources(enabled: boolean) {

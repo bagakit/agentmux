@@ -2,7 +2,7 @@ import { ArrowLeft, Code2, Play, RefreshCw, Settings2, Square, X } from 'lucide-
 import { useContext, useLayoutEffect, useRef, useState } from 'react'
 import type { ToolkitAction, ToolkitConfirmedResult, ToolkitToolDefinition } from '@agentmux/core/control'
 import { api } from '../../lib/api'
-import { presentError } from '../../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { ToolkitIcon } from './ToolkitIcon'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'

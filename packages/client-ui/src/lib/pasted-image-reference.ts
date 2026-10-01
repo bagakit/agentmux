@@ -1,4 +1,4 @@
-import { PASTED_IMAGE_EXTENSIONS } from '../../../shared/contracts'
+import { PASTED_IMAGE_EXTENSIONS } from '../lib/pasted-images.js'
 
 /**
  * Recognise a token in conversation text that points at an image THIS app wrote to its own pasted

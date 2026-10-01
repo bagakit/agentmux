@@ -1,7 +1,8 @@
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentSessionHistoryContentPart,
@@ -14,12 +15,8 @@ import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { api } from '../src/renderer/src/lib/api'
-import {
-  UNKNOWN_SPEAKER_ID,
-  createSpeakerResolver,
-  speakerOf,
-  speakerOfUserMessage
-} from '../src/renderer/src/lib/conversation-speaker'
+import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
+import { speakerOf } from '../src/renderer/src/lib/conversation-speaker'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 

@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from 'react'
-import type { ConversationAnnotation } from '../../src/renderer/src/components/ConversationMessage'
+import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle, type ConversationAnnotationSelection } from '../../src/renderer/src/components/ConversationAnnotationNote'
 
 /** The same note owner as SessionPane; unknown headless geometry stays unknown. */

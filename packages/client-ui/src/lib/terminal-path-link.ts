@@ -7,7 +7,7 @@
  * Detection is deliberately conservative: underlining ordinary prose is worse than missing a path.
  * The crux acceptance rule — a core must contain a `/`, or carry a `:line` suffix AND at least one
  * letter — drops bare dotted words (`e.g.`, `foo.bar`, `1.2.3`, `README`) and every all-digit token
- * a `:n` would otherwise promote (`prior clock` clocks, `1.2.3:4` versions), while still catching
+ * a `:n` would otherwise promote (clock-formatted numeric tokens, `1.2.3:4` versions), while still catching
  * `README.md:3:1` and every real relative/absolute path. See the module test for the full
  * accept/reject corpus.
  */
@@ -114,10 +114,10 @@ export function detectTerminalPathLinks(
     // every bare dotted word (`e.g.`, `1.2.3`, `README`) without touching real paths.
     if (!core.includes('/') && !hasSuffix) continue
     // ...but a `:n` suffix only promotes a core that could be a FILENAME, and a core carrying no
-    // letter is a number. `prior clock` is a clock, `1.2.3:4` a version, `prior observation:5` a date — each
+    // letter is a number. a clock-formatted token is a time, `1.2.3:4` a version, a date-formatted numeric token a date — each
     // satisfies the suffix branch above with a bare numeric core and would underline as a file.
     // Timestamped log lines make this the common case, not an edge one. A directory-bearing core is
-    // exempt: `logs/2024:5` names a real place, and the `/` is the signal.
+    // exempt: `logs/<numeric-name>:5` names a real place, and the `/` is the signal.
     if (!core.includes('/') && !/[A-Za-z]/.test(core)) continue
     const resolved = resolveWorkspaceRelativePath(core, workspaceRoot, homeDir)
     if (resolved === null) continue
@@ -141,7 +141,7 @@ export function detectTerminalPathLinks(
  * `~/` is expanded against `homeDir` FIRST, then the result runs through the very same within-root
  * test an absolute path gets — because the only thing the open pipeline can open is a path inside the
  * active Workspace (`files.read` throws "Path escapes the workspace root" for anything else). So
- * `~/proj/src/x.ts` with home `homeFixture/` and root `homeFixture/proj` relativises to `src/x.ts`, while
+ * `~/proj/src/x.ts` with home `<home>` and root `<home>/proj` relativises to `src/x.ts`, while
  * `~/.claude/plugins/...` — the reported case — expands to an absolute path OUTSIDE the root and is
  * rejected, exactly as `/etc/passwd` is. Expanding then reusing the absolute branch is what keeps
  * `~/` from becoming a second, looser notion of "openable" that drifts from the absolute one.

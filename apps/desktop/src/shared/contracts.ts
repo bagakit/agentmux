@@ -1,3 +1,4 @@
+import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
@@ -1157,37 +1158,6 @@ export type BrowserPng = {
   width: number
   height: number
   byteLength: number
-}
-
-// A pasted (or captured) image is written to `<home>/.agentmux/pasted/…` and cited in the message text
-// as a path the Agent reads for itself. This is the ONE list of formats that round-trips: the paste
-// write clamps an unknown clip format to `png`, and the read IPC refuses any path whose extension is not
-// here. Both sides import THIS tuple — a second hand-copied whitelist is exactly the drift that makes
-// "the write accepted it but the read shows a broken image" appear in only half the cases. Values are
-// lowercase, no leading dot.
-export const PASTED_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'] as const
-export type PastedImageExtension = (typeof PASTED_IMAGE_EXTENSIONS)[number]
-
-/** The `<img>`-ready mime for each accepted extension. `jpg` and `jpeg` share one. */
-export const PASTED_IMAGE_MIME_TYPES: Record<PastedImageExtension, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp'
-}
-
-/** A pasted screenshot is large but bounded; anything past this is a mistake, not a screenshot. The
- *  read cap equals the write cap so nothing the paste accepts is later unreadable. */
-export const PASTED_IMAGE_MAX_BYTES = 16 * 1024 * 1024
-
-/**
- * A pasted image read back from disk as an `<img>`-ready data URI. The only consumer (`ConversationImage`)
- * drops the `dataUrl` straight into an `<img src>`; no width/height (unlike a browser screenshot these are
- * not decoded in main, and the thumbnail sizes itself with CSS).
- */
-export type PastedImage = {
-  dataUrl: string
 }
 
 export type BrowserScreenshotCapture = {

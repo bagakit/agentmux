@@ -1,6 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import type { OpenHttpLinkOrigin } from '../src/renderer/src/lib/open-destination.js'
@@ -42,7 +42,7 @@ vi.mock('../src/renderer/src/components/ActivityView.js', () => ({
 vi.mock('../src/renderer/src/components/OpenDestinationBar.js', () => ({
   OpenDestinationPopover: () => null
 }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({
   AgentInteractionCard: () => <div data-test-interaction-card />
 }))
 // 桩把 SessionPane 交下来的 tabName 俘获出来——这正是被测的那次派生的产物。

@@ -1,5 +1,5 @@
 import { createElement, useEffect } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'

@@ -1,12 +1,12 @@
 import { createElement, Fragment, isValidElement, type ReactElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   looksLikeMarkdown,
   parseAgentMarkdown,
   type InlineNode
-} from '../src/renderer/src/lib/agent-markdown.js'
+} from '@agentmux/client-ui/agent-markdown'
 
 // Inline parsing now belongs to remark, so reach it the way the renderer does: through a paragraph.
 function parseInline(source: string): InlineNode[] {
@@ -15,7 +15,7 @@ function parseInline(source: string): InlineNode[] {
   if (!first || first.kind !== 'paragraph') return []
   return first.children
 }
-import { AgentMarkdown, type LinkClickModifiers } from '../src/renderer/src/components/AgentMarkdown.js'
+import { AgentMarkdown, type LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 
 // This harness has no DOM and cannot dispatch a click. AgentMarkdown and its inner Inline/Block are
 // pure, hookless render functions, so we invoke the tree by hand and read a rendered element's onClick

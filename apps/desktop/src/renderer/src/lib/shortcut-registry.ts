@@ -1,4 +1,4 @@
-import { isImeOwnedKeyboardEvent } from './ime-composition-keyboard-event'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 // The one place every keyboard binding lives — chord, stable id, scope, and the platform bottom line,
 // each expressed exactly once. Before this, the same "which key is which action" decision was scattered
 // across four libs (workbench / terminal / quick-switch / editor-save), each with its own platform split

@@ -24,6 +24,7 @@ import { allStyleRules, allStyles } from './helpers/styles.js'
 
 const STYLES_ONLY_IN_COMMENT = /\/\*[\s\S]*?\*\//g
 const COMPONENTS_DIR = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
+const SHARED_UI_DIR = fileURLToPath(new URL('../../../packages/client-ui/src', import.meta.url))
 
 /**
  * 判据只盯 BEM 约定的 class（名字里带 `__` 或 `--`）。这不是为了压噪音，而是因为这两种记号
@@ -113,7 +114,7 @@ function libFiles(dir: string): string[] {
  */
 function libClasses(): Rendered[] {
   const out: Rendered[] = []
-  for (const file of libFiles(COMPONENTS_DIR)) {
+  for (const file of [...libFiles(COMPONENTS_DIR), ...libFiles(SHARED_UI_DIR)]) {
     const source = ts.createSourceFile(
       file,
       readFileSync(file, 'utf8'),
@@ -160,7 +161,7 @@ type Rendered = { token: string; file: string }
  */
 function renderedClasses(): Rendered[] {
   const out: Rendered[] = []
-  for (const file of tsxFiles(COMPONENTS_DIR)) {
+  for (const file of [...tsxFiles(COMPONENTS_DIR), ...tsxFiles(SHARED_UI_DIR)]) {
     const source = readFileSync(file, 'utf8')
       .replace(STYLES_ONLY_IN_COMMENT, '')
       .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
@@ -210,7 +211,7 @@ const PRESENCE_FLAG = /data-([a-z][a-z0-9-]*)\s*=\s*\{[^{}]*\?\s*''\s*:\s*undefi
 
 function presenceFlags(): PresenceFlag[] {
   const out: PresenceFlag[] = []
-  for (const file of tsxFiles(COMPONENTS_DIR)) {
+  for (const file of [...tsxFiles(COMPONENTS_DIR), ...tsxFiles(SHARED_UI_DIR)]) {
     const source = readFileSync(file, 'utf8')
       .replace(STYLES_ONLY_IN_COMMENT, '')
       .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
@@ -421,7 +422,7 @@ type PortalLayer = { classes: string[]; file: string; primitive: string }
  */
 function portalLayers(): PortalLayer[] {
   const out: PortalLayer[] = []
-  for (const file of tsxFiles(COMPONENTS_DIR)) {
+  for (const file of [...tsxFiles(COMPONENTS_DIR), ...tsxFiles(SHARED_UI_DIR)]) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const relative = file.slice(COMPONENTS_DIR.length + 1)
     const visit = (node: ts.Node): void => {

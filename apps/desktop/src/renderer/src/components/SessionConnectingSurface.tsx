@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { AgentAvatarAppearance, AgentExecutorConfig } from '../../../shared/contracts'
 import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { presentError } from '../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentAvatar } from './AgentAvatar'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 

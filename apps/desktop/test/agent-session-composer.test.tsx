@@ -1,8 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-import type { ComposerInsert, ComposerInsertionHandle } from '../src/renderer/src/lib/composer-insertion'
+import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { renderComponentBoundary } from './helpers/render-component-boundary'
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentCatalogEntry } from '@agentmux/core'
 import type { ComposerShortcut, SessionSnapshot } from '../src/shared/contracts.js'
@@ -63,8 +63,8 @@ import {
   AgentSessionComposer,
   agentComposerAvailability
 } from '../src/renderer/src/components/AgentSessionComposer.js'
-import type { AgentComposerProps, ComposerSuggestion } from '../src/renderer/src/components/AgentComposer.js'
-import { parseComposerDraft } from '../src/renderer/src/lib/composer-semantic-reference.js'
+import type { AgentComposerProps, ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
+import { parseComposerDraft } from '@agentmux/client-ui/composer-semantic-reference'
 
 // Errors cross the reportError seam as `unknown`; read them the way the store's banner does.
 function message(error: unknown): string {

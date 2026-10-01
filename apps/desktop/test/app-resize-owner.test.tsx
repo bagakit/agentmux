@@ -1,5 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_AGENT_FOCUS, type AgentFocusContext } from '../src/renderer/src/lib/agent-focus'
 

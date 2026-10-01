@@ -1,6 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // 判定本身在 activity-diff.test.ts / activity-autoscroll.test.ts 里测过了。

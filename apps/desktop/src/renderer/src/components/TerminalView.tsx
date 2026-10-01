@@ -15,11 +15,8 @@ import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
-import {
-  dismissOpenDestinationRequest,
-  parseHttpLinkUrl,
-  type OpenHttpLinkOrigin
-} from '../lib/open-destination'
+import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
+import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { useAppStore } from '../store'
 import { installTerminalOscHandlers } from '../lib/terminal-capability-replies'
 import {
@@ -29,7 +26,7 @@ import {
 import {
   isSystemArtifactPath,
   type TerminalPathLink
-} from '../lib/terminal-path-link'
+} from '@agentmux/client-ui/terminal-path-link'
 import { terminalPathLinksInBuffer, terminalPathLinkAtBufferCell } from '../lib/terminal-link-range'
 import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
@@ -94,7 +91,7 @@ import {
 } from './OpenDestinationBar'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice, TERMINAL_GAP_NOTICE } from './TerminalReplayGapNotice'
-import { errorIdentity } from '../lib/error-presentation'
+import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { terminalIdentityMenuActions } from '../lib/terminal-identity-menu'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import type { MouseTrackingMode } from '../lib/terminal-selection-mode'

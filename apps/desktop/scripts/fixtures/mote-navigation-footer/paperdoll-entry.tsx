@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { createElement, Profiler } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { agentDisplayState } from '@agentmux/core/agent-status'
 import { App } from '../../../src/renderer/src/App'

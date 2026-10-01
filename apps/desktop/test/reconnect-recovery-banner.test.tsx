@@ -1,7 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import {
@@ -48,7 +48,7 @@ vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
     <div data-test-agent-composer={disabled ? 'disabled' : 'enabled'} />
   )
 }))
-vi.mock('../src/renderer/src/components/AgentInteractionCard.js', () => ({
+vi.mock('@agentmux/client-ui/components/AgentInteractionCard', () => ({
   AgentInteractionCard: () => <div data-test-interaction-card />
 }))
 

@@ -1,6 +1,6 @@
 import { Check, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
-import { presentError } from '../../lib/error-presentation'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 export function useSettingsSave() {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')

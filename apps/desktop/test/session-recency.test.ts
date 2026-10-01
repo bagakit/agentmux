@@ -4,7 +4,7 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { AgentTimelineItem, SessionSnapshot } from '../src/shared/contracts.js'
 import { sessionRecentActivity } from '../src/renderer/src/lib/session-recency.js'
 import { projectActivityRow } from '../src/renderer/src/lib/project-activity-row.js'
-import { MAX_STEP_SUMMARY_LENGTH } from '../src/renderer/src/lib/activity-step-summary.js'
+import { MAX_STEP_SUMMARY_LENGTH } from '@agentmux/client-ui/activity-step-summary'
 
 // 用户问的是「这个 Agent 最近在干什么」。答案有一条严格优先级阶梯，每一级都盖过它下面那级——
 // 一级一条 case 只证得了「这一级会出现」，证不了顺序，所以每条 case 都要让上一级也**在场**却被压下去。

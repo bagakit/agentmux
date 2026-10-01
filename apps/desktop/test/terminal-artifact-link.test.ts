@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
-import { isSystemArtifactPath } from '../src/renderer/src/lib/terminal-path-link'
+import { isSystemArtifactPath } from '@agentmux/client-ui/terminal-path-link'
 import { terminalPathLinkAtBufferCell } from '../src/renderer/src/lib/terminal-link-range'
 import { Terminal } from '@xterm/xterm'
 import { openTerminalFileLink } from '../src/renderer/src/lib/terminal-file-action'

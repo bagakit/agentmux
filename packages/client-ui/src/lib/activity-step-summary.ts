@@ -21,9 +21,9 @@ export const MAX_STEP_SUMMARY_LENGTH = 48
  *
  * 路径的识别位在**尾部**。而工具收到的路径是绝对路径（Read/Edit/Write 的入参按约定就是绝对路径，
  * 见 hook-normalizer 原样透传 `tool_input`），于是同一个仓库里每条路径的**前缀完全一样**——保留头部
- * 等于把 48 格全花在 `homeFixture/<user>fixtureRoot/proj/.../<repo>/` 上，两个不同的文件截出来一模一样。实测本仓：
- *   `Edit homeFixture/lib/session-recency.ts`      → `Edit home/proj/priv/bagakit/agentmu…`
- *   `Edit homeFixture/lib/activity-step-summary.ts`→ `Edit home/proj/priv/bagakit/agentmu…`
+ * 等于把 48 格全花在 the shared home/project prefix 上，两个不同的文件截出来一模一样。实测本仓：
+ *   `Edit <workspace>/lib/session-recency.ts`      → `Edit home/proj/priv/bagakit/agentmu…`
+ *   `Edit <workspace>/lib/activity-step-summary.ts`→ `Edit home/proj/priv/bagakit/agentmu…`
  * 两条**全等**。这条摘要存在的唯一理由就是「不展开也认得出是哪个」，保留头部时它一个字节的识别力
  * 都不提供，比没有摘要更坏——它看起来是答案。
  *
@@ -41,7 +41,7 @@ const TAIL_IDENTIFIED_FIELDS: ReadonlySet<string> = new Set(['file_path', 'path'
 /**
  * 路径先**缩短**，再考虑截断——截断是有损的，缩短不是。
  *
- * 这两步换回来的格子实测很大。语料：本仓 `git ls-files '*.ts' '*.tsx'` 的 992 条（prior observation），
+ * 这两步换回来的格子实测很大。语料：本仓 `git ls-files '*.ts' '*.tsx'` 的 992 条（路径摘要审查样本），
  * 每条拼上仓根当作工具真正收到的绝对路径，与 48 格上界比：
  *
  *   | | 完整显示 | 平均码元 |
@@ -50,7 +50,7 @@ const TAIL_IDENTIFIED_FIELDS: ReadonlySet<string> = new Set(['file_path', 'path'
  *   | 剥掉仓根 | **49%** | 49 |
  *
  * 省下的正是**零识别力**的那一段——同一个仓库里每条路径都带着同样的
- * `homeFixture/<user>fixtureRoot/proj/.../<repo>/`。重新量：
+ * the shared home/project prefix。重新量：
  * `git ls-files '*.ts' '*.tsx' | awk '{print length($0)}' | sort -n | uniq -c`（相对侧）。
  *
  * 上一版这里写的是「400 条路径 / 31% / 97 → 53」。那个 400 没说是哪 400 条——既不是 992 的全集，
@@ -62,7 +62,7 @@ const TAIL_IDENTIFIED_FIELDS: ReadonlySet<string> = new Set(['file_path', 'path'
  * - **家目录 → `~`。** 仓外的路径（工具偶尔会读 `~/.claude/settings.json` 这类）省 15 格。
  *   受益窗口只有 15 格宽，所以它是顺手的第二条，不是主力。
  *
- * 只在**开头**匹配，且仓根要求后面跟 `/`：`fixtureRoot/repo-backup/x` 不该因为 `fixtureRoot/repo` 是仓根就被剥成
+ * 只在**开头**匹配，且仓根要求后面跟 `/`：`<workspace>-backup/x` 不该因为 `<workspace>` 是仓根就被剥成
  * `-backup/x`。匹配不上就原样返回——缩短不了就是缩短不了，不猜。
  *
  * 放在 clamp **之前**：顺序反过来就白做了，截断已经把尾巴切掉，再缩短前缀也补不回识别位。
@@ -79,7 +79,7 @@ function shortenPath(value: string, workspaceRoot: string | undefined): string {
  * 不同（`file_path` 与 `path`），但这仍是**声明**而非猜测：候选是写死的，不是从 JSON 里搜出来的。
  *
  * 为什么是一张逐工具的表，而不是一条通用规则？因为一个字段名的**角色是逐工具的，不通用**——实测
- * 7.76 万次真实调用（本机 ~/.claude/projects 全部 transcript，prior observation），任何通用谓词都被真实载荷打脸：
+ * 7.76 万次真实调用（本机 ~/.claude/projects 全部 transcript，摘要审查样本），任何通用谓词都被真实载荷打脸：
  * - 「取第一个短字符串」：SendMessage 的 `to` 是 agent id（`ad10e88e542eac233`），Artifact 的
  *   `favicon` 是一个 emoji——都会取到会误导的东西。而且**非确定**：SendMessage 真实载荷的前两个键
  *   实测出现过 `to,summary` / `message,summary` / `to,message` / `message,to` / `summary,to` 五种序，
@@ -108,7 +108,7 @@ const SUMMARY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   taskcreate: ['subject'], // 不是 description：那是详情 blob，subject 才是标题
   taskupdate: ['status', 'subject'], // status 是状态动词（taskId 单独无意义）；无 status 时退回 subject 标题——
   // 实测 1876 次里 208 次没有 status，其中 33 次带着真标题 subject，取它比裸名强
-  // （语料：本机 ~/.claude/projects 全部 transcript，prior observation 当日计数；数字会随使用增长，
+  // （语料：本机 ~/.claude/projects 全部 transcript，摘要审查样本计数；数字会随使用增长，
   //  钉住的是「无 status 的调用真实存在且其中一部分带 subject」这个形状，不是具体的数）
   sendmessage: ['summary'], // 不是 to（agent id）/ message（~1KB）
   workflow: ['description'], // 不是 script：源码，实测最长 46KB

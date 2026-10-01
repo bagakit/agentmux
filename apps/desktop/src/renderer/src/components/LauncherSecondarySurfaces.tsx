@@ -3,7 +3,7 @@ import type { SessionSnapshot, TerminalThemeId, WorkspaceRecord } from '../../..
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { useAppStore } from '../store'
 import { EMPTY_LAUNCHER_DRAFT, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
-import { InlineComposer } from './InlineComposer'
+import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
 import { useEffect, useRef, useState } from 'react'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { TerminalView } from './TerminalView'
