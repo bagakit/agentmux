@@ -12,6 +12,7 @@ import { MoteIcon } from './MoteIcon'
 import { ProjectIcon } from './ProjectIcon'
 import { MoteFace, type MoteExpression } from './MoteFace'
 import { MoteIdentityMotion, type MoteIdentityMotionProps } from './MoteIdentityMotion'
+import { moteExpression } from '../lib/mote-expression'
 
 function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: SpaceIconTarget['kind']; workspaceId: string; topicId: string; choice: MoteAvatarRef; objectKey: string }) {
   const [image, setImage] = useState<{ identity: string; url: string } | null>(null)
@@ -43,7 +44,9 @@ type SpaceObjectIconProps = {
   lastActivityAt?: number | null | undefined; visible?: boolean | undefined; topicGlyph?: boolean
 } & MoteIdentityMotionProps
 export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectIconProps) {
-  return props.kind === 'mote' && (isMoteFace(props.manualIcon) || props.moteSessionId || props.moteAvailability && props.moteAvailability !== 'static') ? <MoteIdentityMotion moteSessionId={props.moteSessionId} moteHostId={props.moteHostId} moteAvailability={props.moteAvailability} visible={props.visible}>
+  if (props.kind === 'mote' && props.visible === false && !props.moteSessionId) return <SpaceObjectIconContents {...props} expression={moteExpression(undefined, props.moteAvailability ?? 'static', undefined)} />
+  return props.kind === 'mote' ? <MoteIdentityMotion moteSessionId={props.moteSessionId} moteHostId={props.moteHostId} moteAvailability={props.moteAvailability} visible={props.visible} motionKey={props.avatarObjectKey}
+    className={!isMoteFace(props.manualIcon) && !props.moteSessionId && (!props.moteAvailability || props.moteAvailability === 'static') ? 'project-rail-row__icon' : undefined}>
     {expression => <SpaceObjectIconContents {...props} expression={expression} />}
   </MoteIdentityMotion> : <SpaceObjectIconContents {...props} />
 })

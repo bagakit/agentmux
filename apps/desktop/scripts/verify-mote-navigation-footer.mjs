@@ -14,6 +14,7 @@ const args = process.argv.slice(2)
 const avatarRefinement = process.env.AGENTMUX_AVATAR_REFINEMENT === '1'
 const avatarFromChooser = process.env.AGENTMUX_AVATAR_FROM_CHOOSER === '1'
 const avatarColor = process.env.AGENTMUX_MOTE_AVATAR_COLOR === '1'
+const moteAmbient = process.env.AGENTMUX_MOTE_AMBIENT === '1'
 assert.ok(!avatarFromChooser || avatarRefinement, 'Joint chooser proof uses the background-only avatar refinement mode')
 let selectedFrames = null, candidateFile = null, footerOnly = false, floatingResize = false, moteIdentity = false, moteArchive = false, motePaperdoll = false, reuseRenderer = null
 if (args[0] === '--reuse') {
@@ -41,6 +42,7 @@ if (args.length) {
     'settings-bridge-original-mote-input-unsent', 'settings-retained-circle-entry-focus']
 }
 assert.ok(!avatarColor || motePaperdoll && avatarRefinement, 'Color proof extends the maintained background-only paperdoll driver')
+assert.ok(!moteAmbient || motePaperdoll && avatarRefinement, 'Ambient proof uses the maintained background-only paperdoll driver and natural elapsed time')
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-presentation-'))
 const evidence = join(repository, '.tmp/mote-navigation-footer', ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -316,7 +318,7 @@ try {
       const phaseLogs = []
       const exit = await runProbeProcess(require('electron'), [join(fixture, motePaperdoll ? 'paperdoll-main.cjs' : 'archive-main.cjs'),
         join(outDir, motePaperdoll ? 'paperdoll.html' : 'archive.html'), privateRoot, destination, phase, ...(avatarRefinement ? ['refinement', ...(avatarFromChooser ? ['from-chooser'] : [])] : [])], {
-        temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 60000, onLine: line => phaseLogs.push(line)
+        temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: moteAmbient ? 120000 : 60000, onLine: line => phaseLogs.push(line)
       })
       await writeFile(join(destination, 'renderer.log'), phaseLogs.join('\n'))
       const child = JSON.parse(await readFile(join(destination, 'renderer.json'), 'utf8'))

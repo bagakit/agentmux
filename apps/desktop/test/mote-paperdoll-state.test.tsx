@@ -97,11 +97,12 @@ it.each(['done', 'waiting', 'blocked', 'error', 'unknown'] as const)('accepted %
   await event({ type: 'core', hostId: 'local', event: { type: 'agent-status', agentSessionId: defaultAgent.id, state: 'working', evidence: { source: 'native-hook', run: defaultAgent.control.run, observedAt: 210 } } })
   expect(face().dataset.moteExpression).toBe('thinking')
 })
-it('disconnection stops motion without erasing history or blocking the original input', async () => {
+it('disconnection stops working/tool motion while allowing neutral presence without erasing history or blocking the original input', async () => {
   await app.mount(); await start()
   const input = app.panel().querySelector<HTMLElement>('[contenteditable="true"]')
   await event({ type: 'core', hostId: 'local', event: { type: 'connection-state', state: 'lost', evidence: { source: 'run-process', observedAt: 200 } } })
-  expect(face().dataset.moteExpression).toBe('unknown'); expect(face().dataset.moteMotion).toBe('off')
+  expect(face().dataset.moteExpression).toBe('unknown'); expect(face().dataset.moteMotion).toBe('on')
+  expect(face().querySelector('.mote-face__mouth')).not.toBeNull()
   expect(useAppStore.getState().timelines[defaultAgent.id]!.items.map(item => item.id)).toEqual(['tool-now'])
   expect(useAppStore.getState().timelines[defaultAgent.id]!.liveTool).toBeUndefined()
   expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
