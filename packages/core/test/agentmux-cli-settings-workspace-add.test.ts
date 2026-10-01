@@ -1,4 +1,6 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
@@ -14,7 +16,7 @@ import { AgentMuxError } from '../src/errors.js'
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'workspace-add-proof' }
 const operation = 'settings.workspaces.add'
-const command = ['settings', 'workspaces', 'add']
+const command = ['settings', 'workspaces', 'register']
 const committed: AgentMuxControlSettingsResourceItem = { id: 'owner-assigned-workspace', value: {
   hostId: 'owner-host', path: 'owner literal path ', name: 'Owner-selected name', kind: 'future-host-kind',
   repoPath: '$LITERAL/repository', branch: '--help', hostFact: { retained: true }
@@ -23,15 +25,15 @@ const committed: AgentMuxControlSettingsResourceItem = { id: 'owner-assigned-wor
 describe('Workspace add built CLI consumes the public owner without a caller or View', () => {
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[], changed: boolean, ownerError: AgentMuxError | undefined
   beforeEach(async () => {
-    root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-workspace-add-cli-"))
+    root = await mkdtemp(fixturePath("tmp/amux-workspace-add-cli-"))
     seen = []; changed = true; ownerError = undefined
     // This is an opaque host fixture, not a Desktop registration or location implementation.
-    server = new AgentMuxControlServer({ async execute(request): Promise<AgentMuxControlResult> {
+    server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
       if (request.operation !== operation) throw new Error(`Unexpected ${request.operation}`)
       if (ownerError) throw ownerError
       return { operation, item: structuredClone(committed), changed }
-    } }, join(root, 'control.sock'))
+    } })
     await server.start()
   })
   afterEach(async () => { await server?.stop(); if (root) await rm(root, { recursive: true }) })
@@ -39,7 +41,7 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
   async function run(args: readonly string[], input?: string | Buffer) {
     return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [cli, ...args], { cwd: root,
-        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined },
+        env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined },
         stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       const timer = setTimeout(() => { child.kill(); reject(new Error('Workspace add CLI did not finish.')) }, 5_000)
@@ -65,14 +67,14 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
   }
   function success(output: { code: number; stdout: string; stderr: string }) {
     expect(output.code, output.stderr).toBe(0); expect(output.stderr).toBe('')
-    const receipt = parseAgentMuxControlReceipt(JSON.parse(output.stdout))
-    expect(receipt).toMatchObject({ ok: true, operation })
-    if (!receipt.ok || receipt.operation !== operation) throw new Error('Expected a workspace add receipt.')
+    const receipt = objectCliReceipt(JSON.parse(output.stdout))
+    expect(receipt).toMatchObject({ ok: true, operation: 'settings.workspaces.register' })
+    if (!receipt.ok || receipt.operation !== 'settings.workspaces.register') throw new Error('Expected a workspace add receipt.')
     return receipt
   }
   function rejected(output: { code: number; stdout: string; stderr: string }, code = 'INVALID_CLI_ARGUMENT') {
     expect(output.code).toBe(1); expect(output.stdout).toBe('')
-    expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation, error: { code } })
+    expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation: 'settings.workspaces.register', error: { code } })
   }
 
   it.each(['file', 'stdin'])('forwards a literal field object through %s and returns the actual owner item', async carrier => {
@@ -122,7 +124,7 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
   })
 
   it.each([
-    ['settings', 'workspaces'], command, [...command, 'positional-folder'], [...command, '--input'],
+    command, [...command, 'positional-folder'], [...command, '--input'],
     [...command, '--input', '-', 'extra'], [...command, '--input', '-', '--help'],
     [...command, '--input', '-', '--input', '-'], [...command, '--input=-'],
     ['settings', 'workspaces', 'list'], ['settings', 'workspaces', 'get', 'id'],
@@ -135,7 +137,7 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
   })
 
   it.each([null, false, 4, 'literal', []])('requires a pure JSON field object rather than %j', async value => {
-    rejected(await run([...command, '--input', await file(value)]))
+    rejected(await run([...command, '--input', await file(value)]), 'INVALID_CONTROL_REQUEST')
     expect(seen).toEqual([])
   })
 
@@ -156,12 +158,12 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
     expect(seen).toEqual([])
   })
 
-  it.each(['file', 'stdin'])('bounds the complete CLI envelope for %s as an argument error', async carrier => {
+  it.each(['file', 'stdin'])('bounds the complete RPC frame for %s before its owner', async carrier => {
     const input = JSON.stringify({ path: 'x'.repeat(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES - 40) })
     expect(Buffer.byteLength(input)).toBeLessThan(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES)
     const path = carrier === 'stdin' ? '-' : 'frame.json'
     if (carrier === 'file') await writeFile(join(root, path), input)
-    rejected(await run([...command, '--input', path], carrier === 'stdin' ? input : undefined))
+    rejected(await run([...command, '--input', path], carrier === 'stdin' ? input : undefined), 'CONTROL_PROTOCOL_ERROR')
     expect(seen).toEqual([])
   })
 
@@ -169,10 +171,10 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
     await server.stop()
     const output = await run(args)
     expect(output.code).toBe(0); expect(output.stderr).toBe('')
-    expect(output.stdout).toContain('settings workspaces add --input <file|->')
-    expect(output.stdout).toContain('including trailing spaces'); expect(output.stdout).toContain('Main trims the optional name')
+    expect(output.stdout).toContain('settings workspaces register --input <file|->')
+    expect(output.stdout).toContain('including trailing spaces'); expect(output.stdout).toContain('optional name')
     expect(output.stdout).toContain('changed=false'); expect(output.stdout).toContain('CONTROL_UNAVAILABLE')
-    expect(output.stdout).toContain('No managed Agent caller or open View is required')
+    expect(output.stdout).toContain('current Unix user')
     expect(seen).toEqual([])
   })
 
@@ -181,7 +183,7 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
     for (const args of [['settings', '--help'], ['--skill']]) {
       const output = await run(args)
       expect(output.code).toBe(0); expect(output.stderr).toBe('')
-      expect(output.stdout).toContain('settings workspaces add --input <file|->')
+      expect(output.stdout).toContain('settings workspaces register --input <file|->')
     }
     expect(seen).toEqual([])
   })
@@ -199,8 +201,7 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
     {}, { input: null }, { input: [] }, { input: false },
     ...['caller', 'path', 'hostId', 'value', 'expected', 'confirm', 'launch'].map(field => ({ input: {}, [field]: 'extra' }))
   ])('rejects a malformed public request %j before the owner', async fields => {
-    expect(parseAgentMuxControlReceipt(await raw({ ...base, operation, ...fields })))
-      .toMatchObject({ ok: false, operation, error: { code: 'INVALID_CONTROL_REQUEST' } })
+    expect(() => parseAgentMuxControlRequest({ ...base, operation, ...fields })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
     expect(seen).toEqual([])
   })
 })

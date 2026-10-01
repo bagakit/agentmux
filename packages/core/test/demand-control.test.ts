@@ -1,10 +1,11 @@
 import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { openDemandStore, type Demand } from '@agentmux/demand'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest, requestAgentMuxControl } from '../src/control-host.js'
+import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest, connectAgentMuxRpc } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlResult, type AgentMuxDemand } from '../src/control.js'
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'task-request' }
@@ -59,7 +60,7 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
   const grounding = { alignmentRevision: 1, summary: 'Restart inspected', checks: [{ criterionId: 'restore', outcome: 'met', evidence: ['verification.log:12'], note: '' }] }
   const project = (demand: Demand): AgentMuxDemand => {
     const { executorId, activities: _activities, decisions: _decisions, ...facts } = demand
-    return { ...facts, source: 'default-topic', assigneeExecutorId: executorId }
+    return { ...facts, activityLog: demand.activities.map(activity => activity.message), source: 'default-topic', assigneeExecutorId: executorId }
   }
 
   it('roundtrips nonempty owner proposals, revisions and acknowledgements through the socket and cross-process CLI', async () => {
@@ -67,7 +68,7 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
     const store = openDemandStore({ root: join(root, 'demands') })
     await store.create({ id: 'goal', title: 'Restore', description: 'User request', sessionIds: ['live-session'] })
     const seen: string[] = []
-    const server = new AgentMuxControlServer({ async execute(request): Promise<AgentMuxControlResult> {
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request.operation)
       if (request.operation === 'demand.update') {
         const { assigneeExecutorId, ...patch } = request.patch
@@ -77,37 +78,38 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
       if (request.operation === 'demand.show') return { operation: request.operation, demand: project((await store.get(request.demandId))!) }
       if (request.operation === 'demand.list') return { operation: request.operation, demands: (await store.list()).map(project) }
       throw new Error(`Unexpected operation ${request.operation}`)
-    } }, join(root, 'control.sock'))
+    } })
     await server.start()
     const run = async (...args: string[]) => await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
-      const child = spawn(process.execPath, [new URL('../bin/agentmux', import.meta.url).pathname, ...args], { cwd: root, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined }, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(process.execPath, [new URL('../bin/agentmux', import.meta.url).pathname, ...args], { cwd: root, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
       child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
       child.once('error', reject); child.once('close', code => resolve({ code: code ?? -1, stdout, stderr }))
     })
     try {
-      const update = await run('demand', 'update', '--demand', 'goal', '--alignment', JSON.stringify(proposal))
+      const update = await run('goal', 'update', '--goal', 'goal', '--alignment', JSON.stringify(proposal))
       expect(update.code, update.stderr).toBe(0)
-      expect(JSON.parse(update.stdout).result.demand.alignment).toEqual({ ...proposal, revision: 1, confirmedAt: null })
+      expect(JSON.parse(update.stdout).result.goal.alignment).toEqual({ ...proposal, revision: 1, confirmedAt: null })
       await store.confirmAlignment('goal', 1)
-      const grounded = await run('demand', 'update', '--demand', 'goal', '--grounding', JSON.stringify(grounding))
+      const grounded = await run('goal', 'update', '--goal', 'goal', '--grounding', JSON.stringify(grounding))
       expect(grounded.code, grounded.stderr).toBe(0)
-      expect(JSON.parse(grounded.stdout).result.demand.grounding.checks).toEqual(grounding.checks)
+      expect(JSON.parse(grounded.stdout).result.goal.grounding.checks).toEqual(grounding.checks)
       await store.acceptGrounding('goal', 1, (await store.get('goal'))!.grounding!.submissionId)
       const facts = project((await store.get('goal'))!)
-      const shown = await requestAgentMuxControl({ ...base, operation: 'demand.show', demandId: 'goal' }, server.path)
-      expect(shown.result).toEqual({ demand: facts })
-      const listed = await run('demand', 'list')
+      const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+      try { const { parentDemandId, ...publicFacts } = facts; expect(await rpc.call('goal.inspect', { goalId: 'goal' })).toEqual({ goal: { ...publicFacts, parentGoalId: parentDemandId } }) } finally { await rpc.dispose() }
+      const listed = await run('goal', 'ls')
       expect(listed.code, listed.stderr).toBe(0)
-      expect(JSON.parse(listed.stdout).result.demands).toEqual([facts])
+      const { parentDemandId, ...publicFacts } = facts
+      expect(JSON.parse(listed.stdout).result.goals).toEqual([{ ...publicFacts, parentGoalId: parentDemandId }])
       expect(facts.alignment!.criteria).toHaveLength(1)
       expect(facts.grounding!.checks).toHaveLength(1)
       expect(facts.alignment!.confirmedAt).toBeGreaterThan(0)
       expect(facts.grounding!.acceptedAt).toBeGreaterThan(0)
       expect(seen).toEqual(['demand.update', 'demand.update', 'demand.show', 'demand.list'])
       const before = await store.snapshot()
-      const forged = await run('demand', 'update', '--demand', 'goal', '--grounding', JSON.stringify({ ...grounding, acceptedAt: 1 }))
+      const forged = await run('goal', 'update', '--goal', 'goal', '--grounding', JSON.stringify({ ...grounding, acceptedAt: 1 }))
       expect(forged.code).toBe(1)
       expect(await store.snapshot()).toEqual(before)
       expect(seen).toHaveLength(4)

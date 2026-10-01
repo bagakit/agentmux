@@ -1,4 +1,6 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -15,33 +17,33 @@ const seen: AgentMuxControlRequest[] = []
 // Client-owned JSON: Core has no Desktop Host schema or connection defaults.
 const saved = { id: '--help', connection: 'literal current route' }
 beforeEach(async () => {
-  root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-hosts-cli-")); seen.splice(0)
-  server = new AgentMuxControlServer({ async execute(request) {
+  root = await mkdtemp(fixturePath("tmp/amux-hosts-cli-")); seen.splice(0)
+  server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request) {
     seen.push(request)
     if (request.operation === 'settings.hosts.list') return { operation: request.operation, hosts: [saved] }
     if (request.operation === 'settings.hosts.test') return { operation: request.operation,
       input: request.input ?? { ...saved, id: request.id }, outcome: 'unsupported', detail: 'This connection is not supported.' }
     throw new Error(`Unexpected operation ${request.operation}`)
-  } }, join(root, 'control.sock'))
+  } })
   await server.start()
 })
 afterEach(async () => { await server?.stop(); if (root) await rm(root, { recursive: true }) })
 
 it('discovers Host read and Test in the built skill without losing project registration', async () => {
   const result = await exec(process.execPath, [cli, '--skill'], {
-    timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: join(root, 'absent-owner'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined }
+    timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: join(root, 'absent-owner'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
   })
   expect(result.stdout.length).toBeGreaterThan(0)
-  expect(result.stdout).toContain('agentmux settings hosts list')
+  expect(result.stdout).toContain('agentmux settings hosts ls')
   expect(result.stdout).toContain('agentmux settings hosts test <id>')
-  expect(result.stdout).toContain('agentmux settings workspaces add --input <file|->')
+  expect(result.stdout).toContain('agentmux settings workspaces register --input <file|->')
   expect(seen).toEqual([])
 })
 
 async function run(args: string[], input?: string | Buffer, directory = root) {
   try {
     const pending = exec(process.execPath, [cli, 'settings', 'hosts', ...args], {
-      timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined }
+      timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
     })
     if (input !== undefined) pending.child.stdin!.end(input)
     return { code: 0, ...await pending }
@@ -49,7 +51,7 @@ async function run(args: string[], input?: string | Buffer, directory = root) {
 }
 
 it('built public CLI reaches Control without a View and treats special saved IDs as data', async () => {
-  const list = await run(['list']); expect(list.code).toBe(0)
+  const list = await run(['ls']); expect(list.code).toBe(0)
   expect(JSON.parse(list.stdout).result.hosts).toEqual([saved])
   for (const id of ['--help', '--input', 'literal host', '  ']) {
     const test = await run(['test', id]); expect(test.code).toBe(0)
@@ -76,7 +78,7 @@ it('documents explicit Test without a live owner, while ordinary list and Test s
   expect(help.code).toBe(0); expect(help.stdout).toContain('settings hosts test <id>')
   expect(help.stdout).toContain('settings hosts test --input <file|->')
   expect(help.stdout).toContain('check-failed'); expect(help.stdout).toContain('Exit 0')
-  for (const args of [['list'], ['test', 'saved'], ['test', '--input', '-']]) {
+  for (const args of [['ls'], ['test', 'saved'], ['test', '--input', '-']]) {
     const result = await run(args, args.includes('-') ? '{}' : undefined, offline)
     expect(result.code).not.toBe(0); expect(JSON.parse(result.stderr).error.code).toBe('CONTROL_UNAVAILABLE')
   }
@@ -89,7 +91,7 @@ it('draft file carries bounded literal JSON and malformed/mixed modes never reac
   const result = await run(['test', '--input', path]); expect(result.code).toBe(0)
   expect(JSON.parse(result.stdout).result.input).toEqual(input)
   const count = seen.length
-  for (const args of [['test'], ['test', 'saved', '--input', path], ['test', '--input', path, '--input', path], ['list', 'extra']]) {
+  for (const args of [['test'], ['test', 'saved', '--input', path], ['test', '--input', path, '--input', path], ['ls', 'extra']]) {
     expect((await run(args)).code).not.toBe(0)
   }
   await writeFile(path, Buffer.from([0xc3, 0x28])); expect((await run(['test', '--input', path])).code).not.toBe(0)
@@ -101,7 +103,7 @@ it('strict public envelope rejects ambiguous input and preserves captured diagno
   for (const fields of [{}, { id: 'saved', input: {} }, { input: [] }, { input: { nested: undefined } }, { id: 'saved', path: 'x' }]) {
     expect(() => parseAgentMuxControlRequest({ ...base, ...fields })).toThrow()
   }
-  expect(await parseSettingsCommand(['hosts', 'test', '--input'])).toEqual({ operation: 'settings.hosts.test', id: '--input' })
+  expect(await parseSettingsCommand(['hosts', 'test', '--input'])).toEqual({ method: 'settings.hosts.test', params: { id: '--input' } })
   const receipt = { ...base, ok: true, result: { input: saved, outcome: 'check-failed', detail: 'Facts could not be read.' } }
   expect(parseAgentMuxControlReceipt(receipt)).toEqual(receipt)
   expect(() => parseAgentMuxControlReceipt({ ...receipt, result: { ...receipt.result, outcome: 'ready', extra: true } })).toThrow()

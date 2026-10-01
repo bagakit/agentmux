@@ -1333,6 +1333,23 @@ export class AgentMuxClient {
     return this.registry.list().map(cloneSession)
   }
 
+  /** Current durable identities, without replacing the active registry or probing Runs. */
+  async readAgentSessions(): Promise<AgentMuxAgentSession[]> {
+    return (await loadAgentSessions(this.store)).map(cloneSession)
+  }
+
+  /** Durable capability validation for ingress; a long-lived client cannot cache authorization. */
+  async authorizeRetainedAgentCaller(capability: string, callerAgentSessionId: string): Promise<AgentMuxAgentSession> {
+    const current = await this.currentMessageReader(callerAgentSessionId)
+    this.resolveMessageAuthor(capability, callerAgentSessionId, current)
+    return cloneSession(current)
+  }
+
+  /** The durable message owner shared by SDK delivery and public service ingress. */
+  agentMessageQueuePath(): string {
+    return this.messageQueue.path
+  }
+
   agentSession(agentSessionId: string): AgentMuxAgentSession {
     return cloneSession(this.registry.get(agentSessionId))
   }
@@ -2451,6 +2468,49 @@ export class AgentMuxClient {
         run: this.projectRun(attached.run, session),
       }
     }
+  }
+
+  /** Observe one Agent's raw bytes without replacing the client host's visible Attachment. */
+  async observeAgentOutput(agentSessionId: string, afterByte: number,
+    listener: (event: AgentMuxClientEvent) => void): Promise<AgentMuxAgentAttachment & { close(): Promise<void> }> {
+    this.requireConnected()
+    const session = this.requireAgentSession(agentSessionId)
+    const publisher = new AgentMuxClientEventPublisher()
+    publisher.onEvent(listener)
+    const off = this.publisher.onStatusEvent(event => {
+      if (event.type === 'agent-error' && event.evidence?.run?.runId === session.run.runId) publisher.publish(event)
+      else if (event.type === 'connection-state' && event.state !== 'restored') publisher.publish({
+        type: 'agent-error', agentSessionId, code: 'CONTROL_UNAVAILABLE',
+        message: 'This output reader lost its Runtime connection. Reconnect using the original byte cursor.',
+        evidence: { source: 'run-process', observedAt: Date.now(), run: session.run }
+      })
+    })
+    let closed = false
+    let observation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | undefined
+    const close = async () => { if (closed) return; closed = true; off(); publisher.dispose(); await observation?.close() }
+    try {
+      observation = await this.kernel.observeOutput(session.run.runId, afterByte, event => {
+        if (closed) return
+        if (event.type === 'data') publisher.publishRunEvent(event, cloneSession(session))
+        else if (event.type === 'exit') publisher.publish({
+          type: 'process-state', agentSessionId, run: session.run, state: event.state.type,
+          pid: observation?.run.pid ?? null,
+          ...(event.state.type === 'exited' ? { exitCode: event.state.code,
+            ...(event.state.signal === null ? {} : { exitSignal: event.state.signal }) } : {}),
+          evidence: { source: 'run-process', observedAt: event.observedAt, run: session.run }
+        })
+        else if (event.type === 'error' || event.type === 'gap') publisher.publish({
+          type: 'agent-error', agentSessionId, code: event.type === 'error' ? event.error.code : 'OUTPUT_GAP',
+          message: event.type === 'error' ? event.error.message : 'This reader missed a continuous output range. Reconnect from its original cursor.',
+          evidence: { source: 'terminal-output', observedAt: Date.now(), run: session.run }
+        })
+      })
+      if (this.requireAgentSession(agentSessionId).run.runId !== session.run.runId) throw new AgentMuxError(
+        'Agent Session changed while the output reader was being established.', 'STALE_AGENT_SESSION_BINDING')
+      this.assertAgentRun(session, observation.run)
+      return { session: cloneSession(session), attachment: { ...observation,
+        run: this.projectRun(observation.run, session) }, close }
+    } catch (error) { await close(); throw error }
   }
 
   /**

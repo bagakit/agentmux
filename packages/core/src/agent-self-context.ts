@@ -1,6 +1,8 @@
 import type { AgentMuxInspectedRegion } from './control.js'
 import { AgentMuxError } from './errors.js'
 
+export const AGENTMUX_SELF_CONTEXT_VERB = 'whoami' as const
+
 /**
  * 启动定向握手（whoami）里，坐标与能力如何从既有投影拼出——判定层放这里，让每一条都能被直接断言。
  *

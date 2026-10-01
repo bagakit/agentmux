@@ -44,7 +44,7 @@ Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTermin
 
 `refreshRunAttachment(run, afterByte, view, operationId?)` 沿同一个 retained owner 重开该 Client 对原 Run 的观察连接：先打开并核对 snapshot，再替换 live pump；打开失败保原 owner，不停止 Run，也不发送 Input。它与只读 `readRunReplay` 的结果范围不同。刷新直接产生的状态投影携带通用 `observationOrigin`（精确 Run 与 operation），仍是事实更新，不构成新的输入执行意图；独立 Hook、重连及 live output 不带该来源。实际新 attachment 只确认观察连接建立，不是 Run 活性或 Input 送达回执。
 
-Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `output` 与 `output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的「ordered bytes 的公开传输边界」。
+Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `agent output` 与 `agent output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的「ordered bytes 的公开传输边界」。
 
 Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live 和 complete stubborn-tree Stop。源码与历史通过记录不代签当前候选；oracle 和证据范围见[测试策略](../../docs/testing/strategy.md)。
 
@@ -110,8 +110,29 @@ console.log(session.agentSessionId, creation.initialPrompt)
 
 空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的生命周期与持久布局由 Client 持有，实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
 
-Packed consumer 已覆盖 Core API 与 `agentmux list/status/send/interrupt/attach/resume/stop` 的真实 Codex 生命周期。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
+Agent 生命周期通过公开 Core API 和 `agentmux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
 
 浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。只需要合并 Session Timeline snapshot 与 committed revision 时，从 `@agentmux/core/timeline` 导入。结构化回答的可用性判断从 `@agentmux/core/agent-interaction-state` 导入。这些子路径都不会加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
 
 `client.sessionTimeline(agentSessionId)` 返回 `{ agentSessionId, revision, items }`。Timeline 事件也带 revision；Core 一定先保存，再发布事件。Store 是 revision 的唯一 owner，只有内容真的变化才加一，完全相同的重试不会改文件，也不会再次发事件。消费者先读取 snapshot，再按 revision 接事件；遇到断号就重新读取 snapshot，不要自己猜缺失内容。流式更新提交当前完整 content，不提交字符串 delta。
+
+## 公共 JSON-RPC 服务
+
+CLI 是 typed RPC client：解析参数、调用服务、输出回执。`AgentMuxRpcService` 持有统一的业务入口，复用 Core Client 与宿主提供的配置、布局、文件和 Toolkit owner。`AgentMuxControlServer` 将同一个入口暴露为 JSON-RPC 2.0；Unix socket 和 SSH stdio 使用逐行 JSON，HTTP 请求可用 SSE 承载持续观察。宿主未注册的能力返回明确的 unavailable，不另造桌面或 Runtime。
+
+```ts
+import { AgentMuxControlServer, connectAgentMuxRpc, connectLocalAgentMux } from '@agentmux/core'
+
+const core = await connectLocalAgentMux()
+const server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client: core }] })
+await server.start()
+const rpc = await connectAgentMuxRpc()
+const sessions = await rpc.call('agent.ls', {})
+await rpc.dispose()
+await server.stop()
+await core.dispose()
+```
+
+HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，每次 HTTP 请求都验证这个 token。Agent 的 Session capability 在所有传输中继续按同一业务合同验证，HTTP token不替代 Agent 身份。SSH 通过远端 `agentmux system endpoint --stdio` 转发到已有本地服务，不另起 Agent Run。
+
+JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。

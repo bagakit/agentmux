@@ -11,8 +11,8 @@ export type AgentMuxSpaceDestination = AgentMuxSpaceSelector & {
   newTab?: boolean
   split?: 'left' | 'right' | 'above' | 'below'
   newZone?:
-    | { kind: 'worktree'; path: string; branch: string; createBranch: boolean }
-    | { kind: 'directory'; path: string }
+    | { kind: 'worktree'; projectId: string; sourceWorkspaceId?: string; path: string; branch: string; createBranch: boolean }
+    | { kind: 'directory'; projectId: string; sourceWorkspaceId?: string; path: string }
 }
 export type AgentMuxSpaceAddress = {
   spaceId: string | null
@@ -106,7 +106,7 @@ export type AgentMuxSpaceMutationReport = {
   from: AgentMuxSpaceAddress | null
   to: AgentMuxSpaceAddress | null
   agent: AgentMuxSpaceAgentFact | null
-  resource: { hostId: string; path: string; workspaceId: string | null; kind: 'directory' | 'worktree'; branch: string | null } | null
+  resource: { projectId: string | null; sourceWorkspaceId: string | null; hostId: string; path: string; workspaceId: string | null; kind: 'directory' | 'worktree'; branch: string | null } | null
   save: AgentMuxSpatialSave
   issues: AgentMuxSpatialIssue[]
 }

@@ -83,7 +83,8 @@ export type AgentMuxDoctorReport = {
 }
 
 export type DiagnoseAgentMuxOptions = {
-  client: AgentMuxClient
+  client: Pick<AgentMuxClient, 'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' |
+    'probeExecutorAvailability' | 'runtimeDiagnostics' | 'runtimeIdentity'>
   commandOverrides?: Readonly<Record<string, string>>
   workspacePath?: string
   env?: Readonly<Record<string, string>>
@@ -105,7 +106,7 @@ function blockedAgent(catalog: AgentCatalogEntry, hookInstallation: AgentMuxDoct
 }
 
 async function probeAgent(
-  client: AgentMuxClient,
+  client: Pick<AgentMuxClient, 'probeAgent' | 'probeExecutorAvailability'>,
   catalog: AgentCatalogEntry,
   commandOverride: string | undefined,
   hookInstallation: AgentMuxDoctorAgent['hookInstallation']

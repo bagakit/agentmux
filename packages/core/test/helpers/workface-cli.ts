@@ -1,10 +1,11 @@
+import { objectCliReceipt } from './object-cli-receipt.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, expect } from 'vitest'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt } from '../../src/control-host.js'
+import { AgentMuxControlServer } from '../../src/control-host.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '../../src/control.js'
 
 const exec = promisify(execFile)
@@ -18,7 +19,7 @@ export function workfaceCliFixture(initial: AgentMuxControlResult) {
     env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
     Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'),
       AGENTMUX_AGENT_SESSION_STORE: join(root, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') })
-    server = new AgentMuxControlServer({ async execute(request) { seen.push(request); return reply } }, join(root, 'control.sock'))
+    server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request) { seen.push(request); return reply } })
     await server.start()
   })
   afterAll(async () => { await server?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
@@ -35,7 +36,7 @@ export function workfaceCliFixture(initial: AgentMuxControlResult) {
     expect(actual.code, actual.stderr).toBe(code)
     const lines = actual.stdout.trim().split('\n')
     expect(lines).toHaveLength(1)
-    const parsed = parseAgentMuxControlReceipt(JSON.parse(lines[0]!))
+    const parsed = objectCliReceipt(JSON.parse(lines[0]!))
     expect(parsed.ok).toBe(true)
     return parsed
   }

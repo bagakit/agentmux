@@ -3,7 +3,7 @@
  * （`@agentmux/layout` 的 `SplitDirection`、`control.ts` 的 `AgentMuxOpenDestination.direction`），
  * 却被两处 Core 侧运行时校验各自**手抄**成了第二份清单：
  *   - `control-host.ts` 的 `openDestination` 用 `['left','right','up','down'].includes(...)`；
- *   - `agentmux.ts` 的 `openDestination` 用 `? 'left' : … : 'down'` 的**兜底三元**。
+ *   - `agentmux-cli-commands.ts` 的 `openPlacement` 用 `? 'left' : … : 'down'` 的**兜底三元**。
  * 一个 `string[]` 对 `.includes` 只是 `string[]`，删/加一个方向不编译报错、无红测试——审计实测从
  * control-host 那份清单删掉 `'up'`（合法的 split-up 被静默判成 `INVALID_CONTROL_REQUEST`）后，1203 条
  * 全绿、`tsc --noEmit` exit 0，零测试察觉。三元的 `: 'down'` 更险：一个写错或新增的 flag 会**静默落进
@@ -61,7 +61,7 @@ export function isSplitDirection(value: string): value is SplitDirection {
 }
 
 /**
- * `agentmux open --<方向>-of` 的方向 flag → {@link SplitDirection} 的**总映射**，取代 `agentmux.ts` 里
+ * `agentmux terminal open` / `agentmux browser open` 的方向 flag → {@link SplitDirection} 的**总映射**，取代旧入口里
  * `? 'left' : … : 'down'` 那条带兜底桶的三元。
  *
  * 三处收敛买到两样 tsc 保证：
@@ -71,7 +71,7 @@ export function isSplitDirection(value: string): value is SplitDirection {
  *      一个 CLI flag，`SplitDirection extends MappedDirection` 塌成 `never`，TS2322——不再是「新方向从
  *      命令行根本够不到」的静默缺口。
  *
- * 调用方（`agentmux.ts` 的 `openDestination`）把喂给 `exactlyOne` 的 split flag 清单直接由本表的键派生，
+ * 调用方（`agentmux-cli-commands.ts` 的 `openPlacement`）把喂给 `exactlyOne` 的 split flag 清单直接由本表的键派生，
  * 于是「哪些 flag 是方向 flag」也只有这一处。查表未命中时它**显式抛错**而不是兜底 down——见那里的注释：
  * 今天该分支不可达（`exactlyOne` 只返回它收到的清单里的项），保留它是为了让将来新增 flag 却漏配方向时
  * 响亮失败。

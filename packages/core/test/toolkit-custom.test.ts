@@ -111,21 +111,23 @@ describe('custom Toolkit public data and authored CLI', () => {
   it('uses one JSON resource syntax with explicit creation defaults and preserves captured inputs', async () => {
     const dir = await directory(), file = join(dir, 'input.json')
     await writeFile(file, JSON.stringify({ name: definition.name, icon: definition.icon, workspacePath: definition.workspacePath, script: definition.script }))
-    expect(await parseToolkitCommand(['add', definition.id, '--input', file])).toEqual({ operation: 'toolkit.add', toolId: definition.id, value: fields })
+    expect(await parseToolkitCommand(['create', definition.id, '--input', file])).toEqual({ method: 'toolkit.create', params: { toolId: definition.id, value: { name: definition.name, icon: definition.icon, workspacePath: definition.workspacePath, script: definition.script } } })
     await writeFile(file, JSON.stringify({ changes: { name: 'New summary' }, expected: { name: definition.name } }))
-    expect(await parseToolkitCommand(['update', definition.id, '--input', file])).toEqual({ operation: 'toolkit.update', toolId: definition.id, changes: { name: 'New summary' }, expected: { name: definition.name } })
+    expect(await parseToolkitCommand(['update', definition.id, '--input', file])).toEqual({ method: 'toolkit.update', params: { toolId: definition.id, input: { changes: { name: 'New summary' }, expected: { name: definition.name } } } })
     await writeFile(file, JSON.stringify(input))
-    expect(await parseToolkitCommand(['run', definition.id, '--input', file])).toEqual({ operation: 'toolkit.run', toolId: definition.id, input })
-    expect(await parseToolkitCommand(['watch', definition.id])).toEqual({ operation: 'toolkit.watch', toolId: definition.id })
-    expect(await parseToolkitCommand(['list'])).toEqual({ operation: 'toolkit.list' })
+    expect(await parseToolkitCommand(['run', definition.id, '--input', file])).toEqual({ method: 'toolkit.run', params: { toolId: definition.id, input } })
+    expect(await parseToolkitCommand(['watch', definition.id])).toEqual({ method: 'toolkit.watch', params: { toolId: definition.id } })
+    expect(await parseToolkitCommand(['ls'])).toEqual({ method: 'toolkit.ls', params: {} })
     await writeFile(file, JSON.stringify({ ...fields, id: 'another' }))
-    await expect(parseToolkitCommand(['add', definition.id, '--input', file])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
+    const raw = await parseToolkitCommand(['create', definition.id, '--input', file])
+    expect(raw.params.value).toEqual({ ...fields, id: 'another' })
+    expect(() => parseAgentMuxControlRequest({ ...base, operation: 'toolkit.add', ...raw.params })).toThrow()
     const malformed = Buffer.from(JSON.stringify({ ...fields, name: '#' }))
     const marker = malformed.indexOf(35)
     expect(marker).toBeGreaterThan(0)
     malformed[marker] = 255
     await writeFile(file, malformed)
-    const decoded = await parseToolkitCommand(['add', definition.id, '--input', file]).then(
+    const decoded = await parseToolkitCommand(['create', definition.id, '--input', file]).then(
       value => ({ ok: true, value }), error => ({ ok: false, code: error.code }))
     expect(decoded).toEqual({ ok: false, code: 'INVALID_CLI_ARGUMENT' })
   })
@@ -150,9 +152,9 @@ describe('custom Toolkit public data and authored CLI', () => {
     const actionInput = { invocationId: 'action-request', expectedRevision: definition.revision, sourceExecutionId: 'original-result', expectedAdmissionExecutionId: null }
     await writeFile(file, JSON.stringify(actionInput))
     const command = await parseToolkitCommand(['action', definition.id, 'refresh', '--input', file])
-    expect(command).toEqual({ operation: 'toolkit.action', toolId: definition.id, actionId: 'refresh', input: actionInput })
+    expect(command).toEqual({ method: 'toolkit.action', params: { toolId: definition.id, actionId: 'refresh', input: actionInput } })
     expect(agentMuxControlTimeoutMs('toolkit.action')).toBe(agentMuxControlTimeoutMs('toolkit.run'))
-    const request = { ...base, ...command }
+    const request = { ...base, operation: 'toolkit.action' as const, ...command.params }
     expect(parseAgentMuxControlRequest(request)).toEqual(request)
     expect(() => parseAgentMuxControlRequest({ ...request, toolId: 'performance' })).toThrow()
     expect(() => parseAgentMuxControlRequest({ ...request, input: { ...actionInput, sourceExecutionId: undefined } })).toThrow()

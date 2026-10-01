@@ -696,7 +696,7 @@ export function createBrowserPageDispatch(
         throw new Error(
           `Page function "${name}" is injected but this Browser cannot serve it. ` +
             'An AgentMux Browser is a single page, so it has no tabs of its own — ' +
-            'use gotoUrl() here, and `agentmux open browser` to get another page.'
+            'use gotoUrl() here, and `agentmux browser open` to get another page.'
         )
     }
   }

@@ -48,14 +48,14 @@ describe('workbench layout preset SSOT', () => {
   // -------------------------------------------------------------------------
   // 运行时成员判定只有一处拼写：谓词。
   //
-  // 判据落在「这两个文件里不再出现内联的预设名字面量」上——那正是 Step 2 复现过的盲点：从
+  // 判据落在「服务校验文件里不再出现内联的预设名字面量」上——那正是 Step 2 复现过的盲点：从
   // control-host.ts 的 `['columns-3','grid-4','grid-6','grid-9'].includes(...)` 删掉 'grid-9'，
   // core tsc 退 0、30 条测试全绿，而 `arrange --preset grid-9` 被静默判非法。谓词把那份清单收进
   // 元组一处，这条守卫钉住没有人把它抄回来。
   // -------------------------------------------------------------------------
-  const CONSUMERS = ['control-host.ts', 'agentmux.ts'] as const
+  const CONSUMERS = ['control-codec.ts'] as const
 
-  it('前提自检：这两个消费者确实都调用了谓词', () => {
+  it('前提自检：服务校验消费者确实都调用了谓词', () => {
     // 没有这条，下面「文件里没有预设名字面量」会在文件根本没接谓词时也绿——那时清单是别处抄的，
     // 守卫却报平安。先证消费者真的在用 SSOT，再证它没同时留一份手抄。
     for (const file of CONSUMERS) {
@@ -66,7 +66,7 @@ describe('workbench layout preset SSOT', () => {
     }
   })
 
-  it('这两个消费者里没有内联的预设名字面量——清单只在元组里', () => {
+  it('服务校验消费者里没有内联的预设名字面量——清单只在元组里', () => {
     // 自检：这个正则真能认出 Step 2 复现的那种内联数组。没有它，把正则写坏会让守卫恒绿
     //（记忆 grep 守卫看不见早退 / false-green-gate-patterns）。
     const PRESET_LITERAL = /'(?:columns-3|grid-4|grid-6|grid-9)'/

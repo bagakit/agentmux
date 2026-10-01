@@ -1,5 +1,5 @@
+import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
-import { AGENTMUX_SELF_CONTEXT_VERB } from './agentmux-cli-help.js'
 
 /**
  * AgentMux 对 Agent 说的话，收敛到这一个模块。

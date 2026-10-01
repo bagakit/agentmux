@@ -4828,8 +4828,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : 'Inspect the actual work and report every current criterion with met/gap/unknown, locatable evidence references and concrete gaps. A reference is not proof by itself. The person accepts results in Goals; never claim their acceptance.',
       `Current durable Goal facts:\n${JSON.stringify({ id: demand.id, title: demand.title, description: demand.description, projectId: demand.projectId, sessionIds: demand.sessionIds, alignment: demand.alignment, grounding: demand.grounding }, null, 2)}`,
       'Read the current Goal before submitting. Use the public CLI below; replace the example with your actual proposal, not its placeholder content. Owner generates revision/submission IDs and acknowledgement timestamps.',
-      `"$AGENTMUX_CLI" demand show --demand ${quote(demand.id)}`,
-      `"$AGENTMUX_CLI" demand update --demand ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
+      `"$AGENTMUX_CLI" goal inspect --goal ${quote(demand.id)}`,
+      `"$AGENTMUX_CLI" goal update --goal ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
     ].join('\n\n')
     return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work')
   },

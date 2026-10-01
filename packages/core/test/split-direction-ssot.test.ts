@@ -114,8 +114,8 @@ describe('分屏方向 SSOT', () => {
   // （值全对），只有「消费者不再 import SSOT」与「消费者里又出现内联方向枚举」这两条结构判据能抓住它。
   // -------------------------------------------------------------------------
   const CONSUMERS = [
-    { file: 'control-host.ts', imported: 'isSplitDirection' },
-    { file: 'agentmux.ts', imported: 'SPLIT_FLAG_DIRECTIONS' }
+    { file: 'control-codec.ts', imported: 'isSplitDirection' },
+    { file: 'agentmux-cli-commands.ts', imported: 'SPLIT_FLAG_DIRECTIONS' }
   ] as const
 
   function readSrc(name: string): string {

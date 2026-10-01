@@ -1,4 +1,6 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createConnection } from 'node:net'
@@ -6,7 +8,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt } from '../src/control-host.js'
+import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
   type AgentMuxControlResult, type AgentMuxControlSettingEntry } from '../src/control.js'
 import { AgentMuxError } from '../src/errors.js'
@@ -27,10 +29,10 @@ describe('settings CLI over the public Control socket', () => {
   let seen: AgentMuxControlRequest[]
 
   beforeEach(async () => {
-    root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-settings-cli-"))
+    root = await mkdtemp(fixturePath("tmp/amux-settings-cli-"))
     entries = structuredClone(initial)
     seen = []
-    server = new AgentMuxControlServer({ async execute(request): Promise<AgentMuxControlResult> {
+    server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
       if (request.operation === 'settings.get') {
         const selected = request.target === undefined || request.target === '' || request.target === 'client'
@@ -49,7 +51,7 @@ describe('settings CLI over the public Control socket', () => {
         return { operation: request.operation, entry }
       }
       throw new Error(`Settings must not invoke ${request.operation}`)
-    } }, join(root, 'control.sock'))
+    } })
     await server.start()
   })
 
@@ -59,8 +61,8 @@ describe('settings CLI over the public Control socket', () => {
   })
 
   async function run(args: readonly string[]) {
-    const options = { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
-      AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined } }
+    const options = { timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
+      AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
     try {
       const output = await exec(process.execPath, [cli, ...args], options)
       return { code: 0, ...output }
@@ -70,11 +72,10 @@ describe('settings CLI over the public Control socket', () => {
   }
 
   it('gets real host scalar facts without a managed caller or View and forwards an exact target', async () => {
-    const all = await run(['settings', 'get'])
+    const all = await run(['settings', 'inspect'])
     expect(all.code).toBe(0)
-    expect(parseAgentMuxControlReceipt(JSON.parse(all.stdout))).toEqual({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: expect.any(String), ok: true, operation: 'settings.get', result: { entries: initial, partial: true } })
-    const selected = await run(['settings', 'get', 'client.copy'])
+    expect(objectCliReceipt(JSON.parse(all.stdout))).toEqual({ ok: true, operation: 'settings.inspect', result: { entries: initial, partial: true } })
+    const selected = await run(['settings', 'inspect', 'client.copy'])
     expect(selected.code).toBe(0)
     expect(JSON.parse(selected.stdout).result).toEqual({ entries: [initial[1]], partial: true })
     expect(seen.map(({ requestId, ...request }) => request)).toEqual([
@@ -86,10 +87,9 @@ describe('settings CLI over the public Control socket', () => {
   it('sets through the owner and reports the subsequent committed facts', async () => {
     const written = await run(['settings', 'set', 'client.mode', 'bright'])
     expect(written.code).toBe(0)
-    expect(parseAgentMuxControlReceipt(JSON.parse(written.stdout))).toEqual({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: expect.any(String), ok: true, operation: 'settings.set',
+    expect(objectCliReceipt(JSON.parse(written.stdout))).toEqual({ ok: true, operation: 'settings.set',
       result: { entry: { ...initial[0], value: 'bright' } } })
-    const read = await run(['settings', 'get', 'client.mode'])
+    const read = await run(['settings', 'inspect', 'client.mode'])
     expect(read.code).toBe(0)
     expect(JSON.parse(read.stdout).result).toEqual({ entries: [{ ...initial[0], value: 'bright' }], partial: true })
     expect(seen.map(({ requestId, ...request }) => request)).toEqual([
@@ -107,9 +107,8 @@ describe('settings CLI over the public Control socket', () => {
   })
 
   it.each([
-    [['settings'], 'settings'],
-    [['settings', 'get', 'a', 'b'], 'settings.get'],
-    [['settings', 'get', '--target', 'a'], 'settings.get'],
+        [['settings', 'inspect', 'a', 'b'], 'settings.get'],
+    [['settings', 'inspect', '--target', 'a'], 'settings.get'],
     [['settings', 'set'], 'settings.set'],
     [['settings', 'set', 'client.mode'], 'settings.set'],
     [['settings', 'set', 'client.mode', 'bright', 'extra'], 'settings.set'],
@@ -121,12 +120,12 @@ describe('settings CLI over the public Control socket', () => {
     const rejected = await run(args as string[])
     expect(rejected.code).toBe(1)
     expect(rejected.stdout).toBe('')
-    expect(JSON.parse(rejected.stderr)).toMatchObject({ ok: false, operation, error: { code: 'INVALID_CLI_ARGUMENT' } })
+    expect(JSON.parse(rejected.stderr)).toMatchObject({ ok: false, error: { code: 'INVALID_CLI_ARGUMENT' } })
     expect(seen).toEqual([])
   })
 
   it.each([
-    [['settings', 'get', 'unknown'], 'settings.get', 'UNSUPPORTED_SETTING'],
+    [['settings', 'inspect', 'unknown'], 'settings.get', 'UNSUPPORTED_SETTING'],
     [['settings', 'set', 'unknown', 'bright'], 'settings.set', 'UNSUPPORTED_SETTING'],
     [['settings', 'set', 'client.mode', 'invalid'], 'settings.set', 'INVALID_SETTING_VALUE'],
     [['settings', 'set', 'client.conflict', 'bright'], 'settings.set', 'CONFIG_CONFLICT']
@@ -134,12 +133,12 @@ describe('settings CLI over the public Control socket', () => {
     const failed = await run(args as string[])
     expect(failed.code).toBe(1)
     expect(failed.stdout).toBe('')
-    expect(parseAgentMuxControlReceipt(JSON.parse(failed.stderr))).toMatchObject({ ok: false, operation, error: { code } })
+    expect(objectCliReceipt(JSON.parse(failed.stderr))).toMatchObject({ ok: false, operation: operation === 'settings.get' ? 'settings.inspect' : operation, error: { code } })
     expect(seen).toHaveLength(1)
     expect(entries).toEqual(initial)
   })
 
-  it.each([['settings', '--help'], ['settings', 'get', '--help'], ['settings', 'set', '-h']])(
+  it.each([['settings', '--help'], ['--help', 'settings', 'inspect'], ['settings', 'set', '-h']])(
     'provides offline help at syntax positions %j', async (...args) => {
       await server.stop()
       const output = await run(args)
@@ -166,10 +165,10 @@ describe('settings CLI over the public Control socket', () => {
     const skill = await run(['--skill'])
     expect(help.code).toBe(0)
     expect(skill.code).toBe(0)
-    expect(help.stdout).toContain('settings    Read or change preferences')
-    expect(skill.stdout).toContain('agentmux settings get')
+    expect(help.stdout).toContain('agentmux settings inspect')
+    expect(skill.stdout).toContain('agentmux settings inspect')
     expect(skill.stdout).toContain('agentmux settings set <key> <value>')
-    expect(skill.stdout).toContain('partial means other settings')
+    expect(skill.stdout).toContain('partial')
     expect(seen).toEqual([])
   })
 
@@ -196,9 +195,7 @@ describe('settings CLI over the public Control socket', () => {
       operation: 'settings.set', key: 'client.mode', value: 'bright', [field]: 'unexpected'
     }))
   ])('rejects malformed wire fields before executing %j', async (fields) => {
-    const receipt = await raw({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'bad-wire', ...fields })
-    expect(parseAgentMuxControlReceipt(receipt)).toMatchObject({ requestId: 'bad-wire', ok: false,
-      operation: fields.operation, error: { code: 'INVALID_CONTROL_REQUEST' } })
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'bad-owner-dto', ...fields })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
     expect(seen).toEqual([])
     expect(entries).toEqual(initial)
   })

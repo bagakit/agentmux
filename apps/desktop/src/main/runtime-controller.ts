@@ -1573,6 +1573,11 @@ export class RuntimeController {
     }
   }
 
+  /** Borrow configured Core owners; the public service never owns their lifecycle. */
+  rpcClients(): readonly { hostId: string; client: AgentMuxClient }[] {
+    return [...this.hosts].map(([hostId, host]) => ({ hostId, client: host.client }))
+  }
+
   private async connectedClient(hostId: string): Promise<AgentMuxClient> {
     if (this.hostReconfigurationReservations.has(hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${hostId}`)

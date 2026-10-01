@@ -71,16 +71,19 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
   if (result.split && !result.regionId) fail('Split requires an exact Region; discover it with agentmux space ls --zone <zone-id>.', code)
   if (result.newTab && (result.tabId || result.regionId || result.split)) fail('New Tab cannot also target a Tab or Region.', code)
   if (Object.hasOwn(source, 'newZone')) {
-    const resource = fields(source.newZone, ['kind', 'path', 'branch', 'createBranch'], code)
+    const resource = fields(source.newZone, ['kind', 'projectId', 'sourceWorkspaceId', 'path', 'branch', 'createBranch'], code)
+    const projectId = spaceControlId(resource.projectId, 'Resource Project', code, true)
+    const sourceWorkspace = Object.hasOwn(resource, 'sourceWorkspaceId')
+      ? { sourceWorkspaceId: spaceControlId(resource.sourceWorkspaceId, 'Resource Workspace', code) } : {}
     const path = string(resource.path, 'Zone directory', code, MAX_SPATIAL_ID_BYTES)
     if (!path.length || path.includes('\0')) fail('Zone directory is invalid.', code)
     if (resource.kind === 'directory') {
-      fields(resource, ['kind', 'path'], code)
-      result.newZone = { kind: 'directory', path }
+      fields(resource, ['kind', 'projectId', 'sourceWorkspaceId', 'path'], code)
+      result.newZone = { kind: 'directory', projectId, ...sourceWorkspace, path }
     } else if (resource.kind === 'worktree') {
       const branch = string(resource.branch, 'Worktree branch', code, MAX_SPATIAL_ID_BYTES)
       if (!branch.length || branch.includes('\0')) fail('Worktree branch is invalid.', code)
-      result.newZone = { kind: 'worktree', path, branch, createBranch: bool(resource.createBranch, 'createBranch', code) }
+      result.newZone = { kind: 'worktree', projectId, ...sourceWorkspace, path, branch, createBranch: bool(resource.createBranch, 'createBranch', code) }
     } else fail('New Zone resource is invalid.', code)
     if (!result.spaceId || result.zoneId || result.tabId || result.regionId || result.split) fail('New Zone requires only an exact parent Space; discover it with agentmux space ls.', code)
     // Every new Zone opens its first Tab, whether the caller spells out --new-tab or not.
@@ -267,8 +270,8 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
       initialPrompt: member(item.initialPrompt, ['not-requested', 'confirmed', 'unconfirmed', 'unknown'], 'Initial prompt', code) }
   })()
   const resource = source.resource === null ? null : (() => {
-    const item = fields(source.resource, ['hostId', 'path', 'workspaceId', 'kind', 'branch'], code)
-    return { hostId: spaceControlId(item.hostId, 'Resource Host', code), path: string(item.path, 'Resource directory', code),
+    const item = fields(source.resource, ['projectId', 'sourceWorkspaceId', 'hostId', 'path', 'workspaceId', 'kind', 'branch'], code)
+    return { projectId: nullableId(item.projectId, 'Resource Project', code, true), sourceWorkspaceId: nullableId(item.sourceWorkspaceId, 'Resource Workspace', code), hostId: spaceControlId(item.hostId, 'Resource Host', code), path: string(item.path, 'Resource directory', code),
       workspaceId: nullableId(item.workspaceId, 'Workspace', code), kind: member(item.kind, ['directory', 'worktree'], 'Resource kind', code), branch: nullableString(item.branch, 'Branch', code) }
   })()
   return { requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown'], 'Mutation outcome', code),

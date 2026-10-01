@@ -9,13 +9,13 @@ it('compiles the complete public Core export graph without Node ambient types or
   try {
     const consumer = join(directory, 'consumer.mts')
     await writeFile(consumer, `import * as core from '@agentmux/core'
-const publicApi = core
-const subscribe: typeof core.subscribeAgentMuxToolkit = publicApi.subscribeAgentMuxToolkit
-type ToolkitWatchRequest = Parameters<typeof subscribe>[0]
-type ToolkitWatchHandlers = Parameters<typeof subscribe>[1]
-declare const request: ToolkitWatchRequest
-declare const handlers: ToolkitWatchHandlers
-void subscribe(request, handlers)
+const connect: typeof core.connectAgentMuxRpc = core.connectAgentMuxRpc
+declare const client: core.AgentMuxRpcClient
+const subscribe: core.AgentMuxRpcClient['subscribe'] = client.subscribe
+declare const request: core.AgentMuxRpcStreamParams<'toolkit.watch'>
+declare const handlers: core.AgentMuxRpcSubscriptionOptions<'toolkit.watch'>
+void connect
+void subscribe('toolkit.watch', request, handlers)
 `)
     const program = ts.createProgram([consumer], {
       noEmit: true,

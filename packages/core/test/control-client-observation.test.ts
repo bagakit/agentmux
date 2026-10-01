@@ -1,10 +1,10 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import {
   AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxControlReceipt,
-  requestAgentMuxControl, type AgentMuxControlInspectClientRequest
+  connectAgentMuxRpc, type AgentMuxControlInspectClientRequest
 } from '../src/index.js'
 
 const request: AgentMuxControlInspectClientRequest = { schemaVersion: 5, requestId: 'private-client-observation', operation: 'inspect.client' }
@@ -15,19 +15,23 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
+async function inspect(socket: string) {
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+  try { return await client.call('app.inspect', { operationId: request.requestId }) } finally { await client.dispose() }
+}
+
 it('carries a nonempty host-owned observation through the actual public Control socket without interpreting its layout', async () => {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-client-observation-")); roots.push(root)
+  const root = await mkdtemp(fixturePath("tmp/amx-client-observation-")); roots.push(root)
   const socket = join(root, 'control.sock')
   const observation = { schema: 'private.client-observation', loading: true,
     regions: [{ id: 'original-region', attached: false }], renderer: null }
   const requests: unknown[] = []
-  const server = new AgentMuxControlServer({ execute: async received => {
+  const server = new AgentMuxControlServer({ coreClients: () => [], execute: async received => {
     requests.push(received)
     return { operation: 'inspect.client', observation }
   } }, socket)
   servers.push(server); await server.start()
-  expect(await requestAgentMuxControl(request, socket)).toEqual({ schemaVersion: 5,
-    requestId: request.requestId, ok: true, operation: 'inspect.client', result: { observation } })
+  expect(await inspect(socket)).toEqual({ observation })
   expect(requests).toEqual([request])
 })
 
@@ -53,11 +57,11 @@ it('requires an object receipt while leaving concrete host metadata to the host 
 })
 
 it('returns an explicit error when a complete observation exceeds the existing framing budget', async () => {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-client-budget-")); roots.push(root)
+  const root = await mkdtemp(fixturePath("tmp/amx-client-budget-")); roots.push(root)
   const socket = join(root, 'control.sock')
-  const server = new AgentMuxControlServer({ execute: async () => ({ operation: 'inspect.client',
+  const server = new AgentMuxControlServer({ coreClients: () => [], execute: async () => ({ operation: 'inspect.client',
     observation: { originalRegions: ['retained'], metadata: 'x'.repeat(256 * 1024) } }) }, socket)
   servers.push(server); await server.start()
-  await expect(requestAgentMuxControl(request, socket)).rejects.toMatchObject({ code: 'CONTROL_FAILED',
-    message: 'Complete client observation exceeds the Control message budget.' })
+  await expect(inspect(socket)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR',
+    message: 'RPC message exceeds its bounded frame budget.' })
 })

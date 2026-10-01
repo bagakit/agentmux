@@ -1,4 +1,6 @@
 import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
@@ -12,8 +14,8 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION,
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'browser-settings-proof' }
 const initial: [string, string][] = [['first', 'host-defined-choice'], ['neighbor', 'another-choice']]
-const listArgs = ['settings', 'browser', 'links', 'list']
-const forgetArgs = ['settings', 'browser', 'links', 'forget']
+const listArgs = ['settings', 'browser-links', 'ls']
+const forgetArgs = ['settings', 'browser-links', 'forget']
 
 describe('Browser settings built CLI consumes the public Control owner without a caller or View', () => {
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[], answers: Map<string, string>
@@ -22,7 +24,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
     root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-browser-settings-cli-"))
     seen = []; answers = new Map(initial)
     // Choice vocabulary belongs to the owner. Core must not import a Desktop enum.
-    server = new AgentMuxControlServer({ async execute(request): Promise<AgentMuxControlResult> {
+    server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
       if (request.operation === 'settings.browser.links.list') {
         return { operation: request.operation, entries: [...answers].map(([scheme, choice]) => ({ scheme, choice })) }
@@ -31,7 +33,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
         return { operation: request.operation, scheme: request.scheme, changed: answers.delete(request.scheme) }
       }
       throw new Error(`Unexpected ${request.operation}`)
-    } }, join(root, 'control.sock'))
+    } })
     await server.start()
   })
   afterEach(async () => { await server?.stop(); if (root) await rm(root, { recursive: true }) })
@@ -39,7 +41,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
   async function run(args: readonly string[], input?: string | Buffer) {
     return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [cli, ...args], { cwd: root,
-        env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined },
+        env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined },
         stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       const timer = setTimeout(() => { child.kill(); reject(new Error('Browser settings CLI did not finish.')) }, 5_000)
@@ -63,7 +65,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
   }
   function success(output: { code: number; stdout: string; stderr: string }) {
     expect(output.code, output.stderr).toBe(0); expect(output.stderr).toBe('')
-    const receipt = parseAgentMuxControlReceipt(JSON.parse(output.stdout)); expect(receipt.ok).toBe(true)
+    const receipt = objectCliReceipt(JSON.parse(output.stdout)); expect(receipt.ok).toBe(true)
     if (!receipt.ok) throw new Error('Expected a successful receipt.')
     return receipt
   }
@@ -93,9 +95,9 @@ describe('Browser settings built CLI consumes the public Control owner without a
   it.each(['file', 'stdin'])('round-trips a listed NUL key through bounded JSON %s, preserving its neighbor', async carrier => {
     const scheme = 'short\0stored:key'; answers.set(scheme, 'opaque literal answer')
     const listed = success(await run(listArgs))
-    if (listed.operation !== 'settings.browser.links.list') throw new Error('Expected a link list.')
+    if (listed.operation !== 'settings.browser-links.ls') throw new Error('Expected a link list.')
     expect(listed.result.entries).toEqual([...initial, [scheme, 'opaque literal answer']].map(([scheme, choice]) => ({ scheme, choice })))
-    const exact = listed.result.entries.find(entry => entry.scheme === scheme)!.scheme
+    const exact = listed.result.entries.find((entry: { scheme: string }) => entry.scheme === scheme)!.scheme
     const input = { scheme: exact }, path = carrier === 'stdin' ? '-' : await file(input, '--help')
     expect(success(await run([...forgetArgs, '--input', path], carrier === 'stdin' ? JSON.stringify(input) : undefined)).result)
       .toEqual({ scheme, changed: true })
@@ -128,7 +130,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
   ])('requires exactly the string scheme input envelope %j', async input => {
     const output = await run([...forgetArgs, '--input', await file(input)])
     expect(output.code).toBe(1); expect(output.stdout).toBe('')
-    expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation: 'settings.browser.links.forget', error: { code: 'INVALID_CLI_ARGUMENT' } })
+    expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation: 'settings.browser-links.forget', error: { code: 'INVALID_CONTROL_REQUEST' } })
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })
 
@@ -153,14 +155,14 @@ describe('Browser settings built CLI consumes the public Control owner without a
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })
 
-  it.each(['file', 'stdin'])('classifies the full CLI request budget as an argument error for %s before its owner', async carrier => {
+  it.each(['file', 'stdin'])('rejects a full RPC frame over budget for %s before its owner', async carrier => {
     const input = JSON.stringify({ scheme: 'x'.repeat(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES - 40) })
     expect(Buffer.byteLength(input)).toBeLessThan(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES)
     const path = carrier === 'stdin' ? '-' : 'frame.json'
     if (carrier === 'file') await writeFile(join(root, path), input)
     const output = await run([...forgetArgs, '--input', path], carrier === 'stdin' ? input : undefined)
     expect(output.code).toBe(1); expect(output.stdout).toBe('')
-    expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation: 'settings.browser.links.forget', error: { code: 'INVALID_CLI_ARGUMENT' } })
+    expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation: 'settings.browser-links.forget', error: { code: 'CONTROL_PROTOCOL_ERROR' } })
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })
 
@@ -172,7 +174,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
   })
 
   it.each([
-    ['settings', 'browser', '--help'], ['settings', 'browser', 'links', '-h'], [...listArgs, '--help']
+    ['settings', 'browser-links', '--help'], ['settings', 'browser-links', '-h'], [...listArgs, '--help']
   ])('prints honest offline help at syntax position %j', async (...args) => {
     await server.stop(); const output = await run(args)
     expect(output.code).toBe(0); expect(output.stderr).toBe('')
@@ -188,15 +190,15 @@ describe('Browser settings built CLI consumes the public Control owner without a
       expect(output.stdout).toContain('current Unix user'); expect(output.stdout).toContain('does not establish human approval')
     }
     const skill = await run(['--skill'])
-    expect(skill.stdout).toContain('settings browser links forget --input <file|->'); expect(seen).toEqual([])
+    expect(skill.stdout).toContain('settings browser-links forget --input <file|->'); expect(seen).toEqual([])
   })
 
   it('reports an offline owner for list and literal help forget without a local write fallback', async () => {
     await server.stop()
     for (const args of [listArgs, [...forgetArgs, '--help'], [...forgetArgs, '--input', await file({ scheme: 'first' })]]) {
       const output = await run(args); expect(output.code).toBe(1); expect(output.stdout).toBe('')
-      expect(parseAgentMuxControlReceipt(JSON.parse(output.stderr))).toMatchObject({ ok: false,
-        operation: args === listArgs ? 'settings.browser.links.list' : 'settings.browser.links.forget', error: { code: 'CONTROL_UNAVAILABLE' } })
+      expect(objectCliReceipt(JSON.parse(output.stderr))).toMatchObject({ ok: false,
+        operation: args === listArgs ? 'settings.browser-links.ls' : 'settings.browser-links.forget', error: { code: 'CONTROL_UNAVAILABLE' } })
     }
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })
@@ -206,14 +208,12 @@ describe('Browser settings built CLI consumes the public Control owner without a
     { operation: 'settings.browser.links.forget' }, { operation: 'settings.browser.links.forget', scheme: false },
     ...['choice', 'expected', 'confirm', 'path', 'input', 'caller'].map(field => ({ operation: 'settings.browser.links.forget', scheme: 'first', [field]: 'extra' }))
   ])('rejects malformed public wire before the owner %j', async fields => {
-    expect(parseAgentMuxControlReceipt(await raw({ ...base, ...fields }))).toMatchObject({ ok: false,
-      operation: fields.operation, error: { code: 'INVALID_CONTROL_REQUEST' } })
+    expect(() => parseAgentMuxControlRequest({ ...base, ...fields })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })
 
   it('rejects unknown public choice-setting operations instead of accepting a hidden setter', async () => {
-    expect(await raw({ ...base, operation: 'settings.browser.links.set', scheme: 'first', choice: 'allow' }))
-      .toMatchObject({ ok: false, operation: null, error: { code: 'INVALID_CONTROL_REQUEST' } })
+    expect(() => parseAgentMuxControlRequest({ ...base, operation: 'settings.browser.links.set', scheme: 'first', choice: 'allow' })).toThrow()
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })
 })

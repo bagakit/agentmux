@@ -1,4 +1,5 @@
 import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { AgentMuxControlServer } from '../dist/control-host.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -63,6 +64,8 @@ async function consumerFixture(memoryStore = false) {
     capabilityHash: hashAgentCapability(capability),  createdAt: 100, updatedAt: 100
   }
   await store.compareAndSwap(null, current)
+  const persisted = await loadAgentSessions(store)
+  expect(persisted).toEqual([current])
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'global-messages.ndjson'))
   const client = new AgentMuxClient({ store })
   const internals = client as unknown as ConsumerInternals
@@ -71,7 +74,7 @@ async function consumerFixture(memoryStore = false) {
   await internals.registry.load('local')
   cleanups.push(async () => await client.dispose())
   const queue = new DurableAgentMuxMessageQueue(join(root, 'global-messages.ndjson'))
-  return { root, store, current, capability, client, queue, internals,
+  return { root, store, current: persisted[0]!, capability, client, queue, internals,
     input: { capability, callerAgentSessionId: current.agentSessionId } }
 }
 
@@ -354,6 +357,9 @@ describe('actual built agentmux deliveries CLI', () => {
       if (failures.length > 0) throw new AggregateError(failures, 'Private Agent Run cleanup failed.')
     })
     await client.connect()
+    const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: () => [{ hostId: 'local', client }] })
+    await server.start()
+    cleanups.push(async () => await server.stop())
     for (const agentSessionId of ['reader-one', 'reader-two', 'reader-three']) {
       sessions.push(await client.createAgent({ agentSessionId, providerId: 'codex', executorId: 'codex',
         commandOverride: script, workspacePath: root,
@@ -379,7 +385,7 @@ describe('actual built agentmux deliveries CLI', () => {
     const statusBefore = await client.statusAgent('reader-one')
     const cli = fileURLToPath(new URL('../dist/agentmux.js', import.meta.url))
     const invoke = async (agentSessionId: string, args: string[], keepAlive = false, capability = credentials.get(agentSessionId)!.capability) => {
-      const child = spawn(process.execPath, [...(keepAlive ? ['--import', hold] : []), cli, 'deliveries', ...args], {
+      const child = spawn(process.execPath, [...(keepAlive ? ['--import', hold] : []), cli, 'message', 'inbox', ...args], {
         detached: true, stdio: ['ignore', 'pipe', 'pipe'], cwd: root,
         env: { ...env, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: capability }
       })
@@ -400,7 +406,7 @@ describe('actual built agentmux deliveries CLI', () => {
     }
     const interrupted = await invoke('reader-one', ['check', '--limit', '1'], true)
     expect(interrupted.receipt.ok).toBe(true)
-    expect(interrupted.receipt.operation).toBe('deliveries.check')
+    expect(interrupted.receipt.operation).toBe('message.inbox.check')
     const first = interrupted.receipt.result!
     expect(first.messages.map((item) => item.envelope.messageId)).toEqual(['one'])
     expect(first.consumerId).toBe('reader-one')
@@ -419,7 +425,7 @@ describe('actual built agentmux deliveries CLI', () => {
     const stale = await invoke('reader-one', ['ack', '--generation', '999', '--reader-run', first.readerRun.runId])
     expect(stale.receipt).toMatchObject({ ok: false, error: { code: 'AGENT_DELIVERY_GENERATION_STALE' } })
     const ack = await invoke('reader-one', ['ack', '--generation', String(first.generation), '--reader-run', first.readerRun.runId])
-    expect(ack.receipt).toMatchObject({ ok: true, operation: 'deliveries.ack', result: { acknowledgedMessageIds: ['one'], nextGeneration: 2 } })
+    expect(ack.receipt).toMatchObject({ ok: true, operation: 'message.inbox.ack', result: { acknowledgedMessageIds: ['one'], nextGeneration: 2 } })
     const next = await invoke('reader-one', ['check', '--limit', '100'])
     expect(next.receipt.result!.messages.map((item) => item.envelope.messageId)).toEqual(['two', 'three'])
     expect((await invoke('reader-two', ['check', '--limit', '1'])).receipt.result).toEqual(other.receipt.result)

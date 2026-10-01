@@ -161,6 +161,27 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'demand.link-session': true,
   'demand.link-project': true,
   'demand.decision-log': true
+  'agent.view': true,
+  'space.view': true,
+  'space.swap': true,
+  'open.file': true,
+  'agent.rename': true,
+  'agent.inspect': true,
+  'space.rename': true,
+  'space.bind': true,
+  'space.unbind': true,
+  'metrics.get': true,
+  'metrics.watch': true,
+  'toolkit.list': true,
+  'toolkit.get': true,
+  'toolkit.add': true,
+  'toolkit.update': true,
+  'toolkit.remove': true,
+  'toolkit.action': true,
+  'toolkit.script': true,
+  'toolkit.run': true,
+  'toolkit.stop': true,
+  'toolkit.watch': true,
 }
 
 const PERMISSION_KIND_MEMBERS = Object.keys(PERMISSION_KIND_ANCHOR) as readonly PermissionOptionKind[]
@@ -534,7 +555,7 @@ describe('三条联合的成员判定只有一处声明', () => {
       expect(parsed.length, 'src/ 扫描面是空的').toBeGreaterThanOrEqual(20)
       const rels = parsed.map(({ rel }) => rel)
       expect(rels).toContain('src/agent-session-store.ts')
-      expect(rels).toContain('src/control-host.ts')
+      expect(rels).toContain('src/control-codec.ts')
       expect(rels).toContain('src/types.ts')
     })
 
@@ -610,7 +631,7 @@ describe('三条联合的成员判定只有一处声明', () => {
       const REQUIRED = [
         { rel: 'src/agent-session-store.ts', name: 'isPermissionOptionKind', from: './types.js' },
         { rel: 'src/agent-session-store.ts', name: 'isPromptDeliveryDegradedReason', from: './types.js' },
-        { rel: 'src/control-host.ts', name: 'isAgentMuxControlOperation', from: './control.js' }
+        { rel: 'src/control-codec.ts', name: 'isAgentMuxControlOperation', from: './control.js' }
       ] as const
 
       /** 这个文件是不是从 `from` 具名 import 了 `name`（走 parser，不用正则）。 */

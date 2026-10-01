@@ -14,6 +14,22 @@ export function workspaceZoneId(spaceId: string, workspaceId: string): string {
 }
 export function homeZoneId(spaceId: string): string { return JSON.stringify([spaceId, 'home']) }
 
+/** Resolve execution resources independently of every display Space and current focus. */
+export function projectResourceWorkspace(workspaces: readonly WorkspaceRecord[], projectId: string, sourceWorkspaceId?: string): WorkspaceRecord {
+  const candidates = workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID &&
+    directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path) === projectId)
+  if (!candidates.length) throw Object.assign(new Error('The exact resource Project is unknown. Discover it with agentmux app snapshot.'), { code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })
+  if (sourceWorkspaceId !== undefined) {
+    const selected = candidates.find(workspace => workspace.id === sourceWorkspaceId)
+    if (!selected) throw Object.assign(new Error('The resource Workspace is not in the specified Project.'), { code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })
+    return selected
+  }
+  const roots = candidates.filter(workspace => workspace.path === (workspace.repoPath ?? workspace.path) && workspace.kind !== 'worktree')
+  if (roots.length === 1) return roots[0]!
+  if (roots.length === 0 && candidates.length === 1) return candidates[0]!
+  throw Object.assign(new Error('This Project has multiple possible execution sources. Specify --source-workspace using an exact Workspace from app snapshot.'), { code: 'SPACE_RESOURCE_SOURCE_REQUIRED' })
+}
+
 /** Extra resource association only; directories, Git and runtime facts remain at their owners. */
 export type SpaceZoneBinding = {
   /** Original creation/resource context; never a unique display parent. */

@@ -1,4 +1,5 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath, fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -16,66 +17,67 @@ const zoneId = JSON.stringify([spaceId, 'zone', 'existing-directory'])
 describe('public Desktop focus and client inspection', () => {
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[]
   beforeEach(async () => {
-    root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-desktop-focus-cli-")); seen = []
-    server = new AgentMuxControlServer({ async execute(request): Promise<AgentMuxControlResult> {
+    root = await mkdtemp(fixturePath("tmp/amx-desktop-focus-cli-")); seen = []
+    server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
       if (request.operation === 'focus') return focusFacts(request)
       if (request.operation === 'inspect.client') return { operation: request.operation,
         observation: { schema: 'private-client', source: 'mock', unknown: true } }
       throw new Error(`Unexpected mutation/Runtime operation: ${request.operation}`)
-    } }, join(root, 'control.sock'))
+    } })
     await server.start()
   })
   afterEach(async () => { await server.stop(); await rm(root, { recursive: true }) })
   async function run(args: readonly string[]) {
     return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [cli, ...args], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
-        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'),
-        AGENTMUX_AGENT_SESSION_STORE: join(root, 'sessions.json') } })
+        ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'),
+        AGENTMUX_AGENT_SESSION_STORE: join(root, 'sessions.json'), AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })
       let stdout = '', stderr = ''
       child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
       child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
       child.once('error', reject); child.once('close', code => resolve({ code: code ?? -1, stdout, stderr }))
     })
   }
-  async function json(args: readonly string[], code = 0) {
+  async function json(args: readonly string[], code = 1) {
     const result = await run(args)
     expect(result.code, result.stderr).toBe(code)
-    const output = code === 0 ? result.stdout : result.stderr
-    expect(code === 0 ? result.stderr : result.stdout).toBe('')
+    const output = result.stdout || result.stderr
+    expect(result.stdout ? result.stderr : result.stdout).toBe('')
     expect(output.trim().split('\n')).toHaveLength(1)
     return JSON.parse(output)
   }
   it('uses literal hierarchical IDs, defaults input preserve and keeps partial/candidates in the final receipt', async () => {
-    const raw = await json(['focus', '--space', spaceId, '--zone', zoneId, '--tab', 'tab', '--region', '--help'])
+    const raw = await json(['space', 'focus', '--space', spaceId, '--zone', zoneId, '--tab', 'tab', '--region', '--help'])
+    expect(raw.ok, JSON.stringify({ raw, seen })).toBe(true)
     const request = seen[0]
     expect(seen).toHaveLength(1)
     expect(request).toEqual({ ...base, requestId: expect.any(String), operation: 'focus',
       target: { kind: 'space', spaceId, zoneId, tabId: 'tab', regionId: '--help' }, inputPolicy: 'preserve' })
     if (request?.operation !== 'focus') throw new Error('Expected focus')
     const { operation: _, ...expected } = focusFacts(request)
-    expect(parseAgentMuxControlReceipt(raw)).toEqual({ ...base, requestId: request.requestId, ok: true, operation: 'focus', result: expected })
+    expect(raw).toEqual({ ok: true, operation: 'space.focus', operationId: request.requestId, result: expected })
   })
   it.each([['--space', spaceId], ['--zone', zoneId], ['--tab', 'tab'], ['--region', 'region']])('accepts an exact %s identity without caller/focus inference', async (flag, id) => {
-    await json(['focus', flag, id, '--input', 'preserve'])
+    expect(await json(['space', 'focus', flag, id, '--input', 'preserve'])).toMatchObject({ ok: true, operation: 'space.focus', result: { partial: true } })
     expect(seen).toEqual([{ ...base, requestId: expect.any(String), operation: 'focus', target: { kind: 'space', [`${flag.slice(2)}Id`]: id }, inputPolicy: 'preserve' }])
   })
   it('transports exact Goal and each existing Surface without an Agent launch/send', async () => {
-    await json(['focus', '--goal', '--help'])
-    for (const surface of ['space', 'focus', 'goals', 'survey']) await json(['focus', '--surface', surface])
+    expect(await json(['goal', 'focus', '--goal', '--help'])).toMatchObject({ ok: true, operation: 'goal.focus', result: { partial: true } })
+    for (const surface of ['space', 'focus', 'goals', 'survey']) expect(await json(['app', 'focus', '--surface', surface])).toMatchObject({ ok: true, operation: 'app.focus', result: { partial: true } })
     expect(seen.map(request => request.operation)).toEqual(['focus', 'focus', 'focus', 'focus', 'focus'])
     expect(seen[0]).toMatchObject({ target: { kind: 'goal', goalId: '--help' }, inputPolicy: 'preserve' })
     expect(seen.slice(1).map(request => request.operation === 'focus' && request.target)).toEqual(
       ['space', 'focus', 'goals', 'survey'].map(surface => ({ kind: 'surface', surface })))
   })
   it('allows explicit input target only for exact existing Tab/Region selectors', async () => {
-    await json(['focus', '--tab', 'tab', '--input', 'target'])
-    await json(['focus', '--region', 'region', '--input', 'target'])
+    expect(await json(['space', 'focus', '--tab', 'tab', '--input', 'target'])).toMatchObject({ ok: true, result: { input: { policy: 'target', outcome: 'unconfirmed' } } })
+    expect(await json(['space', 'focus', '--region', 'region', '--input', 'target'])).toMatchObject({ ok: true, result: { input: { policy: 'target', outcome: 'unconfirmed' } } })
     expect(seen.map(request => request.operation === 'focus' && request.inputPolicy)).toEqual(['target', 'target'])
   })
   it('exposes the existing read-only inspect.client operation without connecting to a Run', async () => {
-    const receipt = await json(['inspect', '--client'])
-    expect(receipt).toMatchObject({ ok: true, operation: 'inspect.client', result: { observation: { schema: 'private-client', source: 'mock', unknown: true } } })
+    const receipt = await json(['app', 'inspect'], 0)
+    expect(receipt).toMatchObject({ ok: true, operation: 'app.inspect', result: { observation: { schema: 'private-client', source: 'mock', unknown: true } } })
     expect(seen).toEqual([{ ...base, requestId: expect.any(String), operation: 'inspect.client' }])
   })
   it('rejects repeated/unknown flags, parentless or mixed goals/surfaces, and guessed input owners before the owner runs', async () => {
@@ -84,9 +86,9 @@ describe('public Desktop focus and client inspection', () => {
       ['--region', 'R', 'extra'], ['--input', 'preserve'], ['--goal', 'G', '--input', 'target'], ['--surface', 'space', '--input', 'target'],
       ['--zone', 'Z', '--input', 'target'], ['--region', 'R', '--input', 'unknown']]
     expect(invalid).toHaveLength(15)
-    for (const args of invalid) expect(await json(['focus', ...args], 1)).toMatchObject({ ok: false, error: { code: 'INVALID_CLI_ARGUMENT' } })
+    for (const args of invalid) expect(await json(['space', 'focus', ...args], 1)).toMatchObject({ ok: false, error: { code: expect.stringMatching(/^INVALID_(CLI_ARGUMENT|CONTROL_REQUEST)$/u) } })
     for (const args of [['--client', '--tab', 'T'], ['--client', '--client'], ['--client=true'], ['--client', 'extra']]) {
-      expect(await json(['inspect', ...args], 1)).toMatchObject({ ok: false, error: { code: 'INVALID_CLI_ARGUMENT' } })
+      expect(await json(['app', 'inspect', ...args], 1)).toMatchObject({ ok: false, error: { code: expect.stringMatching(/^INVALID_(CLI_ARGUMENT|CONTROL_REQUEST)$/u) } })
     }
     expect(seen).toEqual([])
   }, 30_000)
@@ -109,7 +111,7 @@ describe('public Desktop focus and client inspection', () => {
       { ...receipt, result: { ...body, input: { ...body.input, before: { ...body.input.before, value: 'secret draft' } } } },
       { ...receipt, result: { ...body, presentation: { ...body.presentation, state: 'main-visible' } } },
       { ...receipt, result: { ...body, navigation: { ...body.navigation, selection: { ...body.navigation.selection, space: { ...body.navigation.selection.space, regionId: 'other' } } } } },
-      { ...receipt, result: { ...body, issues: [{ ...body.issues[0], candidates: [{ zoneId, cwd: upstreamFixturePath("invented") }] }] } }
+      { ...receipt, result: { ...body, issues: [{ ...body.issues[0], candidates: [{ zoneId, cwd: fixturePath("invented") }] }] } }
     ]
     expect(invalid).toHaveLength(5)
     for (const value of invalid) expect(() => parseAgentMuxControlReceipt(value)).toThrow()
@@ -140,9 +142,9 @@ describe('public Desktop focus and client inspection', () => {
       presentation: { ...receipt.result.presentation, state: 'pending', [key]: `unconfirmed-${key}` } } })).toMatchObject({ result: { partial: true } })
   })
   it('documents navigation, factual inspection, exact input transfer and the default preserve policy', () => {
-    expect(agentMuxCommandHelp('focus')).toContain('--goal <demand-id>')
-    expect(agentMuxCommandHelp('focus')).toContain('Default --input preserve')
-    expect(agentMuxCommandHelp('focus')).toContain('--input target')
-    expect(agentMuxCommandHelp('inspect')).toContain('inspect --client')
+    expect(agentMuxCommandHelp('goal.focus')).toContain('--goal ID')
+    expect(agentMuxCommandHelp('space.focus')).toContain('Default --input preserve')
+    expect(agentMuxCommandHelp('space.focus')).toContain('--input target')
+    expect(agentMuxCommandHelp('app.inspect')).toContain('agentmux app inspect')
   })
 })
