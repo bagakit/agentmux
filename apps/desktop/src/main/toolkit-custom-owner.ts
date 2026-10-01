@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunAttachment } from '@agentmux/core'
-import { parseToolkitSnapshot, parseToolkitRunInput, TOOLKIT_TEXT_MAX_BYTES, TOOLKIT_TEXT_MAX_JSON_BYTES,
+import { parseToolkitSnapshot, parseToolkitRunInput, parseToolkitActionInput, TOOLKIT_TEXT_MAX_BYTES, TOOLKIT_TEXT_MAX_JSON_BYTES,
   type ToolkitAdmission, type ToolkitConfirmedResult, type ToolkitRunInput,
-  type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '@agentmux/core/control'
+  type ToolkitExecution, type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '@agentmux/core/control'
 import type { ConfigOwner } from './config-owner.js'
 import { findToolkitTool, toolkitTools } from './toolkit-config.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
@@ -112,30 +112,53 @@ export class CustomToolkitOwner {
     execution.admission.state = 'unknown'; execution.admission.reason = message(error)
     this.publish(execution.tool)
   }
-  private repeat(tool: Tool, input: ToolkitRunInput): boolean {
+  private savedAction(definition: ToolkitToolDefinition, id: string) {
+    const action = definition.actions?.find(action => action.id === id)
+    if (!action) throw new AgentMuxError('Action does not exist in the saved tool configuration.', 'SETTING_RESOURCE_NOT_FOUND')
+    return action
+  }
+  private repeat(tool: Tool, input: ToolkitRunInput, action: NonNullable<ToolkitExecution['action']> | null): boolean {
     const fact = tool.admission?.invocationId === input.invocationId ? tool.admission
       : tool.latest?.invocationId === input.invocationId ? tool.latest : null
     if (!fact) return false
-    if (fact.definition.revision !== input.expectedRevision || fact.expectedLatestExecutionId !== input.expectedLatestExecutionId) {
+    const sameAction = action === null ? fact.action == null : fact.action != null && fact.action.id === action.id &&
+      fact.action.sourceExecutionId === action.sourceExecutionId && fact.action.expectedAdmissionExecutionId === action.expectedAdmissionExecutionId
+    if (fact.definition.revision !== input.expectedRevision || fact.expectedLatestExecutionId !== input.expectedLatestExecutionId ||
+        !sameAction || (action !== null && tool.admission !== null && fact !== tool.admission)) {
       throw new AgentMuxError('Invocation belongs to another captured request.', 'CONFIG_CONFLICT')
     }
     return true
   }
   async run(id: string, rawInput: unknown, signal: AbortSignal): Promise<ToolkitScriptSnapshot> {
-    const input = parseToolkitRunInput(rawInput), tool = await this.load(id)
+    return await this.admit(id, parseToolkitRunInput(rawInput), null, signal)
+  }
+  async action(id: string, actionId: string, rawInput: unknown, signal: AbortSignal): Promise<ToolkitScriptSnapshot> {
+    const input = parseToolkitActionInput(rawInput)
+    return await this.admit(id, { invocationId: input.invocationId, expectedRevision: input.expectedRevision,
+      expectedLatestExecutionId: input.sourceExecutionId }, { id: actionId, sourceExecutionId: input.sourceExecutionId,
+      expectedAdmissionExecutionId: input.expectedAdmissionExecutionId }, signal)
+  }
+  private async admit(id: string, input: ToolkitRunInput, action: NonNullable<ToolkitExecution['action']> | null, signal: AbortSignal): Promise<ToolkitScriptSnapshot> {
+    const tool = await this.load(id)
     let execution: Execution | null = null
     await this.args.config.inspect(current => {
       if (signal.aborted) throw new AgentMuxError('Tool admission cancelled.', 'CONTROL_CANCELLED')
       if (this.closed) throw new AgentMuxError('Toolkit owner is closed.', 'CONTROL_UNAVAILABLE')
       const definition = findToolkitTool(current, id)
       if (definition.revision !== input.expectedRevision) throw new AgentMuxError('Tool configuration changed; inspect it before running.', 'CONFIG_CONFLICT')
-      if (this.repeat(tool, input)) return
+      if (this.repeat(tool, input, action)) return
+      if (action && (!tool.latest || tool.latest.definition.revision !== definition.revision ||
+          tool.latest.target.workspacePath !== definition.workspacePath || tool.latest.executionId !== action.sourceExecutionId ||
+          (tool.admission?.executionId ?? null) !== action.expectedAdmissionExecutionId)) {
+        throw new AgentMuxError('Action result, configuration or target changed; inspect it before acting.', 'CONFIG_CONFLICT')
+      }
       if (tool.error || tool.admission) throw new AgentMuxError('Tool has an in-use or unconfirmed execution.', 'SETTING_RESOURCE_IN_USE')
       const latest = tool.latest?.executionId ?? null
       if (latest !== input.expectedLatestExecutionId) throw new AgentMuxError('Tool result changed; inspect it before running.', 'CONFIG_CONFLICT')
       if (!definition.enabled) throw new AgentMuxError('Tool is disabled.', 'CONTROL_UNAVAILABLE')
+      if (action) this.savedAction(definition, action.id)
       const admission: ToolkitAdmission = { executionId: randomUUID(), invocationId: input.invocationId,
-        definition: structuredClone(definition), expectedLatestExecutionId: input.expectedLatestExecutionId,
+        definition: structuredClone(definition), expectedLatestExecutionId: input.expectedLatestExecutionId, action,
         target: { workspacePath: definition.workspacePath }, run: null, startedAt: this.now(), text: '', state: 'pending', reason: null }
       tool.admission = admission
       execution = this.execution(tool, admission); tool.live = execution
@@ -161,9 +184,10 @@ export class CustomToolkitOwner {
       if (this.closed) { await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null); return }
       execution.creating = true
       const definition = execution.admission.definition
+      const program = execution.admission.action ? this.savedAction(definition, execution.admission.action.id) : definition
       const run = await execution.port.create({ createOperationId: execution.admission.executionId,
         workspacePath: definition.workspacePath, command: this.args.runner,
-        args: ['--input-type=module', '--eval', definition.script, '--', ...definition.args], env: this.args.env, cols: 80, rows: 24 },
+        args: ['--input-type=module', '--eval', program.script, '--', ...program.args], env: this.args.env, cols: 80, rows: 24 },
         event => this.accept(execution, event))
       execution.admission.run = { hostId: 'local', runId: run.runId }; execution.creating = false
       await this.save(execution.tool)

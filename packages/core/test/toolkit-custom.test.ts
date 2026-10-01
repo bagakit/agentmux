@@ -11,7 +11,7 @@ import { parseToolkitResult, parseToolkitSnapshot, parseToolkitToolFields,
   type AgentMuxToolkitPort, type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '../src/toolkit.js'
 
 const definition: ToolkitToolDefinition = { id: 'summary', revision: 'revision-one', name: 'Summary', icon: 'terminal',
-  enabled: true, statusBar: 'icon', workspacePath: '/project', script: "console.log('ready')", args: [] }
+  enabled: true, statusBar: 'icon', workspacePath: '/project', script: "console.log('ready')", args: [], actions: [] }
 const { id: _id, revision: _revision, ...fields } = definition
 const input = { invocationId: 'explicit-invocation', expectedRevision: definition.revision, expectedLatestExecutionId: null }
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'custom-owning' } as const
@@ -94,7 +94,7 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(() => parseToolkitSnapshot({ ...snapshot(), definition: { ...definition, id: 'performance' }, toolId: 'performance' })).toThrow()
   })
   it('only accepts owner-confirmed success and bounded text attached to the captured target', () => {
-    const result = { executionId: 'execution-one', invocationId: input.invocationId, definition, expectedLatestExecutionId: null,
+    const result = { executionId: 'execution-one', invocationId: input.invocationId, definition, expectedLatestExecutionId: null, action: null,
       target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'run-one' }, startedAt: 10,
       state: 'succeeded', reason: null, endedAt: 12, exitCode: 0, text: '' }
     const parsed = parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: result })
@@ -127,6 +127,41 @@ describe('custom Toolkit public data and authored CLI', () => {
     const decoded = await parseToolkitCommand(['add', definition.id, '--input', file]).then(
       value => ({ ok: true, value }), error => ({ ok: false, code: error.code }))
     expect(decoded).toEqual({ ok: false, code: 'INVALID_CLI_ARGUMENT' })
+  })
+  it('admits only saved action data within the unchanged combined definition budget', () => {
+    const action = { id: 'refresh', label: 'Refresh', script: "console.log('refreshed')", args: [] }
+    const { actions: _actions, ...unconfigured } = fields
+    expect(parseToolkitToolFields(unconfigured)).toEqual(unconfigured)
+    expect(parseToolkitToolFields({ ...fields, actions: [action] })).toEqual({ ...fields, actions: [action] })
+    expect(() => parseToolkitToolFields({ ...fields, actions: [action, action] })).toThrow()
+    expect(() => parseToolkitToolFields({ ...fields, actions: Array.from({ length: 17 }, (_, i) => ({ ...action, id: String(i) })) })).toThrow()
+    expect(() => parseToolkitToolFields({ ...fields, actions: [{ ...action, label: '' }] })).toThrow()
+    expect(() => parseToolkitToolFields({ ...fields, script: 'a'.repeat(28000), actions: [{ ...action, script: 'b'.repeat(16000) }] })).toThrow()
+    expect(() => parseToolkitToolFields({ ...fields, actions: [{ ...action, target: '/other' }] })).toThrow()
+    const original = { executionId: 'original', invocationId: 'original-request', definition: { ...unconfigured, id: definition.id, revision: definition.revision },
+      expectedLatestExecutionId: null, target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'original-run' },
+      startedAt: 10, endedAt: 12, state: 'succeeded', reason: null, exitCode: 0, text: 'original' }
+    expect(parseToolkitSnapshot({ ...snapshot(), definition: original.definition, state: 'succeeded', latestConfirmed: original }))
+      .toEqual({ ...snapshot(), definition: original.definition, state: 'succeeded', latestConfirmed: original })
+  })
+  it('preserves the original action scope through bounded CLI input and a real Control socket', async () => {
+    const dir = await directory(), file = join(dir, 'action.json')
+    const actionInput = { invocationId: 'action-request', expectedRevision: definition.revision, sourceExecutionId: 'original-result', expectedAdmissionExecutionId: null }
+    await writeFile(file, JSON.stringify(actionInput))
+    const command = await parseToolkitCommand(['action', definition.id, 'refresh', '--input', file])
+    expect(command).toEqual({ operation: 'toolkit.action', toolId: definition.id, actionId: 'refresh', input: actionInput })
+    expect(agentMuxControlTimeoutMs('toolkit.action')).toBe(agentMuxControlTimeoutMs('toolkit.run'))
+    const request = { ...base, ...command }
+    expect(parseAgentMuxControlRequest(request)).toEqual(request)
+    expect(() => parseAgentMuxControlRequest({ ...request, toolId: 'performance' })).toThrow()
+    expect(() => parseAgentMuxControlRequest({ ...request, input: { ...actionInput, sourceExecutionId: undefined } })).toThrow()
+    expect(() => parseAgentMuxControlRequest({ ...request, input: { ...actionInput, target: '/other' } })).toThrow()
+    await expect(parseToolkitCommand(['action', definition.id, 'refresh'])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
+    const execute = vi.fn(async () => ({ operation: 'toolkit.action' as const, snapshot: snapshot() }))
+    const server = new AgentMuxControlServer({ execute: vi.fn(), toolkit: { execute, subscribe: vi.fn() } }, join(dir, 'action.sock'))
+    await server.start(); cleanup.push(() => server.stop())
+    await expect(requestAgentMuxControl(request, join(dir, 'action.sock'))).resolves.toMatchObject({ operation: 'toolkit.action' })
+    expect(execute).toHaveBeenCalledExactlyOnceWith(request, expect.any(AbortSignal))
   })
   it('reads and watches a custom tool through real Control sockets without executing it', async () => {
     const path = join(await directory(), 'control.sock'), execute = vi.fn(async () => ({ operation: 'toolkit.get' as const, snapshot: snapshot() }))

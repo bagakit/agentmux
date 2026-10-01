@@ -6,16 +6,16 @@ import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner.js'
 import { executeToolkitConfig, prepareToolkitConfig, toolkitFields } from '../src/main/toolkit-config.js'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitSnapshot, type ToolkitAdmission, type ToolkitRunInput, type ToolkitToolDefinition } from '@agentmux/core/control'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitSnapshot, type ToolkitAdmission, type ToolkitActionInput, type ToolkitRunInput, type ToolkitToolDefinition } from '@agentmux/core/control'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment } from '@agentmux/core'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port.js'
 
 const tool: ToolkitToolDefinition = { id: 'quota', revision: 'author-1', name: 'Quota', icon: 'terminal', enabled: true,
-  statusBar: 'icon', workspacePath: '/tmp', script: "console.log('工具_ACK')", args: [] }
+  statusBar: 'icon', workspacePath: '/tmp', script: "console.log('工具_ACK')", args: [], actions: [] }
 const flush = async () => { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)) }
 const deferred = () => { let resolve!: () => void; return { promise: new Promise<void>(r => { resolve = r }), release: () => resolve() } }
-function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'exited') {
-  let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [structuredClone(tool)] } }
+function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'exited', definition = tool) {
+  let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [structuredClone(definition)] } }
   let custom!: CustomToolkitOwner, accept: (event: AgentMuxClientEvent) => void = () => {}
   let state = initialState, bytes = Buffer.from(output), finalBytes = bytes.byteLength
   const receipts = new Map<string, unknown>()
@@ -38,6 +38,7 @@ function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'ex
   const input = (latest: string | null = null): ToolkitRunInput => ({ invocationId: randomUUID(), expectedRevision: config.toolkit.tools[0]!.revision, expectedLatestExecutionId: latest })
   return { custom, owner, storage, receipts, port, input, get config() { return config },
     exit: () => { state = 'exited'; accept({ type: 'process-state', state: 'exited', exitCode: 0, run: { runId: 'exact-tool-run' } } as any) },
+    begin: () => { state = 'running'; bytes = Buffer.alloc(0); finalBytes = 0 },
     final: (text: string, barrier = Buffer.byteLength(text)) => { bytes = Buffer.from(text); finalBytes = barrier },
     liveBytes: (data: Uint8Array, startByte: number) => accept({ type: 'terminal-output', run: { runId: 'exact-tool-run' }, dataBytes: data,
       evidence: { outputByteRange: { startByte, endByte: startByte + data.byteLength } } } as any) }
@@ -487,4 +488,93 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     expect(f.port.create).toHaveBeenCalledOnce()
   })
 
+})
+
+describe('saved Toolkit actions share captured admission and Raw execution', () => {
+  const refresh = { id: 'refresh', label: 'Refresh', script: "console.log('action_ACK')", args: ['captured-arg'] }
+  const input = (definition: ToolkitToolDefinition, sourceExecutionId: string): ToolkitActionInput => ({ invocationId: randomUUID(),
+    expectedRevision: definition.revision, sourceExecutionId, expectedAdmissionExecutionId: null })
+  it('executes only the saved action program without changing the main definition, and retains the exact invocation', async () => {
+    const f = fixture('main_ACK', 'exited', { ...tool, actions: [refresh] })
+    const first = await f.custom.run('quota', f.input(), new AbortController().signal)
+    const request = input(f.config.toolkit.tools[0]!, first.latestConfirmed!.executionId)
+    f.final('action_ACK')
+    const value = await f.custom.action('quota', 'refresh', request, new AbortController().signal)
+    expect(value.latestConfirmed?.executionId).not.toBe(first.latestConfirmed!.executionId)
+    expect(value.latestConfirmed).toMatchObject({ action: { id: 'refresh', sourceExecutionId: request.sourceExecutionId,
+      expectedAdmissionExecutionId: null }, definition: { script: tool.script, actions: [refresh] }, text: 'action_ACK' })
+    expect(vi.mocked(f.port.create).mock.calls[1]![0].args).toEqual(['--input-type=module', '--eval', refresh.script, '--', 'captured-arg'])
+    expect(parseToolkitSnapshot(value)).toEqual(value)
+    expect((await f.custom.action('quota', 'refresh', request, new AbortController().signal)).latestConfirmed).toEqual(value.latestConfirmed)
+    expect(f.port.create).toHaveBeenCalledTimes(2)
+    await expect(f.custom.action('quota', 'refresh', { ...request, expectedAdmissionExecutionId: 'another-baseline' }, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    await expect(f.custom.run('quota', { invocationId: request.invocationId, expectedRevision: request.expectedRevision,
+      expectedLatestExecutionId: request.sourceExecutionId }, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.port.create).toHaveBeenCalledTimes(2)
+  })
+  it('rejects a retained action after another admission replaces its baseline, and rejects the forgotten request after a later result', async () => {
+    const f = fixture('main', 'exited', { ...tool, actions: [refresh] })
+    const first = await f.custom.run('quota', f.input(), new AbortController().signal)
+    const request = input(f.config.toolkit.tools[0]!, first.latestConfirmed!.executionId)
+    const action = await f.custom.action('quota', 'refresh', request, new AbortController().signal)
+    f.begin()
+    await f.custom.run('quota', f.input(action.latestConfirmed!.executionId), new AbortController().signal)
+    const staleResult = await f.custom.action('quota', 'refresh', request, new AbortController().signal).then(() => null, error => error)
+    expect(staleResult).toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.port.create).toHaveBeenCalledTimes(3)
+    f.final('new_result'); f.exit(); await flush()
+    await expect(f.custom.action('quota', 'refresh', request, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.port.create).toHaveBeenCalledTimes(3)
+  })
+  it('returns the same unknown admission for an exact repeated action without creating a second Run', async () => {
+    const f = fixture('main', 'exited', { ...tool, actions: [refresh] })
+    const first = await f.custom.run('quota', f.input(), new AbortController().signal)
+    const request = input(f.config.toolkit.tools[0]!, first.latestConfirmed!.executionId)
+    f.port.create = vi.fn().mockRejectedValueOnce(new Error('owned-create-outcome-unconfirmed'))
+    const unknown = await f.custom.action('quota', 'refresh', request, new AbortController().signal)
+    expect(unknown).toMatchObject({ state: 'unknown', latestConfirmed: first.latestConfirmed,
+      admission: { invocationId: request.invocationId, action: { id: 'refresh' } } })
+    expect(await f.custom.action('quota', 'refresh', request, new AbortController().signal)).toEqual(unknown)
+    expect(f.port.create).toHaveBeenCalledOnce()
+    await expect(f.custom.action('quota', 'other', request, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.port.create).toHaveBeenCalledOnce()
+  })
+  it('rejects actions from stale configuration and same-config replaced results without changing admission', async () => {
+    const f = fixture('main', 'exited', { ...tool, actions: [refresh] })
+    const first = await f.custom.run('quota', f.input(), new AbortController().signal)
+    const request = input(f.config.toolkit.tools[0]!, first.latestConfirmed!.executionId)
+    await f.custom.run('quota', f.input(first.latestConfirmed!.executionId), new AbortController().signal)
+    await expect(f.custom.action('quota', 'refresh', request, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    const latest = (await f.custom.get('quota')).latestConfirmed!
+    const beforeEdit = input(f.config.toolkit.tools[0]!, latest.executionId)
+    await f.owner.update(current => ({ ...current, toolkit: { ...current.toolkit,
+      tools: [{ ...current.toolkit!.tools![0]!, workspacePath: '/different-target' }] } }))
+    const staleTarget = await f.custom.action('quota', 'refresh', beforeEdit, new AbortController().signal).then(() => null, error => error)
+    expect(staleTarget).toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.port.create).toHaveBeenCalledTimes(2)
+    expect((await f.custom.get('quota')).admission).toBeNull()
+  })
+  it('never turns result text into an action program', async () => {
+    const f = fixture(JSON.stringify({ actions: [refresh] }))
+    const first = await f.custom.run('quota', f.input(), new AbortController().signal)
+    const missing = await f.custom.action('quota', 'refresh', input(f.config.toolkit.tools[0]!, first.latestConfirmed!.executionId), new AbortController().signal).then(() => null, error => error)
+    expect(missing).toMatchObject({ code: 'SETTING_RESOURCE_NOT_FOUND' })
+    expect(f.port.create).toHaveBeenCalledOnce()
+    expect((await f.custom.get('quota')).latestConfirmed).toEqual(first.latestConfirmed)
+  })
+  it('compares absent and empty actions only in Toolkit authored fields without rewriting an unchanged definition', async () => {
+    const { actions: _actions, ...plain } = tool
+    const f = fixture('main', 'exited', plain)
+    const noop = await executeToolkitConfig({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
+      operation: 'toolkit.update', toolId: 'quota', changes: { actions: [] }, expected: { actions: [] } }, f.owner)
+    expect(noop).toMatchObject({ changed: false, definition: plain })
+    expect(f.config.toolkit.tools[0]).toEqual(plain)
+    const saved = await executeToolkitConfig({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
+      operation: 'toolkit.update', toolId: 'quota', changes: { actions: [refresh] }, expected: { actions: [] } }, f.owner)
+    expect(saved).toMatchObject({ changed: true, definition: { actions: [refresh] } })
+    await expect(executeToolkitConfig({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
+      operation: 'toolkit.update', toolId: 'quota', changes: { actions: [] }, expected: { actions: [] } }, f.owner)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.config.toolkit.tools[0]!.actions).toEqual([refresh])
+    expect(f.port.create).not.toHaveBeenCalled()
+  })
 })

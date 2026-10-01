@@ -236,14 +236,15 @@ const TOOLKIT_HELP = `Usage: agentmux toolkit list
        agentmux toolkit add|update <tool> --input <file|->
        agentmux toolkit remove <tool> [--input <file|->]
        agentmux toolkit run|stop <tool> [--input <file|->]
+       agentmux toolkit action <tool> <action> --input <file|->
 
 Create a saved local JavaScript ESM tool. Example add input:
   {"name":"Daily summary","icon":"terminal","workspacePath":"/path/to/project",
    "script":"console.log('Ready')"}
-Optional creation fields: enabled=true, statusBar="icon" (or "label"), args=[].
+Optional creation fields: enabled=true, statusBar="icon" (or "label"), args=[], actions=[].
 Updates use {"changes":{...},"expected":{...}}; expected covers every changed field.
 Removal input uses {"expected":{...}} with the complete saved editable fields.
-IDs and revisions belong to the owner, never in editable input. Performance is read-only.
+Tool IDs are positional. Revisions are issued by the owner, never editable. Performance is read-only.
 
 Saving, enabling its entry, get/script/list and user-tool watch do not run scripts.
 run captures the current definition and result baseline, then explicitly admits one Run.
@@ -252,6 +253,13 @@ expectedRevision and expectedLatestExecutionId; query get after an unknown recei
 never assume the write did not run. Stop input pins executionId (null means no active Run).
 Closing a user-tool watch or floating result releases only its reader, not the script.
 Results are bounded merged terminal text, with actual execution identity and exit facts.
+Saved actions contain id, label, JavaScript ESM script and args, and share the tool's fixed
+working directory. At most 16 actions share the same total definition budget as the main script.
+Action input captures invocationId, expectedRevision, sourceExecutionId and
+expectedAdmissionExecutionId (null when no execution is active). Use the original confirmed
+result and configuration: newer results or changed targets reject stale actions with conflict.
+An already retained invocation returns the same fact; unknown outcomes are not retried.
+Output stays plain text and cannot define actions. Inspect saved actions in get before use.
 Scripts use the current local Unix user's files, environment and network; no sandbox,
 secret storage, scheduling, remote execution or Agent tasks are provided by this slice.
 
@@ -261,7 +269,7 @@ stop ends only its exact observation and never stops Agents. Other observers ret
 independent leases. Its source identity and per-source observation times remain visible.`
 
 const HELP = new Map<string, string>([
-  ...['toolkit','toolkit.list','toolkit.get','toolkit.script','toolkit.run','toolkit.stop','toolkit.watch','toolkit.add','toolkit.update','toolkit.remove'].map(name => [name, TOOLKIT_HELP] as [string,string]),
+  ...['toolkit','toolkit.list','toolkit.get','toolkit.script','toolkit.run','toolkit.stop','toolkit.watch','toolkit.add','toolkit.update','toolkit.remove','toolkit.action'].map(name => [name, TOOLKIT_HELP] as [string,string]),
   ['metrics', METRICS_HELP],
   ['metrics.get', METRICS_HELP],
   ['metrics.watch', METRICS_HELP],

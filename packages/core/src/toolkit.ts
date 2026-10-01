@@ -18,19 +18,25 @@ export const TOOLKIT_MAX_USER_TOOLS = 128
 export const TOOLKIT_TOOL_FIELDS_MAX_BYTES = 39 * 1024
 export const TOOLKIT_DEFINITION_MAX_BYTES = 40 * 1024
 export const TOOLKIT_TEXT_MAX_JSON_BYTES = 48 * 1024
+export const TOOLKIT_MAX_ACTIONS = 16
+export type ToolkitAction = { id: string; label: string; script: string; args: string[] }
 export type ToolkitToolFields = {
   name: string; icon: string; enabled: boolean; statusBar: 'icon' | 'label'
-  workspacePath: string; script: string; args: string[]
+  workspacePath: string; script: string; args: string[]; actions?: ToolkitAction[]
 }
 export type ToolkitToolInput = ToolkitToolFields & { id: string }
 export type ToolkitToolDefinition = ToolkitToolInput & { revision: string }
 export type ToolkitRunInput = {
   invocationId: string; expectedRevision: string; expectedLatestExecutionId: string | null
 }
+export type ToolkitActionInput = {
+  invocationId: string; expectedRevision: string; sourceExecutionId: string; expectedAdmissionExecutionId: string | null
+}
 export type ToolkitExecution = {
   executionId: string; invocationId: string; definition: ToolkitToolDefinition
   expectedLatestExecutionId: string | null; target: { workspacePath: string }
   run: { hostId: string; runId: string } | null; startedAt: number; text: string
+  action?: { id: string; sourceExecutionId: string; expectedAdmissionExecutionId: string | null } | null
 }
 export type ToolkitAdmission = ToolkitExecution & {
   state: 'pending' | 'running' | 'stopping' | 'unknown'; reason: string | null
@@ -51,13 +57,14 @@ export type ToolkitDescriptor =
       icon: string; enabled: boolean; statusBar: 'icon' | 'label' }
 export type ToolkitScript = { toolId: string; path: string | null; sha256: string; text: string }
 export const TOOLKIT_OPERATIONS = ['toolkit.list', 'toolkit.get', 'toolkit.script', 'toolkit.run',
-  'toolkit.stop', 'toolkit.watch', 'toolkit.add', 'toolkit.update', 'toolkit.remove'] as const
+  'toolkit.stop', 'toolkit.watch', 'toolkit.add', 'toolkit.update', 'toolkit.remove', 'toolkit.action'] as const
 export type ToolkitOperation = typeof TOOLKIT_OPERATIONS[number]
 type Envelope = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
 export type ToolkitRequest = Envelope & (
   | { operation: 'toolkit.list' }
   | { operation: 'toolkit.get' | 'toolkit.script' | 'toolkit.watch'; toolId: string }
   | { operation: 'toolkit.run'; toolId: string; input?: ToolkitRunInput }
+  | { operation: 'toolkit.action'; toolId: string; actionId: string; input: ToolkitActionInput }
   | { operation: 'toolkit.stop'; toolId: string; executionId?: string | null }
   | { operation: 'toolkit.add'; toolId: string; value: ToolkitToolFields }
   | { operation: 'toolkit.update'; toolId: string; changes: Partial<ToolkitToolFields>; expected?: Partial<ToolkitToolFields> }
@@ -66,7 +73,7 @@ export type ToolkitRequest = Envelope & (
 export type ToolkitResult =
   | { operation: 'toolkit.list'; tools: ToolkitDescriptor[] }
   | { operation: 'toolkit.script'; script: ToolkitScript }
-  | { [O in 'toolkit.get' | 'toolkit.run' | 'toolkit.stop']: { operation: O; snapshot: ToolkitSnapshot } }['toolkit.get' | 'toolkit.run' | 'toolkit.stop']
+  | { [O in 'toolkit.get' | 'toolkit.run' | 'toolkit.stop' | 'toolkit.action']: { operation: O; snapshot: ToolkitSnapshot } }['toolkit.get' | 'toolkit.run' | 'toolkit.stop' | 'toolkit.action']
   | { [O in 'toolkit.add' | 'toolkit.update']: { operation: O; definition: ToolkitToolDefinition; changed: boolean } }['toolkit.add' | 'toolkit.update']
   | { operation: 'toolkit.remove'; toolId: string; removed: true }
   | { operation: 'toolkit.watch' }
@@ -105,8 +112,22 @@ function nullable(v: unknown, check: (v: unknown) => void) { if (v !== null) che
 function runRef(v: unknown) {
   if (v !== null) { const r = record(v, ['hostId', 'runId']); identity(r.hostId); identity(r.runId) }
 }
-const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args'] as const
+const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions'] as const
 function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string) {
+  if (key === 'actions') {
+    if (!Array.isArray(value) || value.length > TOOLKIT_MAX_ACTIONS) invalid(code)
+    const ids = new Set<string>()
+    for (const item of value) {
+      const action = record(item, ['id', 'label', 'script', 'args'], [], code)
+      const id = identity(action.id, code)
+      if (ids.has(id)) invalid(code)
+      ids.add(id)
+      text(action.label, 256, code); encodedText(action.label, 768, code)
+      if (!(action.label as string).trim() || (action.label as string).includes('\0')) invalid(code)
+      field('script', action.script, code); field('args', action.args, code)
+    }
+    return
+  }
   if (key === 'enabled') { if (typeof value !== 'boolean') invalid(code); return }
   if (key === 'statusBar') { if (value !== 'icon' && value !== 'label') invalid(code); return }
   if (key === 'args') {
@@ -125,13 +146,13 @@ function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string) {
 }
 /** Pure data validation; the host owns paths, icon choices, persistence and revision issuance. */
 export function parseToolkitToolFields(value: unknown, partial = false, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitToolFields | Partial<ToolkitToolFields> {
-  const r = record(value, partial ? [] : TOOL_FIELDS, partial ? TOOL_FIELDS : [], code)
+  const r = record(value, partial ? [] : TOOL_FIELDS.filter(key => key !== 'actions'), partial ? TOOL_FIELDS : ['actions'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)
   for (const key of Object.keys(r)) field(key as typeof TOOL_FIELDS[number], r[key], code)
   return r as ToolkitToolFields | Partial<ToolkitToolFields>
 }
 export function parseToolkitToolDefinition(value: unknown): ToolkitToolDefinition {
-  const r = record(value, [...TOOL_FIELDS, 'id', 'revision'])
+  const r = record(value, [...TOOL_FIELDS.filter(key => key !== 'actions'), 'id', 'revision'], ['actions'])
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_DEFINITION_MAX_BYTES) invalid()
   const { id, revision, ...fields } = r
   identity(id); identity(revision)
@@ -144,11 +165,22 @@ export function parseToolkitRunInput(value: unknown, code = 'INVALID_CONTROL_REQ
   if (r.expectedLatestExecutionId !== null) identity(r.expectedLatestExecutionId, code)
   return r as ToolkitRunInput
 }
+export function parseToolkitActionInput(value: unknown, code = 'INVALID_CONTROL_REQUEST'): ToolkitActionInput {
+  const r = record(value, ['invocationId', 'expectedRevision', 'sourceExecutionId', 'expectedAdmissionExecutionId'], [], code)
+  identity(r.invocationId, code); identity(r.expectedRevision, code); identity(r.sourceExecutionId, code)
+  if (r.expectedAdmissionExecutionId !== null) identity(r.expectedAdmissionExecutionId, code)
+  return r as ToolkitActionInput
+}
 const EXECUTION_FIELDS = ['executionId', 'invocationId', 'definition', 'expectedLatestExecutionId', 'target', 'run', 'startedAt', 'text'] as const
 function execution(value: unknown, confirmed: boolean): ToolkitAdmission | ToolkitConfirmedResult {
-  const r = record(value, [...EXECUTION_FIELDS, 'state', 'reason', ...(confirmed ? ['endedAt', 'exitCode'] : [])])
+  const r = record(value, [...EXECUTION_FIELDS, 'state', 'reason', ...(confirmed ? ['endedAt', 'exitCode'] : [])], ['action'])
   identity(r.executionId); identity(r.invocationId); nullable(r.expectedLatestExecutionId, identity)
   const definition = parseToolkitToolDefinition(r.definition)
+  if (r.action !== undefined && r.action !== null) {
+    const action = record(r.action, ['id', 'sourceExecutionId', 'expectedAdmissionExecutionId'])
+    identity(action.id); identity(action.sourceExecutionId); nullable(action.expectedAdmissionExecutionId, identity)
+    if (!definition.actions?.some(item => item.id === action.id) || action.sourceExecutionId !== r.expectedLatestExecutionId) invalid()
+  }
   const target = record(r.target, ['workspacePath']); text(target.workspacePath); encodedText(target.workspacePath, 4096)
   if (target.workspacePath !== definition.workspacePath) invalid()
   runRef(r.run); time(r.startedAt); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096)); text(r.text, TOOLKIT_TEXT_MAX_BYTES); encodedText(r.text, TOOLKIT_TEXT_MAX_JSON_BYTES)
@@ -267,6 +299,11 @@ export function parseToolkitRequest(value: unknown): ToolkitRequest {
     }
     case 'toolkit.remove': record(source, base, ['expected'], code); if (Object.hasOwn(source, 'expected')) parseToolkitToolFields(source.expected, false, code); break
     case 'toolkit.run': record(source, source.toolId === 'performance' ? base : [...base, 'input'], [], code); if (source.toolId !== 'performance') parseToolkitRunInput(source.input, code); break
+    case 'toolkit.action': {
+      if (source.toolId === 'performance') invalid(code)
+      record(source, [...base, 'actionId', 'input'], [], code)
+      identity(source.actionId, code); parseToolkitActionInput(source.input, code); break
+    }
     case 'toolkit.stop': record(source, source.toolId === 'performance' ? base : [...base, 'executionId'], [], code); if (source.toolId !== 'performance' && source.executionId !== null) identity(source.executionId, code); break
     default: record(source, base, [], code)
   }

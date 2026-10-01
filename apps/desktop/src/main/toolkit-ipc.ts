@@ -23,6 +23,7 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
   handle('toolkit:list', () => execute({ operation: 'toolkit.list' }))
   for (const operation of ['get', 'script'] as const) handle('toolkit:' + operation, (_event, toolId: unknown) => execute({ operation: 'toolkit.' + operation, toolId }))
   handle('toolkit:run', (_event, toolId: unknown, input: unknown) => execute({ operation: 'toolkit.run', toolId, ...(input === undefined ? {} : { input }) }))
+  handle('toolkit:action', (_event, toolId: unknown, actionId: unknown, input: unknown) => execute({ operation: 'toolkit.action', toolId, actionId, input }))
   handle('toolkit:stop', (_event, toolId: unknown, executionId: unknown) => execute({ operation: 'toolkit.stop', toolId, ...(executionId === undefined ? {} : { executionId }) }))
   handle('toolkit:add', (_event, toolId: unknown, value: unknown) => execute({ operation: 'toolkit.add', toolId, value }))
   handle('toolkit:update', (_event, toolId: unknown, changes: unknown, expected: unknown) => execute({ operation: 'toolkit.update', toolId, changes, ...(expected === undefined ? {} : { expected }) }))

@@ -247,6 +247,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }
     if (request.operation === 'toolkit.script') return { operation: request.operation, script: this.custom.script(request.toolId) }
     if (request.operation === 'toolkit.run') return { operation: request.operation, snapshot: await this.custom.run(request.toolId, request.input, signal) }
+    if (request.operation === 'toolkit.action') return { operation: request.operation, snapshot: await this.custom.action(request.toolId, request.actionId, request.input, signal) }
     if (request.operation === 'toolkit.stop') {
       if (request.executionId === undefined) throw new AgentMuxError('Stop requires a captured execution identity.', 'INVALID_CONTROL_REQUEST')
       return { operation: request.operation, snapshot: await this.custom.stop(request.toolId, request.executionId) }
