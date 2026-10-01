@@ -795,7 +795,9 @@ type AppState = {
     location?: { line: number; column?: number; noteBlock?: NoteBlockTarget },
     workspaceId?: string,
     openAsText?: boolean,
-    placement?: FileOpenPlacement
+    placement?: FileOpenPlacement,
+    /** Cancels this caller's reveal only; the shared document read remains owned. */
+    navigationSignal?: AbortSignal
   ): Promise<boolean>
   /**
    * 给一个已在板上、但还没有文档的文件面装上它的文档。
@@ -816,7 +818,7 @@ type AppState = {
   refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
   setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<void>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<void>
-  renameScratchTopic(topicId: string, title: string): Promise<ScratchTopicSnapshot>
+  renameScratchTopic(topicId: string, title: string, workspaceId?: string): Promise<ScratchTopicSnapshot>
   /**
    * 给一个 Agent 设用户手改名（传空清除，交还派生链）。只写 `agentNames[sessionId]`，不碰 session id、
    * run、寻址或 Core——名字是纯展示投影，永不进 Core Session 事实。
@@ -835,12 +837,12 @@ type AppState = {
    * 症状是**开错文件**而不是报错——名字撞上另一个项目里的同名文件时界面上一切正常。
    * 所以解析必须只发生一次，然后把结果交给下游，而不是让下游自己再问一遍。
    */
-  createPath(input: CreateWorkspacePathInput): Promise<string>
+  createPath(input: CreateWorkspacePathInput, workspaceId?: string): Promise<string>
   createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string): Promise<NoteCreationReceipt>
   revealCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   retryCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
-  renamePath(path: string, nextPath: string): Promise<void>
-  deletePath(path: string): Promise<void>
+  renamePath(path: string, nextPath: string, workspaceId?: string): Promise<void>
+  deletePath(path: string, workspaceId?: string): Promise<void>
   updateDocument(tabId: string, content: string, regionId?: string): void
   saveDocument(tabId: string, regionId?: string): Promise<void>
   overwriteDocument(tabId: string, regionId?: string): Promise<void>
@@ -2292,12 +2294,12 @@ let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 /** The existing Space and Survey selection facts captured by file display intents. */
-function fileNavigationSelection(state: AppState): string {
+export function fileNavigationSelection(state: AppState): string {
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
     tabId ? state.tabs[tabId]?.layout.activeRegionId : undefined,
-    state.agentFocus.execution.sessionId, state.agentFocus.pmo.sessionId, state.surveyZoneSelection])
+    state.agentFocus.execution.sessionId, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
 
 async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string): Promise<string> {
@@ -5136,7 +5138,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }))
     }
   },
-  async openFile(path, tabGroupId, location, requestedWorkspaceId, openAsText, placement) {
+  async openFile(path, tabGroupId, location, requestedWorkspaceId, openAsText, placement, navigationSignal) {
     // 显式 workspace 优先于活动 workspace。异步动作（建文件、切 diff）必须能把**自己开头那次**
     // 解析结果传进来：否则调用方解析一次、这里再解析一次，两次之间用户切了侧栏就漂移，
     // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
@@ -5185,7 +5187,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       unsubscribe()
       if (fileOpenNavigationUnsubscribe === unsubscribe) fileOpenNavigationUnsubscribe = undefined
     }
-    const mayReveal = () => (background || intentVersion === fileOpenIntentVersion && !cancelled) && resourceCurrent()
+    const mayReveal = () => (background || !navigationSignal?.aborted && intentVersion === fileOpenIntentVersion && !cancelled) && resourceCurrent()
     const selectProjection = () => {
       if (background) return
       // This is an explicit original File action, not discovery or arbitrary selection.
@@ -5258,7 +5260,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const targetGroupId = tabGroupId ?? layout.activeGroupId
         const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
         const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? undefined : topicId, placement))
+        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement))
         rememberPlacement()
         result.data = { kind: 'text', reason: null }
         selectProjection()
@@ -5271,7 +5273,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         releaseNavigation()
         const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
         const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? undefined : topicId, placement))
+        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement))
         rememberPlacement()
         result.data = { kind: get().documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'media-preview', reason: null }
         selectProjection()
@@ -5321,11 +5323,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   ? reduceDocumentAttached(state, workspaceId, path, result.document)
                   : reduceDocumentLoadFailed(state, workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength })
                 const opened = format && !format.sourceEditable
-                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? undefined : topicId, placement)
+                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement)
                   : result.status === 'read'
-                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? undefined : topicId, placement)
+                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement)
                   : reduceDocumentLoadFailed(
-                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? undefined : topicId, placement),
+                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement),
                     workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength }
                   )
                 const placed = opened.layouts[displayId!]!
@@ -5378,8 +5380,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
           const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
           set((current) => current.documents[key]
-            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? undefined : topicId, placement)
-            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? undefined : topicId, placement))
+            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement)
+            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement))
           rememberPlacement()
           selectProjection()
           return !background && intentVersion === fileOpenIntentVersion
@@ -5762,9 +5764,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
     }
   },
-  async renameScratchTopic(topicId, title) {
+  async renameScratchTopic(topicId, title, requestedWorkspaceId) {
     const state = get()
-    const workspace = state.config?.workspaces.find((item) => item.id === state.activeWorkspaceId)
+    const workspace = state.config?.workspaces.find((item) => item.id === (requestedWorkspaceId ?? state.activeWorkspaceId))
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Select the Scratch workspace first')
     }
@@ -5782,8 +5784,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw error
     }
   },
-  async createPath(input) {
-    const workspaceId = get().activeWorkspaceId
+  async createPath(input, requestedWorkspaceId) {
+    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
     try {
       await api.files.create(workspaceId, input)
@@ -5942,8 +5944,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (receipt?.status !== 'error') return receipt
     return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId)
   },
-  async renamePath(path, nextPath) {
-    const workspaceId = get().activeWorkspaceId
+  async renamePath(path, nextPath, requestedWorkspaceId) {
+    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
     return await withWorkspaceFileMutation(workspaceId, path, async () => {
       const stateBeforeMove = get()
@@ -6011,8 +6013,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
   },
-  async deletePath(path) {
-    const workspaceId = get().activeWorkspaceId
+  async deletePath(path, requestedWorkspaceId) {
+    const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
     return await withWorkspaceFileMutation(workspaceId, path, async () => {
       const observedPaths = Object.keys(get().documents).flatMap((key) => {

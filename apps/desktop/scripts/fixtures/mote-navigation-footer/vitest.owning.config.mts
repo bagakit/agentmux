@@ -32,7 +32,7 @@ export default defineConfig({
     include: ['test/mote-avatar-identity.test.tsx', 'test/mote-avatar-assets.test.ts', 'test/mote-primary-identity.test.tsx', 'test/mote-primary-directory.test.ts', 'test/space-object-appearance.test.tsx', 'test/space-object-appearance-persistence.test.ts', 'test/mote-floating-resize.test.tsx', 'test/pmo-teams-topic-floating.test.tsx', 'test/mote-navigation-rail.test.tsx', 'test/mote-footer-density.test.tsx',
       'test/surface-nav-density.test.ts', 'test/mote-hover-settings-ownership.test.tsx', 'test/footer-navigation-density.test.ts',
       'test/mote-archive-service.test.ts', 'test/mote-archive-interaction.test.tsx',
-      'test/mote-default-dialogue.test.tsx', 'test/mote-hover-surface.test.tsx', 'test/mote-shortcut-context.test.tsx', 'test/mote-paperdoll-avatar.test.tsx', 'test/mote-paperdoll-state.test.tsx', 'test/mote-launcher-identity.test.tsx'],
+      'test/mote-default-dialogue.test.tsx', 'test/mote-hover-surface.test.tsx', 'test/mote-shortcut-context.test.tsx', 'test/mote-paperdoll-avatar.test.tsx', 'test/mote-paperdoll-state.test.tsx', 'test/mote-avatar-motion.test.tsx', 'test/mote-launcher-identity.test.tsx'],
     passWithNoTests: false,
     maxWorkers: 1
   }

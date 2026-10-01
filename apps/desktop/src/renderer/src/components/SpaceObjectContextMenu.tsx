@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Archive, ArchiveRestore, NotebookPen, Pin, Shapes } from 'lucide-react'
+import { Archive, ArchiveRestore, BookOpen, Maximize2, NotebookPen, Pencil, Pin, Plus, Shapes } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -26,13 +26,13 @@ export function useSpaceObjectMenu() {
       // Hand focus to the Dialog only after the menu's focus scope closes.
       const next = openPicker.current
       openPicker.current = null
+      const node = trigger.current
+      const row = node?.matches('[data-space-icon-target]') ? node : node?.querySelector<HTMLElement>('[data-space-icon-target]')
+      const focusTarget = row ?? node
+      focusTarget?.focus()
+      // The next Dialog inherits this original invoker, rather than a removed
+      // menu item or body. Its focus and native-popover ancestry stay precise.
       if (next) next()
-      else {
-        const node = trigger.current
-        const row = node?.matches('[data-space-icon-target]') ? node : node?.querySelector<HTMLElement>('[data-space-icon-target]')
-        const focusTarget = row ?? node
-        focusTarget?.focus()
-      }
     },
     changeIcon(callback: () => void) { openPicker.current = callback }
   }
@@ -42,7 +42,7 @@ export function useSpaceObjectMenu() {
 export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuOpen, moteArchive, moteActions, container }: {
   target: SpaceIconTarget; onChangeIcon?(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
   moteArchive?: { archived: boolean; disabled?: boolean; reason?: string; onChange(): Promise<boolean>; returnFocus?(): HTMLElement | null }
-  moteActions?: { pinned: boolean; onTogglePin(): void; onEdit(): void }
+  moteActions?: { pinned: boolean; onTogglePin(): void; onEdit(): void; onRename?(): void; onNewDiscussion?(): void; onMaterials?(): void; onOpenSpace?(): void }
   container?: () => HTMLElement | null
 }) {
   const menu = useSpaceObjectMenu()
@@ -58,15 +58,21 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={event => {
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
+        {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><Pencil size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
         {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => onChangeIcon(target))}>
           <Shapes size={14} /><span>{target.avatarTarget ? 'Change avatar…' : 'Change icon…'}</span>
         </ContextMenu.Item> : null}
         {moteActions ? <>
+          <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onEdit)}>
+            <NotebookPen size={14} /><span>Edit persona</span>
+          </ContextMenu.Item>
+          {moteActions.onNewDiscussion || moteActions.onMaterials || moteActions.onOpenSpace ? <ContextMenu.Separator className="tab-context-menu__separator" /> : null}
+          {moteActions.onNewDiscussion ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onNewDiscussion!)}><Plus size={14} /><span>New discussion</span></ContextMenu.Item> : null}
+          {moteActions.onMaterials ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onMaterials!)}><BookOpen size={14} /><span>Open materials</span></ContextMenu.Item> : null}
+          {moteActions.onOpenSpace ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onOpenSpace!)}><Maximize2 size={14} /><span>Open in Space</span></ContextMenu.Item> : null}
+          <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={moteActions.onTogglePin}>
             <Pin size={14} /><span>{moteActions.pinned ? 'Unpin Mote' : 'Pin Mote'}</span>
-          </ContextMenu.Item>
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onEdit)}>
-            <NotebookPen size={14} /><span>Edit SOUL.md</span>
           </ContextMenu.Item>
         </> : null}
         {moteArchive ? <ContextMenu.Item className="tab-context-menu__item" disabled={moteArchive.disabled ?? false}

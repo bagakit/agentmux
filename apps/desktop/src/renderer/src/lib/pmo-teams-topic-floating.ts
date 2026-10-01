@@ -223,7 +223,7 @@ export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boo
   })
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribePmoTeamsTopicFloatingState(listener: () => void): () => void {
   listeners.add(listener)
   unsubscribeTabRemoved ??= subscribeWorkbenchTabRemoved(tab => {
     const current = state
@@ -246,5 +246,5 @@ function subscribe(listener: () => void): () => void {
   }
 }
 export function usePmoTeamsTopicFloatingState(): [PmoTeamsTopicFloatingState, (next: Partial<PmoTeamsTopicFloatingState>) => void] {
-  return [useSyncExternalStore(subscribe, snapshot, () => CLOSED), update]
+  return [useSyncExternalStore(subscribePmoTeamsTopicFloatingState, snapshot, () => CLOSED), update]
 }

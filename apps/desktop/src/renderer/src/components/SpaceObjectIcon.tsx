@@ -43,7 +43,7 @@ type SpaceObjectIconProps = {
   lastActivityAt?: number | null | undefined; visible?: boolean | undefined; topicGlyph?: boolean
 } & MoteIdentityMotionProps
 export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectIconProps) {
-  return props.kind === 'mote' && (props.moteSessionId || props.moteAvailability && props.moteAvailability !== 'static') ? <MoteIdentityMotion moteSessionId={props.moteSessionId} moteHostId={props.moteHostId} moteAvailability={props.moteAvailability} visible={props.visible}>
+  return props.kind === 'mote' && (isMoteFace(props.manualIcon) || props.moteSessionId || props.moteAvailability && props.moteAvailability !== 'static') ? <MoteIdentityMotion moteSessionId={props.moteSessionId} moteHostId={props.moteHostId} moteAvailability={props.moteAvailability} visible={props.visible}>
     {expression => <SpaceObjectIconContents {...props} expression={expression} />}
   </MoteIdentityMotion> : <SpaceObjectIconContents {...props} />
 })

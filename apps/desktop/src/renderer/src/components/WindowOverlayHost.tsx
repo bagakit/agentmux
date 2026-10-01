@@ -12,6 +12,63 @@ export const OVERLAY_LAYER_BANDS = {
 export type OverlayLayerBand = (typeof OVERLAY_LAYER_BANDS)[keyof typeof OVERLAY_LAYER_BANDS]
 
 const WINDOW_OVERLAY_HOST_ID = 'agentmux-window-overlay-host'
+const interactiveOverlay = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-state="open"], [data-state="delayed-open"]'
+const interactionHosts = new WeakMap<HTMLElement, HTMLElement>()
+
+function captureNativeInvoker(host: HTMLElement): void {
+  const active = document.activeElement
+  const popover = active instanceof HTMLElement ? active.closest<HTMLElement>('[popover]') : null
+  if (popover && popover !== host && !host.contains(popover) && popover.matches(':popover-open')) {
+    // DOM ancestry is the native auto-popover's light-dismiss ownership. A
+    // higher manual layer alone does not preserve that ancestor on pointerup.
+    if (host.parentElement !== popover) popover.appendChild(host)
+  } else if (host.parentElement?.hasAttribute('popover') && !host.parentElement.matches(':popover-open')) {
+    // A closed empty Portal may have followed its former invoker during render.
+    // Recover that same host before the next ordinary Dialog's autofocus runs.
+    const root = document.getElementById(WINDOW_OVERLAY_HOST_ID)
+    if (root) root.appendChild(host)
+  }
+}
+
+/** Promote only new interactive surfaces; persistent window chrome stays painted. */
+function bindWindowOverlayTopLayer(host: HTMLElement): void {
+  host.setAttribute('popover', 'manual')
+  const active = new Set<Element>()
+  const chromeEntry = (node: Element) => { const chrome = node.closest('[data-overlay-layer="window-chrome"]'); return chrome && host.contains(chrome) }
+  const eligible = (node: Element) => { const closed = node.closest('[data-state="closed"]')
+    return node.matches(interactiveOverlay) && (!closed || !host.contains(closed)) && !chromeEntry(node) }
+  const observer = new MutationObserver(records => {
+    let opened = false
+    const admit = (node: Element) => {
+      if (eligible(node) && !active.has(node)) { active.add(node); opened = true }
+    }
+    for (const record of records) {
+      if (record.type === 'attributes') admit(record.target as Element)
+      else for (const node of record.addedNodes) {
+        if (!(node instanceof Element) || chromeEntry(node)) continue
+        admit(node)
+        for (const child of node.querySelectorAll(interactiveOverlay)) admit(child)
+      }
+    }
+    for (const node of active) if (!host.contains(node) || !eligible(node)) active.delete(node)
+    if (!host.isConnected) { observer.disconnect(); return }
+    if (typeof host.showPopover !== 'function') return
+    const shown = host.matches(':popover-open')
+    if (active.size === 0) {
+      if (shown) host.hidePopover()
+      const root = document.getElementById(WINDOW_OVERLAY_HOST_ID)
+      if (root && host.parentElement !== root) root.appendChild(host)
+      return
+    }
+    if (!opened && shown) return
+    // Native popovers and HTML dialogs share the top layer. A newer window
+    // overlay must enter after its invoker. Reordering has no focus side effect
+    // for a manual popover: Radix still owns modality, focus and Escape.
+    if (shown) host.hidePopover()
+    host.showPopover()
+  })
+  observer.observe(host, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state', 'role'] })
+}
 
 /**
  * Internal helper to synchronously and idempotently ensure that the shared
@@ -37,9 +94,26 @@ function ensureWindowOverlayHost(): HTMLElement | null {
   return host
 }
 
+function ensureInteractionHost(): HTMLElement | null {
+  const root = ensureWindowOverlayHost()
+  if (!root) return null
+  let host = interactionHosts.get(root)
+  if (!host?.isConnected) {
+    host = document.createElement('div')
+    host.id = WINDOW_OVERLAY_HOST_ID + '-interaction'
+    host.className = 'window-overlay-host'
+    host.dataset.overlayHost = 'interaction'
+    root.appendChild(host)
+    interactionHosts.set(root, host)
+    bindWindowOverlayTopLayer(host)
+  }
+  captureNativeInvoker(host)
+  return host
+}
+
 export function getWindowOverlayHost(): HTMLElement | null {
   if (typeof document === 'undefined') return null
-  return ensureWindowOverlayHost()
+  return ensureInteractionHost()
 }
 
 /**
@@ -51,7 +125,7 @@ export function resolveOverlayContainer(
   container?: HTMLElement | Element | DocumentFragment | null
 ): HTMLElement | Element | DocumentFragment {
   if (container) return container
-  const host = ensureWindowOverlayHost()
+  const host = ensureInteractionHost()
   if (!host) {
     if (typeof document !== 'undefined') {
       throw new Error(
@@ -64,9 +138,9 @@ export function resolveOverlayContainer(
 }
 
 export function useWindowOverlayHost(): HTMLElement | null {
-  const [host, setHost] = useState<HTMLElement | null>(() => ensureWindowOverlayHost())
+  const [host, setHost] = useState<HTMLElement | null>(() => ensureInteractionHost())
   useLayoutEffect(() => {
-    setHost(ensureWindowOverlayHost())
+    setHost(ensureInteractionHost())
   }, [])
   return host
 }
@@ -94,7 +168,7 @@ export function WindowOverlayPortal({
   container
 }: WindowOverlayPortalProps) {
   const host = useWindowOverlayHost()
-  const target = container ?? host
+  const target = container ?? (layer === OVERLAY_LAYER_BANDS.windowChrome ? ensureWindowOverlayHost() : host)
   if (!target) return null
   return createPortal(
     <div

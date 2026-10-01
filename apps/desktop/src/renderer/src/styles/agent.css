@@ -91,6 +91,14 @@
 .window-status-bar button:focus-visible { outline-offset: -2px; }
 .window-status-bar__surface-switch { position: relative; padding-left: 40px; flex: 0 0 auto; display: flex; align-items: center; }
 .window-overlay-host { position: fixed; z-index: var(--layer-tooltip); inset: 0; pointer-events: none; isolation: isolate; }
+.window-overlay-host[popover] { display: block; margin: 0; padding: 0; border: 0; width: auto; height: auto; overflow: visible; background: transparent; color: inherit; pointer-events: none; }
+.window-overlay-host[popover]:not(:popover-open) { display: none; }
+/* FocusScope mounts synchronously. A new surface has no host box until the
+   observer promotes it; closed surfaces and their descendants remain hidden. */
+.window-overlay-host[popover]:not(:popover-open):has(:is([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-state="open"], [data-state="delayed-open"]):not([data-state="closed"], [data-state="closed"] *)) { display: contents; }
+.window-overlay-host[popover] [data-state="closed"]:is([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], .dialog-scrim),
+.window-overlay-host[popover] [data-state="closed"]:has([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"]) { display: none; pointer-events: none; }
+.window-overlay-host[popover]::backdrop { background: transparent; pointer-events: none; }
 .window-overlay-host > * { pointer-events: auto; }
 .window-overlay-host__entry { position: absolute; inset: 0; pointer-events: none; }
 .window-overlay-host__entry > * { pointer-events: auto; }
