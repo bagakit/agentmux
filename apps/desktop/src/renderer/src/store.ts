@@ -1,3 +1,4 @@
+import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
@@ -488,6 +489,8 @@ type AppState = {
   surveyZoneSelection: SurveyZoneSelection | null
   /** Explicit display membership only, independent of automatic Browser discovery. */
   surveyCollectedZones: Record<string, true>
+  surveyExplorationNames: Record<string, string>
+  setSurveyExplorationName(zoneId: string, name: string): boolean
   setSurveyZoneCollected(zoneId: string, collected: boolean): boolean
   surveyToolsOpen: boolean
   surveySidebarWidth: number
@@ -1849,6 +1852,7 @@ type PersistedAppState = {
   mainSurface?: MainSurface
   surveyZoneSelection?: SurveyZoneSelection | null
   surveyCollectedZones?: Record<string, true>
+  surveyExplorationNames?: Record<string, string>
   noteBlockSelections?: Record<string, NoteBlockTarget>
   focusTimelineNameWidth?: number
   surveySidebarCollapsed?: boolean
@@ -1878,6 +1882,7 @@ export type RestoredUiState = Pick<
   | 'mainSurface'
   | 'surveyZoneSelection'
   | 'surveyCollectedZones'
+  | 'surveyExplorationNames'
   | 'noteBlockSelections'
   | 'surveySidebarCollapsed'
   | 'surveySidebarWidth'
@@ -1959,6 +1964,7 @@ export function restorePersistedUiState(
     | 'mainSurface'
     | 'surveyZoneSelection'
     | 'surveyCollectedZones'
+    | 'surveyExplorationNames'
     | 'noteBlockSelections'
     | 'surveySidebarCollapsed'
     | 'surveySidebarWidth'
@@ -1986,6 +1992,7 @@ export function restorePersistedUiState(
     mainSurface: restoredMainSurface(persisted.mainSurface),
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
+    surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
     noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
     surveySidebarCollapsed: restoredBoolean(persisted.surveySidebarCollapsed, false),
     surveySidebarWidth: clampSurveySidebarWidth(persisted.surveySidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
@@ -2041,6 +2048,7 @@ function selectPersistedInputs(state: AppState) {
     mainSurface: state.mainSurface,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
+    surveyExplorationNames: state.surveyExplorationNames,
     surveySidebarCollapsed: state.surveySidebarCollapsed,
     surveySidebarWidth: state.surveySidebarWidth,
     agentFocus: state.agentFocus,
@@ -2462,6 +2470,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   mainSurface: 'workbench',
   surveyZoneSelection: null,
   surveyCollectedZones: {},
+  surveyExplorationNames: {},
+  setSurveyExplorationName(zoneId, name) {
+    const state = get(), trimmed = name.trim()
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    if (!spatialCatalog(state, topics).zones.some(zone => zone.zoneId === zoneId && zone.kind !== 'unknown')) return false
+    if (trimmed) set({ surveyExplorationNames: { ...state.surveyExplorationNames, [zoneId]: trimmed } })
+    else { const { [zoneId]: _removed, ...surveyExplorationNames } = state.surveyExplorationNames; set({ surveyExplorationNames }) }
+    void saveWorkbenchSelection(false)
+    return true
+  },
   surveySidebarCollapsed: false,
   setSurveySidebarCollapsed(surveySidebarCollapsed) { set({ surveySidebarCollapsed }) },
   surveySidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH,

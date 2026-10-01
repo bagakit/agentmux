@@ -101,7 +101,7 @@ beforeEach(() => {
   })
   useAppStore.setState({ loading: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench',
     surveySidebarWidth: 220, surveySidebarCollapsed: false,
-    surveyCollectedZones: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: composerConfig, activeWorkspaceId: workspace.id,
+    surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: composerConfig, activeWorkspaceId: workspace.id,
     sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]) },
     agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
     projectRailOpen: true, toolsOpen: true, workspaceTool: 'agents', demands: {}, browserAnnotationsByBrowserId: {},
@@ -131,7 +131,7 @@ async function submit(form: HTMLFormElement) {
 }
 async function enterSurvey() { await dom.click('[aria-label="Survey: browse and manage pages"]') }
 async function openItemOptions() {
-  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Item options"]')!
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Exploration options"]')!
   expect(trigger).not.toBeNull()
   if (document.querySelector('.survey-item-menu')) return trigger
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
@@ -552,7 +552,7 @@ it('does not let a delayed new item steal a later explicit Zone selection', asyn
   let finish!: (snapshot: BrowserSnapshot) => void
   vi.mocked(api.browser.create).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   await dom.render(<App />); await enterSurvey()
-  await dom.click('[aria-label="New survey item"]')
+  await dom.click('[aria-label="New exploration"]')
   const nativeId = vi.mocked(api.browser.create).mock.calls[0]![0]
   await choose(); const chosen = useAppStore.getState().surveyZoneSelection
   await act(async () => finish({ ...browser, id: nativeId, url: 'about:blank' }))
@@ -590,7 +590,7 @@ it('creates a Scratch temporary Zone and a new Tab without inheriting another ac
     tabs: { [mixed.id]: mixed, [existing.id]: existing }, layouts: { ...useAppStore.getState().layouts, [scratch.id]: createWorkspaceLayout('scratch-group', [existing.id]) },
     scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1, topics: [topic], error: null, reading: false } } })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
-  await dom.render(<App />); await enterSurvey(); await dom.click('[aria-label="New survey item"]')
+  await dom.render(<App />); await enterSurvey(); await dom.click('[aria-label="New exploration"]')
   const selected = useAppStore.getState().surveyZoneSelection!, tab = useAppStore.getState().tabs[selected.active!.tabId]!
   expect(tab.workspaceId).toBe(scratch.id); expect(tab.topicId).toBeUndefined(); expect(tab.space?.zoneId).toBe(selected.zoneId)
   await dom.click('.global-survey-surface [title="New tab"]')
@@ -792,12 +792,14 @@ it('explicitly views the exact nonfirst Tab and returns all Groups without repla
   expect(observation.survey.at(-1)!.projection!.entity).toEqual({ kind: 'tab', tabId: mixed.id })
   expect(observation.survey.at(-1)!.projection!.selection).toEqual([active])
   expect(observation.survey.at(-1)!.projection!.catalog.locations).toEqual(originalCatalog.locations)
-  expect(observation.survey.at(-1)!.viewTargets![mixed.id]!.hostId).toBe(originalTargets[mixed.id]!.hostId)
+  const currentTargets = observation.survey.at(-1)!.viewTargets![mixed.id]!
+  expect(currentTargets.length).toBeGreaterThan(0)
+  expect(currentTargets.map(target => target.hostId)).toEqual(originalTargets[mixed.id]!.map(target => target.hostId))
   expect(dom.container.querySelectorAll('.global-survey-surface .workbench-tab-slot')).toHaveLength(1)
   expect(slot().id).toBe(host); expect(slot().querySelector('.retained-workbench-view')).toBe(original)
   expect(address()).toBe(field); expect(field.value).toBe('Keep original Tab input'); expect([field.selectionStart, field.selectionEnd]).toEqual([2, 13])
   expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
-  expect(dom.container.querySelector('.survey-view-controls')!.textContent).toContain('Full item')
+  expect(dom.container.querySelector('.survey-view-controls')!.textContent).toContain('All tabs')
   expect(dom.container.querySelector('.global-survey-surface [title="New tab"]')).toBeNull()
   await selectRegion(pageA.regionId)
   const changed = useAppStore.getState().surveyZoneSelection!
@@ -867,20 +869,20 @@ it('refuses an unknown or inactive Tab view without selecting a first reference 
   expect(observation.survey.at(-1)!.projection!.entity.kind).toBe('zone'); healthy()
 })
 
-it('presents all confirmed mixed-Tab names in the original order instead of a count as the Item title', async () => {
+it('keeps a distinct unnamed exploration instead of concatenating its mixed Tab names', async () => {
   const named = { ...mixed, name: 'Reading notes' }, second = { ...createWorkbenchTab('second', pageC), name: 'Interface draft' }
   useAppStore.setState({ tabs: { [named.id]: named, [second.id]: second }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [named.id, second.id]) } })
   await dom.render(<App />); await enterSurvey(); await choose()
   const before = useAppStore.getState(), row = dom.container.querySelector<HTMLElement>('.survey-item-row[data-selected="true"]')!
-  expect(row.querySelector('strong')!.textContent).toBe('Reading notes · Interface draft')
-  expect(row.querySelector('.survey-item')!.getAttribute('title')).toBe('Reading notes · Interface draft')
-  expect(row.querySelector('.survey-item')!.getAttribute('aria-label')).toBe('Show survey item: Reading notes · Interface draft')
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
+  expect(row.querySelector('strong')!.textContent).toBe('Untitled exploration')
+  expect(row.querySelector('.survey-item')!.getAttribute('title')).toBe('Untitled exploration')
+  expect(row.querySelector('.survey-item')!.getAttribute('aria-label')).toBe('Show survey item: Untitled exploration')
+  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(false)
   expect(row.textContent).not.toContain('2 tabs')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
 })
 
-it.each([false, true])('flat list names every original mixed content instead of borrowing one Browser as the Zone title (single: %s)', async single => {
+it.each([false, true])('flat list keeps a confirmed shared name and never borrows one Browser for distinct mixed Tabs (single: %s)', async single => {
   const tab = single ? createWorkbenchTab(mixed.id, pageA) : addWorkbenchRegion(createWorkbenchTab(mixed.id, agent), agent.regionId, 'right', pageA)
   const second = createWorkbenchTab('unnamed-file-tab', file)
   useAppStore.setState({ tabs: single ? { [tab.id]: tab } : { [tab.id]: tab, [second.id]: second },
@@ -888,7 +890,7 @@ it.each([false, true])('flat list names every original mixed content instead of 
   const before = useAppStore.getState()
   await dom.render(<App />); await enterSurvey(); await choose()
   const title = dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent
-  expect(title).toBe(single ? browser.title : `Agent · ${browser.title} · draft.md`)
+  expect(title).toBe(single ? browser.title : 'Untitled exploration')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().documents).toBe(before.documents)
   expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep my draft'); expect(api.sessions.stop).not.toHaveBeenCalled()
@@ -900,17 +902,17 @@ it('flat list exposes one Item-options menu in either sidebar state and keeps th
   await dom.render(<App />); await enterSurvey(); await choose()
   const before = useAppStore.getState(), original = slot().querySelector('.retained-workbench-view')!
   expect(original).not.toBeNull()
-  expect(dom.container.querySelectorAll('[aria-label="Item options"]')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('[aria-label="Exploration options"]')).toHaveLength(1)
   expect(dom.container.querySelector('.survey-item-details')).toBeNull()
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
+  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(false)
   const optionsTrigger = await openItemOptions()
-  expect(document.querySelector('.survey-item-menu')!.textContent).toContain('Agent · draft.md · Same title · Same title')
+  expect(document.querySelector('.survey-item-menu')!.textContent).toContain('Agent')
   await act(async () => document.querySelector('.survey-item-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   await vi.waitFor(() => expect(document.activeElement).toBe(optionsTrigger))
   expect(collection).not.toHaveBeenCalled(); expect(relation).not.toHaveBeenCalled()
   await openItemOptions(); await dom.click('[aria-label="Hide Survey items"]')
   expect(document.querySelector('[role="menu"]')).toBeNull()
-  expect(dom.container.querySelectorAll('[aria-label="Item options"]')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('[aria-label="Exploration options"]')).toHaveLength(1)
   expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(false)
   await openItemSubmenu('Choose original work surface')
   const candidate = [...document.querySelectorAll<HTMLElement>('.survey-panel-choice')].find(item => JSON.parse(item.dataset.surveyPanelReference!).regionId === pageB.regionId)!
@@ -974,4 +976,131 @@ it('closes the actual unknown service disclosure and releases its overlay when n
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(document.activeElement).toBe(dom.container.querySelector('[aria-label="Close browser management"]'))
   healthy()
+})
+
+
+it('renames an exploration through its real menu without renaming or rebuilding any original Tab', async () => {
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const zoneId = originalZoneId(), before = useAppStore.getState()
+  await openItemOptions()
+  const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Rename exploration')!
+  expect(rename).not.toBeNull(); await act(async () => rename.click())
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Exploration name"]')!
+  await fill(input, 'Understanding the workflow'); await submit(input.closest('form')!)
+  expect(useAppStore.getState().surveyExplorationNames).toEqual({ [zoneId]: 'Understanding the workflow' })
+  expect(dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent).toBe('Understanding the workflow')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection); healthy()
+})
+
+it('starts a Note exploration from Survey without creating a Browser or leaving its empty preparation Tab', async () => {
+  const writes = new Map<string, string>()
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { writes.set(input.path, input.content); return { status: 'written', revision: 'note-created' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: writes.get(path)!, revision: 'note-created' } }))
+  await dom.render(<App />); await enterSurvey()
+  expect(dom.container.querySelector('.survey-start-heading h1')!.textContent).toBe('Explore an idea')
+  const before = useAppStore.getState()
+  await dom.click('.survey-start-note')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.active).not.toBeNull())
+  const current = useAppStore.getState(), selected = current.surveyZoneSelection!, ref = selected.active!
+  expect(selected.zoneId).not.toBe(originalZoneId())
+  expect(current.tabs[ref.tabId]!.space?.zoneId).toBe(selected.zoneId)
+  expect(current.tabs[ref.tabId]!.regions[ref.regionId]).toMatchObject({ kind: 'file' })
+  expect(Object.values(current.tabs).filter(tab => tab.space?.zoneId === selected.zoneId)).toHaveLength(1)
+  expect(api.browser.create).not.toHaveBeenCalled(); expect(api.files.write).toHaveBeenCalledTimes(1)
+  expect(current.tabs[mixed.id]).toBe(before.tabs[mixed.id]); expect(current.layouts[workspace.id]!.activeGroupId).toBe(before.layouts[workspace.id]!.activeGroupId); healthy()
+})
+
+it('adds a Note to the exact selected exploration and keeps later selection when its write completes', async () => {
+  let release!: () => void, notePath = '', content = ''
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { notePath = input.path; content = input.content; await waiting; return { status: 'written', revision: 'new' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path: notePath, content, revision: 'new' } }))
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), zoneId = originalZoneId()
+  await dom.click('[aria-label="Add note to this exploration"]')
+  expect(api.files.write).toHaveBeenCalledTimes(1)
+  expect(Object.values(useAppStore.getState().tabs).filter(tab => tab.space?.zoneId && tab.space.zoneId !== zoneId)).toEqual([])
+  await act(async () => useAppStore.getState().setSurveyZoneSelection(null))
+  await act(async () => { release(); await waiting })
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-relation-notice')?.textContent).toContain('original Note target'))
+  expect(useAppStore.getState().surveyZoneSelection).toBeNull(); expect(api.files.read).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs[mixed.id]).toBe(before.tabs[mixed.id]); healthy()
+})
+
+it('checks the same Note after an unknown write without issuing another create or write', async () => {
+  let notePath = '', content = ''
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { notePath = input.path; content = input.content; return { status: 'unknown', code: 'WRITE_ACK_UNKNOWN', message: 'Write acknowledgement unavailable' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path: notePath, content, revision: 'confirmed' } }))
+  await dom.render(<App />); await enterSurvey(); await dom.click('.survey-start-note')
+  await vi.waitFor(() => expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('acknowledgement'))
+  const prepared = useAppStore.getState(), zoneId = Object.keys(prepared.surveyCollectedZones)[0]!
+  expect(zoneId).toBeDefined(); expect(api.files.write).toHaveBeenCalledTimes(1)
+  const recover = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Recover same note')!
+  expect(recover).not.toBeNull(); await act(async () => recover.click())
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.zoneId).toBe(zoneId))
+  expect(api.files.write).toHaveBeenCalledTimes(1); expect(api.browser.create).not.toHaveBeenCalled()
+  expect(Object.values(useAppStore.getState().tabs).filter(tab => tab.space?.zoneId === zoneId)).toHaveLength(1); healthy()
+})
+
+
+it('restores the exact exploration name through the original UI owner without dropping unknown names', () => {
+  const names = { [originalZoneId()]: 'Understanding a workflow', 'retained-unknown-zone': 'Unfinished research' }
+  const restored = restorePersistedUiState(composerConfig, { workbenchSpaceSelection: null, surveyExplorationNames: names, surveyCollectedZones: { 'retained-unknown-zone': true } })
+  expect(restored.surveyExplorationNames).toEqual(names)
+  expect(restored.surveyCollectedZones).toEqual({ 'retained-unknown-zone': true })
+})
+
+it('adds a Note in a foreign nonactive display Group while preserving the original global selection', async () => {
+  const writes = new Map<string, string>(), foreignGroup = 'foreign-note-group'
+  const original = createWorkspaceLayout('original-group', [mixed.id])
+  const display = { ...original, root: { type: 'split' as const, direction: 'horizontal' as const, ratio: .4, first: original.root, second: { type: 'leaf' as const, groupId: foreignGroup } },
+    groups: [...original.groups, { id: foreignGroup, tabOrder: [mixed.id], activeTabId: mixed.id, recentTabIds: [mixed.id] }] }
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, otherWorkspace] }, layouts: { [workspace.id]: createWorkspaceLayout('resource-group', [mixed.id]), [otherWorkspace.id]: display } })
+  vi.spyOn(api.files, 'write').mockImplementation(async (id, input) => { expect(id).toBe(workspace.id); writes.set(input.path, input.content); return { status: 'written', revision: 'new' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (id, path) => { expect(id).toBe(workspace.id); return { status: 'read', document: { path, content: writes.get(path)!, revision: 'new' } } })
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const reference = { displayWorkspaceId: otherWorkspace.id, groupId: foreignGroup, tabId: mixed.id, regionId: pageA.regionId }
+  await act(async () => useAppStore.getState().setSurveyZoneSelection({ zoneId: originalZoneId(), selection: [reference], active: reference }))
+  const before = useAppStore.getState()
+  await dom.click('[aria-label="Add note to this exploration"]')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.active?.tabId).not.toBe(mixed.id))
+  const current = useAppStore.getState(), active = current.surveyZoneSelection!.active!
+  expect(active.displayWorkspaceId).toBe(otherWorkspace.id); expect(active.groupId).toBe(foreignGroup)
+  expect(current.tabs[active.tabId]!.workspaceId).toBe(workspace.id); expect(current.tabs[active.tabId]!.space?.zoneId).toBe(originalZoneId())
+  expect(current.activeWorkspaceId).toBe(before.activeWorkspaceId)
+  expect(current.layouts[otherWorkspace.id]!.activeGroupId).toBe(before.layouts[otherWorkspace.id]!.activeGroupId)
+  expect(current.layouts[otherWorkspace.id]!.groups[0]!.activeTabId).toBe(before.layouts[otherWorkspace.id]!.groups[0]!.activeTabId); healthy()
+})
+
+
+it('recovers the original new exploration when Launcher preparation is unavailable', async () => {
+  const create = vi.spyOn(useAppStore.getState(), 'createWorkbenchZone')
+  const open = vi.spyOn(useAppStore.getState(), 'openLauncher').mockReturnValueOnce(undefined)
+  const writes = new Map<string, string>()
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { writes.set(input.path, input.content); return { status: 'written', revision: 'new' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: writes.get(path)!, revision: 'new' } }))
+  await dom.render(<App />); await enterSurvey(); await dom.click('.survey-start-note')
+  await vi.waitFor(() => expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('Group is still restoring'))
+  const zoneIds = Object.keys(useAppStore.getState().surveyCollectedZones)
+  expect(zoneIds).toHaveLength(1); expect(create).toHaveBeenCalledTimes(1); expect(api.files.write).not.toHaveBeenCalled()
+  const recover = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Recover same note')!
+  expect(recover).not.toBeNull(); await act(async () => recover.click())
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.zoneId).toBe(zoneIds[0]))
+  expect(create).toHaveBeenCalledTimes(1); expect(open).toHaveBeenCalledTimes(2); expect(api.files.write).toHaveBeenCalledTimes(1); healthy()
+})
+
+
+it('opens the sole confirmed occurrence of a never-activated exploration without another panel choice', async () => {
+  const original = createWorkbenchTab('original-browser', pageA), untouched = createWorkbenchTab('untouched-browser', pageC)
+  const state = useAppStore.getState()
+  const created = await state.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })
+  untouched.space = { zoneId: created.zone.zoneId, spaceId: directoryIdentity(workspace.hostId, workspace.path) }
+  useAppStore.setState({ tabs: { [original.id]: original, [untouched.id]: untouched }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [original.id, untouched.id]) } })
+  const before = useAppStore.getState()
+  await dom.render(<App />); await enterSurvey(); await choose(created.zone.zoneId)
+  expect(useAppStore.getState().surveyZoneSelection!.active).toEqual({ displayWorkspaceId: workspace.id, groupId: 'original-group', tabId: untouched.id, regionId: pageC.regionId })
+  expect(dom.container.querySelector('.survey-panel-status')).toBeNull()
+  expect(dom.container.querySelector('.global-survey-surface [data-workbench-region-id="page-c"]')).not.toBeNull()
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
 })

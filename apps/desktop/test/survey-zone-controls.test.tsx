@@ -38,7 +38,7 @@ async function mount(overrides: Partial<ComponentProps<typeof SurveyTopicRelatio
   return props
 }
 async function open() {
-  const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Item options"]')!
+  const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Exploration options"]')!
   expect(trigger).not.toBeNull(); await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
   const sub = document.querySelector<HTMLElement>('[aria-label="Link Topics"]')!
   expect(sub).not.toBeNull(); await act(async () => sub.focus()); await key(sub, 'ArrowRight')
@@ -107,7 +107,7 @@ it('keeps pending relation changes controlled and opening a linked Topic indepen
 
 it('keeps the original editor draft and selection while explicit Item-menu disclosure follows Radix', async () => {
   const props = await mount()
-  const editor = container.querySelector('input')!, trigger = container.querySelector('[aria-label="Item options"]')!
+  const editor = container.querySelector('input')!, trigger = container.querySelector('[aria-label="Exploration options"]')!
   editor.focus(); editor.setSelectionRange(3, 14); await pointer(trigger, 'pointerover')
   expect(menu()).toBeNull(); expect(document.activeElement).toBe(editor)
   await open(); await pointer(checkbox('topic-a'), 'pointermove')
@@ -136,7 +136,7 @@ it('selects the original Zone and keeps its resource and membership actions in t
         onManageBrowsers={() => {}} onOpenWorkspace={onOpenWorkspace} /></>))
   }
   await render(resource, [topicA, topicB, mote])
-  const select = container.querySelector<HTMLButtonElement>('[aria-current="true"]')!, trigger = container.querySelector<HTMLButtonElement>('[aria-label="Item options"]')!
+  const select = container.querySelector<HTMLButtonElement>('[aria-current="true"]')!, trigger = container.querySelector<HTMLButtonElement>('[aria-label="Exploration options"]')!
   await act(async () => select.click()); expect(onSelect).toHaveBeenCalledExactlyOnceWith('original-zone')
   expect(container.querySelectorAll('.survey-item-details')).toHaveLength(0)
   expect(container.textContent).not.toContain('Resource project')

@@ -112,3 +112,16 @@
 
 .survey-page-content > .survey-relation-notice { flex: none; padding: var(--sp-3) var(--sp-5); }
 @media (max-height: 480px) { .survey-tabs { gap: var(--sp-4); padding-block: var(--sp-3); } .survey-start { gap: var(--sp-4); padding: var(--sp-5); } }
+
+.survey-start-heading { max-width: 520px; text-align: center; }
+.survey-start-heading h1 { margin: 0 0 var(--sp-3); color: var(--text); font-size: var(--fs-display); font-weight: 550; letter-spacing: -.025em; }
+.survey-start-heading p { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; }
+.survey-start-note { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 32px; padding: var(--sp-2) var(--sp-4); border: 1px solid var(--survey-edge); border-radius: var(--radius); color: var(--text-2); background: var(--wash-1); font: inherit; font-size: var(--fs-body); cursor: pointer; }
+.survey-start-note:hover { color: var(--text); background: var(--wash-2); }
+.survey-start-note:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+.survey-start-note:disabled { opacity: .5; cursor: default; }
+.survey-sidebar-actions .survey-new-page { padding-inline: var(--sp-2); gap: var(--sp-2); }
+.survey-item-name { display: flex; align-items: center; gap: var(--sp-1); min-height: 36px; padding: var(--sp-1); }
+.survey-item-name input { flex: 1; min-width: 0; width: 100%; border: 1px solid var(--survey-edge); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: var(--sp-2); font: inherit; font-size: var(--fs-body); }
+.survey-item-name input:focus { outline: 0; box-shadow: var(--focus-ring); }
+.survey-item-name button { flex: none; padding: 0; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
